@@ -62,7 +62,7 @@ Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son
 | `make migrate` | `cd backend; uv run alembic upgrade head` |
 | `make admin ARGS="--help"` | `cd backend; uv run vigia-admin --help` |
 
-`run`, `worker`, `migrate` y `admin` quedan operativos cuando llegan sus tareas (TASK-133, TASK-130, TASK-106 y TASK-132). Hasta entonces, `make` avisa de qué falta y termina con error.
+`run`, `worker` y `admin` quedan operativos cuando llegan sus tareas (TASK-133, TASK-130 y TASK-132). Hasta entonces, `make` avisa de qué falta y termina con error. `migrate` ya funciona (TASK-106).
 
 ### Variables del entorno local
 
@@ -76,7 +76,18 @@ $env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317"
 $env:OTEL_SERVICE_NAME = "vigia-api"      # vigia-worker, vigia-migrate o vigia-admin según el proceso
 ```
 
+`make migrate` añade las contraseñas locales de los roles que crea la primera migración. En PowerShell, antes de `uv run alembic upgrade head`: `$env:VIGIA_DB_APP_PASSWORD = "vigia_app_local_only"; $env:VIGIA_DB_MIGRATE_PASSWORD = "vigia_migrate_local_only"`.
+
 `make test` no exporta estas variables. Corre `pytest` en otra consola, sin ellas: `AWS_ENDPOINT_URL` redirigiría a LocalStack las pruebas unitarias con moto.
+
+### Migraciones
+
+Una sola cadena de Alembic para U-02, U-03 y U-04, solo hacia adelante (`backend/alembic.ini`, `backend/migrations/`):
+
+- Revisión `<unidad>_<NNNN>`: `nuc_` (U-02), `gob_` (U-03), `laz_` (U-04). `NNNN` es la posición en la cadena, y es lo que devuelve `shared.vigia_schema_version()`. Cada unidad añade eslabones al final: `cd backend && uv run alembic revision --rev-id nuc_0002 -m "identity tables"`.
+- `downgrade` lanza `NotImplementedError`. Prohibidos `DROP TABLE`, `TRUNCATE` y `DELETE` sobre tablas de solo anexar, registradas en `backend/migrations/append_only.py`. Nombres de tabla siempre con esquema.
+- `cd backend && uv run python tools/lint_migrations.py` lo comprueba (reglas `MIG001` a `MIG005`). También lo corre pytest (`tests/unit/test_lint_migrations.py`).
+- Cada imagen declara la versión mínima del esquema que necesita (`vigia_platform.shared.schema_version.MINIMUM_SCHEMA_VERSION`) y no arranca sobre uno más viejo.
 
 ### Pruebas de integración
 

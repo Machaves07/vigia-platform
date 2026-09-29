@@ -6,7 +6,7 @@
 #   make test      suite completa del backend (PROFILE=ci por defecto; PROFILE=nightly)
 #   make run       API (vigia-api) contra el entorno local           — llega con TASK-133
 #   make worker    worker (vigia-worker) contra el entorno local     — llega con TASK-130
-#   make migrate   alembic upgrade head contra PostgreSQL local      — llega con TASK-106
+#   make migrate   alembic upgrade head contra PostgreSQL local
 #   make admin     orden administrativa: make admin ARGS="--help"    — llega con TASK-132
 #
 # En Windows sin `make`, el README tiene los mismos comandos con `uv run`.
@@ -36,6 +36,12 @@ LOCAL_ENV = \
 	AWS_SECRET_ACCESS_KEY=test \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:$${VIGIA_LOCAL_OTLP_GRPC_PORT:-4317} \
 	OTEL_SERVICE_NAME=$(1)
+
+# Contraseñas locales de los roles vigia_app y vigia_migrate, que crea la migración nuc_0001
+# (en AWS llegan de los secretos db/app y db/migrate). Valores fijos del entorno local.
+MIGRATE_ENV = \
+	VIGIA_DB_APP_PASSWORD=vigia_app_local_only \
+	VIGIA_DB_MIGRATE_PASSWORD=vigia_migrate_local_only
 
 # $(call require,<archivo relativo a backend>,<tarea que lo crea>)
 define require
@@ -72,7 +78,7 @@ worker:
 
 migrate:
 	$(call require,alembic.ini,TASK-106)
-	cd $(BACKEND) && $(call LOCAL_ENV,vigia-migrate) uv run alembic upgrade head
+	cd $(BACKEND) && $(call LOCAL_ENV,vigia-migrate) $(MIGRATE_ENV) uv run alembic upgrade head
 
 admin:
 	$(call require,src/vigia_platform/identity/application/admin_cli.py,TASK-132)

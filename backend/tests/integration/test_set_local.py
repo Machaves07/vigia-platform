@@ -409,6 +409,9 @@ async def test_paused_postgres_read_ends_temporarily_unavailable_within_timeout(
 SAFETY_CAP_SECONDS = 30.0
 """Tope externo de la prueba: si el adaptador se colgara, falla aquí en vez de colgar la suite."""
 
+DRAIN_WHILE_PAUSED_SECONDS = 5.0
+"""Tope del drenaje con la base en pausa: sin red, cortar y retirar la conexión es inmediato."""
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("where", ["sentencia", "commit"])
@@ -446,12 +449,22 @@ async def test_paused_postgres_inside_open_transaction_ends_within_command_timeo
             if start is not None:
                 elapsed = loop.time() - start
 
+    person_pool = cast(QueuePool, _engine(database, PoolClass.PERSON).sync_engine.pool)
     try:
         with pytest.raises(TemporarilyUnavailable) as caught:
             try:
                 await asyncio.wait_for(write(), SAFETY_CAP_SECONDS)
             finally:
-                container.unpause()
+                paused_drained = False
+                try:
+                    # Aún en pausa: la conexión rota se cortó con ``terminate()`` (sin red) y ya
+                    # salió del pool. Si ``terminate`` dejara de cortarla, el descarte esperaría a
+                    # un servidor que no responde y esto vencería (seguimiento 2 de VIG-26).
+                    await asyncio.wait_for(database._drain(), DRAIN_WHILE_PAUSED_SECONDS)
+                    paused_drained = person_pool.checkedout() == 0
+                finally:
+                    container.unpause()
+        assert paused_drained, "la conexión rota sigue fuera del pool con PostgreSQL en pausa"
         assert caught.value.commit_outcome_unknown == (where == "commit")
         assert caught.value.retry_after_seconds == 5
         assert elapsed <= settings.command_timeout_seconds + 1.0, (elapsed, settings)
@@ -459,7 +472,6 @@ async def test_paused_postgres_inside_open_transaction_ends_within_command_timeo
         # Tras reanudar: el adaptador responde y la conexión rota se retiró del pool.
         assert (await database.read(context, text("SELECT 3")))[0][0] == 3
         await asyncio.wait_for(database._drain(), SAFETY_CAP_SECONDS)
-        person_pool = cast(QueuePool, _engine(database, PoolClass.PERSON).sync_engine.pool)
         assert person_pool.checkedout() == 0
     finally:
         await database.dispose()
