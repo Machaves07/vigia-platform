@@ -1,0 +1,44 @@
+# Colector de OpenTelemetry del entorno local (TASK-103, LC-NUC-36, PAT-NUC-MAN-07).
+#
+# Misma forma que el colector lateral de `pilot` (infrastructure-design.md §9.1): receptor OTLP en
+# 4317 (gRPC) y 4318 (HTTP) y lote de 5 s y 512 tramos. En local no hay CloudWatch ni X-Ray: el
+# exportador es `debug`, que escribe un resumen en la salida del contenedor
+# (`docker compose logs otel-collector`). La extensión `health_check` responde en 13133 y es la
+# que consulta la comprobación de salud de `docker-compose.yml`.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
