@@ -40,7 +40,7 @@ from vigia_platform.ledger.registry import (
     RecordTypeUnknown,
     RegistryStartupError,
 )
-from vigia_platform.ledger.schema_rules import compatibility_problems
+from vigia_platform.ledger.schema_rules import compatibility_problems, structure_problems
 from vigia_platform.shared.context import ActorUnit
 
 Short = Annotated[StrictStr, Field(min_length=1, max_length=40, pattern=r"^[a-z]{1,40}$")]
@@ -521,6 +521,20 @@ class UnboundedNumber(ContentModel):
     level: StrictInt
 
 
+class NumberWithoutMaximum(ContentModel):
+    level: Annotated[StrictInt, Field(ge=0)]
+
+
+class NumberWithoutMinimum(ContentModel):
+    level: Annotated[StrictInt, Field(le=10)]
+
+
+class BoundedBytes(ContentModel):
+    """Binario con tope: solo lo para la regla de binarios, aunque se declare texto libre."""
+
+    snapshot_ref: Annotated[bytes, Field(max_length=100)]
+
+
 class UnboundedString(ContentModel):
     code: Annotated[StrictStr, Field(pattern=r"^[a-z]+$")]
 
@@ -559,6 +573,8 @@ class LongestClosedString(ContentModel):
         (LongClosedString, "/blob: cadena cerrada de más de 1024 caracteres no admitida"),
         (UnboundedList, "/codes: lista sin número máximo de elementos"),
         (UnboundedNumber, "/level: número sin mínimo"),
+        (NumberWithoutMaximum, "/level: número sin máximo"),
+        (NumberWithoutMinimum, "/level: número sin mínimo"),
         (UnboundedString, "/code: cadena sin longitud máxima"),
         (AnyField, "/payload: campo sin tipo declarado"),
     ],
@@ -571,6 +587,23 @@ def test_loose_schemas_are_rejected(model: type[BaseModel], expected: str) -> No
 
 def test_closed_string_at_the_length_cap_is_accepted() -> None:
     RecordTypeRegistry().register(_type(LongestClosedString))
+
+
+def test_bounded_binary_is_rejected_even_when_declared_as_free_text() -> None:
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_type(BoundedBytes, free_text_paths=("/snapshot_ref",)))
+    assert "/snapshot_ref: contenido binario no admitido" in str(raised.value)
+
+
+def test_reference_cycles_are_reported_not_followed_forever() -> None:
+    cyclic = {
+        "$defs": {"A": {"$ref": "#/$defs/B"}, "B": {"$ref": "#/$defs/A"}},
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"loop": {"$ref": "#/$defs/A"}},
+    }
+    problems = [str(problem) for problem in structure_problems(cyclic)]
+    assert "/loop: referencia sin resolver: '#/$defs/A'" in problems
 
 
 # --- validador compilado -------------------------------------------------------------------

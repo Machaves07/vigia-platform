@@ -267,6 +267,8 @@ def _identity_document(candidate: FreeTextCandidate, field: FreeTextField) -> No
         "cedula" + NBSP + "1020304050",
         "cedula" + IDEOGRAPHIC_SPACE + "1020304050",
         "cedula" + NARROW_NBSP + "1020304050",
+        "cedula" + chr(0x1680) + "1020304050",  # espacio ogam: Zs que NFKC no convierte
+        "cedula" + chr(0x1680) + chr(0x1680) + "1020304050",
         "cedula   1020304050",  # espacios repetidos
         "cedula" + NBSP + IDEOGRAPHIC_SPACE + " 1020304050",
         "cedula " + _fullwidth("1020304050"),

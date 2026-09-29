@@ -285,6 +285,9 @@ def test_closed_fields_with_safe_names_are_never_flagged(
             r"^[a-z<>]{1,50}$",
             r"^[a-z&;]{1,50}$",
             r"^[a-z]{1,50}\$",
+            r"a[a-z]{1,9}b",  # sin anclar: la cadena puede llevar cualquier cosa alrededor
+            r"^[a-z]{1,9}b",
+            r"[a-z]{1,9}b$",
         ]
     )
 )

@@ -185,10 +185,7 @@ def apply_base_policy(text: str, field: FreeTextField) -> str:
         raise TypeError("el texto libre debe ser una cadena")
     if len(text) > _EXPANSION_FACTOR * field.max_length:
         raise _reject(FreeTextRejection.TOO_LONG, field)
-    for char in text:
-        # Los sustitutos sueltos se miran antes de normalizar: no son texto Unicode válido.
-        if "\ud800" <= char <= "\udfff":
-            raise _reject(FreeTextRejection.DISALLOWED_CHARACTER, field)
+    # Un sustituto suelto sobrevive a la normalización y cae abajo por su categoría ``Cs``.
     normalized = unicodedata.normalize("NFC", text)
     for char in normalized:
         reason = _REJECTED_CATEGORIES.get(unicodedata.category(char))
