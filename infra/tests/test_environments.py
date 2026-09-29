@@ -102,19 +102,21 @@ def test_invalid_instances_stop_the_synthesis(value: object) -> None:
 @pytest.mark.parametrize(
     ("value", "expected"), [(True, True), (False, False), ("true", True), ("false", False)]
 )
-@pytest.mark.parametrize("key", ["first_deploy", "ca_rotation"])
+@pytest.mark.parametrize("key", ["first_deploy", "ca_rotation", "nat_per_az"])
 def test_flags_accept_booleans_and_their_cli_form(key: str, value: object, expected: bool) -> None:
     assert getattr(_config(**{key: value}), key) is expected
 
 
 @pytest.mark.parametrize("value", ["True", "yes", "1", 1, 0, ""])
-@pytest.mark.parametrize("key", ["first_deploy", "ca_rotation"])
+@pytest.mark.parametrize("key", ["first_deploy", "ca_rotation", "nat_per_az"])
 def test_flags_reject_other_values(key: str, value: object) -> None:
     with pytest.raises(ContextError, match=f"'{key}'"):
         _config(**{key: value})
 
 
-@pytest.mark.parametrize("key", ["environment", "instance", "first_deploy", "ca_rotation"])
+@pytest.mark.parametrize(
+    "key", ["environment", "instance", "first_deploy", "ca_rotation", "nat_per_az"]
+)
 def test_missing_context_stops_the_synthesis(key: str) -> None:
     context = {k: v for k, v in default_context().items() if k != key}
     with pytest.raises(ContextError, match=f"Falta el contexto '{key}'"):
