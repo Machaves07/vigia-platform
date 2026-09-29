@@ -20,6 +20,7 @@ from stacks import DEPENDENCIES, STACK_ORDER
 from tests.conftest import Synthesized, cdk_settings, synthesize
 from tests.template_rules import resources
 from tests.test_data import expected_data_resources
+from tests.test_edge import expected_edge_resources
 from tests.test_foundation import expected_foundation_resources
 
 ORDER = ("foundation", "data", "edge", "compute", "observability", "datasets")
@@ -56,12 +57,15 @@ def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
 
 
 def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
-    """``vigia-foundation`` (presupuestos, traducciones) y ``vigia-data`` (depósito de registros
-    y vaciado automático) cambian con el despliegue."""
+    """``vigia-foundation`` (presupuestos, traducciones), ``vigia-data`` (depósito de registros
+    y vaciado automático) y ``vigia-edge`` (zona, cortafuegos, almacén de confianza) cambian
+    con el despliegue."""
     if key == "foundation":
         return expected_foundation_resources(config)
     if key == "data":
         return expected_data_resources(config)
+    if key == "edge":
+        return expected_edge_resources(config)
     return EXPECTED_RESOURCES[key]
 
 
@@ -147,3 +151,4 @@ def test_cdk_json_fixes_the_qualifier_and_default_context() -> None:
     assert context["first_deploy"] is False
     assert context["ca_rotation"] is False
     assert context["nat_per_az"] is False
+    assert context["nodes_tls_mode"] == "mtls"

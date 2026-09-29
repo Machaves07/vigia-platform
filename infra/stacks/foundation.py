@@ -197,6 +197,9 @@ STAGING_BUDGET = "staging"
 # dueño crea antes del primer despliegue (registro de la cuenta, P1). Nunca en el repositorio.
 ALERTS_EMAIL_PARAMETER = "/vigia/alerts-email"
 
+# Grupo de registro del cortafuegos de ``vigia-edge``; su clave es ``vigia-logs``.
+WAF_LOG_GROUP_PREFIX = "aws-waf-logs-"
+
 
 @dataclass(frozen=True)
 class Principals:
@@ -218,6 +221,11 @@ def deploy_role_name(config: EnvironmentConfig) -> str:
     if config.instance == SHARED_INSTANCE:
         return "vigia-deploy"
     return f"vigia-deploy-{config.instance}"
+
+
+def waf_log_group_name(config: EnvironmentConfig) -> str:
+    """``aws-waf-logs-vigia-app`` (§9.2); el servicio exige el prefijo ``aws-waf-logs-``."""
+    return f"{WAF_LOG_GROUP_PREFIX}{config.resource_name('app')}"
 
 
 def budgets_enabled(config: EnvironmentConfig) -> bool:
@@ -372,6 +380,18 @@ class FoundationStack(VigiaStack):
                         "StringLike": {"kms:EncryptionContext:aws:s3:arn": self._edge_ca_arn()},
                     },
                 ),
+                # ``vigia-edge`` (paso 8 del primer despliegue): CloudFormation crea el almacén de
+                # confianza ``vigia-node-trust`` y el servicio de balanceo lee ``ca/root.pem``
+                # con las credenciales de quien llama (hipótesis (b) de R14 en U-03).
+                self._for_roles(
+                    "CloudFormationReadsEdgeCa",
+                    [p.cfn_execution],
+                    ["kms:Decrypt"],
+                    {
+                        **s3,
+                        "StringLike": {"kms:EncryptionContext:aws:s3:arn": self._edge_ca_arn()},
+                    },
+                ),
                 # CloudFormation crea los secretos de ``vigia-data`` cifrados con esta clave.
                 self._for_roles(
                     "CloudFormationCreatesSecrets",
@@ -467,8 +487,15 @@ class FoundationStack(VigiaStack):
         )
 
     def _logs_service(self) -> iam.PolicyStatement:
-        """El servicio de registros cifra los grupos ``/vigia/<despliegue>/*`` de la cuenta y el de
-        los registros de PostgreSQL de la base del despliegue (§9.2)."""
+        """El servicio de registros cifra los grupos ``/vigia/<despliegue>/*`` de la cuenta, el de
+        los registros de PostgreSQL de la base del despliegue y, con cortafuegos, el de
+        ``vigia-app-waf`` (§9.2)."""
+        names = [
+            f"/vigia/{self.config.deployment}/*",
+            f"/aws/rds/instance/vigia-{self.config.deployment}-db/*",
+        ]
+        if self.config.waf_enabled:
+            names.append(waf_log_group_name(self.config))
         log_groups = [
             self.format_arn(
                 service="logs",
@@ -476,10 +503,7 @@ class FoundationStack(VigiaStack):
                 resource_name=name,
                 arn_format=ArnFormat.COLON_RESOURCE_NAME,
             )
-            for name in (
-                f"/vigia/{self.config.deployment}/*",
-                f"/aws/rds/instance/vigia-{self.config.deployment}-db/*",
-            )
+            for name in names
         ]
         return iam.PolicyStatement(
             sid="LogsForVigiaLogGroups",
@@ -687,6 +711,17 @@ class FoundationStack(VigiaStack):
                 conditions={"StringEquals": {"aws:SourceAccount": self.account}},
             )
         )
+        # Alarmas de CloudWatch de la cuenta: aviso de bloqueos por tasa de ``vigia-edge`` (nº 11)
+        # y las de ``vigia-observability`` (§9.4).
+        topic.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="CloudWatchAlarmsPublish",
+                principals=[iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+                actions=["sns:Publish"],
+                resources=[topic.topic_arn],
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            )
+        )
         return topic
 
     def _budgets(self) -> list[budgets.CfnBudget]:
@@ -777,4 +812,5 @@ __all__ = [
     "SecurityGroupName",
     "budgets_enabled",
     "deploy_role_name",
+    "waf_log_group_name",
 ]

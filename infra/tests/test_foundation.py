@@ -24,6 +24,7 @@ from stacks.foundation import (
     SecurityGroupName,
     budgets_enabled,
     deploy_role_name,
+    waf_log_group_name,
 )
 from tests.conftest import Synthesized, synthesize
 from tests.template_rules import (
@@ -592,7 +593,8 @@ def test_key_policies_follow_the_design_table(
     admin_only = {"kms:DescribeKey", "kms:PutKeyPolicy", "kms:ScheduleKeyDeletion"}
     for name in KeyName:
         assert admin_only <= grants[name][cfn], name
-        # CloudFormation solo usa datos de ``vigia-secrets``, y solo por Secrets Manager.
+        # CloudFormation solo usa datos de ``vigia-secrets``: por Secrets Manager y, para
+        # ``vigia-node-trust``, la lectura de ``vigia-edge/ca/*`` por S3.
         data_use = {"kms:Decrypt", "kms:Sign", "kms:GenerateDataKey", "kms:Encrypt"}
         assert bool(grants[name][cfn] & data_use) is (name is KeyName.SECRETS), name
     creates_secrets = _statement(keys[KeyName.SECRETS], "CloudFormationCreatesSecrets")
@@ -696,11 +698,43 @@ def test_logs_key_is_limited_to_the_deployment_log_groups(deployment: Synthesize
     arns = statement["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
     prefix = "arn:aws:logs:us-east-1:<AccountId>:log-group:"
     deployment_name = deployment.config.deployment
-    # Los grupos del despliegue y el de los registros de PostgreSQL de su base (vigia-data).
+    # Los grupos del despliegue, el de los registros de PostgreSQL de su base (vigia-data) y,
+    # donde hay cortafuegos, el de vigia-app-waf (vigia-edge, §9.2).
+    waf = (
+        [f"{prefix}aws-waf-logs-{deployment.config.resource_name('app')}"]
+        if deployment.config.waf_enabled
+        else []
+    )
     assert [render(arn, template) for arn in arns] == [
         f"{prefix}/vigia/{deployment_name}/*",
         f"{prefix}/aws/rds/instance/vigia-{deployment_name}-db/*",
+        *waf,
     ]
+
+
+def test_waf_log_group_name_carries_the_service_prefix() -> None:
+    assert waf_log_group_name(_synth().config) == "aws-waf-logs-vigia-app"
+    assert waf_log_group_name(_synth(instance="acme").config) == "aws-waf-logs-vigia-app-acme"
+
+
+def test_cloudformation_decrypts_only_the_edge_ca_package_through_s3(
+    deployment: Synthesized,
+) -> None:
+    """``vigia-edge`` crea ``vigia-node-trust`` leyendo ``ca/root.pem`` con el rol de ejecución
+    de CloudFormation: solo ``Decrypt``, solo por S3 y solo sobre ``vigia-edge/ca/*``."""
+    template = _foundation(deployment)
+    key = _keys(template, deployment.config)[KeyName.SECRETS]
+    statement = _statement(key, "CloudFormationReadsEdgeCa")
+    assert statement["Action"] == "kms:Decrypt"
+    assert _principal_roles(statement, template) == [
+        "cdk-vigia-cfn-exec-role-<AccountId>-us-east-1"
+    ]
+    assert statement["Condition"]["StringEquals"] == {
+        "kms:ViaService": "s3.us-east-1.amazonaws.com"
+    }
+    condition = statement["Condition"]["StringLike"]["kms:EncryptionContext:aws:s3:arn"]
+    bucket = deployment.config.bucket_name("edge", "<AccountId>")
+    assert render(condition, template) == f"arn:aws:s3:::{bucket}/ca/*"
 
 
 def test_secrets_key_serves_only_the_database_secrets_through_secrets_manager(
@@ -899,9 +933,23 @@ def test_rds_events_may_publish_to_the_alerts_topic(deployment: Synthesized) -> 
     template = _foundation(deployment)
     statements = _topic_statements(template)
     budgets = {"BudgetsPublish"} if budgets_enabled(deployment.config) else set()
-    assert set(statements) == {"RdsEventsPublish"} | budgets
+    assert set(statements) == {"RdsEventsPublish", "CloudWatchAlarmsPublish"} | budgets
     statement = statements["RdsEventsPublish"]
     assert statement["Principal"] == {"Service": "events.rds.amazonaws.com"}
+    assert statement["Action"] == "sns:Publish"
+    ((topic_id, _),) = _of_type(template, "AWS::SNS::Topic")
+    assert reference_target(statement["Resource"]) == topic_id
+    assert statement["Condition"] == {
+        "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
+    }
+
+
+def test_cloudwatch_alarms_may_publish_to_the_alerts_topic(deployment: Synthesized) -> None:
+    """Aviso de bloqueos por tasa de ``vigia-edge`` (nº 11) y alarmas de §9.4: con política
+    propia en el tema, CloudWatch necesita su permiso; solo ``sns:Publish`` desde la cuenta."""
+    template = _foundation(deployment)
+    statement = _topic_statements(template)["CloudWatchAlarmsPublish"]
+    assert statement["Principal"] == {"Service": "cloudwatch.amazonaws.com"}
     assert statement["Action"] == "sns:Publish"
     ((topic_id, _),) = _of_type(template, "AWS::SNS::Topic")
     assert reference_target(statement["Resource"]) == topic_id

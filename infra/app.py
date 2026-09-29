@@ -1,7 +1,7 @@
 """Aplicación CDK de U-02 (infrastructure-design §2.3, TASK-144).
 
-Lee el contexto (``environment``, ``instance``, ``first_deploy``, ``ca_rotation``; valores
-por defecto en ``cdk.json``), registra las pilas del despliegue en su orden y aplica las
+Lee el contexto (``environment``, ``instance``, ``first_deploy``, ``ca_rotation``,
+``nat_per_az``, ``nodes_tls_mode``; valores por defecto en ``cdk.json``), registra las pilas del despliegue en su orden y aplica las
 etiquetas globales ``project=vigia``, ``unit=U-02``, ``managed_by=cdk`` y
 ``environment=<entorno>``. Calificador de arranque ``vigia`` (``cdk bootstrap --qualifier
 vigia``); la cuenta no se fija, así que ``cdk synth`` no necesita credenciales.

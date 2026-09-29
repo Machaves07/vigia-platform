@@ -166,6 +166,11 @@ ARCHIVE_DEEP_ARCHIVE_AFTER = Duration.days(180)  # [objetivo propio]
 ABORT_INCOMPLETE_UPLOADS_AFTER = Duration.days(7)  # nº 22, [objetivo propio]
 ACCESS_LOGS_EXPIRATION = Duration.days(365)  # ciclo de vida de vigia-logs (U-01)
 ACCESS_LOGS_POLICY_WARNING = "@aws-cdk/aws-s3:accessLogsPolicyNotAdded"
+# Prefijos de los registros de acceso de los balanceadores de ``vigia-edge`` (§4.2 y §4.3).
+LOAD_BALANCER_LOG_PREFIXES = ("alb/app", "alb/nodes")
+# Cuenta del servicio de balanceo que entrega los registros en us-east-1 (documentación de
+# Elastic Load Balancing); el de red (contingencia de R2) entrega por ``delivery.logs``.
+ELB_LOG_DELIVERY_ACCOUNT = "127311923021"
 
 # Cabecera de suma que exige la política de vigia-evidence (§6.2; hipótesis (a) de R14).
 CHECKSUM_CONDITION_KEY = "s3:x-amz-checksum-sha256"
@@ -256,7 +261,7 @@ class DataStack(VigiaStack):
         if not config.access_logs_bucket_owned:
             return s3.Bucket.from_bucket_name(self, "AccessLogsBucket", name)
         # Mismo cifrado que el vigia-logs heredado: SSE-S3, excepción declarada (§2.3).
-        return s3.Bucket(
+        bucket = s3.Bucket(
             self,
             "AccessLogsBucket",
             bucket_name=name,
@@ -269,6 +274,51 @@ class DataStack(VigiaStack):
             ],
             removal_policy=self.removal,
             auto_delete_objects=config.buckets_auto_delete_objects,
+        )
+        self._accept_load_balancer_logs(bucket)
+        return bucket
+
+    def _accept_load_balancer_logs(self, bucket: s3.Bucket) -> None:
+        """Entrega de los registros de ``vigia-alb-app`` y ``vigia-alb-nodes`` (o del balanceador
+        de red de la contingencia) en sus prefijos. ``vigia-edge`` importa el depósito por nombre
+        y no toca esta política, así que no cambia con ``nodes_tls_mode``."""
+        objects = [
+            bucket.arn_for_objects(f"{prefix}/AWSLogs/{self.account}/*")
+            for prefix in LOAD_BALANCER_LOG_PREFIXES
+        ]
+        source_account = {"StringEquals": {"aws:SourceAccount": self.account}}
+        bucket.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="LoadBalancerLogDelivery",
+                principals=[
+                    iam.ArnPrincipal(f"arn:{self.partition}:iam::{ELB_LOG_DELIVERY_ACCOUNT}:root")
+                ],
+                actions=["s3:PutObject"],
+                resources=objects,
+            )
+        )
+        bucket.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="NetworkLoadBalancerLogDelivery",
+                principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
+                actions=["s3:PutObject"],
+                resources=objects,
+                conditions={
+                    "StringEquals": {
+                        "s3:x-amz-acl": "bucket-owner-full-control",
+                        "aws:SourceAccount": self.account,
+                    }
+                },
+            )
+        )
+        bucket.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="NetworkLoadBalancerLogAclCheck",
+                principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
+                actions=["s3:GetBucketAcl"],
+                resources=[bucket.bucket_arn],
+                conditions=source_account,
+            )
         )
 
     def _bucket(self, usage: BucketUsage) -> s3.Bucket:
@@ -576,6 +626,8 @@ class DataStack(VigiaStack):
 
 __all__ = [
     "DOMAIN_PARAMETER",
+    "LOAD_BALANCER_LOG_PREFIXES",
+    "LOGS_USAGE",
     "BucketUsage",
     "DataStack",
     "DbUser",
