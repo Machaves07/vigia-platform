@@ -125,7 +125,7 @@ def test_exception_logs_type_only() -> None:
 
 def test_non_string_message_and_long_message() -> None:
     assert _format(_record(ValueError("dato")))["message"] == redaction.REDACTED
-    long = _format(_record("a " * 600))["message"]
+    long = _format(_record("a " * 600 + "%s", 1))["message"]
     assert isinstance(long, str) and len(long) == MAX_MESSAGE_CHARS
 
 

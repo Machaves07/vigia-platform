@@ -10,13 +10,17 @@
   sus puntos a ``otel_dropped_total{signal="metrics"}``. La aplicación nunca espera a la
   telemetría.
 - **Lista blanca de atributos** (NFR-NUC-41): cada tramo pasa por ``SanitizingSpanExporter``
-  antes de salir. Solo quedan identificadores y enumeraciones; los nombres pasan por
-  ``redact_text``, la descripción del estado se retira y un evento ``exception`` conserva solo el
-  tipo (nunca el mensaje ni la traza). Las métricas se limpian al registrar
-  (``metrics.PlatformMetrics``); una vista global quita los nombres de atributo no permitidos y
-  ``SanitizingMetricExporter`` limpia los valores al exportar, retira los ejemplares (llevan los
-  atributos filtrados) y fusiona las series que queden iguales. Así también quedan cubiertas las
-  métricas de la instrumentación automática.
+  antes de salir. Solo quedan identificadores y enumeraciones; el nombre del tramo y el de cada
+  evento salen solo si están en su lista cerrada (``span_name`` y ``event_name`` los registran;
+  la instrumentación automática se reconstruye desde listas cerradas) y si no, como ``other``;
+  la descripción del estado se retira y un evento ``exception`` conserva solo el tipo (nunca el
+  mensaje ni la traza). Las métricas se limpian al registrar (``metrics.PlatformMetrics``); una
+  vista global quita los nombres de atributo no permitidos y ``SanitizingMetricExporter`` limpia
+  los valores al exportar, retira los ejemplares (llevan los atributos filtrados) y fusiona las
+  series que queden iguales. Así también quedan cubiertas las métricas de la instrumentación
+  automática.
+- **Caída del colector**: una línea de registro al empezar a fallar la exportación de cada
+  señal y otra al recuperarse, en lugar de una por lote (el exportador OTLP queda en silencio).
 - ``enable_auto_instrumentation`` activa FastAPI, SQLAlchemy, httpx y botocore desde la fábrica
   de la aplicación; importa esas bibliotecas solo al llamarla.
 """
@@ -54,6 +58,7 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import Link, Status
 
 from vigia_platform.shared.observability import redaction
+from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import METER_NAME, PlatformMetrics
 
 __all__ = [
@@ -66,13 +71,14 @@ __all__ = [
     "TelemetrySettings",
     "configure_telemetry",
     "enable_auto_instrumentation",
+    "event_name",
     "metric_views",
     "sanitize_metrics",
     "sanitize_span",
+    "span_name",
 ]
 
 TRACER_NAME: Final = "vigia_platform"
-MAX_SPAN_NAME_CHARS: Final = 128
 _EXCEPTION_EVENT: Final = "exception"
 _INTERRUPTED_EXPORT_GRACE_SECONDS: Final = 2.0
 
@@ -92,9 +98,48 @@ class TelemetrySettings:
     metric_export_interval_seconds: float = 60.0
 
 
-def _span_name(name: str) -> str:
-    cleaned = redaction.redact_text(name)[:MAX_SPAN_NAME_CHARS]
-    return cleaned or "span"
+_log = get_logger("shared.observability")
+
+
+def span_name(name: str) -> str:
+    """Registra ``name`` en la lista cerrada de nombres de tramo y lo devuelve.
+
+    Uso: ``LEDGER_WRITE: Final = span_name("ledger.write")`` y
+    ``tracer.start_as_current_span(LEDGER_WRITE)``. Un nombre sin registrar sale como ``other``.
+    """
+    redaction.DEFAULT_POLICY.register_span_names([name])
+    return name
+
+
+def event_name(name: str) -> str:
+    """Registra ``name`` en la lista cerrada de nombres de evento y lo devuelve."""
+    redaction.DEFAULT_POLICY.register_event_names([name])
+    return name
+
+
+class _ExportHealth:
+    """Una línea al empezar a fallar la exportación de una señal y otra al recuperarse."""
+
+    def __init__(self, signal: str) -> None:
+        self._signal = signal
+        self._failing = False
+        self._lock = threading.Lock()
+
+    def __call__(self, succeeded: bool) -> None:
+        with self._lock:
+            changed = self._failing == succeeded
+            self._failing = not succeeded
+        if not changed:
+            return
+        with contextlib.suppress(Exception):  # Registrar nunca rompe la exportación.
+            if succeeded:
+                _log.info("exportación de telemetría recuperada", signal=self._signal)
+            else:
+                _log.warning(
+                    "exportación de telemetría fallando; lo descartado se cuenta en"
+                    " otel_dropped_total",
+                    signal=self._signal,
+                )
 
 
 def sanitize_span(span: ReadableSpan, policy: redaction.AttributePolicy) -> ReadableSpan:
@@ -113,11 +158,15 @@ def sanitize_span(span: ReadableSpan, policy: redaction.AttributePolicy) -> Read
             events.append(Event(_EXCEPTION_EVENT, kept, event.timestamp))
         else:
             events.append(
-                Event(_span_name(event.name), policy.clean(event.attributes), event.timestamp)
+                Event(
+                    policy.clean_event_name(event.name),
+                    policy.clean(event.attributes),
+                    event.timestamp,
+                )
             )
     links = [Link(link.context, policy.clean(link.attributes)) for link in span.links]
     return ReadableSpan(
-        name=_span_name(span.name),
+        name=policy.clean_span_name(span.name),
         context=span.context,
         parent=span.parent,
         resource=span.resource,
@@ -163,6 +212,7 @@ class BoundedSpanProcessor(SpanProcessor):
         exporter: SpanExporter,
         *,
         on_drop: Callable[[int], None],
+        on_result: Callable[[bool], None] | None = None,
         max_queue_size: int = 2048,
         max_export_batch_size: int = 512,
         schedule_delay_seconds: float = 5.0,
@@ -172,6 +222,7 @@ class BoundedSpanProcessor(SpanProcessor):
             raise ValueError("la cola y el lote deben admitir al menos un tramo")
         self._exporter = exporter
         self._on_drop = on_drop
+        self._on_result = on_result
         self._max_queue_size = max_queue_size
         self._batch_size = min(max_export_batch_size, max_queue_size)
         self._delay = schedule_delay_seconds
@@ -181,6 +232,7 @@ class BoundedSpanProcessor(SpanProcessor):
         self._export_lock = threading.Lock()
         self._wake = threading.Event()
         self._stopped = threading.Event()
+        self._flush_waiters: list[threading.Event] = []
         self._worker = threading.Thread(target=self._run, name="vigia-otel-spans", daemon=True)
         self._worker.start()
 
@@ -217,10 +269,13 @@ class BoundedSpanProcessor(SpanProcessor):
                 result = self._exporter.export(batch)
             except Exception:
                 result = SpanExportResult.FAILURE
-        if result is not SpanExportResult.SUCCESS:
+        succeeded = result is SpanExportResult.SUCCESS
+        if self._on_result is not None:
+            with contextlib.suppress(Exception):
+                self._on_result(succeeded)
+        if not succeeded:
             self._drop(len(batch))
-            return False
-        return True
+        return succeeded
 
     def _drain(self) -> bool:
         succeeded = True
@@ -228,17 +283,28 @@ class BoundedSpanProcessor(SpanProcessor):
             succeeded = self._export(batch) and succeeded
         return succeeded
 
+    def _take_waiters(self) -> list[threading.Event]:
+        with self._lock:
+            waiters, self._flush_waiters = self._flush_waiters, []
+        return waiters
+
     def _run(self) -> None:
         while not self._stopped.is_set():
             self._wake.wait(self._delay)
             self._wake.clear()
+            waiters = self._take_waiters()
             self._drain()
+            for waiter in waiters:
+                waiter.set()
         # Cierre: un intento; si falla, lo que queda se cuenta sin esperar a más exportaciones.
+        waiters = self._take_waiters()
         batch = self._next_batch()
         if batch and self._export(batch):
             self._drain()
         else:
             self._discard_pending()
+        for waiter in waiters:
+            waiter.set()
 
     def _discard_pending(self) -> None:
         with self._lock:
@@ -252,7 +318,18 @@ class BoundedSpanProcessor(SpanProcessor):
             return len(self._queue)
 
     def force_flush(self, timeout_millis: int = 30_000) -> bool:
-        return self._drain()
+        """Pide al hilo exportador que vacíe la cola y espera como mucho ``timeout_millis``.
+
+        Devuelve ``False`` si el plazo vence (colector que no responde); quien llama nunca
+        espera más que su plazo.
+        """
+        if self._stopped.is_set():
+            return self.pending() == 0
+        done = threading.Event()
+        with self._lock:
+            self._flush_waiters.append(done)
+        self._wake.set()
+        return done.wait(max(timeout_millis, 0) / 1000)
 
     def shutdown(self) -> None:
         if self._stopped.is_set():
@@ -288,13 +365,19 @@ class _DropCounter:
 class CountingMetricExporter(MetricExporter):
     """Exportador de métricas que cuenta en ``otel_dropped_total`` los puntos no entregados."""
 
-    def __init__(self, inner: MetricExporter, on_drop: Callable[[int], None]) -> None:
+    def __init__(
+        self,
+        inner: MetricExporter,
+        on_drop: Callable[[int], None],
+        on_result: Callable[[bool], None] | None = None,
+    ) -> None:
         super().__init__(
             preferred_temporality=getattr(inner, "_preferred_temporality", None),
             preferred_aggregation=getattr(inner, "_preferred_aggregation", None),
         )
         self._inner = inner
         self._on_drop = on_drop
+        self._on_result = on_result
 
     @staticmethod
     def _points(metrics_data: MetricsData) -> int:
@@ -312,6 +395,9 @@ class CountingMetricExporter(MetricExporter):
             result = self._inner.export(metrics_data, timeout_millis=timeout_millis, **kwargs)
         except Exception:
             result = MetricExportResult.FAILURE
+        if self._on_result is not None:
+            with contextlib.suppress(Exception):
+                self._on_result(result is MetricExportResult.SUCCESS)
         if result is not MetricExportResult.SUCCESS:
             with contextlib.suppress(Exception):  # Contar un descarte nunca rompe la aplicación.
                 self._on_drop(self._points(metrics_data))
@@ -470,6 +556,7 @@ def configure_telemetry(
                     endpoint=config.otlp_endpoint, timeout=config.export_timeout_seconds
                 ),
                 on_drop=lambda count: drops(count, "metrics"),
+                on_result=_ExportHealth("metrics"),
             ),
             policy,
         ),
@@ -494,6 +581,7 @@ def configure_telemetry(
             policy,
         ),
         on_drop=lambda count: drops(count, "traces"),
+        on_result=_ExportHealth("traces"),
         max_queue_size=config.max_queue_size,
         max_export_batch_size=config.max_export_batch_size,
         schedule_delay_seconds=config.schedule_delay_seconds,

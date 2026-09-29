@@ -3,9 +3,15 @@
 Dos barreras, compartidas por ``logging``, ``metrics`` y ``tracing``:
 
 - ``redact_text`` sustituye por ``[redactado]`` todo lo que tenga forma de bloque PEM, enlace
-  (``esquema://…`` o ``www.…``), correo (cualquier trozo sin espacios con ``@``) o token (20 o más
-  caracteres seguidos del alfabeto ``A-Z a-z 0-9 _ - + / =``). Se aplica a los mensajes de
-  registro y a los nombres de tramos y eventos, que el código fija como constantes.
+  (``esquema://…`` o ``www.…``), correo (cualquier trozo sin espacios con ``@``), credencial con
+  esquema (``Bearer …``, ``Basic …``), JWT (``eyJ…`` con sus segmentos, aunque sean cortos),
+  token con puntos (segmentos de dos o más caracteres con letras y dígitos, 10 o más en total) o
+  token (20 o más caracteres seguidos del alfabeto ``A-Z a-z 0-9 _ - + / =``). Se aplica a los
+  mensajes de registro, que el código fija como constantes (regla VIG004); es la segunda barrera.
+- **Nombres de tramo y de evento**: solo salen los de una lista cerrada (``register_span_names``
+  y ``register_event_names``) y las formas de la instrumentación automática reconstruidas desde
+  listas cerradas (método HTTP y ruta registrada, verbo SQL, servicio y operación de AWS); todo
+  lo demás sale como ``other``. Un texto libre o un secreto corto nunca es uno de ellos.
 - ``AttributePolicy`` decide qué atributos se emiten: solo **identificadores** (UUID canónico),
   **enumeraciones** (listas cerradas o miembros de ``enum.Enum``), enteros acotados y booleanos
   declarados, bajo una lista blanca de nombres (NFR-NUC-17, NFR-NUC-41). Un nombre fuera de la
@@ -48,16 +54,33 @@ AttributeValue = str | bool | int | float
 _PEM = re.compile(r"-----BEGIN[^\n]*?-----.*?(?:-----END[^\n]*?-----|\Z)", re.DOTALL)
 _LINK = re.compile(r"\S*://\S*|\S*www\.\S*", re.IGNORECASE)
 _EMAIL = re.compile(r"\S*@\S*")
+_AUTH = re.compile(r"\b(?:bearer|basic|digest|token|apikey)[ \t:=]+\S+", re.IGNORECASE)
+_JWT = re.compile(r"\S*eyJ[A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]*){1,2}\S*")
+_DOTTED = re.compile(r"[A-Za-z0-9_\-+/=]{2,}(?:\.[A-Za-z0-9_\-+/=]{2,})+")
 _TOKEN = re.compile(r"[A-Za-z0-9_\-+/=]{20,}")
+_DIGIT = re.compile(r"\d")
+_LETTER = re.compile(r"[A-Za-z]")
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _ENUM_MEMBER_VALUE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REGISTERED_VALUE = re.compile(r"^[A-Za-z0-9_./{}:-]{1,128}$")
+_REGISTERED_NAME = re.compile(r"^[A-Za-z0-9_./{}: -]{1,128}$")
+_HTTP_SPAN = re.compile(
+    r"(?:HTTP )?(?P<method>[A-Z_]+)(?: (?P<route>/\S*))?(?P<suffix> http (?:send|receive))?"
+)
+_RPC_SPAN = re.compile(r"(?P<service>[A-Za-z0-9]+)\.(?P<method>[A-Za-z0-9]+)")
 
 
 def _token(match: re.Match[str]) -> str:
     run = match.group(0)
     return run if _UUID.fullmatch(run) else REDACTED
+
+
+def _dotted(match: re.Match[str]) -> str:
+    run = match.group(0)
+    if len(run) >= 10 and _DIGIT.search(run) and _LETTER.search(run):
+        return REDACTED
+    return run
 
 
 def redact_text(text: str) -> str:
@@ -66,8 +89,9 @@ def redact_text(text: str) -> str:
     Un UUID canónico (minúsculas con guiones) es un identificador permitido y no cuenta como
     token; cualquier otra tira de 20 o más caracteres del alfabeto de token sí.
     """
-    for pattern in (_PEM, _LINK, _EMAIL):
+    for pattern in (_PEM, _LINK, _EMAIL, _AUTH, _JWT):
         text = pattern.sub(REDACTED, text)
+    text = _DOTTED.sub(_dotted, text)
     return _TOKEN.sub(_token, text)
 
 
@@ -186,6 +210,8 @@ class AttributePolicy:
         self._enumerations: dict[str, set[str]] = {
             key: set(values) for key, values in DEFAULT_ENUMERATIONS.items()
         }
+        self._span_names: set[str] = set()
+        self._event_names: set[str] = set()
 
     @property
     def keys(self) -> frozenset[str]:
@@ -215,6 +241,49 @@ class AttributePolicy:
         shared = _SHARED_REGISTRATION.get(key)
         if shared is not None:
             self._enumerations[shared].update(accepted)
+
+    @staticmethod
+    def _check_names(names: Iterable[str]) -> list[str]:
+        accepted = list(names)
+        for name in accepted:
+            if not _REGISTERED_NAME.fullmatch(name) or redact_text(name) != name:
+                raise ValueError("nombre de tramo o de evento no admitido")
+        return accepted
+
+    def register_span_names(self, names: Iterable[str]) -> None:
+        """Amplía la lista cerrada de nombres de tramo (constantes del código, al arrancar)."""
+        self._span_names.update(self._check_names(names))
+
+    def register_event_names(self, names: Iterable[str]) -> None:
+        """Amplía la lista cerrada de nombres de evento de tramo."""
+        self._event_names.update(self._check_names(names))
+
+    def clean_span_name(self, name: object) -> str:
+        """Nombre registrado, forma de la instrumentación automática o ``other``."""
+        if not isinstance(name, str):
+            return OTHER
+        if name in self._span_names:
+            return name
+        http = _HTTP_SPAN.fullmatch(name)
+        if http and http["method"] in _HTTP_METHODS:
+            route = http["route"]
+            kept = f" {route}" if route and route in self._enumerations["route"] else ""
+            return f"{http['method']}{kept}{http['suffix'] or ''}"
+        first = name.split(" ", 1)[0]
+        if first in _SQL_OPERATIONS or first == "connect":
+            return first
+        rpc = _RPC_SPAN.fullmatch(name)
+        if (
+            rpc
+            and rpc["service"] in self._enumerations["rpc.service"]
+            and rpc["method"] in self._enumerations["rpc.method"]
+        ):
+            return name
+        return OTHER
+
+    def clean_event_name(self, name: object) -> str:
+        """Nombre de evento registrado u ``other``."""
+        return name if isinstance(name, str) and name in self._event_names else OTHER
 
     def values(self, key: str) -> frozenset[str]:
         """Valores registrados de la enumeración ``key``."""

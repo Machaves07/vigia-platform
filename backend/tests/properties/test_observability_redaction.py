@@ -1,26 +1,32 @@
 """PR-NUC-54: ningún secreto, token, PEM, correo, enlace ni texto libre sale en la telemetría.
 
-Metapropiedad de LC-NUC-31 (NFR-NUC-17, NFR-NUC-41, PAT-NUC-SEG-09): los generadores producen
-valores sensibles y la propiedad los inyecta por **cada canal** por el que un dato puede llegar
-a la telemetría. Después busca cada valor en todo lo emitido:
+Metapropiedad de LC-NUC-31 (NFR-NUC-17, NFR-NUC-41, PAT-NUC-SEG-09). Los generadores producen
+valores sensibles (secretos largos y cortos, tokens, JWT de segmentos cortos, credenciales
+``Bearer``, PEM, correos, enlaces y texto libre) y la propiedad los inyecta por **cada canal**
+por el que un dato puede llegar a la telemetría. Después busca cada valor en todo lo emitido y,
+para trazas y métricas, también en los bytes OTLP serializados que saldrían hacia el colector.
 
-- **Registros**: campos permitidos y desconocidos, contexto de ``log_context``, argumentos ``%``
-  y ``extra`` de bibliotecas de terceros, mensaje de una excepción registrada y, para los
-  valores con forma reconocible (token, PEM, correo, enlace), el propio mensaje.
+- **Registros**: campos permitidos y desconocidos; contexto de ``log_context``; argumentos ``%`` y
+  ``extra`` de terceros; mensaje de una excepción registrada; el **mensaje** de ``get_logger``
+  construido en ejecución; el **componente** de ``get_logger`` y el nombre de un registrador
+  ajeno; un registrador ajeno con un **f-string** sin argumentos; la **excepción no recuperada
+  de una tarea de asyncio**; y, solo para las formas reconocibles (token, PEM, correo, enlace),
+  la plantilla de un registrador ajeno con argumentos.
 - **Métricas**: atributos permitidos y desconocidos en las métricas de la plataforma y en un
-  instrumento crudo de OpenTelemetry como los de la instrumentación automática; medidas dentro
-  de un tramo, que es cuando el SDK guarda ejemplares con los atributos filtrados.
-- **Trazas**: atributos del tramo, al crearlo y después, eventos, enlaces, excepciones
-  registradas o escapadas, descripción del estado y, para las formas reconocibles, nombres de
-  tramo y de evento.
+  instrumento crudo como los de la instrumentación automática, medidas dentro de un tramo (el SDK
+  guarda entonces ejemplares con los atributos filtrados).
+- **Trazas**: atributos al crear el tramo y después, eventos, enlaces, excepciones registradas o
+  escapadas, descripción del estado y los **nombres**: ``start_as_current_span``,
+  ``start_span``, ``update_name`` y ``add_event`` con el valor generado.
 
-Los mensajes y los nombres de tramo son constantes del código (reglas ``G`` de ruff); por eso
-el texto libre y los secretos sin forma reconocible no se inyectan en ellos.
+Las llamadas que inyectan un valor como mensaje o como nombre llevan ``# noqa: VIG004``: la regla
+de lint las prohíbe en el código; aquí se hacen a propósito para probar la barrera en ejecución.
 
 Cada valor generado lleva algo que una salida legítima no contiene nunca (``@``, ``://``,
-``-----BEGIN``, un símbolo final de ``SECRET_SYMBOLS``, 20 o más caracteres de token seguidos,
-o varias palabras con una mayúscula). Así la búsqueda por subcadena no confunde un valor
-generado con un nombre de campo, una marca de tiempo o un mensaje: si aparece, es una fuga.
+``-----BEGIN``, ``eyJ`` seguido de puntos, un símbolo de ``SECRET_SYMBOLS``, una mayúscula entre
+minúsculas seguida de dígitos, 20 o más caracteres de token seguidos, o varias palabras con una
+mayúscula). Así la búsqueda por subcadena no confunde un valor generado con un nombre de campo,
+una marca de tiempo o un mensaje: si aparece, es una fuga.
 
 ``test_without_the_filter_the_property_finds_leaks`` quita los filtros y exige que Hypothesis
 encuentre una fuga en cada señal: la propiedad detecta lo que promete.
@@ -28,7 +34,9 @@ encuentre una fuga en cada señal: la propiedad detecta lo que promete.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import gc
 import io
 import json
 import logging
@@ -36,11 +44,13 @@ import string
 import textwrap
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from hypothesis import HealthCheck, find, given, settings
 from hypothesis import strategies as st
+from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
+from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
 from opentelemetry.sdk.metrics.export import (
     MetricExporter,
     MetricExportResult,
@@ -76,6 +86,36 @@ secrets_ = st.builds(
 )
 """Contraseñas, códigos de recuperación y secretos arbitrarios."""
 
+short_secrets = st.builds(
+    lambda head, upper, tail, digits: f"{head}{upper}{tail}{digits}",
+    st.from_regex(r"[a-z]{2,6}", fullmatch=True),
+    st.sampled_from(string.ascii_uppercase),
+    st.from_regex(r"[a-z]{1,4}", fullmatch=True),
+    st.from_regex(r"[0-9]{1,3}", fullmatch=True),
+)
+"""Contraseñas cortas sin forma reconocible, como ``hunter2`` con una mayúscula."""
+
+_segment = st.from_regex(r"[A-Za-z0-9_-]{3,6}", fullmatch=True)
+short_jwts = st.builds(
+    lambda header, payload, signature: f"eyJ{header}.{payload}.{signature}",
+    st.binary(min_size=1, max_size=6).map(_b64url),
+    st.binary(min_size=1, max_size=6).map(_b64url),
+    st.binary(max_size=6).map(_b64url),
+)
+"""JWT con segmentos cortos."""
+
+dotted_bearers = st.builds(
+    lambda scheme, parts: scheme + ".".join(parts),
+    st.sampled_from(["", "Bearer ", "bearer "]),
+    st.lists(_segment, min_size=3, max_size=4).filter(
+        lambda parts: (
+            any(c.isdigit() for p in parts for c in p)
+            and any(c.isupper() for p in parts for c in p)
+        )
+    ),
+)
+"""Tokens de portador con puntos (``mF_9.B5f-4.1JqM``), con o sin ``Bearer``."""
+
 tokens = st.one_of(
     st.binary(min_size=16, max_size=48).map(_b64url),
     st.binary(min_size=16, max_size=48).map(lambda data: base64.b64encode(data).decode("ascii")),
@@ -83,8 +123,10 @@ tokens = st.one_of(
     st.tuples(
         st.from_regex(r"[a-z]{2,5}_", fullmatch=True), st.binary(min_size=16, max_size=32)
     ).map(lambda parts: parts[0] + _b64url(parts[1])),
+    short_jwts,
+    dotted_bearers,
 )
-"""Identificadores de sesión, tokens de invitación o de vista en vivo, claves de API."""
+"""Identificadores de sesión, tokens de invitación o de vista en vivo, claves de API, JWT."""
 
 pem_blocks = st.builds(
     lambda label, body: (
@@ -119,13 +161,14 @@ free_texts = st.builds(
     lambda words: " ".join([*words[:1], words[1].capitalize(), *words[2:]]),
     st.lists(st.text(alphabet=_WORD_ALPHABET, min_size=4, max_size=12), min_size=3, max_size=10),
 )
-"""Motivos y textos libres: varias palabras, una con mayúscula."""
+"""Motivos, descripciones y nombres de personas: varias palabras, una con mayúscula."""
 
 PATTERN_KINDS = ("token", "pem", "email", "link")
 """Formas que ``redact_text`` reconoce dentro de un texto."""
 
 KINDS: Mapping[str, st.SearchStrategy[str]] = {
     "secret": secrets_,
+    "short_secret": short_secrets,
     "token": tokens,
     "pem": pem_blocks,
     "email": emails,
@@ -185,8 +228,20 @@ def _injections(
     return found
 
 
-LOG_CHANNELS = ("field", "context", "argument", "stdlib_extra", "exception", "stdlib_exception")
-log_cases = _injections(LOG_CHANNELS, ("message",))
+LOG_CHANNELS = (
+    "field",
+    "context",
+    "argument",
+    "stdlib_extra",
+    "exception",
+    "stdlib_exception",
+    "message",
+    "component",
+    "stdlib_logger_name",
+    "stdlib_fstring",
+    "asyncio_task",
+)
+log_cases = _injections(LOG_CHANNELS, ("stdlib_template",))
 
 METRIC_CHANNELS = ("platform", "raw_instrument")
 metric_cases = _injections(METRIC_CHANNELS, ())
@@ -199,8 +254,12 @@ TRACE_CHANNELS = (
     "record_exception",
     "escaped_exception",
     "status",
+    "span_name",
+    "start_span_name",
+    "update_name",
+    "event_name",
 )
-trace_cases = _injections(TRACE_CHANNELS, ("span_name", "event_name"))
+trace_cases = _injections(TRACE_CHANNELS, ())
 
 
 # --- Búsqueda en la salida -----------------------------------------------------------------
@@ -218,12 +277,38 @@ def _strings(value: object) -> Iterator[str]:
             yield from _strings(item)
 
 
-def _leaks(injections: Sequence[Injection], emitted: Sequence[str]) -> list[str]:
-    haystack = "\n".join(emitted)
-    return [f"{i.kind} por {i.channel}" for i in injections if i.value in haystack]
+def _leaks(
+    injections: Sequence[Injection], emitted: Sequence[str], wire: Sequence[bytes] = ()
+) -> list[str]:
+    """Inyecciones cuyo valor aparece en lo emitido o en los bytes OTLP serializados."""
+    text = "\n".join(emitted)
+    blob = b"\n".join(wire)
+    found: list[str] = []
+    for i in injections:
+        if i.value in text:
+            found.append(f"{i.kind} por {i.channel}")
+        elif i.value.encode("utf-8") in blob:
+            found.append(f"{i.kind} por {i.channel} (OTLP)")
+    return found
 
 
 # --- Registros -----------------------------------------------------------------------------
+
+
+async def _fail(value: str) -> None:
+    raise ValueError(value)
+
+
+def _unretrieved_task_exception(value: str) -> None:
+    """Deja que asyncio registre «Task exception was never retrieved» con ``value`` dentro."""
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(_fail(value))
+        loop.run_until_complete(asyncio.wait([task]))
+        del task
+        gc.collect()
+    finally:
+        loop.close()
 
 
 def emit_logs(injections: Sequence[Injection]) -> list[str]:
@@ -239,6 +324,7 @@ def emit_logs(injections: Sequence[Injection]) -> list[str]:
     third_party = logging.getLogger("tercero.biblioteca")
     try:
         for i in injections:
+            built = "texto previo" + i.separator + i.value + " texto posterior"
             if i.channel == "field":
                 log.info("evento de prueba", **{i.key: i.value})
             elif i.channel == "context":
@@ -258,9 +344,23 @@ def emit_logs(injections: Sequence[Injection]) -> list[str]:
                     raise RuntimeError(i.value)
                 except RuntimeError:
                     third_party.exception("fallo de biblioteca")
+            elif i.channel == "message":
+                log.warning(built)  # noqa: VIG004 — inyección hostil a propósito.
+            elif i.channel == "component":
+                obs_logging.get_logger(i.value).info(  # noqa: VIG004 — inyección hostil.
+                    "evento de componente"
+                )
+            elif i.channel == "stdlib_logger_name":
+                logging.getLogger("tercero." + i.value).warning("valor %s", 1)
+            elif i.channel == "stdlib_fstring":
+                third_party.warning(built)
+            elif i.channel == "asyncio_task":
+                _unretrieved_task_exception(i.value)
             else:
-                message = "texto previo" + i.separator + i.value + " texto posterior"
-                log.warning(message)
+                # La plantilla de una biblioteca es válida: ``%`` del dato va escapado y, al
+                # formatearla, el texto vuelve a contener el valor tal cual.
+                template = built.replace("%", "%%") + " %s"
+                third_party.warning(template, 1)
     finally:
         root.removeHandler(handler)
         root.setLevel(previous_level)
@@ -275,7 +375,7 @@ def test_logs_never_contain_generated_values(injections: list[Injection]) -> Non
     assert emit_logs(injections) == []
 
 
-# --- Métricas ------------------------------------------------------------------------------
+# --- Métricas y trazas ---------------------------------------------------------------------
 
 
 class CollectingMetricExporter(MetricExporter):
@@ -298,10 +398,28 @@ class CollectingMetricExporter(MetricExporter):
         return None
 
 
+SPAN_ORIGIN: Final = "origen"
+SPAN_OPERATION: Final = "operacion"
+SPAN_LINKED: Final = "enlazado"
+SPAN_MEASURE: Final = "medicion"
+SPAN_FAILED: Final = "operacion fallida"
+EVENT: Final = "evento"
+
+POLICY = redaction.AttributePolicy()
+"""Política propia de la propiedad, con sus nombres de tramo y de evento registrados."""
+POLICY.register_span_names([SPAN_ORIGIN, SPAN_OPERATION, SPAN_LINKED, SPAN_MEASURE, SPAN_FAILED])
+POLICY.register_event_names([EVENT])
+
 _SETTINGS = tracing.TelemetrySettings(
     schedule_delay_seconds=3600, metric_export_interval_seconds=3600
 )
 _SPECS_WITH_ATTRIBUTES = [spec for spec in CATALOG if spec.attributes]
+
+
+def _telemetry(spans: InMemorySpanExporter, metrics: CollectingMetricExporter) -> tracing.Telemetry:
+    return tracing.configure_telemetry(
+        _SETTINGS, span_exporter=spans, metric_exporter=metrics, policy=POLICY
+    )
 
 
 def _record(spec: MetricSpec, telemetry: tracing.Telemetry, attributes: dict[str, str]) -> None:
@@ -317,16 +435,14 @@ def _record(spec: MetricSpec, telemetry: tracing.Telemetry, attributes: dict[str
 def emit_metrics(injections: Sequence[Injection]) -> list[str]:
     """Inyecta por los atributos de métricas y devuelve las fugas de lo exportado."""
     exporter = CollectingMetricExporter()
-    telemetry = tracing.configure_telemetry(
-        _SETTINGS, span_exporter=InMemorySpanExporter(), metric_exporter=exporter
-    )
+    telemetry = _telemetry(InMemorySpanExporter(), exporter)
     tracer = telemetry.tracer()
     raw = telemetry.meter_provider.get_meter("instrumentacion.automatica").create_counter(
         "instrumentacion_automatica_prueba"
     )
     try:
         for index, i in enumerate(injections):
-            with tracer.start_as_current_span("medicion"):
+            with tracer.start_as_current_span(SPAN_MEASURE):
                 if i.channel == "platform":
                     spec = _SPECS_WITH_ATTRIBUTES[index % len(_SPECS_WITH_ATTRIBUTES)]
                     key = sorted(spec.attributes)[0] if i.key in spec.attributes else i.key
@@ -348,16 +464,14 @@ def emit_metrics(injections: Sequence[Injection]) -> list[str]:
                         emitted.extend(_strings(dict(point.attributes or {})))
                         for exemplar in point.exemplars or ():
                             emitted.extend(_strings(dict(exemplar.filtered_attributes or {})))
-    return _leaks(injections, emitted)
+    wire = [encode_metrics(batch).SerializeToString() for batch in exporter.batches]
+    return _leaks(injections, emitted, wire)
 
 
 @given(metric_cases)
 @settings(suppress_health_check=[HealthCheck.too_slow])
 def test_metric_attributes_never_contain_generated_values(injections: list[Injection]) -> None:
     assert emit_metrics(injections) == []
-
-
-# --- Trazas --------------------------------------------------------------------------------
 
 
 def _span_strings(span: ReadableSpan) -> Iterator[str]:
@@ -376,36 +490,39 @@ def _span_strings(span: ReadableSpan) -> Iterator[str]:
 def emit_traces(injections: Sequence[Injection]) -> list[str]:
     """Inyecta por los canales de trazas y devuelve las fugas de lo exportado."""
     exporter = InMemorySpanExporter()
-    telemetry = tracing.configure_telemetry(
-        _SETTINGS, span_exporter=exporter, metric_exporter=CollectingMetricExporter()
-    )
+    telemetry = _telemetry(exporter, CollectingMetricExporter())
     tracer = telemetry.tracer()
     try:
-        with tracer.start_as_current_span("origen") as origin:
+        with tracer.start_as_current_span(SPAN_ORIGIN) as origin:
             origin_context = origin.get_span_context()
         for i in injections:
+            built = SPAN_OPERATION + i.separator + i.value
             if i.channel == "span_name":
-                with tracer.start_as_current_span("operacion" + i.separator + i.value):
+                with tracer.start_as_current_span(built):  # noqa: VIG004 — inyección hostil.
                     pass
+            elif i.channel == "start_span_name":
+                tracer.start_span(i.value).end()  # noqa: VIG004 — inyección hostil.
             elif i.channel == "start_attribute":
-                with tracer.start_as_current_span("operacion", attributes={i.key: i.value}):
+                with tracer.start_as_current_span(SPAN_OPERATION, attributes={i.key: i.value}):
                     pass
             elif i.channel == "link_attribute":
-                tracer.start_span("enlazado", links=[Link(origin_context, {i.key: i.value})]).end()
+                tracer.start_span(SPAN_LINKED, links=[Link(origin_context, {i.key: i.value})]).end()
             elif i.channel == "escaped_exception":
                 with (
                     pytest.raises(RuntimeError),
-                    tracer.start_as_current_span("operacion fallida"),
+                    tracer.start_as_current_span(SPAN_FAILED),
                 ):
                     raise RuntimeError(i.value)
             else:
-                with tracer.start_as_current_span("operacion") as span:
+                with tracer.start_as_current_span(SPAN_OPERATION) as span:
                     if i.channel == "attribute":
                         span.set_attribute(i.key, i.value)
                     elif i.channel == "event_attribute":
-                        span.add_event("evento", {i.key: i.value})
+                        span.add_event(EVENT, {i.key: i.value})
                     elif i.channel == "event_name":
-                        span.add_event("evento" + i.separator + i.value)
+                        span.add_event(built)  # noqa: VIG004 — inyección hostil.
+                    elif i.channel == "update_name":
+                        span.update_name(i.value)  # noqa: VIG004 — inyección hostil.
                     elif i.channel == "record_exception":
                         span.record_exception(ValueError(i.value))
                     else:
@@ -413,8 +530,10 @@ def emit_traces(injections: Sequence[Injection]) -> list[str]:
         telemetry.span_processor.force_flush()
     finally:
         telemetry.shutdown()
-    emitted = [text for span in exporter.get_finished_spans() for text in _span_strings(span)]
-    return _leaks(injections, emitted)
+    finished = exporter.get_finished_spans()
+    emitted = [text for span in finished for text in _span_strings(span)]
+    wire = [encode_spans(finished).SerializeToString()] if finished else []
+    return _leaks(injections, emitted, wire)
 
 
 @given(trace_cases)
@@ -430,7 +549,7 @@ def _identity_span(span: ReadableSpan, policy: redaction.AttributePolicy) -> Rea
 
 
 def _without_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Quita la redacción: texto intacto, atributos y argumentos tal cual, tramos sin limpiar."""
+    """Quita la redacción: textos, nombres, atributos y argumentos salen tal cual."""
 
     def clean(
         self: redaction.AttributePolicy,
@@ -445,6 +564,8 @@ def _without_filters(monkeypatch: pytest.MonkeyPatch) -> None:
         redaction.AttributePolicy, "clean_value", lambda self, key, value, replacement: value
     )
     monkeypatch.setattr(obs_logging, "_safe_argument", lambda value: value)
+    monkeypatch.setattr(obs_logging, "_is_code_constant", lambda text, frame: True)
+    monkeypatch.setattr(obs_logging, "_message", lambda record: record.getMessage())
     monkeypatch.setattr(tracing, "sanitize_span", _identity_span)
 
 

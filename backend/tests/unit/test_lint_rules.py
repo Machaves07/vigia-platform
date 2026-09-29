@@ -132,3 +132,102 @@ def test_cli_reports_clean_tree() -> None:
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout.startswith("lint_rules: sin violaciones")
+
+
+# --- VIG004: mensajes y nombres constantes -------------------------------------------------
+
+VIG004_VIOLATING = """\
+import logging
+
+from opentelemetry import trace
+
+from vigia_platform.shared.observability.logging import get_logger
+
+log = get_logger("identity.auth")
+tracer = trace.get_tracer("identity")
+
+
+class Service:
+    def __init__(self, name: str) -> None:
+        self.log = get_logger(name)  # VIG004
+
+    def login(self, reason: str, user: str) -> None:
+        log.warning(reason)  # VIG004
+        log.info(f"fallo de {user}")  # VIG004
+        self.log.error("fallo de " + user)  # VIG004
+        get_logger("identity.otro").critical(reason)  # VIG004
+        with tracer.start_as_current_span("login " + user) as span:  # VIG004
+            span.update_name(user)  # VIG004
+            span.add_event(reason)  # VIG004
+        tracer.start_span(name=user).end()  # VIG004
+        logging.getLogger("tercero").info(reason)
+"""
+"""Cada línea marcada viola VIG004; la última es un registrador ajeno y no aplica."""
+
+VIG004_COMPLIANT = """\
+from typing import Final
+
+from opentelemetry import trace
+
+from vigia_platform.shared.observability import tracing
+from vigia_platform.shared.observability.logging import get_logger
+from vigia_platform.shared.observability.metrics import METER_NAME
+
+LOGIN: Final = tracing.span_name("identity.login")
+FAILED: Final[str] = "inicio de sesión fallido"
+log = get_logger("identity.auth")
+
+
+class Service:
+    def __init__(self) -> None:
+        self.log = get_logger("identity.service")
+
+    def login(self, user: str) -> None:
+        self.log.info("servicio iniciado", actor_id=user)
+        log.warning(FAILED)
+        with trace.get_tracer(METER_NAME).start_as_current_span(LOGIN) as span:
+            span.add_event("reintento")
+            span.update_name(tracing.TRACER_NAME)
+"""
+
+
+def _marked_lines(source: str) -> list[int]:
+    return [n for n, line in enumerate(source.splitlines(), start=1) if "# VIG004" in line]
+
+
+def _lint_file(tmp_path: Path, name: str, source: str) -> subprocess.CompletedProcess[str]:
+    path = tmp_path / name
+    path.write_text(source, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), str(path)],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_vig004_violating_file_fails_naming_the_rule(tmp_path: Path) -> None:
+    completed = _lint_file(tmp_path, "violating.py", VIG004_VIOLATING)
+    assert completed.returncode == 1
+    reported = [
+        int(line.split(":")[1]) for line in completed.stdout.splitlines() if " VIG004 " in line
+    ]
+    assert reported == _marked_lines(VIG004_VIOLATING)
+    assert "VIG004 warning() con primer argumento no constante" in completed.stdout
+
+
+def test_vig004_compliant_file_passes(tmp_path: Path) -> None:
+    completed = _lint_file(tmp_path, "compliant.py", VIG004_COMPLIANT)
+    assert completed.returncode == 0, completed.stdout
+    assert completed.stdout.startswith("lint_rules: sin violaciones")
+
+
+def test_noqa_suppresses_only_the_named_rule() -> None:
+    source = (
+        "from vigia_platform.shared.observability.logging import get_logger\n"
+        'log = get_logger("x")\n'
+        "log.info(dato)  # noqa: VIG004 — prueba hostil\n"
+        "log.info(dato)  # noqa: VIG001\n"
+    )
+    assert _rules(source) == [(4, "VIG004")]

@@ -71,6 +71,8 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
+# Códigos propios de `tools/lint_rules.py`: ruff acepta `# noqa: VIG004` sin avisar.
+external = ["VIG"]
 select = [
   "E",   # pycodestyle
   "W",
