@@ -355,13 +355,24 @@ def test_no_ingress_from_the_internet(deployment: Synthesized) -> None:
         assert "SourceSecurityGroupId" in props
 
 
-def _ingress(template: JsonObject) -> set[tuple[str, int, str]]:
+# Regla de un grupo: protocolo, puerto inicial, puerto final y origen o destino. Comparar el
+# rango y el protocolo completos impide que 443-65535 o UDP/443 pasen por 443/TCP.
+Rule = tuple[str, int, int, str]
+
+
+def _rule(props: JsonObject, target: str) -> Rule:
+    return (str(props["IpProtocol"]), int(props["FromPort"]), int(props["ToPort"]), target)
+
+
+def _ingress(template: JsonObject) -> set[tuple[str, Rule]]:
     names = {v: k for k, v in _groups(template).items()}
     return {
         (
             names[str(reference_target(properties(r)["GroupId"]))],
-            int(properties(r)["FromPort"]),
-            names[str(reference_target(properties(r)["SourceSecurityGroupId"]))],
+            _rule(
+                properties(r),
+                names[str(reference_target(properties(r)["SourceSecurityGroupId"]))],
+            ),
         )
         for _, r in _of_type(template, "AWS::EC2::SecurityGroupIngress")
     }
@@ -370,35 +381,59 @@ def _ingress(template: JsonObject) -> set[tuple[str, int, str]]:
 def test_ingress_follows_the_design_table(pilot_foundation: JsonObject) -> None:
     tasks = ("sg-api", "sg-worker", "sg-tasks")
     assert _ingress(pilot_foundation) == {
-        *(("sg-db", 5432, source) for source in tasks),
-        *(("sg-endpoints", 443, source) for source in tasks),
+        *(("sg-db", ("tcp", 5432, 5432, source)) for source in tasks),
+        *(("sg-endpoints", ("tcp", 443, 443, source)) for source in tasks),
     }
 
 
-def _egress(template: JsonObject) -> dict[str, set[tuple[int, str]]]:
+def _egress(template: JsonObject) -> dict[str, set[Rule]]:
     names = {v: k for k, v in _groups(template).items()}
-    egress: dict[str, set[tuple[int, str]]] = {name: set() for name in names.values()}
+    egress: dict[str, set[Rule]] = {name: set() for name in names.values()}
     for logical_id, group in _of_type(template, "AWS::EC2::SecurityGroup"):
         for rule in properties(group).get("SecurityGroupEgress", []):
-            egress[names[logical_id]].add((int(rule["FromPort"]), str(rule["CidrIp"])))
+            egress[names[logical_id]].add(_rule(rule, str(rule["CidrIp"])))
     for _, rule in _of_type(template, "AWS::EC2::SecurityGroupEgress"):
         props = properties(rule)
-        assert props["FromPort"] == props["ToPort"]
         egress[names[str(reference_target(props["GroupId"]))]].add(
-            (
-                int(props["FromPort"]),
-                names[str(reference_target(props["DestinationSecurityGroupId"]))],
-            )
+            _rule(props, names[str(reference_target(props["DestinationSecurityGroupId"]))])
         )
     return egress
 
 
 # Regla que CDK escribe cuando un grupo no tiene salida: no permite ningún tráfico.
-_NO_EGRESS = {(252, "255.255.255.255/32")}
+_NO_EGRESS = {("icmp", 252, 86, "255.255.255.255/32")}
+
+
+@pytest.mark.parametrize(
+    ("changes", "rule"),
+    [
+        ({"ToPort": 65535}, ("tcp", 443, 65535, "0.0.0.0/0")),
+        ({"IpProtocol": "udp"}, ("udp", 443, 443, "0.0.0.0/0")),
+    ],
+    ids=["port-range", "udp"],
+)
+def test_egress_comparison_sees_protocol_and_port_range(
+    pilot_foundation: JsonObject, changes: dict[str, object], rule: Rule
+) -> None:
+    """Seguimiento de VIG-27: ampliar el rango o cambiar el protocolo de la salida 443 hacia
+    ``0.0.0.0/0`` deja de coincidir con la tabla de diseño."""
+    template = json.loads(json.dumps(pilot_foundation))
+    names = {v: k for k, v in _groups(template).items()}
+    group_id = next(i for i, n in names.items() if n == "sg-api")
+    rules = properties(template["Resources"][group_id])["SecurityGroupEgress"]
+    public = next(r for r in rules if r["CidrIp"] == "0.0.0.0/0")
+    public.update(changes)
+    found = _egress(template)["sg-api"]
+    assert rule in found
+    assert ("tcp", 443, 443, "0.0.0.0/0") not in found
 
 
 def test_egress_follows_the_design_table(pilot_foundation: JsonObject) -> None:
-    task_egress = {(5432, "sg-db"), (443, "sg-endpoints"), (443, "0.0.0.0/0")}
+    task_egress = {
+        ("tcp", 5432, 5432, "sg-db"),
+        ("tcp", 443, 443, "sg-endpoints"),
+        ("tcp", 443, 443, "0.0.0.0/0"),
+    }
     assert _egress(pilot_foundation) == {
         "sg-api": task_egress,
         "sg-worker": task_egress,
