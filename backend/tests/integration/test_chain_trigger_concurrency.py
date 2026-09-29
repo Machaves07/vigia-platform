@@ -11,7 +11,10 @@ el escritor de la aplicación (TASK-113), desde varias conexiones a la vez:
   organización y auditoría), cada cadena cumple la propiedad y cada ``record_hash`` (o
   ``entry_hash``) se recalcula en Python desde las columnas persistidas y el hash anterior;
 - si otra transacción retiene la cabeza más que ``lock_timeout``, la escritura falla con
-  ``lock_not_available`` (``chain_locked_timeout`` en ``shared.db``) y no deja hueco.
+  ``lock_not_available`` (``chain_locked_timeout`` en ``shared.db``) y no deja hueco;
+- un ``INSERT ... SELECT ... ON CONFLICT DO NOTHING`` de ``vigia_app`` no puede avanzar la cabeza
+  por filas que luego descarta: con un identificador repetido falla entero (``23505``) y con
+  identificadores distintos deja la cadena completa.
 
 Solo datos generados.
 """
@@ -31,6 +34,7 @@ from hypothesis import strategies as st
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.ledger_database import (
+    UNIQUE_VIOLATION,
     DatabaseLoop,
     MigratedDatabase,
     audit_envelope,
@@ -38,6 +42,7 @@ from tests.ledger_database import (
     chain_hash,
     genesis_hash,
     insert_audit,
+    insert_batch,
     insert_record,
     migrated_database,
     record_envelope,
@@ -174,6 +179,10 @@ async def _verify(superuser: Any, chain: Chain) -> list[Any]:
         "audit" if chain.audit else "ledger",
         chain.plant_id,
     )
+    if not rows:
+        # Una cadena sin filas no tiene cabeza: nada la avanzó.
+        assert head is None, dict(head)
+        return []
     assert head is not None
     assert (head["last_sequence"], head["last_hash"]) == (len(rows), previous)
     return list(rows)
@@ -264,3 +273,62 @@ def test_lock_timeout_fails_without_leaving_a_gap(
     loop.run(_run_concurrently(app_pool, [(chain, 0.0, 0.0)]))
     rows = loop.run(_verify(superuser, chain))
     assert len(rows) == 2
+
+
+# --- ON CONFLICT DO NOTHING no deja la cabeza por delante de las filas ----------------------------
+
+BATCH_ROWS = 400
+
+
+def _batch_target(chain: Chain) -> tuple[str, dict[str, Any], str]:
+    if chain.audit:
+        return "shared.audit_entry", audit_values(chain.organization_id), "entry_id"
+    return (
+        "ledger.ledger_record",
+        record_values(chain.organization_id, chain.plant_id),
+        "record_id",
+    )
+
+
+async def _batch(pool: Any, chain: Chain, *, repeated_id: bool) -> str | asyncpg.PostgresError:
+    table, values, id_column = _batch_target(chain)
+    overrides = {} if repeated_id else {id_column: "gen_random_uuid()"}
+    async with pool.acquire() as connection:
+        try:
+            async with connection.transaction():
+                await set_organization(connection, chain.organization_id)
+                return await insert_batch(
+                    connection, table, values, rows=BATCH_ROWS, overrides=overrides
+                )
+        except asyncpg.PostgresError as error:
+            return error
+
+
+@pytest.mark.parametrize("audit", [False, True], ids=("ledger", "audit"))
+def test_on_conflict_do_nothing_with_a_repeated_id_fails_whole(
+    loop: DatabaseLoop, superuser: Any, app_pool: Any, audit: bool
+) -> None:
+    """Sonda E1 de la revisión: 400 filas con el mismo identificador en una sola sentencia.
+
+    Sin la tabla de identidad, el disparador avanzaba la cabeza 400 veces y ``ON CONFLICT`` solo
+    insertaba las filas de marca distinta: huecos y ``previous_hash`` huérfanos para siempre.
+    """
+    chain = Chain(uuid.uuid4(), None if audit else uuid.uuid4(), audit=audit)
+    outcome = loop.run(_batch(app_pool, chain, repeated_id=True))
+    assert isinstance(outcome, asyncpg.PostgresError), outcome
+    assert outcome.sqlstate == UNIQUE_VIOLATION
+    # Nada escrito: ni filas ni cabeza. La siguiente escritura parte del génesis.
+    assert loop.run(_verify(superuser, chain)) == []
+    loop.run(_run_concurrently(app_pool, [(chain, 0.0, 0.0)]))
+    assert len(loop.run(_verify(superuser, chain))) == 1
+
+
+@pytest.mark.parametrize("audit", [False, True], ids=("ledger", "audit"))
+def test_on_conflict_do_nothing_with_distinct_ids_keeps_the_chain_complete(
+    loop: DatabaseLoop, superuser: Any, app_pool: Any, audit: bool
+) -> None:
+    chain = Chain(uuid.uuid4(), None if audit else uuid.uuid4(), audit=audit)
+    outcome = loop.run(_batch(app_pool, chain, repeated_id=False))
+    assert outcome == f"INSERT 0 {BATCH_ROWS}"
+    loop.run(_run_concurrently(app_pool, [(chain, 0.0, 0.0)]))
+    assert len(loop.run(_verify(superuser, chain))) == BATCH_ROWS + 1

@@ -47,15 +47,19 @@ KEYED_RECORD_TYPE = "finding_received"
 APPEND_ONLY_TABLES = (
     "ledger.ledger_record",
     "ledger.record_source_key",
+    "ledger.record_identity",
     "ledger.evidence",
+    "ledger.evidence_identity",
     "ledger.label",
     "shared.audit_entry",
+    "shared.audit_entry_identity",
     "shared.outbox_event",
     "shared.dead_letter",
 )
 """Tablas ⛓ de TASK-108 (BR-NUC-43): el disparador rechaza ``UPDATE``, ``DELETE`` y ``TRUNCATE``."""
 
 RESTRICT_VIOLATION = "23001"
+UNIQUE_VIOLATION = "23505"
 SERIALIZATION_FAILURE = "40001"
 INSUFFICIENT_PRIVILEGE = "42501"
 
@@ -242,6 +246,80 @@ async def insert_audit(connection: Any, values: Mapping[str, Any]) -> Any:
         f" VALUES ({placeholders}) RETURNING *"
     )
     return await connection.fetchrow(statement, *values.values())
+
+
+def evidence_values(
+    organization_id: uuid.UUID, plant_id: uuid.UUID, record_id: uuid.UUID, verified_at: datetime
+) -> dict[str, Any]:
+    """Columnas de una fila de ``ledger.evidence`` (clip sintético ya verificado)."""
+    return {
+        "evidence_id": uuid.uuid4(),
+        "organization_id": organization_id,
+        "plant_id": plant_id,
+        "zone_id": uuid.uuid4(),
+        "node_id": uuid.uuid4(),
+        "record_id": record_id,
+        "clip_id": uuid.uuid4(),
+        "camera_id": uuid.uuid4(),
+        "storage_key": "org/x/clip.mp4",
+        "sha256": "a" * 64,
+        "size_bytes": 1024,
+        "content_type": "video/mp4",
+        "media_kind": "video",
+        "duration_ms": 5000,
+        "segment": "full",
+        "verified_at": verified_at,
+    }
+
+
+async def insert_evidence(connection: Any, values: Mapping[str, Any]) -> Any:
+    """``INSERT`` en ``ledger.evidence`` y la fila persistida (``RETURNING *``)."""
+    columns = list(values)
+    placeholders = ", ".join(f"${index}" for index in range(1, len(columns) + 1))
+    statement = (
+        f"INSERT INTO ledger.evidence ({', '.join(columns)})"  # noqa: S608 - columnas fijas
+        f" VALUES ({placeholders}) RETURNING *"
+    )
+    return await connection.fetchrow(statement, *values.values())
+
+
+async def insert_batch(
+    connection: Any,
+    table: str,
+    values: Mapping[str, Any],
+    *,
+    rows: int,
+    overrides: Mapping[str, str] | None = None,
+) -> str:
+    """``INSERT ... SELECT ... FROM generate_series(1, rows) ON CONFLICT DO NOTHING``.
+
+    Cada fila lleva ``values``, salvo las columnas de ``overrides``, que toman esa expresión SQL
+    (por ejemplo ``gen_random_uuid()``). Devuelve la etiqueta de la sentencia (``INSERT 0 n``).
+    """
+    types = dict(
+        await connection.fetch(
+            "SELECT attname, format_type(atttypid, atttypmod) FROM pg_attribute"
+            " WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped",
+            table,
+        )
+    )
+    overrides = dict(overrides or {})
+    columns = list(values)
+    parameters = [values[column] for column in columns if column not in overrides]
+    expressions, index = [], 0
+    for column in columns:
+        if column in overrides:
+            expressions.append(overrides[column])
+        else:
+            index += 1
+            expressions.append(f"${index}::{types[column]}")
+    statement = (
+        f"INSERT INTO {table} ({', '.join(columns)})"  # noqa: S608 - nombres fijos
+        f" SELECT {', '.join(expressions)} FROM generate_series(1, {int(rows)})"
+        " ON CONFLICT DO NOTHING"
+    )
+    status: str = await connection.execute(statement, *parameters)
+    return status
 
 
 # --- Oráculo en Python ----------------------------------------------------------------------------

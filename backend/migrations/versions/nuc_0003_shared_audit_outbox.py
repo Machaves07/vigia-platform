@@ -12,6 +12,10 @@ organización, ``ledger.chain_head``, ``ledger.vigia_chain_link()`` y
   ``filters_hash = SHA-256(filters)`` y ``entry_hash = SHA-256(sobre ‖ previous_hash)``.
   ``filters`` son los bytes canónicos RFC 8785 de los filtros (≤ 4 KB) y ``filters_json`` se genera
   de ellos, igual que ``content`` en el expediente: el sobre lleva su hash, no el documento.
+- ``shared.audit_entry_identity``: ``entry_id`` único en toda la auditoría (la clave primaria de la
+  tabla particionada incluye ``occurred_at``). El disparador lo reclama sin ``ON CONFLICT`` antes
+  de avanzar la cabeza, igual que ``ledger.record_identity``; ``vigia_app`` no tiene privilegios
+  sobre ella.
 - ``shared.vigia_canonical_audit_envelope(shared.audit_entry)``: bytes RFC 8785 del sobre de la
   entrada con forma fija, claves ``actor``, ``chain_sequence``, ``correlation_id``, ``entry_id``,
   ``filters_hash``, ``occurred_at``, ``operation``, ``organization_id``, ``outcome``,
@@ -98,6 +102,18 @@ _AUDIT_ENTRY = (
         'Registro de auditoría (AuditEntry, domain-entities §4.2): solo anexar, por mes'
     """,
     "CREATE INDEX audit_entry_chain ON shared.audit_entry (organization_id, chain_sequence)",
+    """
+    CREATE TABLE shared.audit_entry_identity (
+        entry_id uuid PRIMARY KEY,
+        organization_id uuid NOT NULL,
+        occurred_at timestamptz NOT NULL
+    )
+    """,
+    """
+    COMMENT ON TABLE shared.audit_entry_identity IS
+        'entry_id único en toda la auditoría; lo reclama el disparador de encadenado antes de '
+        'avanzar la cabeza'
+    """,
     """
     CREATE INDEX audit_entry_operation_occurred
         ON shared.audit_entry (organization_id, operation, occurred_at)
@@ -257,11 +273,17 @@ $$
 
 _CLIENT_TABLES = (
     "shared.audit_entry",
+    "shared.audit_entry_identity",
     "shared.outbox_event",
     "shared.outbox_delivery",
     "shared.dead_letter",
 )
-_APPEND_ONLY_TABLES = ("shared.audit_entry", "shared.outbox_event", "shared.dead_letter")
+_APPEND_ONLY_TABLES = (
+    "shared.audit_entry",
+    "shared.audit_entry_identity",
+    "shared.outbox_event",
+    "shared.dead_letter",
+)
 
 
 def _row_security(table: str) -> tuple[str, ...]:

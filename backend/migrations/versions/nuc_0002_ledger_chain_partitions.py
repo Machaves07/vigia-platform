@@ -20,6 +20,13 @@ Revisión nuc_0002 (LC-NUC-12, parte 2). Lo que crea, todo de ``vigia_migrate``:
 - ``ledger.record_source_key``: la unicidad de ``(organization_id, record_type, source_key)``
   (NFR-NUC-08). Un índice único de una tabla particionada tiene que incluir ``received_at``, así que
   la clave vive en esta tabla sin particionar, que llena el disparador.
+- ``ledger.record_identity`` y ``ledger.evidence_identity``: por el mismo motivo, la clave primaria
+  de una tabla particionada incluye la marca y no hace único a ``record_id`` ni a ``evidence_id``.
+  Cada ``INSERT`` reclama su identificador en estas tablas sin particionar, desde un disparador y
+  sin ``ON CONFLICT``. Un identificador repetido falla con ``unique_violation`` (``23505``) y aborta
+  la sentencia entera, cabeza de la cadena incluida. Así un ``INSERT ... ON CONFLICT DO NOTHING``
+  de la aplicación no puede descartar en silencio una fila que ya avanzó la cabeza, porque
+  PostgreSQL resuelve el conflicto **después** de los disparadores ``BEFORE``.
 - ``ledger.evidence`` (``Evidence``, §3.5), particionada por mes de ``verified_at``; ``anonymized``
   es la constante ``true`` (P3). Los campos de la verificación diferida de la marca los añade
   TASK-121 (adenda A-14).
@@ -38,7 +45,8 @@ Revisión nuc_0002 (LC-NUC-12, parte 2). Lo que crea, todo de ``vigia_migrate``:
   ``SHA-256("vigia:genesis:" + organization_id + ":" + (plant_id | "organization"))``), fija
   ``chain_sequence``, la marca (``received_at``, o ``occurred_at`` en auditoría), ``previous_hash``,
   ``content_hash = SHA-256(content)`` y ``record_hash = SHA-256(sobre ‖ previous_hash)``, con
-  ``previous_hash`` como sus 64 caracteres hexadecimales en UTF-8, y actualiza la cabeza. Lo que la
+  ``previous_hash`` como sus 64 caracteres hexadecimales en UTF-8, reclama el identificador y
+  actualiza la cabeza. Lo que la
   aplicación aporte en esas columnas se sobrescribe. La misma función encadena ``AuditEntry``
   (argumento ``audit``, nuc_0003).
 - ``shared.vigia_reject_mutation()``: rechaza ``UPDATE``, ``DELETE`` y ``TRUNCATE`` en las tablas
@@ -55,7 +63,8 @@ de la exclusión cruza el cambio de mes, la partición ya no corresponde y el di
 **Privilegios** (PAT-NUC-SEG-05): ``vigia_app`` tiene ``SELECT`` e ``INSERT`` en las tablas de
 solo anexar, ``SELECT`` en ``chain_head`` y ``SELECT``, ``INSERT`` y ``UPDATE`` en
 ``communication_state``; ninguno sobre las particiones (se accede por la tabla padre, donde están
-las políticas).
+las políticas) ni sobre ``record_identity`` y ``evidence_identity``, que solo escriben los
+disparadores.
 """
 
 from __future__ import annotations
@@ -320,6 +329,18 @@ _LEDGER_RECORD = (
         'Clave de idempotencia única por organización y tipo (BR-CTR-26, NFR-NUC-08); la llena '
         'el disparador de encadenado'
     """,
+    """
+    CREATE TABLE ledger.record_identity (
+        record_id uuid PRIMARY KEY,
+        organization_id uuid NOT NULL,
+        received_at timestamptz NOT NULL
+    )
+    """,
+    """
+    COMMENT ON TABLE ledger.record_identity IS
+        'record_id único en todo el expediente; lo reclama el disparador de encadenado antes de '
+        'avanzar la cabeza'
+    """,
 )
 
 _EVIDENCE = (
@@ -368,6 +389,43 @@ _EVIDENCE = (
         ON ledger.evidence (organization_id, plant_id, zone_id, verified_at)
     """,
     "CREATE INDEX evidence_record ON ledger.evidence (organization_id, record_id)",
+    """
+    CREATE TABLE ledger.evidence_identity (
+        evidence_id uuid PRIMARY KEY,
+        organization_id uuid NOT NULL,
+        verified_at timestamptz NOT NULL
+    )
+    """,
+    """
+    COMMENT ON TABLE ledger.evidence_identity IS
+        'evidence_id único en toda la evidencia; lo reclama un disparador al insertar'
+    """,
+    # SECURITY DEFINER: vigia_app no tiene privilegios sobre evidence_identity. Sujeta a la
+    # seguridad a nivel de fila (FORCE) con el contexto de la sesión, como el encadenado.
+    """
+    CREATE FUNCTION ledger.vigia_claim_evidence_id() RETURNS trigger
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = pg_catalog
+    AS $$
+    BEGIN
+        INSERT INTO ledger.evidence_identity (evidence_id, organization_id, verified_at)
+        VALUES (NEW.evidence_id, NEW.organization_id, NEW.verified_at);
+        RETURN NEW;
+    END
+    $$
+    """,
+    """
+    COMMENT ON FUNCTION ledger.vigia_claim_evidence_id() IS
+        'Reclama evidence_id en ledger.evidence_identity: un identificador repetido falla (23505)'
+    """,
+    "REVOKE ALL ON FUNCTION ledger.vigia_claim_evidence_id() FROM PUBLIC",
+    """
+    CREATE TRIGGER evidence_claim_id
+        BEFORE INSERT ON ledger.evidence
+        FOR EACH ROW EXECUTE FUNCTION ledger.vigia_claim_evidence_id()
+    """,
+    "ALTER TABLE ledger.evidence ENABLE ALWAYS TRIGGER evidence_claim_id",
 )
 
 _LABEL = (
@@ -567,8 +625,12 @@ _CHAIN_LINK = (
 
         NEW.chain_sequence := head.last_sequence + 1;
         NEW.previous_hash := head.last_hash;
+        -- El identificador se reclama sin ON CONFLICT antes de avanzar la cabeza: si se repite,
+        -- 23505 aborta la sentencia y la cabeza no avanza por una fila que no se insertaría.
         IF chain_kind = 'ledger' THEN
             NEW.received_at := taken_at;
+            INSERT INTO ledger.record_identity (record_id, organization_id, received_at)
+            VALUES (NEW.record_id, NEW.organization_id, NEW.received_at);
             NEW.content_hash := encode(public.digest(NEW.content, 'sha256'), 'hex');
             NEW.record_hash := encode(public.digest(
                 ledger.vigia_canonical_envelope(NEW) || convert_to(NEW.previous_hash, 'UTF8'),
@@ -587,6 +649,8 @@ _CHAIN_LINK = (
             END IF;
         ELSE
             NEW.occurred_at := taken_at;
+            INSERT INTO shared.audit_entry_identity (entry_id, organization_id, occurred_at)
+            VALUES (NEW.entry_id, NEW.organization_id, NEW.occurred_at);
             NEW.filters_hash := encode(public.digest(NEW.filters, 'sha256'), 'hex');
             NEW.entry_hash := encode(public.digest(
                 shared.vigia_canonical_audit_envelope(NEW)
@@ -619,14 +683,18 @@ _CLIENT_TABLES = (
     "ledger.chain_head",
     "ledger.ledger_record",
     "ledger.record_source_key",
+    "ledger.record_identity",
     "ledger.evidence",
+    "ledger.evidence_identity",
     "ledger.label",
     "ledger.communication_state",
 )
 _APPEND_ONLY_TABLES = (
     "ledger.ledger_record",
     "ledger.record_source_key",
+    "ledger.record_identity",
     "ledger.evidence",
+    "ledger.evidence_identity",
     "ledger.label",
 )
 

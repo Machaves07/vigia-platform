@@ -229,8 +229,20 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
     assert {owner for owner, _ in tables.values()} == {"vigia_migrate"}
     # Tablas globales: sin datos de cliente ni seguridad a nivel de fila (domain-entities §6).
     assert {tables[table] for table in GLOBAL_TABLES} == {("vigia_migrate", False)}
-    # Las de cliente de las migraciones siguientes (TASK-108 en adelante), todas con ella.
-    assert all(rls for table, (_, rls) in tables.items() if table not in GLOBAL_TABLES)
+    # Las de cliente de las migraciones siguientes (TASK-108 en adelante), todas con ella y
+    # forzada: también el dueño (vigia_migrate, los disparadores SECURITY DEFINER) queda sujeto.
+    client_tables = [table for table in tables if table not in GLOBAL_TABLES]
+    assert all(tables[table][1] for table in client_tables)
+    forced = {
+        (row["nspname"], row["relname"]): row["relforcerowsecurity"]
+        for row in await superuser.fetch(
+            "SELECT n.nspname, c.relname, c.relforcerowsecurity FROM pg_class c"
+            " JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE n.nspname IN ('identity', 'ledger', 'shared') AND c.relkind IN ('r', 'p')"
+        )
+    }
+    not_forced = [table for table in client_tables if not forced[table]]
+    assert not_forced == [], not_forced
     # vigia_app no alcanza ninguna partición directamente: solo por la tabla padre.
     reachable_partitions = await superuser.fetch(
         "SELECT inhrelid::regclass::text FROM pg_inherits"

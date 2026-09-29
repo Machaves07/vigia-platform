@@ -1,8 +1,9 @@
 """PR-NUC-18: ninguna tabla de solo anexar admite ``UPDATE``, ``DELETE`` ni ``TRUNCATE`` (TASK-108).
 
 Metapropiedad (BR-NUC-43, PAT-NUC-SEG-05) sobre las tablas ⛓ de ``nuc_0002`` y ``nuc_0003``:
-``ledger.ledger_record``, ``ledger.record_source_key``, ``ledger.evidence``, ``ledger.label``,
-``shared.audit_entry``, ``shared.outbox_event`` y ``shared.dead_letter``.
+``ledger.ledger_record``, ``ledger.record_source_key``, ``ledger.record_identity``,
+``ledger.evidence``, ``ledger.evidence_identity``, ``ledger.label``, ``shared.audit_entry``,
+``shared.audit_entry_identity``, ``shared.outbox_event`` y ``shared.dead_letter``.
 
 - Con ``vigia_app``, cualquier sentencia de mutación generada falla por permisos (``42501``).
 - Con ``vigia_migrate`` (dueño) o con el superusuario del contenedor (el "rol privilegiado de
@@ -15,7 +16,11 @@ Además, los criterios del particionado y del encadenado que se comprueban sin c
 - la migración crea la partición por defecto y las del mes en curso y los tres siguientes;
 - el disparador ignora los hashes y la secuencia que aporta la aplicación, rechaza la fila de otra
   organización, la de ``plant_id`` incoherente con el tipo y la que cambió de mes esperando la
-  exclusión; la clave de idempotencia es única por organización y tipo.
+  exclusión; la clave de idempotencia es única por organización y tipo; la marca nunca es menor
+  que la de la cabeza;
+- ``record_id``, ``entry_id`` y ``evidence_id`` son únicos aunque la marca sea otra;
+- la seguridad a nivel de fila está forzada: el dueño de las tablas (``vigia_migrate``) con el
+  contexto de otra organización no ve ninguna fila.
 """
 
 from __future__ import annotations
@@ -39,10 +44,13 @@ from tests.ledger_database import (
     PLANT_RECORD_TYPE,
     RESTRICT_VIOLATION,
     SERIALIZATION_FAILURE,
+    UNIQUE_VIOLATION,
     DatabaseLoop,
     MigratedDatabase,
     audit_values,
+    evidence_values,
     insert_audit,
+    insert_evidence,
     insert_record,
     migrated_database,
     record_values,
@@ -58,8 +66,21 @@ FAR_FUTURE = datetime(2031, 6, 15, 12, 0, tzinfo=UTC)
 PRIVILEGED = ("vigia_migrate", None)
 """El dueño de las tablas y el superusuario del contenedor."""
 
-UNIQUE_VIOLATION = "23505"
 CHECK_VIOLATION = "23514"
+CLIENT_TABLES = (
+    "ledger.chain_head",
+    "ledger.ledger_record",
+    "ledger.record_source_key",
+    "ledger.record_identity",
+    "ledger.evidence",
+    "ledger.evidence_identity",
+    "ledger.label",
+    "shared.audit_entry",
+    "shared.audit_entry_identity",
+    "shared.outbox_event",
+    "shared.dead_letter",
+)
+"""Tablas de cliente con filas de ``ORGANIZATION`` tras ``_seed``."""
 
 
 # --- Fixtures -------------------------------------------------------------------------------------
@@ -97,15 +118,9 @@ async def _seed(superuser: Any, app: Any) -> None:
         await insert_record(app, record_values(ORGANIZATION, None))
         await insert_audit(app, audit_values(ORGANIZATION, filters={"zone": "Z-01"}))
         for verified_at in (record["received_at"], FAR_FUTURE):
-            await app.execute(
-                "INSERT INTO ledger.evidence (evidence_id, organization_id, plant_id, zone_id,"
-                " node_id, record_id, clip_id, camera_id, storage_key, sha256, size_bytes,"
-                " content_type, media_kind, duration_ms, segment, verified_at)"
-                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'org/x/clip.mp4', $9, 1024, 'video/mp4',"
-                " 'video', 5000, 'full', $10)",
-                uuid.uuid4(), ORGANIZATION, PLANT, uuid.uuid4(), uuid.uuid4(),
-                record["record_id"], uuid.uuid4(), uuid.uuid4(), "a" * 64, verified_at,
-            )  # fmt: skip
+            await insert_evidence(
+                app, evidence_values(ORGANIZATION, PLANT, record["record_id"], verified_at)
+            )
         await app.execute(
             "INSERT INTO ledger.label (label_id, organization_id, plant_id, zone_id,"
             " source_record_id, subject_record_id, family, outcome, reason_category, labeled_at,"
@@ -204,7 +219,8 @@ _WHERE = ("", " WHERE true", f" WHERE organization_id = '{ORGANIZATION}'")
 def mutation_statements(draw: st.DrawFn, targets: list[str], columns: dict[str, list[str]]) -> str:
     """``UPDATE``, ``DELETE`` o ``TRUNCATE`` sobre una tabla ⛓ o una partición con filas."""
     target = draw(st.sampled_from(targets))
-    parent = next(table for table in APPEND_ONLY_TABLES if target.startswith(table))
+    # La más larga: ``ledger.evidence_identity`` también empieza por ``ledger.evidence_``.
+    parent = max((table for table in APPEND_ONLY_TABLES if target.startswith(table)), key=len)
     kind = draw(st.sampled_from(("update", "delete", "truncate")))
     where = draw(st.sampled_from(_WHERE))
     if kind == "update":
@@ -530,3 +546,97 @@ def test_application_only_reads_chain_heads_and_its_own_organization(
     assert loop.run(visible(None)) == 0
     assert loop.run(visible(uuid.uuid4())) == 0
     assert loop.run(visible(ORGANIZATION)) >= 3
+
+
+@pytest.mark.parametrize("table", CLIENT_TABLES)
+def test_row_security_is_forced_even_for_the_owner(
+    loop: DatabaseLoop, connections: dict[str | None, Any], table: str
+) -> None:
+    """``FORCE ROW LEVEL SECURITY``: el dueño solo ve la organización del contexto."""
+
+    async def visible(organization_id: uuid.UUID) -> int:
+        migrate = connections["vigia_migrate"]
+        async with migrate.transaction():
+            await set_organization(migrate, organization_id)
+            count: int = await migrate.fetchval(f"SELECT count(*) FROM {table}")  # noqa: S608
+            return count
+
+    assert loop.run(visible(uuid.uuid4())) == 0
+    assert loop.run(visible(ORGANIZATION)) >= 1
+
+
+# --- Identificadores únicos aunque la marca sea otra ----------------------------------------------
+
+
+async def _twice(connection: Any, insert: Any) -> asyncpg.PostgresError | None:
+    """La misma fila en dos transacciones confirmadas por separado (reintento tras un COMMIT)."""
+    try:
+        for _ in range(2):
+            async with connection.transaction():
+                await set_organization(connection, ORGANIZATION)
+                await insert(connection)
+            await connection.execute("SELECT pg_sleep(0.01)")
+    except asyncpg.PostgresError as error:
+        return error
+    return None
+
+
+def test_record_id_is_unique_across_marks(
+    loop: DatabaseLoop, connections: dict[str | None, Any]
+) -> None:
+    values = record_values(ORGANIZATION, PLANT)
+    error = loop.run(_twice(connections["vigia_app"], lambda c: insert_record(c, values)))
+    assert error is not None and error.sqlstate == UNIQUE_VIOLATION
+    rows = loop.run(
+        connections[None].fetchval(
+            "SELECT count(*) FROM ledger.ledger_record WHERE record_id = $1", values["record_id"]
+        )
+    )
+    assert rows == 1
+
+
+def test_entry_id_is_unique_across_marks(
+    loop: DatabaseLoop, connections: dict[str | None, Any]
+) -> None:
+    values = audit_values(ORGANIZATION)
+    error = loop.run(_twice(connections["vigia_app"], lambda c: insert_audit(c, values)))
+    assert error is not None and error.sqlstate == UNIQUE_VIOLATION
+    rows = loop.run(
+        connections[None].fetchval(
+            "SELECT count(*) FROM shared.audit_entry WHERE entry_id = $1", values["entry_id"]
+        )
+    )
+    assert rows == 1
+
+
+def test_evidence_id_is_unique_across_marks(
+    loop: DatabaseLoop, connections: dict[str | None, Any]
+) -> None:
+    first = evidence_values(ORGANIZATION, PLANT, uuid.uuid4(), FAR_FUTURE)
+    second = first | {"verified_at": FAR_FUTURE + timedelta(days=40)}
+    marks = iter((first, second))
+    error = loop.run(_twice(connections["vigia_app"], lambda c: insert_evidence(c, next(marks))))
+    assert error is not None and error.sqlstate == UNIQUE_VIOLATION
+
+
+def test_mark_never_goes_below_the_chain_head(
+    loop: DatabaseLoop, connections: dict[str | None, Any]
+) -> None:
+    """Si el reloj retrocede (aquí, la cabeza adelantada a mano), la marca sigue la de la cabeza."""
+    organization_id = uuid.uuid4()
+
+    async def scenario() -> tuple[datetime, datetime]:
+        superuser = connections[None]
+        async with superuser.transaction():
+            await set_organization(superuser, organization_id)
+            await insert_record(superuser, record_values(organization_id, None))
+            ahead: datetime = await superuser.fetchval(
+                "UPDATE ledger.chain_head SET updated_at = updated_at + interval '1 second'"
+                " WHERE organization_id = $1 RETURNING updated_at",
+                organization_id,
+            )
+            second = await insert_record(superuser, record_values(organization_id, None))
+            return ahead, second["received_at"]
+
+    ahead, received_at = loop.run(scenario())
+    assert received_at >= ahead
