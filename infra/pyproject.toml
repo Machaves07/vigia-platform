@@ -1,0 +1,67 @@
+# Aplicación CDK de U-02 (TASK-144, infrastructure-design §2.3). Proyecto propio,
+# independiente del backend: `vigia_platform` no depende de `aws-cdk-lib` y este proyecto
+# no depende de `vigia_platform`. `cdk synth` no necesita credenciales de AWS.
+
+[project]
+name = "vigia-platform-infra"
+version = "0.1.0"
+description = "Aplicación CDK de la plataforma núcleo de Vigía (no publicada)."
+license = { text = "Todos los derechos reservados" }
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "aws-cdk-lib>=2.271,<3",
+  "constructs>=10.8,<11",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[tool.uv]
+package = false
+
+# --- ruff -----------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["cdk.out"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle
+  "W",
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # bugbear
+  "UP",  # pyupgrade
+  "S",   # bandit
+  "SIM",
+  "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "config", "stacks", "tests"]
+
+# --- mypy -----------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app.py", "config", "stacks", "tests"]
+strict = true
+warn_unreachable = true
+
+# --- pytest ---------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
