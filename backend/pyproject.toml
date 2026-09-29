@@ -22,7 +22,8 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "pydantic>=2,<3",
-  "sqlalchemy[asyncio]>=2,<3",
+  # <2.1: la instrumentación de OpenTelemetry (0.66b0, la última) solo admite SQLAlchemy < 2.1.
+  "sqlalchemy[asyncio]>=2,<2.1",
   "asyncpg>=0.29",
   "alembic>=1.13",
   "boto3>=1.35",
@@ -37,6 +38,7 @@ dependencies = [
   "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
   "opentelemetry-instrumentation-httpx>=0.48b0",
   "opentelemetry-instrumentation-botocore>=0.48b0",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.45",
 ]
 
 [dependency-groups]
@@ -78,6 +80,7 @@ select = [
   "UP",  # pyupgrade
   "S",   # bandit: S301 pickle, S302 marshal, S307 eval, S506 yaml.load inseguro, S608 SQL por formato
   "DTZ", # flake8-datetimez: prohibidos los `datetime` sin zona (BR-NUC-47)
+  "G",   # flake8-logging-format: el mensaje de registro es una constante (NFR-NUC-17)
   "TID", # banned-api: deserialización insegura (NFR-NUC-27) y hora del sistema (PAT-NUC-RES-07)
   "SIM",
   "RUF",
