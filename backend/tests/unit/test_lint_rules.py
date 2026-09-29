@@ -25,7 +25,7 @@ def _rules(source: str) -> list[tuple[int, str]]:
 
 
 def test_repository_tree_has_no_violations() -> None:
-    paths = [BACKEND / "src", BACKEND / "tests", BACKEND / "tools"]
+    paths = [BACKEND / "src", BACKEND / "tests", BACKEND / "tools", BACKEND / "migrations"]
     assert [str(v) for v in check_paths(paths, root=BACKEND)] == []
 
 

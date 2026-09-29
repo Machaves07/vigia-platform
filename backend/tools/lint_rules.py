@@ -21,9 +21,10 @@ no expresa:
 Una línea con ``# noqa: VIGnnn`` omite esa regla en esa línea (solo para pruebas hostiles que
 inyectan datos a propósito, con el motivo en el comentario).
 
-Uso: ``uv run python tools/lint_rules.py [ruta ...]`` (por defecto ``src``, ``tests`` y
-``tools``). Imprime ``archivo:línea:columna: VIGnnn mensaje`` y termina en 1 si hay alguna
-violación. ``tests/unit/test_lint_rules.py`` lo ejecuta sobre el árbol en cada corrida de pytest.
+Uso: ``uv run python tools/lint_rules.py [ruta ...]`` (por defecto ``src``, ``tests``,
+``tools`` y ``migrations``). Imprime ``archivo:línea:columna: VIGnnn mensaje`` y termina en 1 si
+hay alguna violación. ``tests/unit/test_lint_rules.py`` lo ejecuta sobre el árbol en cada corrida
+de pytest.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from pathlib import Path
 
 __all__ = ["Violation", "check_paths", "check_source", "main"]
 
-DEFAULT_PATHS = ("src", "tests", "tools")
+DEFAULT_PATHS = ("src", "tests", "tools", "migrations")
 
 SQL_TEXT_FUNCTIONS = frozenset(
     {"sqlalchemy.text", "sqlalchemy.sql.text", "sqlalchemy.sql.expression.text"}

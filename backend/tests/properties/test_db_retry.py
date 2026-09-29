@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
-from collections.abc import Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -294,6 +294,17 @@ async def _write(database: Database, context: ScopeContext) -> None:
         await transaction.execute(USER_STATEMENT)
 
 
+SAFETY_CAP_SECONDS = 5.0
+"""Tope externo de cada escenario: si una mutación del adaptador lo dejara colgado, la prueba
+falla con ``TimeoutError`` en vez de colgar la suite (seguimiento 3 de la revisión de VIG-26).
+Un escenario sano dura menos de 0,5 s; el tope acota también cada paso de reducción."""
+
+
+def _run[T](scenario: Coroutine[Any, Any, T]) -> T:
+    """``asyncio.run`` con el tope externo ``SAFETY_CAP_SECONDS``."""
+    return asyncio.run(asyncio.wait_for(scenario, SAFETY_CAP_SECONDS))
+
+
 # --- Propiedades --------------------------------------------------------------------------------
 
 
@@ -308,7 +319,7 @@ def test_read_attempts_at_most_two_and_retry_only_connection_failures(
 
     outcome: object
     try:
-        outcome = [tuple(row) for row in asyncio.run(database.read(context, USER_STATEMENT))]
+        outcome = [tuple(row) for row in _run(database.read(context, USER_STATEMENT))]
     except Exception as error:
         outcome = error
 
@@ -355,7 +366,7 @@ def test_write_runs_exactly_once_and_never_retries(
 
     outcome: BaseException | None = None
     try:
-        asyncio.run(_write(database, context))
+        _run(_write(database, context))
     except Exception as error:
         outcome = error
 
@@ -409,7 +420,7 @@ def test_any_sequence_never_applies_a_write_twice(
                 assert 1 <= journal.attempts - attempts <= MAX_READ_ATTEMPTS
                 assert journal.effects_applied == effects  # una lectura no escribe
 
-    asyncio.run(run())
+    _run(run())
     assert journal.effects_applied <= operations.count("write")
     assert journal.commits_sent <= journal.attempts
     assert len(journal.sleeps) <= operations.count("read")
@@ -432,7 +443,7 @@ def test_without_context_no_connection_is_requested(value: object) -> None:
     with pytest.raises(ContextAbsent):
         database.transaction(cast(ScopeContext, value))
     with pytest.raises(ContextAbsent):
-        asyncio.run(database.read(cast(ScopeContext, value), USER_STATEMENT))
+        _run(database.read(cast(ScopeContext, value), USER_STATEMENT))
     assert journal.attempts == 0
 
 
@@ -453,7 +464,7 @@ def test_swallowed_statement_error_never_commits() -> None:
                 await transaction.execute(USER_STATEMENT)
 
     with pytest.raises(TransactionAborted):
-        asyncio.run(swallow())
+        _run(swallow())
     assert journal.commits_sent == 0
     assert journal.released == 1
 
@@ -468,7 +479,7 @@ def test_caller_error_rolls_back_without_commit() -> None:
             raise InjectedOther("fallo del llamador")
 
     with pytest.raises(InjectedOther):
-        asyncio.run(fail())
+        _run(fail())
     assert journal.commits_sent == 0
     assert (journal.released, journal.discarded) == (1, 0)
 
@@ -479,7 +490,7 @@ def test_cancellation_discards_the_connection_and_is_not_retried() -> None:
     database = _api_database(journal, [fault])
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(database.read(make_context(), USER_STATEMENT))
+        _run(database.read(make_context(), USER_STATEMENT))
     assert journal.attempts == 1
     assert (journal.released, journal.discarded) == (0, 1)
 
@@ -506,7 +517,7 @@ def test_hung_server_read_ends_after_two_bounded_attempts() -> None:
             await database.read(make_context(), USER_STATEMENT)
         return loop.time() - start
 
-    elapsed = asyncio.run(timed())
+    elapsed = _run(timed())
     assert journal.attempts == 2
     assert elapsed < 2 * 0.05 + 1.0
 
@@ -535,7 +546,7 @@ def test_abandoned_attempts_return_their_late_connections() -> None:
         await database._drain(5.0)  # los abandonados terminan solos y devuelven su conexión
         assert not database._abandoned
 
-    asyncio.run(scenario())
+    _run(scenario())
     assert journal.attempts == 3  # 1 escritura + 2 lecturas
     assert journal.user_statements == 2  # las lecturas abandonadas terminan solas
     assert journal.commits_sent == 2
@@ -597,7 +608,7 @@ def test_a_hung_server_never_blocks_the_caller(
         assert not database._abandoned
         return outcome, elapsed
 
-    outcome, elapsed = asyncio.run(scenario())
+    outcome, elapsed = _run(scenario())
 
     if operation == "write":
         assert journal.attempts == 1
@@ -661,7 +672,7 @@ def test_dispose_is_bounded_while_a_step_hangs() -> None:
         assert not database._abandoned
         return loop.time() - start
 
-    elapsed = asyncio.run(scenario())
+    elapsed = _run(scenario())
     assert elapsed < 2 * ATTEMPT_TIMEOUT + SLACK
 
 
@@ -680,7 +691,7 @@ def test_swallowed_connection_error_discards_without_network() -> None:
             assert transaction.broken
 
     with pytest.raises(TransactionAborted):
-        asyncio.run(swallow())
+        _run(swallow())
     assert (journal.released, journal.discarded, journal.commits_sent) == (0, 1, 0)
 
 
@@ -704,7 +715,7 @@ def test_route_class_selects_the_pool_and_worker_uses_its_own() -> None:
         with route_class_scope(RouteClass.PERSON):
             await _write(api, node_context)
 
-    asyncio.run(scenario())
+    _run(scenario())
     assert journals[PoolClass.PERSON].attempts == 2
     assert journals[PoolClass.NODE].attempts == 1
     assert journals[PoolClass.WORKER].attempts == 1

@@ -1,0 +1,8 @@
+# Falsos positivos revisados de gitleaks, uno por línea (<commit>:<archivo>:<regla>:<línea>).
+# Solo huellas de commits ya publicados cuyo contenido no es un secreto; el árbol actual no las
+# repite. Cada entrada lleva su motivo.
+#
+# VIG-31: nombres de secretos de prueba ("vigia/pilot/db/migrate") junto a la clave
+# MIGRATE_SECRET_VARIABLE; no son valores. El commit siguiente los pasa a constantes.
+c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_credentials.py:generic-api-key:49
+c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_credentials.py:generic-api-key:101
