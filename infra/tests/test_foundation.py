@@ -601,8 +601,13 @@ def test_key_policies_follow_the_design_table(
     assert creates_secrets["Condition"]["StringEquals"] == {
         "kms:ViaService": "secretsmanager.us-east-1.amazonaws.com"
     }
-    assert grants[KeyName.EVIDENCE].keys() - {cfn} == {"vigia-api-task", "vigia-worker-task"}
+    assert grants[KeyName.EVIDENCE].keys() - {cfn} == {
+        "vigia-api-task",
+        "vigia-worker-task",
+        "vigia-restore",
+    }
     assert grants[KeyName.EVIDENCE]["vigia-api-task"] == {"kms:Decrypt", "kms:GenerateDataKey"}
+    assert grants[KeyName.EVIDENCE]["vigia-restore"] == {"kms:Decrypt", "kms:GenerateDataKey"}
     assert grants[KeyName.SECRETS].keys() - {cfn} == {
         "vigia-api-task",
         "vigia-worker-task",
@@ -654,6 +659,7 @@ def test_s3_backed_keys_are_used_only_through_s3(
     via_s3 = {"kms:ViaService": "s3.us-east-1.amazonaws.com"}
     for name, sid in [
         (KeyName.EVIDENCE, "ApiAndWorkerThroughS3"),
+        (KeyName.EVIDENCE, "RestoreDrillThroughS3"),
         (KeyName.ARCHIVE, "WorkerWritesThroughS3"),
         (KeyName.ARCHIVE, "RestoreReads"),
         (KeyName.SECRETS, "DeployReadsEdgeCa"),
