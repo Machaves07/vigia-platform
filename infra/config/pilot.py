@@ -45,7 +45,11 @@ WORKER_MAX_TASKS = 3
 
 
 def pilot_config(
-    *, instance: str = SHARED_INSTANCE, first_deploy: bool = False, ca_rotation: bool = False
+    *,
+    instance: str = SHARED_INSTANCE,
+    first_deploy: bool = False,
+    ca_rotation: bool = False,
+    nat_per_az: bool = False,
 ) -> EnvironmentConfig:
     """Configuración de ``pilot`` para la instancia compartida o una dedicada."""
     return EnvironmentConfig(
@@ -75,4 +79,5 @@ def pilot_config(
         api_max_tasks=API_MAX_TASKS,
         worker_min_tasks=WORKER_MIN_TASKS,
         worker_max_tasks=WORKER_MAX_TASKS,
+        nat_per_az=nat_per_az,
     )

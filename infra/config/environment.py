@@ -11,6 +11,8 @@ valores por defecto; ``--context clave=valor`` los sustituye):
   (infrastructure-design §5.4 y nota U02-H-06 de §2.3).
 - ``ca_rotation``: concede temporalmente los mismos permisos del arranque para rotar la
   raíz de ``vigia-node-ca`` (deployment-architecture §6.4, nota de D-8).
+- ``nat_per_az``: añade la segunda traducción de direcciones ``vigia-nat-b`` (mitigación de
+  R13, infrastructure-design §13; runbook de deployment-architecture §6.2).
 
 Un valor fuera de su forma cerrada detiene la síntesis con un mensaje en español: nunca
 se sintetiza un despliegue con un contexto adivinado.
@@ -33,7 +35,14 @@ CONTEXT_ENVIRONMENT = "environment"
 CONTEXT_INSTANCE = "instance"
 CONTEXT_FIRST_DEPLOY = "first_deploy"
 CONTEXT_CA_ROTATION = "ca_rotation"
-CONTEXT_KEYS = (CONTEXT_ENVIRONMENT, CONTEXT_INSTANCE, CONTEXT_FIRST_DEPLOY, CONTEXT_CA_ROTATION)
+CONTEXT_NAT_PER_AZ = "nat_per_az"
+CONTEXT_KEYS = (
+    CONTEXT_ENVIRONMENT,
+    CONTEXT_INSTANCE,
+    CONTEXT_FIRST_DEPLOY,
+    CONTEXT_CA_ROTATION,
+    CONTEXT_NAT_PER_AZ,
+)
 
 # ``staging-<n>`` con ``n`` entero positivo sin ceros a la izquierda (número de ejecución).
 _STAGING = re.compile(r"^staging-([1-9][0-9]{0,8})$")
@@ -116,6 +125,9 @@ class EnvironmentConfig:
     api_max_tasks: int
     worker_min_tasks: int
     worker_max_tasks: int
+
+    # Red (§3): una traducción de direcciones, excepción R13; ``nat_per_az`` añade la segunda.
+    nat_per_az: bool = False
 
     region: str = REGION
 
