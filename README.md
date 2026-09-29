@@ -92,7 +92,7 @@ Una sola cadena de Alembic para U-02, U-03 y U-04, solo hacia adelante (`backend
 
 ### Pruebas de integración
 
-`backend/tests/integration/conftest.py` ofrece dos fixtures de sesión, `postgres_endpoint` y `localstack_endpoint`, que cualquier prueba de integración reutiliza:
+`backend/tests/conftest.py` declara dos fixtures de sesión, `postgres_endpoint` y `localstack_endpoint` (con los generadores de `backend/tests/integration/conftest.py`), que cualquier prueba con contenedores reutiliza:
 
 - **Por defecto**, cada corrida de pytest levanta sus propios contenedores con testcontainers, con las mismas imágenes y digests que `docker-compose.yml`, y los borra al terminar.
 - **Con `VIGIA_TEST_USE_COMPOSE=1`**, las pruebas usan el entorno ya levantado con `make up` o `docker compose up -d`. Es más rápido al iterar.

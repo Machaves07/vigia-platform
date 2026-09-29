@@ -27,7 +27,7 @@ from tests.integration.conftest import (
     POSTGRES_USER,
     PostgresEndpoint,
 )
-from tests.integration.test_roles import run_alembic
+from tests.integration.test_roles import HEAD_SCHEMA_VERSION, run_alembic
 from vigia_platform.shared.migration_credentials import (
     APP_PASSWORD_VARIABLE,
     MIGRATE_PASSWORD_VARIABLE,
@@ -150,7 +150,7 @@ def test_first_deploy_with_a_non_superuser_master(cluster: RdsLikeCluster) -> No
     )
     assert [row[0] for row in owners] == ["vigia_migrate"]
     assert public_create[0][0] is False  # el CREATE temporal en public se retiró
-    assert version[0][0] == 1
+    assert version[0][0] == HEAD_SCHEMA_VERSION
 
     async def as_app() -> None:
         endpoint = cluster.as_role("vigia_app", database)
@@ -162,7 +162,8 @@ def test_first_deploy_with_a_non_superuser_master(cluster: RdsLikeCluster) -> No
             database=database,
         )
         try:
-            assert await connection.fetchval("SELECT shared.vigia_schema_version()") == 1
+            version = await connection.fetchval("SELECT shared.vigia_schema_version()")
+            assert version == HEAD_SCHEMA_VERSION
             with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
                 await connection.execute("CREATE TABLE shared.probe (x integer)")
         finally:
