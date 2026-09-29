@@ -52,6 +52,9 @@ services:
       # Sin telemetría hacia LocalStack y sin descargar su certificado de pruebas.
       DISABLE_EVENTS: "1"
       SKIP_SSL_CERT_DOWNLOAD: "1"
+      # Valida las firmas SigV4 como S3: un PUT prefirmado sin la cabecera de suma firmada se
+      # rechaza (TASK-112). LocalStack no las valida por defecto.
+      S3_SKIP_SIGNATURE_VALIDATION: "0"
     ports:
       - "127.0.0.1:${VIGIA_LOCAL_LOCALSTACK_PORT:-4566}:4566"
     healthcheck:

@@ -30,6 +30,7 @@ import contextlib
 import os
 import socket
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -39,6 +40,8 @@ import boto3  # type: ignore[import-untyped]
 import httpx
 import pytest
 from botocore.config import Config  # type: ignore[import-untyped]
+
+from vigia_platform.shared.storage import AddressingStyle, StorageCredentials, StorageSettings
 
 if TYPE_CHECKING:
     from testcontainers.core.container import DockerContainer
@@ -67,6 +70,9 @@ LOCALSTACK_ENVIRONMENT = {
     "AWS_DEFAULT_REGION": LOCALSTACK_REGION,
     "DISABLE_EVENTS": "1",
     "SKIP_SSL_CERT_DOWNLOAD": "1",
+    # LocalStack no valida firmas por defecto: sin esto aceptaría un ``PUT`` prefirmado sin la
+    # cabecera de suma que la URL firmó (TASK-112).
+    "S3_SKIP_SIGNATURE_VALIDATION": "0",
 }
 LOCALSTACK_ACCESS_KEY_ID = "test"
 LOCALSTACK_SECRET_ACCESS_KEY = "test"  # noqa: S105 - LocalStack acepta cualquier valor
@@ -126,6 +132,33 @@ class LocalStackEndpoint:
             aws_secret_access_key=LOCALSTACK_SECRET_ACCESS_KEY,
             config=config,
         )
+
+    def storage_settings(self, bucket: str) -> StorageSettings:
+        """``StorageSettings`` de ``shared.storage`` contra LocalStack (direcciones por ruta)."""
+        return StorageSettings(
+            bucket=bucket,
+            endpoint_url=self.url,
+            region=self.region,
+            addressing_style=AddressingStyle.PATH,
+            credentials=StorageCredentials(LOCALSTACK_ACCESS_KEY_ID, LOCALSTACK_SECRET_ACCESS_KEY),
+        )
+
+
+@contextlib.contextmanager
+def versioned_bucket(s3: Any, prefix: str) -> Iterator[str]:
+    """Depósito propio con versionado, como ``vigia-evidence``; se vacía y se borra al salir."""
+    name = f"{prefix}-{uuid.uuid4().hex[:16]}"
+    s3.create_bucket(Bucket=name)
+    s3.put_bucket_versioning(Bucket=name, VersioningConfiguration={"Status": "Enabled"})
+    try:
+        yield name
+    finally:
+        for upload in s3.list_multipart_uploads(Bucket=name).get("Uploads", []):
+            s3.abort_multipart_upload(Bucket=name, Key=upload["Key"], UploadId=upload["UploadId"])
+        listing = s3.list_object_versions(Bucket=name)
+        for item in listing.get("Versions", []) + listing.get("DeleteMarkers", []):
+            s3.delete_object(Bucket=name, Key=item["Key"], VersionId=item["VersionId"])
+        s3.delete_bucket(Bucket=name)
 
 
 def use_compose() -> bool:
