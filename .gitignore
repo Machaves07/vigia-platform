@@ -1,0 +1,37 @@
+# Medios y conjuntos de datos: nunca entran al repositorio (P3, RNF-PRI-05).
+# Solo se admiten imágenes y clips sintéticos en backend/tests/fixtures/synthetic/.
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+*.mkv
+datasets/
+registros/
+!backend/tests/fixtures/synthetic/**
+
+# Entornos y cachés
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.benchmarks/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+node_modules/
+# Ensamblado de nube que genera `cdk synth` en infra/
+cdk.out/
+
+# Secretos y configuración local
+.env
+.env.*
+*.pem
+*.key

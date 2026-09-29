@@ -1,0 +1,7 @@
+# Finales de línea LF en el repositorio y en toda copia de trabajo, también en Windows con
+# core.autocrlf=true: `uv.lock` y `openapi/app.yaml` se comparan byte a byte (NFR-NUC-52).
+* text=auto eol=lf
+
+# Artefactos generados: plegados en las revisiones de GitHub.
+backend/uv.lock linguist-generated=true
+backend/openapi/** linguist-generated=true
