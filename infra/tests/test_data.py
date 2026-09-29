@@ -470,7 +470,7 @@ def test_evidence_policy_rejects_plain_http_and_uploads_without_checksum(
         ({"instance": "acme"}, "app"),
         ({"environment": "staging-7"}, "staging-7"),
         ({"environment": "staging-1"}, "staging-1"),
-        ({"environment": "staging-999999999"}, "staging-999999999"),
+        ({"environment": "staging-9999999"}, "staging-9999999"),
         ({"environment": "staging-7", "instance": "acme"}, "staging-7"),
     ],
     ids=[

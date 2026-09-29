@@ -88,6 +88,8 @@ DEPLOYMENTS: Mapping[str, Mapping[str, Any]] = {
     "pilot": {},
     "pilot-first-deploy": {"first_deploy": "true"},
     "pilot-ca-rotation": {"ca_rotation": "true"},
+    # Contingencia de R2 (infrastructure-design §4.3): balanceador de red con paso directo.
+    "pilot-passthrough": {"nodes_tls_mode": "passthrough"},
     "staging-7": {"environment": "staging-7"},
     "dedicated-acme": {"instance": "acme"},
 }
