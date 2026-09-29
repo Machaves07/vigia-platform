@@ -1,6 +1,6 @@
 # vigia-platform
 
-Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. Este repositorio nace con TASK-101 (VIG-18): el backend en Python 3.12, sus herramientas de calidad y el árbol de módulos vacío. La base de datos, el entorno local con Docker, la infraestructura y el frontend llegan en tareas posteriores.
+Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. Este repositorio nace con TASK-101 (VIG-18): el backend en Python 3.12, sus herramientas de calidad y el árbol de módulos vacío. TASK-103 (VIG-21) añade el entorno local con Docker; la base de datos, la infraestructura y el frontend llegan en tareas posteriores.
 
 ## Estructura
 
