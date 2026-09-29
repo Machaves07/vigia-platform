@@ -1,6 +1,6 @@
 # vigia-platform
 
-Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. Este repositorio nace con TASK-101 (VIG-18): el backend en Python 3.12, sus herramientas de calidad y el árbol de módulos vacío. La base de datos, el entorno local con Docker, la infraestructura y el frontend llegan en tareas posteriores.
+Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. Este repositorio nace con TASK-101 (VIG-18): el backend en Python 3.12, sus herramientas de calidad y el árbol de módulos vacío. TASK-103 (VIG-21) añade el entorno local con Docker; la base de datos, la infraestructura y el frontend llegan en tareas posteriores.
 
 ## Estructura
 
@@ -18,6 +18,9 @@ vigia-platform/
   infra/                   pilas de AWS CDK en Python (TASK-144)
   docs/runbooks/           restauración, cola muerta, rotación, archivado
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
+  local/                   configuración de los servicios locales (colector de OpenTelemetry)
+  docker-compose.yml       entorno local: PostgreSQL 16, LocalStack y colector (TASK-103)
+  Makefile                 up, down, ps, test, run, worker, migrate, admin (TASK-103)
 ```
 
 Cada módulo sigue puertos y adaptadores: `domain/` nunca importa FastAPI, SQLAlchemy ni boto3. Los módulos críticos `identity.auth`, `identity.authz`, `ledger.chain`, `shared.signing` y `shared.crypto` se importan sin FastAPI ni SQLAlchemy (NFR-NUC-25); `tools/check_isolated_imports.py` lo comprueba.
@@ -34,7 +37,61 @@ cd backend && uv run mypy --strict src
 cd backend && uv run pytest -q --hypothesis-profile=ci          # nocturno: --hypothesis-profile=nightly
 ```
 
-`uv sync --frozen` instala Python 3.12 si hace falta (`.python-version`) y resuelve `vigia-contracts` al commit fijado en `uv.lock`. Las pruebas de integración (`-m integration`) necesitan Docker en ejecución; todavía no hay ninguna.
+`uv sync --frozen` instala Python 3.12 si hace falta (`.python-version`) y resuelve `vigia-contracts` al commit fijado en `uv.lock`. Las pruebas de integración (`-m integration`) necesitan Docker en ejecución: ver la sección siguiente.
+
+## Entorno local con Docker
+
+`docker-compose.yml` (TASK-103, PAT-NUC-MAN-07) levanta los mismos servicios que usan las pruebas de integración. Requisito: Docker Desktop, o Docker Engine con Compose v2, en ejecución.
+
+| Servicio | Imagen, fijada por digest | Puertos en `127.0.0.1` |
+|---|---|---|
+| `postgres` | `postgres:16` (PostgreSQL 16.15), base `vigia`, usuario `vigia` | 5432 |
+| `localstack` | `localstack/localstack:4.14.0`, edición comunitaria: S3 con sumas de verificación, KMS y Secrets Manager | 4566 |
+| `otel-collector` | binario de `otel/opentelemetry-collector-contrib:0.161.0` (`local/otel-collector/`) | 4317 (OTLP gRPC), 4318 (OTLP HTTP) |
+
+Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son valores fijos del entorno local, no secretos. Si un puerto está ocupado, cámbialo con `VIGIA_LOCAL_POSTGRES_PORT`, `VIGIA_LOCAL_LOCALSTACK_PORT`, `VIGIA_LOCAL_OTLP_GRPC_PORT` o `VIGIA_LOCAL_OTLP_HTTP_PORT`. El colector escribe un resumen de lo que recibe en `docker compose logs otel-collector`.
+
+| `make` (Linux, macOS, WSL, Git Bash) | Windows sin `make`, desde la raíz del repositorio |
+|---|---|
+| `make up` | `docker compose up -d --wait` (o `docker compose up -d` y luego `docker compose ps` hasta ver los tres `healthy`) |
+| `make ps` | `docker compose ps` |
+| `make down` | `docker compose down -v` (borra también la base) |
+| `make test` | `cd backend; uv run pytest -q --hypothesis-profile=ci` |
+| `make run` | `cd backend; uv run uvicorn vigia_platform.shared.api.app:create_app --factory --host 127.0.0.1 --port 8000` |
+| `make worker` | `cd backend; uv run python -m vigia_platform.shared.worker.main` |
+| `make migrate` | `cd backend; uv run alembic upgrade head` |
+| `make admin ARGS="--help"` | `cd backend; uv run vigia-admin --help` |
+
+`run`, `worker`, `migrate` y `admin` quedan operativos cuando llegan sus tareas (TASK-133, TASK-130, TASK-106 y TASK-132). Hasta entonces, `make` avisa de qué falta y termina con error.
+
+### Variables del entorno local
+
+`make run`, `worker`, `migrate` y `admin` apuntan al entorno de compose con los nombres estándar que ya leen las bibliotecas: libpq y asyncpg (`PG*`), boto3 (`AWS_*`) y el SDK de OpenTelemetry (`OTEL_*`). En PowerShell, antes de los comandos de la tabla:
+
+```powershell
+$env:PGHOST = "127.0.0.1"; $env:PGPORT = "5432"; $env:PGUSER = "vigia"; $env:PGPASSWORD = "vigia_local"; $env:PGDATABASE = "vigia"
+$env:AWS_ENDPOINT_URL = "http://127.0.0.1:4566"; $env:AWS_DEFAULT_REGION = "us-east-1"
+$env:AWS_ACCESS_KEY_ID = "test"; $env:AWS_SECRET_ACCESS_KEY = "test"
+$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317"
+$env:OTEL_SERVICE_NAME = "vigia-api"      # vigia-worker, vigia-migrate o vigia-admin según el proceso
+```
+
+`make test` no exporta estas variables. Corre `pytest` en otra consola, sin ellas: `AWS_ENDPOINT_URL` redirigiría a LocalStack las pruebas unitarias con moto.
+
+### Pruebas de integración
+
+`backend/tests/integration/conftest.py` ofrece dos fixtures de sesión, `postgres_endpoint` y `localstack_endpoint`, que cualquier prueba de integración reutiliza:
+
+- **Por defecto**, cada corrida de pytest levanta sus propios contenedores con testcontainers, con las mismas imágenes y digests que `docker-compose.yml`, y los borra al terminar.
+- **Con `VIGIA_TEST_USE_COMPOSE=1`**, las pruebas usan el entorno ya levantado con `make up` o `docker compose up -d`. Es más rápido al iterar.
+
+```text
+cd backend && uv run pytest -q --hypothesis-profile=ci -m integration tests/integration/test_localstack_checksum.py
+cd backend && VIGIA_TEST_USE_COMPOSE=1 uv run pytest -q -m integration tests/integration     # bash
+cd backend; $env:VIGIA_TEST_USE_COMPOSE = "1"; uv run pytest -q -m integration tests/integration   # PowerShell
+```
+
+Sin Docker, estas pruebas fallan con un mensaje; nunca se omiten en silencio.
 
 ## Dependencia del contrato
 
@@ -66,7 +123,7 @@ cd backend && uv run pytest -q --hypothesis-profile=ci          # nocturno: --hy
 
 ## Variables de configuración y orden administrativa
 
-Todavía no existen: las define TASK-103 (entorno local) y las tareas de `vigia-admin`. Ningún secreto, clave ni `.env` entra al repositorio.
+Las del entorno local están en «Variables del entorno local». El modelo de configuración de la aplicación llega con TASK-133 y la orden `vigia-admin` con TASK-132. Ningún secreto, clave ni `.env` entra al repositorio.
 
 ## Documentación de referencia
 
