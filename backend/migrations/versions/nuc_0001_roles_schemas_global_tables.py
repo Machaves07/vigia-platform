@@ -9,9 +9,10 @@ Revisión nuc_0001, primer eslabón de la cadena única.
     uno (nunca ``DELETE`` sobre las tablas globales).
   - ``vigia_migrate``: dueño de los esquemas y de todo lo que crean las migraciones; ``CREATE``
     en la base para los esquemas de U-03 y U-04; solo lo usa la tarea de despliegue.
-  - Contraseñas de ``VIGIA_DB_APP_PASSWORD`` y ``VIGIA_DB_MIGRATE_PASSWORD`` (secretos ``db/app``
-    y ``db/migrate``), enviadas como verificador SCRAM-SHA-256 (``shared.role_passwords``). Si el
-    rol ya existe en el clúster, se le fijan los atributos y la contraseña de nuevo.
+  - Contraseñas de los secretos ``db/app`` y ``db/migrate`` (en local, de
+    ``VIGIA_DB_APP_PASSWORD`` y ``VIGIA_DB_MIGRATE_PASSWORD``; ``shared.migration_credentials``),
+    enviadas como verificador SCRAM-SHA-256 (``shared.role_passwords``). Si el rol ya existe en
+    el clúster, se le fijan los atributos y la contraseña de nuevo.
   - ``PUBLIC`` pierde ``CONNECT`` y ``TEMPORARY`` en la base y ``CREATE`` en ``public``.
 - Extensiones ``pgcrypto`` (hashes del disparador de encadenado) y ``btree_gist`` (exclusión de
   ``ZoneNodeAssignment``, pendiente nº 36, adenda A-12 y A-32), en ``public``.
@@ -32,13 +33,9 @@ sea siempre ``vigia_migrate``.
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
-from vigia_platform.shared.role_passwords import (
-    APP_PASSWORD_VARIABLE,
-    MIGRATE_PASSWORD_VARIABLE,
-    role_password_verifier,
-)
+from vigia_platform.shared.role_passwords import role_password_verifier
 
 revision: str = "nuc_0001"
 down_revision: str | None = None
@@ -238,8 +235,9 @@ _APP_GRANTS = (
 
 def upgrade() -> None:
     # Antes de tocar la base: sin las dos contraseñas no se crea nada (fallo cerrado).
-    app_verifier = role_password_verifier(APP_PASSWORD_VARIABLE)
-    migrate_verifier = role_password_verifier(MIGRATE_PASSWORD_VARIABLE)
+    passwords = context.config.attributes.get("role_passwords", {})
+    app_verifier = role_password_verifier("vigia_app", passwords)
+    migrate_verifier = role_password_verifier("vigia_migrate", passwords)
 
     op.execute(_STAGE_VERIFIER.bindparams(verifier=app_verifier))
     op.execute(_APP_ROLE)

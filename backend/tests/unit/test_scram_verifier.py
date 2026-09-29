@@ -18,7 +18,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vigia_platform.shared.role_passwords import (
-    APP_PASSWORD_VARIABLE,
     MAX_PASSWORD_LENGTH,
     MIN_PASSWORD_LENGTH,
     RolePasswordError,
@@ -80,10 +79,13 @@ def test_verifier_never_contains_the_password(password: str) -> None:
     assert password not in verifier
 
 
+APP = "vigia_app"
+
+
 def test_random_salt_differs_per_call() -> None:
-    environ = {APP_PASSWORD_VARIABLE: "x" * 32}
-    first = role_password_verifier(APP_PASSWORD_VARIABLE, environ)
-    second = role_password_verifier(APP_PASSWORD_VARIABLE, environ)
+    passwords = {APP: "x" * 32}
+    first = role_password_verifier(APP, passwords)
+    second = role_password_verifier(APP, passwords)
     assert _parts(first)[1] != _parts(second)[1]
 
 
@@ -114,17 +116,15 @@ def test_policy_accepts_printable_ascii_within_bounds(password: str) -> None:
 )
 def test_policy_rejects_and_never_echoes_the_value(password: str) -> None:
     with pytest.raises(RolePasswordError) as caught:
-        role_password_verifier(APP_PASSWORD_VARIABLE, {APP_PASSWORD_VARIABLE: password})
-    assert APP_PASSWORD_VARIABLE in str(caught.value)
+        role_password_verifier(APP, {APP: password})
+    assert APP in str(caught.value)
     if password:
         assert password not in str(caught.value)
 
 
-def test_missing_variable_is_rejected() -> None:
-    with pytest.raises(
-        RolePasswordError, match=f"falta la variable de entorno {APP_PASSWORD_VARIABLE}"
-    ):
-        role_password_verifier(APP_PASSWORD_VARIABLE, {})
+def test_missing_role_is_rejected() -> None:
+    with pytest.raises(RolePasswordError, match="falta la contraseña de vigia_app"):
+        role_password_verifier(APP, {"vigia_migrate": "x" * 32})
 
 
 @pytest.mark.parametrize(("salt", "iterations"), [(b"s" * 15, 4096), (b"s" * 16, 4095)])

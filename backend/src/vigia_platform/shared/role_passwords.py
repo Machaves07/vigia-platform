@@ -1,11 +1,9 @@
 """Contraseñas de los roles de base que crea la migración ``nuc_0001`` (NFR-NUC-20, PAT-NUC-SEG-05).
 
-La tarea ``vigia-migrate`` recibe las contraseñas de los secretos ``db/app`` y ``db/migrate``
-como variables de entorno (``VIGIA_DB_APP_PASSWORD`` y ``VIGIA_DB_MIGRATE_PASSWORD``;
-infrastructure-design §5.4 y §7.2). Al servidor nunca llega la contraseña en claro: se envía el
-**verificador SCRAM-SHA-256** calculado aquí (el mismo formato que guarda PostgreSQL en
-``pg_authid``), de modo que ni los registros de sentencias ni ``pg_stat_statements`` pueden
-contenerla.
+Las contraseñas llegan de los secretos ``db/app`` y ``db/migrate`` (``shared.migration_credentials``
+las resuelve). Al servidor nunca llega la contraseña en claro: se envía el **verificador
+SCRAM-SHA-256** calculado aquí (el mismo formato que guarda PostgreSQL en ``pg_authid``), de modo
+que ni los registros de sentencias ni ``pg_stat_statements`` pueden contenerla.
 
 Solo se admiten contraseñas de ASCII imprimible (``0x20``-``0x7E``), de 16 a 1024 caracteres:
 para ellas la normalización SASLprep que aplica el cliente al autenticarse es la identidad, así
@@ -18,25 +16,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 import re
 import secrets
 from collections.abc import Mapping
 from typing import Final
 
 __all__ = [
-    "APP_PASSWORD_VARIABLE",
-    "MIGRATE_PASSWORD_VARIABLE",
     "RolePasswordError",
     "role_password_verifier",
     "scram_sha256_verifier",
     "validate_role_password",
 ]
-
-APP_PASSWORD_VARIABLE: Final = "VIGIA_DB_APP_PASSWORD"  # noqa: S105 - nombre, no valor
-"""Contraseña de ``vigia_app`` (secreto ``vigia/<entorno>/db/app``)."""
-MIGRATE_PASSWORD_VARIABLE: Final = "VIGIA_DB_MIGRATE_PASSWORD"  # noqa: S105 - nombre, no valor
-"""Contraseña de ``vigia_migrate`` (secreto ``vigia/<entorno>/db/migrate``)."""
 
 MIN_PASSWORD_LENGTH: Final = 16
 MAX_PASSWORD_LENGTH: Final = 1024
@@ -78,15 +68,15 @@ def scram_sha256_verifier(password: str, *, salt: bytes, iterations: int = SCRAM
     return f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
 
 
-def role_password_verifier(variable: str, environ: Mapping[str, str] | None = None) -> str:
-    """Verificador SCRAM de la contraseña que trae la variable ``variable``, con sal aleatoria."""
-    value = (os.environ if environ is None else environ).get(variable)
+def role_password_verifier(role: str, passwords: Mapping[str, str]) -> str:
+    """Verificador SCRAM, con sal aleatoria, de la contraseña de ``role`` en ``passwords``."""
+    value = passwords.get(role)
     if not value:
         raise RolePasswordError(
-            f"falta la variable de entorno {variable}: la migración que crea los roles recibe "
-            "sus contraseñas de los secretos db/app y db/migrate"
+            f"falta la contraseña de {role}: la migración que crea los roles la recibe de los "
+            "secretos db/app y db/migrate (ver vigia_platform.shared.migration_credentials)"
         )
     try:
         return scram_sha256_verifier(value, salt=secrets.token_bytes(SCRAM_SALT_BYTES))
     except RolePasswordError as error:
-        raise RolePasswordError(f"{variable}: {error}") from None
+        raise RolePasswordError(f"contraseña de {role}: {error}") from None

@@ -87,6 +87,7 @@ Una sola cadena de Alembic para U-02, U-03 y U-04, solo hacia adelante (`backend
 - Revisión `<unidad>_<NNNN>`: `nuc_` (U-02), `gob_` (U-03), `laz_` (U-04). `NNNN` es la posición en la cadena, y es lo que devuelve `shared.vigia_schema_version()`. Cada unidad añade eslabones al final: `cd backend && uv run alembic revision --rev-id nuc_0002 -m "identity tables"`.
 - `downgrade` lanza `NotImplementedError`. Prohibidos `DROP TABLE`, `TRUNCATE` y `DELETE` sobre tablas de solo anexar, registradas en `backend/migrations/append_only.py`. Nombres de tabla siempre con esquema.
 - `cd backend && uv run python tools/lint_migrations.py` lo comprueba (reglas `MIG001` a `MIG005`). También lo corre pytest (`tests/unit/test_lint_migrations.py`).
+- En AWS, la tarea `vigia-migrate` solo recibe nombres o ARN de secretos (`VIGIA_DB_MIGRATE_SECRET` y, en el primer despliegue, `VIGIA_DB_MASTER_SECRET_ARN` y `VIGIA_DB_APP_SECRET`). `vigia_platform.shared.migration_credentials` lee los valores de Secrets Manager. El modo TLS lo fijan `PGSSLMODE` y `PGSSLROOTCERT`.
 - Cada imagen declara la versión mínima del esquema que necesita (`vigia_platform.shared.schema_version.MINIMUM_SCHEMA_VERSION`) y no arranca sobre uno más viejo.
 
 ### Pruebas de integración

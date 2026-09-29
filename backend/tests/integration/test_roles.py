@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import secrets
 import subprocess
@@ -29,8 +30,14 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.conftest import PostgresEndpoint
-from vigia_platform.shared.role_passwords import APP_PASSWORD_VARIABLE, MIGRATE_PASSWORD_VARIABLE
+from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from vigia_platform.shared.migration_credentials import (
+    APP_PASSWORD_VARIABLE,
+    APP_SECRET_VARIABLE,
+    MASTER_SECRET_VARIABLE,
+    MIGRATE_PASSWORD_VARIABLE,
+    MIGRATE_SECRET_VARIABLE,
+)
 from vigia_platform.shared.schema_version import SchemaTooOld, ensure_minimum_schema_version
 
 pytestmark = pytest.mark.integration
@@ -474,7 +481,7 @@ def test_missing_role_password_creates_nothing(postgres_endpoint: PostgresEndpoi
             "head",
         )
         assert failed.returncode != 0
-        assert f"falta la variable de entorno {APP_PASSWORD_VARIABLE}" in failed.stderr
+        assert "falta la contraseña de vigia_app" in failed.stderr
         assert migrate_password not in failed.stdout + failed.stderr
 
         async def leftovers() -> list[str]:
@@ -498,6 +505,95 @@ def test_missing_role_password_creates_nothing(postgres_endpoint: PostgresEndpoi
         assert asyncio.run(leftovers()) == []
     finally:
         asyncio.run(_admin(postgres_endpoint, f"DROP DATABASE IF EXISTS {database} WITH (FORCE)"))
+
+
+def test_aws_mode_reads_the_secrets_the_migrate_task_receives(
+    migrated: MigratedDatabase, localstack_endpoint: LocalStackEndpoint
+) -> None:
+    """Como la tarea ``vigia-migrate`` (``infra/stacks/compute.py``): solo nombres y ARN en el
+    entorno; destino, usuario maestro y contraseñas de rol en Secrets Manager (LocalStack).
+
+    Las variables PG* apuntan a propósito a otro usuario y a otra base: si la migración las usara
+    en vez de los secretos, fallaría. Las contraseñas de rol son las del resto del módulo (los
+    roles son del clúster y ``nuc_0001`` las vuelve a fijar).
+    """
+    endpoint = migrated.endpoint
+    database = _database_name("vigia_aws")
+    asyncio.run(_admin(endpoint, f"CREATE DATABASE {database}"))
+    client = localstack_endpoint.aws_client("secretsmanager")
+    prefix = f"vigia/test-{secrets.token_hex(4)}"
+    target = {"engine": "postgres", "host": endpoint.host, "port": endpoint.port}
+    documents = {
+        "db/migrate": {
+            **target,
+            "dbname": database,
+            "username": "vigia_migrate",
+            "password": migrated.migrate_password,
+        },
+        "db/app": {
+            **target,
+            "dbname": database,
+            "username": "vigia_app",
+            "password": migrated.app_password,
+        },
+        "master": {"username": endpoint.user, "password": endpoint.password},
+    }
+    arns = {
+        name: client.create_secret(Name=f"{prefix}/{name}", SecretString=json.dumps(document))[
+            "ARN"
+        ]
+        for name, document in documents.items()
+    }
+    aws = {
+        "AWS_ENDPOINT_URL": localstack_endpoint.url,
+        "AWS_REGION": localstack_endpoint.region,
+        "AWS_DEFAULT_REGION": localstack_endpoint.region,
+        "AWS_ACCESS_KEY_ID": "test",
+        "AWS_SECRET_ACCESS_KEY": "test",
+        "PGUSER": "nobody",
+        "PGPASSWORD": "wrong",
+        MIGRATE_SECRET_VARIABLE: f"{prefix}/db/migrate",
+    }
+    try:
+        first = run_alembic(
+            endpoint,
+            "no_such_database",
+            {
+                **aws,
+                APP_SECRET_VARIABLE: f"{prefix}/db/app",
+                MASTER_SECRET_VARIABLE: arns["master"],
+            },
+            "upgrade",
+            "head",
+        )
+        assert first.returncode == 0, first.stderr
+        assert "Running upgrade  -> nuc_0001" in first.stderr
+        # Despliegues siguientes: solo db/migrate, se entra como vigia_migrate.
+        later = run_alembic(endpoint, "no_such_database", aws, "current")
+        assert later.returncode == 0, later.stderr
+        assert "nuc_0001 (head)" in later.stdout
+        for output in (first, later):
+            for secret in (migrated.app_password, migrated.migrate_password, endpoint.password):
+                assert secret not in output.stdout + output.stderr
+
+        async def app_version() -> int:
+            connection = await asyncpg.connect(
+                host=endpoint.host,
+                port=endpoint.port,
+                user="vigia_app",
+                password=migrated.app_password,
+                database=database,
+            )
+            try:
+                return int(await connection.fetchval("SELECT shared.vigia_schema_version()"))
+            finally:
+                await connection.close()
+
+        assert asyncio.run(app_version()) == 1
+    finally:
+        for arn in arns.values():
+            client.delete_secret(SecretId=arn, ForceDeleteWithoutRecovery=True)
+        asyncio.run(_admin(endpoint, f"DROP DATABASE IF EXISTS {database} WITH (FORCE)"))
 
 
 def test_offline_sql_mode_is_refused(migrated: MigratedDatabase) -> None:
