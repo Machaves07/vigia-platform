@@ -380,6 +380,9 @@ _LITERAL_ESCAPES: Final = frozenset(".-/+\\{}()[]*?|^$_:")
 _OPERATORS: Final = frozenset("()|?*+")
 _PRINTABLE_ASCII: Final = frozenset(chr(code) for code in range(0x21, 0x7F))
 """ASCII visible sin espacio: lo único que un patrón cerrado puede contener."""
+_BASE64_ALPHABET: Final = _UPPER | _LOWER | _DIGITS | frozenset("+/=")
+"""Alfabeto base64 estándar: el único con mayúsculas y minúsculas que cierra, y solo con
+longitud fija (firmas y claves)."""
 _MARKUP_CHARACTERS: Final = frozenset("<>&")
 """Un patrón que admite estos caracteres podría llevar marcado: se trata como texto libre."""
 MAX_CLOSED_LENGTH: Final = 1024
@@ -401,6 +404,7 @@ def _admitted_characters(pattern: str) -> frozenset[str] | None:
     if any(char not in _PRINTABLE_ASCII for char in body) or "[:" in body or "(?" in body:
         return None
     admitted: set[str] = set()
+    depth = 0
     index = 0
     while index < len(body):
         char = body[index]
@@ -426,10 +430,19 @@ def _admitted_characters(pattern: str) -> frozenset[str] | None:
         elif char in "^$.]}":
             return None
         else:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth < 0:
+                    return None
+            elif char == "|" and depth == 0:
+                # ``^a|b$`` es ``(^a)`` o ``(b$)``: cada rama queda sin anclar por un lado.
+                return None
             if char not in _OPERATORS:
                 admitted.add(char)
             index += 1
-    return frozenset(admitted)
+    return frozenset(admitted) if depth == 0 else None
 
 
 def _class_members(body: str, start: int, admitted: set[str]) -> int | None:
@@ -478,13 +491,20 @@ def _class_members(body: str, start: int, admitted: set[str]) -> int | None:
 
 
 def _pattern_is_closed(pattern: str, *, fixed_length: bool) -> bool:
-    """Un patrón es cerrado si no admite espacio ni nada fuera del ASCII visible y, salvo que la
-    longitud sea fija (una firma o una clave en base64), no mezcla mayúsculas y minúsculas: así
-    ``^[A-Za-z]{1,64}$`` o ``^[A-Z][a-z]+$``, que admiten un nombre, siguen siendo texto libre."""
+    """Un patrón es cerrado si no admite espacio ni nada fuera del ASCII visible y no mezcla
+    mayúsculas y minúsculas: así ``^[A-Za-z]{1,64}$`` o ``^[A-Z][a-z]+$``, que admiten un
+    nombre, siguen siendo texto libre.
+
+    Única excepción: una codificación base64 de longitud fija (una firma o una clave), cuyo
+    alfabeto incluye dígitos y no tiene otro separador que ``+``, ``/`` y ``=``. Es un límite
+    de la heurística: ``^[A-Za-z0-9]{64}$`` cabría un nombre pegado con relleno; el nombre del
+    campo y la revisión son las otras capas."""
     admitted = _admitted_characters(pattern)
     if admitted is None or admitted & _MARKUP_CHARACTERS:
         return False
-    return fixed_length or not (admitted & _UPPER and admitted & _LOWER)
+    if not (admitted & _UPPER and admitted & _LOWER):
+        return True
+    return fixed_length and admitted <= _BASE64_ALPHABET and bool(admitted & _DIGITS)
 
 
 def is_free_text(node: JsonSchema) -> bool:

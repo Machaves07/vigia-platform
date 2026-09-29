@@ -122,6 +122,9 @@ def test_ordinary_punctuation_is_accepted(text: str) -> None:
         ("Zona\ufe0fnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # selector de variación
         ("Zona\u2800norte", FreeTextRejection.INVISIBLE_CHARACTER),  # braille en blanco
         ("Zona\u00adnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # guion blando
+        # Ronda 2: Cf fuera de Default_Ignorable; solo los detecta la regla de categoria Cf.
+        ("Zona\u0600norte", FreeTextRejection.INVISIBLE_CHARACTER),  # U+0600, signo arabe
+        ("Zona\ufff9norte", FreeTextRejection.INVISIBLE_CHARACTER),  # U+FFF9, ancla interlineal
         ("Zona\ue000norte", FreeTextRejection.DISALLOWED_CHARACTER),  # uso privado
         ("Zona\ufffenorte", FreeTextRejection.DISALLOWED_CHARACTER),  # no carácter
         ("Zona\ud800norte", FreeTextRejection.DISALLOWED_CHARACTER),  # sustituto suelto

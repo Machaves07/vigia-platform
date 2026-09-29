@@ -16,6 +16,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import (
+    AfterValidator,
     Base64Bytes,
     Base64Str,
     BaseModel,
@@ -25,8 +26,12 @@ from pydantic import (
     StrictInt,
     StrictStr,
     WithJsonSchema,
+    WrapValidator,
     create_model,
+    field_validator,
+    model_validator,
 )
+from pydantic_core import core_schema
 from vigia_contracts.models.common import UUID, Timestamp
 from vigia_contracts.models.finding import Finding
 
@@ -288,6 +293,11 @@ def test_closed_fields_with_safe_names_are_never_flagged(
             r"a[a-z]{1,9}b",  # sin anclar: la cadena puede llevar cualquier cosa alrededor
             r"^[a-z]{1,9}b",
             r"[a-z]{1,9}b$",
+            # Revisión, ronda 2: alternancia fuera de grupo, que deja cada rama medio anclada.
+            r"^[a-z]{1,8}|[0-9]{1,8}$",
+            r"^([a-z]{1,8})|([0-9]{1,8})$",
+            r"^(a|b$",
+            r"^a)|(b$",
         ]
     )
 )
@@ -311,6 +321,8 @@ def test_open_patterns_still_count_as_free_text(pattern: str) -> None:
         (r"^[a-z]{2}(-[a-z]+)+-[0-9]$", (9, 32)),
         (r"^[A-Za-z0-9+/]{86}==$", (88, 88)),  # firma en base64: longitud fija
         (r"^\d{4}\-\d{2}$", (7, 7)),
+        (r"^(a|b)$", (1, 1)),  # alternancia dentro de un grupo anclado
+        (r"^(read|write)-[0-9]{1,4}$", (6, 10)),
     ],
 )
 def test_closed_patterns_of_identifiers_are_not_free_text(
@@ -487,3 +499,138 @@ def test_forbidden_booleans_are_rejected_too() -> None:
     model = _model(zone_id=(UUID, ...), face_visible=(StrictBool, ...))
     with pytest.raises(RecordTypeRejected, match="/face_visible: campo prohibido"):
         RecordTypeRegistry().register(_definition(model))
+
+
+# --- revisión, ronda 2 ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("pattern", "length"),
+    [
+        (r"^[A-Za-z_]{64}$", 64),  # longitud fija con «_»: cabe «Juan_Perez_Gomez_CC_…»
+        (r"^[A-Za-z]{40}$", 40),  # longitud fija sin dígitos: no es una codificación
+        (r"^[A-Za-z0-9-]{43}$", 43),  # alfabeto con separador «-»
+    ],
+)
+def test_fixed_length_exemption_is_only_for_base64(pattern: str, length: int) -> None:
+    node = {"type": "string", "minLength": length, "maxLength": length, "pattern": pattern}
+    assert is_free_text(node)
+
+
+_HOSTILE = "Juan Perez Gomez cedula 1020304050 <b>x</b>"
+_CLOSED = Annotated[StrictStr, Field(max_length=8, pattern=r"^[a-z]{1,8}$")]
+
+
+def _keep(value: Any, handler: Any) -> Any:
+    return value
+
+
+class _WrapOnLiteral(ContentModel):
+    zone_id: UUID
+    person_name: Annotated[Literal["x"], WrapValidator(_keep)]
+
+
+class _WrapOnClosedPattern(ContentModel):
+    zone_id: UUID
+    note: Annotated[_CLOSED, WrapValidator(_keep)]
+
+
+class _FieldValidatorWrap(ContentModel):
+    zone_id: UUID
+    note: _CLOSED
+
+    @field_validator("note", mode="wrap")
+    @classmethod
+    def _skip(cls, value: Any, handler: Any) -> Any:
+        return value
+
+
+class _ModelValidatorBefore(ContentModel):
+    zone_id: UUID
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_extra(cls, data: Any) -> Any:
+        return {key: value for key, value in dict(data).items() if key == "zone_id"}
+
+
+class _PlainCode:
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+        return core_schema.no_info_plain_validator_function(
+            lambda value: value,
+            json_schema_input_schema=core_schema.str_schema(pattern=r"^[a-z]{1,8}$", max_length=8),
+        )
+
+
+class _PlainCoreSchema(ContentModel):
+    zone_id: UUID
+    note: _PlainCode
+
+
+@pytest.mark.parametrize(
+    ("model", "document"),
+    [
+        (_WrapOnLiteral, {"person_name": _HOSTILE}),
+        (_WrapOnClosedPattern, {"note": _HOSTILE}),
+        (_FieldValidatorWrap, {"note": _HOSTILE}),
+        (_ModelValidatorBefore, {"person_name": _HOSTILE}),
+        (_PlainCoreSchema, {"note": _HOSTILE}),
+    ],
+)
+def test_function_validators_that_bypass_the_schema_are_rejected(
+    model: type[ContentModel], document: dict[str, str]
+) -> None:
+    """El validador aceptaría ``document`` aunque el esquema comprobado no lo admita."""
+    assert model.model_validate({"zone_id": _ZONE, **document})
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert "validador de función before, wrap o plain" in str(raised.value)
+
+
+_CLOSED_CORE = core_schema.str_schema(pattern=r"^[a-z]{1,8}$", max_length=8, strict=True)
+_OPEN_CORE = core_schema.str_schema(strict=True)
+
+
+class _LaxOrStrict:
+    """El JSON Schema describe la rama laxa (cerrada); el modelo estricto valida con la otra."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+        return core_schema.lax_or_strict_schema(lax_schema=_CLOSED_CORE, strict_schema=_OPEN_CORE)
+
+
+class _JsonOrPython:
+    """El JSON Schema describe la rama JSON (cerrada); ``model_validate`` usa la de Python."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source: Any, handler: Any) -> Any:
+        return core_schema.json_or_python_schema(json_schema=_CLOSED_CORE, python_schema=_OPEN_CORE)
+
+
+class _LaxOrStrictModel(ContentModel):
+    zone_id: UUID
+    note: _LaxOrStrict
+
+
+class _JsonOrPythonModel(ContentModel):
+    zone_id: UUID
+    note: _JsonOrPython
+
+
+@pytest.mark.parametrize("model", [_LaxOrStrictModel, _JsonOrPythonModel])
+def test_split_core_schemas_are_rejected(model: type[ContentModel]) -> None:
+    assert model.model_validate({"zone_id": _ZONE, "note": _HOSTILE})
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert "/note: esquema con dos ramas" in str(raised.value)
+
+
+class _AfterValidator(ContentModel):
+    zone_id: UUID
+    code: Annotated[_CLOSED, AfterValidator(lambda value: value)]
+
+
+def test_after_validators_are_accepted() -> None:
+    """``after`` recibe el valor ya validado por el esquema: no puede ampliar lo admitido."""
+    RecordTypeRegistry().register(_definition(_AfterValidator))

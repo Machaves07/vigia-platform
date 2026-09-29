@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict
+from vigia_contracts.models._base import ContractModel
 
 from vigia_platform.ledger.free_text import FreeTextField
 from vigia_platform.ledger.schema_rules import (
@@ -496,6 +497,7 @@ _JS_HOOKS: Final = (
 )
 _HARMLESS_UPDATES: Final = frozenset({"title", "description", "examples"})
 _DEFAULT_MODEL_HOOK: Final = BaseModel.__get_pydantic_json_schema__.__func__  # type: ignore[attr-defined]
+_CONTRACT_RULES: Final = ContractModel.check_contract_rules.__func__
 
 
 def _is_builtin_hook(hook: object) -> bool:
@@ -506,17 +508,43 @@ def _is_builtin_hook(hook: object) -> bool:
     return module.startswith("pydantic._internal.")
 
 
+_REPLACING_VALIDATORS: Final = frozenset({"function-before", "function-wrap", "function-plain"})
+"""Validadores de función que ven la entrada antes (o en lugar) del esquema: pueden aceptar lo
+que el esquema rechaza. ``function-after`` recibe el valor ya validado y se admite."""
+_SPLIT_SCHEMAS: Final = frozenset({"lax-or-strict", "json-or-python"})
+"""Esquemas del núcleo con dos ramas: el JSON Schema describe una y se valida con la otra (la
+estricta, o la de Python). Ningún modelo del contrato ni de U-02 los usa."""
+
+
+def _is_contract_rules(function: object) -> bool:
+    """El único validador envolvente admitido: el de ``ContractModel``, que llama a ``handler`` y
+    devuelve su resultado (capa residual del esquema del contrato). Se identifica por la función."""
+    return getattr(function, "__func__", None) is _CONTRACT_RULES
+
+
 def _custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
-    """El JSON Schema que se comprueba y se persiste debe ser el que Pydantic deriva del validador.
+    """El JSON Schema que se comprueba y se persiste debe describir lo que se valida.
 
     ``WithJsonSchema``, ``json_schema_extra``, ``Base64Str`` o un ``__get_pydantic_json_schema__``
-    propio cambian el esquema sin cambiar lo que se valida: la metapropiedad miraría un esquema
-    y el validador aceptaría otra cosa. Se buscan en el esquema del núcleo, que es lo que valida.
+    propio cambian el esquema sin cambiar lo que se valida; un validador ``before``, ``wrap`` o
+    ``plain`` (de campo, de modelo o de un ``__get_pydantic_core_schema__`` propio), o un esquema
+    de dos ramas (``lax_or_strict``, ``json_or_python``), cambia lo que se valida sin cambiar el
+    esquema. En los dos casos la metapropiedad miraría un esquema y el
+    validador aceptaría otra cosa. Se buscan en el esquema del núcleo, que es lo que valida.
     """
     found: set[str] = set()
+    replacing: set[str] = set()
+    split: set[str] = set()
 
     def visit(node: object, path: str) -> None:
         if isinstance(node, Mapping):
+            if node.get("type") in _REPLACING_VALIDATORS:
+                function = node.get("function")
+                target = function.get("function") if isinstance(function, Mapping) else None
+                if not (node.get("type") == "function-wrap" and _is_contract_rules(target)):
+                    replacing.add(path or "/")
+            if node.get("type") in _SPLIT_SCHEMAS:
+                split.add(path or "/")
             owner = node.get("cls")
             if (
                 node.get("type") == "model"
@@ -549,11 +577,23 @@ def _custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
                 visit(item, path)
 
     visit(model.__pydantic_core_schema__, "")
-    return [
-        f"{path}: JSON Schema personalizado (WithJsonSchema, json_schema_extra, Base64 o "
-        "__get_pydantic_json_schema__); el esquema comprobado no describiría lo que se valida"
-        for path in sorted(found)
-    ]
+    return (
+        [
+            f"{path}: JSON Schema personalizado (WithJsonSchema, json_schema_extra, Base64 o "
+            "__get_pydantic_json_schema__); el esquema comprobado no describiría lo que se valida"
+            for path in sorted(found)
+        ]
+        + [
+            f"{path}: validador de función before, wrap o plain; lo validado no sería lo que "
+            "describe el esquema comprobado (solo se admiten validadores after)"
+            for path in sorted(replacing)
+        ]
+        + [
+            f"{path}: esquema con dos ramas (lax-or-strict o json-or-python); el esquema "
+            "comprobado describiría una rama y se validaría con la otra"
+            for path in sorted(split)
+        ]
+    )
 
 
 def _single(nodes: list[FieldNode]) -> list[FieldNode]:
