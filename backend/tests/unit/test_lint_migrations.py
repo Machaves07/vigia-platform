@@ -243,6 +243,42 @@ def test_allowed_sql_passes(sql: str) -> None:
     assert sql_rules(sql) == []
 
 
+# Revisión de VIG-31, menor 4: formas destructivas que la primera versión no veía.
+@pytest.mark.parametrize(
+    ("sql", "rule"),
+    [
+        ("DROP OWNED BY vigia_migrate CASCADE", "MIG003"),
+        ("drop owned by current_user", "MIG003"),
+        ("ALTER TABLE shared.audit_entry RENAME TO tmp", "MIG002"),
+        ("ALTER TABLE IF EXISTS ONLY ledger.ledger_record RENAME TO old", "MIG002"),
+        ('ALTER TABLE "identity"."role_assignment" rename to x', "MIG002"),
+        ("ALTER TABLE audit_entry RENAME TO tmp", "MIG003"),
+        ("DROP ", "MIG003"),  # 'DROP ' + 'TABLE ledger.x'
+        ("SELECT 1; DELETE", "MIG003"),
+        ("TRUNCATE\n", "MIG003"),
+        ("ALTER ROLE vigia_app PASSWORD 'plain-text'", "MIG006"),
+        ("CREATE ROLE x LOGIN PASSWORD E'plain'", "MIG006"),
+        ("alter role x password $$plain$$", "MIG006"),
+    ],
+)
+def test_more_destructive_forms_fail(sql: str, rule: str) -> None:
+    assert rule in sql_rules(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER TABLE identity.scratch RENAME TO scratch_old",
+        "ALTER TABLE shared.audit_entry RENAME COLUMN a TO b",
+        "ALTER TABLE shared.consumer ADD COLUMN probe integer",
+        "EXECUTE format('ALTER ROLE vigia_app WITH %s PASSWORD %L', a, b)",
+        "SELECT set_config('vigia.role_verifier', :verifier, true)",
+    ],
+)
+def test_harmless_alter_and_parametrized_password_pass(sql: str) -> None:
+    assert sql_rules(sql) == []
+
+
 def test_docstrings_are_prose_not_sql(tmp_path: Path) -> None:
     source = migration("nuc_0002", "nuc_0001", upgrade='    """Nunca DROP TABLE ni DELETE FROM."""')
     source = source.replace('"""Migración de prueba."""', '"""Prohibido DROP TABLE ledger.x."""')

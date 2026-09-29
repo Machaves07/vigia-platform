@@ -12,7 +12,11 @@ Revisión nuc_0001, primer eslabón de la cadena única.
   - Contraseñas de los secretos ``db/app`` y ``db/migrate`` (en local, de
     ``VIGIA_DB_APP_PASSWORD`` y ``VIGIA_DB_MIGRATE_PASSWORD``; ``shared.migration_credentials``),
     enviadas como verificador SCRAM-SHA-256 (``shared.role_passwords``). Si el rol ya existe en
-    el clúster, se le fijan los atributos y la contraseña de nuevo.
+    el clúster, se le fijan de nuevo ``LOGIN``, ``CREATEDB``, ``CREATEROLE``, ``INHERIT`` y la
+    contraseña; si tiene ``SUPERUSER``, ``REPLICATION`` o ``BYPASSRLS``, o ``vigia_app`` es
+    miembro de otro rol, la migración falla (un maestro sin ``SUPERUSER`` no puede quitarlos).
+  - Funciona con un usuario maestro sin ``SUPERUSER`` (``vigia_owner`` de RDS: ``CREATEROLE``,
+    ``CREATEDB`` y dueño de la base).
   - ``PUBLIC`` pierde ``CONNECT`` y ``TEMPORARY`` en la base y ``CREATE`` en ``public``.
 - Extensiones ``pgcrypto`` (hashes del disparador de encadenado) y ``btree_gist`` (exclusión de
   ``ZoneNodeAssignment``, pendiente nº 36, adenda A-12 y A-32), en ``public``.
@@ -47,18 +51,28 @@ _STAGE_VERIFIER = sa.text("SELECT set_config('vigia.role_verifier', :verifier, t
 
 _CLEAR_VERIFIER = "SELECT set_config('vigia.role_verifier', '', true)"
 
+# Un rol que ya existe solo se ajusta con lo que un maestro sin SUPERUSER puede cambiar (LOGIN,
+# CREATEDB, CREATEROLE, INHERIT y la contraseña). Si tiene SUPERUSER, REPLICATION o BYPASSRLS, o
+# vigia_app pertenece a otro rol (podría hacer SET ROLE), la migración falla: fallo cerrado.
 _APP_ROLE = """
 DO $$
 DECLARE
-    attributes CONSTANT text :=
-        'LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS';
+    attributes CONSTANT text := 'LOGIN NOCREATEDB NOCREATEROLE NOINHERIT';
 BEGIN
     IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vigia_app') THEN
+        IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vigia_app'
+                   AND (rolsuper OR rolreplication OR rolbypassrls))
+           OR EXISTS (SELECT FROM pg_catalog.pg_auth_members AS m
+                      JOIN pg_catalog.pg_roles AS r ON r.oid = m.member
+                      WHERE r.rolname = 'vigia_app') THEN
+            RAISE EXCEPTION 'vigia_app ya existe con SUPERUSER, REPLICATION, BYPASSRLS o como '
+                'miembro de otro rol: corrígelo a mano antes de migrar';
+        END IF;
         EXECUTE format('ALTER ROLE vigia_app WITH %s PASSWORD %L',
                        attributes, current_setting('vigia.role_verifier'));
     ELSE
-        EXECUTE format('CREATE ROLE vigia_app WITH %s PASSWORD %L',
-                       attributes, current_setting('vigia.role_verifier'));
+        EXECUTE format('CREATE ROLE vigia_app WITH %s NOSUPERUSER NOREPLICATION NOBYPASSRLS '
+                       'PASSWORD %L', attributes, current_setting('vigia.role_verifier'));
     END IF;
 END
 $$
@@ -67,15 +81,19 @@ $$
 _MIGRATE_ROLE = """
 DO $$
 DECLARE
-    attributes CONSTANT text :=
-        'LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS';
+    attributes CONSTANT text := 'LOGIN NOCREATEDB NOCREATEROLE INHERIT';
 BEGIN
     IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vigia_migrate') THEN
+        IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vigia_migrate'
+                   AND (rolsuper OR rolreplication OR rolbypassrls)) THEN
+            RAISE EXCEPTION 'vigia_migrate ya existe con SUPERUSER, REPLICATION o BYPASSRLS: '
+                'corrígelo a mano antes de migrar';
+        END IF;
         EXECUTE format('ALTER ROLE vigia_migrate WITH %s PASSWORD %L',
                        attributes, current_setting('vigia.role_verifier'));
     ELSE
-        EXECUTE format('CREATE ROLE vigia_migrate WITH %s PASSWORD %L',
-                       attributes, current_setting('vigia.role_verifier'));
+        EXECUTE format('CREATE ROLE vigia_migrate WITH %s NOSUPERUSER NOREPLICATION NOBYPASSRLS '
+                       'PASSWORD %L', attributes, current_setting('vigia.role_verifier'));
     END IF;
 END
 $$
@@ -256,8 +274,11 @@ def upgrade() -> None:
     op.execute("CREATE SCHEMA identity AUTHORIZATION vigia_migrate")
     op.execute("CREATE SCHEMA ledger AUTHORIZATION vigia_migrate")
     op.execute("CREATE SCHEMA shared AUTHORIZATION vigia_migrate")
-    # Las migraciones siguientes corren como vigia_migrate: debe poder anotar su versión.
+    # Las migraciones siguientes corren como vigia_migrate: debe poder anotar su versión. Sin
+    # SUPERUSER (el maestro de RDS), el nuevo dueño necesita CREATE en public solo para el cambio.
+    op.execute("GRANT CREATE ON SCHEMA public TO vigia_migrate")
     op.execute("ALTER TABLE public.alembic_version OWNER TO vigia_migrate")
+    op.execute("REVOKE CREATE ON SCHEMA public FROM vigia_migrate")
 
     op.execute("SET LOCAL ROLE vigia_migrate")
     for statement in _GLOBAL_TABLES:

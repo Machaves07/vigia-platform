@@ -192,7 +192,7 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
     assert roles["vigia_app"]["rolinherit"] is False
 
     extensions = {row[0] for row in await superuser.fetch("SELECT extname FROM pg_extension")}
-    assert {"pgcrypto", "btree_gist"} <= extensions
+    assert extensions == {"plpgsql", "pgcrypto", "btree_gist"}
     digest = await superuser.fetchval("SELECT encode(public.digest('vigia', 'sha256'), 'hex')")
     assert digest == hashlib.sha256(b"vigia").hexdigest()
     assert (
@@ -310,6 +310,20 @@ async def test_vigia_app_cannot_create_tables(app: Any, statement: str) -> None:
     with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError) as caught:
         await app.execute(statement)
     assert caught.value.sqlstate == INSUFFICIENT_PRIVILEGE
+
+
+@pytest.mark.asyncio
+async def test_vigia_app_belongs_to_no_role_and_cannot_become_vigia_migrate(
+    app: Any, superuser: Any
+) -> None:
+    memberships = await superuser.fetch(
+        "SELECT pg_get_userbyid(roleid) FROM pg_auth_members WHERE member = 'vigia_app'::regrole"
+    )
+    assert memberships == []
+    for statement in ("SET ROLE vigia_migrate", "SET SESSION AUTHORIZATION vigia_migrate"):
+        with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError) as caught:
+            await app.execute(statement)
+        assert caught.value.sqlstate == INSUFFICIENT_PRIVILEGE
 
 
 @pytest.mark.asyncio

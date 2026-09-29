@@ -7,12 +7,14 @@ falla ante:
   y) ``raise NotImplementedError(...)``: la reversión es redesplegar la imagen anterior.
 - ``MIG002`` — ``DROP TABLE``, ``TRUNCATE`` o ``DELETE FROM`` sobre una tabla de solo anexar, o
   ``DROP SCHEMA`` sobre un esquema que las contiene (``migrations/append_only.py``), en el SQL
-  de cualquier cadena del módulo o en ``op.drop_table``. Una tabla protege sus particiones
-  (``shared.audit_entry_2026_10``).
+  de cualquier cadena del módulo o en ``op.drop_table``; también ``ALTER TABLE ... RENAME TO``
+  sobre una de ellas (renombrarla permitiría borrarla con otro nombre). Una tabla protege sus
+  particiones (``shared.audit_entry_2026_10``).
 - ``MIG003`` — sentencia destructiva que no se puede verificar: nombre dinámico (f-string,
   ``%``, ``.format``, concatenación, ``EXECUTE`` en ``DO``), nombre sin esquema, ``op.drop_table``
-  con argumentos no literales o ``delete()`` de SQLAlchemy. Fallo cerrado: se escribe con el
-  nombre calificado y literal, o no se escribe.
+  con argumentos no literales, ``delete()`` de SQLAlchemy, ``DROP OWNED`` o una cadena que
+  termina en ``DROP``, ``DELETE`` o ``TRUNCATE`` (la sentencia se completa concatenando). Fallo
+  cerrado: se escribe con el nombre calificado y literal, o no se escribe.
 - ``MIG004`` — la cadena no es lineal: más de una cabeza o de una raíz, bifurcación, fusión
   (``down_revision`` en tupla), ``branch_labels`` o ``depends_on``, referencia a una revisión
   inexistente o ciclo.
@@ -20,6 +22,8 @@ falla ante:
   ``laz_`` U-04) o fuera del formato ``<unidad>_<NNNN>``; ``NNNN`` distinto de la posición del
   eslabón en la cadena (1, 2, 3…: es lo que devuelve ``shared.vigia_schema_version()``);
   duplicado; archivo que no empieza por la revisión; ``revision`` ausente o no literal.
+- ``MIG006`` — ``PASSWORD`` seguido de un literal: las contraseñas de rol llegan de los secretos
+  (``shared.migration_credentials``), nunca escritas en una migración.
 
 Uso: ``uv run python tools/lint_migrations.py [directorio de versiones]`` (por defecto
 ``migrations/versions``). Imprime ``archivo:línea:columna: MIGnnn mensaje`` y termina en 1 si hay
@@ -66,6 +70,14 @@ _DESTRUCTIVE = re.compile(
     re.IGNORECASE,
 )
 _PRIVILEGE_CONTEXT = re.compile(r"\s*(?:,|ON\b)", re.IGNORECASE)
+_RENAME = re.compile(
+    rf"\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"
+    rf"(?P<name>{_IDENTIFIER}(?:\s*\.\s*{_IDENTIFIER})?)\s*\*?\s+RENAME\s+TO\b",
+    re.IGNORECASE,
+)
+_DROP_OWNED = re.compile(r"\bDROP\s+OWNED\b", re.IGNORECASE)
+_SPLIT_KEYWORD = re.compile(r"\b(?:DROP|DELETE|TRUNCATE)\s*$", re.IGNORECASE)
+_LITERAL_PASSWORD = re.compile(r"\bPASSWORD\s+(?:[EU]&?'|'|\$)", re.IGNORECASE)
 _OPTIONAL_WORDS = {
     "drop_table": ("IF EXISTS",),
     "truncate": ("TABLE", "ONLY"),
@@ -192,7 +204,7 @@ def _strip_comments(sql: str) -> str:
 def check_sql(
     sql: str, registry: AppendOnlyRegistry, filename: str, line: int, column: int
 ) -> list[Violation]:
-    """Violaciones MIG002 y MIG003 de un fragmento de SQL."""
+    """Violaciones MIG002, MIG003 y MIG006 de un fragmento de SQL."""
     violations: list[Violation] = []
     cleaned = _strip_comments(sql)
     for match in _DESTRUCTIVE.finditer(cleaned):
@@ -248,6 +260,67 @@ def check_sql(
                         f"{label} sobre {first}.{second}, tabla de solo anexar (P4, NFR-NUC-14)",
                     )
                 )
+    for match in _RENAME.finditer(cleaned):
+        renamed = _QUALIFIED.fullmatch(match.group("name"))
+        first = _normalize_identifier(renamed.group("first")) if renamed else ""
+        second = (
+            _normalize_identifier(renamed.group("second"))
+            if renamed and renamed.group("second")
+            else ""
+        )
+        if not second:
+            violations.append(
+                Violation(
+                    filename,
+                    line,
+                    column,
+                    "MIG003",
+                    f"ALTER TABLE {first} RENAME sin esquema: califica la tabla (esquema.tabla)",
+                )
+            )
+        elif registry.protects_table(first, second):
+            violations.append(
+                Violation(
+                    filename,
+                    line,
+                    column,
+                    "MIG002",
+                    f"ALTER TABLE {first}.{second} RENAME: renombrar una tabla de solo anexar "
+                    "abre la puerta a borrarla con otro nombre (P4, NFR-NUC-14)",
+                )
+            )
+    if _DROP_OWNED.search(cleaned):
+        violations.append(
+            Violation(
+                filename,
+                line,
+                column,
+                "MIG003",
+                "DROP OWNED borra todo lo de un rol, tablas de solo anexar incluidas: prohibido",
+            )
+        )
+    if _SPLIT_KEYWORD.search(cleaned):
+        violations.append(
+            Violation(
+                filename,
+                line,
+                column,
+                "MIG003",
+                "DROP, DELETE o TRUNCATE al final de una cadena: la sentencia se completa por "
+                "concatenación y no se puede verificar (escríbela en un solo literal)",
+            )
+        )
+    if _LITERAL_PASSWORD.search(cleaned):
+        violations.append(
+            Violation(
+                filename,
+                line,
+                column,
+                "MIG006",
+                "PASSWORD con un literal: las contraseñas llegan de los secretos, nunca en el "
+                "código de una migración (shared.migration_credentials)",
+            )
+        )
     return violations
 
 
