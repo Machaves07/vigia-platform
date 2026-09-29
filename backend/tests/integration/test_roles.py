@@ -220,6 +220,9 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
         for row in await superuser.fetch(
             "SELECT schemaname, tablename, tableowner, rowsecurity FROM pg_tables"
             " WHERE schemaname IN ('identity', 'ledger', 'shared')"
+            # Las particiones no: la política está en la tabla padre (TASK-108).
+            " AND NOT (quote_ident(schemaname) || '.' || quote_ident(tablename))::regclass"
+            " IN (SELECT inhrelid FROM pg_inherits)"
         )
     }
     assert set(tables) >= GLOBAL_TABLES
@@ -228,6 +231,12 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
     assert {tables[table] for table in GLOBAL_TABLES} == {("vigia_migrate", False)}
     # Las de cliente de las migraciones siguientes (TASK-108 en adelante), todas con ella.
     assert all(rls for table, (_, rls) in tables.items() if table not in GLOBAL_TABLES)
+    # vigia_app no alcanza ninguna partición directamente: solo por la tabla padre.
+    reachable_partitions = await superuser.fetch(
+        "SELECT inhrelid::regclass::text FROM pg_inherits"
+        " WHERE has_table_privilege('vigia_app', inhrelid, 'SELECT, INSERT, UPDATE, DELETE')"
+    )
+    assert reachable_partitions == []
 
     regions = [tuple(row) for row in await superuser.fetch("SELECT * FROM identity.data_region")]
     assert regions == [("us-east-1", "Este de Estados Unidos (Norte de Virginia)", "US")]
@@ -486,7 +495,7 @@ def test_upgrade_again_is_a_no_op(migrated: MigratedDatabase) -> None:
     assert "Running upgrade" not in again.stderr
     current = run_alembic(migrated.endpoint, migrated.database, {}, "current")
     assert current.returncode == 0, current.stderr
-    assert "nuc_0001 (head)" in current.stdout
+    assert f"{HEAD_REVISION} (head)" in current.stdout
 
 
 def test_missing_role_password_creates_nothing(postgres_endpoint: PostgresEndpoint) -> None:
