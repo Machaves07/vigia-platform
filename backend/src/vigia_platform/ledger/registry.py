@@ -303,9 +303,12 @@ class RecordTypeRegistry:
             )
         name = definition.record_type
         problems = _declaration_problems(definition)
-        if problems:
+        model: object = definition.content_model
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
             raise RecordTypeRejected(name, problems)
-        schema = _json_copy(definition.content_model.model_json_schema(mode="validation"))
+        # Con la declaración mal formada se sigue examinando el esquema: el mensaje debe nombrar
+        # también cualquier campo prohibido (fallo cerrado, con el motivo completo).
+        schema = _json_copy(model.model_json_schema(mode="validation"))
         problems.extend(structure_problems(schema))
         problems.extend(privacy_problems(schema, definition.free_text_paths))
         problems.extend(_path_problems(definition, schema))

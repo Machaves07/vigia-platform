@@ -144,6 +144,19 @@ def test_person_name_text_field_fails_naming_the_type_and_the_path() -> None:
     assert "la plataforma no arranca" in message
 
 
+def test_forbidden_field_is_named_even_when_its_declared_path_is_malformed() -> None:
+    """Contraejemplo de Hypothesis (semilla 1802709680): ``personName`` declarado en
+    ``free_text_paths`` daba solo «ruta mal formada»; el motivo de privacidad se perdía."""
+    model = _model(zone_id=(UUID, ...), personName=(FreeText, ...))
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model, free_text_paths=("/personName",)))
+    assert "ruta declarada mal formada: '/personName'" in raised.value.problems
+    assert any(
+        problem.startswith("/personName: campo prohibido por BR-NUC-51")
+        for problem in raised.value.problems
+    )
+
+
 def test_person_name_is_also_rejected_when_undeclared() -> None:
     model = _model(zone_id=(UUID, ...), person_name=(FreeText, ...))
     with pytest.raises(RecordTypeRejected, match="/person_name: campo prohibido"):
