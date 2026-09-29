@@ -127,7 +127,7 @@ ban-relative-imports = "all"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tools", "tests"]
+files = ["src", "tools", "tests", "migrations"]
 strict = true
 warn_unreachable = true
 mypy_path = "src"
