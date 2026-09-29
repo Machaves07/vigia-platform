@@ -19,6 +19,7 @@ from config import EnvironmentConfig
 from stacks import DEPENDENCIES, STACK_ORDER
 from tests.conftest import Synthesized, cdk_settings, synthesize
 from tests.template_rules import resources
+from tests.test_compute import expected_compute_resources
 from tests.test_data import expected_data_resources
 from tests.test_edge import expected_edge_resources
 from tests.test_foundation import expected_foundation_resources
@@ -58,14 +59,16 @@ def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
 
 def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
     """``vigia-foundation`` (presupuestos, traducciones), ``vigia-data`` (depósito de registros
-    y vaciado automático) y ``vigia-edge`` (zona, cortafuegos, almacén de confianza) cambian
-    con el despliegue."""
+    y vaciado automático), ``vigia-edge`` (zona, cortafuegos, almacén de confianza) y
+    ``vigia-compute`` (registro, escalado, permisos del arranque) cambian con el despliegue."""
     if key == "foundation":
         return expected_foundation_resources(config)
     if key == "data":
         return expected_data_resources(config)
     if key == "edge":
         return expected_edge_resources(config)
+    if key == "compute":
+        return expected_compute_resources(config)
     return EXPECTED_RESOURCES[key]
 
 

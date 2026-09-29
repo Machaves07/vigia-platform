@@ -360,6 +360,14 @@ class FoundationStack(VigiaStack):
                     ["kms:Decrypt", "kms:GenerateDataKey"],
                     s3,
                 ),
+                # Notas U02-H-14 de deployment-architecture §6.1 (TASK-148): el ensayo lee una
+                # versión anterior de una evidencia y la escribe en vigia-drill, con esta clave.
+                self._for_roles(
+                    "RestoreDrillThroughS3",
+                    [p.restore],
+                    ["kms:Decrypt", "kms:GenerateDataKey"],
+                    s3,
+                ),
             ]
         if name is KeyName.SECRETS:
             statements = [

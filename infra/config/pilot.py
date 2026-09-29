@@ -43,6 +43,12 @@ API_MIN_TASKS = 2
 API_MAX_TASKS = 6
 WORKER_MIN_TASKS = 1
 WORKER_MAX_TASKS = 3
+# §9.1: colector lateral ADOT fijado por digest (índice multiarquitectura de v0.45.1; Fargate
+# elige la variante linux/arm64). Lo usa también staging: misma plantilla.
+OTEL_COLLECTOR_IMAGE = (
+    "public.ecr.aws/aws-observability/aws-otel-collector:v0.45.1"
+    "@sha256:4eabdc3213c7897d12df8daa4b8f1bf2fd3ebffc72ccdb8279102169a932342e"
+)
 
 
 def pilot_config(
