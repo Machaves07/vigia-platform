@@ -51,9 +51,16 @@ cd backend && uv run pytest -q --hypothesis-profile=ci          # nocturno: --hy
 | `S301`, `S302`, `S307`, `S506`, `TID251` | `pickle`, `marshal`, `yaml.load` inseguro y `eval` (NFR-NUC-27) | ruff, `backend/pyproject.toml` |
 | `DTZ*` | `datetime` sin zona horaria (BR-NUC-47) | ruff |
 | `TID251` | hora del sistema fuera de `vigia_platform.shared.clock` (PAT-NUC-RES-07) | ruff, con excepción solo para `shared/clock/` |
+| `G001` a `G004` | mensaje de registro construido con `format`, `%`, `+` o f-string (NFR-NUC-17) | ruff |
+| `TID251` en `src/` | registro con la biblioteca estándar (`logging.getLogger`, `logging.info`…, `logging.root`): en `src/` solo `get_logger` (NFR-NUC-17) | ruff, `backend/src/ruff.toml` |
 | `VIG001` | `text()` con f-string, `%`, `.format()` o concatenación (NFR-NUC-19) | `tools/lint_rules.py` |
 | `VIG002` | httpx sin `timeout=` (PAT-NUC-RES-03) | `tools/lint_rules.py` |
 | `VIG003` | boto3 sin `config=` o `botocore.config.Config` sin tiempos de espera (PAT-NUC-RES-03) | `tools/lint_rules.py` |
+| `VIG004` | mensaje de `get_logger` o nombre de tramo o evento que no es un literal ni una constante `Final` (NFR-NUC-17, PR-NUC-54) | `tools/lint_rules.py` |
+
+## Observabilidad
+
+`vigia_platform.shared.observability` (TASK-104) da el registro JSON con redacción (`get_logger`, `log_context`, `configure_logging`), las métricas con nombre fijo (`get_metrics()`, catálogo en `metrics.CATALOG` y condiciones de alarma de NFR-NUC-38 en `metrics.ALARM_CONDITIONS`) y OpenTelemetry con exportación OTLP de cola acotada hacia `localhost:4317` (`tracing.configure_telemetry`, `tracing.enable_auto_instrumentation`). El mensaje de un registro y el nombre de un tramo o de un evento son siempre constantes (VIG004): un mensaje construido en ejecución sale como `[redactado]` y un nombre de tramo sin registrar (`tracing.span_name`, `tracing.event_name`) sale como `other`. Los datos van como campos o atributos con nombre y solo salen identificadores y enumeraciones. Con el colector caído, la aplicación no espera: lo descartado se cuenta en `otel_dropped_total`.
 
 `tools/lint_rules.py` corre también dentro de la suite (`tests/unit/test_lint_rules.py`), así que `pytest` falla si el árbol tiene una violación.
 

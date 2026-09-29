@@ -10,6 +10,16 @@ no expresa:
 - ``VIG002`` — cliente o petición de httpx sin ``timeout=`` (PAT-NUC-RES-03, NFR-NUC-36).
 - ``VIG003`` — cliente o recurso de boto3 sin ``config=`` o ``botocore.config.Config`` sin
   ``connect_timeout`` y ``read_timeout`` (PAT-NUC-RES-03, NFR-NUC-36).
+- ``VIG004`` — primer argumento no constante en ``get_logger(...)``, en
+  ``log.debug/info/warning/error/exception/critical(...)`` sobre un registrador de
+  ``get_logger`` y en ``start_as_current_span``, ``start_span``, ``update_name`` y ``add_event``
+  (NFR-NUC-17, NFR-NUC-41, PR-NUC-54). Vale un literal de cadena o una constante: un nombre del
+  módulo anotado ``Final`` o un nombre en mayúsculas importado (``from m import NOMBRE`` o
+  ``m.NOMBRE``). Un f-string, una concatenación, una variable o un parámetro no valen: por ahí
+  entran texto libre y secretos. En ejecución, ``shared.observability`` lo vuelve a comprobar.
+
+Una línea con ``# noqa: VIGnnn`` omite esa regla en esa línea (solo para pruebas hostiles que
+inyectan datos a propósito, con el motivo en el comentario).
 
 Uso: ``uv run python tools/lint_rules.py [ruta ...]`` (por defecto ``src``, ``tests`` y
 ``tools``). Imprime ``archivo:línea:columna: VIGnnn mensaje`` y termina en 1 si hay alguna
@@ -19,6 +29,7 @@ violación. ``tests/unit/test_lint_rules.py`` lo ejecuta sobre el árbol en cada
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +62,10 @@ BOTO3_FACTORIES = frozenset({"boto3.client", "boto3.resource"})
 BOTO3_SESSION_METHODS = frozenset({"client", "resource"})
 BOTOCORE_CONFIG = frozenset({"botocore.config.Config", "botocore.client.Config"})
 BOTOCORE_TIMEOUT_KEYWORDS = ("connect_timeout", "read_timeout")
+LOG_METHODS = frozenset({"debug", "info", "warning", "error", "exception", "critical"})
+SPAN_METHODS = frozenset({"start_as_current_span", "start_span", "update_name", "add_event"})
+_NOQA = re.compile(r"#\s*noqa:\s*(?P<codes>[A-Z0-9, ]+)")
+_CONSTANT_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,15 +215,143 @@ def _check_call(call: ast.Call, aliases: dict[str, str], filename: str) -> list[
     return found
 
 
+def _is_get_logger(node: ast.expr, aliases: dict[str, str]) -> bool:
+    qualified = _qualified_name(node, aliases)
+    if qualified is not None:
+        return qualified == "get_logger" or qualified.endswith(".get_logger")
+    return isinstance(node, ast.Name) and node.id == "get_logger"
+
+
+def _target_key(node: ast.expr) -> str | None:
+    """``log`` para un nombre, ``self.log`` para un atributo de un nombre."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return None
+
+
+def _logger_targets(tree: ast.AST, aliases: dict[str, str]) -> set[str]:
+    """Nombres y atributos a los que se asigna el resultado de ``get_logger(...)``."""
+    targets: set[str] = set()
+    for node in ast.walk(tree):
+        value: ast.expr | None = None
+        names: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            value, names = node.value, list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            value, names = node.value, [node.target]
+        if isinstance(value, ast.Call) and _is_get_logger(value.func, aliases):
+            targets.update(key for name in names if (key := _target_key(name)) is not None)
+    return targets
+
+
+def _is_final(annotation: ast.expr) -> bool:
+    if isinstance(annotation, ast.Subscript):
+        annotation = annotation.value
+    if isinstance(annotation, ast.Name):
+        return annotation.id == "Final"
+    return isinstance(annotation, ast.Attribute) and annotation.attr == "Final"
+
+
+def _constants(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Constantes ``Final`` del módulo y nombres en mayúsculas importados; módulos importados."""
+    constants: set[str] = set()
+    modules: set[str] = set()
+    for statement in tree.body:
+        if (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and _is_final(statement.annotation)
+        ):
+            constants.add(statement.target.id)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if _CONSTANT_NAME.fullmatch(alias.name):
+                    constants.add(local)
+                else:
+                    modules.add(local)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                modules.add(alias.asname or alias.name.split(".")[0])
+    return constants, modules
+
+
+def _is_constant_argument(node: ast.expr, constants: set[str], modules: set[str]) -> bool:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in constants
+    return (
+        isinstance(node, ast.Attribute)
+        and _CONSTANT_NAME.fullmatch(node.attr) is not None
+        and isinstance(node.value, ast.Name)
+        and node.value.id in modules
+    )
+
+
+def _check_constant_names(
+    tree: ast.Module, aliases: dict[str, str], filename: str
+) -> list[Violation]:
+    loggers = _logger_targets(tree, aliases)
+    constants, modules = _constants(tree)
+    found: list[Violation] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        what: str | None = None
+        argument: ast.expr | None = None
+        func = node.func
+        if _is_get_logger(func, aliases):
+            what, argument = "get_logger", _first_argument(node, "component")
+        elif isinstance(func, ast.Attribute) and func.attr in SPAN_METHODS:
+            what, argument = func.attr, _first_argument(node, "name")
+        elif isinstance(func, ast.Attribute) and func.attr in LOG_METHODS:
+            receiver = func.value
+            is_logger = _target_key(receiver) in loggers or (
+                isinstance(receiver, ast.Call) and _is_get_logger(receiver.func, aliases)
+            )
+            if is_logger:
+                what, argument = func.attr, _first_argument(node, "message")
+        if what is None or argument is None:
+            continue
+        if not _is_constant_argument(argument, constants, modules):
+            found.append(
+                Violation(
+                    filename,
+                    argument.lineno,
+                    argument.col_offset + 1,
+                    "VIG004",
+                    f"{what}() con primer argumento no constante: usa un literal o una constante"
+                    " Final; por ahí entran texto libre y secretos (NFR-NUC-17, PR-NUC-54)",
+                )
+            )
+    return found
+
+
+def _suppressed(source: str) -> dict[int, set[str]]:
+    lines: dict[int, set[str]] = {}
+    for number, line in enumerate(source.splitlines(), start=1):
+        match = _NOQA.search(line)
+        if match:
+            lines[number] = {code.strip() for code in match["codes"].split(",")}
+    return lines
+
+
 def check_source(source: str, filename: str) -> list[Violation]:
-    """Violaciones de un módulo, ordenadas por posición."""
+    """Violaciones de un módulo, ordenadas por posición (sin las omitidas con ``# noqa``)."""
     tree = ast.parse(source, filename=filename)
     aliases = _aliases(tree)
     found: list[Violation] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             found.extend(_check_call(node, aliases, filename))
-    return sorted(found, key=lambda v: (v.line, v.column, v.rule))
+    found.extend(_check_constant_names(tree, aliases, filename))
+    suppressed = _suppressed(source)
+    kept = [v for v in found if v.rule not in suppressed.get(v.line, set())]
+    return sorted(kept, key=lambda v: (v.line, v.column, v.rule))
 
 
 def _python_files(path: Path) -> list[Path]:
