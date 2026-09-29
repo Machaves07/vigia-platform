@@ -11,6 +11,7 @@ from config.environment import (
     CONTEXT_FIRST_DEPLOY,
     CONTEXT_INSTANCE,
     CONTEXT_KEYS,
+    CONTEXT_NAT_PER_AZ,
     REGION,
     ContextError,
     EnvironmentConfig,
@@ -37,13 +38,20 @@ __all__ = [
 
 
 def load_config(context: Mapping[str, object]) -> EnvironmentConfig:
-    """Construye la configuración a partir de los cuatro valores de contexto obligatorios."""
+    """Construye la configuración a partir de los cinco valores de contexto obligatorios."""
     environment, ephemeral = parse_environment(require(context, CONTEXT_ENVIRONMENT))
     instance = parse_instance(require(context, CONTEXT_INSTANCE))
     first_deploy = parse_flag(CONTEXT_FIRST_DEPLOY, require(context, CONTEXT_FIRST_DEPLOY))
     ca_rotation = parse_flag(CONTEXT_CA_ROTATION, require(context, CONTEXT_CA_ROTATION))
+    nat_per_az = parse_flag(CONTEXT_NAT_PER_AZ, require(context, CONTEXT_NAT_PER_AZ))
     if ephemeral:
         return staging_config(
-            environment, instance=instance, first_deploy=first_deploy, ca_rotation=ca_rotation
+            environment,
+            instance=instance,
+            first_deploy=first_deploy,
+            ca_rotation=ca_rotation,
+            nat_per_az=nat_per_az,
         )
-    return pilot_config(instance=instance, first_deploy=first_deploy, ca_rotation=ca_rotation)
+    return pilot_config(
+        instance=instance, first_deploy=first_deploy, ca_rotation=ca_rotation, nat_per_az=nat_per_az
+    )

@@ -19,6 +19,7 @@ from config import EnvironmentConfig
 from stacks import DEPENDENCIES, STACK_ORDER
 from tests.conftest import Synthesized, cdk_settings, synthesize
 from tests.template_rules import resources
+from tests.test_foundation import expected_foundation_resources
 
 ORDER = ("foundation", "data", "edge", "compute", "observability", "datasets")
 
@@ -53,10 +54,17 @@ def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
     }
 
 
+def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
+    """``vigia-foundation`` cambia con el despliegue (presupuestos, traducciones)."""
+    if key == "foundation":
+        return expected_foundation_resources(config)
+    return EXPECTED_RESOURCES[key]
+
+
 def test_each_stack_has_its_expected_resources(deployment: Synthesized) -> None:
     for name, template in deployment.templates.items():
         found = Counter(str(resource["Type"]) for _, resource in resources(template))
-        assert found == EXPECTED_RESOURCES[_short(name, deployment.config)], name
+        assert found == _expected(_short(name, deployment.config), deployment.config), name
 
 
 def test_stacks_are_in_us_east_1_with_the_vigia_qualifier(deployment: Synthesized) -> None:
@@ -130,3 +138,4 @@ def test_cdk_json_fixes_the_qualifier_and_default_context() -> None:
     assert context["instance"] == "shared"
     assert context["first_deploy"] is False
     assert context["ca_rotation"] is False
+    assert context["nat_per_az"] is False

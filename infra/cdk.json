@@ -6,6 +6,7 @@
     "instance": "shared",
     "first_deploy": false,
     "ca_rotation": false,
+    "nat_per_az": false,
     "@aws-cdk/core:bootstrapQualifier": "vigia",
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
