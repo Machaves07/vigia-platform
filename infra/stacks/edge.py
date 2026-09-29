@@ -44,7 +44,8 @@ Nodos (§4.3 y R2), según ``nodes_tls_mode``:
 - ``passthrough`` (contingencia de R2): balanceador de red ``vigia-nlb-nodes`` con el mismo grupo
   ``sg-alb-nodes``, escucha TCP 443 con paso directo hacia ``tg-api-nodes`` (TCP 8443, donde la
   aplicación termina TLS con su certificado y verifica el del nodo). Sin almacén de confianza ni
-  certificado público de ``nodes.``. Las demás pilas no cambian.
+  certificado público de ``nodes.``. De las demás pilas solo cambia ``vigia-compute``, que expone
+  el puerto 8443 en la tarea de ``vigia-api`` (TASK-148).
 
 Ningún balanceador escucha en 80 y todos registran el acceso; ``sg-api`` recibe 8000 (o 8443 en
 la contingencia) solo desde el grupo de su balanceador (§3).

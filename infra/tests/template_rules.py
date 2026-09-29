@@ -403,6 +403,18 @@ RESOURCE_WILDCARDS: tuple[DeclaredWildcard, ...] = (
         "deployment-architecture §6.1: depósito de ensayo vigia-drill",
     ),
     DeclaredWildcard(
+        "ecs-cluster-tasks",
+        re.compile(r"^arn:[^:]+:ecs:[^:]+:[^:]+:task/vigia-[a-z0-9-]+/\*$"),
+        "§8: DescribeTasks de vigia-deploy sobre las tareas del clúster (vigia-migrate con "
+        "--wait); el identificador de la tarea no se conoce antes de lanzarla",
+    ),
+    DeclaredWildcard(
+        "backup-snapshots",
+        re.compile(r"^arn:[^:]+:rds:[^:]+:[^:]+:snapshot:awsbackup:job-\*$"),
+        "§8 y deployment-architecture §6.1: vigia-restore restaura desde las instantáneas "
+        "mensuales de la bóveda, que AWS Backup nombra awsbackup:job-<id>",
+    ),
+    DeclaredWildcard(
         "access-log-delivery",
         re.compile(
             rf"{_S3}vigia-logs[^/*?]*/(alb/(app|nodes)|s3/(evidence|archive|edge|drill|datasets))"

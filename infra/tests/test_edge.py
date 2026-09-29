@@ -605,15 +605,16 @@ def test_hosts_follow_the_environment(context: dict[str, str], app: str, nodes: 
 
 @pytest.mark.parametrize("environment", ["pilot", "staging-7"])
 def test_passthrough_changes_only_vigia_edge(environment: str) -> None:
+    """Y ``vigia-compute``, que expone el puerto 8443 de la aplicación (TASK-148)."""
     baseline = _synth(environment=environment)
     contingency = _synth(environment=environment, nodes_tls_mode="passthrough")
     assert contingency.stack_names == baseline.stack_names
-    edge = baseline.config.stack_name("edge")
+    changed = {baseline.config.stack_name("edge"), baseline.config.stack_name("compute")}
     for name in baseline.stack_names:
         same = json.dumps(contingency.templates[name], sort_keys=True) == json.dumps(
             baseline.templates[name], sort_keys=True
         )
-        assert same is (name != edge), name
+        assert same is (name not in changed), name
 
 
 def test_passthrough_is_a_network_load_balancer_straight_to_the_application() -> None:
