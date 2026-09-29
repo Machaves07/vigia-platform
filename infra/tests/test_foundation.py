@@ -69,12 +69,14 @@ def expected_foundation_resources(config: EnvironmentConfig) -> Counter[str]:
             "AWS::KMS::Key": 7,
             "AWS::KMS::Alias": 7,
             "AWS::SNS::Topic": 1,
+            # Eventos de la base de ``vigia-data`` y, en ``pilot``, presupuestos.
+            "AWS::SNS::TopicPolicy": 1,
             "AWS::SNS::Subscription": 1,
             "AWS::SSM::Parameter": 1,
         }
     )
     if budgets_enabled(config):
-        expected += Counter({"AWS::Budgets::Budget": 2, "AWS::SNS::TopicPolicy": 1})
+        expected += Counter({"AWS::Budgets::Budget": 2})
     return expected
 
 
@@ -656,10 +658,36 @@ def test_logs_key_is_limited_to_the_deployment_log_groups(deployment: Synthesize
     template = _foundation(deployment)
     key = _keys(template, deployment.config)[KeyName.LOGS]
     statement = _statement(key, "LogsForVigiaLogGroups")
-    arn = statement["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
-    assert render(arn, template) == (
-        f"arn:aws:logs:us-east-1:<AccountId>:log-group:/vigia/{deployment.config.deployment}/*"
-    )
+    arns = statement["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
+    prefix = "arn:aws:logs:us-east-1:<AccountId>:log-group:"
+    deployment_name = deployment.config.deployment
+    # Los grupos del despliegue y el de los registros de PostgreSQL de su base (vigia-data).
+    assert [render(arn, template) for arn in arns] == [
+        f"{prefix}/vigia/{deployment_name}/*",
+        f"{prefix}/aws/rds/instance/vigia-{deployment_name}-db/*",
+    ]
+
+
+def test_secrets_key_serves_only_the_database_secrets_through_secrets_manager(
+    deployment: Synthesized,
+) -> None:
+    """Rotación de ``db/app`` y ``db/migrate`` y secreto maestro de RDS (§7.2): solo por Secrets
+    Manager, solo en la cuenta y solo para los secretos de la base del despliegue."""
+    template = _foundation(deployment)
+    key = _keys(template, deployment.config)[KeyName.SECRETS]
+    statement = _statement(key, "DatabaseSecretsThroughSecretsManager")
+    assert set(statement["Action"]) == {"kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"}
+    conditions = statement["Condition"]
+    assert conditions["StringEquals"] == {
+        "kms:ViaService": "secretsmanager.us-east-1.amazonaws.com",
+        "kms:CallerAccount": {"Ref": "AWS::AccountId"},
+    }
+    secrets = conditions["StringLike"]["kms:EncryptionContext:SecretARN"]
+    prefix = "arn:aws:secretsmanager:us-east-1:<AccountId>:secret:"
+    assert [render(arn, template) for arn in secrets] == [
+        f"{prefix}vigia/{deployment.config.deployment}/db/*",
+        f"{prefix}rds!db-*",
+    ]
 
 
 def test_node_ca_signing_is_limited_to_ecdsa_sha_256(
@@ -816,11 +844,32 @@ def test_pilot_has_the_two_budgets(pilot_foundation: JsonObject) -> None:
     }
 
 
+def _topic_statements(template: JsonObject) -> dict[str, JsonObject]:
+    ((_, policy),) = _of_type(template, "AWS::SNS::TopicPolicy")
+    return {s["Sid"]: s for s in properties(policy)["PolicyDocument"]["Statement"]}
+
+
 def test_budgets_may_publish_to_the_alerts_topic(pilot_foundation: JsonObject) -> None:
-    ((_, policy),) = _of_type(pilot_foundation, "AWS::SNS::TopicPolicy")
-    (statement,) = properties(policy)["PolicyDocument"]["Statement"]
+    statement = _topic_statements(pilot_foundation)["BudgetsPublish"]
     assert statement["Principal"] == {"Service": "budgets.amazonaws.com"}
     assert statement["Action"] == "sns:Publish"
+    assert statement["Condition"] == {
+        "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
+    }
+
+
+def test_rds_events_may_publish_to_the_alerts_topic(deployment: Synthesized) -> None:
+    """Suscripción de eventos de la base (§6.1): con política propia en el tema, RDS necesita
+    su permiso; solo ``sns:Publish`` y solo desde la cuenta."""
+    template = _foundation(deployment)
+    statements = _topic_statements(template)
+    budgets = {"BudgetsPublish"} if budgets_enabled(deployment.config) else set()
+    assert set(statements) == {"RdsEventsPublish"} | budgets
+    statement = statements["RdsEventsPublish"]
+    assert statement["Principal"] == {"Service": "events.rds.amazonaws.com"}
+    assert statement["Action"] == "sns:Publish"
+    ((topic_id, _),) = _of_type(template, "AWS::SNS::Topic")
+    assert reference_target(statement["Resource"]) == topic_id
     assert statement["Condition"] == {
         "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
     }
@@ -832,7 +881,7 @@ def test_staging_synthesis_has_no_budgets(first_deploy: bool, ca_rotation: bool)
     deployment = _synth(environment="staging-7", **_flags(first_deploy, ca_rotation))
     for name, template in deployment.templates.items():
         assert list(_of_type(template, "AWS::Budgets::Budget")) == [], name
-        assert list(_of_type(template, "AWS::SNS::TopicPolicy")) == [], name
+        assert "BudgetsPublish" not in json.dumps(template), name
 
 
 def test_dedicated_instance_budgets_carry_its_name() -> None:
