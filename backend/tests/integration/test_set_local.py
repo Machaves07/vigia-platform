@@ -404,3 +404,94 @@ async def test_paused_postgres_read_ends_temporarily_unavailable_within_timeout(
         assert person_pool.checkedout() == 0
     finally:
         await database.dispose()
+
+
+SAFETY_CAP_SECONDS = 30.0
+"""Tope externo de la prueba: si el adaptador se colgara, falla aquí en vez de colgar la suite."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["sentencia", "commit"])
+async def test_paused_postgres_inside_open_transaction_ends_within_command_timeout(
+    paused_postgres: tuple[PostgresEndpoint, Any], where: str
+) -> None:
+    """PostgreSQL se pausa con la transacción ya abierta: la escritura no se cuelga.
+
+    ``sentencia``: la pausa llega antes de una sentencia → ``TemporarilyUnavailable``.
+    ``commit``: la pausa llega justo antes de salir del bloque → el ``COMMIT`` vence y el
+    resultado se declara desconocido (``commit_outcome_unknown``). En los dos casos la duración
+    queda dentro del tope de comando y, tras reanudar, ninguna conexión queda fuera del pool.
+    """
+    endpoint, container = paused_postgres
+    settings = _settings(
+        endpoint, connect_timeout_seconds=1.0, statement_timeout_ms=1_000, pool_timeout_seconds=1.0
+    )
+    database = Database.create(settings)
+    context = make_context()
+    loop = asyncio.get_running_loop()
+    elapsed = 0.0
+
+    async def write() -> None:
+        nonlocal elapsed
+        start: float | None = None
+        try:
+            async with database.transaction(context) as transaction:
+                await transaction.execute(text("SELECT 1"))
+                container.pause()
+                start = loop.time()
+                if where == "sentencia":
+                    await transaction.execute(text("SELECT 2"))
+        finally:
+            # Incluye la salida del bloque: ni la limpieza ni el COMMIT pueden colgarse.
+            if start is not None:
+                elapsed = loop.time() - start
+
+    try:
+        with pytest.raises(TemporarilyUnavailable) as caught:
+            try:
+                await asyncio.wait_for(write(), SAFETY_CAP_SECONDS)
+            finally:
+                container.unpause()
+        assert caught.value.commit_outcome_unknown == (where == "commit")
+        assert caught.value.retry_after_seconds == 5
+        assert elapsed <= settings.command_timeout_seconds + 1.0, (elapsed, settings)
+
+        # Tras reanudar: el adaptador responde y la conexión rota se retiró del pool.
+        assert (await database.read(context, text("SELECT 3")))[0][0] == 3
+        await asyncio.wait_for(database._drain(), SAFETY_CAP_SECONDS)
+        person_pool = cast(QueuePool, _engine(database, PoolClass.PERSON).sync_engine.pool)
+        assert person_pool.checkedout() == 0
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dispose_during_outage_is_bounded(
+    paused_postgres: tuple[PostgresEndpoint, Any],
+) -> None:
+    """Un apagado con la base caída y intentos abandonados termina en su tope, sin colgarse.
+
+    Lo único que ``dispose`` cancela es una comprobación previa colgada dentro del pool, que el
+    adaptador no puede cortar: SQLAlchemy avisa entonces de una conexión que recoge el
+    recolector de basura. En el apagado es inocuo; en operación normal no ocurre (las demás
+    pruebas de pausa exigen ``checkedout() == 0``).
+    """
+    endpoint, container = paused_postgres
+    settings = _settings(
+        endpoint, connect_timeout_seconds=1.0, statement_timeout_ms=1_000, pool_timeout_seconds=1.0
+    )
+    database = Database.create(settings)
+    context = make_context()
+    assert (await database.read(context, text("SELECT 1")))[0][0] == 1
+    container.pause()
+    try:
+        for _ in range(2):
+            with pytest.raises(TemporarilyUnavailable):
+                await database.read(context, text("SELECT 1"))
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await asyncio.wait_for(database.dispose(), SAFETY_CAP_SECONDS)
+        elapsed = loop.time() - start
+        assert elapsed <= settings.attempt_timeout_seconds + 2.0, elapsed
+    finally:
+        container.unpause()

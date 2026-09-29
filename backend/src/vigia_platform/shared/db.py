@@ -29,13 +29,24 @@ eslabón de clase de ruta de la cadena de middleware (TASK-134) fija la clase co
 
 Tiempos de espera (NFR-NUC-36, ``[objetivos propios]``): conexión 5 s; ``statement_timeout``
 10 s (30 s solo en el worker) y ``lock_timeout`` 2 s fijados en el servidor por conexión; espera
-de pool 5 s; cada comando tiene además un tope en el cliente de ``statement_timeout`` + 1 s (un
-servidor que no responde no cuelga la petición); y la apertura (y el intento de lectura
-completo) tiene un tope de conexión + comando. Al vencer ese tope el llamador recibe el error y
-el intento se abandona **sin cancelarlo**: termina solo, acotado por los topes del controlador,
-y devuelve su conexión al pool (cancelar a SQLAlchemy a mitad del cierre de una conexión rota
-la dejaría fuera del pool). Comprobación previa de cada conexión (``pool_pre_ping``) y
-``sslmode=verify-full`` por defecto.
+de pool 5 s. En el cliente, cada paso de la petición tiene su tope y nunca espera más:
+
+- **tope de comando** = ``statement_timeout`` + 1 s (11 s; 31 s en el worker): cada sentencia
+  de ``Transaction.execute``, el ``COMMIT`` y la devolución de la conexión al pool;
+- **tope del intento** = conexión + tope de comando (16 s): la apertura de la transacción
+  (sacar conexión, ``BEGIN`` y ``SET LOCAL``) y cada intento de lectura completo;
+- **tope de una lectura** = dos topes del intento + 100 ms (32,1 s por defecto; 21,1 s medidos
+  con la base pausada), ``[objetivo propio]`` derivado de NFR-NUC-36 que la cadena de
+  middleware (TASK-134) debe tener en cuenta en el tiempo de la petición.
+
+Al vencer un tope, el llamador recibe el error de inmediato y el paso se abandona **sin
+cancelarlo** (cancelar a SQLAlchemy a mitad del cierre de una conexión rota la deja fuera del
+pool): se corta el transporte de su conexión (``terminate`` de asyncpg, sin red), el paso
+colgado falla enseguida y la conexión se retira del pool en segundo plano. Una sentencia que
+vence da ``TemporarilyUnavailable``; un ``COMMIT`` que vence, además ``commit_outcome_unknown``.
+Lo único que puede seguir esperando al servidor es una comprobación previa en curso dentro del
+pool; ``dispose`` espera a lo abandonado como mucho el tope del intento y cancela el resto.
+Comprobación previa de cada conexión (``pool_pre_ping``) y ``sslmode=verify-full`` por defecto.
 
 Métricas: ``db_pool_size`` y ``db_pool_in_use`` con el atributo ``pool_class``.
 """
@@ -388,6 +399,10 @@ class ConnectionPort(Protocol):
         """Descarta la conexión sin ir a la red (tras un fallo o una cancelación)."""
         ...
 
+    def terminate(self) -> None:
+        """Corta ya el transporte del controlador, sin red ni espera (servidor colgado)."""
+        ...
+
 
 class PoolPort(Protocol):
     async def acquire(self) -> ConnectionPort: ...
@@ -396,10 +411,18 @@ class PoolPort(Protocol):
 
 
 class _EngineConnection:
-    __slots__ = ("_connection",)
+    __slots__ = ("_connection", "_driver")
 
-    def __init__(self, connection: AsyncConnection) -> None:
+    def __init__(self, connection: AsyncConnection, driver: Any) -> None:
         self._connection = connection
+        self._driver = driver
+        """La ``asyncpg.Connection`` de debajo, para cortarla sin pasar por SQLAlchemy."""
+
+    def terminate(self) -> None:
+        # ``terminate`` de asyncpg cierra el transporte y cancela sus peticiones de
+        # cancelación pendientes: lo que dejaba colgado el cierre elegante de SQLAlchemy.
+        with contextlib.suppress(Exception):
+            self._driver.terminate()
 
     async def begin(self, *, read_only: bool) -> None:
         if read_only:
@@ -418,6 +441,9 @@ class _EngineConnection:
         await self._connection.close()
 
     async def discard(self) -> None:
+        # Primero se corta el transporte: así la invalidación de SQLAlchemy no espera a un
+        # servidor que no responde.
+        self.terminate()
         try:
             await self._connection.invalidate()
         finally:
@@ -433,7 +459,12 @@ class _EnginePool:
     async def acquire(self) -> ConnectionPort:
         connection = self.engine.connect()
         await connection.start()
-        return _EngineConnection(connection)
+        try:
+            raw = await connection.get_raw_connection()
+        except BaseException:
+            await connection.close()
+            raise
+        return _EngineConnection(connection, raw.driver_connection)
 
     async def dispose(self) -> None:
         await self.engine.dispose()
@@ -490,12 +521,16 @@ async def _discard_quietly(connection: ConnectionPort) -> None:
         await connection.discard()
 
 
-async def _release_or_discard(connection: ConnectionPort) -> None:
-    """Devuelve la conexión al pool; si ni eso responde, la descarta."""
-    try:
-        await connection.release()
-    except Exception:
-        await _discard_quietly(connection)
+class _Abandoned:
+    """Marca de que un paso se abandonó: su conexión se retira en segundo plano."""
+
+    __slots__ = ("value",)
+
+    def __init__(self) -> None:
+        self.value = False
+
+    def set(self) -> None:
+        self.value = True
 
 
 # --- Transacción y adaptador --------------------------------------------------------------------
@@ -504,12 +539,14 @@ async def _release_or_discard(connection: ConnectionPort) -> None:
 class Transaction:
     """La transacción abierta por ``Database.transaction``: solo ejecuta sentencias."""
 
-    __slots__ = ("_broken", "_connection", "_failed")
+    __slots__ = ("_broken", "_connection", "_database", "_failed", "_retired")
 
-    def __init__(self, connection: ConnectionPort) -> None:
+    def __init__(self, connection: ConnectionPort, database: Database) -> None:
         self._connection = connection
+        self._database = database
         self._failed = False
         self._broken = False
+        self._retired = _Abandoned()
 
     @property
     def failed(self) -> bool:
@@ -524,11 +561,21 @@ class Transaction:
     async def execute(
         self, statement: Executable, parameters: Mapping[str, Any] | None = None
     ) -> Result[Any]:
-        """Ejecuta ``statement`` con parámetros; traduce los fallos transitorios."""
+        """Ejecuta ``statement`` con parámetros y tope de comando; traduce los fallos transitorios.
+
+        Si el servidor no responde dentro de ``command_timeout_seconds``, la sentencia se
+        abandona (sin cancelarla), la conexión se corta y se retira en segundo plano, y aquí se
+        lanza ``TemporarilyUnavailable``. Nunca se reintenta.
+        """
         if self._failed:
             raise TransactionAborted()
         try:
-            return await self._connection.execute(statement, parameters)
+            return await self._database._within(
+                self._connection.execute(statement, parameters),
+                self._database._command_timeout,
+                connection=self._connection,
+                abandoned=self._retired,
+            )
         except Exception as error:
             self._failed = True
             self._broken = _classify(error) is _FailureKind.CONNECTION
@@ -550,6 +597,7 @@ class Database:
         *,
         process: ProcessKind,
         attempt_timeout_seconds: float,
+        command_timeout_seconds: float,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if not isinstance(process, ProcessKind):
@@ -559,6 +607,7 @@ class Database:
         self._pools = dict(pools)
         self._process = process
         self._attempt_timeout = attempt_timeout_seconds
+        self._command_timeout = command_timeout_seconds
         self._sleep = sleep
         self._abandoned: set[asyncio.Future[Any]] = set()
 
@@ -581,52 +630,111 @@ class Database:
             pools,
             process=settings.process,
             attempt_timeout_seconds=settings.attempt_timeout_seconds,
+            command_timeout_seconds=settings.command_timeout_seconds,
             sleep=sleep,
         )
 
-    async def dispose(self) -> None:
-        """Espera los intentos abandonados (acotados por sus propios topes) y cierra los pools."""
+    async def _drain(self, timeout: float | None = None) -> None:
+        """Espera a los pasos abandonados como mucho ``timeout`` (por defecto, el del intento)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + (self._attempt_timeout if timeout is None else timeout)
         while self._abandoned:
-            await asyncio.gather(*self._abandoned, return_exceptions=True)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            await asyncio.wait(set(self._abandoned), timeout=remaining)
+
+    async def dispose(self) -> None:
+        """Cierra los pools; con la base caída, en un tiempo acotado.
+
+        Espera a los pasos abandonados como mucho el tope del intento; los que sigan pendientes
+        (p. ej. una comprobación previa contra un servidor colgado) se cancelan: en el apagado
+        ya no importa devolver su conexión, y ``engine.dispose`` cierra las del pool.
+        """
+        await self._drain()
+        for pending in list(self._abandoned):
+            pending.cancel()
+        if self._abandoned:
+            await asyncio.wait(set(self._abandoned), timeout=self._attempt_timeout)
         for pool in self._pools.values():
             await pool.dispose()
 
-    async def _bounded[T](
+    async def _within[T](
         self,
         work: Coroutine[Any, Any, T],
+        timeout: float,
         *,
-        on_abandon: Callable[[T], Awaitable[None]] | None = None,
+        connection: ConnectionPort | None = None,
+        abandoned: _Abandoned | None = None,
+        after: Callable[[asyncio.Future[T]], Awaitable[None]] | None = None,
     ) -> T:
-        """Espera ``work`` como mucho el tope del intento, **sin cancelarlo** al vencer.
+        """Espera ``work`` como mucho ``timeout``, **sin cancelarlo** al vencer.
 
         Cancelar a SQLAlchemy a mitad de la comprobación previa o del cierre de una conexión
-        rota la deja fuera del pool hasta que la recoge el recolector de basura. Por eso el
-        intento corre en su propia tarea: al vencer el tope (o si cancelan al llamador) se
-        abandona y termina solo, acotado por los tiempos de espera del controlador; si llega a
-        entregar una conexión, ``on_abandon`` la devuelve.
+        rota la deja fuera del pool hasta que la recoge el recolector de basura. Por eso el paso
+        corre en su propia tarea. Al vencer el tope (o si cancelan al llamador), el llamador
+        recibe el error de inmediato y el paso se abandona:
+
+        - si hay ``connection``, se corta su transporte (``terminate``): el paso colgado falla
+          enseguida y la conexión se retira del pool en segundo plano;
+        - ``abandoned`` queda marcado, para que quien llama no vuelva a tocar esa conexión;
+        - ``after`` corre cuando el paso termina (p. ej. devolver una conexión entregada tarde).
         """
         task = asyncio.ensure_future(work)
         try:
-            return await asyncio.wait_for(asyncio.shield(task), self._attempt_timeout)
+            return await asyncio.wait_for(asyncio.shield(task), timeout)
         except BaseException:
             if not task.done():
-                self._abandon(task, on_abandon)
+                if abandoned is not None:
+                    abandoned.set()
+                if connection is not None:
+                    connection.terminate()
+                    retire = connection
+
+                    async def discard(_: asyncio.Future[T]) -> None:
+                        await _discard_quietly(retire)
+
+                    after = after or discard
+                self._abandon(task, after)
             raise
 
     def _abandon[T](
-        self, task: asyncio.Future[T], on_abandon: Callable[[T], Awaitable[None]] | None
+        self,
+        task: asyncio.Future[T],
+        after: Callable[[asyncio.Future[T]], Awaitable[None]] | None,
     ) -> None:
         self._abandoned.add(task)
 
         def finished(done: asyncio.Future[T]) -> None:
             self._abandoned.discard(done)
-            if done.cancelled() or done.exception() is not None or on_abandon is None:
+            if not done.cancelled():
+                done.exception()  # recogida: un paso abandonado no deja avisos sin leer
+            if after is None:
                 return
-            cleanup = asyncio.ensure_future(on_abandon(done.result()))
+            cleanup = asyncio.ensure_future(after(done))
             self._abandoned.add(cleanup)
             cleanup.add_done_callback(self._abandoned.discard)
 
         task.add_done_callback(finished)
+
+    async def _release(self, connection: ConnectionPort) -> None:
+        """Devuelve la conexión al pool con tope de comando; si no responde, la retira."""
+        abandoned = _Abandoned()
+        try:
+            await self._within(
+                connection.release(),
+                self._command_timeout,
+                connection=connection,
+                abandoned=abandoned,
+            )
+        except BaseException:
+            if not abandoned.value:
+                await _discard_quietly(connection)
+
+    async def _release_late(self, done: asyncio.Future[ConnectionPort]) -> None:
+        """Una apertura abandonada que acabó entregando conexión: se devuelve al pool."""
+        if not done.cancelled() and done.exception() is None:
+            await self._release(done.result())
 
     def _pool(self) -> PoolPort:
         if self._process is ProcessKind.WORKER:
@@ -641,16 +749,18 @@ class Database:
         return context
 
     async def _open(
-        self, pool: PoolPort, context: ScopeContext, *, read_only: bool
+        self, pool: PoolPort, context: ScopeContext, attempt: _Attempt
     ) -> ConnectionPort:
-        """Saca una conexión, abre la transacción y fija las tres variables."""
-        connection = await pool.acquire()
+        """Saca una conexión, abre la transacción de escritura y fija las tres variables."""
+        connection = attempt.connection = await pool.acquire()
         try:
-            await connection.begin(read_only=read_only)
+            await connection.begin(read_only=False)
             await connection.execute(_SET_SCOPE, scope_parameters(context))
         except BaseException:
+            attempt.connection = None
             await _discard_quietly(connection)
             raise
+        attempt.connection = None  # desde aquí la conexión es de quien la pidió
         return connection
 
     def transaction(
@@ -664,40 +774,70 @@ class Database:
 
     @contextlib.asynccontextmanager
     async def _transaction(self, context: ScopeContext) -> AsyncIterator[Transaction]:
+        attempt = _Attempt()
+        abandoned = _Abandoned()
         try:
-            connection = await self._bounded(
-                self._open(self._pool(), context, read_only=False),
-                on_abandon=_release_or_discard,
-            )
+            try:
+                connection = await self._within(
+                    self._open(self._pool(), context, attempt),
+                    self._attempt_timeout,
+                    abandoned=abandoned,
+                    after=self._release_late,
+                )
+            finally:
+                # Apertura abandonada a mitad de BEGIN o del SET LOCAL: se corta la conexión
+                # para que la apertura colgada falle enseguida y la retire ella misma.
+                if abandoned.value and attempt.connection is not None:
+                    attempt.connection.terminate()
         except Exception as error:
             translated = _translate(error)
             if translated is None:
                 raise
             raise translated from error
-        transaction = Transaction(connection)
+        transaction = Transaction(connection, self)
         try:
             yield transaction
         except BaseException as error:
-            if isinstance(error, Exception) and not transaction.broken:
-                await _release_or_discard(connection)
-            else:
-                await _discard_quietly(connection)
+            await self._close_after_error(connection, transaction, error)
             raise
         if transaction.failed:
-            await _release_or_discard(connection)
+            await self._close_after_error(connection, transaction, None)
             raise TransactionAborted()
         try:
-            await connection.commit()
+            await self._within(
+                connection.commit(),
+                self._command_timeout,
+                connection=connection,
+                abandoned=transaction._retired,
+            )
         except BaseException as error:
-            await _discard_quietly(connection)
+            if not transaction._retired.value:
+                await _discard_quietly(connection)
             if not isinstance(error, Exception):
                 raise
-            # Tras enviar el COMMIT nunca se reintenta (PR-NUC-41).
+            # Tras enviar el COMMIT nunca se reintenta (PR-NUC-41); si venció el tope, el
+            # resultado es desconocido (TimeoutError se traduce como fallo de conexión).
             translated = _translate(error, after_commit=True)
             if translated is None:
                 raise
             raise translated from error
-        await _release_or_discard(connection)
+        await self._release(connection)
+
+    async def _close_after_error(
+        self, connection: ConnectionPort, transaction: Transaction, error: BaseException | None
+    ) -> None:
+        """Cierra la transacción que no se confirma, sin esperar a un servidor que no responde.
+
+        Si un paso se abandonó, la conexión ya se retira en segundo plano. Si hubo fallo de
+        conexión o una cancelación, se descarta sin ir a la red. Si no, se revierte devolviéndola
+        al pool con tope de comando.
+        """
+        if transaction._retired.value:
+            return
+        if transaction.broken or (error is not None and not isinstance(error, Exception)):
+            await _discard_quietly(connection)
+        else:
+            await self._release(connection)
 
     async def read(
         self,
@@ -709,11 +849,9 @@ class Database:
         context = self._require_context(context)
         pool = self._pool()
         for attempt in range(1, MAX_READ_ATTEMPTS + 1):
-            progress = _ReadProgress()
+            progress = _Attempt()
             try:
-                return await self._bounded(
-                    self._read_once(pool, context, statement, parameters, progress)
-                )
+                return await self._attempt_read(pool, context, statement, parameters, progress)
             except TimeoutError as error:  # venció el tope del intento
                 if progress.committing:
                     # El COMMIT ya se envió: nunca se reintenta (PR-NUC-41).
@@ -732,17 +870,41 @@ class Database:
             await self._sleep(READ_RETRY_DELAY_SECONDS)
         raise AssertionError("inalcanzable")  # pragma: no cover
 
+    async def _attempt_read(
+        self,
+        pool: PoolPort,
+        context: ScopeContext,
+        statement: Executable,
+        parameters: Mapping[str, Any] | None,
+        progress: _Attempt,
+    ) -> Sequence[Row[Any]]:
+        """Un intento de lectura con el tope del intento.
+
+        Si vence con una conexión ya entregada, se corta su transporte: el intento colgado falla
+        enseguida y él mismo la retira del pool (no queda esperando al servidor).
+        """
+        abandoned = _Abandoned()
+        try:
+            return await self._within(
+                self._read_once(pool, context, statement, parameters, progress),
+                self._attempt_timeout,
+                abandoned=abandoned,
+            )
+        finally:
+            if abandoned.value and progress.connection is not None:
+                progress.connection.terminate()
+
     async def _read_once(
         self,
         pool: PoolPort,
         context: ScopeContext,
         statement: Executable,
         parameters: Mapping[str, Any] | None,
-        progress: _ReadProgress,
+        progress: _Attempt,
     ) -> Sequence[Row[Any]]:
         connection: ConnectionPort | None = None
         try:
-            connection = await pool.acquire()
+            connection = progress.connection = await pool.acquire()
             await connection.begin(read_only=True)
             await connection.execute(_SET_SCOPE, scope_parameters(context))
             rows = (await connection.execute(statement, parameters)).all()
@@ -752,10 +914,11 @@ class Database:
             kind = _classify(error)
             committing = progress.committing
             if connection is not None:
+                progress.connection = None
                 if kind is _FailureKind.CONNECTION or committing:
                     await _discard_quietly(connection)
                 else:
-                    await _release_or_discard(connection)
+                    await self._release(connection)
             if kind is _FailureKind.CONNECTION and not committing:
                 raise _RetryableRead() from error
             translated = _translate(error, after_commit=committing)
@@ -764,9 +927,12 @@ class Database:
             raise translated from error
         except BaseException:
             if connection is not None:
+                progress.connection = None
                 await _discard_quietly(connection)
             raise
-        await _release_or_discard(connection)
+        # La devolución tiene su propio tope (``_release``): el llamador ya no la corta.
+        progress.connection = None
+        await self._release(connection)
         return rows
 
 
@@ -775,7 +941,9 @@ class _RetryableRead(Exception):
 
 
 @dataclass(slots=True)
-class _ReadProgress:
-    """Hasta dónde llegó un intento de lectura (lo consulta el llamador si vence el tope)."""
+class _Attempt:
+    """Hasta dónde llegó un intento (apertura o lectura); lo consulta el llamador si vence."""
 
     committing: bool = False
+    connection: ConnectionPort | None = None
+    """La conexión en uso por el intento, mientras la tenga; se corta si el intento se abandona."""

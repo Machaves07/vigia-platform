@@ -65,6 +65,7 @@ class Phase(enum.Enum):
     EXECUTE = "execute"
     COMMIT_BEFORE_APPLY = "commit_before_apply"
     COMMIT_AFTER_APPLY = "commit_after_apply"
+    RELEASE = "release"  # solo para ``hang_at``: los guiones de fallos no la sortean
 
     @property
     def at_commit(self) -> bool:
@@ -127,7 +128,7 @@ class Fault:
 
 @st.composite
 def faults(draw: st.DrawFn) -> Fault:
-    phase = draw(st.sampled_from(Phase))
+    phase = draw(st.sampled_from([p for p in Phase if p is not Phase.RELEASE]))
     kind = draw(st.sampled_from(Kind))
     if kind is Kind.CONNECTION:
         make = draw(CONNECTION_ERRORS)
@@ -162,6 +163,7 @@ class Journal:
     effects_applied: int = 0
     released: int = 0
     discarded: int = 0
+    terminated: int = 0
     sleeps: list[float] = field(default_factory=list)
     begins: list[bool] = field(default_factory=list)
     scope_before_statement: list[bool] = field(default_factory=list)
@@ -174,16 +176,30 @@ class _Rows:
 
 
 class FakeConnection:
-    def __init__(self, journal: Journal, fault: Fault | None) -> None:
+    """Conexión doble. ``hang_at``: el servidor deja de responder en esa fase, y la llamada
+    solo termina (con error de conexión) cuando se corta el transporte, como con asyncpg."""
+
+    def __init__(self, journal: Journal, fault: Fault | None, hang_at: Phase | None = None) -> None:
         self.journal = journal
         self.fault = fault
+        self.hang_at = hang_at
         self.scope_set = False
         self.read_only = False
         self.pending = 0
+        self._cut = asyncio.Event()
 
     def _maybe_fail(self, phase: Phase) -> None:
         if self.fault is not None and self.fault.phase is phase:
             raise self.fault.error()
+
+    async def _maybe_hang(self, phase: Phase) -> None:
+        if self.hang_at is phase:
+            await self._cut.wait()
+            raise ConnectionResetError("transporte cortado")
+
+    def terminate(self) -> None:
+        self.journal.terminated += 1
+        self._cut.set()
 
     async def begin(self, *, read_only: bool) -> None:
         self.journal.begins.append(read_only)
@@ -199,6 +215,7 @@ class FakeConnection:
             self.scope_set = True
             return cast(Result[Any], _Rows())
         self.journal.scope_before_statement.append(self.scope_set)
+        await self._maybe_hang(Phase.EXECUTE)
         self._maybe_fail(Phase.EXECUTE)
         self.journal.user_statements += 1
         if not self.read_only:
@@ -207,12 +224,14 @@ class FakeConnection:
 
     async def commit(self) -> None:
         self.journal.commits_sent += 1
+        await self._maybe_hang(Phase.COMMIT_BEFORE_APPLY)
         self._maybe_fail(Phase.COMMIT_BEFORE_APPLY)
         self.journal.effects_applied += self.pending
         self.pending = 0
         self._maybe_fail(Phase.COMMIT_AFTER_APPLY)
 
     async def release(self) -> None:
+        await self._maybe_hang(Phase.RELEASE)
         self.journal.released += 1
 
     async def discard(self) -> None:
@@ -246,6 +265,7 @@ def _database(pools: Mapping[PoolClass, PoolPort], journal: Journal, **kwargs: A
         pools,
         process=kwargs.pop("process", ProcessKind.API),
         attempt_timeout_seconds=kwargs.pop("attempt_timeout_seconds", 5.0),
+        command_timeout_seconds=kwargs.pop("command_timeout_seconds", 5.0),
         sleep=sleep,
     )
 
@@ -512,7 +532,8 @@ def test_abandoned_attempts_return_their_late_connections() -> None:
                 raise AssertionError("no debe abrirse")
         with pytest.raises(TemporarilyUnavailable):
             await database.read(make_context(), USER_STATEMENT)
-        await database.dispose()  # espera a los abandonados
+        await database._drain(5.0)  # los abandonados terminan solos y devuelven su conexión
+        assert not database._abandoned
 
     asyncio.run(scenario())
     assert journal.attempts == 3  # 1 escritura + 2 lecturas
@@ -520,6 +541,147 @@ def test_abandoned_attempts_return_their_late_connections() -> None:
     assert journal.commits_sent == 2
     assert journal.effects_applied == 0
     assert (journal.released, journal.discarded) == (3, 0)
+
+
+COMMAND_TIMEOUT = 0.05
+ATTEMPT_TIMEOUT = 0.1
+SLACK = 0.5
+
+
+class HangingPool(FakePool):
+    """Cada conexión deja de responder en ``hang_at`` (sentencia, COMMIT o devolución)."""
+
+    def __init__(self, journal: Journal, hang_at: Phase) -> None:
+        super().__init__(journal)
+        self.hang_at = hang_at
+
+    async def acquire(self) -> ConnectionPort:
+        self.journal.attempts += 1
+        return FakeConnection(self.journal, None, hang_at=self.hang_at)
+
+
+@given(
+    context=scope_contexts(),
+    hang_at=st.sampled_from([Phase.EXECUTE, Phase.COMMIT_BEFORE_APPLY, Phase.RELEASE]),
+    operation=st.sampled_from(["read", "write"]),
+)
+def test_a_hung_server_never_blocks_the_caller(
+    context: ScopeContext, hang_at: Phase, operation: str
+) -> None:
+    """Revisión de VIG-26: con el servidor colgado en la sentencia, el COMMIT o la devolución,
+    la operación termina dentro de su tope, la escritura tiene exactamente 1 intento y ninguna
+    conexión se queda fuera del pool (cada una se devuelve o se retira una sola vez)."""
+    journal = Journal()
+    pool = HangingPool(journal, hang_at)
+    database = _database(
+        {PoolClass.NODE: pool, PoolClass.PERSON: pool},
+        journal,
+        attempt_timeout_seconds=ATTEMPT_TIMEOUT,
+        command_timeout_seconds=COMMAND_TIMEOUT,
+    )
+
+    async def scenario() -> tuple[object, float]:
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        outcome: object
+        try:
+            if operation == "read":
+                outcome = [tuple(row) for row in await database.read(context, USER_STATEMENT)]
+            else:
+                await _write(database, context)
+                outcome = None
+        except Exception as error:
+            outcome = error
+        elapsed = loop.time() - start
+        await database._drain(5.0)
+        assert not database._abandoned
+        return outcome, elapsed
+
+    outcome, elapsed = asyncio.run(scenario())
+
+    if operation == "write":
+        assert journal.attempts == 1
+        assert elapsed < COMMAND_TIMEOUT + SLACK
+        if hang_at is Phase.EXECUTE:
+            assert type(outcome) is TemporarilyUnavailable
+            assert not outcome.commit_outcome_unknown
+            assert journal.commits_sent == 0
+        elif hang_at is Phase.COMMIT_BEFORE_APPLY:
+            assert type(outcome) is TemporarilyUnavailable
+            assert outcome.commit_outcome_unknown
+        else:  # confirmada; solo se colgó la devolución: se retira sin molestar al llamador
+            assert outcome is None
+            assert journal.effects_applied == 1
+    else:
+        assert journal.effects_applied == 0
+        if hang_at is Phase.EXECUTE:
+            assert type(outcome) is TemporarilyUnavailable
+            assert journal.attempts == MAX_READ_ATTEMPTS
+            assert elapsed < MAX_READ_ATTEMPTS * ATTEMPT_TIMEOUT + SLACK
+        elif hang_at is Phase.COMMIT_BEFORE_APPLY:
+            assert type(outcome) is TemporarilyUnavailable
+            assert outcome.commit_outcome_unknown
+            assert journal.attempts == 1  # tras el COMMIT, nunca se reintenta
+            assert elapsed < ATTEMPT_TIMEOUT + SLACK
+        else:
+            assert outcome == [(1,)]
+            assert journal.attempts == 1
+            assert elapsed < ATTEMPT_TIMEOUT + SLACK
+    # Toda conexión colgada se cortó y se retiró; ninguna se devolvió y además se retiró.
+    assert journal.terminated >= 1
+    assert journal.released + journal.discarded == journal.attempts
+
+
+def test_dispose_is_bounded_while_a_step_hangs() -> None:
+    """``dispose`` no espera sin límite a un paso que no termina (p. ej. una comprobación
+    previa contra un servidor colgado, que el adaptador no puede cortar)."""
+    journal = Journal()
+
+    class NeverPool(FakePool):
+        async def acquire(self) -> ConnectionPort:
+            self.journal.attempts += 1
+            await asyncio.Event().wait()
+            raise AssertionError("inalcanzable")
+
+    pool = NeverPool(journal)
+    database = _database(
+        {PoolClass.NODE: pool, PoolClass.PERSON: pool},
+        journal,
+        attempt_timeout_seconds=ATTEMPT_TIMEOUT,
+        command_timeout_seconds=COMMAND_TIMEOUT,
+    )
+
+    async def scenario() -> float:
+        with pytest.raises(TemporarilyUnavailable):
+            await database.read(make_context(), USER_STATEMENT)
+        assert database._abandoned  # los dos intentos siguen colgados
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await database.dispose()
+        assert not database._abandoned
+        return loop.time() - start
+
+    elapsed = asyncio.run(scenario())
+    assert elapsed < 2 * ATTEMPT_TIMEOUT + SLACK
+
+
+def test_swallowed_connection_error_discards_without_network() -> None:
+    """Menor 2 de la revisión: si el llamador se traga un error de conexión y sale del bloque,
+    la conexión rota se descarta (sin ir a la red para revertir), igual que en la rama de
+    excepción, y se avisa con ``TransactionAborted``."""
+    journal = Journal()
+    fault = Fault(Phase.EXECUTE, Kind.CONNECTION, lambda: ConnectionResetError("rota"))
+    database = _api_database(journal, [fault])
+
+    async def swallow() -> None:
+        async with database.transaction(make_context()) as transaction:
+            with pytest.raises(TemporarilyUnavailable):
+                await transaction.execute(USER_STATEMENT)
+            assert transaction.broken
+
+    with pytest.raises(TransactionAborted):
+        asyncio.run(swallow())
+    assert (journal.released, journal.discarded, journal.commits_sent) == (0, 1, 0)
 
 
 def test_route_class_selects_the_pool_and_worker_uses_its_own() -> None:
