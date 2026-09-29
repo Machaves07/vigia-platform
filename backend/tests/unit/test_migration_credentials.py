@@ -36,19 +36,18 @@ MIGRATE_SECRET = {
     "username": "vigia_migrate",
     "password": MIGRATE_VALUE,
 }
+MIGRATE_ID = "vigia/pilot/db/migrate"
+APP_ID = "vigia/pilot/db/app"
+MASTER_ID = "arn:aws:secretsmanager:us-east-1:111122223333:secret:rds!db-1"
 SECRETS = {
-    "vigia/pilot/db/migrate": json.dumps(MIGRATE_SECRET),
-    "vigia/pilot/db/app": json.dumps(
-        {**MIGRATE_SECRET, "username": "vigia_app", "password": APP_VALUE}
-    ),
-    "arn:aws:secretsmanager:us-east-1:111122223333:secret:rds!db-1": json.dumps(
-        {"username": "vigia_owner", "password": MASTER_VALUE}
-    ),
+    MIGRATE_ID: json.dumps(MIGRATE_SECRET),
+    APP_ID: json.dumps({**MIGRATE_SECRET, "username": "vigia_app", "password": APP_VALUE}),
+    MASTER_ID: json.dumps({"username": "vigia_owner", "password": MASTER_VALUE}),
 }
 FIRST_DEPLOY = {
-    MIGRATE_SECRET_VARIABLE: "vigia/pilot/db/migrate",
-    APP_SECRET_VARIABLE: "vigia/pilot/db/app",
-    MASTER_SECRET_VARIABLE: "arn:aws:secretsmanager:us-east-1:111122223333:secret:rds!db-1",
+    MIGRATE_SECRET_VARIABLE: MIGRATE_ID,
+    APP_SECRET_VARIABLE: APP_ID,
+    MASTER_SECRET_VARIABLE: MASTER_ID,
 }
 
 
@@ -97,12 +96,10 @@ def test_first_deploy_logs_in_as_master_and_gets_both_role_passwords() -> None:
 
 def test_later_deploys_log_in_as_vigia_migrate() -> None:
     fetch = RecordingFetcher(SECRETS)
-    credentials = resolve_migration_credentials(
-        {MIGRATE_SECRET_VARIABLE: "vigia/pilot/db/migrate"}, fetch
-    )
+    credentials = resolve_migration_credentials({MIGRATE_SECRET_VARIABLE: MIGRATE_ID}, fetch)
     assert (credentials.url.username, credentials.url.password) == ("vigia_migrate", MIGRATE_VALUE)
     assert credentials.role_passwords == {"vigia_migrate": MIGRATE_VALUE}
-    assert fetch.calls == ["vigia/pilot/db/migrate"]
+    assert fetch.calls == [MIGRATE_ID]
 
 
 def test_aws_mode_ignores_local_password_variables() -> None:
