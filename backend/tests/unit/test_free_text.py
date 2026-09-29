@@ -77,6 +77,12 @@ def test_control_characters_are_rejected(text: str) -> None:
         "Zona &#60;b",
         "Zona &#x3C;b",
         "Zona &amp; almacén",
+        # Revisión, ronda 1: entidades sin «;», que los navegadores decodifican igual.
+        "Zona &ltscript&gt",
+        "Zona &#60script",
+        "Zona &#x3cscript",
+        "Zona &LT;b",
+        "Zona &quot",
         "Zona \uff1cb\uff1e",  # «<b>» de ancho completo: NFKC lo convierte en marcado
     ],
 )
@@ -106,6 +112,14 @@ def test_ordinary_punctuation_is_accepted(text: str) -> None:
         ("Zona\u200bnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # anchura cero
         ("Zona\u202enorte", FreeTextRejection.INVISIBLE_CHARACTER),  # inversión de dirección
         ("Zona\ufeffnorte", FreeTextRejection.INVISIBLE_CHARACTER),
+        # Revisión, ronda 1: invisibles que no son ``Cf`` (Default_Ignorable, braille).
+        ("Zona\u3164norte", FreeTextRejection.INVISIBLE_CHARACTER),  # relleno hangul
+        ("Zona\uffa0norte", FreeTextRejection.INVISIBLE_CHARACTER),  # relleno hangul ancho medio
+        ("Zona\u115fnorte", FreeTextRejection.INVISIBLE_CHARACTER),
+        ("Zona\u034fnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # CGJ
+        ("Zona\ufe0fnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # selector de variación
+        ("Zona\u2800norte", FreeTextRejection.INVISIBLE_CHARACTER),  # braille en blanco
+        ("Zona\u00adnorte", FreeTextRejection.INVISIBLE_CHARACTER),  # guion blando
         ("Zona\ue000norte", FreeTextRejection.DISALLOWED_CHARACTER),  # uso privado
         ("Zona\ufffenorte", FreeTextRejection.DISALLOWED_CHARACTER),  # no carácter
         ("Zona\ud800norte", FreeTextRejection.DISALLOWED_CHARACTER),  # sustituto suelto

@@ -15,8 +15,20 @@ from typing import Annotated, Any, Literal
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import Field, StrictBool, StrictInt, StrictStr, create_model
+from pydantic import (
+    Base64Bytes,
+    Base64Str,
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    WithJsonSchema,
+    create_model,
+)
 from vigia_contracts.models.common import UUID, Timestamp
+from vigia_contracts.models.finding import Finding
 
 from vigia_platform.ledger.record_types import register_u02_record_types
 from vigia_platform.ledger.registry import (
@@ -37,6 +49,7 @@ from vigia_platform.ledger.schema_rules import (
 from vigia_platform.shared.context import ActorUnit
 
 FreeText = Annotated[StrictStr, Field(min_length=1, max_length=200)]
+_ZONE = "0190a8a0-0000-7000-8000-000000000000"
 
 SAFE_WORDS = ("zone", "plant", "node", "reason", "code", "record", "batch", "status", "level")
 """Palabras que no identifican a nadie, para componer nombres de campo legítimos."""
@@ -72,7 +85,7 @@ FORBIDDEN_NAMES = (
 )
 
 
-def _definition(model: type[ContentModel], **overrides: Any) -> RecordType:
+def _definition(model: type[BaseModel], **overrides: Any) -> RecordType:
     values: dict[str, Any] = {
         "record_type": "probe_recorded",
         "writer_unit": ActorUnit.U04,
@@ -111,6 +124,7 @@ def test_u02_free_text_is_only_the_declared_names_and_the_concession_reason() ->
     assert declared == {
         ("organization_created", "/name"),
         ("plant_created", "/name"),
+        ("plant_created", "/timezone"),
         ("zone_created", "/name"),
         ("provider_concession_granted", "/reason"),
     }
@@ -239,12 +253,187 @@ def test_closed_fields_with_safe_names_are_never_flagged(
             r"^\w+( \w+)*$",
             r"[a-z]{1,50}",
             r"^[a-z]{1,50}",
+            # Revisión, ronda 1: sintaxis que el motor de Rust de Pydantic entiende como abierta.
+            r"^[\x20-\x7e]{1,200}$",
+            r"^[ -~]{1,200}$",
+            r"^[a-z\ ]{1,200}$",
+            r"^[a-z\t]{1,200}$",
+            r"^(\w|\x20){1,200}$",
+            r"^[[:print:]]{1,200}$",
+            r"^[[:space:]a-z]{1,200}$",
+            r"^[\x00-\x{10FFFF}]{1,200}$",
+            r"^[A-Za-z]{1,64}$",  # admite un nombre pegado
+            r"^[A-Z][a-z]{1,30}$",
+            r"^(?i)[a-z]{1,50}$",
+            r"^(?x)[a-z ]{1,50}$",
+            r"^[a-z\p{L}]{1,50}$",
+            r"^[a-zé]{1,50}$",
+            r"^[!-~]{1,50}$",  # ASCII visible completo: marcado y mayúsculas y minúsculas
+            r"^[a-z<>]{1,50}$",
+            r"^[a-z&;]{1,50}$",
+            r"^[a-z]{1,50}\$",
         ]
     )
 )
 def test_open_patterns_still_count_as_free_text(pattern: str) -> None:
     node = {"type": "string", "maxLength": 50, "pattern": pattern}
     assert is_free_text(node)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "length"),
+    [
+        (r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", (36, 36)),
+        (
+            r"^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]"
+            r":[0-5][0-9]\.[0-9]{3}Z$",
+            (24, 24),
+        ),
+        (r"^[A-Z0-9-]{2,32}$", (2, 32)),
+        (r"^[0-9a-f]{64}$", (64, 64)),
+        (r"^[a-z][a-z0-9_.-]{0,63}$", (1, 64)),
+        (r"^[a-z]{2}(-[a-z]+)+-[0-9]$", (9, 32)),
+        (r"^[A-Za-z0-9+/]{86}==$", (88, 88)),  # firma en base64: longitud fija
+        (r"^\d{4}\-\d{2}$", (7, 7)),
+    ],
+)
+def test_closed_patterns_of_identifiers_are_not_free_text(
+    pattern: str, length: tuple[int, int]
+) -> None:
+    node = {"type": "string", "minLength": length[0], "maxLength": length[1], "pattern": pattern}
+    assert not is_free_text(node)
+
+
+# --- revisión, ronda 1: el esquema debe ser el que se valida ----------------------------------
+
+
+def test_format_does_not_close_a_string() -> None:
+    """``format`` desconocido no lo impone Pydantic: la cadena sigue siendo texto libre."""
+    assert is_free_text({"type": "string", "maxLength": 200, "format": "x"})
+    assert is_free_text({"type": "string", "maxLength": 200, "format": "email"})
+
+
+@pytest.mark.parametrize("annotation", [bytes, Base64Str, Base64Bytes])
+@pytest.mark.parametrize("name", ["attachment", "image", "snapshot_jpeg", "foto"])
+def test_binary_fields_are_rejected(annotation: Any, name: str) -> None:
+    model = _model(zone_id=(UUID, ...), **{name: (annotation, ...)})
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert f"/{name}" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("annotation", "document"),
+    [
+        (
+            Annotated[StrictStr, Field(max_length=200), WithJsonSchema({"const": "x"})],
+            "Juan Pérez Gómez, cédula 1020304050",
+        ),
+        (
+            Annotated[StrictStr, Field(max_length=200, json_schema_extra={"format": "x"})],
+            "Juan Pérez, tel 3001234567",
+        ),
+        (
+            Annotated[
+                StrictStr,
+                Field(max_length=200, json_schema_extra={"pattern": "^[a-z]{1,9}$"}),
+            ],
+            "Juan Pérez",
+        ),
+    ],
+)
+def test_custom_json_schemas_are_rejected(annotation: Any, document: str) -> None:
+    """El validador aceptaría ``document`` aunque el esquema declarado lo prohíba."""
+    model = _model(zone_id=(UUID, ...), person_name=(annotation, ...), note=(annotation, ...))
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model))
+    assert "JSON Schema personalizado" in str(raised.value)
+    assert "/note" in str(raised.value)
+    assert model.model_validate({"zone_id": _ZONE, "person_name": document, "note": document})
+
+
+class _OwnSchema(ContentModel):
+    zone_id: UUID
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema: Any, handler: Any) -> Any:
+        return {"type": "object", "additionalProperties": False, "properties": {}}
+
+
+class _ExtraInConfig(ContentModel):
+    model_config = ContentModel.model_config | {"json_schema_extra": {"title": "x", "x": 1}}
+    zone_id: UUID
+
+
+@pytest.mark.parametrize("model", [_OwnSchema, _ExtraInConfig])
+def test_models_that_rewrite_their_own_schema_are_rejected(model: type[ContentModel]) -> None:
+    with pytest.raises(RecordTypeRejected, match="JSON Schema personalizado"):
+        RecordTypeRegistry().register(_definition(model))
+
+
+def test_contract_models_keep_the_schema_pydantic_derives() -> None:
+    """Los modelos generados del contrato (U-03 guarda ``Finding``) no personalizan su esquema.
+
+    Sus cadenas de versión, origen del reloj y clave de almacenamiento mezclan mayúsculas y
+    minúsculas con longitud variable: cuentan como texto libre y U-03 las declara.
+    """
+    declared = (
+        "/contract_version",
+        "/software_version",
+        "/node_time/clock/source",
+        "/cameras[*]/clips[*]/storage_key",
+    )
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(
+            _definition(Finding, record_type="finding_received", writer_unit=ActorUnit.U03)
+        )
+    assert "JSON Schema personalizado" not in str(raised.value)
+    assert sorted(p.split(":")[0] for p in raised.value.problems) == sorted(declared)
+    compiled = RecordTypeRegistry().register(
+        _definition(
+            Finding,
+            record_type="finding_received",
+            writer_unit=ActorUnit.U03,
+            free_text_paths=declared,
+        )
+    )
+    assert compiled.definition.content_model is Finding
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "nombre",
+        "documento",
+        "worker_name",
+        "operator_badge",
+        "id_number",
+        "fingerprint_hash",
+        "contact_email",
+        "phone",
+        "license_plate",
+        "photo_ref",
+        "face_embedding",
+        "embedding",
+        "iris_code",
+        "voice_sample",
+        "thumbnail_key",
+    ],
+)
+def test_review_round_one_names_are_forbidden(name: str) -> None:
+    assert forbidden_name_reason(name) is not None
+    model = _model(zone_id=(UUID, ...), **{name: (Annotated[StrictInt, Field(ge=0, le=9)], ...)})
+    with pytest.raises(RecordTypeRejected, match=f"/{name}: campo prohibido"):
+        RecordTypeRegistry().register(_definition(model))
+
+
+def test_embedding_of_bounded_floats_is_rejected() -> None:
+    vector = Annotated[
+        tuple[Annotated[StrictFloat, Field(ge=-1.0, le=1.0)], ...], Field(max_length=512)
+    ]
+    model = _model(zone_id=(UUID, ...), appearance_embedding=(vector, ...))
+    with pytest.raises(RecordTypeRejected, match="/appearance_embedding: campo prohibido"):
+        RecordTypeRegistry().register(_definition(model))
 
 
 def test_constant_fields_are_not_examined_by_name() -> None:
@@ -267,6 +456,10 @@ def test_constant_fields_are_not_examined_by_name() -> None:
         "model_name",
         "name",
         "filename",
+        "hardware_fingerprint",
+        "certificate_fingerprint",
+        "public_key_fingerprint",
+        "image_digest",
     ],
 )
 def test_legitimate_names_used_by_other_units_are_not_forbidden(name: str) -> None:

@@ -2,9 +2,10 @@
 
 Catorce tipos, todos escritos solo por U-02 y en su versión 1. El contenido solo lleva
 identificadores, códigos, listas cerradas, marcas y hashes; el único texto libre son los
-nombres de organización, planta y zona y el motivo de una concesión, declarados en
-``free_text_paths`` (BR-NUC-51). Ninguno tiene clave de idempotencia ni rutas de evidencia ni
-regla de etiqueta. Los tipos de U-03 y U-04 los registran esas unidades.
+nombres de organización, planta y zona, la zona horaria de la planta y el motivo de una
+concesión, declarados en ``free_text_paths`` (BR-NUC-51). Ninguno tiene clave de
+idempotencia ni rutas de evidencia ni regla de etiqueta. Los tipos de U-03 y U-04 los
+registran esas unidades.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 from typing import Annotated, Final, Literal
 
 from pydantic import Field, StrictInt, StrictStr
-from vigia_contracts.models.common import UUID, Code, KeyId, Sha256Hex, Timestamp
+from vigia_contracts.models.common import UUID, Code, Sha256Hex, Timestamp
 
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType
 from vigia_platform.shared.context import ActorUnit
@@ -38,7 +39,9 @@ TimeZone = Annotated[
     StrictStr,
     Field(min_length=3, max_length=64, pattern=r"^(UTC|[A-Z][A-Za-z_]+(/[A-Za-z0-9_+-]+){1,2})$"),
 ]
-"""Zona IANA (``America/Bogota``, ``America/Argentina/Buenos_Aires``, ``UTC``)."""
+"""Zona IANA (``America/Bogota``, ``America/Argentina/Buenos_Aires``, ``UTC``). Mezcla
+mayúsculas y minúsculas, así que cuenta como texto libre y se declara en ``free_text_paths``:
+pasa además la política de texto libre."""
 
 Ed25519Signature = Annotated[
     StrictStr, Field(min_length=88, max_length=88, pattern=r"^[A-Za-z0-9+/]{86}==$")
@@ -51,9 +54,17 @@ Ed25519PublicKey = Annotated[
 """Clave pública Ed25519 (32 bytes) en base64 estándar."""
 
 RouteTemplate = Annotated[
-    StrictStr, Field(min_length=1, max_length=256, pattern=r"^/[A-Za-z0-9_{}/.-]{0,255}$")
+    StrictStr, Field(min_length=1, max_length=256, pattern=r"^/[a-z0-9_{}/.-]{0,255}$")
 ]
-"""Plantilla de ruta de la API (``/api/v1/zones/{zone_id}``), nunca la URL concreta."""
+"""Plantilla de ruta de la API (``/api/v1/zones/{zone_id}``), nunca la URL concreta; las rutas
+de la plataforma van en minúsculas."""
+
+PlatformKeyId = Annotated[
+    StrictStr, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
+]
+"""Identificador de una clave de la plataforma: el ``KeyId`` del contrato restringido a
+minúsculas. La plataforma genera sus identificadores; un ``KeyId`` con mayúsculas y minúsculas
+admitiría un nombre pegado y contaría como texto libre (``schema_rules.is_free_text``)."""
 
 AuditPartition = Annotated[
     StrictStr,
@@ -180,17 +191,17 @@ class Checkpoint(ContentModel):
     covered_sequence: Sequence64
     covered_hash: Sha256Hex
     taken_at: Timestamp
-    key_id: KeyId
+    key_id: PlatformKeyId
     signature: Ed25519Signature
 
 
 class KeyRotated(ContentModel):
     """Rotación de una clave de firma de la organización proveedora (respuesta 11)."""
 
-    key_id: KeyId
+    key_id: PlatformKeyId
     purpose: SigningPurpose
     public_key: Ed25519PublicKey
-    previous_key_id: KeyId | None = None
+    previous_key_id: PlatformKeyId | None = None
     valid_from: Timestamp
     rotated_by: UUID
 
@@ -200,8 +211,8 @@ class KeySetPublished(ContentModel):
 
     publication_id: UUID
     issued_at: Timestamp
-    signed_by_key_id: KeyId
-    key_ids: Annotated[tuple[KeyId, ...], Field(min_length=1, max_length=16)]
+    signed_by_key_id: PlatformKeyId
+    key_ids: Annotated[tuple[PlatformKeyId, ...], Field(min_length=1, max_length=16)]
 
 
 class AuditPartitionArchived(ContentModel):
@@ -241,7 +252,7 @@ _PLANT = ChainLevel.PLANT
 
 U02_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _u02("organization_created", _ORG, OrganizationCreated, free_text_paths=("/name",)),
-    _u02("plant_created", _PLANT, PlantCreated, free_text_paths=("/name",)),
+    _u02("plant_created", _PLANT, PlantCreated, free_text_paths=("/name", "/timezone")),
     _u02("zone_created", _PLANT, ZoneCreated, free_text_paths=("/name",)),
     _u02("node_declared", _PLANT, NodeDeclared),
     _u02("node_zone_assigned", _PLANT, NodeZoneAssigned),

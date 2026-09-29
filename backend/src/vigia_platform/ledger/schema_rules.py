@@ -5,16 +5,18 @@ versión ya persistida; ningún tipo que las incumpla llega a registrarse, así 
 no arranca (BR-NUC-44, 51, 52). Trabajan sobre el JSON Schema que Pydantic deriva del modelo
 de contenido, resolviendo las referencias locales ``#/$defs/...``.
 
-Rutas de contenido: puntero JSON con ``[*]`` para los elementos de una lista y ``/*`` para los
-valores de un mapa, como en ``domain-entities.md`` de U-04 (``/why_steps[*]/statement``).
+Rutas de contenido: puntero JSON con ``[*]`` para los elementos de una lista, como en
+``domain-entities.md`` de U-04 (``/why_steps[*]/statement``).
 
 - ``structure_problems``: esquema estricto de verdad: todo objeto con ``additionalProperties:
-  false`` (o mapa con claves cerradas y tope de entradas), toda cadena con longitud máxima o lista
-  cerrada, toda lista con tope de elementos, todo número con mínimo y máximo, nombres de campo en
-  ``snake_case``.
+  false`` (sin mapas), toda cadena con longitud máxima o lista cerrada, ninguna cadena binaria,
+  ninguna cadena cerrada de más de 1024 caracteres, toda lista con tope de elementos, todo
+  número con mínimo y máximo, nombres de campo en ``snake_case``.
 - ``privacy_problems`` (metapropiedad PR-NUC-16, parte de esquemas): ningún campo con nombre de
   la lista prohibida (nombre de persona, documento de identidad, empleado, ``track_id``, rostro,
-  apariencia) y ningún texto libre fuera de ``free_text_paths``.
+  apariencia, contacto, imagen) y ningún texto libre fuera de ``free_text_paths``. Es texto
+  libre toda cadena sin lista cerrada ni patrón cerrado (``is_free_text``); ``format`` no
+  cierra nada.
 - ``compatibility_problems``: una versión nueva solo amplía a la anterior (BR-NUC-52): no retira
   campos, no estrecha rangos, longitudes ni listas cerradas y no añade campos obligatorios.
 
@@ -139,9 +141,49 @@ FORBIDDEN_NAME_TOKENS: Final = frozenset(
         "surnames",
         "apellido",
         "apellidos",
+        "nombre",
+        "nombres",
+        "documento",
+        "documentos",
+        # la persona como trabajador
+        "worker",
+        "workers",
+        "operario",
+        "operarios",
+        "badge",
+        # contacto
+        "email",
+        "correo",
+        "phone",
+        "telefono",
+        "mobile",
+        # imágenes y rasgos
+        "photo",
+        "photos",
+        "foto",
+        "fotos",
+        "snapshot",
+        "thumbnail",
+        "embedding",
+        "embeddings",
+        "iris",
+        "voice",
+        "voz",
+        # vehículo
+        "plate",
+        "placa",
     }
 )
-"""Palabras de un nombre de campo que identifican a una persona observada (BR-NUC-51)."""
+"""Palabras de un nombre de campo que identifican a una persona observada (BR-NUC-51).
+
+Quedan fuera a propósito, porque nombran entidades o usuarios y no personas observadas:
+``name`` (de organización, planta o zona), ``display_name`` (instantánea del usuario que firma),
+``document_ref`` y ``document_kind`` (documentos de gobierno de U-03), ``image_digest``
+(imagen de software) y ``hardware_fingerprint`` (huella del equipo, ver
+``_DEVICE_QUALIFIERS``). Un campo ``const`` (``workers_role: "copasst"``) no se examina."""
+
+_DEVICE_QUALIFIERS: Final = frozenset({"hardware", "device", "certificate", "key", "public"})
+"""``fingerprint`` solo se admite tras una de estas palabras: huella de equipo o de clave."""
 
 FORBIDDEN_NAME_PAIRS: Final = frozenset(
     {
@@ -158,6 +200,8 @@ FORBIDDEN_NAME_PAIRS: Final = frozenset(
         ("national", "id"),
         ("numero", "documento"),
         ("re", "id"),
+        ("id", "number"),
+        ("license", "plate"),
     }
 )
 """Pares de palabras consecutivas que nombran un dato de identidad de persona."""
@@ -321,9 +365,6 @@ def field_nodes(schema: JsonSchema) -> tuple[list[FieldNode], list[SchemaProblem
                             required and child in mandatory,
                             depth + 1,
                         )
-                extra = alternative.get("additionalProperties")
-                if isinstance(extra, Mapping):
-                    visit(extra, f"{path}/*", None, False, depth + 1)
             elif kind == "array" and "items" in alternative:
                 visit(alternative["items"], f"{path}[*]", None, False, depth + 1)
 
@@ -331,48 +372,133 @@ def field_nodes(schema: JsonSchema) -> tuple[list[FieldNode], list[SchemaProblem
     return nodes, problems
 
 
-def _pattern_admits_space(pattern: str) -> bool:
-    """Si una expresión puede admitir espacios o cualquier carácter (texto abierto).
+_DIGITS: Final = frozenset("0123456789")
+_UPPER: Final = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_LOWER: Final = frozenset("abcdefghijklmnopqrstuvwxyz")
+_LITERAL_ESCAPES: Final = frozenset(".-/+\\{}()[]*?|^$_:")
+"""Escapes que solo significan su propio carácter; ``\\d`` es el único escape de clase admitido."""
+_OPERATORS: Final = frozenset("()|?*+")
+_PRINTABLE_ASCII: Final = frozenset(chr(code) for code in range(0x21, 0x7F))
+"""ASCII visible sin espacio: lo único que un patrón cerrado puede contener."""
+_MARKUP_CHARACTERS: Final = frozenset("<>&")
+"""Un patrón que admite estos caracteres podría llevar marcado: se trata como texto libre."""
+MAX_CLOSED_LENGTH: Final = 1024
+"""Tope de una cadena cerrada no declarada: no cabe una imagen en base64."""
+_BINARY_FORMATS: Final = frozenset({"binary", "base64", "byte"})
 
-    Cerrada = anclada con ``^…$`` y sin ``.`` fuera de una clase, sin ``\\s``, ``\\S``, ``\\W``,
-    ``\\D``, sin clases negadas y sin espacio literal. ``^[A-Z0-9-]{2,32}$`` es cerrada;
-    ``^.{1,50}$`` y ``^[^<>]*$`` no.
+
+def _admitted_characters(pattern: str) -> frozenset[str] | None:
+    """Caracteres que admite un patrón cerrado, o ``None`` si el patrón es abierto.
+
+    Lista blanca, porque Pydantic valida con el motor de Rust y cualquier sintaxis que el
+    tokenizador no entienda (clases POSIX ``[[:print:]]``, ``\\x20``, ``\\u0020``, ``\\t``, ``\\w``,
+    ``\\s``, ``\\p{…}``, banderas ``(?i)`` o ``(?x)``, clases negadas, ``.``) cuenta como abierta.
+    Solo se admite ASCII visible, anclado con ``^…$``.
     """
-    if not (pattern.startswith("^") and pattern.endswith("$")):
-        return True
-    in_class = False
+    if len(pattern) < 2 or pattern[0] != "^" or pattern[-1] != "$" or pattern.endswith("\\$"):
+        return None
+    body = pattern[1:-1]
+    if any(char not in _PRINTABLE_ASCII for char in body) or "[:" in body or "(?" in body:
+        return None
+    admitted: set[str] = set()
     index = 0
-    while index < len(pattern):
-        char = pattern[index]
+    while index < len(body):
+        char = body[index]
         if char == "\\":
-            escaped = pattern[index + 1 : index + 2]
-            if escaped in {"s", "S", "W", "D", "p", "P", "X", "N"}:
-                return True
+            escaped = body[index + 1 : index + 2]
+            if escaped == "d":
+                admitted |= _DIGITS
+            elif escaped in _LITERAL_ESCAPES:
+                admitted.add(escaped)
+            else:
+                return None
             index += 2
-            continue
-        if char == " ":
-            return True
-        if in_class:
-            if char == "]":
-                in_class = False
         elif char == "[":
-            in_class = True
-            if pattern[index + 1 : index + 2] == "^":
-                return True
-        elif char == ".":
-            return True
-        index += 1
-    return False
+            end = _class_members(body, index + 1, admitted)
+            if end is None:
+                return None
+            index = end + 1
+        elif char == "{":
+            close = body.find("}", index)
+            if close == -1 or not re.fullmatch(r"[0-9]+(,[0-9]*)?", body[index + 1 : close]):
+                return None
+            index = close + 1
+        elif char in "^$.]}":
+            return None
+        else:
+            if char not in _OPERATORS:
+                admitted.add(char)
+            index += 1
+    return frozenset(admitted)
+
+
+def _class_members(body: str, start: int, admitted: set[str]) -> int | None:
+    """Añade a ``admitted`` los miembros de la clase que empieza en ``start``; devuelve su ``]``."""
+    if body[start : start + 1] == "^":
+        return None
+    # Cada miembro es un carácter; ``None`` es un guion sin escapar y "" es ``\d`` (ya sumado),
+    # que no puede ser extremo de un rango.
+    tokens: list[str | None] = []
+    index = start
+    while index < len(body) and body[index] != "]":
+        char = body[index]
+        if char == "\\":
+            escaped = body[index + 1 : index + 2]
+            if escaped == "d":
+                admitted |= _DIGITS
+                tokens.append("")
+            elif escaped in _LITERAL_ESCAPES:
+                tokens.append(escaped)
+            else:
+                return None
+            index += 2
+        elif char == "[":
+            return None
+        else:
+            tokens.append(None if char == "-" else char)
+            index += 1
+    if index >= len(body) or not tokens:
+        return None
+    position = 0
+    while position < len(tokens):
+        low = tokens[position]
+        high = tokens[position + 2] if position + 2 < len(tokens) else None
+        if low and high and tokens[position + 1] is None:
+            if ord(low) > ord(high):
+                return None
+            admitted |= {chr(code) for code in range(ord(low), ord(high) + 1)}
+            position += 3
+            continue
+        if low is None:
+            admitted.add("-")
+        elif low:
+            admitted.add(low)
+        position += 1
+    return index
+
+
+def _pattern_is_closed(pattern: str, *, fixed_length: bool) -> bool:
+    """Un patrón es cerrado si no admite espacio ni nada fuera del ASCII visible y, salvo que la
+    longitud sea fija (una firma o una clave en base64), no mezcla mayúsculas y minúsculas: así
+    ``^[A-Za-z]{1,64}$`` o ``^[A-Z][a-z]+$``, que admiten un nombre, siguen siendo texto libre."""
+    admitted = _admitted_characters(pattern)
+    if admitted is None or admitted & _MARKUP_CHARACTERS:
+        return False
+    return fixed_length or not (admitted & _UPPER and admitted & _LOWER)
 
 
 def is_free_text(node: JsonSchema) -> bool:
-    """Una cadena sin lista cerrada, sin formato y sin patrón cerrado es texto libre."""
+    """Una cadena sin lista cerrada ni patrón cerrado es texto libre.
+
+    ``format`` no cierra nada: Pydantic no impone los formatos que no conoce (fallo cerrado).
+    """
     if _kind(node) != "string" or _closed_values(node) is not None:
         return False
-    if isinstance(node.get("format"), str):
-        return False
     pattern = node.get("pattern")
-    return not (isinstance(pattern, str) and not _pattern_admits_space(pattern))
+    if not isinstance(pattern, str):
+        return True
+    fixed = node.get("minLength") == node.get("maxLength") and "maxLength" in node
+    return not _pattern_is_closed(pattern, fixed_length=fixed)
 
 
 def _fold(name: str) -> str:
@@ -385,9 +511,13 @@ def forbidden_name_reason(name: str) -> str | None:
     spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
     folded = _fold(spaced)
     tokens = [token for token in re.split(r"[^a-z0-9]+", folded) if token]
-    for token in tokens:
+    for position, token in enumerate(tokens):
         if token in FORBIDDEN_NAME_TOKENS:
             return f"la palabra «{token}» identifica a una persona observada"
+        if token in {"fingerprint", "fingerprints", "huella"} and (
+            position == 0 or tokens[position - 1] not in _DEVICE_QUALIFIERS
+        ):
+            return f"«{token}» sin calificar de equipo o de clave identifica a una persona"
     for pair in itertools.pairwise(tokens):
         if pair in FORBIDDEN_NAME_PAIRS:
             return f"«{'_'.join(pair)}» identifica a una persona observada"
@@ -418,25 +548,16 @@ def _node_structure(node: FieldNode) -> list[SchemaProblem]:
     if kind == "any":
         found.append(SchemaProblem(path, "campo sin tipo declarado"))
     elif kind == "object":
-        extra = schema.get("additionalProperties", True)
-        if extra is not False:
-            names = schema.get("propertyNames")
-            closed_names = (
-                isinstance(names, Mapping)
-                and isinstance(names.get("pattern"), str)
-                and not _pattern_admits_space(names["pattern"])
-                and isinstance(names.get("maxLength"), int)
-            )
-            if not (isinstance(extra, Mapping) and closed_names and "maxProperties" in schema):
-                found.append(
-                    SchemaProblem(
-                        path,
-                        "objeto que admite propiedades adicionales (exige "
-                        "additionalProperties: false, o mapa con claves cerradas y tope)",
-                    )
+        if schema.get("additionalProperties", True) is not False or "patternProperties" in schema:
+            found.append(
+                SchemaProblem(
+                    path,
+                    "objeto que admite propiedades adicionales o un mapa (exige "
+                    "additionalProperties: false; un mapa se modela como lista de pares)",
                 )
-    elif kind == "string" and not closed and not isinstance(schema.get("maxLength"), int):
-        found.append(SchemaProblem(path, "cadena sin longitud máxima"))
+            )
+    elif kind == "string":
+        found.extend(_string_structure(schema, path, closed=closed))
     elif kind == "array":
         if not isinstance(schema.get("maxItems"), int):
             found.append(SchemaProblem(path, "lista sin número máximo de elementos"))
@@ -447,6 +568,34 @@ def _node_structure(node: FieldNode) -> list[SchemaProblem]:
             found.append(SchemaProblem(path, "número sin mínimo"))
         if "maximum" not in schema and "exclusiveMaximum" not in schema:
             found.append(SchemaProblem(path, "número sin máximo"))
+    return found
+
+
+def _string_structure(schema: JsonSchema, path: str, *, closed: bool) -> list[SchemaProblem]:
+    found: list[SchemaProblem] = []
+    if (
+        schema.get("format") in _BINARY_FORMATS
+        or "contentEncoding" in schema
+        or "contentMediaType" in schema
+    ):
+        found.append(
+            SchemaProblem(
+                path,
+                "contenido binario no admitido: el expediente no incrusta imágenes ni archivos; "
+                "las evidencias se referencian con ClipReference",
+            )
+        )
+    if closed:
+        return found
+    maximum = schema.get("maxLength")
+    if not isinstance(maximum, int):
+        found.append(SchemaProblem(path, "cadena sin longitud máxima"))
+    elif not is_free_text(schema) and maximum > MAX_CLOSED_LENGTH:
+        found.append(
+            SchemaProblem(
+                path, f"cadena cerrada de más de {MAX_CLOSED_LENGTH} caracteres no admitida"
+            )
+        )
     return found
 
 

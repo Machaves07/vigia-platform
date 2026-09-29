@@ -71,9 +71,8 @@ __all__ = [
 RECORD_TYPE_NAME: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 """Nombre de tipo de registro y de evento: ``snake_case``, hasta 64 caracteres."""
 
-CONTENT_PATH: Final = re.compile(r"^(?:/(?:[a-z][a-z0-9_]{0,63}|\*)(?:\[\*\])?)+$")
-"""Ruta declarada de contenido: puntero JSON con ``[*]`` para los elementos de una lista y
-``/*`` para los valores de un mapa."""
+CONTENT_PATH: Final = re.compile(r"^(?:/[a-z][a-z0-9_]{0,63}(?:\[\*\])?)+$")
+"""Ruta declarada de contenido: puntero JSON con ``[*]`` para los elementos de una lista."""
 
 MAX_PATHS: Final = 64
 """Tope de rutas declaradas por lista (``source_key_path`` cabe en 256 caracteres, tabla)."""
@@ -313,6 +312,11 @@ class RecordTypeRegistry:
         previous = self._latest(name)
         if previous is not None:
             problems.extend(_version_problems(previous, definition, schema))
+        elif definition.schema_version != 1:
+            problems.append(
+                f"la primera versión que se registra es la 1, no la {definition.schema_version}: "
+                "las versiones se registran todas, en orden y sin huecos (BR-NUC-52)"
+            )
         if problems:
             raise RecordTypeRejected(name, problems)
         compiled = CompiledType(definition, schema, _free_text_fields(name, definition, schema))
@@ -397,9 +401,14 @@ class RecordTypeRegistry:
                     f"{getattr(current, attribute)!r}; no puede cambiar entre versiones"
                 )
         same_version = self._versions[name].get(row.schema_version)
-        if same_version is not None and normalized_schema(
-            same_version.content_schema
-        ) != normalized_schema(row.content_schema):
+        if same_version is None:
+            problems.append(
+                f"{name}: la versión {row.schema_version} está en la base y el código no la "
+                "registra; sin ella los registros históricos no pueden presentarse (BR-NUC-52)"
+            )
+        elif normalized_schema(same_version.content_schema) != normalized_schema(
+            row.content_schema
+        ):
             problems.append(
                 f"{name}: el esquema de la versión {row.schema_version} cambió sin subir "
                 "schema_version"
@@ -451,6 +460,7 @@ def _declaration_problems(definition: RecordType) -> list[SchemaProblem | str]:
         problems.append(
             "content_model debe ser estricto: extra='forbid' y strict=True (PAT-NUC-SEG-07)"
         )
+    problems.extend(_custom_json_schema_problems(model))
     declared = [
         *definition.free_text_paths,
         *definition.evidence_paths,
@@ -473,6 +483,74 @@ def _declaration_problems(definition: RecordType) -> list[SchemaProblem | str]:
         if not isinstance(event, str) or not RECORD_TYPE_NAME.match(event):
             problems.append(f"nombre de evento mal formado: {event!r}")
     return problems
+
+
+_JS_HOOKS: Final = (
+    "pydantic_js_functions",
+    "pydantic_js_annotation_functions",
+    "pydantic_js_extra",
+    "pydantic_js_updates",
+)
+_HARMLESS_UPDATES: Final = frozenset({"title", "description", "examples"})
+_DEFAULT_MODEL_HOOK: Final = BaseModel.__get_pydantic_json_schema__.__func__  # type: ignore[attr-defined]
+
+
+def _is_builtin_hook(hook: object) -> bool:
+    """El gancho estándar de Pydantic: el de ``BaseModel`` sin redefinir o uno interno."""
+    if getattr(hook, "__func__", None) is _DEFAULT_MODEL_HOOK:
+        return True
+    module = getattr(hook, "__module__", "") or ""
+    return module.startswith("pydantic._internal.")
+
+
+def _custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
+    """El JSON Schema que se comprueba y se persiste debe ser el que Pydantic deriva del validador.
+
+    ``WithJsonSchema``, ``json_schema_extra``, ``Base64Str`` o un ``__get_pydantic_json_schema__``
+    propio cambian el esquema sin cambiar lo que se valida: la metapropiedad miraría un esquema
+    y el validador aceptaría otra cosa. Se buscan en el esquema del núcleo, que es lo que valida.
+    """
+    found: set[str] = set()
+
+    def visit(node: object, path: str) -> None:
+        if isinstance(node, Mapping):
+            owner = node.get("cls")
+            if (
+                node.get("type") == "model"
+                and isinstance(owner, type)
+                and issubclass(owner, BaseModel)
+                and owner.model_config.get("json_schema_extra")
+            ):
+                found.add(path or "/")
+            metadata = node.get("metadata")
+            if isinstance(metadata, Mapping):
+                for key in _JS_HOOKS:
+                    value = metadata.get(key)
+                    if not value:
+                        continue
+                    if key == "pydantic_js_functions" and all(map(_is_builtin_hook, value)):
+                        continue
+                    if key == "pydantic_js_updates" and set(value) <= _HARMLESS_UPDATES:
+                        continue
+                    found.add(path or "/")
+            for key, value in node.items():
+                if key == "metadata":
+                    continue
+                if key == "fields" and isinstance(value, Mapping):
+                    for field_name, field_schema in value.items():
+                        visit(field_schema, f"{path}/{field_name}")
+                else:
+                    visit(value, path)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                visit(item, path)
+
+    visit(model.__pydantic_core_schema__, "")
+    return [
+        f"{path}: JSON Schema personalizado (WithJsonSchema, json_schema_extra, Base64 o "
+        "__get_pydantic_json_schema__); el esquema comprobado no describiría lo que se valida"
+        for path in sorted(found)
+    ]
 
 
 def _single(nodes: list[FieldNode]) -> list[FieldNode]:
@@ -528,10 +606,11 @@ def _version_problems(
 ) -> list[SchemaProblem | str]:
     """Una versión nueva de un tipo ya registrado en este proceso."""
     problems: list[SchemaProblem | str] = []
-    if definition.schema_version <= previous.schema_version:
+    expected = previous.schema_version + 1
+    if definition.schema_version != expected:
         problems.append(
-            f"la versión {definition.schema_version} no es mayor que la ya registrada "
-            f"({previous.schema_version}); cada versión nueva sube schema_version"
+            f"se esperaba la versión {expected} y llegó la {definition.schema_version}: las "
+            "versiones se registran todas, en orden y sin huecos (BR-NUC-52)"
         )
         return problems
     for attribute in ("writer_unit", "chain_level", "source_key_path", "chain_follows_scope"):

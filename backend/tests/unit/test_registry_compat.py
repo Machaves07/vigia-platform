@@ -108,15 +108,17 @@ def test_persisted_version_with_a_field_the_code_removed_blocks_startup() -> Non
     store = InMemoryRecordTypeStore()
     _run(old.synchronize(store))
 
+    # El código retira ``code`` de la versión 1 ya persistida, sin subir la versión.
     new = RecordTypeRegistry()
-    new.register(_type(SampleV2WithoutCode, version=2))
+    new.register(_type(SampleV2WithoutCode, version=1))
     with pytest.raises(RegistryStartupError) as raised:
         _run(new.synchronize(store))
     message = str(raised.value)
     assert "incompatible con el ya persistido; la plataforma no arranca" in message
-    assert "sample_recorded v1 → v2 /code: campo retirado" in message
+    assert "el esquema de la versión 1 cambió sin subir schema_version" in message
+    assert "sample_recorded v1 → v1 /code: campo retirado" in message
     assert not new.sealed
-    assert _run(store.load())["sample_recorded"].schema_version == 1
+    assert "code" in _run(store.load())["sample_recorded"].content_schema["properties"]
 
 
 # --- estrechamientos y ampliaciones ----------------------------------------------------------
@@ -222,7 +224,7 @@ def test_narrowing_is_rejected_naming_the_path(
 def test_widening_requires_a_higher_version_and_keeps_every_version() -> None:
     registry = RecordTypeRegistry()
     registry.register(_type(SampleV1))
-    with pytest.raises(RecordTypeRejected, match="no es mayor que la ya registrada"):
+    with pytest.raises(RecordTypeRejected, match="se esperaba la versión 2 y llegó la 1"):
         registry.register(_type(SampleV2Widened, version=1))
     registry.register(_type(SampleV2Widened, version=2))
     assert registry.get("sample_recorded").schema_version == 2
@@ -231,11 +233,18 @@ def test_widening_requires_a_higher_version_and_keeps_every_version() -> None:
         registry.get("sample_recorded", schema_version=3)
 
 
-def test_versions_are_registered_in_ascending_order() -> None:
+@pytest.mark.parametrize("first", [2, 5])
+def test_a_type_starts_at_version_one(first: int) -> None:
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_type(SampleV2Widened, version=first))
+    assert f"la primera versión que se registra es la 1, no la {first}" in str(raised.value)
+
+
+def test_versions_have_no_gaps() -> None:
     registry = RecordTypeRegistry()
-    registry.register(_type(SampleV2Widened, version=2))
-    with pytest.raises(RecordTypeRejected, match="la versión 1 no es mayor"):
-        registry.register(_type(SampleV1, version=1))
+    registry.register(_type(SampleV1))
+    with pytest.raises(RecordTypeRejected, match="se esperaba la versión 2 y llegó la 3"):
+        registry.register(_type(SampleV2Widened, version=3))
 
 
 @pytest.mark.parametrize(
@@ -270,16 +279,32 @@ def test_widened_version_is_persisted_over_the_previous_row() -> None:
     assert new.sealed
 
 
-def test_widened_version_is_accepted_against_the_row_without_the_old_code() -> None:
+def test_code_that_drops_the_persisted_version_cannot_start() -> None:
+    """BR-NUC-52: con v1 persistida, un código que solo trae v2 no arranca ni toca la fila."""
     old = RecordTypeRegistry()
     old.register(_type(SampleV1))
     store = InMemoryRecordTypeStore()
     _run(old.synchronize(store))
 
     new = RecordTypeRegistry()
-    new.register(_type(SampleV2Widened, version=2))
-    _run(new.synchronize(store))
-    assert _run(store.load())["sample_recorded"].schema_version == 2
+    with pytest.raises(RecordTypeRejected) as raised:
+        new.register(_type(SampleV2Widened, version=2))
+    assert "la plataforma no arranca" in str(raised.value)
+    assert "la primera versión que se registra es la 1, no la 2" in str(raised.value)
+    assert _run(store.load())["sample_recorded"].schema_version == 1
+
+
+def test_persisted_version_missing_from_the_code_blocks_startup() -> None:
+    """Defensa en ``synchronize`` aunque el registro llegue sin una versión intermedia."""
+    registry = RecordTypeRegistry()
+    registry.register(_type(SampleV1))
+    registry.register(_type(SampleV2Widened, version=2))
+    row = registry.get("sample_recorded", schema_version=1).to_persisted()
+    del registry._versions["sample_recorded"][1]
+    with pytest.raises(RegistryStartupError) as raised:
+        _run(registry.synchronize(InMemoryRecordTypeStore({"sample_recorded": row})))
+    assert "la versión 1 está en la base y el código no la registra" in str(raised.value)
+    assert not registry.sealed
 
 
 def _persisted(registry: RecordTypeRegistry, **changes: Any) -> dict[str, PersistedRecordType]:
@@ -377,7 +402,7 @@ def test_u02_registers_its_fourteen_types_once() -> None:
     register_u02_record_types(registry)
     assert len(registry.record_types()) == len(U02_RECORD_TYPES) == 14
     assert {c.writer_unit for c in registry.latest()} == {ActorUnit.U02}
-    with pytest.raises(RecordTypeRejected, match="no es mayor que la ya registrada"):
+    with pytest.raises(RecordTypeRejected, match="se esperaba la versión 2 y llegó la 1"):
         register_u02_record_types(registry)
 
 
@@ -504,24 +529,34 @@ class AnyField(ContentModel):
     payload: Any
 
 
-_MAP_KEYS: dict[str, Any] = {
-    "propertyNames": {"pattern": r"^[a-z][a-z0-9_]{0,31}$", "maxLength": 32},
-    "maxProperties": 16,
-}
-
-
 class BoundedMap(ContentModel):
+    """Mapa con claves cerradas y tope: Pydantic lo describe con ``patternProperties`` y sin
+    ``additionalProperties: false``, así que el esquema no refleja lo que se valida."""
+
     previous_values: Annotated[
-        dict[str, Annotated[StrictStr, Field(min_length=1, max_length=80)]],
-        Field(json_schema_extra=_MAP_KEYS),
+        dict[
+            Annotated[StrictStr, Field(pattern=r"^[a-z]{1,8}$", max_length=8)],
+            Annotated[StrictInt, Field(ge=0, le=10)],
+        ],
+        Field(max_length=4),
     ]
+
+
+class LongClosedString(ContentModel):
+    blob: Annotated[StrictStr, Field(max_length=1025, pattern=r"^[a-z0-9]{1,1025}$")]
+
+
+class LongestClosedString(ContentModel):
+    blob: Annotated[StrictStr, Field(max_length=1024, pattern=r"^[a-z0-9]{1,1024}$")]
 
 
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
         (RecursiveNode, "anidamiento excesivo o esquema recursivo"),
-        (UnboundedMap, "/values: objeto que admite propiedades adicionales"),
+        (UnboundedMap, "/values: objeto que admite propiedades adicionales o un mapa"),
+        (BoundedMap, "/previous_values: objeto que admite propiedades adicionales o un mapa"),
+        (LongClosedString, "/blob: cadena cerrada de más de 1024 caracteres no admitida"),
         (UnboundedList, "/codes: lista sin número máximo de elementos"),
         (UnboundedNumber, "/level: número sin mínimo"),
         (UnboundedString, "/code: cadena sin longitud máxima"),
@@ -534,13 +569,8 @@ def test_loose_schemas_are_rejected(model: type[BaseModel], expected: str) -> No
     assert expected in str(raised.value)
 
 
-def test_bounded_map_with_closed_keys_is_accepted_and_its_values_are_free_text() -> None:
-    with pytest.raises(RecordTypeRejected, match="/previous_values/\\*: texto libre fuera"):
-        RecordTypeRegistry().register(_type(BoundedMap))
-    compiled = RecordTypeRegistry().register(
-        _type(BoundedMap, free_text_paths=("/previous_values/*",))
-    )
-    assert compiled.free_text_fields["/previous_values/*"].max_length == 80
+def test_closed_string_at_the_length_cap_is_accepted() -> None:
+    RecordTypeRegistry().register(_type(LongestClosedString))
 
 
 # --- validador compilado -------------------------------------------------------------------

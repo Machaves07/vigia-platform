@@ -9,10 +9,12 @@ Todo texto libre del expediente vive en una ruta declarada en ``free_text_paths`
    - normalización Unicode **NFC**: el texto que se guarda es el normalizado;
    - sin caracteres de control (categoría ``Cc``, incluidos tabulador y salto de línea, y los
      separadores de línea y párrafo ``Zl``/``Zp``), sin caracteres de formato invisibles
-     (``Cf``: marcas de dirección, anchura cero), sin sustitutos sueltos (``Cs``), de uso
+     (``Cf``: marcas de dirección, anchura cero) ni ignorables por defecto (rellenos hangul,
+     CGJ, selectores de variación, braille en blanco), sin sustitutos sueltos (``Cs``), de uso
      privado (``Co``) ni sin asignar (``Cn``);
    - sin marcado: ni etiquetas o comentarios (``<b>``, ``</p>``, ``<!--``, ``<?xml``) ni
-     secuencias de escape de entidades (``&lt;``, ``&#60;``, ``&#x3C;``); se buscan también en la
+     secuencias de escape de entidades, con o sin ``;`` (``&lt;``, ``&ltscript``, ``&#60``,
+     ``&#x3C``); se buscan también en la
      forma NFKC, para que ``<b>`` escrito con signos de ancho completo (U+FF1C, U+FF1E) no pase;
    - longitud en caracteres (tras NFC) entre el mínimo y el máximo que declara el esquema.
 
@@ -44,8 +46,36 @@ __all__ = [
 
 _MARKUP: Final = re.compile(
     r"<[A-Za-z/!?]"  # etiqueta, cierre, comentario o instrucción de procesamiento
-    r"|&(?:#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);"  # entidad con nombre o numérica
+    r"|&#[0-9]"  # entidad numérica, con o sin «;» (los navegadores la decodifican igual)
+    r"|&#[xX][0-9A-Fa-f]"
+    r"|&[A-Za-z][A-Za-z0-9]*;"  # entidad con nombre
+    r"|&(?:lt|gt|amp|quot|apos|nbsp)",  # entidades heredadas que se decodifican sin «;»
+    re.IGNORECASE,
 )
+
+_DEFAULT_IGNORABLE: Final = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x2800, 0x2800),  # braille en blanco: no es ignorable, pero se ve como un espacio vacío
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+"""Puntos de código ``Default_Ignorable_Code_Point`` de Unicode (más U+2800): invisibles, parten
+palabras sin verse y burlarían el validador de vocabulario (rellenos hangul, CGJ, selectores de
+variación). Python no expone la propiedad, así que se enumeran sus rangos."""
 _EXPANSION_FACTOR: Final = 4
 """Un texto con más de cuatro veces el máximo de caracteres se rechaza antes de normalizarlo:
 ninguna composición NFC reduce tanto, y así una cadena gigante no cuesta una normalización."""
@@ -128,6 +158,9 @@ def apply_base_policy(text: str, field: FreeTextField) -> str:
         reason = _REJECTED_CATEGORIES.get(unicodedata.category(char))
         if reason is not None:
             raise _reject(FreeTextRejection(reason), field)
+        code = ord(char)
+        if any(low <= code <= high for low, high in _DEFAULT_IGNORABLE):
+            raise _reject(FreeTextRejection.INVISIBLE_CHARACTER, field)
     if _MARKUP.search(normalized) or _MARKUP.search(unicodedata.normalize("NFKC", normalized)):
         raise _reject(FreeTextRejection.MARKUP, field)
     if len(normalized) > field.max_length:
