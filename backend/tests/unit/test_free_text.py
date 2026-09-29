@@ -17,11 +17,13 @@ from hypothesis import strategies as st
 
 from vigia_platform.ledger import free_text
 from vigia_platform.ledger.free_text import (
+    FreeTextCandidate,
     FreeTextField,
     FreeTextPolicyRegistry,
     FreeTextRejected,
     FreeTextRejection,
     apply_base_policy,
+    canonical_form,
 )
 
 FIELD = FreeTextField(record_type="zone_created", path="/name", min_length=1, max_length=120)
@@ -167,9 +169,9 @@ def test_field_limits_must_be_coherent() -> None:
 def test_plugged_validators_run_after_the_base_policy_on_nfc_text() -> None:
     seen: list[str] = []
 
-    def vocabulary(text: str, field: FreeTextField) -> None:
-        seen.append(text)
-        if "prohibida" in text:
+    def vocabulary(candidate: FreeTextCandidate, field: FreeTextField) -> None:
+        seen.append(candidate.text)
+        if "prohibida" in candidate.canonical:
             raise FreeTextRejected("blocked_vocabulary", field, "vocabulario bloqueado")
 
     registry = FreeTextPolicyRegistry()
@@ -228,3 +230,98 @@ def test_accepted_text_is_nfc_idempotent_and_clean(text: str) -> None:
 def test_any_control_character_is_rejected(prefix: str, control: str, suffix: str) -> None:
     with pytest.raises(FreeTextRejected):
         apply_base_policy(prefix + control + suffix, FIELD)
+
+
+# --- adenda A-45: forma canónica para los validadores enchufados ---------------------------
+
+NBSP = chr(0x00A0)
+IDEOGRAPHIC_SPACE = chr(0x3000)
+NARROW_NBSP = chr(0x202F)
+ACUTE = chr(0x0301)
+
+
+def _fullwidth(digits: str) -> str:
+    return "".join(chr(0xFF10 + int(d)) for d in digits)
+
+
+def _mathematical(digits: str) -> str:
+    return "".join(chr(0x1D7CE + int(d)) for d in digits)  # dígitos matemáticos en negrita
+
+
+_CEDULA = re.compile(r"cedula \d{5,}")
+
+
+def _identity_document(candidate: FreeTextCandidate, field: FreeTextField) -> None:
+    """Validador de ejemplo al estilo de U-04 §14.5, que solo mira la forma canónica."""
+    if _CEDULA.search(candidate.canonical):
+        raise FreeTextRejected("person_attribution_detected", field, "documento de identidad")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "cedula 1020304050",
+        "Cédula 1020304050",
+        "CÉDULA 1020304050",
+        "Ce" + ACUTE + "dula 1020304050",  # tilde en NFD
+        "cedula" + NBSP + "1020304050",
+        "cedula" + IDEOGRAPHIC_SPACE + "1020304050",
+        "cedula" + NARROW_NBSP + "1020304050",
+        "cedula   1020304050",  # espacios repetidos
+        "cedula" + NBSP + IDEOGRAPHIC_SPACE + " 1020304050",
+        "cedula " + _fullwidth("1020304050"),
+        "Cédula" + NBSP + _mathematical("1020304050"),
+        "Operario con cédula" + IDEOGRAPHIC_SPACE + _fullwidth("80012") + " en la zona",
+    ],
+)
+def test_plugged_validator_sees_the_canonical_form(text: str) -> None:
+    """A-45: un patrón ``cedula \\d{5,}`` no se esquiva con NBSP, U+3000, dígitos de ancho
+    completo o matemáticos, tildes ni mayúsculas."""
+    registry = FreeTextPolicyRegistry()
+    registry.register("identity_document", _identity_document)
+    with pytest.raises(FreeTextRejected) as raised:
+        registry.apply(text, FIELD)
+    assert raised.value.reason == "person_attribution_detected"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Cédula de la zona sin revisar", "cedula 1234", "Zona 1020304050 de envasado"],
+)
+def test_canonical_validator_does_not_reject_unrelated_text(text: str) -> None:
+    registry = FreeTextPolicyRegistry()
+    registry.register("identity_document", _identity_document)
+    assert registry.apply(text, FIELD) == unicodedata.normalize("NFC", text)
+
+
+def test_the_canonical_form_is_never_what_is_stored() -> None:
+    text = "Área" + NBSP + "Norte " + _fullwidth("12")
+    received: list[FreeTextCandidate] = []
+    registry = FreeTextPolicyRegistry()
+    registry.register("spy", lambda candidate, field: received.append(candidate))
+    stored = registry.apply(text, FIELD)
+    assert stored == unicodedata.normalize("NFC", text)
+    assert received == [FreeTextCandidate(text=stored, canonical="area norte 12")]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (chr(0x0130) + "stanbul", "istanbul"),  # «İ».lower() añade un punto combinante
+        ("ÅNGSTRÖM", "angstrom"),
+        ("Ñandú" + NBSP + NBSP + "Norte", "nandu norte"),
+        (_mathematical("42") + IDEOGRAPHIC_SPACE + "Zona", "42 zona"),
+    ],
+)
+def test_canonical_form_examples(text: str, expected: str) -> None:
+    assert canonical_form(text) == expected
+
+
+@given(st.text(max_size=80))
+def test_canonical_form_is_idempotent_and_has_the_a45_shape(text: str) -> None:
+    canonical = canonical_form(text)
+    assert canonical_form(canonical) == canonical
+    assert "  " not in canonical
+    assert all(char == " " for char in canonical if unicodedata.category(char) == "Zs")
+    assert not any(unicodedata.combining(char) for char in unicodedata.normalize("NFD", canonical))
+    assert canonical == canonical.lower()

@@ -20,8 +20,11 @@ Todo texto libre del expediente vive en una ruta declarada en ``free_text_paths`
 
 2. **Validadores enchufados** (``FreeTextPolicyRegistry.register``), en el orden de registro,
    sobre el texto ya normalizado: U-04 registra al arrancar el de vocabulario bloqueado y
-   atribución a personas (RF-PLA-15, C-PLA-28). Un validador acepta o lanza
-   ``FreeTextRejected``; no puede reescribir el texto.
+   atribución a personas (RF-PLA-15, C-PLA-28). Cada uno recibe un ``FreeTextCandidate`` con el
+   texto NFC y su **forma canónica** (``canonical_form``, adenda A-45): NFKC, espacios Unicode
+   como un espacio ASCII, sin diacríticos y en minúsculas, para que un patrón no se esquive con
+   NBSP, U+3000, dígitos de ancho completo o tildes. La forma canónica nunca se persiste. Un
+   validador acepta o lanza ``FreeTextRejected``; no puede reescribir el texto.
 
 El rechazo lo traduce el escritor (TASK-113) a ``free_text_rejected``.
 """
@@ -36,12 +39,14 @@ from dataclasses import dataclass
 from typing import Final
 
 __all__ = [
+    "FreeTextCandidate",
     "FreeTextField",
     "FreeTextPolicyRegistry",
     "FreeTextRejected",
     "FreeTextRejection",
     "FreeTextValidator",
     "apply_base_policy",
+    "canonical_form",
 ]
 
 _MARKUP: Final = re.compile(
@@ -135,8 +140,39 @@ class FreeTextRejected(ValueError):
         self.field = field
 
 
-FreeTextValidator = Callable[[str, FreeTextField], None]
-"""Validador enchufable: recibe el texto normalizado y lanza ``FreeTextRejected`` si lo rechaza."""
+_REPEATED_SPACES: Final = re.compile(" {2,}")
+
+
+def canonical_form(text: str) -> str:
+    """Forma canónica **solo para validar** (adenda A-45, punto 2); nunca se persiste.
+
+    NFKC (dígitos de ancho completo y matemáticos pasan a ASCII), todo espacio ``Zs`` (NBSP,
+    U+3000…) como un espacio ASCII con los repetidos colapsados, sin marcas diacríticas y en
+    minúsculas. Así «Cédula», un NBSP y dígitos de ancho completo se validan como
+    ``cedula 1020304050``.
+    """
+    # Las minúsculas van antes de quitar las marcas: «İ».lower() añade un punto combinante.
+    folded = unicodedata.normalize("NFKC", text).lower()
+    decomposed = unicodedata.normalize("NFD", folded)
+    bare = unicodedata.normalize(
+        "NFKC", "".join(char for char in decomposed if not unicodedata.combining(char))
+    )
+    spaced = "".join(" " if unicodedata.category(char) == "Zs" else char for char in bare)
+    return _REPEATED_SPACES.sub(" ", spaced)
+
+
+@dataclass(frozen=True)
+class FreeTextCandidate:
+    """Lo que recibe un validador enchufado: el texto que se guardará y su forma canónica."""
+
+    text: str
+    """El texto en NFC que se persiste y se firma."""
+    canonical: str
+    """``canonical_form(text)``: solo para buscar patrones; nunca se guarda."""
+
+
+FreeTextValidator = Callable[[FreeTextCandidate, FreeTextField], None]
+"""Validador enchufable: recibe el candidato y lanza ``FreeTextRejected`` si lo rechaza."""
 
 
 def _reject(reason: FreeTextRejection, field: FreeTextField) -> FreeTextRejected:
@@ -196,8 +232,14 @@ class FreeTextPolicyRegistry:
         return tuple(self._validators)
 
     def apply(self, text: str, field: FreeTextField) -> str:
-        """Política base y después cada validador; devuelve el texto NFC que se guarda."""
+        """Política base y después cada validador; devuelve el texto NFC que se guarda.
+
+        Cada validador recibe el texto NFC y su forma canónica (A-45): lo que se devuelve y se
+        persiste es siempre el texto NFC.
+        """
         normalized = apply_base_policy(text, field)
-        for validator in self._validators.values():
-            validator(normalized, field)
+        if self._validators:
+            candidate = FreeTextCandidate(text=normalized, canonical=canonical_form(normalized))
+            for validator in self._validators.values():
+                validator(candidate, field)
         return normalized
