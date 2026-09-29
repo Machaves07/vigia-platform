@@ -24,6 +24,7 @@ from config.environment import (
     PILOT,
     SHARED_INSTANCE,
     EnvironmentConfig,
+    NodesTlsMode,
     ObjectLock,
     ObjectLockMode,
 )
@@ -50,6 +51,7 @@ def pilot_config(
     first_deploy: bool = False,
     ca_rotation: bool = False,
     nat_per_az: bool = False,
+    nodes_tls_mode: NodesTlsMode = NodesTlsMode.MTLS,
 ) -> EnvironmentConfig:
     """Configuración de ``pilot`` para la instancia compartida o una dedicada."""
     return EnvironmentConfig(
@@ -80,4 +82,5 @@ def pilot_config(
         worker_min_tasks=WORKER_MIN_TASKS,
         worker_max_tasks=WORKER_MAX_TASKS,
         nat_per_az=nat_per_az,
+        nodes_tls_mode=nodes_tls_mode,
     )

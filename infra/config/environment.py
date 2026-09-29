@@ -1,6 +1,6 @@
 """Modelo de configuración de un despliegue y lectura estricta del contexto de CDK.
 
-Un despliegue queda determinado por cuatro valores de contexto (``cdk.json`` fija los
+Un despliegue queda determinado por seis valores de contexto (``cdk.json`` fija los
 valores por defecto; ``--context clave=valor`` los sustituye):
 
 - ``environment``: ``pilot`` (permanente) o ``staging-<n>`` (efímero, ``<n>`` es el número
@@ -13,6 +13,9 @@ valores por defecto; ``--context clave=valor`` los sustituye):
   raíz de ``vigia-node-ca`` (deployment-architecture §6.4, nota de D-8).
 - ``nat_per_az``: añade la segunda traducción de direcciones ``vigia-nat-b`` (mitigación de
   R13, infrastructure-design §13; runbook de deployment-architecture §6.2).
+- ``nodes_tls_mode``: ``mtls`` (autenticación mutua en ``vigia-alb-nodes``) o ``passthrough``
+  (contingencia de R2: balanceador de red con paso directo y terminación en la aplicación,
+  infrastructure-design §4.3).
 
 Un valor fuera de su forma cerrada detiene la síntesis con un mensaje en español: nunca
 se sintetiza un despliegue con un contexto adivinado.
@@ -36,12 +39,14 @@ CONTEXT_INSTANCE = "instance"
 CONTEXT_FIRST_DEPLOY = "first_deploy"
 CONTEXT_CA_ROTATION = "ca_rotation"
 CONTEXT_NAT_PER_AZ = "nat_per_az"
+CONTEXT_NODES_TLS_MODE = "nodes_tls_mode"
 CONTEXT_KEYS = (
     CONTEXT_ENVIRONMENT,
     CONTEXT_INSTANCE,
     CONTEXT_FIRST_DEPLOY,
     CONTEXT_CA_ROTATION,
     CONTEXT_NAT_PER_AZ,
+    CONTEXT_NODES_TLS_MODE,
 )
 
 # ``staging-<n>`` con ``n`` entero positivo sin ceros a la izquierda (número de ejecución).
@@ -56,6 +61,10 @@ _BUCKET_NAME_MAX = 63
 _ROLE_NAME_MAX = 64
 _LONGEST_BUCKET_USAGE = "evidence"
 _LONGEST_ROLE = "task-execution"
+# Balanceadores, grupos de destino y almacenes de confianza admiten 32 caracteres; el nombre
+# más largo de ``vigia-edge`` es el del almacén ``vigia-node-trust`` (§4.3).
+_LOAD_BALANCING_NAME_MAX = 32
+_LONGEST_LOAD_BALANCING_NAME = "node-trust"
 
 
 class ContextError(ValueError):
@@ -67,6 +76,15 @@ class ObjectLockMode(StrEnum):
 
     GOVERNANCE = "GOVERNANCE"
     COMPLIANCE = "COMPLIANCE"
+
+
+class NodesTlsMode(StrEnum):
+    """Terminación TLS de ``nodes.<dominio>`` (infrastructure-design §4.3, R2)."""
+
+    #: Balanceador de aplicación con autenticación mutua en modo de verificación.
+    MTLS = "mtls"
+    #: Contingencia de R2: balanceador de red con paso directo; la aplicación termina TLS.
+    PASSTHROUGH = "passthrough"
 
 
 @dataclass(frozen=True)
@@ -129,6 +147,9 @@ class EnvironmentConfig:
     # Red (§3): una traducción de direcciones, excepción R13; ``nat_per_az`` añade la segunda.
     nat_per_az: bool = False
 
+    # Borde (§4.3): autenticación mutua en el balanceador o contingencia de R2.
+    nodes_tls_mode: NodesTlsMode = NodesTlsMode.MTLS
+
     region: str = REGION
 
     def __post_init__(self) -> None:
@@ -136,6 +157,11 @@ class EnvironmentConfig:
         limits = (
             (self.bucket_name(_LONGEST_BUCKET_USAGE, "0" * 12), _BUCKET_NAME_MAX, "depósito"),
             (self.resource_name(_LONGEST_ROLE), _ROLE_NAME_MAX, "rol"),
+            (
+                self.resource_name(_LONGEST_LOAD_BALANCING_NAME),
+                _LOAD_BALANCING_NAME_MAX,
+                "balanceo de carga",
+            ),
         )
         for name, maximum, kind in limits:
             if len(name) > maximum:
@@ -237,6 +263,17 @@ def parse_flag(key: str, value: object) -> bool:
     if value == "false":
         return False
     raise ContextError(f"El contexto '{key}' debe ser 'true' o 'false'; se recibió {value!r}.")
+
+
+def parse_nodes_tls_mode(value: object) -> NodesTlsMode:
+    """Lee ``nodes_tls_mode``: ``mtls`` o ``passthrough``."""
+    for mode in NodesTlsMode:
+        if value == mode.value:
+            return mode
+    raise ContextError(
+        f"El contexto '{CONTEXT_NODES_TLS_MODE}' debe ser 'mtls' o 'passthrough'; "
+        f"se recibió {value!r}."
+    )
 
 
 def require(context: Mapping[str, object], key: str) -> object:

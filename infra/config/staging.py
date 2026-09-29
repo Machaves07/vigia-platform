@@ -21,7 +21,7 @@ Las tareas mínimas son las de ``pilot`` (§10: 3 vCPU más en ``staging``: 2 de
 from __future__ import annotations
 
 from config import pilot
-from config.environment import SHARED_INSTANCE, EnvironmentConfig
+from config.environment import SHARED_INSTANCE, EnvironmentConfig, NodesTlsMode
 
 # §6.1 y nota D-8.
 DB_INSTANCE_CLASS = "db.t4g.small"
@@ -40,6 +40,7 @@ def staging_config(
     first_deploy: bool = False,
     ca_rotation: bool = False,
     nat_per_az: bool = False,
+    nodes_tls_mode: NodesTlsMode = NodesTlsMode.MTLS,
 ) -> EnvironmentConfig:
     """Configuración de ``staging-<n>``; ``environment`` ya viene validado."""
     return EnvironmentConfig(
@@ -69,4 +70,5 @@ def staging_config(
         worker_min_tasks=pilot.WORKER_MIN_TASKS,
         worker_max_tasks=pilot.WORKER_MAX_TASKS,
         nat_per_az=nat_per_az,
+        nodes_tls_mode=nodes_tls_mode,
     )

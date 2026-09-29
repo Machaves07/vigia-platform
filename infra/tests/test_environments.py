@@ -19,7 +19,14 @@ from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_wafv2 as wafv2
 
-from config import ContextError, EnvironmentConfig, ObjectLock, ObjectLockMode, load_config
+from config import (
+    ContextError,
+    EnvironmentConfig,
+    NodesTlsMode,
+    ObjectLock,
+    ObjectLockMode,
+    load_config,
+)
 from tests.conftest import Synthesized, default_context, probe
 from tests.template_rules import (
     SECURITY_RULES,
@@ -40,7 +47,7 @@ def _config(**context: Any) -> EnvironmentConfig:
 
 @pytest.mark.parametrize(
     ("value", "ephemeral"),
-    [("pilot", False), ("staging-1", True), ("staging-7", True), ("staging-123456789", True)],
+    [("pilot", False), ("staging-1", True), ("staging-7", True), ("staging-1234567", True)],
 )
 def test_valid_environments(value: str, ephemeral: bool) -> None:
     config = _config(environment=value)
@@ -70,7 +77,7 @@ def test_invalid_environments_stop_the_synthesis(value: object) -> None:
         _config(environment=value)
 
 
-@pytest.mark.parametrize("value", ["shared", "acme", "acme-2", "a1", "abcdefghij0123456789"])
+@pytest.mark.parametrize("value", ["shared", "acme", "acme-2", "a1", "abcdefghij01234"])
 def test_valid_instances(value: str) -> None:
     assert _config(instance=value).instance == value
 
@@ -115,7 +122,29 @@ def test_flags_reject_other_values(key: str, value: object) -> None:
 
 
 @pytest.mark.parametrize(
-    "key", ["environment", "instance", "first_deploy", "ca_rotation", "nat_per_az"]
+    ("value", "expected"),
+    [("mtls", NodesTlsMode.MTLS), ("passthrough", NodesTlsMode.PASSTHROUGH)],
+)
+def test_nodes_tls_mode_accepts_its_two_values(value: str, expected: NodesTlsMode) -> None:
+    assert _config(nodes_tls_mode=value).nodes_tls_mode is expected
+
+
+def test_nodes_tls_mode_defaults_to_mutual_authentication() -> None:
+    assert default_context()["nodes_tls_mode"] == "mtls"
+    assert _config().nodes_tls_mode is NodesTlsMode.MTLS
+
+
+@pytest.mark.parametrize(
+    "value", ["MTLS", "mtls ", "pass-through", "tls", "nlb", "", True, 1, ["mtls"]]
+)
+def test_nodes_tls_mode_rejects_other_values(value: object) -> None:
+    with pytest.raises(ContextError, match="'nodes_tls_mode'"):
+        _config(nodes_tls_mode=value)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["environment", "instance", "first_deploy", "ca_rotation", "nat_per_az", "nodes_tls_mode"],
 )
 def test_missing_context_stops_the_synthesis(key: str) -> None:
     context = {k: v for k, v in default_context().items() if k != key}
@@ -213,10 +242,10 @@ def test_names_carry_the_deployment_suffix(
 @pytest.mark.parametrize(
     "context",
     [
-        {"instance": "abcdefghij0123456789"},
-        {"environment": "staging-123456789"},
-        {"instance": "abcdefg", "environment": "staging-123456789"},  # 63 exactos
-        {"instance": "abcdefghij0123", "environment": "staging-7"},
+        {"instance": "abcdefghij01234"},  # vigia-node-trust-abcdefghij01234: 32 exactos
+        {"environment": "staging-1234567"},
+        {"instance": "ab", "environment": "staging-1234"},
+        {"instance": "abcde", "environment": "staging-7"},
     ],
 )
 def test_longest_accepted_names_fit_their_service_limits(context: dict[str, str]) -> None:
@@ -224,6 +253,26 @@ def test_longest_accepted_names_fit_their_service_limits(context: dict[str, str]
     assert len(config.bucket_name("evidence", ACCOUNT)) <= 63
     assert len(config.resource_name("task-execution")) <= 64
     assert len(config.stack_name("observability")) <= 128
+    # Balanceadores, grupos de destino y almacén de confianza de vigia-edge (§4).
+    assert len(config.resource_name("node-trust")) == 32
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"instance": "abcdefghij012345"},
+        {"instance": "abcdefghij0123456789"},
+        {"environment": "staging-12345678"},
+        {"environment": "staging-123456789"},
+        {"instance": "abcdef", "environment": "staging-7"},
+    ],
+)
+def test_deployments_whose_load_balancing_names_overflow_stop_the_synthesis(
+    context: dict[str, str],
+) -> None:
+    """``vigia-node-trust`` con el sufijo del despliegue no cabe en los 32 caracteres."""
+    with pytest.raises(ContextError, match="el máximo es 32"):
+        _config(**context)
 
 
 @pytest.mark.parametrize(

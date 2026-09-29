@@ -7,6 +7,7 @@
     "first_deploy": false,
     "ca_rotation": false,
     "nat_per_az": false,
+    "nodes_tls_mode": "mtls",
     "@aws-cdk/core:bootstrapQualifier": "vigia",
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
