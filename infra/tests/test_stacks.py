@@ -19,6 +19,7 @@ from config import EnvironmentConfig
 from stacks import DEPENDENCIES, STACK_ORDER
 from tests.conftest import Synthesized, cdk_settings, synthesize
 from tests.template_rules import resources
+from tests.test_data import expected_data_resources
 from tests.test_foundation import expected_foundation_resources
 
 ORDER = ("foundation", "data", "edge", "compute", "observability", "datasets")
@@ -55,9 +56,12 @@ def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
 
 
 def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
-    """``vigia-foundation`` cambia con el despliegue (presupuestos, traducciones)."""
+    """``vigia-foundation`` (presupuestos, traducciones) y ``vigia-data`` (depósito de registros
+    y vaciado automático) cambian con el despliegue."""
     if key == "foundation":
         return expected_foundation_resources(config)
+    if key == "data":
+        return expected_data_resources(config)
     return EXPECTED_RESOURCES[key]
 
 
@@ -95,7 +99,11 @@ def test_resources_inherit_the_global_tags() -> None:
 
     synthesized = synthesize(add_bucket, environment="staging-7")
     template = synthesized.templates["vigia-data-staging-7"]
-    bucket = next(r for _, r in resources(template) if r["Type"] == "AWS::S3::Bucket")
+    bucket = next(
+        r
+        for logical_id, r in resources(template)
+        if r["Type"] == "AWS::S3::Bucket" and logical_id.startswith("TagProbe")
+    )
     tags = {tag["Key"]: tag["Value"] for tag in bucket["Properties"]["Tags"]}
     assert tags == {
         "project": "vigia",

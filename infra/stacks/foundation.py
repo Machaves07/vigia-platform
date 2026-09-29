@@ -31,6 +31,10 @@ principales ni acciones:
 - ``vigia-node-ca`` concede ``Sign`` y ``GetPublicKey`` a ``vigia-admin-task`` **solo** con
   ``first_deploy=true`` o ``ca_rotation=true``; ``vigia-secrets`` concede a ``vigia-deploy``
   ``Decrypt`` acotado por ``kms:ViaService`` de S3 a la lectura de ``vigia-edge/ca/*``.
+- Para ``vigia-data`` (TASK-146): ``vigia-secrets`` admite, solo por Secrets Manager, los secretos
+  de la base (``vigia/<despliegue>/db/*`` y el maestro ``rds!db-*`` que gestiona RDS), cuyo rol de
+  rotación genera el servicio; ``vigia-logs`` cifra también el grupo de registros de PostgreSQL de
+  la base del despliegue, y el tema ``vigia-alerts`` admite la publicación de eventos de RDS.
 
 En ``staging-<n>`` (D-8) todo se destruye con el entorno: claves con borrado programado de 7 días
 (``vigia-node-ca`` es la de la ejecución) y grupo de registro con ``DESTROY``. Los presupuestos
@@ -375,6 +379,7 @@ class FoundationStack(VigiaStack):
                     ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
                     self._via_service("secretsmanager"),
                 ),
+                self._db_secrets_rotation(),
             ]
             return statements
         if name is KeyName.BACKUP:
@@ -434,14 +439,48 @@ class FoundationStack(VigiaStack):
             },
         )
 
-    def _logs_service(self) -> iam.PolicyStatement:
-        """El servicio de registros cifra los grupos ``/vigia/<despliegue>/*`` de la cuenta."""
-        log_groups = self.format_arn(
-            service="logs",
-            resource="log-group",
-            resource_name=f"/vigia/{self.config.deployment}/*",
-            arn_format=ArnFormat.COLON_RESOURCE_NAME,
+    def _db_secrets_rotation(self) -> iam.PolicyStatement:
+        """Secretos de la base (§7.2) por Secrets Manager: la función de rotación de un solo
+        usuario, cuyo rol genera el servicio al desplegar ``vigia-data``, y el secreto maestro que
+        gestiona RDS (``rds!db-...``). Solo esos secretos y solo por el servicio."""
+        secrets = [
+            self.format_arn(
+                service="secretsmanager",
+                resource="secret",
+                resource_name=name,
+                arn_format=ArnFormat.COLON_RESOURCE_NAME,
+            )
+            for name in (f"vigia/{self.config.deployment}/db/*", "rds!db-*")
+        ]
+        return iam.PolicyStatement(
+            sid="DatabaseSecretsThroughSecretsManager",
+            principals=[iam.AccountRootPrincipal()],
+            actions=["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"],
+            resources=["*"],
+            conditions={
+                "StringEquals": {
+                    "kms:ViaService": f"secretsmanager.{self.region}.amazonaws.com",
+                    "kms:CallerAccount": self.account,
+                },
+                "StringLike": {"kms:EncryptionContext:SecretARN": secrets},
+            },
         )
+
+    def _logs_service(self) -> iam.PolicyStatement:
+        """El servicio de registros cifra los grupos ``/vigia/<despliegue>/*`` de la cuenta y el de
+        los registros de PostgreSQL de la base del despliegue (§9.2)."""
+        log_groups = [
+            self.format_arn(
+                service="logs",
+                resource="log-group",
+                resource_name=name,
+                arn_format=ArnFormat.COLON_RESOURCE_NAME,
+            )
+            for name in (
+                f"/vigia/{self.config.deployment}/*",
+                f"/aws/rds/instance/vigia-{self.config.deployment}-db/*",
+            )
+        ]
         return iam.PolicyStatement(
             sid="LogsForVigiaLogGroups",
             principals=[iam.ServicePrincipal(f"logs.{self.region}.amazonaws.com")],
@@ -636,6 +675,17 @@ class FoundationStack(VigiaStack):
             topic=topic,
             protocol=sns.SubscriptionProtocol.EMAIL,
             endpoint=ssm.StringParameter.value_for_string_parameter(self, ALERTS_EMAIL_PARAMETER),
+        )
+        # Suscripción de eventos de la base de ``vigia-data`` (§6.1): con una política propia en
+        # el tema, RDS necesita su permiso explícito.
+        topic.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="RdsEventsPublish",
+                principals=[iam.ServicePrincipal("events.rds.amazonaws.com")],
+                actions=["sns:Publish"],
+                resources=[topic.topic_arn],
+                conditions={"StringEquals": {"aws:SourceAccount": self.account}},
+            )
         )
         return topic
 

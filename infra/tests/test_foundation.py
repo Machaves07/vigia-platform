@@ -69,12 +69,14 @@ def expected_foundation_resources(config: EnvironmentConfig) -> Counter[str]:
             "AWS::KMS::Key": 7,
             "AWS::KMS::Alias": 7,
             "AWS::SNS::Topic": 1,
+            # Eventos de la base de ``vigia-data`` y, en ``pilot``, presupuestos.
+            "AWS::SNS::TopicPolicy": 1,
             "AWS::SNS::Subscription": 1,
             "AWS::SSM::Parameter": 1,
         }
     )
     if budgets_enabled(config):
-        expected += Counter({"AWS::Budgets::Budget": 2, "AWS::SNS::TopicPolicy": 1})
+        expected += Counter({"AWS::Budgets::Budget": 2})
     return expected
 
 
@@ -353,13 +355,24 @@ def test_no_ingress_from_the_internet(deployment: Synthesized) -> None:
         assert "SourceSecurityGroupId" in props
 
 
-def _ingress(template: JsonObject) -> set[tuple[str, int, str]]:
+# Regla de un grupo: protocolo, puerto inicial, puerto final y origen o destino. Comparar el
+# rango y el protocolo completos impide que 443-65535 o UDP/443 pasen por 443/TCP.
+Rule = tuple[str, int, int, str]
+
+
+def _rule(props: JsonObject, target: str) -> Rule:
+    return (str(props["IpProtocol"]), int(props["FromPort"]), int(props["ToPort"]), target)
+
+
+def _ingress(template: JsonObject) -> set[tuple[str, Rule]]:
     names = {v: k for k, v in _groups(template).items()}
     return {
         (
             names[str(reference_target(properties(r)["GroupId"]))],
-            int(properties(r)["FromPort"]),
-            names[str(reference_target(properties(r)["SourceSecurityGroupId"]))],
+            _rule(
+                properties(r),
+                names[str(reference_target(properties(r)["SourceSecurityGroupId"]))],
+            ),
         )
         for _, r in _of_type(template, "AWS::EC2::SecurityGroupIngress")
     }
@@ -368,35 +381,59 @@ def _ingress(template: JsonObject) -> set[tuple[str, int, str]]:
 def test_ingress_follows_the_design_table(pilot_foundation: JsonObject) -> None:
     tasks = ("sg-api", "sg-worker", "sg-tasks")
     assert _ingress(pilot_foundation) == {
-        *(("sg-db", 5432, source) for source in tasks),
-        *(("sg-endpoints", 443, source) for source in tasks),
+        *(("sg-db", ("tcp", 5432, 5432, source)) for source in tasks),
+        *(("sg-endpoints", ("tcp", 443, 443, source)) for source in tasks),
     }
 
 
-def _egress(template: JsonObject) -> dict[str, set[tuple[int, str]]]:
+def _egress(template: JsonObject) -> dict[str, set[Rule]]:
     names = {v: k for k, v in _groups(template).items()}
-    egress: dict[str, set[tuple[int, str]]] = {name: set() for name in names.values()}
+    egress: dict[str, set[Rule]] = {name: set() for name in names.values()}
     for logical_id, group in _of_type(template, "AWS::EC2::SecurityGroup"):
         for rule in properties(group).get("SecurityGroupEgress", []):
-            egress[names[logical_id]].add((int(rule["FromPort"]), str(rule["CidrIp"])))
+            egress[names[logical_id]].add(_rule(rule, str(rule["CidrIp"])))
     for _, rule in _of_type(template, "AWS::EC2::SecurityGroupEgress"):
         props = properties(rule)
-        assert props["FromPort"] == props["ToPort"]
         egress[names[str(reference_target(props["GroupId"]))]].add(
-            (
-                int(props["FromPort"]),
-                names[str(reference_target(props["DestinationSecurityGroupId"]))],
-            )
+            _rule(props, names[str(reference_target(props["DestinationSecurityGroupId"]))])
         )
     return egress
 
 
 # Regla que CDK escribe cuando un grupo no tiene salida: no permite ningún tráfico.
-_NO_EGRESS = {(252, "255.255.255.255/32")}
+_NO_EGRESS = {("icmp", 252, 86, "255.255.255.255/32")}
+
+
+@pytest.mark.parametrize(
+    ("changes", "rule"),
+    [
+        ({"ToPort": 65535}, ("tcp", 443, 65535, "0.0.0.0/0")),
+        ({"IpProtocol": "udp"}, ("udp", 443, 443, "0.0.0.0/0")),
+    ],
+    ids=["port-range", "udp"],
+)
+def test_egress_comparison_sees_protocol_and_port_range(
+    pilot_foundation: JsonObject, changes: dict[str, object], rule: Rule
+) -> None:
+    """Seguimiento de VIG-27: ampliar el rango o cambiar el protocolo de la salida 443 hacia
+    ``0.0.0.0/0`` deja de coincidir con la tabla de diseño."""
+    template = json.loads(json.dumps(pilot_foundation))
+    names = {v: k for k, v in _groups(template).items()}
+    group_id = next(i for i, n in names.items() if n == "sg-api")
+    rules = properties(template["Resources"][group_id])["SecurityGroupEgress"]
+    public = next(r for r in rules if r["CidrIp"] == "0.0.0.0/0")
+    public.update(changes)
+    found = _egress(template)["sg-api"]
+    assert rule in found
+    assert ("tcp", 443, 443, "0.0.0.0/0") not in found
 
 
 def test_egress_follows_the_design_table(pilot_foundation: JsonObject) -> None:
-    task_egress = {(5432, "sg-db"), (443, "sg-endpoints"), (443, "0.0.0.0/0")}
+    task_egress = {
+        ("tcp", 5432, 5432, "sg-db"),
+        ("tcp", 443, 443, "sg-endpoints"),
+        ("tcp", 443, 443, "0.0.0.0/0"),
+    }
     assert _egress(pilot_foundation) == {
         "sg-api": task_egress,
         "sg-worker": task_egress,
@@ -656,10 +693,36 @@ def test_logs_key_is_limited_to_the_deployment_log_groups(deployment: Synthesize
     template = _foundation(deployment)
     key = _keys(template, deployment.config)[KeyName.LOGS]
     statement = _statement(key, "LogsForVigiaLogGroups")
-    arn = statement["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
-    assert render(arn, template) == (
-        f"arn:aws:logs:us-east-1:<AccountId>:log-group:/vigia/{deployment.config.deployment}/*"
-    )
+    arns = statement["Condition"]["ArnLike"]["kms:EncryptionContext:aws:logs:arn"]
+    prefix = "arn:aws:logs:us-east-1:<AccountId>:log-group:"
+    deployment_name = deployment.config.deployment
+    # Los grupos del despliegue y el de los registros de PostgreSQL de su base (vigia-data).
+    assert [render(arn, template) for arn in arns] == [
+        f"{prefix}/vigia/{deployment_name}/*",
+        f"{prefix}/aws/rds/instance/vigia-{deployment_name}-db/*",
+    ]
+
+
+def test_secrets_key_serves_only_the_database_secrets_through_secrets_manager(
+    deployment: Synthesized,
+) -> None:
+    """Rotación de ``db/app`` y ``db/migrate`` y secreto maestro de RDS (§7.2): solo por Secrets
+    Manager, solo en la cuenta y solo para los secretos de la base del despliegue."""
+    template = _foundation(deployment)
+    key = _keys(template, deployment.config)[KeyName.SECRETS]
+    statement = _statement(key, "DatabaseSecretsThroughSecretsManager")
+    assert set(statement["Action"]) == {"kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"}
+    conditions = statement["Condition"]
+    assert conditions["StringEquals"] == {
+        "kms:ViaService": "secretsmanager.us-east-1.amazonaws.com",
+        "kms:CallerAccount": {"Ref": "AWS::AccountId"},
+    }
+    secrets = conditions["StringLike"]["kms:EncryptionContext:SecretARN"]
+    prefix = "arn:aws:secretsmanager:us-east-1:<AccountId>:secret:"
+    assert [render(arn, template) for arn in secrets] == [
+        f"{prefix}vigia/{deployment.config.deployment}/db/*",
+        f"{prefix}rds!db-*",
+    ]
 
 
 def test_node_ca_signing_is_limited_to_ecdsa_sha_256(
@@ -816,11 +879,32 @@ def test_pilot_has_the_two_budgets(pilot_foundation: JsonObject) -> None:
     }
 
 
+def _topic_statements(template: JsonObject) -> dict[str, JsonObject]:
+    ((_, policy),) = _of_type(template, "AWS::SNS::TopicPolicy")
+    return {s["Sid"]: s for s in properties(policy)["PolicyDocument"]["Statement"]}
+
+
 def test_budgets_may_publish_to_the_alerts_topic(pilot_foundation: JsonObject) -> None:
-    ((_, policy),) = _of_type(pilot_foundation, "AWS::SNS::TopicPolicy")
-    (statement,) = properties(policy)["PolicyDocument"]["Statement"]
+    statement = _topic_statements(pilot_foundation)["BudgetsPublish"]
     assert statement["Principal"] == {"Service": "budgets.amazonaws.com"}
     assert statement["Action"] == "sns:Publish"
+    assert statement["Condition"] == {
+        "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
+    }
+
+
+def test_rds_events_may_publish_to_the_alerts_topic(deployment: Synthesized) -> None:
+    """Suscripción de eventos de la base (§6.1): con política propia en el tema, RDS necesita
+    su permiso; solo ``sns:Publish`` y solo desde la cuenta."""
+    template = _foundation(deployment)
+    statements = _topic_statements(template)
+    budgets = {"BudgetsPublish"} if budgets_enabled(deployment.config) else set()
+    assert set(statements) == {"RdsEventsPublish"} | budgets
+    statement = statements["RdsEventsPublish"]
+    assert statement["Principal"] == {"Service": "events.rds.amazonaws.com"}
+    assert statement["Action"] == "sns:Publish"
+    ((topic_id, _),) = _of_type(template, "AWS::SNS::Topic")
+    assert reference_target(statement["Resource"]) == topic_id
     assert statement["Condition"] == {
         "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
     }
@@ -832,7 +916,7 @@ def test_staging_synthesis_has_no_budgets(first_deploy: bool, ca_rotation: bool)
     deployment = _synth(environment="staging-7", **_flags(first_deploy, ca_rotation))
     for name, template in deployment.templates.items():
         assert list(_of_type(template, "AWS::Budgets::Budget")) == [], name
-        assert list(_of_type(template, "AWS::SNS::TopicPolicy")) == [], name
+        assert "BudgetsPublish" not in json.dumps(template), name
 
 
 def test_dedicated_instance_budgets_carry_its_name() -> None:
