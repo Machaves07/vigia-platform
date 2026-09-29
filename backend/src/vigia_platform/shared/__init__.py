@@ -1,0 +1,1 @@
+"""Servicios transversales (esquema ``shared``)."""
