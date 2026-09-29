@@ -1,0 +1,108 @@
+# Colector lateral de vigia-api y vigia-worker (infrastructure-design §9.1, cierra R9).
+#
+# La pila vigia-compute (stacks/compute.py) entrega este archivo al contenedor `otel` en la
+# variable AOT_CONFIG_CONTENT, que la distribución de AWS para OpenTelemetry (ADOT) lee al
+# arrancar. Las referencias a variables de entorno (env:NOMBRE) las resuelve la pila al
+# sintetizar con los valores de la tarea (CloudFormation no admite su sintaxis fuera de
+# Fn::Sub), y el colector las resuelve igual si lee este archivo tal cual: nada de este archivo
+# depende del despliegue. Validado arrancando la imagen fijada en config/pilot.py.
+#
+# - Receptor OTLP gRPC solo en la interfaz local de la tarea (localhost:4317).
+# - Procesadores: límite de memoria, detección de recursos de ECS, filtro de atributos
+#   (NFR-NUC-41), dimensiones fijas y lote de 5 s y 512 elementos.
+# - Exportadores: `awsemf` (métricas al espacio Vigia/Platform con las dimensiones service,
+#   environment, route y component; sin dimensiones de alta cardinalidad) y `awsxray` (trazas,
+#   muestreo del 100 % en el piloto: el colector no muestrea). Los registros propios del
+#   colector salen por la salida estándar hacia /vigia/<despliegue>/otel.
+# - Fallo: la memoria del colector está acotada por memory_limiter (rechaza al receptor por
+#   encima del 80 %) y el lote; los exportadores de AWS reintentan con el SDK y no admiten una
+#   cola propia en esta versión. Si el colector cae, la aplicación descarta con el contador otel_dropped_total
+#   (PAT-NUC-RES-03) y ECS reinicia el contenedor.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  resourcedetection:
+    detectors: [env, ecs]
+    timeout: 2s
+    override: false
+
+  # Lista blanca de NFR-NUC-41: la aplica la aplicación (AttributePolicy de
+  # backend/src/vigia_platform/shared/observability/redaction.py), que solo emite
+  # identificadores, enumeraciones cerradas, enteros acotados y booleanos declarados. ADOT no
+  # trae el procesador `transform` (keep_keys), así que esta segunda barrera borra las familias
+  # de atributos de texto libre o de red que la instrumentación automática podría añadir: URL,
+  # cabeceras, agente de usuario, direcciones, identidad del usuario, sentencias SQL y mensajes
+  # de excepción. En métricas, además, solo las dimensiones de `metric_declarations` llegan a
+  # CloudWatch como dimensión.
+  attributes/allowlist:
+    actions:
+      - pattern: ^(url|user_agent|client|server|source|destination|net|network|enduser|user|session|messaging|http\.request\.header|http\.response\.header)\..*
+        action: delete
+      - pattern: ^http\.(url|target|user_agent|client_ip|host|scheme|server_name|flavor)$
+        action: delete
+      - pattern: ^db\.(statement|query\.text|user|connection_string|name|namespace)$
+        action: delete
+      - pattern: ^exception\.(message|stacktrace)$
+        action: delete
+
+  # Dimensiones fijas de toda métrica de la tarea: el escalado del worker lee
+  # outbox_oldest_pending_age_seconds con service y environment (stacks/compute.py).
+  attributes/dimensions:
+    actions:
+      - key: service
+        value: ${env:VIGIA_SERVICE}
+        action: upsert
+      - key: environment
+        value: ${env:VIGIA_ENVIRONMENT}
+        action: upsert
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  awsemf:
+    namespace: Vigia/Platform
+    region: ${env:AWS_REGION}
+    # Grupo de §9.2 (lo crea vigia-observability); cada tarea escribe en su propio flujo.
+    log_group_name: ${env:VIGIA_OTEL_LOG_GROUP}
+    log_stream_name: emf/${env:VIGIA_SERVICE}/{TaskId}
+    dimension_rollup_option: NoDimensionRollup
+    resource_to_telemetry_conversion:
+      enabled: false
+    metric_declarations:
+      - dimensions:
+          - [service, environment]
+          - [service, environment, route]
+          - [service, environment, component]
+        metric_name_selectors:
+          - ".*"
+
+  awsxray:
+    region: ${env:AWS_REGION}
+    indexed_attributes: [correlation_id]
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, attributes/allowlist, batch]
+      exporters: [awsxray]
+    metrics:
+      receivers: [otlp]
+      processors:
+        [memory_limiter, resourcedetection, attributes/allowlist, attributes/dimensions, batch]
+      exporters: [awsemf]
