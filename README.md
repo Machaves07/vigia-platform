@@ -52,6 +52,7 @@ cd backend && uv run pytest -q --hypothesis-profile=ci          # nocturno: --hy
 | `DTZ*` | `datetime` sin zona horaria (BR-NUC-47) | ruff |
 | `TID251` | hora del sistema fuera de `vigia_platform.shared.clock` (PAT-NUC-RES-07) | ruff, con excepción solo para `shared/clock/` |
 | `G001` a `G004` | mensaje de registro construido con `format`, `%`, `+` o f-string (NFR-NUC-17) | ruff |
+| `TID251` en `src/` | registro con la biblioteca estándar (`logging.getLogger`, `logging.info`…, `logging.root`): en `src/` solo `get_logger` (NFR-NUC-17) | ruff, `backend/src/ruff.toml` |
 | `VIG001` | `text()` con f-string, `%`, `.format()` o concatenación (NFR-NUC-19) | `tools/lint_rules.py` |
 | `VIG002` | httpx sin `timeout=` (PAT-NUC-RES-03) | `tools/lint_rules.py` |
 | `VIG003` | boto3 sin `config=` o `botocore.config.Config` sin tiempos de espera (PAT-NUC-RES-03) | `tools/lint_rules.py` |

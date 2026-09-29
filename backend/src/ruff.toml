@@ -1,0 +1,45 @@
+# Configuración de ruff para src/: la de backend/pyproject.toml más la prohibición del registro
+# de la biblioteca estándar (revisión de VIG-22, ronda 2). Una plantilla % guardada en una
+# variable y pasada a un registrador de logging no la ven ni las reglas G ni VIG004: en src/
+# se registra solo con shared.observability.logging.get_logger. El propio módulo de
+# observabilidad usa logging con `# noqa: TID251` línea a línea.
+#
+# ruff sustituye (no amplía) la tabla banned-api al extender: aquí se repite entera la de
+# pyproject.toml. tests/unit/test_lint_rules.py::test_src_ruff_config_keeps_every_root_ban
+# falla si alguna entrada de la raíz falta aquí.
+extend = "../pyproject.toml"
+
+[lint.flake8-tidy-imports.banned-api]
+"pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"_pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"cPickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"dill".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"shelve".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"marshal".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"yaml.load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"yaml.load_all".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load_all."
+"yaml.unsafe_load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"yaml.full_load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"builtins.eval".msg = "Prohibido por NFR-NUC-27."
+"datetime.datetime.now".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.datetime.utcnow".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.datetime.today".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.date.today".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.time".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.time_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.monotonic".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.monotonic_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.perf_counter".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.perf_counter_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+# Registro de la biblioteca estándar: solo get_logger en src/.
+"logging.getLogger".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.root".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.debug".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.info".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.warning".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.warn".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.error".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.exception".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.critical".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.fatal".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.log".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."

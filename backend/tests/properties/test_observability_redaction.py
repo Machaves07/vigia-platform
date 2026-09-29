@@ -10,7 +10,8 @@ para trazas y métricas, también en los bytes OTLP serializados que saldrían h
   ``extra`` de terceros; mensaje de una excepción registrada; el **mensaje** de ``get_logger``
   construido en ejecución; el **componente** de ``get_logger`` y el nombre de un registrador
   ajeno; un registrador ajeno con un **f-string** sin argumentos; la **excepción no recuperada
-  de una tarea de asyncio**; y, solo para las formas reconocibles (token, PEM, correo, enlace),
+  de una tarea de asyncio**; una plantilla ``%`` en una variable que **no encaja** con sus
+  argumentos; y, solo para las formas reconocibles (token, PEM, correo, enlace),
   la plantilla de un registrador ajeno con argumentos.
 - **Métricas**: atributos permitidos y desconocidos en las métricas de la plataforma y en un
   instrumento crudo como los de la instrumentación automática, medidas dentro de un tramo (el SDK
@@ -239,6 +240,7 @@ LOG_CHANNELS = (
     "component",
     "stdlib_logger_name",
     "stdlib_fstring",
+    "stdlib_mismatch",
     "asyncio_task",
 )
 log_cases = _injections(LOG_CHANNELS, ("stdlib_template",))
@@ -322,6 +324,11 @@ def emit_logs(injections: Sequence[Injection]) -> list[str]:
     root.setLevel(logging.DEBUG)
     log = obs_logging.get_logger("pruebas.redaccion")
     third_party = logging.getLogger("tercero.biblioteca")
+    # Plantillas que no encajan: sin propagar a la raíz, donde el manejador de captura de pytest
+    # relanzaría el error de formato; solo las ve el formateador de la plataforma.
+    mismatched = logging.getLogger("tercero.plantilla")
+    mismatched.propagate = False
+    mismatched.addHandler(handler)
     try:
         for i in injections:
             built = "texto previo" + i.separator + i.value + " texto posterior"
@@ -354,6 +361,9 @@ def emit_logs(injections: Sequence[Injection]) -> list[str]:
                 logging.getLogger("tercero." + i.value).warning("valor %s", 1)
             elif i.channel == "stdlib_fstring":
                 third_party.warning(built)
+            elif i.channel == "stdlib_mismatch":
+                # Plantilla en una variable que no encaja con su argumento (sobra uno).
+                mismatched.warning(built.replace("%", "%%"), 7)
             elif i.channel == "asyncio_task":
                 _unretrieved_task_exception(i.value)
             else:
@@ -363,6 +373,8 @@ def emit_logs(injections: Sequence[Injection]) -> list[str]:
                 third_party.warning(template, 1)
     finally:
         root.removeHandler(handler)
+        mismatched.removeHandler(handler)
+        mismatched.propagate = True  # Si quedara en False, pytest le engancharía su captura.
         root.setLevel(previous_level)
     emitted = [
         text for line in stream.getvalue().splitlines() for text in _strings(json.loads(line))

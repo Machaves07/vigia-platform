@@ -25,7 +25,8 @@ Qué nunca sale (el formateador lo garantiza, no la disciplina de quien llama):
   Después pasa por ``redact_text`` y se corta a 512 caracteres.
 - **Mensaje de terceros** (un registrador que no es de ``get_logger``): sin argumentos ``%`` sale
   como ``[redactado]``, porque puede ser un f-string con datos (p. ej. la excepción no recuperada
-  de una tarea de asyncio); con argumentos se conserva la plantilla, redactada.
+  de una tarea de asyncio); con argumentos se conserva la plantilla, redactada, salvo que no
+  encaje con ellos: entonces también sale ``[redactado]``.
 - **Componente**: el de ``get_logger`` si es constante; el de terceros, el módulo cargado más
   largo que prefija el nombre del registrador; si no, ``other``.
 - **Excepciones**: solo ``exception_type`` (nombre de la clase); nunca el mensaje ni la traza.
@@ -157,8 +158,9 @@ def _message(record: logging.LogRecord) -> str:
             arguments = tuple(_safe_argument(value) for value in record.args)
         try:
             text = text % arguments
-        except (TypeError, ValueError, KeyError):
-            text = record.msg
+        except Exception:
+            # Plantilla y argumentos que no encajan: la plantilla puede ser texto libre.
+            return redaction.REDACTED
     return redaction.redact_text(text)[:MAX_MESSAGE_CHARS]
 
 
@@ -251,7 +253,7 @@ class PlatformLogger:
 
     def __init__(self, component: str) -> None:
         self.component = component
-        self._logger = logging.getLogger(f"vigia.{component}")
+        self._logger = logging.getLogger(f"vigia.{component}")  # noqa: TID251 — módulo de observabilidad.
 
     def _log(self, level: int, message: str, fields: Mapping[str, object], exc: bool) -> None:
         if self._logger.isEnabledFor(level):
@@ -309,11 +311,11 @@ def configure_logging(
     chosen = (level or os.environ.get(LOG_LEVEL_ENV) or "INFO").upper()
     handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
     handler.setFormatter(JsonFormatter(policy))
-    root = logging.getLogger()
+    root = logging.getLogger()  # noqa: TID251 — módulo de observabilidad.
     for existing in list(root.handlers):
         root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(chosen if chosen in LEVELS else "INFO")
     for name, quiet in QUIET_LOGGERS.items():
-        logging.getLogger(name).setLevel(quiet)
+        logging.getLogger(name).setLevel(quiet)  # noqa: TID251 — módulo de observabilidad.
     return handler

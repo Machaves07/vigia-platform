@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,80 @@ def test_noqa_suppresses_only_the_named_rule() -> None:
         "log.info(dato)  # noqa: VIG001\n"
     )
     assert _rules(source) == [(4, "VIG004")]
+
+
+# --- Ronda 2: registro de la biblioteca estándar prohibido en src/ (TID251) ---------------
+
+STDLIB_LOGGING_VIOLATING = """\
+import logging
+from logging import getLogger
+
+log = logging.getLogger(__name__)
+other = getLogger("identity.auth")
+
+
+def report(template: str, value: int) -> None:
+    log.info(template, value)
+    logging.warning(template, value)
+    logging.root.error(template)
+"""
+
+STDLIB_LOGGING_COMPLIANT = """\
+from vigia_platform.shared.observability.logging import get_logger
+
+log = get_logger("identity.auth")
+
+
+def report(value: int) -> None:
+    log.info("informe generado", status=value)
+"""
+
+
+def _ruff(source: str, filename: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "--output-format",
+            "concise",
+            "--stdin-filename",
+            filename,
+            "-",
+        ],
+        cwd=BACKEND,
+        input=source,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_src_forbids_stdlib_logging_naming_the_rule() -> None:
+    completed = _ruff(STDLIB_LOGGING_VIOLATING, "src/vigia_platform/identity/informe.py")
+    assert completed.returncode == 1
+    banned = [line for line in completed.stdout.splitlines() if " TID251 " in line]
+    assert [int(line.split(":")[1]) for line in banned] == [2, 4, 10, 11]
+    assert all("usa vigia_platform.shared.observability.logging.get_logger" in b for b in banned)
+
+
+def test_src_accepts_get_logger() -> None:
+    completed = _ruff(STDLIB_LOGGING_COMPLIANT, "src/vigia_platform/identity/informe.py")
+    assert completed.returncode == 0, completed.stdout
+
+
+def test_stdlib_logging_stays_allowed_outside_src() -> None:
+    completed = _ruff(STDLIB_LOGGING_VIOLATING, "tests/unit/informe.py")
+    assert " TID251 " not in completed.stdout
+
+
+def test_src_ruff_config_keeps_every_root_ban() -> None:
+    """ruff sustituye la tabla al extender: src/ruff.toml repite cada prohibición de la raíz."""
+    with (BACKEND / "pyproject.toml").open("rb") as handle:
+        root = tomllib.load(handle)["tool"]["ruff"]["lint"]["flake8-tidy-imports"]["banned-api"]
+    with (BACKEND / "src" / "ruff.toml").open("rb") as handle:
+        src = tomllib.load(handle)["lint"]["flake8-tidy-imports"]["banned-api"]
+    assert {key: value for key, value in src.items() if key in root} == root
+    assert "logging.getLogger" in src

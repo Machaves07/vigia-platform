@@ -202,3 +202,39 @@ def test_export_failures_log_one_line_per_outage(captured: io.StringIO) -> None:
         ("WARNING", "traces"),
     ]
     assert all(line["component"] == "shared.observability" for line in lines)
+
+
+# --- Ronda 2: plantilla % que no encaja con sus argumentos ---------------------------------
+
+
+@pytest.mark.parametrize(
+    ("template", "arguments"),
+    [
+        ("La operaria Ana Ruiz reportó dolor lumbar", (7,)),
+        ("clave hunter2 %d", ("x",)),
+        ("clave hunter2 %s %s", (1,)),
+        ("La operaria Ana Ruiz reportó %(motivo)s", ({"otro": 1},)),
+        ("clave hunter2 %z", (1,)),
+    ],
+    ids=["sobran-argumentos", "tipo-incorrecto", "faltan-argumentos", "clave-ausente", "formato"],
+)
+def test_template_that_does_not_fit_its_arguments_is_redacted(
+    template: str, arguments: tuple[object, ...]
+) -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JsonFormatter())
+    # Sin propagar: el manejador de captura de pytest relanzaría el error de formato.
+    library = logging.getLogger("asyncio.plantilla")
+    library.propagate = False
+    library.addHandler(handler)
+    try:
+        library.warning(template, *arguments)
+    finally:
+        library.removeHandler(handler)
+        library.propagate = True  # Si quedara en False, pytest le engancharía su captura.
+    (line,) = _lines(stream)
+    assert line["message"] == redaction.REDACTED
+    assert line["component"] == "asyncio"
+    text = stream.getvalue()
+    assert "hunter2" not in text and "Ana Ruiz" not in text and "lumbar" not in text

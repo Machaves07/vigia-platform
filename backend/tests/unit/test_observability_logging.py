@@ -114,7 +114,7 @@ def test_percent_arguments_keep_numbers_uuids_and_enums_only() -> None:
 def test_mapping_arguments_and_broken_templates_do_not_fail() -> None:
     record = logging.LogRecord("x", logging.INFO, "f.py", 1, "n=%(n)s", ({"n": 3},), None)
     assert _format(record)["message"] == "n=3"
-    assert _format(_record("sin %s marcador %d", "a"))["message"] == "sin %s marcador %d"
+    assert _format(_record("sin %s marcador %d", "a"))["message"] == redaction.REDACTED
 
 
 def test_exception_logs_type_only() -> None:
