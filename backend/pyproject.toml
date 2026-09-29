@@ -1,0 +1,161 @@
+# Backend de vigia-platform (U-02, TASK-101). Paquete `vigia_platform` en `src/`.
+# Consume `vigia-contracts` por `git+ssh` (ADR-004) fijado por hash de commit de `main`
+# durante el desarrollo; TASK-153 lo cambia a la etiqueta `v1.0.0`.
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vigia-platform"
+version = "0.1.0"
+description = "Plataforma núcleo de Vigía: identidad, expediente y servicios transversales."
+license = { text = "Todos los derechos reservados" }
+requires-python = ">=3.12,<3.13"
+classifiers = [
+  "Private :: Do Not Upload",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+]
+dependencies = [
+  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@0365139aa69b7abe788b60a2224a108fa4e97c37#subdirectory=generated/python",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2,<3",
+  "sqlalchemy[asyncio]>=2,<3",
+  "asyncpg>=0.29",
+  "alembic>=1.13",
+  "boto3>=1.35",
+  "httpx>=0.27",
+  "argon2-cffi>=23.1",
+  "pyotp>=2.9",
+  "qrcode>=8",
+  "cryptography>=42",
+  "rfc8785>=0.1.4",
+  "opentelemetry-sdk>=1.27",
+  "opentelemetry-instrumentation-fastapi>=0.48b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
+  "opentelemetry-instrumentation-httpx>=0.48b0",
+  "opentelemetry-instrumentation-botocore>=0.48b0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "hypothesis>=6",
+  "pytest-benchmark>=4",
+  "coverage>=7",
+  "testcontainers>=4.8",
+  "moto>=5",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+# La dependencia de `vigia-contracts` es una referencia directa (git+ssh), permitida por PEP 508.
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vigia_platform"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/vigia_platform"]
+
+# --- ruff -----------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle
+  "W",
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # bugbear
+  "UP",  # pyupgrade
+  "S",   # bandit: S301 pickle, S302 marshal, S307 eval, S506 yaml.load inseguro, S608 SQL por formato
+  "DTZ", # flake8-datetimez: prohibidos los `datetime` sin zona (BR-NUC-47)
+  "TID", # banned-api: deserialización insegura (NFR-NUC-27) y hora del sistema (PAT-NUC-RES-07)
+  "SIM",
+  "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603"]
+"tools/**" = ["S603"]
+# `shared.clock` es el único paquete autorizado a leer la hora del sistema (PAT-NUC-RES-07).
+"src/vigia_platform/shared/clock/**" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# Deserialización segura (NFR-NUC-27, SECURITY-13): solo JSON a través de los modelos estrictos.
+# Hora del sistema (PAT-NUC-RES-07): solo `vigia_platform.shared.clock` la lee; el resto recibe
+# un `Clock`. `tools/lint_rules.py` (VIG003) repite esta regla sobre `src/` con resolución de alias.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"_pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"cPickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"dill".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"shelve".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"marshal".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
+"yaml.load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"yaml.load_all".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load_all."
+"yaml.unsafe_load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"yaml.full_load".msg = "Prohibido por NFR-NUC-27: usa yaml.safe_load."
+"builtins.eval".msg = "Prohibido por NFR-NUC-27."
+"datetime.datetime.now".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.datetime.utcnow".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.datetime.today".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"datetime.date.today".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.time".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.time_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.monotonic".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.monotonic_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.perf_counter".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+"time.perf_counter_ns".msg = "Hora del sistema solo en vigia_platform.shared.clock (PAT-NUC-RES-07): inyecta Clock."
+
+# --- mypy -----------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tools", "tests"]
+strict = true
+warn_unreachable = true
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# --- pytest ---------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+  "nightly: prueba que solo corre con el perfil nightly (--hypothesis-profile=nightly)",
+  "integration: prueba con PostgreSQL o LocalStack en contenedores (testcontainers; requiere Docker)",
+]
+
+# --- coverage (NFR-NUC-45) ------------------------------------------------
+
+[tool.coverage.run]
+source_pkgs = ["vigia_platform"]
+parallel = true
+relative_files = true
+
+[tool.coverage.paths]
+vigia_platform = ["src/vigia_platform", "*/src/vigia_platform"]
+
+[tool.coverage.report]
+skip_empty = true
