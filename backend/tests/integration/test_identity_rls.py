@@ -141,9 +141,19 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
 
     policies: dict[str, dict[str, str]] = {}
     for row in await superuser.fetch(
-        "SELECT tablename, policyname, permissive, cmd, roles::text[] AS roles FROM pg_policies"
-        " WHERE schemaname = 'identity'"
+        "SELECT tablename, policyname, permissive, cmd, roles::text[] AS roles, qual"
+        " FROM pg_policies WHERE schemaname = 'identity'"
     ):
+        if (row["tablename"], row["policyname"]) == ("user_account", "login_lookup"):
+            # nuc_0006 (TASK-124): solo lectura, solo el dueño y solo con la variable que fija
+            # identity.login_organization; vigia_app no la tiene.
+            assert (row["cmd"], row["roles"], row["permissive"]) == (
+                "SELECT",
+                ["vigia_migrate"],
+                "PERMISSIVE",
+            ), dict(row)
+            assert "vigia.login_lookup" in row["qual"], dict(row)
+            continue
         assert row["cmd"] == "ALL" and row["roles"] == ["public"], dict(row)
         policies.setdefault(row["tablename"], {})[row["policyname"]] = row["permissive"]
     with_plant_or_zone = {
