@@ -191,9 +191,9 @@ PROBE_TYPES = (
 )
 
 
-def build_registry() -> RecordTypeRegistry:
+def build_registry(extra_types: Sequence[RecordType] = ()) -> RecordTypeRegistry:
     registry = RecordTypeRegistry()
-    for definition in (*U02_RECORD_TYPES, *PROBE_TYPES):
+    for definition in (*U02_RECORD_TYPES, *PROBE_TYPES, *extra_types):
         registry.register(definition)
     return registry
 
@@ -421,14 +421,21 @@ class WriterEnvironment:
 
 @contextlib.contextmanager
 def writer_environment(
-    migrated: MigratedDatabase, *, pool_size: int = 6, lock_timeout_ms: int = 2_000
+    migrated: MigratedDatabase,
+    *,
+    pool_size: int = 6,
+    lock_timeout_ms: int = 2_000,
+    extra_types: Sequence[RecordType] = (),
 ) -> Iterator[WriterEnvironment]:
-    """Escritor sobre la base migrada, como ``vigia_app``, con los tipos de prueba sincronizados."""
+    """Escritor sobre la base migrada, como ``vigia_app``, con los tipos de prueba sincronizados.
+
+    ``extra_types`` añade tipos al registro (p. ej. los de U-03 que lee la cobertura).
+    """
     loop = DatabaseLoop()
     database = app_database(migrated, worker_pool_size=pool_size, lock_timeout_ms=lock_timeout_ms)
     probed = ProbedDatabase(database)
     clock = SimulatedClock(NOW)
-    registry = build_registry()
+    registry = build_registry(extra_types)
     catalog = probe_catalog()
     system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
 
