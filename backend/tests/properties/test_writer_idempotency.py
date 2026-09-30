@@ -300,6 +300,9 @@ def test_hostile_content_ends_in_content_invalid(
     context = unit_context(place.organization_id, ActorUnit.U02)
     rejection = _rejected(_write(environment, context, ZONE_TYPE, document))
     assert rejection.code is LedgerRejectionCode.CONTENT_INVALID
+    if isinstance(document, dict) and "big" in document:
+        # El tope de 256 KB se aplica antes de validar el esquema: sin puntero de campo.
+        assert rejection.field is None
 
 
 @pytest.mark.parametrize(
