@@ -208,7 +208,11 @@ def test_existing_role_with_forbidden_attributes_fails_closed(
     finally:
         asyncio.run(_run(cluster.superuser, cleanup))
     assert failed.returncode != 0
-    assert f"{role} ya existe con SUPERUSER" in failed.stderr
+    # El mensaje también aparece en el SQL del bloque que se muestra con el error: se exige la
+    # excepción que levantó el propio bloque (RAISE, SQLSTATE P0001), no cualquier fallo.
+    assert f"<class 'asyncpg.exceptions.RaiseError'>: {role} ya existe con SUPERUSER" in (
+        failed.stderr
+    )
     leftovers = asyncio.run(
         _run(
             cluster.as_role(MASTER, database),

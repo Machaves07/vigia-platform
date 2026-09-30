@@ -6,15 +6,20 @@ así que un usuario de otra organización no existe para el almacén (``not_foun
 
 - La fila de ``identity.totp_credential`` solo guarda ``secret_encrypted`` y
   ``data_key_wrapped`` (cifrado de sobre); el secreto en claro nunca llega aquí.
-- ``save_enrollment`` sustituye una credencial **desactivada** (``ON CONFLICT ... WHERE
-  disabled_at IS NOT NULL``) y nunca una activa: con una activa, ``AlreadyEnrolled``.
-- ``advance_step`` fija ``last_accepted_step`` solo si el paso es mayor que el guardado, en la
-  misma sentencia: dos verificaciones concurrentes del mismo paso no se aceptan las dos.
-- Los códigos de recuperación válidos son los sin usar **de la inscripción vigente**:
-  ``generated_at = enrolled_at`` de una credencial activa. Los de inscripciones anteriores no se
-  borran (``vigia_app`` no tiene ``DELETE``) y dejan de valer.
-- ``reset`` desactiva la credencial, borra ``second_factor_enrolled_at``, cierra las sesiones
-  activas con ``second_factor_reset`` y audita ``second_factor_reset`` en la misma transacción.
+- Una credencial está **confirmada** cuando ``user_account.second_factor_enrolled_at`` es su
+  ``enrolled_at``: el usuario demostró un primer código (``confirm_enrollment``, BR-NUC-22).
+- ``save_enrollment`` sustituye una credencial **desactivada o sin confirmar** (``ON CONFLICT ...
+  WHERE``) y nunca una activa y confirmada: con una así, ``AlreadyEnrolled``. No marca la
+  inscripción ni la audita: eso lo hace ``confirm_enrollment`` en su transacción.
+- ``advance_step`` fija ``last_accepted_step`` solo si la credencial está activa y confirmada y
+  el paso es mayor que el guardado, en la misma sentencia: dos verificaciones concurrentes del
+  mismo paso no se aceptan las dos.
+- Los códigos de recuperación válidos son los sin usar **de la inscripción vigente y
+  confirmada**: ``generated_at = enrolled_at`` de una credencial activa y confirmada. Los de
+  inscripciones anteriores no se borran (``vigia_app`` no tiene ``DELETE``) y dejan de valer.
+- ``reset`` desactiva la credencial, borra ``second_factor_enrolled_at``, revoca las sesiones
+  activas con ``second_factor_reset`` y audita ``second_factor_reset`` y el cierre de sesiones en
+  la misma transacción.
 """
 
 from __future__ import annotations
@@ -26,12 +31,14 @@ from typing import Final
 
 from sqlalchemy import text
 
+from vigia_platform.identity.adapters.session_store import end_user_sessions
 from vigia_platform.identity.auth.second_factor import (
     AlreadyEnrolled,
     RecoveryCodeRecord,
     SecondFactorNotFound,
     TotpCredential,
 )
+from vigia_platform.identity.auth.sessions import SessionEndReason
 from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter, ResourceRef
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.context import ScopeContext
@@ -40,9 +47,15 @@ __all__ = ["PostgresSecondFactorStore"]
 
 _USER_RESOURCE: Final = "user"
 
+# Una credencial ``c`` está confirmada cuando la inscripción del usuario es la suya:
+# EXISTS (SELECT FROM identity.user_account u WHERE u.user_id = c.user_id
+#         AND u.second_factor_enrolled_at = c.enrolled_at). Va escrita en cada sentencia.
 _SELECT_CREDENTIAL: Final = text(
-    "SELECT user_id, organization_id, secret_encrypted, data_key_wrapped, enrolled_at,"
-    " last_accepted_step, disabled_at FROM identity.totp_credential WHERE user_id = :user_id"
+    "SELECT c.user_id, c.organization_id, c.secret_encrypted, c.data_key_wrapped, c.enrolled_at,"
+    " c.last_accepted_step, c.disabled_at,"
+    " EXISTS (SELECT FROM identity.user_account u WHERE u.user_id = c.user_id"
+    " AND u.second_factor_enrolled_at = c.enrolled_at) AS confirmed"
+    " FROM identity.totp_credential c WHERE c.user_id = :user_id"
 )
 _UPSERT_CREDENTIAL: Final = text(
     "INSERT INTO identity.totp_credential (user_id, organization_id, secret_encrypted,"
@@ -53,6 +66,9 @@ _UPSERT_CREDENTIAL: Final = text(
     " data_key_wrapped = EXCLUDED.data_key_wrapped, enrolled_at = EXCLUDED.enrolled_at,"
     " last_accepted_step = NULL, disabled_at = NULL"
     " WHERE identity.totp_credential.disabled_at IS NOT NULL"
+    " OR NOT EXISTS (SELECT FROM identity.user_account u"
+    " WHERE u.user_id = identity.totp_credential.user_id"
+    " AND u.second_factor_enrolled_at = identity.totp_credential.enrolled_at)"
     " RETURNING user_id"
 )
 _INSERT_RECOVERY_CODE: Final = text(
@@ -60,21 +76,33 @@ _INSERT_RECOVERY_CODE: Final = text(
     " generated_at) VALUES (:recovery_code_id, :user_id, :organization_id, :code_hash,"
     " :generated_at)"
 )
+_USER_EXISTS: Final = text("SELECT 1 FROM identity.user_account WHERE user_id = :user_id")
+_CONFIRM_STEP: Final = text(
+    "UPDATE identity.totp_credential c SET last_accepted_step = :step"
+    " WHERE c.user_id = :user_id AND c.disabled_at IS NULL AND c.enrolled_at = :enrolled_at"
+    " AND NOT EXISTS (SELECT FROM identity.user_account u WHERE u.user_id = c.user_id"
+    " AND u.second_factor_enrolled_at = c.enrolled_at)"
+    " AND (c.last_accepted_step IS NULL OR c.last_accepted_step < :step)"
+    " RETURNING c.user_id"
+)
 _MARK_ENROLLED: Final = text(
     "UPDATE identity.user_account SET second_factor_enrolled_at = :enrolled_at"
-    " WHERE user_id = :user_id"
+    " WHERE user_id = :user_id AND second_factor_enrolled_at IS NULL RETURNING user_id"
 )
-_USER_EXISTS: Final = text("SELECT 1 FROM identity.user_account WHERE user_id = :user_id")
 _ADVANCE_STEP: Final = text(
-    "UPDATE identity.totp_credential SET last_accepted_step = :step"
-    " WHERE user_id = :user_id AND disabled_at IS NULL"
-    " AND (last_accepted_step IS NULL OR last_accepted_step < :step)"
-    " RETURNING user_id"
+    "UPDATE identity.totp_credential c SET last_accepted_step = :step"
+    " WHERE c.user_id = :user_id AND c.disabled_at IS NULL"
+    " AND EXISTS (SELECT FROM identity.user_account u WHERE u.user_id = c.user_id"
+    " AND u.second_factor_enrolled_at = c.enrolled_at)"
+    " AND (c.last_accepted_step IS NULL OR c.last_accepted_step < :step)"
+    " RETURNING c.user_id"
 )
 _UNUSED_RECOVERY_CODES: Final = text(
     "SELECT r.recovery_code_id, r.user_id, r.organization_id, r.code_hash, r.generated_at,"
     " r.used_at FROM identity.recovery_code r"
     " JOIN identity.totp_credential c ON c.user_id = r.user_id"
+    " JOIN identity.user_account u ON u.user_id = c.user_id"
+    " AND u.second_factor_enrolled_at = c.enrolled_at"
     " WHERE r.user_id = :user_id AND r.used_at IS NULL AND c.disabled_at IS NULL"
     " AND r.generated_at = c.enrolled_at"
     " ORDER BY r.recovery_code_id"
@@ -84,6 +112,8 @@ _MARK_RECOVERY_CODE_USED: Final = text(
     " FROM identity.totp_credential c"
     " WHERE r.recovery_code_id = :recovery_code_id AND r.used_at IS NULL"
     " AND c.user_id = r.user_id AND c.disabled_at IS NULL AND r.generated_at = c.enrolled_at"
+    " AND EXISTS (SELECT FROM identity.user_account u WHERE u.user_id = c.user_id"
+    " AND u.second_factor_enrolled_at = c.enrolled_at)"
     " RETURNING r.recovery_code_id"
 )
 _CLEAR_ENROLLED: Final = text(
@@ -93,11 +123,6 @@ _CLEAR_ENROLLED: Final = text(
 _DISABLE_CREDENTIAL: Final = text(
     "UPDATE identity.totp_credential SET disabled_at = :now"
     " WHERE user_id = :user_id AND disabled_at IS NULL"
-)
-_CLOSE_SESSIONS: Final = text(
-    "UPDATE identity.session SET status = 'revoked', end_reason = 'second_factor_reset',"
-    " ended_at = :now WHERE user_id = :user_id AND status = 'active'"
-    " RETURNING session_id_hash"
 )
 
 
@@ -128,6 +153,7 @@ class PostgresSecondFactorStore:
             enrolled_at=row.enrolled_at,
             last_accepted_step=row.last_accepted_step,
             disabled_at=row.disabled_at,
+            confirmed=bool(row.confirmed),
         )
 
     async def save_enrollment(
@@ -166,16 +192,28 @@ class PostgresSecondFactorStore:
                         "generated_at": record.generated_at,
                     },
                 )
-            await transaction.execute(
-                _MARK_ENROLLED,
-                {"user_id": credential.user_id, "enrolled_at": credential.enrolled_at},
+
+    async def confirm_enrollment(
+        self, context: ScopeContext, user_id: uuid.UUID, enrolled_at: datetime, step: int
+    ) -> bool:
+        async with self._database.transaction(context) as transaction:
+            accepted = await transaction.execute(
+                _CONFIRM_STEP, {"user_id": user_id, "enrolled_at": enrolled_at, "step": step}
             )
+            if accepted.first() is None:
+                return False
+            marked = await transaction.execute(
+                _MARK_ENROLLED, {"user_id": user_id, "enrolled_at": enrolled_at}
+            )
+            if marked.first() is None:
+                raise _Conflict()
             await self._audit.append(
                 context,
                 AuditOperation.SECOND_FACTOR_ENROLLED,
-                resource=ResourceRef(_USER_RESOURCE, credential.user_id),
+                resource=ResourceRef(_USER_RESOURCE, user_id),
                 transaction=transaction,
             )
+        return True
 
     async def advance_step(self, context: ScopeContext, user_id: uuid.UUID, step: int) -> bool:
         async with self._database.transaction(context) as transaction:
@@ -214,8 +252,8 @@ class PostgresSecondFactorStore:
             if (await transaction.execute(_CLEAR_ENROLLED, {"user_id": user_id})).first() is None:
                 raise SecondFactorNotFound()
             await transaction.execute(_DISABLE_CREDENTIAL, {"user_id": user_id, "now": now})
-            closed = len(
-                (await transaction.execute(_CLOSE_SESSIONS, {"user_id": user_id, "now": now})).all()
+            closed = await end_user_sessions(
+                transaction, self._audit, user_id, SessionEndReason.SECOND_FACTOR_RESET, now
             )
             await self._audit.append(
                 context,
@@ -225,3 +263,10 @@ class PostgresSecondFactorStore:
                 transaction=transaction,
             )
         return closed
+
+
+class _Conflict(Exception):
+    """El paso se aceptó pero la marca de inscripción ya estaba: se revierte todo."""
+
+    def __init__(self) -> None:
+        super().__init__("la inscripción cambió durante la confirmación")

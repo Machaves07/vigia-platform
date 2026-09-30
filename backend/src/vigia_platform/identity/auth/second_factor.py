@@ -9,7 +9,13 @@ para todos (BR-NUC-21). Lo que decide si se exige es ``user_account.second_facto
   generado en el servidor con ``qrcode`` (SVG) y 10 códigos de recuperación que se muestran
   **una sola vez** y se guardan como Argon2id. Sin KMS no hay inscripción:
   ``SecretsUnavailable`` (``temporarily_unavailable``) y nada se guarda; el factor nunca se
-  omite (FS-NUC-05 b). Un usuario con una credencial activa no se reinscribe sin ``reset``.
+  omite (FS-NUC-05 b). La credencial nace **sin confirmar**: no cuenta como inscrita, no
+  verifica códigos y una inscripción nueva la sustituye (quien no llegó a escanear el QR vuelve
+  a empezar). Un usuario con una credencial confirmada no se reinscribe sin ``reset``.
+- ``confirm_enrollment(context, credential, code, now) -> bool``: la inscripción solo cuenta
+  cuando el usuario demuestra un primer TOTP válido (BR-NUC-22). En una transacción del almacén
+  acepta ese paso, fija ``second_factor_enrolled_at`` y audita ``second_factor_enrolled``.
+- ``credential(context, user_id)``: la credencial guardada (activa o no, confirmada o no).
 - ``verify_totp(context, credential, code, now) -> bool``: RFC 6238 con paso de 30 s, 6 dígitos
   ASCII y tolerancia de ±1 paso. Solo se acepta un paso **mayor** que ``last_accepted_step``
   (``business-logic-model.md`` §1), y el almacén lo avanza con una condición en la misma
@@ -170,10 +176,17 @@ class TotpCredential:
     enrolled_at: datetime
     last_accepted_step: int | None = None
     disabled_at: datetime | None = None
+    confirmed: bool = False
+    """El usuario demostró un primer código: ``second_factor_enrolled_at = enrolled_at``."""
 
     @property
     def active(self) -> bool:
         return self.disabled_at is None
+
+    @property
+    def usable(self) -> bool:
+        """Activa y confirmada: la única que verifica códigos."""
+        return self.active and self.confirmed
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +220,7 @@ class SecondFactorStore(Protocol):
     async def get_credential(
         self, context: ScopeContext, user_id: uuid.UUID
     ) -> TotpCredential | None:
-        """La credencial del usuario (activa o desactivada) o ``None``."""
+        """La credencial del usuario (activa o desactivada, confirmada o no) o ``None``."""
         ...
 
     async def save_enrollment(
@@ -216,24 +229,31 @@ class SecondFactorStore(Protocol):
         credential: TotpCredential,
         recovery_codes: Sequence[RecoveryCodeRecord],
     ) -> None:
-        """Guarda la credencial nueva (o sustituye una desactivada), los códigos, marca
-        ``second_factor_enrolled_at`` y audita ``second_factor_enrolled``, todo o nada.
+        """Guarda la credencial nueva **sin confirmar** (o sustituye una desactivada o sin
+        confirmar) y sus códigos, todo o nada; no marca la inscripción ni la audita.
 
         Raises:
-            AlreadyEnrolled: el usuario ya tiene una credencial activa.
+            AlreadyEnrolled: el usuario ya tiene una credencial activa y confirmada.
             SecondFactorNotFound: el usuario no existe en la organización del contexto.
         """
         ...
 
+    async def confirm_enrollment(
+        self, context: ScopeContext, user_id: uuid.UUID, enrolled_at: datetime, step: int
+    ) -> bool:
+        """Si la credencial activa sin confirmar es la de ``enrolled_at``: acepta ``step``, fija
+        ``second_factor_enrolled_at`` y audita ``second_factor_enrolled``; ``True`` si confirmó."""
+        ...
+
     async def advance_step(self, context: ScopeContext, user_id: uuid.UUID, step: int) -> bool:
-        """Fija ``last_accepted_step = step`` solo si la credencial está activa y ``step`` es
-        mayor que el guardado; ``True`` si cambió una fila."""
+        """Fija ``last_accepted_step = step`` solo si la credencial está activa y confirmada y
+        ``step`` es mayor que el guardado; ``True`` si cambió una fila."""
         ...
 
     async def unused_recovery_codes(
         self, context: ScopeContext, user_id: uuid.UUID
     ) -> Sequence[RecoveryCodeRecord]:
-        """Los códigos sin usar de la inscripción vigente (credencial activa)."""
+        """Los códigos sin usar de la inscripción vigente (credencial activa y confirmada)."""
         ...
 
     async def mark_recovery_code_used(
@@ -410,14 +430,14 @@ class SecondFactorService:
 
         Raises:
             SecretsUnavailable: KMS no responde (``temporarily_unavailable``); nada se guardó.
-            AlreadyEnrolled: ya tiene una credencial activa.
+            AlreadyEnrolled: ya tiene una credencial activa y confirmada.
             SecondFactorNotFound: ``user`` no es de la organización del contexto.
         """
         _require_context(context)
         if context.organization_id != user.organization_id:
             raise SecondFactorNotFound()
         existing = await self._store.get_credential(context, user.user_id)
-        if existing is not None and existing.active:
+        if existing is not None and existing.usable:
             raise AlreadyEnrolled()
         secret = self._random_bytes(TOTP_SECRET_BYTES)
         if not isinstance(secret, bytes) or len(secret) != TOTP_SECRET_BYTES:
@@ -450,29 +470,62 @@ class SecondFactorService:
         svg = await self._cpu_pool.run(qr_svg, uri)
         return EnrollmentChallenge(credential, uri, svg, codes)
 
-    async def verify_totp(
+    async def credential(self, context: ScopeContext, user_id: uuid.UUID) -> TotpCredential | None:
+        """La credencial guardada de ``user_id``; ``None`` si no tiene o es de otra organización."""
+        _require_context(context)
+        return await self._store.get_credential(context, user_id)
+
+    async def confirm_enrollment(
         self, context: ScopeContext, credential: TotpCredential, code: str, now: datetime
     ) -> bool:
-        """``True`` si ``code`` acredita un paso nuevo dentro de ±1 paso y el almacén lo fijó.
-
-        Un código mal formado o una credencial desactivada no llegan a descifrar nada.
+        """``True`` si ``code`` es un primer TOTP válido de la credencial sin confirmar y el
+        almacén confirmó la inscripción (BR-NUC-22).
 
         Raises:
             SecretsUnavailable: KMS no responde y la clave de datos no está en memoria.
             DecryptionFailed: la fila no se autentica (otra credencial o bytes alterados).
         """
         _require_context(context)
-        if not credential.active or not isinstance(code, str) or not _TOTP_CODE.fullmatch(code):
+        if not credential.active or credential.confirmed:
             return False
+        step = await self._matching_step(credential, code, now)
+        if step is None:
+            return False
+        return await self._store.confirm_enrollment(
+            context, credential.user_id, credential.enrolled_at, step
+        )
+
+    async def verify_totp(
+        self, context: ScopeContext, credential: TotpCredential, code: str, now: datetime
+    ) -> bool:
+        """``True`` si ``code`` acredita un paso nuevo dentro de ±1 paso y el almacén lo fijó.
+
+        Un código mal formado o una credencial desactivada o sin confirmar no llegan a descifrar
+        nada.
+
+        Raises:
+            SecretsUnavailable: KMS no responde y la clave de datos no está en memoria.
+            DecryptionFailed: la fila no se autentica (otra credencial o bytes alterados).
+        """
+        _require_context(context)
+        if not credential.usable:
+            return False
+        step = await self._matching_step(credential, code, now)
+        if step is None:
+            return False
+        return await self._store.advance_step(context, credential.user_id, step)
+
+    async def _matching_step(
+        self, credential: TotpCredential, code: str, now: datetime
+    ) -> int | None:
+        if not isinstance(code, str) or not _TOTP_CODE.fullmatch(code):
+            return None
         secret = await self._crypto.decrypt(
             credential.secret_encrypted,
             credential.data_key_wrapped,
             credential_aad(credential.organization_id, credential.user_id),
         )
-        step = match_totp(secret, code, now, credential.last_accepted_step)
-        if step is None:
-            return False
-        return await self._store.advance_step(context, credential.user_id, step)
+        return match_totp(secret, code, now, credential.last_accepted_step)
 
     async def consume_recovery_code(
         self, context: ScopeContext, credential: TotpCredential, code: str
@@ -480,7 +533,7 @@ class SecondFactorService:
         """``True`` si ``code`` es un código sin usar de la inscripción vigente; queda usado."""
         _require_context(context)
         canonical = normalize_recovery_code(code)
-        if canonical is None or not credential.active:
+        if canonical is None or not credential.usable:
             return False
         unused = await self._store.unused_recovery_codes(context, credential.user_id)
         for record in unused:
