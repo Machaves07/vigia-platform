@@ -18,6 +18,7 @@ from tests.second_factor_support import FakeKms
 from tests.signing_support import START
 from vigia_platform.shared.api.app import AppConfig, AppRuntime, UnitRegistration, create_app
 from vigia_platform.shared.db import DatabaseHealth, TemporarilyUnavailable
+from vigia_platform.shared.observability.redaction import AttributePolicy
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.signing.keys import SigningPurpose
 from vigia_platform.shared.signing.service import SigningStartupError
@@ -167,6 +168,8 @@ class World:
             "registries": (self._synchronize,),
             "sleep": self._sleep,
             "on_startup_failure": self.exits.append,
+            # Una política propia: la global no se toca en las pruebas.
+            "attribute_policy": AttributePolicy(),
         }
         values.update(changes)
         return AppRuntime(**values)

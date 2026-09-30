@@ -87,7 +87,11 @@ from vigia_platform.shared.api.labels import DEFAULT_LABELS_PATH, LabelsInvalid,
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeLevel
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.observability.redaction import DEFAULT_POLICY, redact_text
+from vigia_platform.shared.observability.redaction import (
+    DEFAULT_POLICY,
+    AttributePolicy,
+    redact_text,
+)
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
@@ -224,6 +228,8 @@ class AppRuntime:
     authorizer: Authorizer = field(default_factory=DenyAll)
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     on_startup_failure: Callable[[int], None] = _terminate
+    attribute_policy: AttributePolicy = DEFAULT_POLICY
+    """Política de redacción que amplía la fábrica con las rutas y los motivos de salud."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -479,7 +485,6 @@ def _assemble(
     install_error_handlers(app, catalog, clock)
     app.add_middleware(ErrorBoundary, catalog=catalog, clock=clock)
     app.openapi = lambda: _openapi(app)  # type: ignore[method-assign]
-    _register_observability(app)
     return app
 
 
@@ -488,15 +493,15 @@ def _registrable(values: Iterable[str]) -> list[str]:
     return [v for v in values if _ROUTE_TEMPLATE.fullmatch(v) and redact_text(v) == v]
 
 
-def _register_observability(app: FastAPI) -> None:
+def _register_observability(app: FastAPI, policy: AttributePolicy) -> None:
     """Amplía las listas cerradas de la redacción con las rutas y los motivos de esta app.
 
     Una plantilla con forma de token (p. ej. 20 o más caracteres seguidos sin punto) sale en
     los registros como ``[redactado]``: la política no la admite y aquí no se registra.
     """
     templates = [route.path for route in iter_declared_routes(app.routes) if route.is_api_route]
-    DEFAULT_POLICY.register("route", _registrable(templates))
-    DEFAULT_POLICY.register(
+    policy.register("route", _registrable(templates))
+    policy.register(
         "reason", _registrable([c.value for c in ReadinessCheck] + [c.value for c in StartupCheck])
     )
 
@@ -533,6 +538,7 @@ def create_app(
         permissions=platform_permissions() if permissions is None else permissions,
         lifespan=lifespan,
     )
+    _register_observability(app, runtime.attribute_policy)
     setattr(app.state, AUTHORIZER_STATE_KEY, runtime.authorizer)
     setattr(app.state, READINESS_STATE_KEY, supervisor)
     return app

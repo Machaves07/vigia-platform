@@ -64,6 +64,7 @@ from vigia_platform.shared.api.app import (
 from vigia_platform.shared.api.health import READINESS_BUDGET_SECONDS
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
 from vigia_platform.shared.observability.metrics import MetricName
+from vigia_platform.shared.observability.redaction import AttributePolicy
 from vigia_platform.shared.secrets import (
     AwsCredentials,
     AwsSettings,
@@ -193,6 +194,7 @@ class Stack:
             signing=self.signing,
             kms=KmsAdapter(_aws(self.kms.url)),
             on_startup_failure=self.exits.append,
+            attribute_policy=AttributePolicy(),
         )
         return create_app(config, runtime=runtime)
 

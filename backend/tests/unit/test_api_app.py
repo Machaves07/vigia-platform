@@ -29,6 +29,7 @@ from vigia_platform.shared.api.app import (
 )
 from vigia_platform.shared.api.errors import ApiErrorBody
 from vigia_platform.shared.api.health import READINESS_BUDGET_SECONDS
+from vigia_platform.shared.observability.redaction import DEFAULT_POLICY, AttributePolicy
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.signing.keys import SigningPurpose
 
@@ -251,6 +252,17 @@ def test_docs_exist_outside_production(environment: str) -> None:
         spec = client.get("/openapi.json")
     assert spec.status_code == 200 and "/health/live" in spec.json()["paths"]
     assert "/health/ready" not in spec.json()["paths"]
+
+
+# --- Redacción ---------------------------------------------------------------------------------
+
+
+def test_routes_and_reasons_are_registered_in_the_given_policy_only() -> None:
+    policy = AttributePolicy()
+    World().app(runtime={"attribute_policy": policy})
+    assert {"/health/live", "/health/ready"} <= policy.values("route")
+    assert {"database", "signing_keys", "data_key"} <= policy.values("reason")
+    assert DEFAULT_POLICY.values("route") == frozenset()
 
 
 # --- Configuración -----------------------------------------------------------------------------
