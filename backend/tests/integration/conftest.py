@@ -15,11 +15,15 @@ Dos modos, elegidos con la variable de entorno ``VIGIA_TEST_USE_COMPOSE``:
 Si Docker no está disponible, o el entorno de compose no responde, la fixture **falla** con un
 mensaje en español: una prueba de integración nunca pasa sin ejecutar nada.
 
-Las fixtures son de sesión y cualquier prueba de integración las reutiliza:
+Las fixtures son de sesión y cualquier prueba las reutiliza. Se declaran en ``tests/conftest.py``
+con los generadores de este módulo, para que las propiedades de ``tests/properties/`` que
+necesitan la base (TASK-108) compartan el mismo contenedor que ``tests/integration/``:
 
-- ``postgres_endpoint``: dónde conectarse a PostgreSQL 16 (``PostgresEndpoint``);
-- ``localstack_endpoint``: dónde llamar a S3, KMS y Secrets Manager (``LocalStackEndpoint``),
-  con clientes de boto3 que ya llevan tiempos de espera (PAT-NUC-RES-03, regla ``VIG003``).
+- ``postgres_endpoint`` (``postgres_endpoint_session``): dónde conectarse a PostgreSQL 16
+  (``PostgresEndpoint``);
+- ``localstack_endpoint`` (``localstack_endpoint_session``): dónde llamar a S3, KMS y Secrets
+  Manager (``LocalStackEndpoint``), con clientes de boto3 que ya llevan tiempos de espera
+  (PAT-NUC-RES-03, regla ``VIG003``).
 
 Solo datos generados (NFR-CTR-43). Las credenciales son las fijas del entorno local.
 """
@@ -240,8 +244,7 @@ def _fail_without_compose(service: str, where: str) -> NoReturn:
     )
 
 
-@pytest.fixture(scope="session")
-def postgres_endpoint() -> Iterator[PostgresEndpoint]:
+def postgres_endpoint_session() -> Iterator[PostgresEndpoint]:
     """PostgreSQL 16 con la base ``vigia``: contenedor propio o el de ``docker compose``."""
     if use_compose():
         endpoint = PostgresEndpoint(
@@ -281,8 +284,7 @@ def postgres_endpoint() -> Iterator[PostgresEndpoint]:
         container.stop()
 
 
-@pytest.fixture(scope="session")
-def localstack_endpoint() -> Iterator[LocalStackEndpoint]:
+def localstack_endpoint_session() -> Iterator[LocalStackEndpoint]:
     """LocalStack comunitario con S3, KMS y Secrets Manager en marcha."""
     if use_compose():
         port = _compose_port("VIGIA_LOCAL_LOCALSTACK_PORT", LOCALSTACK_PORT)
