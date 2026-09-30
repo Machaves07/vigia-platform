@@ -156,6 +156,8 @@ class PersistedRecordType:
     evidence_paths: tuple[str, ...]
     label_rule: Mapping[str, str] | None
     outbox_events: tuple[str, ...]
+    chain_follows_scope: bool = False
+    """Columna de ``nuc_0005``: el disparador de encadenado la usa para BR-NUC-45."""
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,7 @@ class CompiledType:
                 None if definition.label_rule is None else dict(definition.label_rule.paths())
             ),
             outbox_events=definition.outbox_events,
+            chain_follows_scope=definition.chain_follows_scope,
         )
 
 
@@ -403,7 +406,7 @@ class RecordTypeRegistry:
             ]
         problems: list[str] = []
         current = latest.to_persisted()
-        for attribute in ("writer_unit", "chain_level", "source_key_path"):
+        for attribute in ("writer_unit", "chain_level", "source_key_path", "chain_follows_scope"):
             if getattr(row, attribute) != getattr(current, attribute):
                 problems.append(
                     f"{name}: «{attribute}» cambió de {getattr(row, attribute)!r} a "

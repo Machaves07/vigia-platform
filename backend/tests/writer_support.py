@@ -201,10 +201,10 @@ def build_registry(extra_types: Sequence[RecordType] = ()) -> RecordTypeRegistry
 _SAVE_RECORD_TYPE = text(
     "INSERT INTO ledger.record_type (record_type, writer_unit, chain_level, schema_version,"
     " content_schema, source_key_path, free_text_paths, evidence_paths, label_rule,"
-    " outbox_events) VALUES (:record_type, :writer_unit, :chain_level, :schema_version,"
-    " CAST(:content_schema AS jsonb), :source_key_path, CAST(:free_text_paths AS text[]),"
-    " CAST(:evidence_paths AS text[]), CAST(:label_rule AS jsonb),"
-    " CAST(:outbox_events AS text[]))"
+    " outbox_events, chain_follows_scope) VALUES (:record_type, :writer_unit, :chain_level,"
+    " :schema_version, CAST(:content_schema AS jsonb), :source_key_path,"
+    " CAST(:free_text_paths AS text[]), CAST(:evidence_paths AS text[]),"
+    " CAST(:label_rule AS jsonb), CAST(:outbox_events AS text[]), :chain_follows_scope)"
 )
 
 
@@ -417,6 +417,8 @@ class WriterEnvironment:
     audit: AuditWriter
     clock: SimulatedClock
     provider_organization_id: uuid.UUID
+    outbox: Outbox | None = None
+    """La bandeja del escritor, para quien publica fuera de él (p. ej. la auditoría)."""
 
 
 @contextlib.contextmanager
@@ -459,25 +461,27 @@ def writer_environment(
                         if row.label_rule is None
                         else json.dumps(row.label_rule),
                         "outbox_events": list(row.outbox_events),
+                        "chain_follows_scope": row.chain_follows_scope,
                     },
                 )
         registry.seal()
 
     storage = InstrumentedStorage(probed.probe)
     provider = uuid.uuid4()
+    outbox = Outbox(catalog, clock)
     writer = EscritorExpediente(
         database=probed,
         registry=registry,
         free_text=FreeTextPolicyRegistry(),
         evidence=EvidenceVerifier(storage, clock),
-        outbox=Outbox(catalog, clock),
+        outbox=outbox,
         clock=clock,
     )
     audit = AuditWriter(database=probed, clock=clock, provider_organization_id=provider)
     try:
         loop.run(synchronize())
         yield WriterEnvironment(
-            loop, migrated, probed, storage, registry, writer, audit, clock, provider
+            loop, migrated, probed, storage, registry, writer, audit, clock, provider, outbox
         )
     finally:
         loop.run(database.dispose())
