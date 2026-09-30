@@ -569,6 +569,8 @@ def localize_finding(document: Mapping[str, Any], place: Place) -> dict[str, Any
         finding[name] = str(getattr(place, name))
     for camera in finding["cameras"]:
         for clip in camera["clips"]:
+            # El kit repite identificadores entre ejemplos; cada clip real tiene su propia clave.
+            clip["clip_id"] = str(uuid7())
             clip["storage_key"] = place.storage_key(clip["clip_id"])
     return finding
 
