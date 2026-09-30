@@ -86,7 +86,7 @@ from vigia_platform.shared.context import (
     ScopeLevel,
     _seal_scope_context,
 )
-from vigia_platform.shared.db import ConnectionPort, Database, PoolPort, Transaction
+from vigia_platform.shared.db import ConnectionPort, Database, PoolPort, ProcessKind, Transaction
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.storage import (
@@ -324,6 +324,10 @@ class ProbedDatabase:
         pools = database._pools
         for pool_class, pool in list(pools.items()):
             pools[pool_class] = _ArmedPool(pool, self)
+
+    @property
+    def process(self) -> ProcessKind:
+        return self.database.process
 
     def transaction(self, context: ScopeContext) -> contextlib.AbstractAsyncContextManager[Any]:
         return self._transaction(context)
