@@ -212,9 +212,22 @@ def test_kms_data_key_and_node_ca_signature(localstack_endpoint: LocalStackEndpo
 
     async def scenario() -> None:
         kms = KmsAdapter(_settings(localstack_endpoint.url))
-        data_key = await kms.generate_data_key(symmetric)
+        context = {"vigia_purpose": "envelope"}
+        data_key = await kms.generate_data_key(symmetric, context=context)
         assert len(data_key.plaintext) == 32 and data_key.wrapped != data_key.plaintext
-        assert await kms.decrypt(data_key.wrapped) == data_key.plaintext
+        assert await kms.decrypt(data_key.wrapped, key_id=symmetric, context=context) == (
+            data_key.plaintext
+        )
+        # La clave de datos está ligada a su propósito y a su clave maestra (seguimiento de
+        # VIG-66): otro contexto u otra clave maestra no la descifran, y no es transitorio.
+        other_master = raw.create_key(Description="otra clave maestra")["KeyMetadata"]["KeyId"]
+        for key_id, other_context in (
+            (symmetric, {"vigia_purpose": "startup_check"}),
+            (symmetric, {"vigia_purpose": "envelope", "extra": "x"}),
+            (other_master, context),
+        ):
+            with pytest.raises(ValueError, match="no corresponde"):
+                await kms.decrypt(data_key.wrapped, key_id=key_id, context=other_context)
 
         message = b"TBSCertificate sintetico " + uuid.uuid4().bytes
         signature = await kms.sign(node_ca, message)
@@ -232,7 +245,7 @@ def test_kms_unreachable_is_unavailable_within_the_timeout() -> None:
     async def scenario() -> None:
         kms = KmsAdapter(_settings(_closed_port_url()))
         with pytest.raises(SecretsUnavailable):
-            await kms.generate_data_key("alias/vigia-secrets")
+            await kms.generate_data_key("alias/vigia-secrets", context={"vigia_purpose": "x"})
 
     asyncio.run(scenario())
 

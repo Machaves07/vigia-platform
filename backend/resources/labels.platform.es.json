@@ -1,0 +1,144 @@
+{
+  "api_error_code": {
+    "invalid_request": "La petición no es válida. Revisa los datos e inténtalo de nuevo.",
+    "not_found": "No se encontró el recurso solicitado.",
+    "unauthenticated": "Inicia sesión para continuar.",
+    "second_factor_required": "Confirma tu identidad con el segundo factor para continuar.",
+    "forbidden": "No tienes permiso para realizar esta acción.",
+    "throttled": "Demasiados intentos fallidos. Espera un momento antes de volver a intentarlo.",
+    "rate_limited": "Demasiadas peticiones. Espera un momento antes de volver a intentarlo.",
+    "payload_too_large": "La petición supera el tamaño permitido.",
+    "conflict": "La operación entra en conflicto con el estado actual. Actualiza e inténtalo de nuevo.",
+    "temporarily_unavailable": "El servicio no está disponible en este momento. Inténtalo de nuevo más tarde.",
+    "internal_error": "Se produjo un error inesperado. Si persiste, informa del identificador de la petición.",
+    "privacy_notice_required": "Debes aceptar el aviso de tratamiento de datos vigente para continuar.",
+    "period_too_long": "El periodo consultado es demasiado largo. Consulta un periodo más corto.",
+    "zone_without_node": "La zona no tiene un nodo asignado.",
+    "storage_unavailable": "El almacén de evidencias no está disponible en este momento. Inténtalo de nuevo más tarde."
+  },
+  "role": {
+    "coordinator_sst": "coordinador SST",
+    "line_manager": "mando de línea",
+    "plant_manager": "gerente de planta",
+    "administrator": "administrador",
+    "provider_installer": "proveedor o instalador",
+    "copasst": "COPASST",
+    "platform_operator": "operador de plataforma"
+  },
+  "scope_level": {
+    "organization": "organización",
+    "plant": "planta",
+    "zone": "zona"
+  },
+  "organization_kind": {
+    "client": "cliente",
+    "provider": "proveedora"
+  },
+  "organization_status": {
+    "active": "activa",
+    "suspended": "suspendida"
+  },
+  "account_status": {
+    "invited": "invitada",
+    "active": "activa",
+    "deactivated": "desactivada"
+  },
+  "session_status": {
+    "active": "activa",
+    "expired": "vencida",
+    "closed": "cerrada",
+    "revoked": "revocada"
+  },
+  "credential_kind": {
+    "password": "contraseña",
+    "totp": "código por tiempo",
+    "recovery_code": "código de recuperación"
+  },
+  "invitation_status": {
+    "pending": "pendiente",
+    "accepted": "aceptada",
+    "expired": "vencida",
+    "cancelled": "cancelada"
+  },
+  "throttle_subject_kind": {
+    "account": "cuenta",
+    "origin": "origen"
+  },
+  "concession_status": {
+    "active": "activa",
+    "expired": "vencida",
+    "revoked": "revocada"
+  },
+  "actor_kind": {
+    "user": "usuario",
+    "provider_user": "usuario del proveedor bajo concesión",
+    "node": "nodo",
+    "system": "sistema",
+    "operator": "operador de plataforma"
+  },
+  "context_origin": {
+    "session": "sesión",
+    "outbox_event": "evento de la bandeja",
+    "periodic_iteration": "iteración periódica",
+    "admin_command": "orden administrativa"
+  },
+  "signing_purpose": {
+    "catalog": "catálogo",
+    "gate": "compuertas",
+    "live_view_token": "token de vista en vivo",
+    "key_set": "conjunto de claves",
+    "checkpoint": "punto de control"
+  },
+  "key_status": {
+    "active": "activa",
+    "overlapping": "en solapamiento",
+    "retired": "retirada"
+  },
+  "chain_level": {
+    "plant": "cadena de planta",
+    "organization": "cadena de organización"
+  },
+  "checkpoint_kind": {
+    "ledger": "expediente",
+    "audit": "auditoría"
+  },
+  "audit_outcome": {
+    "success": "éxito",
+    "denied": "denegado",
+    "error": "error"
+  },
+  "coverage_state": {
+    "observable": "observable",
+    "degraded": "degradada",
+    "not_observable": "no observable"
+  },
+  "coverage_layer": {
+    "node_report": "lo que el nodo informa",
+    "platform_communication": "lo que la plataforma supo"
+  },
+  "platform_cause": {
+    "no_communication": "sin comunicación con el nodo",
+    "never_reported": "nunca reportó",
+    "zone_not_active": "zona no activa"
+  },
+  "communication_state": {
+    "unknown": "sin latido aún",
+    "reachable": "alcanzable",
+    "mute": "mudo"
+  },
+  "delivery_status": {
+    "pending": "pendiente",
+    "retrying": "en reintento",
+    "delivered": "entregado",
+    "dead_letter": "cola muerta"
+  },
+  "circuit_state": {
+    "closed": "cerrado",
+    "open": "abierto",
+    "half_open": "a prueba"
+  },
+  "verification_result": {
+    "intact": "íntegra",
+    "broken": "rota"
+  }
+}
