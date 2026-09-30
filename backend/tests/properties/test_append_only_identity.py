@@ -262,6 +262,19 @@ def mutations(draw: st.DrawFn, state: AppendOnly) -> Mutation:
     columns = sorted(state.columns[table])
     # Los grupos de cierre salen más a menudo: son los que más se parecen a la excepción.
     group = sorted(CLOSING_COLUMNS.get(table, ()))
+    if group and draw(st.booleans()):
+        # Un cierre válido más otra columna: el caso que la excepción nunca debe dejar pasar.
+        closing = {
+            "zone_node_assignment": (("unassigned_at", dt.datetime(2099, 1, 1, tzinfo=dt.UTC)),),
+            "role_assignment": (
+                ("removed_at", dt.datetime(2099, 1, 1, tzinfo=dt.UTC)),
+                ("removed_by", state.seed.operator_id),
+            ),
+            "provider_concession": (("status", "expired"),),
+        }[table]
+        extra = draw(st.sampled_from([column for column in columns if column not in group]))
+        value = draw(_VALUES[state.columns[table][extra]])
+        return Mutation(role, table, kind, target, (*closing, (extra, value)))
     chosen = draw(
         st.one_of(
             st.lists(st.sampled_from(columns), min_size=1, max_size=4, unique=True),
@@ -468,7 +481,8 @@ async def test_concession_is_closed_once(append_only: AppendOnly, app: Any, clos
         assert (
             await _fails(
                 app,
-                "UPDATE identity.provider_concession SET status = 'revoked' WHERE concession_id = $1",
+                "UPDATE identity.provider_concession SET status = 'revoked'"
+                " WHERE concession_id = $1",
                 concession,
             )
             == "23514"
@@ -498,6 +512,35 @@ async def test_concession_is_closed_once(append_only: AppendOnly, app: Any, clos
             ),
         ):
             assert await _fails(app, sql, *arguments) == RESTRICT_VIOLATION
+    finally:
+        await transaction.rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("table", "setters"),
+    [
+        ("zone_node_assignment", "unassigned_at = '2099-01-01Z', assigned_at = assigned_at"),
+        (
+            "role_assignment",
+            "removed_at = '2099-01-01Z', removed_by = assigned_by, role = 'copasst'",
+        ),
+        ("provider_concession", "status = 'expired', reason = 'Motivo reescrito del cierre'"),
+        ("provider_concession", "status = 'expired', expires_at = expires_at + interval '1 day'"),
+    ],
+)
+async def test_closing_together_with_another_column_fails_even_for_the_owner(
+    append_only: AppendOnly, owner: Any, table: str, setters: str
+) -> None:
+    """El dueño tiene privilegio sobre todo: solo el disparador impide colar otra columna."""
+    seed = append_only.seed
+    key = next(row.key for row in append_only.rows[table] if row.open)
+    transaction = owner.transaction()
+    await transaction.start()
+    try:
+        await set_scope(owner, seed.a.organization_id)
+        sql = f"UPDATE identity.{table} SET {setters} WHERE {PRIMARY_KEYS[table]} = $1"  # noqa: S608
+        assert await _fails(owner, sql, key) == RESTRICT_VIOLATION
     finally:
         await transaction.rollback()
 

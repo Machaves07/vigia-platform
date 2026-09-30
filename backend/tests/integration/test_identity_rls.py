@@ -564,17 +564,41 @@ async def test_user_of_another_organization_cannot_get_a_role_here(
 
 @pytest.mark.asyncio
 async def test_concession_only_on_a_client_organization(identity: Identity, app: Any) -> None:
+    """Sobre la proveedora no hay concesión, ni siquiera a favor de un usuario de un cliente.
+
+    Las organizaciones son distintas y el usuario es de la organización que figura, así que
+    solo el disparador (tipo ``client``) puede rechazarla.
+    """
     seed = identity.seed
-    with pytest.raises(asyncpg.exceptions.CheckViolationError):
+    insert = (
+        "INSERT INTO identity.provider_concession (concession_id, organization_id,"
+        " provider_user_id, provider_organization_id, scope_level, scope_id, reason,"
+        " granted_at, expires_at) VALUES ($1, $2, $3, $4, 'organization', $2,"
+        " 'Concesión sintética de prueba', $5::timestamptz, $5::timestamptz + interval '1 day')"
+    )
+    with pytest.raises(asyncpg.exceptions.CheckViolationError, match="organización cliente"):
         async with app.transaction():
             await set_scope(app, seed.provider_organization_id)
             await app.execute(
-                "INSERT INTO identity.provider_concession (concession_id, organization_id,"
-                " provider_user_id, provider_organization_id, scope_level, scope_id, reason,"
-                " granted_at, expires_at) VALUES ($1, $2, $3, $2, 'organization', $2,"
-                " 'Concesión sobre sí misma', $4::timestamptz, $4::timestamptz + interval '1 day')",
+                insert,
                 uuid.uuid4(),
                 seed.provider_organization_id,
-                seed.installer_id,
+                seed.a.user_id,
+                seed.a.organization_id,
                 BASE_TIME,
             )
+    # Control: la misma forma sobre un cliente entra.
+    transaction = app.transaction()
+    await transaction.start()
+    try:
+        await set_scope(app, seed.b.organization_id)
+        await app.execute(
+            insert,
+            uuid.uuid4(),
+            seed.b.organization_id,
+            seed.installer_id,
+            seed.provider_organization_id,
+            BASE_TIME,
+        )
+    finally:
+        await transaction.rollback()
