@@ -5,7 +5,9 @@ Metapropiedad (BR-NUC-43, PAT-NUC-SEG-05) sobre las tablas ⛓ de ``nuc_0002`` y
 ``ledger.evidence``, ``ledger.evidence_identity``, ``ledger.label``, ``shared.audit_entry``,
 ``shared.audit_entry_identity``, ``shared.outbox_event`` y ``shared.dead_letter``.
 
-- Con ``vigia_app``, cualquier sentencia de mutación generada falla por permisos (``42501``).
+- Con ``vigia_app``, cualquier sentencia de mutación generada falla por permisos (``42501``),
+  salvo el ``UPDATE`` de las columnas de la marca de ``ledger.evidence`` (``nuc_0006``), que
+  para el disparador (``23001``).
 - Con ``vigia_migrate`` (dueño) o con el superusuario del contenedor (el "rol privilegiado de
   prueba" del criterio), falla por el disparador (``23001``), también sobre las particiones y con
   ``session_replication_role = replica``. Los datos quedan intactos.
@@ -236,6 +238,21 @@ def columns(connections: dict[str | None, Any], loop: DatabaseLoop) -> dict[str,
     return {table: loop.run(_columns(connections[None], table)) for table in APPEND_ONLY_TABLES}
 
 
+_MARKER_COLUMNS = (
+    "marker_verification_result",
+    "marker_verified_at",
+    "container_marker_sampled_at",
+)
+"""Columnas que ``vigia_app`` puede actualizar en ``ledger.evidence`` (privilegio por columna)."""
+
+
+def _marker_update(statement: str) -> bool:
+    prefix = "UPDATE ledger.evidence SET "
+    return statement.startswith(prefix) and statement[len(prefix) :].split(" ")[0] in (
+        _MARKER_COLUMNS
+    )
+
+
 @given(data=st.data(), role=st.sampled_from(("vigia_app", "vigia_migrate", None)))
 def test_mutations_on_append_only_tables_always_fail(
     loop: DatabaseLoop,
@@ -249,7 +266,11 @@ def test_mutations_on_append_only_tables_always_fail(
     before = loop.run(_snapshot(connections[None]))
     error = loop.run(_attempt(connections[role], statement))
     assert error is not None, f"{role or 'superusuario'} ejecutó {statement}"
-    if role == "vigia_app":
+    if role == "vigia_app" and _marker_update(statement):
+        # nuc_0006 (TASK-121): vigia_app puede actualizar las columnas de la marca de
+        # ledger.evidence, pero el disparador solo deja pasar pending → intact | broken.
+        assert error.sqlstate == RESTRICT_VIOLATION, (statement, error)
+    elif role == "vigia_app":
         assert error.sqlstate == INSUFFICIENT_PRIVILEGE, (statement, error)
     elif not statement.startswith("TRUNCATE"):
         # Rol privilegiado: lo impide el disparador, no los permisos.

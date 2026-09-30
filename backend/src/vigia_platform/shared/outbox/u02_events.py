@@ -1,11 +1,13 @@
 """Tipos de evento propios de U-02 (domain-entities §4.3, eventos iniciales de U-02).
 
-Trece eventos, todos publicados por U-02. Cada carga lleva solo identificadores, enumeraciones y
-marcas (BR-NUC-75): nunca un nombre, un correo, un motivo ni otro texto libre. La organización,
-la planta, la partición, la secuencia del registro y ``correlation_id`` van en el propio evento,
-no en la carga. Es la versión inicial: quien publica cada evento (TASK-113, 118, 119, 122, 124,
-126, 127, 129) solo puede **ampliarla** con campos opcionales (``OutboxCatalog.synchronize``
-rechaza retirar o estrechar). Los eventos de U-03 y U-04 los registran esas unidades.
+Catorce eventos, todos publicados por U-02: los trece iniciales y
+``evidence_marker_verification_failed`` (pendiente nº 21, adenda A-14; TASK-121). Cada carga
+lleva solo identificadores, enumeraciones y marcas (BR-NUC-75): nunca un nombre, un correo, un
+motivo ni otro texto libre. La organización, la planta, la partición, la secuencia del registro
+y ``correlation_id`` van en el propio evento, no en la carga. Es la versión inicial: quien
+publica cada evento (TASK-113, 118, 119, 122, 124, 126, 127, 129) solo puede **ampliarla** con
+campos opcionales (``OutboxCatalog.synchronize`` rechaza retirar o estrechar). Los eventos de
+U-03 y U-04 los registran esas unidades.
 """
 
 from __future__ import annotations
@@ -170,6 +172,30 @@ class DeadLetterCreated(PayloadModel):
     failed_at: Timestamp
 
 
+# --- evidencias -------------------------------------------------------------------------------
+
+VerificationMethod = Literal["object_metadata", "full_read"]
+"""``Evidence.verification_method`` (nota del 2026-09-20 de ``domain-entities.md`` §3.5)."""
+
+MarkerFailureReason = Literal["marker_missing", "marker_unverifiable", "metadata_unreadable"]
+"""``failure_reason`` cerrado (A-14): marca ausente, marca no verificable, metadato ilegible."""
+
+
+class EvidenceMarkerVerificationFailed(PayloadModel):
+    """Pendiente nº 21 (A-14): la muestra diaria no encontró la marca en el contenedor."""
+
+    evidence_id: UUID
+    record_id: UUID
+    organization_id: UUID
+    plant_id: UUID
+    zone_id: UUID
+    node_id: UUID
+    clip_id: UUID
+    verification_method: VerificationMethod
+    container_marker_sampled_at: Timestamp
+    failure_reason: MarkerFailureReason
+
+
 U02_EVENT_TYPES: Final[tuple[EventType, ...]] = tuple(
     EventType(
         event_name=name,
@@ -203,11 +229,17 @@ U02_EVENT_TYPES: Final[tuple[EventType, ...]] = tuple(
             DeadLetterCreated,
             "Una entrega agotó sus ocho intentos y pasó a la cola muerta",
         ),
+        (
+            "evidence_marker_verification_failed",
+            EvidenceMarkerVerificationFailed,
+            "La muestra diaria no encontró la marca de anonimización en el contenedor de un "
+            "clip; el hallazgo se conserva y se declara",
+        ),
     )
 )
 
 
 def register_u02_event_types(registry: EventTypeRegistry) -> None:
-    """Registra los trece eventos de U-02 al arrancar."""
+    """Registra los catorce eventos de U-02 al arrancar."""
     for event_type in U02_EVENT_TYPES:
         registry.register(event_type)

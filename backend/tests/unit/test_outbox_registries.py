@@ -8,7 +8,8 @@
 - ``PeriodicTaskRegistry`` y ``Schedule``: horarios en UTC, bordes y ``next_after``.
 - ``OutboxCatalog.synchronize``: contraste con lo persistido (retirar o estrechar impide
   arrancar), guardado idempotente y sellado.
-- Los trece eventos de U-02 se registran.
+- Los catorce eventos de U-02 se registran (los trece iniciales y
+  ``evidence_marker_verification_failed``, TASK-121).
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ U02_EVENTS = (
     "key_set_published",
     "key_rotation_due",
     "dead_letter_created",
+    "evidence_marker_verification_failed",
 )
 
 Closed = Annotated[StrictStr, Field(min_length=1, max_length=64, pattern=r"^[a-z_]{1,64}$")]
@@ -92,11 +94,11 @@ def _rejected(catalog: OutboxCatalog, event: EventType) -> str:
 # --- EventType ------------------------------------------------------------------------------
 
 
-def test_u02_registers_the_thirteen_initial_events() -> None:
+def test_u02_registers_its_fourteen_events() -> None:
     catalog = OutboxCatalog()
     register_u02_event_types(catalog.event_types)
     assert set(catalog.event_types.event_names()) == set(U02_EVENTS)
-    assert len(U02_EVENT_TYPES) == 13
+    assert len(U02_EVENT_TYPES) == 14
     assert all(t.publisher_unit is ActorUnit.U02 for t in U02_EVENT_TYPES)
 
 

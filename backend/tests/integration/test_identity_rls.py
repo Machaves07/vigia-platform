@@ -145,7 +145,7 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
         " FROM pg_policies WHERE schemaname = 'identity'"
     ):
         if (row["tablename"], row["policyname"]) == ("user_account", "login_lookup"):
-            # nuc_0006 (TASK-124): solo lectura, solo el dueño y solo con la variable que fija
+            # nuc_0007 (TASK-124): solo lectura, solo el dueño y solo con la variable que fija
             # identity.login_organization; vigia_app no la tiene.
             assert (row["cmd"], row["roles"], row["permissive"]) == (
                 "SELECT",
