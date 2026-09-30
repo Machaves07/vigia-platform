@@ -673,6 +673,47 @@ def test_enrollment_counts_only_after_a_first_valid_code() -> None:
     assert run(h.service.verify_totp(h.context, confirmed, again, now)) is True
 
 
+class _AcceptingStore(InMemorySecondFactorStore):
+    """Almacén que aceptaría cualquier paso y cualquier código: aísla la guarda del servicio."""
+
+    async def advance_step(self, context: ScopeContext, user_id: uuid.UUID, step: int) -> bool:
+        return True
+
+    async def unused_recovery_codes(
+        self, context: ScopeContext, user_id: uuid.UUID
+    ) -> tuple[RecoveryCodeRecord, ...]:
+        self.recovery_queries += 1
+        return tuple(r for r in self.codes.values() if r.user_id == user_id)
+
+    async def mark_recovery_code_used(
+        self, context: ScopeContext, recovery_code_id: uuid.UUID, used_at: datetime
+    ) -> bool:
+        return True
+
+
+def test_service_refuses_an_unconfirmed_credential_on_its_own() -> None:
+    """La guarda del servicio no depende de la del almacén: sin confirmar no descifra nada."""
+    h = harness()
+    store = _AcceptingStore(h.store.organization_id, users={h.user.user_id})
+    service = SecondFactorService(store, h.cipher, _POOL, h.clock)
+    challenge = run(service.enroll(h.context, h.user))
+    cold = SecondFactorService(
+        store, h.fresh_process().cipher, _POOL, h.clock
+    )  # sin la clave de datos en memoria: cualquier descifrado iría a KMS
+    now = h.clock.now()
+    code = independent_code(secret_of(challenge), totp_step(now))
+    decrypts = h.kms.decrypt_calls
+    assert not challenge.credential.confirmed
+    assert run(cold.verify_totp(h.context, challenge.credential, code, now)) is False
+    assert (
+        run(
+            cold.consume_recovery_code(h.context, challenge.credential, challenge.recovery_codes[0])
+        )
+        is False
+    )
+    assert h.kms.decrypt_calls == decrypts and store.recovery_queries == 0
+
+
 # --- Credencial rancia, tiempo constante y vectores fijos (seguimientos nº 2 a 4 de VIG-66) -----
 
 

@@ -94,13 +94,11 @@ __all__ = [
     "alert_threshold",
     "clearing_cookie",
     "client_hint_of",
-    "expiry_reason",
     "idle_expiry",
     "new_session_cookie",
     "origin_hash",
     "retry_after_seconds",
     "session_id_hash",
-    "session_usable",
     "throttle_delay",
     "window_expired",
 ]
@@ -264,42 +262,6 @@ def absolute_expiry(created_at: datetime) -> datetime:
     return created_at + ABSOLUTE_TIMEOUT
 
 
-def expiry_reason(
-    created_at: datetime, last_seen_at: datetime, now: datetime
-) -> SessionEndReason | None:
-    """El motivo por el que una sesión activa ya venció en ``now``, o ``None``.
-
-    Si vencieron las dos, manda el vencimiento absoluto.
-    """
-    if now >= absolute_expiry(created_at):
-        return SessionEndReason.ABSOLUTE_TIMEOUT
-    if now >= idle_expiry(last_seen_at):
-        return SessionEndReason.IDLE_TIMEOUT
-    return None
-
-
-def session_usable(
-    *,
-    status: SessionStatus,
-    created_at: datetime,
-    last_seen_at: datetime,
-    second_factor_verified: bool,
-    user_active: bool,
-    organization_active: bool,
-    now: datetime,
-    purpose: SessionPurpose = SessionPurpose.FULL,
-) -> bool:
-    """BR-NUC-25: ¿se acepta la sesión en ``now`` para ``purpose``? (el modelo de PR-NUC-07)."""
-    verified_as_required = second_factor_verified is (purpose is SessionPurpose.FULL)
-    return (
-        status is SessionStatus.ACTIVE
-        and expiry_reason(created_at, last_seen_at, now) is None
-        and verified_as_required
-        and user_active
-        and organization_active
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class NewSession:
     """La fila de una sesión nueva (el identificador en claro ya no está aquí)."""
@@ -379,7 +341,7 @@ class SessionSummary:
     second_factor_verified: bool
     client_hint: str | None
     usable: bool
-    """Utilizable en el instante de la consulta (``session_usable`` con ``FULL``)."""
+    """Utilizable en el instante de la consulta (como la validación completa)."""
 
 
 class SessionStore(Protocol):

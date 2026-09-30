@@ -483,6 +483,27 @@ def test_reset_closes_sessions_audits_and_forces_reenrollment(env: Environment) 
     env.clock.advance(1)
     second = env.run(service.enroll(context, user))
     assert _secret(second) != _secret(first)
+    # La base, por sí sola, no acepta nada de una inscripción sin confirmar (la guarda del
+    # servicio aparte): ni un paso, ni sus códigos de recuperación.
+    assert env.run(store.advance_step(context, user.user_id, totp_step(env.clock.now()))) is False
+    assert env.run(store.unused_recovery_codes(context, user.user_id)) == ()
+    pending_codes = env.query(
+        "SELECT recovery_code_id FROM identity.recovery_code WHERE user_id = $1"
+        " AND generated_at = $2",
+        user.user_id,
+        second.credential.enrolled_at,
+    )
+    assert len(pending_codes) == 10
+    assert (
+        env.run(
+            store.mark_recovery_code_used(
+                context,
+                uuid.UUID(bytes=pending_codes[0]["recovery_code_id"].bytes),
+                env.clock.now(),
+            )
+        )
+        is False
+    )
     # Sin confirmar, la inscripción nueva no verifica ni consume nada.
     assert (
         env.run(service.consume_recovery_code(context, second.credential, second.recovery_codes[0]))

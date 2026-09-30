@@ -165,6 +165,25 @@ def test_window_resets_fifteen_minutes_after_the_last_allowed_instant() -> None:
     assert after_failure(state, edge, threshold=10).state == ThrottleState(1, edge, edge, None)
 
 
+@given(
+    failures=st.integers(5, 40),
+    skew=st.integers(1, 15 * 60 * 1000).map(lambda ms: timedelta(milliseconds=ms)),
+)
+def test_a_late_failure_with_an_earlier_clock_never_shortens_the_delay(
+    failures: int, skew: timedelta
+) -> None:
+    """Dos instancias con relojes algo distintos: el fallo que se anota después con una hora
+    anterior (o durante el retardo, por una carrera) nunca adelanta ``next_allowed_at``."""
+    recorded = START + timedelta(hours=1)
+    state = ThrottleState(failures, START, recorded + expected_delay(failures), None)
+    late = after_failure(state, recorded - skew, threshold=10).state
+    assert late.consecutive_failures == failures + 1
+    assert late.next_allowed_at >= state.next_allowed_at
+    assert late.next_allowed_at == max(
+        state.next_allowed_at, recorded - skew + expected_delay(failures + 1)
+    )
+
+
 def test_retry_after_rounds_up_and_is_zero_at_the_boundary() -> None:
     state = ThrottleState(5, START, START + timedelta(seconds=30), None)
     assert retry_after_seconds(state, START) == 30

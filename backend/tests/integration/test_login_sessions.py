@@ -571,6 +571,99 @@ def test_login_lookup_reveals_only_the_organization(env: SessionEnvironment) -> 
     assert info["proconfig"] == ["search_path=pg_catalog"]
 
 
+# --- Validación en cada petición: bordes que la máquina de PR-NUC-07 alcanza poco ------------
+
+
+def test_absolute_timeout_ends_a_session_kept_alive(env: SessionEnvironment) -> None:
+    """Con actividad cada 29 minutos la sesión vive hasta las 12 h exactas y ni un instante más."""
+    organization = env.add_organization()
+    user = env.add_user(organization)
+    sessions = env.sessions()
+    cookie = env.run(env.login().authenticate(user.email, user.password, "198.51.100.90")).cookie
+    created = env.clock.now()
+    while env.clock.now() + timedelta(minutes=29) < created + timedelta(hours=12):
+        env.clock.advance(29 * 60)
+        assert env.run(sessions.validate(cookie)) is not None
+    env.clock.advance((created + timedelta(hours=12) - env.clock.now()).total_seconds() - 0.001)
+    assert env.run(sessions.validate(cookie)) is not None
+    env.clock.advance(0.001)
+    assert env.run(sessions.validate(cookie)) is None
+
+
+def test_idle_timeout_is_exclusive_at_thirty_minutes(env: SessionEnvironment) -> None:
+    organization = env.add_organization()
+    user = env.add_user(organization)
+    sessions = env.sessions()
+    cookie = env.run(env.login().authenticate(user.email, user.password, "198.51.100.91")).cookie
+    env.clock.advance(30 * 60 - 0.001)
+    assert env.run(sessions.validate(cookie)) is not None  # prolonga: 30 min desde ahora
+    env.clock.advance(30 * 60)
+    assert env.run(sessions.validate(cookie)) is None
+
+
+@pytest.mark.parametrize("change", ["user", "organization"])
+def test_deactivation_or_suspension_cuts_access_even_without_revoking(
+    env: SessionEnvironment, change: str
+) -> None:
+    """La validación comprueba usuario y organización activos en cada petición (BR-NUC-25)."""
+    organization = env.add_organization()
+    user = env.add_user(organization)
+    pending_user = env.add_user(organization, required=True, enrolled=True)
+    login, sessions = env.login(), env.sessions()
+    cookie = env.run(login.authenticate(user.email, user.password, "198.51.100.92")).cookie
+    pending = env.run(
+        login.authenticate(pending_user.email, pending_user.password, "198.51.100.92")
+    ).cookie
+    assert env.run(sessions.validate(cookie)) is not None
+    if change == "user":
+        for target in (user, pending_user):
+            env.run(
+                env.admin.execute(
+                    "UPDATE identity.user_account SET status = 'deactivated', deactivated_at = $2"
+                    " WHERE user_id = $1",
+                    target.user_id,
+                    env.clock.now(),
+                )
+            )
+    else:
+        env.run(
+            env.admin.execute(
+                "UPDATE identity.organization SET status = 'suspended' WHERE organization_id = $1",
+                organization,
+            )
+        )
+    assert env.run(sessions.validate(cookie)) is None
+    assert env.run(sessions.validate(pending, SessionPurpose.SECOND_FACTOR)) is None
+    assert env.run(login.verify_second_factor(pending, GOOD_CODE)) == INVALID
+    status = env.fetch("SELECT status FROM identity.session WHERE user_id = $1", user.user_id)
+    assert [row["status"] for row in status] == ["active"]  # sin revocar: la validación basta
+
+
+def test_success_resets_the_account_counter(env: SessionEnvironment) -> None:
+    """Cuatro fallos, un éxito y cuatro fallos más: ninguno retiene (el éxito reinició)."""
+    organization = env.add_organization()
+    user = env.add_user(organization)
+    login = env.login()
+    for attempt in range(4):
+        env.run(login.authenticate(user.email, "mala", f"203.0.113.{attempt}"))
+    assert isinstance(
+        env.run(login.authenticate(user.email, user.password, "203.0.113.10")), Authenticated
+    )
+    for attempt in range(4):
+        result = env.run(login.authenticate(user.email, "mala", f"203.0.113.{20 + attempt}"))
+        assert result == INVALID
+    state = env.run(
+        env.store().throttle_state(
+            env.contexts.anonymous(organization),
+            ThrottleSubject.account(organization, user.user_id),
+        )
+    )
+    assert state is not None and state.consecutive_failures == 4
+    assert isinstance(
+        env.run(login.authenticate(user.email, user.password, "203.0.113.30")), Authenticated
+    )
+
+
 def test_idle_expiry_is_checked_by_the_database(env: SessionEnvironment) -> None:
     organization = env.add_organization()
     user = env.add_user(organization)
