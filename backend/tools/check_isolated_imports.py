@@ -7,8 +7,8 @@ deben importarse sin FastAPI ni SQLAlchemy. Este guion lo demuestra en un intér
    importación de los paquetes bloqueados y de sus submódulos (``fastapi``, ``starlette``,
    ``sqlalchemy``, ``asyncpg``, ``alembic``), estén o no instalados en el entorno.
 2. Comprueba que el bloqueo es real: importar un paquete bloqueado falla.
-3. Importa cada módulo crítico y confirma que ninguno de los paquetes bloqueados aparece en
-   ``sys.modules`` al terminar.
+3. Importa cada módulo crítico **y todos sus submódulos** y confirma que ninguno de los
+   paquetes bloqueados aparece en ``sys.modules`` al terminar.
 
 Es una prueba real porque el bloqueo actúa antes que cualquier buscador de ``site-packages``:
 una importación directa o transitiva (también dentro de una función ejecutada al importar)
@@ -24,7 +24,9 @@ import argparse
 import importlib
 import importlib.abc
 import importlib.machinery
+import importlib.util
 import json
+import pkgutil
 import sys
 from collections.abc import Sequence
 from types import ModuleType
@@ -65,6 +67,26 @@ class BlockingFinder(importlib.abc.MetaPathFinder):
         return None
 
 
+def _module_and_submodules(module: str, failures: dict[str, str]) -> list[str]:
+    """``module`` y, si es un paquete, todos sus submódulos (``identity.auth.passwords``…).
+
+    Importar el paquete no importa sus submódulos: sin recorrerlos, un submódulo que importara
+    FastAPI pasaría la prueba. Se localizan sin importarlos; el llamador los importa.
+    """
+    names = [module]
+    try:
+        spec = importlib.util.find_spec(module)
+    except Exception as error:  # El motivo, sea cual sea, es el resultado.
+        failures[module] = f"{type(error).__name__}: {error}"
+        return []
+    if spec is not None and spec.submodule_search_locations is not None:
+        names.extend(
+            info.name
+            for info in pkgutil.walk_packages(spec.submodule_search_locations, f"{module}.")
+        )
+    return names
+
+
 def run(modules: Sequence[str], blocked: Sequence[str]) -> dict[str, object]:
     """Ejecuta la prueba en este intérprete y devuelve el resultado como diccionario."""
     for name in list(sys.modules):
@@ -80,15 +102,20 @@ def run(modules: Sequence[str], blocked: Sequence[str]) -> dict[str, object]:
         block_works = True
 
     failures: dict[str, str] = {}
+    imported: list[str] = []
     for module in modules:
-        try:
-            importlib.import_module(module)
-        except Exception as error:  # El motivo, sea cual sea, es el resultado.
-            failures[module] = f"{type(error).__name__}: {error}"
+        for name in _module_and_submodules(module, failures):
+            try:
+                importlib.import_module(name)
+            except Exception as error:  # El motivo, sea cual sea, es el resultado.
+                failures[name] = f"{type(error).__name__}: {error}"
+            else:
+                imported.append(name)
 
     leaked = sorted(name for name in sys.modules if name.split(".")[0] in blocked)
     return {
         "modules": list(modules),
+        "imported": imported,
         "blocked": list(blocked),
         "block_works": block_works,
         "failures": failures,
