@@ -6,8 +6,10 @@ de verificación; el primer fallo fija el código (como BR-CTR-32):
 1. **contexto** presente y de la organización del contenido (``context_absent``);
 2. **tipo** registrado y escribible por la unidad del actor (``record_type_unknown``);
 3. **esquema y tamaño**: a lo sumo 256 KB (cota calculada sin serializar, antes de validar),
-   esquema estricto del tipo sin coerción ni valores por defecto, alcance coherente y bytes
-   canónicos ≤ 256 KB (``content_invalid`` con el puntero del primer campo que falla);
+   esquema estricto del tipo sin coerción ni valores por defecto (en el pool de CPU si pasa de
+   16 KB), alcance coherente, ``source_key`` de 1 a 64 caracteres, regla de etiqueta proyectable
+   y bytes canónicos ≤ 256 KB (``content_invalid`` con el puntero del primer campo que falla),
+   todo antes de cualquier consulta a la base;
 4. **texto libre**: cada ruta de ``free_text_paths`` pasa ``FreeTextPolicy``; se guarda el texto
    en NFC (``free_text_rejected``);
 5. **idempotencia** por (organización, tipo, ``source_key``): mismo ``content_hash`` →
@@ -60,6 +62,7 @@ from vigia_contracts.models.receipt import Receipt as ContractReceipt
 from vigia_contracts.models.rejection_response import RejectionResponse
 
 from vigia_platform.ledger.canonical import (
+    LARGE_DOCUMENT_BYTES,
     CanonicalFormError,
     canonical_bytes,
     exceeds_canonical_size,
@@ -96,7 +99,7 @@ from vigia_platform.ledger.registry import (
 )
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
-from vigia_platform.shared.cpu_pool import CpuPool
+from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
 from vigia_platform.shared.db import ChainLockedTimeout, Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
@@ -428,6 +431,33 @@ def _error_pointer(error: ValidationError) -> str | None:
     return pointer(kept) or None
 
 
+def _schema_checked(compiled: CompiledType, document: Mapping[str, Any]) -> dict[str, Any]:
+    """El documento validado contra el esquema estricto y leído como RFC 8785 (paso 3).
+
+    Pura y sin E/S: corre en el bucle o, con un contenido grande, en el pool de CPU.
+    """
+    invalid = LedgerRejectionCode.CONTENT_INVALID
+    try:
+        raw = json.dumps(document, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError, RecursionError, OverflowError):
+        raise _reject(invalid) from None
+    try:
+        compiled.validate_json(raw)
+    except ValidationError as error:
+        raise _reject(invalid, _error_pointer(error)) from None
+    except (ValueError, RecursionError, OverflowError):
+        raise _reject(invalid) from None
+    try:
+        # Lectura estricta de RFC 8785 del mismo texto: lo que se canonicaliza y se guarda es el
+        # contenido tal como llegó, sin valores por defecto (BR-NUC-44).
+        parsed = parse(raw.encode("utf-8", "surrogatepass"))
+    except CanonicalFormError:
+        raise _reject(invalid) from None
+    if not isinstance(parsed, dict):  # pragma: no cover - ya validado como objeto
+        raise _reject(invalid)
+    return parsed
+
+
 def _resolve_scope(
     document: Mapping[str, Any], scope: RecordScope | None, compiled: CompiledType
 ) -> tuple[RecordScope, uuid.UUID | None]:
@@ -541,22 +571,25 @@ class EscritorExpediente:
                 raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/organization_id")
         # (2) tipo registrado y unidad autorizada.
         compiled = self._compiled(context, record_type)
-        # (3) esquema y tamaño.
-        document, scope_resolved, chain_plant = self._validate(compiled, document, scope)
-        # (4) texto libre, sobre el documento ya válido: se guarda el texto en NFC.
+        # (3) esquema y tamaño, con todo lo que se exige al contenido: la clave de idempotencia
+        # (≤ 64 caracteres) y la regla de etiqueta, antes de cualquier consulta a la base.
+        document, scope_resolved, chain_plant = await self._validate(compiled, document, scope)
+        source_key = self._source_key(compiled, document)
+        label = self._project_label(compiled, document)
+        # (4) texto libre, sobre el documento ya válido: se guarda el texto en NFC. Las rutas de
+        # la clave y de la etiqueta nunca son texto libre (el registro lo exige): no cambian.
         self._apply_free_text(compiled, document)
         content_bytes = await self._canonical(document)
         content_hash = hashlib.sha256(content_bytes).hexdigest()
         # (5) idempotencia.
-        source_key = self._source_key(compiled, document)
         if source_key is not None:
             existing = await self._by_source_key(context, compiled, source_key)
             if existing is not None:
                 return self._resolve_duplicate(existing, content_hash)
         # (6) evidencias.
         evidences = await self._verify_evidence(context, compiled, document, scope_resolved)
-        # Preparación de la escritura: etiqueta y eventos, también fuera de la transacción.
-        label, label_evidence = await self._label(context, compiled, document)
+        # Preparación de la escritura: evidencias de la etiqueta y eventos, fuera de la transacción.
+        label_evidence = await self._label_evidence(context, label)
         return _Prepared(
             compiled=compiled,
             content=content_bytes,
@@ -581,7 +614,7 @@ class EscritorExpediente:
             raise _reject(LedgerRejectionCode.RECORD_TYPE_UNKNOWN)
         return compiled
 
-    def _validate(
+    async def _validate(
         self, compiled: CompiledType, document: object, scope: RecordScope | None
     ) -> tuple[Any, RecordScope, uuid.UUID | None]:
         invalid = LedgerRejectionCode.CONTENT_INVALID
@@ -590,24 +623,13 @@ class EscritorExpediente:
         # Tope de 256 KB antes de serializar (acotado por el propio tope).
         if exceeds_canonical_size(cast(JsonValue, document), MAX_CONTENT_BYTES):
             raise _reject(invalid)
-        try:
-            raw = json.dumps(document, ensure_ascii=False, allow_nan=False)
-        except (TypeError, ValueError, RecursionError, OverflowError):
-            raise _reject(invalid) from None
-        try:
-            compiled.validate_json(raw)
-        except ValidationError as error:
-            raise _reject(invalid, _error_pointer(error)) from None
-        except (ValueError, RecursionError, OverflowError):
-            raise _reject(invalid) from None
-        try:
-            # Lectura estricta de RFC 8785 del mismo texto: lo que se canonicaliza y se guarda
-            # es el contenido tal como llegó, sin valores por defecto (BR-NUC-44).
-            parsed = parse(raw.encode("utf-8", "surrogatepass"))
-        except CanonicalFormError:
-            raise _reject(invalid) from None
-        if not isinstance(parsed, dict):  # pragma: no cover - ya validado como objeto
-            raise _reject(invalid)
+        if exceeds_canonical_size(cast(JsonValue, document), LARGE_DOCUMENT_BYTES):
+            # Un contenido grande se valida en el pool de CPU, como se canonicaliza
+            # (PAT-NUC-REN-05): cerca de 256 KB serían varios milisegundos en el bucle.
+            pool = self._cpu_pool if self._cpu_pool is not None else get_cpu_pool()
+            parsed = await pool.run(_schema_checked, compiled, document)
+        else:
+            parsed = _schema_checked(compiled, document)
         record_scope, chain_plant = _resolve_scope(parsed, scope, compiled)
         return parsed, record_scope, chain_plant
 
@@ -708,16 +730,21 @@ class EscritorExpediente:
             _Evidence(reference, check) for reference, check in zip(references, checks, strict=True)
         )
 
-    async def _label(
-        self, context: ScopeContext, compiled: CompiledType, document: Any
-    ) -> tuple[LabelProjection | None, tuple[uuid.UUID, ...]]:
+    @staticmethod
+    def _project_label(compiled: CompiledType, document: Any) -> LabelProjection | None:
         rule = compiled.definition.label_rule
         if rule is None:
-            return None, ()
+            return None
         try:
-            projection = project(rule, document)
+            return project(rule, document)
         except LabelRuleViolation as violation:
             raise _reject(LedgerRejectionCode.CONTENT_INVALID, violation.pointer) from None
+
+    async def _label_evidence(
+        self, context: ScopeContext, projection: LabelProjection | None
+    ) -> tuple[uuid.UUID, ...]:
+        if projection is None:
+            return ()
         rows = await self._database.read(
             context,
             evidence_ids_statement(),
@@ -726,7 +753,7 @@ class EscritorExpediente:
                 "record_id": projection.subject_record_id,
             },
         )
-        return projection, tuple(row.evidence_id for row in rows)
+        return tuple(row.evidence_id for row in rows)
 
     @staticmethod
     def _events(compiled: CompiledType, events: Sequence[NewEvent]) -> tuple[NewEvent, ...]:

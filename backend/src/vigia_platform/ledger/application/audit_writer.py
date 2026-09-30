@@ -39,7 +39,11 @@ from pydantic import JsonValue
 from sqlalchemy import text
 
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.ledger.canonical import CanonicalFormError, canonical_bytes_sync
+from vigia_platform.ledger.canonical import (
+    CanonicalFormError,
+    canonical_bytes_sync,
+    exceeds_canonical_size,
+)
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ContextAbsent, ScopeContext
 from vigia_platform.shared.db import Transaction
@@ -57,6 +61,10 @@ __all__ = [
 
 MAX_FILTERS_BYTES: Final = 4 * 1024
 """Tope de ``filters`` (BR-NUC-62; restricción ``audit_entry_filters_size``)."""
+
+_FILTERS_BOUND_FACTOR: Final = 25
+"""Cuántas veces puede pasar la cota de ``exceeds_canonical_size`` del tamaño canónico real: un
+doble cuenta 25 bytes y puede ocupar uno; un texto no imprimible, seis por carácter."""
 
 MAX_RESULT_COUNT: Final = 2**31 - 1
 _SNAKE: Final = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -263,6 +271,10 @@ class AuditWriter:
         if filters is not None:
             if not isinstance(filters, Mapping):
                 raise AuditRejected("audit_entry_invalid", "filters debe ser un objeto JSON")
+            # Sin serializar: la cota de ``exceeds_canonical_size`` es a lo sumo 25 veces el
+            # tamaño canónico (un doble), así que por encima de 25 veces 4 KB seguro que no cabe.
+            if exceeds_canonical_size(dict(filters), _FILTERS_BOUND_FACTOR * MAX_FILTERS_BYTES):
+                raise AuditRejected("filters_too_large", f"filters supera {MAX_FILTERS_BYTES} B")
             try:
                 filters_bytes = canonical_bytes_sync(dict(filters))
             except CanonicalFormError:

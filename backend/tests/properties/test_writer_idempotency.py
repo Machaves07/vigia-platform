@@ -166,6 +166,44 @@ def test_same_key_is_a_duplicate_or_a_conflict_and_never_a_new_record(
     assert after["ledger.ledger_record"] == 1
 
 
+_LETTERS = st.characters(min_codepoint=0x41, max_codepoint=0x24F, categories=["L"])
+_ACCENTED = st.sampled_from("áéíóúÁÉÍÓÚñÑüÜçÇàèâêôãõ")
+
+
+@given(
+    parts=st.tuples(
+        st.text(_LETTERS, max_size=30), _ACCENTED, st.text(_LETTERS | st.just(" "), max_size=30)
+    )
+)
+def test_free_text_in_nfd_is_hashed_and_stored_in_nfc(
+    environment: WriterEnvironment, parts: tuple[str, str, str]
+) -> None:
+    """VIG-129 (mutación M6): el texto libre se normaliza **antes** de canonicalizar y hashear.
+
+    Un texto en NFD se guarda en NFC, el ``content_hash`` es el de lo guardado y la misma
+    escritura en NFC con la misma clave es un duplicado del mismo registro, no un conflicto.
+    """
+    composed = unicodedata.normalize("NFC", "".join(parts).strip() or parts[1])
+    decomposed = unicodedata.normalize("NFD", composed)
+    assert decomposed != composed
+    place = Place.new()
+    x = order_document(place, clips=0)
+    x["note"] = decomposed
+    x_nfc = dict(x, note=composed)
+    context = unit_context(place.organization_id, ActorUnit.U03, kind=ActorKind.NODE)
+
+    first = _accepted(_write(environment, context, ORDER_TYPE, x))
+    assert first.status is AcceptanceStatus.ACCEPTED
+    row = environment.loop.run(fetch_record(environment.migrated, first.record_id))
+    stored = json.loads(bytes(row["content"]))
+    assert stored["note"] == composed
+    assert hashlib.sha256(bytes(row["content"])).hexdigest() == row["content_hash"]
+
+    again = _accepted(_write(environment, context, ORDER_TYPE, x_nfc))
+    assert again.status is AcceptanceStatus.ACCEPTED_DUPLICATE
+    assert again.record_id == first.record_id
+
+
 def test_concurrent_writes_of_different_content_with_one_key_leave_one_record(
     environment: WriterEnvironment,
 ) -> None:
