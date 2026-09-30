@@ -1,6 +1,6 @@
 """Esquema ``identity``: tenencia, usuarios, sesiones y concesiones (TASK-107, LC-NUC-12 parte 2).
 
-Revisión nuc_0002. Las 18 tablas de ``domain-entities.md`` §2 con el aislamiento por
+Revisión nuc_0004. Las 18 tablas de ``domain-entities.md`` §2 con el aislamiento por
 construcción de PAT-NUC-SEG-01 (capa 1, la base, y capa 2, la política de proveedor):
 
 - Tablas, con el nombre de la entidad en ``snake_case``; ``User`` es ``identity.user_account``
@@ -50,15 +50,16 @@ construcción de PAT-NUC-SEG-01 (capa 1, la base, y capa 2, la política de prov
   las columnas que el diseño deja cambiar (claves, organización y marcas de alta quedan fuera).
 
 Lo que no hace: la lógica de aplicación de identidad (M3) y las tablas del expediente, la
-auditoría y la bandeja (TASK-108).
+auditoría y la bandeja (TASK-108, ``nuc_0002`` y ``nuc_0003``, de las que reutiliza
+``shared.vigia_current_organization()`` y ``shared.vigia_reject_mutation()``).
 """
 
 from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0002"
-down_revision: str | None = "nuc_0001"
+revision: str = "nuc_0004"
+down_revision: str | None = "nuc_0003"
 branch_labels: None = None
 depends_on: None = None
 
@@ -82,15 +83,7 @@ _ROLES = (
 )
 
 _FUNCTIONS = (
-    # Capa 1: la organización de la transacción; NULL sin variable o con la variable vacía.
-    """
-    CREATE FUNCTION identity.rls_organization_id() RETURNS uuid
-        LANGUAGE sql
-        STABLE
-    AS $$
-        SELECT NULLIF(pg_catalog.current_setting('vigia.organization_id', true), '')::uuid
-    $$
-    """,
+    # Capa 1 usa shared.vigia_current_organization() de nuc_0002 (NULL sin variable o vacía).
     # Capa 2: ¿puede la transacción ver o escribir una fila de esta organización y planta?
     """
     CREATE FUNCTION identity.rls_provider_scope_allows(row_organization_id uuid, row_plant_id uuid)
@@ -120,19 +113,7 @@ _FUNCTIONS = (
             )
     $$
     """,
-    """
-    CREATE FUNCTION identity.reject_append_only_change() RETURNS trigger
-        LANGUAGE plpgsql
-        SET search_path = pg_catalog
-    AS $$
-    BEGIN
-        RAISE EXCEPTION USING
-            ERRCODE = 'restrict_violation',
-            MESSAGE = format('%I.%I es de solo anexar: %s está prohibido (P4)',
-                             TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP);
-    END
-    $$
-    """,
+    # Sin marca de fin, el rechazo es shared.vigia_reject_mutation() de nuc_0002.
     # Cierre de una asignación de nodo: fija unassigned_at una vez y nada más.
     """
     CREATE FUNCTION identity.guard_zone_node_assignment() RETURNS trigger
@@ -725,9 +706,9 @@ APPEND_ONLY_GUARDS = {
     "zone_node_assignment": "identity.guard_zone_node_assignment()",
     "role_assignment": "identity.guard_role_assignment()",
     "provider_concession": "identity.guard_provider_concession()",
-    "key_set_publication": "identity.reject_append_only_change()",
-    "live_view_token_issuance": "identity.reject_append_only_change()",
-    "privacy_notice_acceptance": "identity.reject_append_only_change()",
+    "key_set_publication": "shared.vigia_reject_mutation()",
+    "live_view_token_issuance": "shared.vigia_reject_mutation()",
+    "privacy_notice_acceptance": "shared.vigia_reject_mutation()",
 }
 """Tablas ⛓ y la función que custodia su ``UPDATE`` y ``DELETE``."""
 
@@ -761,8 +742,8 @@ _APP_UPDATABLE_COLUMNS = {
 
 _ORGANIZATION_POLICY = """
 CREATE POLICY organization_isolation ON identity.{table} AS PERMISSIVE FOR ALL TO PUBLIC
-    USING (organization_id = identity.rls_organization_id())
-    WITH CHECK (organization_id = identity.rls_organization_id())
+    USING (organization_id = shared.vigia_current_organization())
+    WITH CHECK (organization_id = shared.vigia_current_organization())
 """
 
 _PROVIDER_POLICY = """
@@ -792,7 +773,10 @@ def _triggers() -> list[str]:
             f"CREATE TRIGGER append_only_guard BEFORE UPDATE OR DELETE ON identity.{table}"
             f" FOR EACH ROW EXECUTE FUNCTION {function}",
             f"CREATE TRIGGER append_only_no_truncate BEFORE TRUNCATE ON identity.{table}"
-            " FOR EACH STATEMENT EXECUTE FUNCTION identity.reject_append_only_change()",
+            " FOR EACH STATEMENT EXECUTE FUNCTION shared.vigia_reject_mutation()",
+            # Como en nuc_0002: tampoco session_replication_role = replica los apaga.
+            f"ALTER TABLE identity.{table} ENABLE ALWAYS TRIGGER append_only_guard",
+            f"ALTER TABLE identity.{table} ENABLE ALWAYS TRIGGER append_only_no_truncate",
         ]
     statements += [
         "CREATE TRIGGER data_region_immutable BEFORE UPDATE OF data_region ON identity.plant"
@@ -807,13 +791,10 @@ def _triggers() -> list[str]:
 
 def _grants() -> list[str]:
     statements = [
-        "REVOKE ALL ON FUNCTION identity.rls_organization_id() FROM PUBLIC",
         "REVOKE ALL ON FUNCTION identity.rls_provider_scope_allows(uuid, uuid) FROM PUBLIC",
-        "GRANT EXECUTE ON FUNCTION identity.rls_organization_id() TO vigia_app",
         "GRANT EXECUTE ON FUNCTION identity.rls_provider_scope_allows(uuid, uuid) TO vigia_app",
     ]
     for function in (
-        "reject_append_only_change",
         "guard_zone_node_assignment",
         "guard_role_assignment",
         "guard_provider_concession",

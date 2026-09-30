@@ -10,6 +10,10 @@ cabecera y en el resumen; un fallo se reproduce con ``--hypothesis-seed=<semilla
 Las pruebas marcadas ``nightly`` se omiten salvo con ``--hypothesis-profile=nightly``: el mismo
 comando con una ruta explícita sirve en los dos perfiles y nunca pasa sin ejecutar nada. Las
 marcadas ``integration`` necesitan Docker (testcontainers) y se seleccionan con ``-m``.
+
+Las fixtures de sesión ``postgres_endpoint`` y ``localstack_endpoint`` se declaran aquí, con los
+generadores de ``tests/integration/conftest.py``, para que las pruebas de ``tests/integration/`` y
+las propiedades de ``tests/properties/`` que usan la base compartan un solo contenedor.
 """
 
 from __future__ import annotations
@@ -20,6 +24,15 @@ from typing import Any
 
 import pytest
 from hypothesis import is_hypothesis_test, seed, settings
+
+from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
+
+postgres_endpoint = pytest.fixture(scope="session", name="postgres_endpoint")(
+    postgres_endpoint_session
+)
+localstack_endpoint = pytest.fixture(scope="session", name="localstack_endpoint")(
+    localstack_endpoint_session
+)
 
 CI_PROFILE = "ci"
 NIGHTLY_PROFILE = "nightly"

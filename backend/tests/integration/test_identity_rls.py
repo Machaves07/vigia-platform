@@ -1,4 +1,4 @@
-"""Esquema ``identity`` de ``nuc_0002`` contra PostgreSQL 16 real (TASK-107, PAT-NUC-SEG-01).
+"""Esquema ``identity`` de ``nuc_0004`` contra PostgreSQL 16 real (TASK-107, PAT-NUC-SEG-01).
 
 Una base migrada propia del módulo con la proveedora y dos clientes, A y B, sembrados con filas
 en las 18 tablas (``tests/identity_db.py``). Las lecturas y escrituras van como ``vigia_app`` y,
