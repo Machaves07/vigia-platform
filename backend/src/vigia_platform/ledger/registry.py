@@ -186,9 +186,13 @@ class CompiledType:
         """Valida un contenido JSON contra el esquema estricto (sin coerción ni extras).
 
         Lanza ``pydantic.ValidationError``; el escritor lo traduce a ``content_invalid`` con la
-        ruta del primer campo que falla (TASK-113).
+        ruta del primer campo que falla (TASK-113). Valida con el validador del núcleo, no con
+        ``model_validate_json``: un modelo que redefiniera ese método no puede saltarse el esquema.
         """
-        return self.definition.content_model.model_validate_json(document, strict=True)
+        validated: BaseModel = self.definition.content_model.__pydantic_validator__.validate_json(
+            document, strict=True
+        )
+        return validated
 
     def to_persisted(self) -> PersistedRecordType:
         definition = self.definition
