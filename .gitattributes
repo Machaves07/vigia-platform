@@ -5,3 +5,4 @@
 # Artefactos generados: plegados en las revisiones de GitHub.
 backend/uv.lock linguist-generated=true
 backend/openapi/** linguist-generated=true
+backend/tools/vigia_verify.py linguist-generated=true
