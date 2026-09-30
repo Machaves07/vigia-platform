@@ -30,6 +30,9 @@ node_modules/
 # Ensamblado de nube que genera `cdk synth` en infra/
 cdk.out/
 
+# Respaldo local de filtradas: se genera en la construcción (tools/build_pwned_top100k.py).
+backend/resources/pwned-top100k.txt
+
 # Secretos y configuración local
 .env
 .env.*

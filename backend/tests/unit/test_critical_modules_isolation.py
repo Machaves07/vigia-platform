@@ -41,6 +41,8 @@ def _run(*args: str, cwd: Path = BACKEND) -> tuple[int, dict[str, Any]]:
 def test_critical_modules_import_without_fastapi_or_sqlalchemy() -> None:
     code, result = _run()
     assert result["modules"] == list(CRITICAL_MODULES)
+    # Los submódulos también se importan bajo el bloqueo (LC-NUC-01, TASK-122).
+    assert "vigia_platform.identity.auth.passwords" in result["imported"]
     assert result["block_works"] is True
     assert result["failures"] == {}
     assert result["leaked"] == []
@@ -79,3 +81,25 @@ def test_transitive_import_of_sqlalchemy_is_detected(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert "leaky_module" in result["failures"]
     assert "sqlalchemy" in result["failures"]["leaky_module"]
+
+
+def test_submodule_of_a_critical_package_is_imported_and_checked(tmp_path: Path) -> None:
+    """Importar el paquete no basta: un submódulo que importa FastAPI también se detecta."""
+    package = tmp_path / "critical_pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (package / "leaky.py").write_text("import fastapi  # noqa: F401\n", encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--modules", "critical_pkg"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    result = json.loads(completed.stdout)
+    assert completed.returncode == 1
+    assert result["imported"] == ["critical_pkg", "critical_pkg.clean"]
+    assert list(result["failures"]) == ["critical_pkg.leaky"]
+    assert "fastapi" in result["failures"]["critical_pkg.leaky"]
