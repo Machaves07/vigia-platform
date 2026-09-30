@@ -19,6 +19,7 @@ catálogo sellado o con un evento no registrado no se publica.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -47,7 +48,7 @@ from tests.outbox_support import (
     terminate_backend,
 )
 from vigia_platform.shared.clock import SimulatedClock
-from vigia_platform.shared.context import ActorKind, ContextAbsent
+from vigia_platform.shared.context import ActorKind, ActorUnit, ContextAbsent
 from vigia_platform.shared.db import Database, TemporarilyUnavailable, TransactionAborted
 from vigia_platform.shared.outbox.publish import (
     MAX_PAYLOAD_BYTES,
@@ -57,12 +58,16 @@ from vigia_platform.shared.outbox.publish import (
     partition_key,
     stored_payload_size,
 )
-from vigia_platform.shared.outbox.registries import OutboxCatalog
+from vigia_platform.shared.outbox.registries import Consumer, OutboxCatalog, Schedule
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 
 pytestmark = pytest.mark.integration
 
 NOW = datetime(2026, 9, 29, 10, 30, 0, 123456, tzinfo=UTC)
+
+
+async def _noop(*_: Any) -> None:
+    return None
 
 
 @pytest.fixture(scope="module")
@@ -491,3 +496,81 @@ async def test_catalog_is_persisted_by_the_application_role(
         await again.synchronize(SqlOutboxCatalogStore(transaction), SimulatedClock(NOW))
         assert faults.statements == 3  # solo las tres lecturas
     assert again.sealed
+
+
+def test_resynchronizing_never_touches_circuit_or_lease(
+    postgres_endpoint: PostgresEndpoint,
+) -> None:
+    """Un arranque nuevo actualiza lo declarado, nunca el circuito ni el arrendamiento (TASK-129,
+    TASK-130). Base propia: aquí se registra una tarea que el resto del módulo no declara."""
+
+    def catalog(*, external: bool, schedule: Schedule) -> OutboxCatalog:
+        result = probe_catalog()
+        result.periodic_tasks.register("probe_task", schedule, _noop, unit=ActorUnit.U02)
+        result.consumers.register(
+            Consumer(
+                consumer_name="probe_mailer",
+                unit=ActorUnit.U04,
+                subscribed_events=(PROBE_EVENT, BULK_EVENT) if external else (PROBE_EVENT,),
+                handler=_noop,
+                has_external_dependency=external,
+            )
+        )
+        return result
+
+    async def scenario(migrated: MigratedDatabase) -> tuple[dict[str, Any], dict[str, Any]]:
+        database = app_database(migrated)
+        try:
+            for step, (external, schedule) in enumerate(
+                [(False, Schedule.daily()), (True, Schedule.every(60))]
+            ):
+                async with database.transaction(make_context(kind=ActorKind.SYSTEM)) as tx:
+                    await catalog(external=external, schedule=schedule).synchronize(
+                        SqlOutboxCatalogStore(tx), SimulatedClock(NOW)
+                    )
+                if step == 0:
+                    admin = await migrated.connect()
+                    try:
+                        await admin.execute(
+                            "UPDATE shared.consumer SET circuit_state = 'open',"
+                            " circuit_opened_at = now() WHERE consumer_name = $1",
+                            "probe_mailer",
+                        )
+                        await admin.execute(
+                            "UPDATE shared.periodic_task SET lease_owner = 'worker-1',"
+                            " lease_until = now() WHERE task_name = 'probe_task'"
+                        )
+                    finally:
+                        await admin.close()
+        finally:
+            await database.dispose()
+        admin = await migrated.connect()
+        try:
+            consumer = dict(
+                await admin.fetchrow(
+                    "SELECT circuit_state, circuit_opened_at FROM shared.consumer"
+                    " WHERE consumer_name = $1",
+                    "probe_mailer",
+                )
+            )
+            task = dict(
+                await admin.fetchrow(
+                    "SELECT schedule, next_run_at, lease_owner FROM shared.periodic_task"
+                    " WHERE task_name = 'probe_task'"
+                )
+            )
+            mailer = await admin.fetchval(
+                "SELECT has_external_dependency FROM shared.consumer WHERE consumer_name = $1",
+                "probe_mailer",
+            )
+        finally:
+            await admin.close()
+        assert mailer is True
+        return consumer, task
+
+    with migrated_database(postgres_endpoint, "outbox_resync") as migrated:
+        consumer, task = asyncio.run(scenario(migrated))
+    assert consumer["circuit_state"] == "open" and consumer["circuit_opened_at"] is not None
+    assert task["lease_owner"] == "worker-1"
+    assert task["schedule"] == "every:60s"
+    assert task["next_run_at"] == datetime(2026, 9, 29, 10, 31, tzinfo=UTC)
