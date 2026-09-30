@@ -25,6 +25,7 @@ Solo datos generados: los clips son metadatos de bytes sintéticos que nunca se 
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
@@ -38,7 +39,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 import pytest
-from hypothesis import find, given
+from hypothesis import event, find, given, target
 from hypothesis import strategies as st
 from pydantic import Field, StrictStr
 from vigia_contracts.conformance.generators import classification_sequence
@@ -542,10 +543,71 @@ def walk(
         after = page.next_cursor
 
 
+def whole_walk(tenant: Tenant, labels: Sequence[StoredLabel]) -> Query:
+    """Toda la organización, todo el periodo, sin filtros y de una en una: tantas páginas como
+    etiquetas, así que cada ejemplo con dos o más recorre la paginación de verdad."""
+    stamps = [label.labeled_at for label in labels]
+    return Query(
+        scopes=(
+            AllowedScope(ScopeLevel.ORGANIZATION, tenant.organization_id, Role.COORDINATOR_SST),
+        ),
+        period=LabelPeriod(min(stamps), max(stamps) + timedelta(microseconds=1)),
+        zone_id=None,
+        family=None,
+        reason_category=None,
+        page_size=1,
+    )
+
+
 @st.composite
 def queries(
     draw: st.DrawFn, tenant: Tenant, labels: Sequence[StoredLabel], families: Sequence[str]
 ) -> Query:
+    """Una consulta generada; la mitad de las veces amplia (resultados y varias páginas)."""
+    if draw(st.booleans(), label="broad"):
+        return draw(broad_queries(tenant, labels, families))
+    return draw(narrow_queries(tenant, labels, families))
+
+
+@st.composite
+def broad_queries(
+    draw: st.DrawFn, tenant: Tenant, labels: Sequence[StoredLabel], families: Sequence[str]
+) -> Query:
+    """Alcance de toda la organización (o de su planta A), periodo que cubre todas las marcas,
+    a lo sumo un filtro y páginas de 1 o 2: el caso que más páginas con resultados recorre."""
+    organization_id = tenant.organization_id
+    grant = draw(
+        st.sampled_from(
+            [
+                AllowedScope(ScopeLevel.ORGANIZATION, organization_id, Role.COORDINATOR_SST),
+                AllowedScope(ScopeLevel.ORGANIZATION, organization_id, Role.PLANT_MANAGER),
+                AllowedScope(ScopeLevel.PLANT, tenant.places[0].plant_id, Role.PLANT_MANAGER),
+            ]
+        )
+    )
+    # Ruido: una asignación sin ``labels.read`` que no debe ampliar el alcance.
+    noise = AllowedScope(ScopeLevel.ORGANIZATION, organization_id, Role.LINE_MANAGER)
+    scopes = (grant, noise) if draw(st.booleans()) else (grant,)
+    stamps = sorted(label.labeled_at for label in labels)
+    period = LabelPeriod(stamps[0], stamps[-1] + timedelta(microseconds=1))
+    zone_id: uuid.UUID | None = None
+    family: str | None = None
+    reason: str | None = None
+    which = draw(st.sampled_from(["none", "none", "zone", "family", "reason"]))
+    if which == "zone":
+        zone_id = draw(st.sampled_from([p.zone_id for p in tenant.places]))
+    elif which == "family":
+        family = draw(st.sampled_from(families))
+    elif which == "reason":
+        reason = draw(st.sampled_from(REASONS))
+    return Query(scopes, period, zone_id, family, reason, draw(st.integers(1, 2)))
+
+
+@st.composite
+def narrow_queries(
+    draw: st.DrawFn, tenant: Tenant, labels: Sequence[StoredLabel], families: Sequence[str]
+) -> Query:
+    """Alcances mezclados y ajenos, periodos entre marcas vecinas y filtros sin coincidencias."""
     organization_id = tenant.organization_id
     places = tenant.places
     role = st.sampled_from(sorted(Role, key=str))
@@ -589,7 +651,7 @@ def queries(
         zone_id=draw(st.none() | st.sampled_from([*(p.zone_id for p in places), uuid.uuid4()])),
         family=draw(st.none() | st.sampled_from([*families, "guard_bypass", "dwell"])),
         reason_category=draw(st.none() | st.sampled_from([*REASONS, "unused_reason"])),
-        page_size=draw(st.integers(1, 5)),
+        page_size=draw(st.integers(1, 3)),
     )
 
 
@@ -632,7 +694,8 @@ def test_one_label_per_source_and_query_equals_brute_force(
     for index, subject in enumerate(subjects):
         if index and data.draw(st.booleans(), label="tie"):
             environment.run(_freeze_chain_clocks(environment.migrated, tenant.organization_id))
-        for _ in range(data.draw(st.integers(0, 2), label="decisions")):
+        # El primer sujeto lleva al menos dos decisiones: toda consulta amplia tiene 2 o más.
+        for _ in range(data.draw(st.integers(2 if index == 0 else 0, 3), label="decisions")):
             values = data.draw(decision_values(subject.kind))
             decisions.append(write_decision(environment, subject, **values))
 
@@ -656,44 +719,70 @@ def test_one_label_per_source_and_query_equals_brute_force(
         assert label.evidence_ids == tuple(evidence_by_record.get(subject.record_id, ()))
         assert label.labeled_at == decision.received_at
 
-    # Oráculo: la consulta recorrida página a página es el filtro por fuerza bruta.
+    # Oráculo: la consulta recorrida página a página es el filtro por fuerza bruta. La primera,
+    # obligatoria, recorre todas las etiquetas de una en una (2 o más páginas en cada ejemplo).
+    assert len(labels) >= 2
     families = sorted({s.family for s in subjects})
     signers = {d.source_record_id: (d.signer_id, d.signer_role) for d in decisions}
+    pages = check_query(environment, tenant, labels, by_source, signers, whole_walk(tenant, labels))
+    assert len(pages) == len(labels) >= 2
+    most_pages = 0
     for _ in range(data.draw(st.integers(1, 3), label="queries")):
         query = data.draw(queries(tenant, labels, families), label="query")
-        context = reader_context(tenant.organization_id, query.scopes)
-        audit_before = len(audit_rows(environment, tenant.organization_id))
-        pages = walk(environment, context, query)
-        got = [view for page in pages for view in page]
-        assert [view.label_id for view in got] == brute_force(labels, context, query)
-        assert all(0 < len(page) <= query.page_size for page in pages[:-1])
-        assert len(pages[-1]) <= query.page_size
-        for view in got:
-            assert_identifiers_only(view)
-            stored = by_source[view.source_record_id]
-            assert view.label_id == stored.label_id
-            assert view.evidence_ids == stored.evidence_ids
-            assert (view.labeled_by_user_id, view.labeled_by_role) == signers[view.source_record_id]
-        entries = audit_rows(environment, tenant.organization_id)[audit_before:]
-        assert [(e.operation, e.outcome) for e in entries] == [("label_read", "success")] * len(
-            pages
-        )
-        assert [e.result_count for e in entries] == [len(page) for page in pages]
-        assert all(e.scope_zone_id == query.zone_id for e in entries)
+        pages = check_query(environment, tenant, labels, by_source, signers, query)
+        results = sum(len(page) for page in pages)
+        event(f"consulta generada: {min(len(pages), 4)} páginas")
+        event(f"consulta generada: {'con' if results else 'sin'} resultados")
+        most_pages = max(most_pages, len(pages))
+    target(float(most_pages), label="páginas de la consulta generada más larga")
+
+
+def check_query(
+    environment: LabelEnvironment,
+    tenant: Tenant,
+    labels: Sequence[StoredLabel],
+    by_source: Mapping[uuid.UUID, StoredLabel],
+    signers: Mapping[uuid.UUID, tuple[uuid.UUID, str]],
+    query: Query,
+) -> list[tuple[LabelView, ...]]:
+    """Recorre ``query`` y la compara con la fuerza bruta, vista a vista y entrada a entrada."""
+    context = reader_context(tenant.organization_id, query.scopes)
+    audit_before = len(audit_rows(environment, tenant.organization_id))
+    pages = walk(environment, context, query)
+    got = [view for page in pages for view in page]
+    assert [view.label_id for view in got] == brute_force(labels, context, query)
+    assert all(0 < len(page) <= query.page_size for page in pages[:-1])
+    assert len(pages[-1]) <= query.page_size
+    for view in got:
+        assert_identifiers_only(view)
+        stored = by_source[view.source_record_id]
+        assert view.label_id == stored.label_id
+        assert view.evidence_ids == stored.evidence_ids
+        assert (view.labeled_by_user_id, view.labeled_by_role) == signers[view.source_record_id]
+    entries = audit_rows(environment, tenant.organization_id)[audit_before:]
+    assert [(e.operation, e.outcome) for e in entries] == [("label_read", "success")] * len(pages)
+    assert [e.result_count for e in entries] == [len(page) for page in pages]
+    assert all(e.scope_zone_id == query.zone_id for e in entries)
+    return pages
 
 
 # --- Casos con nombre ---------------------------------------------------------------------------
+
+
+@functools.cache
+def _kit_scenario() -> Any:
+    """Un escenario mínimo del kit con al menos un hallazgo (determinista: ``find``)."""
+    return find(
+        classification_sequence(max_size=0),
+        lambda drawn: any(record_kind(r) == "finding" for r in drawn.records),
+    )
 
 
 @pytest.fixture
 def seeded(environment: LabelEnvironment) -> tuple[Tenant, list[Decision]]:
     """Un hallazgo con dos clasificaciones y una detección con una resolución."""
     tenant = new_tenant()
-    scenario = find(
-        classification_sequence(max_size=0),
-        lambda drawn: any(record_kind(r) == "finding" for r in drawn.records),
-    )
-    finding = next(r for r in scenario.records if record_kind(r) == "finding")
+    finding = next(r for r in _kit_scenario().records if record_kind(r) == "finding")
     subject = write_subject(environment, finding, tenant.places[0])
     decisions = [
         write_decision(
@@ -772,6 +861,53 @@ def test_period_start_is_inclusive_and_end_exclusive(
     assert decisions[0].source_record_id not in ids(first + one_us, first + 2 * one_us)
 
 
+def test_tied_labels_are_walked_one_by_one_in_key_order(environment: LabelEnvironment) -> None:
+    """Empates en ``labeled_at``: de una en una, en orden ``(labeled_at, label_id)`` descendente,
+    sin repetir ni omitir, y una entrada ``label_read`` con ``result_count`` 1 por página."""
+    tenant = new_tenant()
+    finding = next(r for r in _kit_scenario().records if record_kind(r) == "finding")
+    subject = write_subject(environment, finding, tenant.places[0])
+    environment.run(_freeze_chain_clocks(environment.migrated, tenant.organization_id))
+    tied = [
+        write_decision(
+            environment,
+            subject,
+            outcome="confirmed",
+            reason_category=REASONS[index % len(REASONS)],
+            signer_role="coordinator_sst",
+            signer_name=SIGNER_NAMES[0],
+        )
+        for index in range(4)
+    ]
+    assert len({decision.received_at for decision in tied}) == 1, "las cuatro deben empatar"
+    labels, _ = environment.run(_stored_labels(environment.migrated, tenant.organization_id))
+    expected = [
+        label.label_id
+        for label in sorted(labels, key=lambda label: (label.labeled_at, label.label_id))[::-1]
+    ]
+    before = len(audit_rows(environment, tenant.organization_id))
+    context = whole(tenant.organization_id)
+    walked: list[uuid.UUID] = []
+    after: LabelCursor | None = None
+    for _ in range(len(expected) + 1):
+        page = environment.run(
+            environment.labels.consultar(
+                context, _all_time(), page=LabelPageRequest(size=1, after=after)
+            )
+        )
+        walked.extend(view.label_id for view in page.items)
+        if page.next_cursor is None:
+            break
+        after = page.next_cursor
+    assert walked == expected
+    assert len(set(walked)) == len(walked) == 4
+    entries = audit_rows(environment, tenant.organization_id)[before:]
+    assert [e.result_count for e in entries] == [1, 1, 1, 1]
+    assert [e.filters.get("page_size") for e in entries] == [1, 1, 1, 1]
+    assert "after" not in entries[0].filters
+    assert all("after" in e.filters for e in entries[1:])
+
+
 def test_a_context_without_labels_read_is_denied_and_audited(
     environment: LabelEnvironment, seeded: tuple[Tenant, list[Decision]]
 ) -> None:
@@ -783,8 +919,9 @@ def test_a_context_without_labels_read_is_denied_and_audited(
             organization_id, [AllowedScope(ScopeLevel.ORGANIZATION, organization_id, role)]
         )
         before = len(audit_rows(environment, organization_id))
-        with pytest.raises(LabelReadDenied):
+        with pytest.raises(LabelReadDenied) as denied:
             environment.run(environment.labels.consultar(context, _all_time()))
+        assert denied.value.code == "not_found", "como authorize: nunca forbidden"
         entries = audit_rows(environment, organization_id)[before:]
         assert [(e.operation, e.outcome, e.result_count) for e in entries] == [
             ("label_read", "denied", 0)

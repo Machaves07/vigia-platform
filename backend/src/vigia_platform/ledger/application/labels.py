@@ -21,9 +21,9 @@ firmadas; cuando se añada, será un tipo de registro y una clave de permiso nue
 **Permiso ``labels.read`` y alcance.** La matriz (``domain-entities.md`` §2.6) lo da solo a
 ``coordinator_sst`` y ``plant_manager``: solo cuentan las asignaciones de ``allowed_scopes`` con
 uno de esos roles (organización, planta o zona), como en ``EvidencePort``. Un contexto sin
-ninguna da ``LabelReadDenied`` y queda auditado con resultado ``denied``. Un filtro por una zona
-fuera de ese alcance devuelve una página vacía (nunca ``forbidden``). La ruta ``GET /labels``
-(TASK-137) aplica además ``authorize``.
+ninguna da ``LabelReadDenied`` (``not_found``, como ``authorize`` sin la clave) y queda auditado
+con resultado ``denied``. Un filtro por una zona fuera de ese alcance devuelve una página vacía.
+Nunca ``forbidden``. La ruta ``GET /labels`` (TASK-137) aplica además ``authorize``.
 
 **Auditoría** (BR-NUC-59, 62): cada consulta escribe exactamente una entrada ``label_read`` con
 los filtros tal cual y ``result_count``, en la misma transacción que la consulta: si la entrada no
@@ -91,9 +91,13 @@ class LabelQueryInvalid(ValueError):
 
 
 class LabelReadDenied(PermissionError):
-    """El contexto no tiene ninguna asignación con ``labels.read``; queda auditado."""
+    """El contexto no tiene ninguna asignación con ``labels.read``; queda auditado.
 
-    code: Final = "forbidden"
+    Responde ``not_found``, como ``authorize`` sin la clave (business-logic-model §1) y como
+    ``EvidencePort``: una respuesta que no distingue «no puedes» de «no hay».
+    """
+
+    code: Final = "not_found"
 
     def __init__(self) -> None:
         super().__init__("el contexto no tiene el permiso labels.read")
