@@ -104,6 +104,9 @@ from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.storage import StorageUnavailable
 
 __all__ = [
+    "CHAIN_LEVEL_CONSTRAINT",
+    "CHECKPOINT_COVERAGE_CONSTRAINT",
+    "CHECK_VIOLATION",
     "MAX_CONTENT_BYTES",
     "MAX_SOURCE_KEY_CHARS",
     "EscritorExpediente",
@@ -114,6 +117,7 @@ __all__ = [
     "Receipt",
     "RecordScope",
     "to_contract_rejection",
+    "violated_constraint",
 ]
 
 MAX_CONTENT_BYTES: Final = 256 * 1024
@@ -124,6 +128,11 @@ MAX_SOURCE_KEY_CHARS: Final = 64
 
 _SOURCE_KEY_CONSTRAINT: Final = "record_source_key_pkey"
 _UNIQUE_VIOLATION: Final = "23505"
+CHECK_VIOLATION: Final = "23514"
+CHAIN_LEVEL_CONSTRAINT: Final = "ledger_record_chain_level"
+"""Restricción con la que el disparador rechaza la planta de la cadena (``nuc_0005``)."""
+CHECKPOINT_COVERAGE_CONSTRAINT: Final = "ledger_record_checkpoint_coverage"
+"""Restricción con la que el disparador rechaza un punto de control que no cubre la cabeza."""
 _RETRY_AFTER_SECONDS: Final = 5
 
 _log = get_logger("ledger.writer")
@@ -743,6 +752,13 @@ class EscritorExpediente:
         except ChainLockedTimeout:
             return LedgerRejection.of(LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT)
         except sa_exc.IntegrityError as error:
+            if _is_chain_level_violation(error):
+                # El registro de tipos y ``ledger.record_type`` no concuerdan en el nivel.
+                _log.error(
+                    "el disparador rechazó la cadena del registro",
+                    record_type=prepared.compiled.record_type,
+                )
+                return LedgerRejection.of(LedgerRejectionCode.CONTENT_INVALID, "/plant_id")
             if prepared.source_key is None or not _is_source_key_violation(error):
                 raise
             # Otra escritura con la misma clave confirmó antes: esta se revirtió entera.
@@ -858,12 +874,23 @@ def _value(member: object) -> str:
     return str(value)
 
 
-def _is_source_key_violation(error: sa_exc.IntegrityError) -> bool:
-    """La violación de unicidad es la de ``ledger.record_source_key`` (misma clave)."""
+def violated_constraint(error: sa_exc.IntegrityError, sqlstate: str) -> str | None:
+    """Nombre de la restricción que violó ``error`` con ``sqlstate``, o ``None``."""
     candidates: list[object] = [error, error.orig, getattr(error.orig, "__cause__", None)]
     for candidate in candidates:
-        if getattr(candidate, "sqlstate", None) != _UNIQUE_VIOLATION:
+        if getattr(candidate, "sqlstate", None) != sqlstate:
             continue
-        if getattr(candidate, "constraint_name", None) == _SOURCE_KEY_CONSTRAINT:
-            return True
-    return False
+        name = getattr(candidate, "constraint_name", None)
+        if isinstance(name, str):
+            return name
+    return None
+
+
+def _is_source_key_violation(error: sa_exc.IntegrityError) -> bool:
+    """La violación de unicidad es la de ``ledger.record_source_key`` (misma clave)."""
+    return violated_constraint(error, _UNIQUE_VIOLATION) == _SOURCE_KEY_CONSTRAINT
+
+
+def _is_chain_level_violation(error: sa_exc.IntegrityError) -> bool:
+    """El disparador rechazó la planta de la cadena para el nivel del tipo (BR-NUC-45)."""
+    return violated_constraint(error, CHECK_VIOLATION) == CHAIN_LEVEL_CONSTRAINT
