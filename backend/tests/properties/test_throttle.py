@@ -15,10 +15,16 @@ un éxito lo reinicia" (``login_attempt_sequences``).
   anota uno u otro, y los dos leen siempre el mismo estado, igual al del modelo. Además, un
   **proceso del sistema operativo** aparte (``python -m tests.throttle_probe``) lee el mismo
   retardo que este proceso acaba de fijar.
-- **Concurrencia**: fallos simultáneos de dos procesos no se pierden (``INSERT ... ON CONFLICT``
-  con la fila bloqueada).
+- **Reserva antes de verificar** (PAT-NUC-ESC-03): ``reserve_attempt`` retiene o cuenta ya el
+  intento; ``release_attempt`` devuelve la reserva de un intento correcto sin acortar nunca un
+  retardo ajeno. Intentos simultáneos de dos procesos se serializan en la fila: los cinco
+  primeros se reservan y el resto ya ve el retardo.
 - **Inicio de sesión**: las cuentas inexistentes cuentan solo por origen; 10 fallos de una cuenta
   publican una ``security_alert`` con ``resource_kind = user`` y 50 de un origen otra sin recurso.
+  El retardo de la cuenta retiene desde cualquier origen nuevo; los fallos del segundo paso
+  cuentan en la fila de la cuenta y retienen hasta un código bueno; un inicio correcto no deja
+  fallos en el origen ni (con sesión pendiente) en la cuenta. Ráfagas de 25 intentos
+  simultáneos, de contraseña o de código, verifican como mucho cinco.
 
 Semillas y ejemplos del perfil activo (``tests/conftest.py``).
 """
@@ -26,6 +32,7 @@ Semillas y ejemplos del perfil activo (``tests/conftest.py``).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
@@ -33,7 +40,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,13 +50,31 @@ from hypothesis import strategies as st
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.outbox_support import app_database
-from tests.session_support import START, FakePasswords, SessionEnvironment, session_environment
+from tests.session_support import (
+    GOOD_CODE,
+    ORIGIN_KEY,
+    START,
+    FakePasswords,
+    FakeSecondFactor,
+    SessionEnvironment,
+    User,
+    session_environment,
+)
 from vigia_platform.identity.adapters.session_store import PostgresSessionStore
-from vigia_platform.identity.auth.login import Rejected, RejectionCode
+from vigia_platform.identity.auth.login import (
+    Authenticated,
+    LoginService,
+    Rejected,
+    RejectionCode,
+    SecondFactorRequired,
+)
+from vigia_platform.identity.auth.passwords import VerifyResult
+from vigia_platform.identity.auth.second_factor import TotpCredential
 from vigia_platform.identity.auth.sessions import (
     ACCOUNT_ALERT_THRESHOLD,
     ORIGIN_ALERT_THRESHOLD,
     THROTTLE_MAX_DELAY,
+    SessionCookie,
     ThrottleState,
     ThrottleSubject,
     ThrottleSubjectKind,
@@ -57,10 +82,13 @@ from vigia_platform.identity.auth.sessions import (
     after_success,
     alert_threshold,
     origin_hash,
+    release_attempt,
+    reserve_attempt,
     retry_after_seconds,
     throttle_delay,
     window_expired,
 )
+from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Database
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -113,7 +141,7 @@ def test_delay_progression_matches_br_nuc_24(
             # Intento retenido: no se verifica ni cuenta; el estado no cambia.
             assert state is not None and now < state.next_allowed_at
             continue
-        new_window = state is None or window_expired(state, now)
+        new_window = state is None or state.consecutive_failures == 0 or window_expired(state, now)
         outcome = after_failure(state, now, threshold=threshold)
         failures = 1 if new_window else failures + 1
         delay = outcome.state.next_allowed_at - now
@@ -193,6 +221,83 @@ def test_retry_after_rounds_up_and_is_zero_at_the_boundary() -> None:
     assert retry_after_seconds(None, START) == 0
 
 
+states = st.builds(
+    lambda failures, offset_s, window_s: ThrottleState(
+        failures,
+        START - timedelta(seconds=window_s),
+        START + timedelta(seconds=offset_s),
+        None,
+    ),
+    st.integers(0, 60),
+    st.integers(-3_600, 900),
+    st.integers(0, 3_600),
+)
+ORIGIN_SUBJECT = ThrottleSubject.origin(uuid.UUID(int=1), "a" * 64)
+_ACCOUNT_SUBJECT = ThrottleSubject.account(uuid.UUID(int=2), uuid.UUID(int=3))
+
+
+@given(before=states, kind=st.sampled_from(ThrottleSubjectKind))
+def test_reservation_is_retained_or_counted_before_verifying(
+    before: ThrottleState, kind: ThrottleSubjectKind
+) -> None:
+    """Retenido si hay retardo (la fila no cambia); si no, contado ya como el fallo siguiente."""
+    subject = ORIGIN_SUBJECT if kind is ThrottleSubjectKind.ORIGIN else _ACCOUNT_SUBJECT
+    reservation = reserve_attempt(subject, before, START)
+    assert reservation.before == before and reservation.subject == subject
+    retry = retry_after_seconds(before, START)
+    if retry > 0:
+        assert not reservation.granted and reservation.retry_after_seconds == retry
+        with pytest.raises(ValueError):
+            release_attempt(before, reservation)
+        return
+    assert reservation.granted and reservation.retry_after_seconds == 0
+    assert reservation.outcome == after_failure(before, START, threshold=alert_threshold(kind))
+
+
+@given(before=states, alerted=st.booleans())
+def test_release_without_other_attempts_restores_the_row(
+    before: ThrottleState, alerted: bool
+) -> None:
+    """Un intento correcto no cuenta: la fila vuelve a como estaba, salvo ``alerted_at``."""
+    now = max(START, before.next_allowed_at)
+    reservation = reserve_attempt(ORIGIN_SUBJECT, before, now)
+    assert reservation.outcome is not None
+    current = reservation.outcome.state
+    if alerted:
+        current = ThrottleState(
+            current.consecutive_failures, current.window_started_at, current.next_allowed_at, now
+        )
+        reservation = dataclasses.replace(
+            reservation, outcome=dataclasses.replace(reservation.outcome, state=current)
+        )
+    released = release_attempt(current, reservation)
+    assert released == dataclasses.replace(before, alerted_at=current.alerted_at)
+    assert retry_after_seconds(released, now) == 0
+
+
+@given(before=states, others=st.integers(1, 10), gap=st.integers(0, 600))
+def test_release_after_concurrent_attempts_only_removes_its_failure(
+    before: ThrottleState, others: int, gap: int
+) -> None:
+    """Con intentos concurrentes por medio, se resta un fallo y el retardo no se acorta."""
+    now = max(START, before.next_allowed_at)
+    reservation = reserve_attempt(ORIGIN_SUBJECT, before, now)
+    assert reservation.outcome is not None
+    current = reservation.outcome.state
+    for _ in range(others):
+        current = after_failure(current, now + timedelta(seconds=gap), threshold=50).state
+    released = release_attempt(current, reservation)
+    assert released.consecutive_failures == current.consecutive_failures - 1
+    assert released.next_allowed_at == current.next_allowed_at
+    assert released.alerted_at == current.alerted_at
+
+
+def test_release_never_goes_below_zero() -> None:
+    reservation = reserve_attempt(ORIGIN_SUBJECT, ThrottleState(0, START, START), START)
+    cleaned = after_success(START + timedelta(minutes=20))  # la limpieza periódica, por medio
+    assert release_attempt(cleaned, reservation).consecutive_failures == 0
+
+
 def test_origin_hash_is_keyed_and_never_the_address() -> None:
     first = origin_hash("203.0.113.7", b"a" * 32)
     assert len(first) == 64 and "203.0.113.7" not in first
@@ -246,6 +351,8 @@ def test_both_processes_see_the_same_state_as_the_model(
     base = env.base
     subject = _subject(env, kind)
     context = base.contexts.anonymous(subject.organization_id)
+    # Un intento retenido se audita: el de una cuenta, con su usuario.
+    user_id = uuid.UUID(subject.key) if kind is ThrottleSubjectKind.ACCOUNT else None
     model: ThrottleState | None = None
     now = START
     for index, (gap, action) in enumerate(events):
@@ -259,11 +366,14 @@ def test_both_processes_see_the_same_state_as_the_model(
             continue
         if action == WAIT and model is not None:
             now = max(now, model.next_allowed_at)
-        if retry_after_seconds(model, now) > 0:
+        reservation = base.run(store.reserve(context, subject, now, user_id=user_id))
+        retry = retry_after_seconds(model, now)
+        if retry > 0:
+            # Retenido: no cuenta y la fila no cambia.
+            assert reservation.outcome is None and reservation.retry_after_seconds == retry
             continue
-        outcome = base.run(store.record_failure(context, subject, now, audit=None, user_id=None))
         expected = after_failure(model, now, threshold=alert_threshold(kind))
-        assert outcome == expected
+        assert reservation.outcome == expected
         model = expected.state
     seen = [base.run(s.throttle_state(context, subject)) for s in env.stores]
     assert seen[0] == seen[1] == model
@@ -278,9 +388,8 @@ def test_another_os_process_reads_the_same_delay(env: Env) -> None:
     context = base.contexts.anonymous(subject.organization_id)
     now = START + timedelta(days=3)
     for _ in range(7):
-        outcome = base.run(
-            env.stores[0].record_failure(context, subject, now, audit=None, user_id=None)
-        )
+        outcome = base.run(env.stores[0].reserve(context, subject, now, user_id=None)).outcome
+        assert outcome is not None
         now = outcome.state.next_allowed_at
     here = retry_after_seconds(outcome.state, START + timedelta(days=3))
     probe = subprocess.run(
@@ -312,7 +421,9 @@ def test_another_os_process_reads_the_same_delay(env: Env) -> None:
 
 
 @pytest.mark.integration
-def test_concurrent_failures_from_two_processes_are_all_counted(env: Env) -> None:
+def test_concurrent_attempts_from_two_processes_are_all_gated(env: Env) -> None:
+    """Ocho intentos simultáneos desde dos «instancias»: se serializan en la fila; los cinco
+    primeros se reservan (1 a 5) y los tres siguientes ya ven el retardo del quinto."""
     base = env.base
     subject = _subject(env, ThrottleSubjectKind.ORIGIN)
     context = base.contexts.anonymous(subject.organization_id)
@@ -321,21 +432,17 @@ def test_concurrent_failures_from_two_processes_are_all_counted(env: Env) -> Non
     async def burst() -> list[Any]:
         return list(
             await asyncio.gather(
-                *(
-                    env.stores[i % 2].record_failure(
-                        context, subject, now, audit=None, user_id=None
-                    )
-                    for i in range(8)
-                )
+                *(env.stores[i % 2].reserve(context, subject, now, user_id=None) for i in range(8))
             )
         )
 
-    outcomes = base.run(burst())
-    assert sorted(o.state.consecutive_failures for o in outcomes) == list(range(1, 9))
+    reservations = base.run(burst())
+    granted = [r.outcome for r in reservations if r.outcome is not None]
+    assert sorted(o.state.consecutive_failures for o in granted) == [1, 2, 3, 4, 5]
+    assert [r.retry_after_seconds for r in reservations if r.outcome is None] == [30] * 3
     final = base.run(env.stores[1].throttle_state(context, subject))
-    assert final is not None and final.consecutive_failures == 8
-    # El retardo nunca retrocede aunque los fallos lleguen a la vez.
-    assert final.next_allowed_at == now + expected_delay(8)
+    assert final is not None and final.consecutive_failures == 5
+    assert final.next_allowed_at == now + expected_delay(5)
 
 
 # --- Inicio de sesión: quién cuenta y alertas -----------------------------------------------
@@ -447,3 +554,182 @@ def test_throttled_attempt_is_not_verified_and_reports_retry_after(env: Env) -> 
     assert [a["operation"] for a in audit] == ["login_failed"] * 5 + ["login_throttled"]
     base.clock.advance(30)
     assert not isinstance(base.run(login.authenticate(user.email, user.password, origin)), Rejected)
+
+
+# --- Reserva antes de verificar: cuenta, segundo paso y ráfagas ----------------------------------
+
+
+class SlowPasswords(FakePasswords):
+    """``FakePasswords`` que tarda como Argon2id: deja a la ráfaga solaparse."""
+
+    async def verify(self, password: str, encoded: str) -> VerifyResult:
+        result = await super().verify(password, encoded)
+        await asyncio.sleep(0.3)
+        return result
+
+
+class CountingSecondFactor(FakeSecondFactor):
+    """``FakeSecondFactor`` que cuenta (y hace lentas) las verificaciones de código."""
+
+    def __init__(self, delay: float = 0.0) -> None:
+        self.verify_calls = 0
+        self.delay = delay
+
+    async def verify_totp(
+        self, context: ScopeContext, credential: TotpCredential, code: str, now: datetime
+    ) -> bool:
+        self.verify_calls += 1
+        await asyncio.sleep(self.delay)
+        return await super().verify_totp(context, credential, code, now)
+
+
+def _account_state(base: SessionEnvironment, user: User) -> ThrottleState | None:
+    subject = ThrottleSubject.account(user.organization_id, user.user_id)
+    state: ThrottleState | None = base.run(
+        base.store().throttle_state(base.contexts.anonymous(user.organization_id), subject)
+    )
+    return state
+
+
+def _origin_state(base: SessionEnvironment, origin: str) -> ThrottleState | None:
+    provider = base.seed.provider_organization_id
+    subject = ThrottleSubject.origin(provider, origin_hash(origin, ORIGIN_KEY))
+    state: ThrottleState | None = base.run(
+        base.store().throttle_state(base.contexts.anonymous(provider), subject)
+    )
+    return state
+
+
+def _pending(base: SessionEnvironment, login: LoginService, user: User) -> SessionCookie:
+    origin = f"192.0.2.{uuid.uuid4().int % 250}"
+    result = base.run(login.authenticate(user.email, user.password, origin))
+    assert isinstance(result, SecondFactorRequired)
+    return result.cookie
+
+
+@pytest.mark.integration
+def test_account_delay_holds_from_any_new_origin(env: Env) -> None:
+    """(a) Cinco fallos desde cinco orígenes: el sexto, desde otro origen y con la contraseña
+    buena, queda retenido por la cuenta sin verificar; el origen nuevo no se queda el fallo."""
+    base = env.base
+    user = base.add_user(base.add_organization())
+    passwords = FakePasswords()
+    login = base.login(passwords=passwords)
+    prefix = f"10.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}"
+    for attempt in range(5):
+        result = base.run(login.authenticate(user.email, "mala", f"{prefix}.{attempt}"))
+        assert result == Rejected(RejectionCode.UNAUTHENTICATED, "credenciales inválidas")
+    calls = passwords.verify_calls
+    fresh = f"{prefix}.99"
+    result = base.run(login.authenticate(user.email, user.password, fresh))
+    assert result == Rejected(
+        RejectionCode.THROTTLED, "demasiados intentos; espera antes de volver a intentar", 30
+    )
+    assert passwords.verify_calls == calls
+    state = _account_state(base, user)
+    assert state is not None and state.consecutive_failures == 5
+    # Un intento retenido no cuenta: la reserva del origen nuevo se devolvió.
+    origin_state = _origin_state(base, fresh)
+    assert origin_state is not None and origin_state.consecutive_failures == 0
+
+
+@pytest.mark.integration
+def test_second_factor_failures_count_on_the_account_and_hold_a_good_code(env: Env) -> None:
+    """(b) y (c) Cinco códigos erróneos suben ``consecutive_failures`` de la cuenta; el siguiente,
+    aunque sea bueno, queda retenido con ``retry_after_seconds`` y no llega a ``verify_totp``."""
+    base = env.base
+    user = base.add_user(base.add_organization(), required=True, enrolled=True)
+    second_factor = CountingSecondFactor()
+    login = base.login(second_factor=second_factor)
+    cookie = _pending(base, login, user)
+    before = _account_state(base, user)
+    assert before is None or before.consecutive_failures == 0
+    for attempt in range(1, 6):
+        result = base.run(login.verify_second_factor(cookie, "000000"))
+        assert result == Rejected(RejectionCode.UNAUTHENTICATED, "credenciales inválidas")
+        state = _account_state(base, user)
+        assert state is not None and state.consecutive_failures == attempt
+    assert second_factor.verify_calls == 5
+    held = base.run(login.verify_second_factor(cookie, GOOD_CODE))
+    assert held == Rejected(
+        RejectionCode.THROTTLED, "demasiados intentos; espera antes de volver a intentar", 30
+    )
+    assert second_factor.verify_calls == 5
+    base.clock.advance(30)
+    assert isinstance(base.run(login.verify_second_factor(cookie, GOOD_CODE)), Authenticated)
+    state = _account_state(base, user)
+    assert state is not None and state.consecutive_failures == 0
+
+
+@pytest.mark.integration
+def test_success_returns_the_origin_reservation(env: Env) -> None:
+    """Entrar bien desde un origen no le suma fallos: una oficina tras una sola dirección no se
+    retiene por sus propios inicios correctos, y un atacante tampoco limpia su origen así."""
+    base = env.base
+    organization = base.add_organization()
+    plain = base.add_user(organization)
+    pending = base.add_user(organization, required=True, enrolled=True)
+    login = base.login()
+    origin = f"198.18.{uuid.uuid4().int % 250}.{uuid.uuid4().int % 250}"
+    for attempt in range(4):
+        base.run(login.authenticate(f"nadie-{attempt}@example.test", "x", origin))
+    for _ in range(3):
+        result = base.run(login.authenticate(plain.email, plain.password, origin))
+        assert isinstance(result, Authenticated)
+        result = base.run(login.authenticate(pending.email, pending.password, origin))
+        assert isinstance(result, SecondFactorRequired)
+    state = _origin_state(base, origin)
+    assert state is not None and state.consecutive_failures == 4
+    assert retry_after_seconds(state, base.clock.now()) == 0
+    # La sesión pendiente tampoco deja un fallo en la cuenta.
+    account = _account_state(base, pending)
+    assert account is not None and account.consecutive_failures == 0
+
+
+@pytest.mark.integration
+def test_concurrent_password_burst_verifies_at_most_five(env: Env) -> None:
+    """Veinticinco intentos simultáneos con contraseña errónea desde 25 orígenes sobre una cuenta
+    nueva: como mucho cinco llegan a Argon2id; el resto se retiene por la cuenta."""
+    base = env.base
+    user = base.add_user(base.add_organization())
+    passwords = SlowPasswords()
+    login = base.login(passwords=passwords)
+    prefix = f"172.{16 + uuid.uuid4().int % 16}.{uuid.uuid4().int % 250}"
+
+    async def burst() -> list[Any]:
+        return list(
+            await asyncio.gather(
+                *(login.authenticate(user.email, "mala", f"{prefix}.{i}") for i in range(25))
+            )
+        )
+
+    results = base.run(burst())
+    assert passwords.verify_calls == 5
+    codes = [r.code for r in results]
+    assert codes.count(RejectionCode.UNAUTHENTICATED) == 5
+    assert codes.count(RejectionCode.THROTTLED) == 20
+    state = _account_state(base, user)
+    assert state is not None and state.consecutive_failures == 5
+
+
+@pytest.mark.integration
+def test_concurrent_code_burst_verifies_at_most_five(env: Env) -> None:
+    """Veinticinco códigos simultáneos sobre una sesión pendiente: como mucho cinco se verifican."""
+    base = env.base
+    user = base.add_user(base.add_organization(), required=True, enrolled=True)
+    second_factor = CountingSecondFactor(delay=0.3)
+    login = base.login(second_factor=second_factor)
+    cookie = _pending(base, login, user)
+
+    async def burst() -> list[Any]:
+        return list(
+            await asyncio.gather(*(login.verify_second_factor(cookie, "000000") for _ in range(25)))
+        )
+
+    results = base.run(burst())
+    assert second_factor.verify_calls == 5
+    codes = [r.code for r in results]
+    assert codes.count(RejectionCode.UNAUTHENTICATED) == 5
+    assert codes.count(RejectionCode.THROTTLED) == 20
+    state = _account_state(base, user)
+    assert state is not None and state.consecutive_failures == 5

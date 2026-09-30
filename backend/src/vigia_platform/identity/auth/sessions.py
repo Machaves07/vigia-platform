@@ -32,11 +32,22 @@ los puertos; el SQL vive en ``identity.adapters.session_store``. Módulo crític
   plataforma). Los intentos sobre cuentas inexistentes cuentan solo por origen.
 - Tras el enésimo fallo consecutivo el retardo es 0 hasta el cuarto y ``30 s x 2^(n-5)`` desde el
   quinto, con tope de 15 minutos (``throttle_delay``). Un intento retenido no cuenta como fallo.
+- **Reserva pesimista** (PAT-NUC-ESC-03, actualización atómica): cada intento se reserva
+  **antes** de verificar, en la transacción que bloquea la fila (``reserve_attempt``). Si hay
+  retardo vigente, el intento se retiene y la fila no cambia; si no, cuenta ya como fallo. Así
+  una ráfaga concurrente verifica como mucho los intentos que el retardo permite: el sexto
+  intento simultáneo ve los cinco anteriores. Si el intento resulta correcto, la reserva se
+  devuelve (``release_attempt``): sin otros intentos por medio, la fila vuelve a su estado
+  anterior; con intentos concurrentes, solo se resta el fallo y el retardo no se acorta. Un
+  intento que falla a medias (error o caída) queda contado: el fallo es cerrado.
 - La ventana de 15 minutos corre desde el último instante permitido (``next_allowed_at``): si no
   hay ningún fallo en los 15 minutos siguientes a poder reintentar, el contador vuelve a empezar.
   Así el retardo no decrece mientras siga el ataque (PR-NUC-06) y el tope de 15 min se alcanza.
-- Un inicio correcto reinicia el contador de la cuenta, no el del origen.
-- ``security_alert`` una vez por ventana al llegar a 10 fallos por cuenta o 50 por origen.
+- Un inicio correcto reinicia el contador de la cuenta; al del origen solo le devuelve su propia
+  reserva (un atacante no limpia su origen entrando en una cuenta suya).
+- ``security_alert`` una vez por ventana al llegar a 10 fallos por cuenta o 50 por origen. La
+  alerta sale con la reserva que alcanza el umbral, aunque ese intento acabe siendo correcto; la
+  devolución conserva ``alerted_at`` para no repetirla en la ventana.
 
 El origen de red nunca se guarda en claro: ``origin_hash`` es un HMAC-SHA256 con una clave de la
 plataforma. Un SHA-256 simple de una dirección IPv4 se invierte recorriendo las 2^32 direcciones.
@@ -76,6 +87,7 @@ __all__ = [
     "THROTTLE_WINDOW",
     "FailureOutcome",
     "NewSession",
+    "Reservation",
     "SessionContexts",
     "SessionCookie",
     "SessionEndReason",
@@ -97,6 +109,8 @@ __all__ = [
     "idle_expiry",
     "new_session_cookie",
     "origin_hash",
+    "release_attempt",
+    "reserve_attempt",
     "retry_after_seconds",
     "session_id_hash",
     "throttle_delay",
@@ -570,7 +584,7 @@ def retry_after_seconds(state: ThrottleState | None, now: datetime) -> int:
 
 def after_failure(state: ThrottleState | None, now: datetime, *, threshold: int) -> FailureOutcome:
     """El estado tras un fallo en ``now`` (``state`` es el guardado, o ``None`` si no hay fila)."""
-    if state is None or window_expired(state, now):
+    if state is None or state.consecutive_failures == 0 or window_expired(state, now):
         failures, window_started_at, alerted_at = 1, now, None
         floor = now
     else:
@@ -591,6 +605,56 @@ def after_failure(state: ThrottleState | None, now: datetime, *, threshold: int)
 def after_success(now: datetime) -> ThrottleState:
     """El contador de la cuenta tras un inicio correcto (o al limpiar una ventana vencida)."""
     return ThrottleState(0, now, now, None)
+
+
+@dataclass(frozen=True, slots=True)
+class Reservation:
+    """Un intento reservado antes de verificarlo (``reserve_attempt``)."""
+
+    subject: ThrottleSubject
+    before: ThrottleState
+    """La fila tal como estaba al bloquearla."""
+    retry_after_seconds: int
+    """Mayor que 0 si el intento se retiene (y entonces no cuenta)."""
+    outcome: FailureOutcome | None
+    """El fallo anotado de forma pesimista; ``None`` si el intento se retiene."""
+
+    @property
+    def granted(self) -> bool:
+        return self.outcome is not None
+
+
+def reserve_attempt(subject: ThrottleSubject, before: ThrottleState, now: datetime) -> Reservation:
+    """Reserva un intento sobre la fila bloqueada ``before``: retenido o contado ya como fallo."""
+    retry = retry_after_seconds(before, now)
+    if retry > 0:
+        return Reservation(subject, before, retry, None)
+    outcome = after_failure(before, now, threshold=alert_threshold(subject.kind))
+    return Reservation(subject, before, 0, outcome)
+
+
+def release_attempt(current: ThrottleState, reservation: Reservation) -> ThrottleState:
+    """La fila tras devolver la reserva de un intento correcto (``current`` es la bloqueada).
+
+    Sin intentos por medio (``current`` es lo que dejó la reserva), la fila vuelve a ``before``.
+    Con intentos concurrentes, solo se resta el fallo: el retardo que fijaron no se acorta. En los
+    dos casos se conserva ``alerted_at``: la alerta de la ventana no se repite.
+    """
+    if reservation.outcome is None:
+        raise ValueError("un intento retenido no tiene reserva que devolver")
+    if current == reservation.outcome.state:
+        return ThrottleState(
+            reservation.before.consecutive_failures,
+            reservation.before.window_started_at,
+            reservation.before.next_allowed_at,
+            current.alerted_at,
+        )
+    return ThrottleState(
+        max(0, current.consecutive_failures - 1),
+        current.window_started_at,
+        current.next_allowed_at,
+        current.alerted_at,
+    )
 
 
 def _require_context(context: object) -> None:

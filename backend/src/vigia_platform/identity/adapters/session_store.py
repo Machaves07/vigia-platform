@@ -10,11 +10,12 @@ contador de otra organización no existen para el almacén.
   ``idle_expires_at = last_seen_at + 30 min`` en el mismo viaje (PAT-NUC-REN-03). En la base
   solo está ``session_id_hash``; el identificador en claro nunca llega aquí.
 - **Retardo** (PAT-NUC-ESC-02, ESC-03): ``INSERT ... ON CONFLICT DO UPDATE ... RETURNING`` crea
-  la fila o la bloquea y la devuelve; el estado siguiente lo calcula ``after_failure`` (la misma
-  función pura que prueba PR-NUC-06) y se guarda en la misma transacción. Dos procesos que fallan
-  a la vez se serializan en la fila: ningún fallo se pierde y el retardo es el mismo desde
-  cualquier instancia. La alerta ``security_alert`` se publica en la bandeja dentro de esa
-  transacción, una vez por ventana.
+  la fila o la bloquea y la devuelve; la reserva del intento la calcula ``reserve_attempt`` (con
+  ``after_failure``, la misma función pura que prueba PR-NUC-06) y se guarda en la misma
+  transacción, **antes** de verificar nada. Dos procesos que intentan a la vez se serializan en
+  la fila: ninguno se pierde, ninguno esquiva el retardo y el retardo es el mismo desde cualquier
+  instancia. La alerta ``security_alert`` se publica en la bandeja dentro de esa transacción, una
+  vez por ventana.
 - **Correo → organización**: ``identity.login_organization`` (``nuc_0006``), la única búsqueda
   previa al contexto de la organización.
 - **Auditoría**: todo evento de autenticación y todo fin de sesión, con su motivo en
@@ -28,6 +29,7 @@ contador de otra organización no existen para el almacén.
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
@@ -42,8 +44,8 @@ from vigia_platform.identity.auth.login import (
 )
 from vigia_platform.identity.auth.passwords import PasswordHash
 from vigia_platform.identity.auth.sessions import (
-    FailureOutcome,
     NewSession,
+    Reservation,
     SessionEndReason,
     SessionPurpose,
     SessionStatus,
@@ -52,9 +54,9 @@ from vigia_platform.identity.auth.sessions import (
     ThrottleSubject,
     ThrottleSubjectKind,
     ValidSession,
-    after_failure,
     after_success,
-    alert_threshold,
+    release_attempt,
+    reserve_attempt,
 )
 from vigia_platform.ledger.application.audit_writer import (
     AuditOperation,
@@ -199,6 +201,11 @@ _LOCK_THROTTLE: Final = text(
     " DO UPDATE SET consecutive_failures = t.consecutive_failures"
     " RETURNING t.consecutive_failures, t.window_started_at, t.next_allowed_at, t.alerted_at"
 )
+_LOCK_FOR_RELEASE: Final = text(
+    "SELECT consecutive_failures, window_started_at, next_allowed_at, alerted_at"
+    " FROM identity.auth_throttle WHERE organization_id = :organization_id"
+    " AND subject_kind = :subject_kind AND subject_key = :subject_key FOR UPDATE"
+)
 _SAVE_THROTTLE: Final = text(
     "UPDATE identity.auth_throttle SET consecutive_failures = :consecutive_failures,"
     " window_started_at = :window_started_at, next_allowed_at = :next_allowed_at,"
@@ -262,6 +269,15 @@ async def _save_state(
             "alerted_at": state.alerted_at,
         },
     )
+
+
+async def _release(transaction: Transaction, reservation: Reservation) -> None:
+    """Devuelve ``reservation`` sobre su fila bloqueada (sin fila, nada que devolver)."""
+    subject = reservation.subject
+    row = (await transaction.execute(_LOCK_FOR_RELEASE, _subject_parameters(subject))).first()
+    current = _state(row)
+    if current is not None:
+        await _save_state(transaction, subject, release_attempt(current, reservation))
 
 
 async def end_user_sessions(
@@ -507,63 +523,69 @@ class PostgresSessionStore:
 
     # --- LoginStore ---------------------------------------------------------------------------
 
-    async def resolve_login(
-        self, context: ScopeContext, email: str, origin: ThrottleSubject
-    ) -> tuple[uuid.UUID | None, ThrottleState | None]:
+    async def begin_login(
+        self, context: ScopeContext, email: str | None, origin: ThrottleSubject, now: datetime
+    ) -> tuple[uuid.UUID | None, Reservation]:
+        organization_id: uuid.UUID | None = None
         async with self._database.transaction(context) as transaction:
-            found = (await transaction.execute(_LOGIN_ORGANIZATION, {"email": email})).one()
-            state = _state(
-                (await transaction.execute(_THROTTLE, _subject_parameters(origin))).first()
-            )
-        organization_id = None if found.organization_id is None else _uuid(found.organization_id)
-        return organization_id, state
+            if email is not None:
+                found = (await transaction.execute(_LOGIN_ORGANIZATION, {"email": email})).one()
+                if found.organization_id is not None:
+                    organization_id = _uuid(found.organization_id)
+            reservation = await self._reserve(transaction, origin, now)
+        return organization_id, reservation
 
     async def load_account(
-        self, context: ScopeContext, email: str, now: datetime
-    ) -> LoginAccount | None:
+        self, context: ScopeContext, email: str, now: datetime, *, reserve: bool
+    ) -> tuple[LoginAccount | None, Reservation | None]:
         async with self._database.transaction(context) as transaction:
             row = (await transaction.execute(_LOAD_ACCOUNT, {"email": email})).first()
-        if row is None:
-            return None
-        return LoginAccount(
-            user_id=_uuid(row.user_id),
-            organization_id=_uuid(row.organization_id),
-            email=row.email,
-            display_name=row.display_name,
-            user_active=row.status == "active",
-            organization_active=row.organization_status == "active",
-            second_factor_required=bool(row.second_factor_required),
-            second_factor_enrolled=bool(row.second_factor_enrolled),
-            password_hash=row.password_hash,
-            throttle=_state(row),
-        )
+            if row is None:
+                return None, None
+            account = LoginAccount(
+                user_id=_uuid(row.user_id),
+                organization_id=_uuid(row.organization_id),
+                email=row.email,
+                display_name=row.display_name,
+                user_active=row.status == "active",
+                organization_active=row.organization_status == "active",
+                second_factor_required=bool(row.second_factor_required),
+                second_factor_enrolled=bool(row.second_factor_enrolled),
+                password_hash=row.password_hash,
+                throttle=_state(row),
+            )
+            if not reserve:
+                return account, None
+            subject = ThrottleSubject.account(account.organization_id, account.user_id)
+            reservation = await self._reserve(transaction, subject, now)
+        # El retardo que decide es el de la fila bloqueada, no el de la lectura previa.
+        return dataclasses.replace(account, throttle=reservation.before), reservation
 
     async def throttle_state(
         self, context: ScopeContext, subject: ThrottleSubject
     ) -> ThrottleState | None:
+        """El estado guardado de ``subject`` (``None`` si no hay fila)."""
         async with self._database.transaction(context) as transaction:
             row = (await transaction.execute(_THROTTLE, _subject_parameters(subject))).first()
         return _state(row)
 
-    async def record_failure(
+    async def reserve(
         self,
         context: ScopeContext,
         subject: ThrottleSubject,
         now: datetime,
         *,
-        audit: LoginAuditEvent | None,
         user_id: uuid.UUID | None,
-    ) -> FailureOutcome:
-        key = _subject_parameters(subject)
+    ) -> Reservation:
         async with self._database.transaction(context) as transaction:
-            locked = (await transaction.execute(_LOCK_THROTTLE, {**key, "now": now})).one()
-            outcome = after_failure(_state(locked), now, threshold=alert_threshold(subject.kind))
-            await _save_state(transaction, subject, outcome.state)
-            if outcome.alert:
-                await self._publish_alert(transaction, subject, now)
-            if audit is not None:
-                await self._append(transaction, audit, user_id)
-        return outcome
+            reservation = await self._reserve(transaction, subject, now)
+            if not reservation.granted:
+                await self._append(transaction, LoginAuditEvent.LOGIN_THROTTLED, user_id)
+        return reservation
+
+    async def release(self, context: ScopeContext, reservation: Reservation) -> None:
+        async with self._database.transaction(context) as transaction:
+            await _release(transaction, reservation)
 
     async def reset_throttle(
         self, context: ScopeContext, subject: ThrottleSubject, now: datetime
@@ -584,6 +606,7 @@ class PostgresSessionStore:
         session: NewSession,
         *,
         rehash: PasswordHash | None,
+        release: Reservation | None,
     ) -> None:
         async with self._database.transaction(context) as transaction:
             await transaction.execute(
@@ -615,6 +638,8 @@ class PostgresSessionStore:
                 await self._succeed(
                     transaction, session.organization_id, session.user_id, session.created_at
                 )
+            elif release is not None:
+                await _release(transaction, release)
 
     async def complete_second_factor(
         self,
@@ -637,6 +662,22 @@ class PostgresSessionStore:
         return True
 
     # --- Internos -----------------------------------------------------------------------------
+
+    async def _reserve(
+        self, transaction: Transaction, subject: ThrottleSubject, now: datetime
+    ) -> Reservation:
+        """Bloquea (o crea) la fila de ``subject`` y reserva el intento; publica la alerta."""
+        key = _subject_parameters(subject)
+        locked = (await transaction.execute(_LOCK_THROTTLE, {**key, "now": now})).one()
+        before = _state(locked)
+        if before is None:  # pragma: no cover - la fila bloqueada siempre tiene contador
+            raise RuntimeError("fila de retardo sin contador")
+        reservation = reserve_attempt(subject, before, now)
+        if reservation.outcome is not None:
+            await _save_state(transaction, subject, reservation.outcome.state)
+            if reservation.outcome.alert:
+                await self._publish_alert(transaction, subject, now)
+        return reservation
 
     async def _succeed(
         self,

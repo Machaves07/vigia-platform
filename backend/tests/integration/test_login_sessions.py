@@ -292,6 +292,30 @@ def test_hash_with_other_parameters_is_recomputed_after_success(
     assert isinstance(again, Authenticated)
 
 
+def test_unknown_account_verifies_against_a_hash_with_the_current_parameters(
+    env: SessionEnvironment, pool: CpuPool
+) -> None:
+    """BR-NUC-23: el hash ficticio cuesta lo mismo que uno real (parámetros vigentes)."""
+
+    seen: list[str] = []
+
+    class Spy(PasswordService):
+        async def verify(self, password: str, encoded: str) -> Any:
+            seen.append(encoded)
+            return await super().verify(password, encoded)
+
+    passwords = Spy(NeverBreached(), pool)
+    login = env.login(passwords=passwords)
+    organization = env.add_organization()
+    invited = env.add_user(organization, status="invited", with_password=False)
+    assert env.run(login.authenticate("fantasma-2@example.test", "x", "198.51.100.41")) == INVALID
+    assert env.run(login.authenticate(invited.email, "x", "198.51.100.42")) == INVALID
+    params = HASH_VERSIONS[CURRENT_VERSION]
+    prefix = f"$argon2id$v=19$m={params.memory_kib},t={params.iterations},p={params.parallelism}$"
+    assert len(seen) == 2
+    assert all(encoded.startswith(prefix) for encoded in seen)
+
+
 # --- Cookie ------------------------------------------------------------------------------------
 
 

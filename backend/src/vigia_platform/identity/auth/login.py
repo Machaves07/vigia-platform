@@ -9,28 +9,41 @@ organización los aporta TASK-125 por el puerto ``LoginContexts``. Módulo crít
 ``authenticate(email, password, origin)``:
 
 1. Normaliza el correo y, en una transacción de la organización proveedora, resuelve la
-   organización del correo (``identity.login_organization``) y lee el retardo del origen. Si la
-   cuenta existe, lee en su organización la cuenta, su credencial y su retardo.
-2. Si algún retardo está vigente: ``throttled`` con ``retry_after_seconds`` y ``login_throttled``
-   auditado, sin verificar nada (sin revelar si la cuenta existe).
-3. Verifica **siempre** una contraseña con Argon2id, también si la cuenta no existe o no tiene
-   credencial (contra un hash ficticio con los parámetros vigentes): el tiempo no distingue los
-   casos (BR-NUC-23). Cuenta inexistente, invitada o desactivada, organización suspendida o
-   contraseña incorrecta: el fallo cuenta por origen y, si la cuenta existe, por cuenta; se
-   audita ``login_failed`` y se responde ``unauthenticated`` con el mismo mensaje
-   (``credenciales inválidas``) en todos los casos.
-4. Contraseña correcta: sesión nueva. Si el usuario tiene el segundo factor inscrito o requerido,
-   la sesión queda **pendiente** (``second_factor_required``; utilizable solo para el segundo
-   factor o, sin inscribir, para inscribirlo). Si no, queda verificada, se reinicia el contador
-   de la cuenta, se fija ``last_login_at`` y se audita ``login_succeeded``. Si el hash se calculó
-   con parámetros de otra versión, se recalcula con los vigentes en la misma transacción.
+   organización del correo (``identity.login_organization``) y **reserva** el intento en el
+   retardo del origen (``reserve_attempt``: retenido, o contado ya como fallo).
+2. En una segunda transacción lee la cuenta en su organización (con un correo desconocido, la
+   misma consulta en la proveedora, que no la encuentra) y, si el origen no retuvo el intento,
+   lo reserva también en el retardo de la cuenta. Las reservas se hacen con la fila bloqueada
+   **antes** de verificar: una ráfaga concurrente no verifica más intentos de los que el retardo
+   permite (PAT-NUC-ESC-03).
+3. Si algún retardo retiene el intento: ``throttled`` con ``retry_after_seconds`` y
+   ``login_throttled`` auditado, sin verificar nada (sin revelar si la cuenta existe); si el
+   origen lo había reservado, se le devuelve (un intento retenido no cuenta).
+4. Verifica **siempre** una contraseña con Argon2id, también si la cuenta no existe o no tiene
+   credencial (contra un hash ficticio con los parámetros vigentes). Cuenta inexistente,
+   invitada o desactivada, organización suspendida o contraseña incorrecta: el fallo ya está
+   contado por la reserva; se audita ``login_failed`` y se responde ``unauthenticated`` con el
+   mismo mensaje (``credenciales inválidas``) en todos los casos.
+5. Contraseña correcta: sesión nueva y se devuelve la reserva del origen. Si el usuario tiene el
+   segundo factor inscrito o requerido, la sesión queda **pendiente** (``second_factor_required``;
+   utilizable solo para el segundo factor o, sin inscribir, para inscribirlo) y se devuelve la
+   reserva de la cuenta. Si no, queda verificada, se reinicia el contador de la cuenta, se fija
+   ``last_login_at`` y se audita ``login_succeeded``. Si el hash se calculó con parámetros de
+   otra versión, se recalcula con los vigentes en la misma transacción.
 
-``verify_second_factor(cookie, code)``: con la sesión pendiente, un TOTP de 6 dígitos dentro de
-±1 paso y posterior al último aceptado, o un código de recuperación sin usar (se marca usado).
-Cada fallo cuenta en el retardo de la cuenta. Con éxito, la sesión queda verificada y se audita
-``login_succeeded`` con el método. ``start_enrollment`` y ``confirm_enrollment`` son la
-inscripción obligatoria en el inicio de sesión (BR-NUC-22): la inscripción solo cuenta cuando el
-usuario demuestra un primer código válido.
+El tiempo no distingue los casos (BR-NUC-23): con un correo desconocido o una cuenta cualquiera
+que falla, el camino es el mismo (tres transacciones y una verificación de Argon2id); la cuenta
+existente solo añade, dentro de la segunda transacción, la sentencia que bloquea su fila. La
+única diferencia visible es la que BR-NUC-24 impone: una cuenta retenida por su retardo responde
+``throttled`` desde cualquier origen.
+
+``verify_second_factor(cookie, code)``: con la sesión pendiente, reserva el intento en el retardo
+de la cuenta (retenido, o contado ya como fallo) y verifica un TOTP de 6 dígitos dentro de ±1
+paso y posterior al último aceptado, o un código de recuperación sin usar (se marca usado). Con
+éxito, la sesión queda verificada, se reinicia el contador y se audita ``login_succeeded`` con el
+método. ``start_enrollment`` y ``confirm_enrollment`` son la inscripción obligatoria en el inicio
+de sesión (BR-NUC-22): la inscripción solo cuenta cuando el usuario demuestra un primer código
+válido, y ese código pasa por el mismo retardo.
 """
 
 from __future__ import annotations
@@ -53,6 +66,7 @@ from vigia_platform.identity.auth.second_factor import (
 from vigia_platform.identity.auth.sessions import (
     FailureOutcome,
     NewSession,
+    Reservation,
     SessionCookie,
     SessionPurpose,
     SessionStore,
@@ -194,6 +208,7 @@ class LoginAccount:
     second_factor_enrolled: bool
     password_hash: str | None = field(repr=False)
     throttle: ThrottleState | None
+    """El retardo de la cuenta tal como estaba al leerla (antes de la reserva)."""
 
     @property
     def can_log_in(self) -> bool:
@@ -253,35 +268,36 @@ class LoginContexts(Protocol):
 class LoginStore(Protocol):
     """Persistencia del inicio de sesión; cada método es una transacción."""
 
-    async def resolve_login(
-        self, context: ScopeContext, email: str, origin: ThrottleSubject
-    ) -> tuple[uuid.UUID | None, ThrottleState | None]:
-        """Organización del correo (o ``None``) y retardo del origen, en la proveedora."""
+    async def begin_login(
+        self, context: ScopeContext, email: str | None, origin: ThrottleSubject, now: datetime
+    ) -> tuple[uuid.UUID | None, Reservation]:
+        """En la proveedora: la organización del correo (o ``None``; sin correo, sin búsqueda) y
+        la reserva del intento en el retardo del origen, en una transacción."""
         ...
 
     async def load_account(
-        self, context: ScopeContext, email: str, now: datetime
-    ) -> LoginAccount | None:
-        """La cuenta del correo en la organización del contexto, con su retardo."""
+        self, context: ScopeContext, email: str, now: datetime, *, reserve: bool
+    ) -> tuple[LoginAccount | None, Reservation | None]:
+        """La cuenta del correo en la organización del contexto y, con ``reserve``, la reserva
+        del intento en su retardo, en una transacción (sin cuenta, sin reserva)."""
         ...
 
-    async def throttle_state(
-        self, context: ScopeContext, subject: ThrottleSubject
-    ) -> ThrottleState | None:
-        """El estado guardado de ``subject`` (``None`` si no hay fila)."""
-        ...
-
-    async def record_failure(
+    async def reserve(
         self,
         context: ScopeContext,
         subject: ThrottleSubject,
         now: datetime,
         *,
-        audit: LoginAuditEvent | None,
         user_id: uuid.UUID | None,
-    ) -> FailureOutcome:
-        """Cuenta un fallo (``INSERT ... ON CONFLICT`` con la fila bloqueada), publica
-        ``security_alert`` si toca y, con ``audit``, lo audita; todo en una transacción."""
+    ) -> Reservation:
+        """Reserva un intento (``INSERT ... ON CONFLICT`` con la fila bloqueada), publica
+        ``security_alert`` si toca y, si se retiene, audita ``login_throttled``; todo en una
+        transacción."""
+        ...
+
+    async def release(self, context: ScopeContext, reservation: Reservation) -> None:
+        """Devuelve la reserva de un intento correcto (``release_attempt``), con la fila
+        bloqueada."""
         ...
 
     async def audit(
@@ -296,9 +312,11 @@ class LoginStore(Protocol):
         session: NewSession,
         *,
         rehash: PasswordHash | None,
+        release: Reservation | None,
     ) -> None:
-        """Inserta la sesión y recalcula el hash si toca. Si nace verificada, además reinicia
-        el contador de la cuenta, fija ``last_login_at`` y audita ``login_succeeded``."""
+        """Inserta la sesión, recalcula el hash si toca y devuelve ``release`` (la reserva de la
+        cuenta de una sesión pendiente). Si nace verificada, además reinicia el contador de la
+        cuenta, fija ``last_login_at`` y audita ``login_succeeded``."""
         ...
 
     async def complete_second_factor(
@@ -371,24 +389,23 @@ class LoginService:
         hashed_origin = origin_hash(origin, self._origin_key)
         origin_subject = ThrottleSubject.origin(self._provider, hashed_origin)
         provider_context = self._contexts.anonymous(self._provider)
-        organization_id: uuid.UUID | None = None
-        origin_state: ThrottleState | None = None
-        if normalized is None:
-            origin_state = await self._store.throttle_state(provider_context, origin_subject)
-        else:
-            organization_id, origin_state = await self._store.resolve_login(
-                provider_context, normalized, origin_subject
-            )
-        account: LoginAccount | None = None
-        if organization_id is not None and normalized is not None:
-            account = await self._store.load_account(
-                self._contexts.anonymous(organization_id), normalized, now
-            )
+        organization_id, by_origin = await self._store.begin_login(
+            provider_context, normalized, origin_subject, now
+        )
+        # Con un correo desconocido, la misma consulta en la proveedora: el mismo trabajo.
+        account_context = provider_context
+        if organization_id is not None:
+            account_context = self._contexts.anonymous(organization_id)
+        account, reservation = await self._store.load_account(
+            account_context, normalized or "", now, reserve=by_origin.granted
+        )
         retry = max(
-            retry_after_seconds(origin_state, now),
+            by_origin.retry_after_seconds,
             retry_after_seconds(None if account is None else account.throttle, now),
         )
         if retry > 0:
+            if by_origin.granted:
+                await self._store.release(provider_context, by_origin)
             await self._audit_throttled(provider_context, account)
             return _throttled(retry)
         encoded = account.password_hash if account is not None else None
@@ -397,7 +414,7 @@ class LoginService:
             encoded if encoded is not None else await self._dummy(),
         )
         if account is None or not account.can_log_in or not verified.ok:
-            await self._record_password_failure(provider_context, origin_subject, account, now)
+            await self._password_failure(provider_context, by_origin, account, reservation, now)
             return _INVALID
         rehash = await self._passwords.hash(password) if verified.needs_rehash else None
         cookie = self._new_cookie(account.organization_id)
@@ -414,7 +431,10 @@ class LoginService:
         context = self._contexts.for_user(
             account.organization_id, account.user_id, account.display_name, cookie.session_id_hash
         )
-        await self._store.open_session(context, session, rehash=rehash)
+        await self._store.open_session(
+            context, session, rehash=rehash, release=reservation if pending else None
+        )
+        await self._store.release(provider_context, by_origin)
         if pending:
             self._metrics.auth_logins_total.add(1, {"result": _Result.SECOND_FACTOR_REQUIRED})
             return SecondFactorRequired(cookie, not account.second_factor_enrolled)
@@ -455,26 +475,21 @@ class LoginService:
             return _INVALID if enrollment else _ENROLL_FIRST
         organization_context = self._contexts.anonymous(session.organization_id)
         subject = ThrottleSubject.account(session.organization_id, session.user_id)
-        state = await self._store.throttle_state(organization_context, subject)
-        retry = retry_after_seconds(state, now)
-        if retry > 0:
-            await self._store.audit(
-                organization_context, LoginAuditEvent.LOGIN_THROTTLED, user_id=session.user_id
-            )
+        # Reservado antes de verificar: una ráfaga de códigos no esquiva el retardo.
+        reservation = await self._store.reserve(
+            organization_context, subject, now, user_id=session.user_id
+        )
+        if reservation.outcome is None:
             self._metrics.auth_logins_total.add(1, {"result": _Result.THROTTLED})
-            return _throttled(retry)
+            return _throttled(reservation.retry_after_seconds)
         context = self._user_context(session)
         credential = await self._second_factor.credential(context, session.user_id)
         method = await self._check_code(context, credential, code, now, enrollment=enrollment)
         if method is None:
-            outcome = await self._store.record_failure(
-                organization_context,
-                subject,
-                now,
-                audit=LoginAuditEvent.LOGIN_FAILED,
-                user_id=session.user_id,
+            await self._store.audit(
+                organization_context, LoginAuditEvent.LOGIN_FAILED, user_id=session.user_id
             )
-            self._count_failure(_FailureReason.SECOND_FACTOR, outcome, now)
+            self._count_failure(_FailureReason.SECOND_FACTOR, reservation.outcome, now)
             return _INVALID
         completed = await self._store.complete_second_factor(
             context, session.session_id_hash, session.user_id, now, method
@@ -547,31 +562,27 @@ class LoginService:
             )
         self._metrics.auth_logins_total.add(1, {"result": _Result.THROTTLED})
 
-    async def _record_password_failure(
+    async def _password_failure(
         self,
         provider_context: ScopeContext,
-        origin_subject: ThrottleSubject,
+        origin: Reservation,
         account: LoginAccount | None,
+        reservation: Reservation | None,
         now: datetime,
     ) -> None:
-        # Sin cuenta, el fallo se audita en la cadena de la proveedora junto al del origen.
-        outcome = await self._store.record_failure(
-            provider_context,
-            origin_subject,
-            now,
-            audit=LoginAuditEvent.LOGIN_FAILED if account is None else None,
-            user_id=None,
-        )
-        self._count_failure(_FailureReason.PASSWORD, outcome, now)
-        if account is not None:
-            outcome = await self._store.record_failure(
+        # Los fallos ya los contaron las reservas; queda auditarlo (sin cuenta, en la proveedora).
+        if account is None:
+            await self._store.audit(provider_context, LoginAuditEvent.LOGIN_FAILED, user_id=None)
+        else:
+            await self._store.audit(
                 self._contexts.anonymous(account.organization_id),
-                ThrottleSubject.account(account.organization_id, account.user_id),
-                now,
-                audit=LoginAuditEvent.LOGIN_FAILED,
+                LoginAuditEvent.LOGIN_FAILED,
                 user_id=account.user_id,
             )
-            self._count_failure(None, outcome, now)
+        if origin.outcome is not None:
+            self._count_failure(_FailureReason.PASSWORD, origin.outcome, now)
+        if reservation is not None and reservation.outcome is not None:
+            self._count_failure(None, reservation.outcome, now)
         self._metrics.auth_logins_total.add(1, {"result": _Result.FAILED})
 
     def _count_failure(
