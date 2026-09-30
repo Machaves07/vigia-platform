@@ -660,6 +660,77 @@ def test_system_constructors() -> None:
     assert contexts.provider_audit_context().organization_id == PROVIDER
 
 
+class _RowStore:
+    """Almacén que devuelve una fila fija: prueba la capa de Python sin la de SQL."""
+
+    def __init__(self, row: Any) -> None:
+        self.row = row
+
+    async def session_row(self, *args: Any) -> Any:
+        return self.row
+
+    async def operator_row(self, *args: Any) -> Any:
+        return None
+
+
+def test_concession_conditions_are_checked_in_python_too() -> None:
+    """Defensa en profundidad: aunque la sentencia devolviera la concesión, el constructor la
+    rechaza si ya venció, es de zona, es de la proveedora, no es la pedida o el usuario no puede
+    concederse concesiones (PR-NUC-10, BR-NUC-04, 37, 40)."""
+    from tests.session_support import START
+    from vigia_platform.identity.auth.sessions import new_session_cookie
+    from vigia_platform.identity.authz.context import ConcessionRow, SessionRow
+
+    client, concession_id, user = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    installer = AllowedScope(ScopeLevel.ORGANIZATION, PROVIDER, Role.PROVIDER_INSTALLER)
+
+    def row(**changes: Any) -> SessionRow:
+        concession = ConcessionRow(
+            concession_id=changes.pop("concession_id", concession_id),
+            organization_id=changes.pop("client", client),
+            scope_level=changes.pop("level", ScopeLevel.ORGANIZATION),
+            scope_id=client,
+            expires_at=changes.pop("expires_at", START + timedelta(hours=1)),
+        )
+        fields: dict[str, Any] = {
+            "user_id": user,
+            "organization_id": PROVIDER,
+            "organization_kind": "provider",
+            "display_name": "Instalador sintético",
+            "privacy_notice_version_accepted": None,
+            "assignments": (installer,),
+            "concession": concession,
+        }
+        fields.update(changes)
+        return SessionRow(**fields)
+
+    def build(session_row: SessionRow) -> Any:
+        contexts = ScopeContexts(
+            store=_RowStore(session_row),
+            clock=SimulatedClock(START),
+            provider_organization_id=PROVIDER,
+            system_actor_id=uuid.uuid4(),
+        )
+        cookie = new_session_cookie(PROVIDER)
+        return asyncio.run(contexts.context_from_session(cookie, concession_id=concession_id))
+
+    assert build(row()).context.organization_id == client
+    for bad in (
+        {"expires_at": START},  # en el instante exacto ya venció
+        {"expires_at": START - timedelta(milliseconds=1)},
+        {"level": ScopeLevel.ZONE},
+        {"client": PROVIDER},
+        {"concession_id": uuid.uuid4()},
+        {"assignments": (AllowedScope(ScopeLevel.ORGANIZATION, PROVIDER, Role.COPASST),)},
+        {"assignments": ()},
+        {"organization_kind": "client"},
+        {"concession": None},
+    ):
+        with pytest.raises(ContextUnavailable) as raised:
+            build(row(**bad))
+        assert raised.value.reason is ContextUnavailableReason.CONCESSION_INVALID, bad
+
+
 def test_session_constructor_without_cookie_is_unavailable() -> None:
     contexts = _contexts()
     for cookie in (None, "cookie", object()):
@@ -1026,6 +1097,34 @@ def test_session_concession_function_is_narrow(environment: AuthzEnvironment) ->
             await connection.close()
 
     assert len(env.run(call(env.provider_organization_id, env.installer_id))) == 1
+    # La función misma comprueba la vigencia (sin depender de la capa de Python).
+    expired = env.add_concession(
+        site.organization_id,
+        env.installer_id,
+        granted_at=env.now() - timedelta(days=3),
+        duration=timedelta(days=1),
+    )
+
+    async def expired_rows() -> list[Any]:
+        connection = await env.sessions.migrated.connect("vigia_app")
+        try:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT set_config('vigia.organization_id', $1, true)",
+                    str(env.provider_organization_id),
+                )
+                return list(
+                    await connection.fetch(
+                        "SELECT * FROM identity.session_concession($1, $2, $3)",
+                        expired,
+                        env.installer_id,
+                        env.now(),
+                    )
+                )
+        finally:
+            await connection.close()
+
+    assert env.run(expired_rows()) == []
     assert env.run(call(site.organization_id, env.installer_id)) == []
     assert env.run(call(None, env.installer_id)) == []
     assert env.run(call(env.provider_organization_id, env.operator_id)) == []
