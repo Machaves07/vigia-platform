@@ -358,6 +358,10 @@ def verify_checkpoint(
         signature = base64.b64decode(content.signature, validate=True)
     except (binascii.Error, ValueError):
         return False
+    if base64.b64encode(signature).decode("ascii") != content.signature:
+        # Base64 no canónico: los 2 bits de relleno del último carácter no son cero. Otro texto
+        # que decodifica a la misma firma no es la firma publicada (PR-NUC-21).
+        return False
     try:
         message = checkpoint_message(
             chain.kind.value,

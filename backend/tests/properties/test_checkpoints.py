@@ -382,8 +382,15 @@ def test_signature_verifies_and_fails_on_any_flipped_bit(
             # Un bit alto de la secuencia la saca de I-JSON: no hay mensaje que pueda verificar.
             assert altered.covered_sequence > MAX_SIGNABLE_SEQUENCE, name
             continue
+        # Contraprueba con ``cryptography`` sobre los bytes de la firma: un texto base64 no
+        # canónico que decodifica a la misma firma ya lo rechazó ``verify_checkpoint``.
+        try:
+            canonical = base64.b64encode(base64.b64decode(altered.signature)).decode()
+        except ValueError:  # ni siquiera es base64: nada que contrastar
+            continue
         assert not (
             altered.key_id == active.key_id
+            and canonical == altered.signature
             and verify_detached(active.public_key, altered_message, altered.signature)
         ), name
 
@@ -443,6 +450,29 @@ def test_signature_with_unknown_or_malformed_key_fails(world: SigningWorld) -> N
             CheckpointChain.audit(),
             replace(content, signature=signature),
             keys,
+        )
+
+
+def test_padding_bits_of_the_last_signature_character_are_rejected(world: SigningWorld) -> None:
+    """Regresión de PR-NUC-21 (Hypothesis, semilla 2236642082): el carácter 86 de la firma solo
+    lleva 4 bits de datos; alterar uno de sus 2 bits de relleno da otro texto que decodifica a la
+    misma firma. Solo el base64 canónico verifica."""
+    organization_id = uuid.uuid4()
+    store = MemoryCheckpointStore(organization_id)
+    store.write_record(CheckpointChain.audit())
+    service = service_for(world, store)
+    (result,) = asyncio.run(service.write_checkpoints_now(u02_context(organization_id)))
+    assert result.checkpoint is not None
+    content = result.checkpoint.content
+    keys = published(service)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    last = alphabet.index(content.signature[85])
+    for padding in (1, 2, 3):
+        altered = content.signature[:85] + alphabet[last ^ padding] + "=="
+        assert base64.b64decode(altered) == base64.b64decode(content.signature)
+        chain = CheckpointChain.audit()
+        assert not verify_checkpoint(
+            organization_id, chain, replace(content, signature=altered), keys
         )
 
 
