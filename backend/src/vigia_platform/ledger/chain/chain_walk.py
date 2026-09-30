@@ -510,6 +510,10 @@ class ChainWalker:
             signature = base64.b64decode(signature_text, validate=True)
         except (binascii.Error, ValueError):
             return self._fail(entry, "checkpoint_malformed")
+        if base64.b64encode(signature).decode("ascii") != signature_text:
+            # Base64 no canónico: los bits de relleno del último carácter no son cero. Otro texto
+            # que decodifica a la misma firma no es la firma escrita (PR-NUC-21).
+            return self._fail(entry, "checkpoint_malformed", "firma en base64 no canónico")
         message = checkpoint_message(
             self.chain.kind,
             self.chain.organization_id,

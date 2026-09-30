@@ -19,6 +19,7 @@ Solo datos generados.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -54,6 +55,18 @@ ORGANIZATION = uuid.UUID("1a1b1c1d-2e2f-4a3b-8c4d-5e5f5a5b5c5d")
 PLANT = uuid.UUID("6f6e6d6c-7b7a-4988-9c9d-0e0f0a0b0c0d")
 KEY = SigningKey.from_seed("checkpoint-a", b"a")
 OTHER_KEY = SigningKey.from_seed("checkpoint-b", b"b")
+
+
+def _noncanonical(text: str) -> str:
+    """El mismo valor en base64 con bits de relleno distintos de cero en el último carácter."""
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    body = text.rstrip("=")
+    padding = len(text) - len(body)
+    last = alphabet.index(body[-1]) | ((1 << (2 * padding)) - 1)
+    changed = body[:-1] + alphabet[last] + "=" * padding
+    assert changed != text
+    assert base64.b64decode(changed, validate=True) == base64.b64decode(text)
+    return changed
 
 
 def _ledger(records: int = 6, checkpoint_every: int = 3) -> ChainBuilder:
@@ -154,6 +167,12 @@ def test_missing_manifest(tmp_path: Path) -> None:
         (lambda d: d["chains"][0].update(file="chains/ledger.jsonl\n"), "manifest_invalid"),
         (lambda d: d["checkpoint_keys"].append(dict(d["checkpoint_keys"][0])), "manifest_invalid"),
         (lambda d: d["checkpoint_keys"][0].update(public_key="x"), "manifest_invalid"),
+        (
+            lambda d: d["checkpoint_keys"][0].update(
+                public_key=_noncanonical(d["checkpoint_keys"][0]["public_key"])
+            ),
+            "manifest_invalid",
+        ),
         (lambda d: d["checkpoint_keys"][0].update(key_id=""), "manifest_invalid"),
         (lambda d: d["checkpoint_keys"][0].update(extra=1), "manifest_invalid"),
         (lambda d: d.pop("checkpoint_keys"), "manifest_invalid"),
@@ -492,6 +511,7 @@ def test_walker_stays_broken() -> None:
             None,
         ),
         (lambda c: c.update(signature=c["signature"][:-3] + "A=="), None),
+        (lambda c: c.update(signature=_noncanonical(c["signature"])), "checkpoint_malformed"),
         (lambda c: c.update(signature="*" * 86 + "=="), "checkpoint_malformed"),
         (lambda c: c.update(signature=c["signature"][4:]), "checkpoint_malformed"),
         (lambda c: c.update(signature=c["signature"][:-2]), "checkpoint_malformed"),
