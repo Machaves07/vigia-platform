@@ -59,7 +59,7 @@ from vigia_contracts.signing import public_key_base64, sign_bytes, signing_key_f
 from vigia_contracts.signing import sign as contract_sign
 
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
@@ -237,6 +237,7 @@ def secret_name(environment: str, purpose: SigningPurpose, key_id: str) -> str:
 # --- Servicio ----------------------------------------------------------------------------------
 
 
+@repository
 class SigningService:
     """``SigningPort`` con un par Ed25519 activo por propósito, cargado en memoria."""
 

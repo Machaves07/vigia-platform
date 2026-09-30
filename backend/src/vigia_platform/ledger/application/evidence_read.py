@@ -54,7 +54,7 @@ from vigia_platform.ledger.application.audit_writer import (
     ResourceRef,
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.shared.context import ContextAbsent, Role, ScopeContext, ScopeLevel
+from vigia_platform.shared.context import ContextAbsent, Role, ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.storage import (
     PRESIGN_GET_MAX_TTL,
     ObjectHead,
@@ -235,6 +235,7 @@ def _verified_bytes(row: Row[Any], head: ObjectHead | None) -> bool:
 # --- El puerto --------------------------------------------------------------------------------
 
 
+@repository
 class EvidenceService:
     """``EvidencePort`` sobre PostgreSQL y el depósito de evidencias."""
 

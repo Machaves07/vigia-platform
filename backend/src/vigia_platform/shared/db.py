@@ -82,7 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.sql import Executable
 
-from vigia_platform.shared.context import ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 
@@ -602,6 +602,7 @@ class Transaction:
             raise
 
 
+@repository
 class Database:
     """El adaptador: un pool por clase de ruta (``api``) o uno solo (``worker``)."""
 

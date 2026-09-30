@@ -60,7 +60,7 @@ from argon2 import exceptions as argon2_exceptions
 
 from vigia_platform.identity.auth.passwords import Argon2Parameters
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorKind, ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ActorKind, ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCrypto
 
@@ -402,6 +402,7 @@ def verify_recovery_code(canonical: str, encoded: str) -> bool:
 # --- Servicio ----------------------------------------------------------------------------------
 
 
+@repository
 class SecondFactorService:
     """Inscripción, verificación y restablecimiento del segundo factor (LC-NUC-02)."""
 

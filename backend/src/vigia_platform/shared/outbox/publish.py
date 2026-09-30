@@ -38,7 +38,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ContextAbsent
+from vigia_platform.shared.context import ContextAbsent, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.registries import CompiledEventType, OutboxCatalog
 
@@ -200,6 +200,7 @@ def _check_partition(name: str, event: NewEvent) -> None:
         )
 
 
+@repository
 class Outbox:
     """Implementación de ``OutboxPort`` sobre ``shared.outbox_event`` y ``outbox_delivery``."""
 

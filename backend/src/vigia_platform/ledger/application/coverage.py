@@ -70,7 +70,7 @@ from vigia_platform.ledger.domain.coverage import (
     compose_timeline,
     state_at,
 )
-from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel
+from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.db import Transaction
 
 __all__ = [
@@ -399,6 +399,7 @@ def _visible(context: ScopeContext, plant_id: uuid.UUID, zone_id: uuid.UUID) -> 
 # --- El puerto ------------------------------------------------------------------------------------
 
 
+@repository
 class CoverageService:
     """``CoveragePort`` sobre PostgreSQL."""
 

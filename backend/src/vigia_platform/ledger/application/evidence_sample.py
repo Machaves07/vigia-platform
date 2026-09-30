@@ -67,7 +67,7 @@ from vigia_platform.ledger.application.evidence_read import EVIDENCE_RESOURCE_KI
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.ledger.container_marker import ContainerMarker, read_container_marker
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
@@ -274,6 +274,7 @@ class _Inspection:
 # --- El servicio --------------------------------------------------------------------------------
 
 
+@repository
 class EvidenceSampler:
     """La muestra diaria de una organización (``evidence_sample``)."""
 

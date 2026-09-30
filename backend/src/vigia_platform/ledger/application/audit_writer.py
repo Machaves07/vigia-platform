@@ -41,7 +41,7 @@ from sqlalchemy import text
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.ledger.canonical import CanonicalFormError, canonical_bytes_sync
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 
@@ -158,6 +158,7 @@ def _optional_uuid(value: object, name: str) -> uuid.UUID | None:
     return value
 
 
+@repository
 class AuditWriter:
     """``audit_writer.append``: la cadena de auditoría por organización (BR-NUC-60)."""
 

@@ -22,7 +22,10 @@ pendiente nº 33): ``{code, detail_code?, message_es, correlation_id, retry_afte
 contexto o validación **deniega**, BR-NUC-93); ``ExternalDependencyDown``, los fallos
 transitorios de la base, del gestor de secretos y los tiempos de espera en
 ``temporarily_unavailable``; el almacén caído en ``storage_unavailable``; la validación de
-FastAPI en ``invalid_request``. ``from_ledger_rejection`` traduce un ``LedgerRejection``.
+FastAPI en ``invalid_request``; ``ResourceNotFound`` de ``authorize`` (sin la clave o fuera de
+alcance) en ``not_found``, nunca ``forbidden`` (BR-NUC-09); ``ContextUnavailable`` en
+``unauthenticated`` (sin sesión utilizable) o ``not_found`` (concesión no vigente).
+``from_ledger_rejection`` traduce un ``LedgerRejection``.
 
 ``ErrorBoundary`` es el manejador global (paso 2 de la cadena de PAT-NUC-SEG-06, que ordena
 TASK-134): envuelve la aplicación ASGI y responde un ``ApiError`` ante cualquier excepción que
@@ -46,6 +49,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.labels import PlatformLabels
 from vigia_platform.shared.clock import Clock
@@ -347,9 +352,17 @@ def translate(error: BaseException) -> ApiError:
         )
     if isinstance(error, TimeoutError):
         return ApiError(ApiErrorCode.TEMPORARILY_UNAVAILABLE)
+    if isinstance(error, ResourceNotFound):
+        # Fuera de alcance o sin la clave: igual que inexistente, nunca ``forbidden`` (BR-NUC-09).
+        return ApiError(ApiErrorCode.NOT_FOUND)
+    if isinstance(error, ContextUnavailable):
+        if error.reason is ContextUnavailableReason.CONCESSION_INVALID:
+            # Concesión inexistente, ajena, vencida o revocada: como una organización inexistente.
+            return ApiError(ApiErrorCode.NOT_FOUND)
+        return ApiError(ApiErrorCode.UNAUTHENTICATED)
     if isinstance(error, ContextAbsent):
-        # Operación de datos sin contexto: se deniega sin decir por qué (la auditoría del intento
-        # es de identity.authz, TASK-125).
+        # Operación de datos sin contexto: se deniega sin decir por qué; el intento ya lo auditó
+        # identity.authz (context_absent_attempt y security_alert).
         _log.error("operación de datos sin contexto denegada")
     return ApiError(ApiErrorCode.INTERNAL_ERROR)
 
