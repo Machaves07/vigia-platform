@@ -138,7 +138,10 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         "expire_sessions",
         "throttle_window_cleanup",
         "expire_concessions",
+        "key_rotation_reminder",
     ),
+    "dependency": ("secrets_manager", "kms"),
+    "purpose": ("catalog", "gate", "live_view_token", "key_set", "checkpoint"),
     "operation": (
         "ledger_write",
         "ledger_write_with_evidence",
@@ -164,7 +167,6 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "event_type": (),
     "consumer": (),
     "audit_operation": (),
-    "purpose": (),
     "table": (),
     # Convenciones semánticas de OpenTelemetry (instrumentación automática).
     "http.route": (),
