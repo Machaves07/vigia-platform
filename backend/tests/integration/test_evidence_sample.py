@@ -1000,6 +1000,35 @@ def test_failure_while_recording_a_broken_mark_leaves_nothing_behind(
     assert len(events(environment, organization_id, "security_alert")) == 1
 
 
+class SwappingStorage:
+    """``HEAD`` real, pero la descarga devuelve otros bytes (marcados): una versión cambiada
+    entre la consulta y la descarga, o un almacén que miente."""
+
+    def __init__(self, inner: S3Storage) -> None:
+        self._inner = inner
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        return await self._inner.head_object(key)
+
+    async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+        # Mismo tamaño y misma marca; solo cambia el contenido del mdat.
+        content = await self._inner.get_object(key, version_id=version_id)
+        return content.replace(b"verificado", b"VERIFICADO")
+
+
+def test_downloaded_bytes_that_are_not_the_verified_ones_are_unverifiable(
+    environment: Environment,
+) -> None:
+    place = Place.new()
+    (clip,) = register_clips(environment, place, [synthetic_clip("verificado")])
+    on_next_day(environment)
+    sampler = environment.sampler(storage=SwappingStorage(environment.storage))
+    outcome = environment.run(sampler.sample_day(periodic_context(place.organization_id)))
+    # Los bytes descargados llevan la marca, pero no son los del expediente: no cuenta.
+    assert outcome.broken == {clip.evidence_id: FailureReason.MARKER_UNVERIFIABLE}
+    assert evidence_row(environment, clip.evidence_id)["marker_verification_result"] == "broken"
+
+
 def test_head_object_checksum_matches_what_the_node_uploaded(environment: Environment) -> None:
     """Sanidad del entorno: LocalStack guarda la suma y el metadato con que sube el nodo."""
     content = synthetic_clip("sanidad")
