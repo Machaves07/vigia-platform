@@ -8,11 +8,12 @@ Revisión nuc_0006 (LC-NUC-15 parte 2; NFR-NUC-33, PAT-NUC-MAN-04; adenda A-14).
   (nota fechada del 2026-09-23 de ``domain-entities.md`` §3.5: nombres distintos del
   ``verified_at`` de la verificación en la escritura). Una evidencia ``pending`` no tiene marcas;
   una verificada tiene las dos.
-- El disparador de solo anexar de ``ledger.evidence`` (``evidence_append_only_row``) se sustituye
-  por ``evidence_marker_transition``: ``DELETE`` sigue prohibido y un ``UPDATE`` solo pasa si es la
-  **única** transición ``pending → intact | broken``, con sus dos marcas, y ninguna otra columna
-  cambia. Una segunda escritura sobre una evidencia ya verificada falla (``restrict_violation``),
-  también para un superusuario (``ENABLE ALWAYS`` en la tabla y en cada partición).
+- El disparador de solo anexar de ``ledger.evidence`` (``evidence_append_only_row``, mismo nombre)
+  pasa a ``ledger.vigia_evidence_marker_transition()``: ``DELETE`` sigue prohibido y un
+  ``UPDATE`` solo pasa si es la **única** transición ``pending → intact | broken``, con sus dos
+  marcas, y ninguna otra columna cambia. Una segunda escritura sobre una evidencia ya verificada
+  falla (``restrict_violation``), también para un superusuario (``ENABLE ALWAYS`` en la tabla y
+  en cada partición).
 - ``ledger.evidence_sample_run``: una fila por organización y día muestreado con la **semilla
   registrada** de la selección, la población y el tamaño de la muestra; de solo anexar, con
   seguridad a nivel de fila. Con la semilla y la población la muestra se vuelve a calcular igual.
@@ -101,11 +102,11 @@ _MARKER_TRANSITION = (
     # Quitarlo de la tabla padre lo quita de cada partición; el nuevo se clona en todas.
     "DROP TRIGGER evidence_append_only_row ON ledger.evidence",
     """
-    CREATE TRIGGER evidence_marker_transition
+    CREATE TRIGGER evidence_append_only_row
         BEFORE UPDATE OR DELETE ON ledger.evidence
         FOR EACH ROW EXECUTE FUNCTION ledger.vigia_evidence_marker_transition()
     """,
-    "ALTER TABLE ledger.evidence ENABLE ALWAYS TRIGGER evidence_marker_transition",
+    "ALTER TABLE ledger.evidence ENABLE ALWAYS TRIGGER evidence_append_only_row",
     # Las particiones existentes, una a una (las futuras las protege create_partitions con
     # shared.vigia_protect_append_only_partition, que pone ENABLE ALWAYS en todos sus disparadores).
     """
@@ -118,7 +119,7 @@ _MARKER_TRANSITION = (
             WHERE inhparent = 'ledger.evidence'::regclass
         LOOP
             EXECUTE format(
-                'ALTER TABLE %s ENABLE ALWAYS TRIGGER evidence_marker_transition', partition);
+                'ALTER TABLE %s ENABLE ALWAYS TRIGGER evidence_append_only_row', partition);
         END LOOP;
     END
     $$
