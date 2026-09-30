@@ -52,6 +52,7 @@ __all__ = [
     "canonical_bytes",
     "canonical_bytes_sync",
     "envelope_canonical",
+    "exceeds_canonical_size",
     "parse",
 ]
 
@@ -139,6 +140,15 @@ def _exceeds(document: JsonValue, limit: int) -> bool:
         if total > limit:
             return True
     return False
+
+
+def exceeds_canonical_size(document: JsonValue, limit: int) -> bool:
+    """``True`` si el tamaño canónico de ``document`` puede superar ``limit`` bytes.
+
+    Cota superior sin serializar, con trabajo acotado por ``limit``: el escritor la usa para
+    rechazar un contenido de más de 256 KB antes de validarlo y canonicalizarlo.
+    """
+    return _exceeds(document, limit)
 
 
 def _canonicalize(document: JsonValue) -> bytes:
