@@ -44,9 +44,16 @@ def make_context(
     kind: ActorKind = ActorKind.USER,
     organization_id: uuid.UUID | None = None,
     origin: ContextOrigin | None = None,
+    concession_id: uuid.UUID | None = None,
 ) -> ScopeContext:
-    """Contexto válido para ``kind``; bajo concesión, con ``origin = session``."""
-    concession_id = uuid.uuid4() if kind is ActorKind.PROVIDER_USER else None
+    """Contexto válido para ``kind``; bajo concesión, con ``origin = session``.
+
+    ``concession_id`` fija la concesión del actor del proveedor (por defecto, una al azar).
+    """
+    if kind is ActorKind.PROVIDER_USER:
+        concession_id = concession_id or uuid.uuid4()
+    elif concession_id is not None:
+        raise ValueError("concession_id solo va con el actor del proveedor")
     if origin is None:
         origin = {
             ActorKind.USER: ContextOrigin.SESSION,
