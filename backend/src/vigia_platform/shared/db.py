@@ -539,14 +539,22 @@ class _Abandoned:
 class Transaction:
     """La transacción abierta por ``Database.transaction``: solo ejecuta sentencias."""
 
-    __slots__ = ("_broken", "_connection", "_database", "_failed", "_retired")
+    __slots__ = ("_broken", "_connection", "_context", "_database", "_failed", "_retired")
 
-    def __init__(self, connection: ConnectionPort, database: Database) -> None:
+    def __init__(
+        self, connection: ConnectionPort, database: Database, context: ScopeContext
+    ) -> None:
         self._connection = connection
         self._database = database
+        self._context = context
         self._failed = False
         self._broken = False
         self._retired = _Abandoned()
+
+    @property
+    def context(self) -> ScopeContext:
+        """El contexto con el que se abrió: el de las variables fijadas con ``SET LOCAL``."""
+        return self._context
 
     @property
     def failed(self) -> bool:
@@ -794,7 +802,7 @@ class Database:
             if translated is None:
                 raise
             raise translated from error
-        transaction = Transaction(connection, self)
+        transaction = Transaction(connection, self, context)
         try:
             yield transaction
         except BaseException as error:

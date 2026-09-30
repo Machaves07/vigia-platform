@@ -66,6 +66,7 @@ __all__ = [
     "RecordTypeStore",
     "RecordTypeUnknown",
     "RegistryStartupError",
+    "custom_json_schema_problems",
     "privacy_violations",
 ]
 
@@ -464,7 +465,7 @@ def _declaration_problems(definition: RecordType) -> list[SchemaProblem | str]:
         problems.append(
             "content_model debe ser estricto: extra='forbid' y strict=True (PAT-NUC-SEG-07)"
         )
-    problems.extend(_custom_json_schema_problems(model))
+    problems.extend(custom_json_schema_problems(model))
     declared = [
         *definition.free_text_paths,
         *definition.evidence_paths,
@@ -522,7 +523,7 @@ def _is_contract_rules(function: object) -> bool:
     return getattr(function, "__func__", None) is _CONTRACT_RULES
 
 
-def _custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
+def custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
     """El JSON Schema que se comprueba y se persiste debe describir lo que se valida.
 
     ``WithJsonSchema``, ``json_schema_extra``, ``Base64Str`` o un ``__get_pydantic_json_schema__``
