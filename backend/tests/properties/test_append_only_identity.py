@@ -207,19 +207,32 @@ class Mutation:
     """La fila por clave, o ``None`` para todas las de la organización."""
     assignments: tuple[tuple[str, Any], ...] = ()
 
-    def is_closing(self, rows: tuple[Row, ...]) -> bool:
-        """``True`` si es la actualización de cierre que el disparador admite."""
+    def is_closing(self, rows: tuple[Row, ...], types: dict[str, str]) -> bool:
+        """``True`` si el disparador admite la sentencia en **alguna** de las filas que alcanza.
+
+        Es el modelo del cierre: fila abierta, lo que cambia de verdad (un ``SET c = c`` no
+        cambia nada) está dentro del grupo de cierre y la marca de fin queda fijada. Basta una
+        fila: el resultado de la sentencia dependería entonces del orden de las filas y de los
+        ``CHECK`` del valor, y eso lo prueban los ejemplos, no la propiedad.
+        """
         group = CLOSING_COLUMNS.get(self.table)
         if self.kind != "update" or group is None:
             return False
-        changed = dict(self.assignments)
+        targets = rows if self.target is None else (self.target,)
+        return any(self._closes(row, group, types) for row in targets)
+
+    def _closes(self, row: Row, group: frozenset[str], types: dict[str, str]) -> bool:
+        if not row.open:
+            return False
+        changed = {
+            column: value
+            for column, value in self.assignments
+            if not _same(types[column], value, _from_json(types[column], row.values[column]))
+        }
         if not set(changed) <= group:
             return False
-        targets = rows if self.target is None else (self.target,)
-        if not any(row.open for row in targets):
-            return False
         if self.table == "provider_concession":
-            return changed.get("status", "active") in ("revoked", "expired")
+            return changed.get("status", row.values["status"]) in ("revoked", "expired")
         marker = "unassigned_at" if self.table == "zone_node_assignment" else "removed_at"
         return changed.get(marker) is not None
 
@@ -236,6 +249,13 @@ class Mutation:
         setters = ", ".join(f"{column} = ${i}" for i, (column, _) in enumerate(self.assignments, 1))
         values = [value for _, value in self.assignments]
         return f"UPDATE {name} SET {setters}{where}", values + arguments  # noqa: S608
+
+
+def _same(data_type: str, new: Any, current: Any) -> bool:
+    """¿Deja la asignación la columna igual? (``jsonb`` se compara como documento)."""
+    if data_type == "jsonb" and new is not None and current is not None:
+        return bool(json.loads(new) == json.loads(current))
+    return bool(new == current)
 
 
 def _from_json(data_type: str, value: Any) -> Any:
@@ -324,7 +344,8 @@ def test_any_generated_mutation_on_an_append_only_table_fails(
     data: st.DataObject,
 ) -> None:
     mutation = data.draw(mutations(append_only))
-    assume(not mutation.is_closing(append_only.rows[mutation.table]))
+    rows, types = append_only.rows[mutation.table], append_only.columns[mutation.table]
+    assume(not mutation.is_closing(rows, types))
     sqlstate = runner.run(_attempt(connections[mutation.role], append_only.seed, mutation))
     allowed = {RESTRICT_VIOLATION}
     if mutation.role == "vigia_app":
@@ -520,7 +541,10 @@ async def test_concession_is_closed_once(append_only: AppendOnly, app: Any, clos
 @pytest.mark.parametrize(
     ("table", "setters"),
     [
-        ("zone_node_assignment", "unassigned_at = '2099-01-01Z', assigned_at = assigned_at"),
+        (
+            "zone_node_assignment",
+            "unassigned_at = '2099-01-01Z', assigned_at = assigned_at - interval '1 second'",
+        ),
         (
             "role_assignment",
             "removed_at = '2099-01-01Z', removed_by = assigned_by, role = 'copasst'",
@@ -541,6 +565,28 @@ async def test_closing_together_with_another_column_fails_even_for_the_owner(
         await set_scope(owner, seed.a.organization_id)
         sql = f"UPDATE identity.{table} SET {setters} WHERE {PRIMARY_KEYS[table]} = $1"  # noqa: S608
         assert await _fails(owner, sql, key) == RESTRICT_VIOLATION
+    finally:
+        await transaction.rollback()
+
+
+@pytest.mark.asyncio
+async def test_closing_that_rewrites_another_column_with_its_own_value_is_accepted(
+    append_only: AppendOnly, owner: Any
+) -> None:
+    """``SET c = c`` no cambia ninguna otra columna: sigue siendo la actualización de cierre."""
+    seed = append_only.seed
+    key = next(row.key for row in append_only.rows["zone_node_assignment"] if row.open)
+    transaction = owner.transaction()
+    await transaction.start()
+    try:
+        await set_scope(owner, seed.a.organization_id)
+        closed = await owner.execute(
+            "UPDATE identity.zone_node_assignment"
+            " SET unassigned_at = '2099-01-01Z', assigned_at = assigned_at"
+            " WHERE assignment_id = $1",
+            key,
+        )
+        assert closed == "UPDATE 1"
     finally:
         await transaction.rollback()
 
