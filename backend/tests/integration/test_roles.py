@@ -9,6 +9,10 @@ corrida. Criterios de TASK-106:
    tablas globales (``test_upgrade_head_creates_roles_schemas_extensions_and_global_tables``);
 3. conectado como ``vigia_app``, ``CREATE TABLE`` falla por permisos
    (``test_vigia_app_cannot_create_tables``).
+
+La cabeza de la cadena (``HEAD_REVISION``, ``HEAD_VERSION``) sale de ``migrations/versions/``:
+las tablas de datos de cliente de migraciones posteriores (``identity`` desde ``nuc_0002``) se
+prueban en sus propios módulos; aquí solo se exige que no tengan la forma de una tabla global.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from tests.migrations_head import HEAD_REVISION, HEAD_VERSION
 from vigia_platform.shared.migration_credentials import (
     APP_PASSWORD_VARIABLE,
     APP_SECRET_VARIABLE,
@@ -219,9 +224,13 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
             " WHERE schemaname IN ('identity', 'ledger', 'shared')"
         )
     }
-    assert set(tables) == GLOBAL_TABLES
-    # Tablas globales: sin datos de cliente ni seguridad a nivel de fila (domain-entities §6).
-    assert set(tables.values()) == {("vigia_migrate", False)}
+    assert set(tables) >= GLOBAL_TABLES
+    assert {owner for owner, _ in tables.values()} == {"vigia_migrate"}
+    # Tablas globales: sin datos de cliente ni seguridad a nivel de fila (domain-entities §6);
+    # todas las demás, las de datos de cliente, con ella.
+    assert {name for name, (_, row_security) in tables.items() if not row_security} == (
+        GLOBAL_TABLES
+    )
 
     regions = [tuple(row) for row in await superuser.fetch("SELECT * FROM identity.data_region")]
     assert regions == [("us-east-1", "Este de Estados Unidos (Norte de Virginia)", "US")]
@@ -234,8 +243,9 @@ async def test_upgrade_head_creates_roles_schemas_extensions_and_global_tables(
     }
     assert {"next_run_at", "lease_owner", "lease_until"} <= periodic
 
-    assert await superuser.fetchval("SELECT version_num FROM public.alembic_version") == "nuc_0001"
-    assert await superuser.fetchval("SELECT shared.vigia_schema_version()") == 1
+    version_num = await superuser.fetchval("SELECT version_num FROM public.alembic_version")
+    assert version_num == HEAD_REVISION
+    assert await superuser.fetchval("SELECT shared.vigia_schema_version()") == HEAD_VERSION
     assert (
         await superuser.fetchval(
             "SELECT pg_get_userbyid(relowner) FROM pg_class"
@@ -440,11 +450,11 @@ async def test_schema_version_check_as_vigia_app(migrated: MigratedDatabase) -> 
     engine = create_async_engine(url)
     try:
         async with engine.connect() as connection:
-            assert await ensure_minimum_schema_version(connection) == 1
-            assert await ensure_minimum_schema_version(connection, 1) == 1
+            assert await ensure_minimum_schema_version(connection) == HEAD_VERSION
+            assert await ensure_minimum_schema_version(connection, 1) == HEAD_VERSION
             with pytest.raises(SchemaTooOld) as caught:
-                await ensure_minimum_schema_version(connection, 2)
-            assert (caught.value.found, caught.value.minimum) == (1, 2)
+                await ensure_minimum_schema_version(connection, HEAD_VERSION + 1)
+            assert (caught.value.found, caught.value.minimum) == (HEAD_VERSION, HEAD_VERSION + 1)
     finally:
         await engine.dispose()
 
@@ -478,7 +488,7 @@ def test_upgrade_again_is_a_no_op(migrated: MigratedDatabase) -> None:
     assert "Running upgrade" not in again.stderr
     current = run_alembic(migrated.endpoint, migrated.database, {}, "current")
     assert current.returncode == 0, current.stderr
-    assert "nuc_0001 (head)" in current.stdout
+    assert f"{HEAD_REVISION} (head)" in current.stdout
 
 
 def test_missing_role_password_creates_nothing(postgres_endpoint: PostgresEndpoint) -> None:
@@ -585,7 +595,7 @@ def test_aws_mode_reads_the_secrets_the_migrate_task_receives(
         # Despliegues siguientes: solo db/migrate, se entra como vigia_migrate.
         later = run_alembic(endpoint, "no_such_database", aws, "current")
         assert later.returncode == 0, later.stderr
-        assert "nuc_0001 (head)" in later.stdout
+        assert f"{HEAD_REVISION} (head)" in later.stdout
         for output in (first, later):
             for secret in (migrated.app_password, migrated.migrate_password, endpoint.password):
                 assert secret not in output.stdout + output.stderr
@@ -603,7 +613,7 @@ def test_aws_mode_reads_the_secrets_the_migrate_task_receives(
             finally:
                 await connection.close()
 
-        assert asyncio.run(app_version()) == 1
+        assert asyncio.run(app_version()) == HEAD_VERSION
     finally:
         for arn in arns.values():
             client.delete_secret(SecretId=arn, ForceDeleteWithoutRecovery=True)
