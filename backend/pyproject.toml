@@ -46,6 +46,9 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "hypothesis>=6",
+  # Solo para importar los generadores del kit de U-01 (PR-NUC-17): el paquete
+  # vigia_contracts.conformance.generators importa numpy al cargarse.
+  "numpy>=1.26",
   "pytest-benchmark>=4",
   "coverage>=7",
   "testcontainers>=4.8",
