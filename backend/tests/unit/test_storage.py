@@ -160,17 +160,84 @@ def test_part_number_bounds(part_number: int) -> None:
         asyncio.run(_storage().presign_part(KEY, "u", part_number, SHA))
 
 
-@pytest.mark.parametrize("key", ["", "/org/x", "org/x y", "org/ñ", "a" * 513, "org/x\n"])
-def test_invalid_keys_never_reach_the_store(key: str) -> None:
-    class Unreachable:
-        def __getattr__(self, name: str) -> Any:
-            raise AssertionError(f"no debía llamarse {name}")
+class _Unreachable:
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"no debía llamarse {name}")
 
-    storage = _storage(Unreachable())
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",
+        "/org/x",
+        "org/x y",
+        "org/ñ",
+        "a" * 513,
+        "org/x\n",
+        # Segmentos vacíos o de puntos (seguimiento de VIG-32): el juego de caracteres del
+        # contrato los admite, el puerto no.
+        "org//x.mp4",
+        "org/x/",
+        "org/../x.mp4",
+        "org/./x.mp4",
+        "org/x/..",
+        "org/x/.",
+        "..",
+        ".",
+        "org/x//",
+    ],
+)
+def test_invalid_keys_never_reach_the_store(key: str) -> None:
+    storage = _storage(_Unreachable())
     with pytest.raises(ValueError):
         asyncio.run(storage.head_object(key))
     with pytest.raises(ValueError):
         asyncio.run(storage.presign_get(key))
+    with pytest.raises(ValueError):
+        asyncio.run(storage.get_object(key))
+    with pytest.raises(ValueError):
+        asyncio.run(storage.presign_put(key, "video/mp4", SHA, {ANONYMIZED_HEADER: "1"}))
+
+
+@pytest.mark.parametrize("key", ["org/x..y/z.mp4", "org/.hidden/x.mp4", "org/x/y...mp4", KEY])
+def test_dots_inside_a_segment_are_still_valid_keys(key: str) -> None:
+    assert asyncio.run(_storage().presign_get(key)).url
+
+
+def test_presign_get_pins_the_version_when_given() -> None:
+    pinned = asyncio.run(_storage().presign_get(KEY, version_id="3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrH"))
+    assert parse_qs(urlsplit(pinned.url).query)["versionId"] == ["3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrH"]
+    assert "versionId" not in parse_qs(urlsplit(asyncio.run(_storage().presign_get(KEY)).url).query)
+
+
+@pytest.mark.parametrize("version_id", ["", "a b", "v\n", "ñ", "a" * 1025])
+def test_invalid_version_ids_never_reach_the_store(version_id: str) -> None:
+    storage = _storage(_Unreachable())
+    with pytest.raises(ValueError):
+        asyncio.run(storage.presign_get(KEY, version_id=version_id))
+    with pytest.raises(ValueError):
+        asyncio.run(storage.get_object(KEY, version_id=version_id))
+
+
+def test_get_object_reads_the_requested_version() -> None:
+    calls: list[dict[str, Any]] = []
+
+    class Body:
+        def read(self) -> bytes:
+            return b"clip"
+
+    class Client:
+        def get_object(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append(kwargs)
+            return {"Body": Body()}
+
+    storage = _storage(Client())
+    assert asyncio.run(storage.get_object(KEY, version_id="v1")) == b"clip"
+    assert asyncio.run(storage.get_object(KEY)) == b"clip"
+    assert calls == [
+        {"Bucket": BUCKET, "Key": KEY, "ChecksumMode": "ENABLED", "VersionId": "v1"},
+        {"Bucket": BUCKET, "Key": KEY, "ChecksumMode": "ENABLED"},
+    ]
 
 
 def test_no_object_listing_is_offered() -> None:
