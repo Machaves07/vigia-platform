@@ -72,6 +72,9 @@ include = ["src/vigia_platform"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# Generado por tools/build_verifier.py a partir de módulos que ruff ya revisa (LC-NUC-18);
+# su igualdad con lo generado la exige `build_verifier.py --check`.
+extend-exclude = ["tools/vigia_verify.py"]
 
 [tool.ruff.lint]
 # Códigos propios de `tools/lint_rules.py`: ruff acepta `# noqa: VIG004` sin avisar.
