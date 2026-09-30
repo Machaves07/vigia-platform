@@ -11,7 +11,9 @@ note en las rutas.
 - ``CpuPool.run(function, *args, **kwargs)`` es el equivalente de ``asyncio.to_thread`` sobre el
   pool acotado: copia las variables de contexto (trazas, correlación) al hilo y devuelve el
   resultado o relanza la excepción de ``function``. Cancelar la espera no detiene la función ya
-  iniciada (como ``asyncio.to_thread``); una tarea cancelada antes de empezar no se ejecuta.
+  iniciada (como ``asyncio.to_thread``). La cancelación llega al pool en una vuelta posterior del
+  bucle de eventos: si para entonces la tarea sigue en cola, no se ejecuta; si un hilo quedó libre
+  y la tomó antes, se ejecuta hasta el final y su resultado se descarta.
 - ``get_cpu_pool()`` devuelve el pool compartido del proceso, con ``SystemClock`` y las métricas
   globales; las pruebas construyen el suyo con ``SimulatedClock`` o sus propias métricas.
 
@@ -66,7 +68,13 @@ class CpuPool:
     async def run[**P, T](
         self, function: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
     ) -> T:
-        """Ejecuta ``function(*args, **kwargs)`` en el pool y espera su resultado."""
+        """Ejecuta ``function(*args, **kwargs)`` en el pool y espera su resultado.
+
+        Cancelar la espera no detiene ``function`` si ya empezó. Una tarea todavía en cola no se
+        ejecuta si la cancelación llega al pool antes de que un hilo la tome; esa cancelación se
+        propaga una vuelta del bucle después de ``Task.cancel()``, y en ese intervalo un hilo
+        recién liberado puede tomarla y ejecutarla (mismo comportamiento que ``run_in_executor``).
+        """
         loop = asyncio.get_running_loop()
         context = contextvars.copy_context()
         call = functools.partial(function, *args, **kwargs)
