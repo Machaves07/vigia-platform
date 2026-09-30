@@ -114,7 +114,8 @@ BR-NUC-60). `filters` y `filters_hash` son nulos a la vez.
 
 - Expediente: registro con `record_type = "checkpoint"`; auditoría: entrada con
   `operation = "checkpoint"`, con el contenido en **`filters`** (la única columna JSON de la
-  auditoría cubierta por el hash; supuesto que TASK-117 debe respetar).
+  auditoría cubierta por el hash). Así los escribe `ledger.chain.checkpoints` (TASK-117), y el
+  disparador de encadenado (`nuc_0005`) rechaza el que no cubre exactamente la cabeza.
 - Contenido, exactamente: `{"covered_sequence", "covered_hash", "taken_at", "key_id",
   "signature"}` (domain-entities §3.4). `covered_sequence` es la secuencia anterior y
   `covered_hash` su hash (o el de génesis si el punto de control es el primer registro).
