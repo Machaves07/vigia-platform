@@ -57,6 +57,7 @@ from vigia_platform.identity.auth.second_factor import (
     SecondFactorNotFound,
     SecondFactorService,
     SecondFactorUser,
+    TotpCredential,
     credential_aad,
     totp_step,
 )
@@ -199,6 +200,26 @@ def _code(secret: bytes, now: datetime) -> str:
     return pyotp.TOTP(base64.b32encode(secret).decode()).at(now)
 
 
+def _confirm(
+    env: Environment,
+    service: SecondFactorService,
+    context: ScopeContext,
+    challenge: EnrollmentChallenge,
+) -> TotpCredential:
+    """Confirma la inscripción con un primer código y avanza un paso; la credencial guardada."""
+    now = env.clock.now()
+    code = _code(_secret(challenge), now)
+    assert env.run(service.confirm_enrollment(context, challenge.credential, code, now)) is True
+    env.clock.advance(30)
+    stored = env.run(
+        PostgresSecondFactorStore(env.database, env.audit).get_credential(
+            context, challenge.credential.user_id
+        )
+    )
+    assert stored is not None and stored.usable
+    return stored
+
+
 def _database_dump(env: Environment) -> str:
     """Todas las filas de todas las tablas de los tres esquemas, como texto (superusuario).
 
@@ -238,11 +259,10 @@ def test_secret_is_never_in_plain_in_any_column_or_log(
     user = env.new_user(sessions=1)
     challenge = env.run(service.enroll(context, user))
     secret = _secret(challenge)
+    credential = _confirm(env, service, context, challenge)
     now = env.clock.now()
-    assert env.run(service.verify_totp(context, challenge.credential, _code(secret, now), now))
-    assert env.run(
-        service.consume_recovery_code(context, challenge.credential, challenge.recovery_codes[0])
-    )
+    assert env.run(service.verify_totp(context, credential, _code(secret, now), now))
+    assert env.run(service.consume_recovery_code(context, credential, challenge.recovery_codes[0]))
     assert env.run(service.reset(context, user.user_id)) == 1
 
     row = env.query(
@@ -312,12 +332,13 @@ def test_verification_continues_without_kms_with_the_data_key_in_memory(env: Env
     user = env.new_user()
     challenge = env.run(enrolling.enroll(context, user))
     secret = _secret(challenge)
+    confirmed = _confirm(env, enrolling, context, challenge)
     # Otro proceso de la API: descifra una vez con KMS y guarda la clave de datos.
     kms = SwitchableKms(KmsAdapter(_settings(env.localstack_url)))
     api, _ = env.service(kms)
     store = PostgresSecondFactorStore(env.database, env.audit)
     now = env.clock.now()
-    assert env.run(api.verify_totp(context, challenge.credential, _code(secret, now), now))
+    assert env.run(api.verify_totp(context, confirmed, _code(secret, now), now))
     kms.inner = KmsAdapter(_settings(_closed_port_url()))
     env.clock.advance(10 * 60)
     now = env.clock.now()
@@ -347,6 +368,7 @@ def test_same_code_is_accepted_once_even_concurrently(env: Environment) -> None:
     user = env.new_user()
     challenge = env.run(service.enroll(context, user))
     secret = _secret(challenge)
+    credential = _confirm(env, service, context, challenge)
     env.clock.advance(60)
     now = env.clock.now()
     code = _code(secret, now)
@@ -354,13 +376,13 @@ def test_same_code_is_accepted_once_even_concurrently(env: Environment) -> None:
     async def twice() -> list[bool]:
         return list(
             await asyncio.gather(
-                service.verify_totp(context, challenge.credential, code, now),
-                service.verify_totp(context, challenge.credential, code, now),
+                service.verify_totp(context, credential, code, now),
+                service.verify_totp(context, credential, code, now),
             )
         )
 
     assert sorted(env.run(twice())) == [False, True]
-    assert env.run(service.verify_totp(context, challenge.credential, code, now)) is False
+    assert env.run(service.verify_totp(context, credential, code, now)) is False
     stored = env.query(
         "SELECT last_accepted_step FROM identity.totp_credential WHERE user_id = $1", user.user_id
     )[0]["last_accepted_step"]
@@ -370,13 +392,13 @@ def test_same_code_is_accepted_once_even_concurrently(env: Environment) -> None:
     async def consume_twice() -> list[bool]:
         return list(
             await asyncio.gather(
-                service.consume_recovery_code(context, challenge.credential, recovery),
-                service.consume_recovery_code(context, challenge.credential, recovery),
+                service.consume_recovery_code(context, credential, recovery),
+                service.consume_recovery_code(context, credential, recovery),
             )
         )
 
     assert sorted(env.run(consume_twice())) == [False, True]
-    assert env.run(service.consume_recovery_code(context, challenge.credential, recovery)) is False
+    assert env.run(service.consume_recovery_code(context, credential, recovery)) is False
     # La base es la que decide: marcar dos veces el mismo código a la vez cambia una sola fila.
     store = PostgresSecondFactorStore(env.database, env.audit)
     unused = env.run(store.unused_recovery_codes(context, user.user_id))
@@ -409,6 +431,7 @@ def test_reset_closes_sessions_audits_and_forces_reenrollment(env: Environment) 
     context = env.context()
     user = env.new_user(sessions=2)
     first = env.run(service.enroll(context, user))
+    stale = _confirm(env, service, context, first)
     with pytest.raises(AlreadyEnrolled):
         env.run(service.enroll(context, user))
     # La base tampoco deja sustituir una credencial activa (carrera entre dos inscripciones).
@@ -442,6 +465,7 @@ def test_reset_closes_sessions_audits_and_forces_reenrollment(env: Environment) 
     )
     assert [(a["operation"], a["result_count"]) for a in audit] == [
         ("second_factor_enrolled", None),
+        ("session_closed", 2),
         ("second_factor_reset", 2),
     ]
     disabled = env.run(
@@ -450,19 +474,48 @@ def test_reset_closes_sessions_audits_and_forces_reenrollment(env: Environment) 
     assert disabled is not None and not disabled.active
     now = env.clock.now()
     assert env.run(service.verify_totp(context, disabled, _code(_secret(first), now), now)) is False
+    # Seguimiento nº 2 de VIG-66: la credencial leída antes del reset sigue «activa» en memoria;
+    # lo que la rechaza es la condición de credencial activa del SQL.
+    assert stale.usable
+    assert env.run(service.verify_totp(context, stale, _code(_secret(first), now), now)) is False
+    assert env.run(service.consume_recovery_code(context, stale, first.recovery_codes[1])) is False
 
     env.clock.advance(1)
     second = env.run(service.enroll(context, user))
     assert _secret(second) != _secret(first)
+    # La base, por sí sola, no acepta nada de una inscripción sin confirmar (la guarda del
+    # servicio aparte): ni un paso, ni sus códigos de recuperación.
+    assert env.run(store.advance_step(context, user.user_id, totp_step(env.clock.now()))) is False
+    assert env.run(store.unused_recovery_codes(context, user.user_id)) == ()
+    pending_codes = env.query(
+        "SELECT recovery_code_id FROM identity.recovery_code WHERE user_id = $1"
+        " AND generated_at = $2",
+        user.user_id,
+        second.credential.enrolled_at,
+    )
+    assert len(pending_codes) == 10
     assert (
-        env.run(service.consume_recovery_code(context, second.credential, first.recovery_codes[0]))
+        env.run(
+            store.mark_recovery_code_used(
+                context,
+                uuid.UUID(bytes=pending_codes[0]["recovery_code_id"].bytes),
+                env.clock.now(),
+            )
+        )
         is False
     )
+    # Sin confirmar, la inscripción nueva no verifica ni consume nada.
     assert (
         env.run(service.consume_recovery_code(context, second.credential, second.recovery_codes[0]))
-        is True
+        is False
     )
     now = env.clock.now()
-    assert env.run(
-        service.verify_totp(context, second.credential, _code(_secret(second), now), now)
+    unconfirmed_code = _code(_secret(second), now)
+    assert env.run(service.verify_totp(context, second.credential, unconfirmed_code, now)) is False
+    current = _confirm(env, service, context, second)
+    assert (
+        env.run(service.consume_recovery_code(context, current, first.recovery_codes[0])) is False
     )
+    assert env.run(service.consume_recovery_code(context, current, second.recovery_codes[0]))
+    now = env.clock.now()
+    assert env.run(service.verify_totp(context, current, _code(_secret(second), now), now))
