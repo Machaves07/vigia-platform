@@ -25,7 +25,9 @@ Lo que ``ledger.chain.verify`` (módulo aislado, sin SQLAlchemy) necesita de la 
 - ``checkpoints`` y ``documents`` (**paso 2**): las filas completas de los puntos de control del
   lote y el ``content_json::text`` (``filters_json::text``) de todo el lote o de la muestra.
 - ``last_verified`` y ``results``: el estado incremental y los últimos resultados, leídos de las
-  entradas ``integrity_verification`` de la auditoría (el resultado anterior de cada cadena).
+  entradas ``integrity_verification`` de la auditoría. El estado incremental es el último punto
+  íntegro anterior a toda rotura abierta (sin un íntegro desde la génesis posterior), no el último
+  ``intact`` sin más: una rotura nunca queda por detrás del punto de partida (BR-NUC-58).
 - ``record``: la entrada ``integrity_verification`` por ``AuditWriter`` y, si la cadena está
   rota, ``integrity_compromised`` por la bandeja, en una sola transacción.
 
@@ -291,13 +293,33 @@ _CHAINS: Final = text(
     " ORDER BY kind, plant_id NULLS FIRST"
 )
 
+# Punto de partida de la incremental (BR-NUC-58). Una rotura sigue abierta mientras no haya después
+# un resultado íntegro desde la génesis (``full`` u ``on_demand``, tras la restauración): el punto
+# es el del último ``intact`` que termina antes de la menor rotura abierta, o la génesis. Así, una
+# completa que encuentra una rotura anterior al punto de la incremental hace que la incremental
+# siguiente vuelva a encontrarla, en lugar de seguir desde un punto posterior.
 _LAST_VERIFIED: Final = text(
-    "SELECT filters FROM shared.audit_entry"
-    " WHERE organization_id = :organization_id AND operation = 'integrity_verification'"
-    " AND filters_json ->> 'chain_kind' = :kind"
-    " AND (filters_json ->> 'plant_id') IS NOT DISTINCT FROM CAST(:plant_id AS text)"
-    " AND filters_json ->> 'result' = 'intact'"
-    " ORDER BY chain_sequence DESC LIMIT 1"
+    """
+    WITH results AS (
+        SELECT chain_sequence, filters, filters_json FROM shared.audit_entry
+        WHERE organization_id = :organization_id AND operation = 'integrity_verification'
+          AND filters_json ->> 'chain_kind' = :kind
+          AND (filters_json ->> 'plant_id') IS NOT DISTINCT FROM CAST(:plant_id AS text)
+    ),
+    cleared AS (
+        SELECT coalesce(max(chain_sequence), 0) AS since FROM results
+        WHERE filters_json ->> 'result' = 'intact' AND filters_json ->> 'mode' <> 'incremental'
+    ),
+    open_break AS (
+        SELECT min(CAST(r.filters_json ->> 'broken_sequence' AS bigint)) AS sequence
+        FROM results AS r, cleared AS c
+        WHERE r.filters_json ->> 'result' = 'broken' AND r.chain_sequence > c.since
+    )
+    SELECT r.filters FROM results AS r, open_break AS b
+    WHERE r.filters_json ->> 'result' = 'intact'
+      AND (b.sequence IS NULL OR CAST(r.filters_json ->> 'to_sequence' AS bigint) < b.sequence)
+    ORDER BY r.chain_sequence DESC LIMIT 1
+    """
 )
 
 _RESULTS: Final = text(

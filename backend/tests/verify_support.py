@@ -315,22 +315,46 @@ async def mutate(
     Los disparadores de la tabla y de sus particiones se desactivan y se restauran en su modo en
     la misma transacción: nada queda desprotegido al confirmar.
     """
+    assignments = ", ".join(f"{column} = ${index}" for index, column in enumerate(changes, start=1))
+    await _unguarded(
+        migrated,
+        table,
+        f"UPDATE {table} SET {assignments}"  # noqa: S608 - nombres fijos de la prueba
+        f" WHERE {id_column} = ${len(changes) + 1}",
+        [*changes.values(), entry_id],
+        "UPDATE 1",
+    )
+
+
+async def delete_entry(
+    migrated: MigratedDatabase, table: str, id_column: str, entry_id: uuid.UUID
+) -> None:
+    """``DELETE`` directo de la fila ``entry_id`` (sin tocar la cabeza), como ``mutate``."""
+    await _unguarded(
+        migrated,
+        table,
+        f"DELETE FROM {table} WHERE {id_column} = $1",  # noqa: S608 - nombres fijos de la prueba
+        [entry_id],
+        "DELETE 1",
+    )
+
+
+async def _unguarded(
+    migrated: MigratedDatabase,
+    table: str,
+    statement: str,
+    arguments: Sequence[Any],
+    expected: str,
+) -> None:
+    """Ejecuta ``statement`` con los disparadores de ``table`` desactivados en la transacción."""
     connection = await migrated.connect()
     try:
         async with connection.transaction():
             triggers = await connection.fetch(_TRIGGERS, table)
             for relation in sorted({row["relation"] for row in triggers}):
                 await connection.execute(f"ALTER TABLE {relation} DISABLE TRIGGER USER")
-            assignments = ", ".join(
-                f"{column} = ${index}" for index, column in enumerate(changes, start=1)
-            )
-            status = await connection.execute(
-                f"UPDATE {table} SET {assignments}"  # noqa: S608 - nombres fijos de la prueba
-                f" WHERE {id_column} = ${len(changes) + 1}",
-                *changes.values(),
-                entry_id,
-            )
-            assert status == "UPDATE 1", status
+            status = await connection.execute(statement, *arguments)
+            assert status == expected, status
             for row in triggers:
                 mode = _MODES[row["tgenabled"]]
                 await connection.execute(f'ALTER TABLE {row["relation"]} {mode} "{row["tgname"]}"')

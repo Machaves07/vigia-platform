@@ -11,7 +11,10 @@ PR-NUC-49 (``tests/properties/test_verify_*.py``) con lo que no generan:
   clave no publicada, firma que no verifica y firma válida recodificada en base64 no canónico
   (seguimiento de VIG-62), en ``full`` y en ``incremental``.
 - **Estado incremental**: la incremental parte del último punto íntegro auditado, con la muestra
-  del 1 % y al menos 100; una cadena rota sigue rota en la siguiente (BR-NUC-58).
+  del 1 % y al menos 100; una cadena rota sigue rota en la siguiente (BR-NUC-58), también si la
+  completa encuentra la rotura por detrás del punto de la incremental, hasta que una completa
+  íntegra tras la restauración la cierra.
+- **Huecos**: falta la última fila de un lote o de la cadena → ``sequence_gap`` en esa secuencia.
 - **Cabeza**: ``ChainHead`` con otro hash o registros por encima de ella → ``head_mismatch``.
 - **Oráculo del sobre**: el sobre escrito en la consulta del paso 1 es byte a byte el de
   ``ledger.vigia_canonical_envelope`` y ``shared.vigia_canonical_audit_envelope`` con nombres
@@ -52,6 +55,7 @@ from tests.verify_support import (
     append_entry,
     build_chain,
     checkpoint_content,
+    delete_entry,
     mutate,
     mutate_head,
     verify_environment,
@@ -373,6 +377,126 @@ def test_broken_chain_stays_broken_until_restored(environment: VerifyEnvironment
         for e in verifications(environment, built.organization_id)
     ]
     assert results == ["intact", "broken", "broken"]
+
+
+def test_full_break_before_the_incremental_point_stays_broken(
+    environment: VerifyEnvironment,
+) -> None:
+    """BR-NUC-58: la completa encuentra una rotura por detrás del punto de la incremental; la
+    incremental siguiente parte de antes de la rotura y la vuelve a encontrar (no «intact» desde el
+    punto posterior), y ``last_results`` la sigue dando rota. Tras restaurar, una completa íntegra
+    cierra la rotura y la incremental vuelve a partir de su punto."""
+    built = environment.run(build_chain(environment.migrated, "plant", ["record"] * 3))
+    assert verify(environment, built, VerificationMode.FULL).intact
+    environment.run(append_entry(environment.migrated, built, "record"))
+    point = verify(environment, built, VerificationMode.INCREMENTAL)
+    assert (point.status, point.to_sequence) == (IntegrityStatus.INTACT, 4)
+    target = built.rows[1]
+    original = target["schema_version"]
+    environment.run(
+        mutate(
+            environment.migrated,
+            built.table,
+            built.id_column,
+            target["record_id"],
+            {"schema_version": original + 5},
+        )
+    )
+    full = verify(environment, built, VerificationMode.FULL)
+    assert (full.status, full.broken_sequence) == (IntegrityStatus.BROKEN, 2)
+    environment.run(append_entry(environment.migrated, built, "record"))
+
+    for _ in range(2):
+        again = verify(environment, built, VerificationMode.INCREMENTAL)
+        assert (again.status, again.from_sequence, again.broken_sequence, again.reason) == (
+            IntegrityStatus.BROKEN,
+            1,
+            2,
+            "record_hash_mismatch",
+        )
+        (latest,) = environment.run(environment.service().last_results(built.context))
+        assert (latest.status, latest.broken_sequence) == (IntegrityStatus.BROKEN, 2)
+    assert len(compromised(environment, built.organization_id)) == 3
+
+    # Restauración: la fila vuelve a su valor. Una incremental íntegra no cierra la rotura (sigue
+    # partiendo de antes de ella); una completa íntegra sí.
+    environment.run(
+        mutate(
+            environment.migrated,
+            built.table,
+            built.id_column,
+            target["record_id"],
+            {"schema_version": original},
+        )
+    )
+    for _ in range(2):
+        incremental = verify(environment, built, VerificationMode.INCREMENTAL)
+        assert (incremental.status, incremental.from_sequence) == (IntegrityStatus.INTACT, 1)
+    restored = verify(environment, built, VerificationMode.FULL)
+    assert (restored.status, restored.to_sequence) == (IntegrityStatus.INTACT, 5)
+    environment.run(append_entry(environment.migrated, built, "record"))
+    after = verify(environment, built, VerificationMode.INCREMENTAL)
+    assert (after.status, after.from_sequence, after.to_sequence) == (IntegrityStatus.INTACT, 6, 6)
+
+
+@pytest.mark.parametrize("altered", [4, 5])
+def test_incremental_broken_before_its_start_goes_back_to_the_earlier_point(
+    environment: VerifyEnvironment, altered: int
+) -> None:
+    """La rotura abierta más baja manda: un punto íntegro anterior a ella sigue valiendo como
+    partida (no hace falta volver a la génesis). Con la rotura justo en el punto de la
+    incremental (5), ese punto ya no vale: su hash es el de una fila alterada."""
+    built = environment.run(build_chain(environment.migrated, "organization", ["record"] * 2))
+    assert verify(environment, built, VerificationMode.FULL).to_sequence == 2
+    for _ in range(3):
+        environment.run(append_entry(environment.migrated, built, "record"))
+    assert verify(environment, built, VerificationMode.INCREMENTAL).to_sequence == 5
+    environment.run(
+        mutate(
+            environment.migrated,
+            built.table,
+            built.id_column,
+            built.rows[altered - 1]["record_id"],
+            {"actor_display_name_snapshot": "Otra persona"},
+        )
+    )
+    assert verify(environment, built, VerificationMode.ON_DEMAND).broken_sequence == altered
+    again = verify(environment, built, VerificationMode.INCREMENTAL)
+    assert (again.status, again.from_sequence, again.broken_sequence) == (
+        IntegrityStatus.BROKEN,
+        3,
+        altered,
+    )
+
+
+@pytest.mark.parametrize("shape", ["plant", "audit"])
+@pytest.mark.parametrize("deleted", [3, 5])
+def test_deleted_last_row_of_a_batch_is_a_sequence_gap(
+    environment: VerifyEnvironment, shape: Any, deleted: int
+) -> None:
+    """Falta la última fila de un lote (3, con lotes de 3) o de la cadena (5) sin tocar la cabeza:
+    ``sequence_gap`` en esa secuencia (la ventana del lote no la ve; la cuenta de filas sí)."""
+    built = environment.run(build_chain(environment.migrated, shape, ["record"] * 5))
+    environment.run(
+        delete_entry(
+            environment.migrated,
+            built.table,
+            built.id_column,
+            built.rows[deleted - 1][built.id_column],
+        )
+    )
+    for mode in (VerificationMode.FULL, VerificationMode.INCREMENTAL):
+        result = verify(environment, built, mode, environment.service(batch_size=3))
+        assert (result.status, result.broken_sequence, result.reason) == (
+            IntegrityStatus.BROKEN,
+            deleted,
+            "sequence_gap",
+        )
+        assert result.to_sequence == deleted - 1
+        if mode is VerificationMode.FULL:
+            # En la auditoría, el resultado de la completa entra detrás: después ya hay una fila
+            # tras el hueco (la ventana lo ve y nombra esa fila).
+            assert result.broken_entry_id is None
 
 
 def test_incremental_does_not_rescan_but_full_does(environment: VerifyEnvironment) -> None:

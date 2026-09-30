@@ -32,7 +32,9 @@ El resultado se audita siempre como ``integrity_verification`` (cadena, modo, se
 resultado; el registro roto como ``resource_ref``) y, ante ``broken``, en la misma transacción se
 publica ``integrity_compromised`` y se suma ``integrity_compromised_total`` (alarma de máxima
 severidad, NFR-NUC-38). Una cadena rota no se repara (BR-NUC-58): la incremental siguiente vuelve
-a partir del último punto íntegro y la vuelve a encontrar rota hasta la restauración.
+a partir del último punto íntegro **anterior a la rotura** y la vuelve a encontrar rota hasta la
+restauración (tras ella, un resultado íntegro desde la génesis cierra la rotura). Vale también
+para una rotura que encuentra la completa por detrás del punto de la incremental.
 
 Si la base falla a mitad (``TemporarilyUnavailable`` u otro error), no hay resultado: no se audita
 nada ni se da la cadena por íntegra (P5); el planificador reintenta.
@@ -485,7 +487,12 @@ class IntegrityStore(Protocol):
     async def last_verified(
         self, context: ScopeContext, chain: CheckpointChain
     ) -> VerifiedPoint | None:
-        """El punto del último resultado ``intact`` de la cadena, o ``None``."""
+        """El punto de partida de la incremental, o ``None`` (génesis).
+
+        Es el del último resultado ``intact`` cuyo ``to_sequence`` queda antes de la menor
+        ``broken_sequence`` de las roturas abiertas: las auditadas después del último resultado
+        íntegro desde la génesis (``full`` u ``on_demand``).
+        """
         ...
 
     async def results(self, context: ScopeContext) -> Sequence[IntegrityResult]:
