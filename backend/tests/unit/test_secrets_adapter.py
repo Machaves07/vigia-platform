@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from botocore.exceptions import (  # type: ignore[import-untyped]
@@ -42,6 +42,7 @@ ARN_PREFIX = ":".join(("arn", "aws", "secretsmanager", "us-east-1", "00000000000
 """ARN sintético de LocalStack, armado por partes (no es una credencial)."""
 ARN = ARN_PREFIX + ":" + "/".join(("vigia", "pilot", "signing", "gate", "k1"))
 SETTINGS = AwsSettings(region="us-east-1", endpoint_url="http://localhost:1")
+CONTEXT = {"vigia_purpose": "envelope"}
 
 
 def _client_error(code: str, status: int = 400) -> ClientError:
@@ -256,11 +257,15 @@ class FakeKmsClient:
             raise self.error
         return self.responses[name]
 
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
     def generate_data_key(self, **params: Any) -> dict[str, Any]:
         assert params["KeySpec"] == "AES_256"
+        self.calls.append(params)
         return self._answer("generate_data_key")
 
     def decrypt(self, **params: Any) -> dict[str, Any]:
+        self.calls.append(params)
         return self._answer("decrypt")
 
     def sign(self, **params: Any) -> dict[str, Any]:
@@ -285,20 +290,54 @@ async def test_kms_operations_return_bytes_and_fail_as_unavailable() -> None:
         }
     )
     kms = KmsAdapter(SETTINGS, client=client)
-    data_key = await kms.generate_data_key("alias/vigia-secrets")
+    data_key = await kms.generate_data_key("alias/vigia-secrets", context=CONTEXT)
     assert data_key.plaintext == b"p" * 32 and data_key.wrapped == b"w" * 60
     assert "p" * 32 not in repr(data_key)
-    assert await kms.decrypt(b"w" * 60) == b"p" * 32
+    assert await kms.decrypt(b"w" * 60, key_id="alias/vigia-secrets", context=CONTEXT) == (
+        b"p" * 32
+    )
+    # La clave maestra y el contexto viajan en las dos llamadas: KMS rechaza cualquier otro.
+    generate_call, decrypt_call = client.calls
+    assert generate_call["KeyId"] == decrypt_call["KeyId"] == "alias/vigia-secrets"
+    assert generate_call["EncryptionContext"] == decrypt_call["EncryptionContext"] == CONTEXT
     assert await kms.sign("alias/vigia-node-ca", b"tbs") == b"s" * 70
     assert await kms.get_public_key("alias/vigia-node-ca") == b"der"
 
     client.responses["decrypt"] = {}
     with pytest.raises(SecretsUnavailable) as raised:
-        await kms.decrypt(b"w")
+        await kms.decrypt(b"w", key_id="alias/vigia-secrets", context=CONTEXT)
     assert raised.value.dependency is Dependency.KMS
     client.error = _client_error("KMSInvalidStateException")
     with pytest.raises(SecretsUnavailable):
         await kms.sign("alias/vigia-node-ca", b"tbs")
+
+
+@pytest.mark.parametrize("code", ["InvalidCiphertextException", "IncorrectKeyException"])
+async def test_kms_decrypt_with_another_key_or_context_is_not_transient(code: str) -> None:
+    kms = KmsAdapter(SETTINGS, client=FakeKmsClient(error=_client_error(code)))
+    with pytest.raises(ValueError, match="no corresponde"):
+        await kms.decrypt(b"w" * 60, key_id="alias/vigia-secrets", context=CONTEXT)
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {},
+        {"Vigia": "x"},
+        {"vigia_purpose": ""},
+        {"vigia_purpose": "texto libre"},
+        {f"k{i}": "v" for i in range(9)},
+        cast(Any, [("vigia_purpose", "envelope")]),
+    ],
+)
+async def test_kms_rejects_malformed_encryption_context(context: Any) -> None:
+    client = FakeKmsClient(responses={"decrypt": {"Plaintext": b"p" * 32}})
+    kms = KmsAdapter(SETTINGS, client=client)
+    with pytest.raises(ValueError):
+        await kms.decrypt(b"w" * 60, key_id="alias/vigia-secrets", context=context)
+    with pytest.raises(ValueError):
+        await kms.generate_data_key("alias/vigia-secrets", context=context)
+    assert client.calls == []
 
 
 @pytest.mark.parametrize(
@@ -308,6 +347,7 @@ async def test_kms_operations_return_bytes_and_fail_as_unavailable() -> None:
         ("sign", ("alias/vigia-node-ca", b"x" * 4097)),
         ("sign", ("alias/vigia node", b"x")),
         ("decrypt", (b"",)),
+        ("decrypt", (b"w" * 60,)),
         ("generate_data_key", ("",)),
         ("get_public_key", ("alias/x\n",)),
     ],
@@ -316,5 +356,12 @@ async def test_kms_inputs_are_validated_before_calling(
     operation: str, arguments: tuple[Any, ...]
 ) -> None:
     kms = KmsAdapter(SETTINGS, client=FakeKmsClient(error=AssertionError("no se llama")))
+    keywords: dict[str, Any] = {}
+    if operation == "decrypt":
+        # Un identificador de clave no válido también se rechaza antes de llamar.
+        key_id = "alias/vigia-secrets" if arguments[0] == b"" else "alias/vigia secrets"
+        keywords = {"key_id": key_id, "context": CONTEXT}
+    elif operation == "generate_data_key":
+        keywords = {"context": CONTEXT}
     with pytest.raises(ValueError):
-        await getattr(kms, operation)(*arguments)
+        await getattr(kms, operation)(*arguments, **keywords)

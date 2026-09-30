@@ -1,0 +1,97 @@
+# Generado por `uv run python -m vigia_platform.shared.api.export_openapi` (NFR-NUC-52).
+# No se edita a mano: la canalización exige `--check` sin diferencia.
+"openapi": "3.1.0"
+"info":
+  "title": "Vigía — interfaz de la plataforma"
+  "version": "0.1.0"
+"paths":
+  "/health/live":
+    "get":
+      "tags":
+        - "salud"
+      "summary": "Salud superficial: el proceso atiende"
+      "operationId": "live_health_live_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LiveStatus"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+"components":
+  "schemas":
+    "ApiErrorBody":
+      "additionalProperties": false
+      "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."
+      "properties":
+        "code":
+          "$ref": "#/components/schemas/ApiErrorCode"
+        "detail_code":
+          "anyOf":
+            - "maxLength": 64
+              "pattern": "[a-z][a-z0-9]*(?:_[a-z0-9]+)+"
+              "type": "string"
+            - "type": "null"
+          "default": null
+          "title": "Detail Code"
+        "message_es":
+          "maxLength": 256
+          "minLength": 1
+          "title": "Message Es"
+          "type": "string"
+        "correlation_id":
+          "format": "uuid"
+          "title": "Correlation Id"
+          "type": "string"
+        "retry_after_seconds":
+          "anyOf":
+            - "maximum": 3600
+              "minimum": 1
+              "type": "integer"
+            - "type": "null"
+          "default": null
+          "title": "Retry After Seconds"
+      "required":
+        - "code"
+        - "message_es"
+        - "correlation_id"
+      "title": "ApiErrorBody"
+      "type": "object"
+    "ApiErrorCode":
+      "description": "``api_error_code`` (domain-entities §1 con el pendiente nº 33): lista cerrada de U-02."
+      "enum":
+        - "invalid_request"
+        - "not_found"
+        - "unauthenticated"
+        - "second_factor_required"
+        - "forbidden"
+        - "throttled"
+        - "rate_limited"
+        - "payload_too_large"
+        - "conflict"
+        - "temporarily_unavailable"
+        - "internal_error"
+        - "privacy_notice_required"
+        - "period_too_long"
+        - "zone_without_node"
+        - "storage_unavailable"
+      "title": "ApiErrorCode"
+      "type": "string"
+    "LiveStatus":
+      "properties":
+        "status":
+          "type": "string"
+          "const": "live"
+          "title": "Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "LiveStatus"
+      "description": "Respuesta de ``/health/live``."
