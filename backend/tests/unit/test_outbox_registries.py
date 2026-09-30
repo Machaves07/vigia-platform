@@ -100,6 +100,51 @@ def test_u02_registers_the_thirteen_initial_events() -> None:
     assert all(t.publisher_unit is ActorUnit.U02 for t in U02_EVENT_TYPES)
 
 
+@pytest.mark.parametrize(
+    "resource_kind",
+    [
+        "juan_perez",  # la sonda del revisor de VIG-47: un snake_case cualquiera
+        "maria",
+        "users",
+        "User",
+        "user ",
+        "usеr",  # noqa: RUF001 - homoglifo a propósito (e cirílica U+0435)
+        "user​",
+        "",
+        "persona_observada",
+    ],
+)
+def test_security_alert_resource_kind_is_a_closed_list(resource_kind: str) -> None:
+    """P3 (seguimiento de VIG-47): el recurso de ``security_alert`` no admite códigos libres."""
+    catalog = OutboxCatalog()
+    register_u02_event_types(catalog.event_types)
+    compiled = catalog.event_types.get("security_alert")
+    assert compiled is not None
+    payload = {
+        "alert_kind": "login_failures_account",
+        "resource_kind": "user",
+        "resource_id": "0192f0c4-3b8a-7c3e-9d2b-5f6a7b8c9d0e",
+        "occurred_at": "2026-09-30T10:00:00.000Z",
+    }
+    compiled.payload_model.model_validate(payload)
+    with pytest.raises(ValueError):
+        compiled.payload_model.model_validate({**payload, "resource_kind": resource_kind})
+    schema = compiled.payload_model.model_json_schema()["properties"]["resource_kind"]
+    enums = [option.get("enum") for option in schema["anyOf"] if option.get("type") != "null"]
+    assert enums == [
+        [
+            "user",
+            "organization",
+            "plant",
+            "zone",
+            "node",
+            "evidence",
+            "ledger_record",
+            "concession",
+        ]
+    ]
+
+
 def test_a_valid_payload_model_registers_with_its_schema() -> None:
     compiled = OutboxCatalog().event_types.register(_event())
     assert compiled.payload_schema["additionalProperties"] is False

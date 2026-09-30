@@ -272,7 +272,12 @@ def test_revoking_cuts_access_in_the_next_transaction(
 def test_expiry_cuts_access_without_any_update(
     policy: Policy, port: UnfilteredPort, superuser: Any, runner: asyncio.Runner
 ) -> None:
-    """La concesión vence sola: ``expires_at > now()`` basta, sin pasarla a ``expired``."""
+    """La concesión vence sola: ``expires_at > now()`` basta, sin pasarla a ``expired``.
+
+    Vence 10 s después de crearla (margen para un PC cargado; antes eran 2 s) y se espera, con el
+    reloj de la base, justo a que venza: la comprobación es la misma, sin depender de cuánto tardó
+    la primera consulta.
+    """
     seed = policy.seed
 
     async def scenario() -> None:
@@ -280,7 +285,7 @@ def test_expiry_cuts_access_without_any_update(
             superuser,
             seed,
             seed.b.organization_id,
-            granted_offset=-dt.timedelta(hours=1) + dt.timedelta(seconds=2),
+            granted_offset=-dt.timedelta(hours=1) + dt.timedelta(seconds=10),
             duration=dt.timedelta(hours=1),
         )
         context = make_context(
@@ -289,7 +294,17 @@ def test_expiry_cuts_access_without_any_update(
             concession_id=concession,
         )
         assert await port.visible(context) == seed.b.scoped_ids()
-        await asyncio.sleep(3)
+        remaining = await superuser.fetchval(
+            "SELECT extract(epoch FROM expires_at - clock_timestamp())"
+            " FROM identity.provider_concession WHERE concession_id = $1",
+            concession,
+        )
+        assert remaining > 0  # seguía vigente cuando se comprobó que se veía
+        await asyncio.sleep(float(remaining) + 0.5)
+        status = await superuser.fetchval(
+            "SELECT status FROM identity.provider_concession WHERE concession_id = $1", concession
+        )
+        assert status == "active"  # nadie la pasó a expired: vence solo por la fecha
         assert await port.visible(context) == EMPTY
 
     runner.run(scenario())

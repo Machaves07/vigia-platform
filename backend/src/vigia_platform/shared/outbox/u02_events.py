@@ -57,6 +57,19 @@ SecurityAlertKind = Literal[
 """Causa de ``security_alert``: BR-NUC-02 y 24, BR-NUC-89, RNF-PRI (muestra de clips) y
 NFR-NUC-28 (``authorization_denied`` repetido)."""
 
+SecurityAlertResourceKind = Literal[
+    "user",
+    "organization",
+    "plant",
+    "zone",
+    "node",
+    "evidence",
+    "ledger_record",
+    "concession",
+]
+"""Recurso de ``security_alert``: lista cerrada, nunca un código libre (P3). Un ``snake_case``
+abierto admitía cualquier palabra (``juan_perez``) en la carga de un evento."""
+
 
 # --- identidad ------------------------------------------------------------------------------
 
@@ -118,7 +131,7 @@ class ConcessionExpired(PayloadModel):
 
 class SecurityAlert(PayloadModel):
     alert_kind: SecurityAlertKind
-    resource_kind: SnakeCode | None = None
+    resource_kind: SecurityAlertResourceKind | None = None
     resource_id: UUID | None = None
     occurred_at: Timestamp
 

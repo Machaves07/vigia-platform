@@ -610,6 +610,43 @@ async def test_delete_and_truncate_fail_even_for_the_owner(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("table", APPEND_ONLY_TABLES)
+async def test_replication_role_replica_does_not_skip_the_guards(
+    append_only: AppendOnly, table: str
+) -> None:
+    """``ENABLE ALWAYS``: ni un superusuario con ``session_replication_role = replica`` borra.
+
+    La misma transacción demuestra que la prueba lo detecta: con el disparador en modo normal
+    (``ENABLE TRIGGER``, lo que quedaría sin ``ALWAYS``) el borrado en réplica sí pasaría.
+    """
+    superuser = await append_only.database.connect()
+    try:
+        transaction = superuser.transaction()
+        await transaction.start()
+        try:
+            await superuser.execute("SET LOCAL session_replication_role = replica")
+            assert await superuser.fetchval(f"SELECT count(*) FROM identity.{table}")  # noqa: S608
+            assert await _fails(superuser, f"DELETE FROM identity.{table}") == RESTRICT_VIOLATION  # noqa: S608
+            assert await _fails(superuser, f"TRUNCATE identity.{table}") == RESTRICT_VIOLATION
+            await superuser.execute(
+                f"ALTER TABLE identity.{table} ENABLE TRIGGER append_only_guard"
+            )
+            await superuser.execute(f"DELETE FROM identity.{table}")  # noqa: S608
+            assert await superuser.fetchval(f"SELECT count(*) FROM identity.{table}") == 0  # noqa: S608
+        finally:
+            await transaction.rollback()
+        # Revertido: los disparadores siguen en ALWAYS y las filas siguen ahí.
+        enabled = await superuser.fetchval(
+            "SELECT tgenabled::text FROM pg_trigger"  # noqa: S608 - tabla de la lista cerrada
+            f" WHERE tgrelid = 'identity.{table}'::regclass AND tgname = 'append_only_guard'"
+        )
+        assert enabled == "A"
+        assert await superuser.fetchval(f"SELECT count(*) FROM identity.{table}")  # noqa: S608
+    finally:
+        await superuser.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "table", ["key_set_publication", "live_view_token_issuance", "privacy_notice_acceptance"]
 )
