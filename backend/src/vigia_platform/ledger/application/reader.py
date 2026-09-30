@@ -446,7 +446,7 @@ _EVIDENCE_OF_RECORDS: Final = text(
     " FROM ledger.evidence AS e"
     " WHERE e.organization_id = :organization_id"
     " AND e.record_id = ANY(CAST(:record_ids AS uuid[]))"
-    " ORDER BY e.record_id, e.evidence_id"
+    " ORDER BY e.record_id, e.starts_at NULLS LAST, e.clip_id, e.evidence_id"
 )
 
 _BY_SOURCE: Final = text(
