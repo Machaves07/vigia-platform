@@ -9,6 +9,10 @@
   eventos sin organización.
 - Seguimientos que VIG-40 y VIG-46 dejaron para el escritor: la validación no depende de un
   ``model_validate_json`` redefinido, y ``LARGE_DOCUMENT_BYTES`` vale 16 KB.
+- VIG-129: la auditoría rechaza una transacción de otra organización sin ejecutar nada (M10);
+  ``filters`` enorme se rechaza sin canonicalizarlo; el paso 3 del escritor (esquema, tope de
+  ``source_key``, regla de etiqueta) fija ``content_invalid`` antes del texto libre y de cualquier
+  consulta a la base; un contenido de más de 16 KB se valida en el pool de CPU.
 """
 
 from __future__ import annotations
@@ -17,14 +21,18 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, cast
 
 import pytest
-from pydantic import Field, StrictInt, ValidationError
+from hypothesis import given
+from hypothesis import strategies as st
+from pydantic import Field, StrictInt, StrictStr, ValidationError
+from vigia_contracts.models.common import UUID
 from vigia_contracts.models.enumerations import AcceptanceStatus, RejectionCode
 
 from tests.writer_support import unit_context
 from vigia_platform.ledger import canonical
+from vigia_platform.ledger.application import audit_writer
 from vigia_platform.ledger.application.audit_writer import (
     MAX_FILTERS_BYTES,
     AuditOperation,
@@ -33,6 +41,7 @@ from vigia_platform.ledger.application.audit_writer import (
     ResourceRef,
 )
 from vigia_platform.ledger.application.writer import (
+    EscritorExpediente,
     LedgerRejection,
     LedgerRejectionCode,
     Receipt,
@@ -46,9 +55,17 @@ from vigia_platform.ledger.content_paths import (
     pointer,
     replace,
 )
-from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
+from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.ledger.registry import (
+    ChainLevel,
+    ContentModel,
+    LabelRule,
+    RecordType,
+    RecordTypeRegistry,
+)
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorUnit, ContextAbsent
+from vigia_platform.shared.db import Database, Transaction
 
 NOW = datetime(2026, 9, 29, 10, 30, tzinfo=UTC)
 
@@ -247,3 +264,247 @@ def test_exceeds_canonical_size_bounds() -> None:
     assert not canonical.exceeds_canonical_size({"a": "x" * 10}, 20)
     assert canonical.exceeds_canonical_size({"a": "x" * 30}, 20)
     assert canonical.exceeds_canonical_size({"a": list(range(10**6))}, 1024)
+
+
+# --- VIG-129: auditoría en una transacción de otra organización (mutación M10) ----------------
+
+
+class _RecordingConnection:
+    """Conexión falsa: cuenta las sentencias; la auditoría no debe llegar a ejecutar ninguna."""
+
+    def __init__(self) -> None:
+        self.executed = 0
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+        self.executed += 1
+        raise AssertionError("la auditoría ejecutó una sentencia")
+
+
+def _transaction_of(organization_id: uuid.UUID) -> tuple[Transaction, _RecordingConnection]:
+    connection = _RecordingConnection()
+    context = unit_context(organization_id, ActorUnit.U02)
+    return Transaction(connection, cast(Database, _NoDatabase()), context), connection
+
+
+def test_audit_in_a_transaction_of_another_organization_is_refused() -> None:
+    writer = _audit()
+    context = unit_context(uuid.uuid4(), ActorUnit.U02)
+    foreign, connection = _transaction_of(uuid.uuid4())
+    with pytest.raises(AuditRejected, match="otra organización") as raised:
+        asyncio.run(writer.append(context, AuditOperation.LEDGER_READ, transaction=foreign))
+    assert raised.value.code == "audit_entry_invalid"
+    assert connection.executed == 0
+
+
+def test_audit_in_a_transaction_of_the_same_organization_reaches_the_statement() -> None:
+    """Control de la prueba anterior: con la misma organización sí se ejecuta la sentencia."""
+    writer = _audit()
+    organization_id = uuid.uuid4()
+    own, _ = _transaction_of(organization_id)
+    context = unit_context(organization_id, ActorUnit.U02)
+    with pytest.raises(AttributeError):
+        # ``_NoDatabase`` no tiene ``_within``: basta con ver que la entrada llegó a ejecutarse.
+        asyncio.run(writer.append(context, AuditOperation.LEDGER_READ, transaction=own))
+
+
+# --- VIG-129: ``filters`` se acota antes de canonicalizar -------------------------------------
+
+
+def test_huge_filters_are_refused_without_canonicalizing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never(document: Any) -> bytes:
+        raise AssertionError("se canonicalizó un filters enorme")
+
+    monkeypatch.setattr(audit_writer, "canonical_bytes_sync", never)
+    context = unit_context(uuid.uuid4(), ActorUnit.U02)
+    filters: dict[str, Any] = {"zones": [str(uuid.uuid4())] * 50_000}
+    with pytest.raises(AuditRejected) as raised:
+        asyncio.run(_audit().append(context, AuditOperation.LEDGER_READ, filters=filters))
+    assert raised.value.code == "filters_too_large"
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"f": [0.0] * 1000},  # la cota cuenta 25 B por doble; ocupan 2 B con la coma
+        {"q": "\u00a0" * 1000},  # no imprimible: la cota cuenta 6 B; en UTF-8 ocupa 2
+    ],
+    ids=["floats", "non_printable"],
+)
+def test_filters_whose_bound_overestimates_are_measured_exactly(filters: dict[str, Any]) -> None:
+    """La cota sin serializar pasa de 4 KB, pero los bytes canónicos caben: llega a la base."""
+    assert canonical.exceeds_canonical_size(filters, MAX_FILTERS_BYTES)
+    assert len(canonical.canonical_bytes_sync(filters)) <= MAX_FILTERS_BYTES
+    context = unit_context(uuid.uuid4(), ActorUnit.U02)
+    with pytest.raises(AssertionError, match="tocó la base"):
+        asyncio.run(_audit().append(context, AuditOperation.LEDGER_READ, filters=filters))
+
+
+def test_filters_just_over_the_limit_are_too_large() -> None:
+    context = unit_context(uuid.uuid4(), ActorUnit.U02)
+    filters = {"q": "x" * (MAX_FILTERS_BYTES - 7)}
+    with pytest.raises(AuditRejected) as raised:
+        asyncio.run(_audit().append(context, AuditOperation.LEDGER_READ, filters=filters))
+    assert raised.value.code == "filters_too_large"
+
+
+# --- VIG-129: el paso 3 completo antes de cualquier consulta a la base (BR-NUC-44) ------------
+
+_KEY = Annotated[StrictStr, Field(min_length=1, max_length=100, pattern=r"^[a-z0-9]{1,100}$")]
+_CATEGORY = Annotated[StrictStr, Field(min_length=2, max_length=32, pattern=r"^[a-z0-9_-]{2,32}$")]
+
+
+class _Signer(ContentModel):
+    user_id: UUID
+    role: Literal["coordinator_sst", "copasst"]
+
+
+class _Step3Probe(ContentModel):
+    """Tipo que el registro acepta y cuyo paso 3 va más allá del esquema: la clave admite hasta
+    100 caracteres (el escritor, 64) y la categoría admite «-» (la etiqueta exige snake_case)."""
+
+    probe_key: _KEY
+    plant_id: UUID
+    zone_id: UUID
+    anchor_record_id: UUID
+    family: Literal["dwell", "coexistence"]
+    outcome: Literal["confirmed", "false_positive"]
+    reason_category: _CATEGORY
+    level: Annotated[StrictInt, Field(ge=0, le=10)]
+    signer: _Signer
+    note: Annotated[StrictStr, Field(min_length=1, max_length=200)]
+    codes: Annotated[tuple[_KEY, ...], Field(max_length=4000)] = ()
+
+
+_STEP3_TYPE = "step3_probe"
+
+
+def _step3_writer(cpu_pool: Any = None) -> EscritorExpediente:
+    registry = RecordTypeRegistry()
+    registry.register(
+        RecordType(
+            record_type=_STEP3_TYPE,
+            writer_unit=ActorUnit.U04,
+            chain_level=ChainLevel.PLANT,
+            schema_version=1,
+            content_model=_Step3Probe,
+            source_key_path="/probe_key",
+            free_text_paths=("/note",),
+            label_rule=LabelRule(
+                subject_record_path="/anchor_record_id",
+                family_path="/family",
+                outcome_path="/outcome",
+                reason_category_path="/reason_category",
+                labeled_by_path="/signer",
+            ),
+        )
+    )
+    return EscritorExpediente(
+        database=_NoDatabase(),
+        registry=registry,
+        free_text=FreeTextPolicyRegistry(),
+        evidence=cast(Any, None),
+        outbox=cast(Any, None),
+        clock=SimulatedClock(NOW),
+        cpu_pool=cpu_pool,
+    )
+
+
+def _step3_document() -> dict[str, Any]:
+    return {
+        "probe_key": "k1",
+        "plant_id": str(uuid.uuid4()),
+        "zone_id": str(uuid.uuid4()),
+        "anchor_record_id": str(uuid.uuid4()),
+        "family": "coexistence",
+        "outcome": "confirmed",
+        "reason_category": "guard_open",
+        "level": 3,
+        "signer": {"user_id": str(uuid.uuid4()), "role": "coordinator_sst"},
+        "note": "Revisión de la guarda norte",
+    }
+
+
+_STEP3_FAILURES: dict[str, tuple[LedgerRejectionCode, str]] = {
+    # En el orden del escritor: esquema, clave, etiqueta (paso 3) y texto libre (paso 4).
+    "schema": (LedgerRejectionCode.CONTENT_INVALID, "/level"),
+    "source_key_65": (LedgerRejectionCode.CONTENT_INVALID, "/probe_key"),
+    "label_rule": (LedgerRejectionCode.CONTENT_INVALID, "/reason_category"),
+    "free_text": (LedgerRejectionCode.FREE_TEXT_REJECTED, "/note"),
+}
+
+
+def _break(document: dict[str, Any], failure: str) -> None:
+    if failure == "schema":
+        document["level"] = 11
+    elif failure == "source_key_65":
+        document["probe_key"] = "a" * 65
+    elif failure == "label_rule":
+        document["reason_category"] = "guard-open"
+    else:
+        document["note"] = "guarda <b>norte</b>"
+
+
+@given(failures=st.sets(st.sampled_from(list(_STEP3_FAILURES)), min_size=1))
+def test_step_three_codes_come_first_and_never_reach_the_database(failures: set[str]) -> None:
+    """Con cualquier combinación de fallos, el primero en el orden de BR-NUC-44 fija el código y
+    ninguno consulta la base (``_NoDatabase`` falla ante cualquier lectura o transacción): una
+    clave de 65 caracteres o una etiqueta imposible nunca llegan a idempotencia ni a evidencias."""
+    document = _step3_document()
+    for failure in failures:
+        _break(document, failure)
+    context = unit_context(uuid.uuid4(), ActorUnit.U04)
+    result = asyncio.run(_step3_writer().write(context, _STEP3_TYPE, document))
+    first = next(name for name in _STEP3_FAILURES if name in failures)
+    assert isinstance(result, LedgerRejection), result
+    assert (result.code, result.field) == _STEP3_FAILURES[first]
+
+
+@pytest.mark.parametrize(("length", "reaches_database"), [(64, True), (65, False)])
+def test_source_key_limit_is_checked_in_step_three(length: int, reaches_database: bool) -> None:
+    document = _step3_document()
+    document["probe_key"] = "a" * length
+    context = unit_context(uuid.uuid4(), ActorUnit.U04)
+    if reaches_database:
+        with pytest.raises(AssertionError, match="leyó la base"):
+            asyncio.run(_step3_writer().write(context, _STEP3_TYPE, document))
+    else:
+        result = asyncio.run(_step3_writer().write(context, _STEP3_TYPE, document))
+        assert result == LedgerRejection.of(LedgerRejectionCode.CONTENT_INVALID, "/probe_key")
+
+
+class _SpyPool:
+    """``CpuPool`` síncrono que anota qué funciones se le enviaron."""
+
+    def __init__(self) -> None:
+        self.functions: list[str] = []
+
+    async def run(self, function: Any, /, *args: Any, **kwargs: Any) -> Any:
+        self.functions.append(function.__name__)
+        return function(*args, **kwargs)
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_large_content_is_validated_in_the_cpu_pool(valid: bool) -> None:
+    pool = _SpyPool()
+    document = _step3_document()
+    document["codes"] = ["abcdefgh"] * 2000  # unos 22 KB canónicos
+    assert canonical.exceeds_canonical_size(document, canonical.LARGE_DOCUMENT_BYTES)
+    if not valid:
+        document["codes"][-1] = "NO"
+    context = unit_context(uuid.uuid4(), ActorUnit.U04)
+    writer = _step3_writer(pool)
+    if valid:
+        with pytest.raises(AssertionError, match="leyó la base"):
+            asyncio.run(writer.write(context, _STEP3_TYPE, document))
+    else:
+        result = asyncio.run(writer.write(context, _STEP3_TYPE, document))
+        assert result == LedgerRejection.of(LedgerRejectionCode.CONTENT_INVALID, "/codes/1999")
+    assert pool.functions[0] == "_schema_checked"
+
+
+def test_small_content_is_validated_in_the_event_loop() -> None:
+    pool = _SpyPool()
+    context = unit_context(uuid.uuid4(), ActorUnit.U04)
+    with pytest.raises(AssertionError, match="leyó la base"):
+        asyncio.run(_step3_writer(pool).write(context, _STEP3_TYPE, _step3_document()))
+    assert pool.functions == []

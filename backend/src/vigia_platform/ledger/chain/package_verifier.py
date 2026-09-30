@@ -284,11 +284,17 @@ def _public_keys(items: object) -> dict[str, bytes]:
         if key_id in keys:
             raise PackageError("manifest_invalid", f"key_id repetido {key_id!r}")
         try:
-            keys[key_id] = base64.b64decode(text, validate=True)
+            key = base64.b64decode(text, validate=True)
         except (binascii.Error, ValueError):
             raise PackageError(
                 "manifest_invalid", f"clave pública no válida para {key_id!r}"
             ) from None
+        if base64.b64encode(key).decode("ascii") != text:
+            # Base64 no canónico: otro texto para la misma clave no es la clave publicada.
+            raise PackageError(
+                "manifest_invalid", f"clave pública en base64 no canónico para {key_id!r}"
+            )
+        keys[key_id] = key
     return keys
 
 

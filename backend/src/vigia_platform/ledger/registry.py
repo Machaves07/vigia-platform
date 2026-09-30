@@ -10,7 +10,8 @@ U-04) registra al arrancar sus tipos con ``RecordTypeRegistry.register(RecordTyp
   texto libre y de evidencias, la regla de etiqueta y los eventos de la bandeja;
 - al registrar se comprueban el esquema estricto, la **metapropiedad de privacidad** PR-NUC-16
   (ningún campo que identifique a una persona observada ni texto libre fuera de
-  ``free_text_paths``) y la coherencia de cada ruta declarada. Cualquier fallo lanza
+  ``free_text_paths``, ni alias que el validador acepte y el esquema no declare) y la coherencia
+  de cada ruta declarada. Cualquier fallo lanza
   ``RecordTypeRejected`` con el tipo y la ruta: la aplicación no arranca.
 
 **Versiones** (BR-NUC-52): un tipo se registra con todas sus versiones en orden ascendente, para
@@ -66,6 +67,7 @@ __all__ = [
     "RecordTypeStore",
     "RecordTypeUnknown",
     "RegistryStartupError",
+    "alias_problems",
     "custom_json_schema_problems",
     "privacy_violations",
 ]
@@ -284,12 +286,17 @@ def _json_copy(document: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def privacy_violations(types: Iterator[CompiledType] | Sequence[CompiledType]) -> list[str]:
-    """Metapropiedad PR-NUC-16 sobre tipos ya compilados: ``tipo ruta: motivo`` por fallo."""
+    """Metapropiedad PR-NUC-16 sobre tipos ya compilados: ``tipo ruta: motivo`` por fallo.
+
+    Además del esquema persistido mira el modelo: un alias haría que el validador aceptara claves
+    que el esquema no declara, fuera del alcance de ``free_text_paths``.
+    """
     return [
         f"{compiled.record_type} v{compiled.schema_version} {problem}"
         for compiled in types
-        for problem in privacy_problems(
-            compiled.content_schema, compiled.definition.free_text_paths
+        for problem in (
+            *privacy_problems(compiled.content_schema, compiled.definition.free_text_paths),
+            *alias_problems(compiled.definition.content_model),
         )
     ]
 
@@ -473,6 +480,7 @@ def _declaration_problems(definition: RecordType) -> list[SchemaProblem | str]:
             "content_model debe ser estricto: extra='forbid' y strict=True (PAT-NUC-SEG-07)"
         )
     problems.extend(custom_json_schema_problems(model))
+    problems.extend(alias_problems(model))
     declared = [
         *definition.free_text_paths,
         *definition.evidence_paths,
@@ -530,6 +538,59 @@ def _is_contract_rules(function: object) -> bool:
     return getattr(function, "__func__", None) is _CONTRACT_RULES
 
 
+_SEQUENCE_SCHEMAS: Final = frozenset({"list", "tuple", "set", "frozenset"})
+
+
+def _core_nodes(node: object, path: str = "") -> Iterator[tuple[str, Mapping[str, Any]]]:
+    """Cada nodo del esquema del núcleo con la ruta del campo que lo contiene (sin ``metadata``),
+    en la notación de las rutas declaradas (``/entries[*]/note``)."""
+    if isinstance(node, Mapping):
+        yield path, node
+        for key, value in node.items():
+            if key == "metadata":
+                continue
+            if key == "fields" and isinstance(value, Mapping):
+                for field_name, field_schema in value.items():
+                    yield from _core_nodes(field_schema, f"{path}/{field_name}")
+            elif key == "items_schema" and node.get("type") in _SEQUENCE_SCHEMAS:
+                yield from _core_nodes(value, f"{path}[*]")
+            else:
+                yield from _core_nodes(value, path)
+    elif isinstance(node, list | tuple):
+        for item in node:
+            yield from _core_nodes(item, path)
+
+
+_FIELD_NODES: Final = frozenset({"model-field", "typed-dict-field", "dataclass-field"})
+_ALIAS_KEYS: Final = ("validation_alias", "serialization_alias")
+
+
+def alias_problems(model: type[BaseModel]) -> list[str]:
+    """Ningún campo del contenido puede tener alias (P3; seguimiento nº 3 de VIG-40).
+
+    Con ``alias``, ``validation_alias`` (``AliasChoices``, ``AliasPath``) o un ``alias_generator``
+    el validador acepta claves que el JSON Schema no declara: ``{"nota": …}`` pasaría el esquema
+    sin que ``free_text_paths`` (``/note``) la encontrara, y se guardaría sin ``FreeTextPolicy``
+    con una clave que el esquema persistido no tiene. Con ``serialization_alias`` el escritor
+    volcaría un modelo con otras claves. Se buscan en el esquema del núcleo, anidados o no.
+    """
+    aliased: set[str] = set()
+    for path, node in _core_nodes(model.__pydantic_core_schema__):
+        if node.get("type") not in _FIELD_NODES:
+            continue
+        if any(node.get(key) is not None for key in _ALIAS_KEYS):
+            name = node.get("name")
+            if node.get("type") == "dataclass-field" and isinstance(name, str):
+                path = f"{path}/{name}"
+            aliased.add(path or "/")
+    return [
+        f"{path}: el campo declara un alias (alias, validation_alias, AliasChoices, AliasPath o "
+        "alias_generator); el contenido se validaría con claves que el esquema persistido no "
+        "declara y el texto libre saltaría FreeTextPolicy (P3)"
+        for path in sorted(aliased)
+    ]
+
+
 def custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
     """El JSON Schema que se comprueba y se persiste debe describir lo que se valida.
 
@@ -544,47 +605,33 @@ def custom_json_schema_problems(model: type[BaseModel]) -> list[str]:
     replacing: set[str] = set()
     split: set[str] = set()
 
-    def visit(node: object, path: str) -> None:
-        if isinstance(node, Mapping):
-            if node.get("type") in _REPLACING_VALIDATORS:
-                function = node.get("function")
-                target = function.get("function") if isinstance(function, Mapping) else None
-                if not (node.get("type") == "function-wrap" and _is_contract_rules(target)):
-                    replacing.add(path or "/")
-            if node.get("type") in _SPLIT_SCHEMAS:
-                split.add(path or "/")
-            owner = node.get("cls")
-            if (
-                node.get("type") == "model"
-                and isinstance(owner, type)
-                and issubclass(owner, BaseModel)
-                and owner.model_config.get("json_schema_extra")
-            ):
-                found.add(path or "/")
-            metadata = node.get("metadata")
-            if isinstance(metadata, Mapping):
-                for key in _JS_HOOKS:
-                    value = metadata.get(key)
-                    if not value:
-                        continue
-                    if key == "pydantic_js_functions" and all(map(_is_builtin_hook, value)):
-                        continue
-                    if key == "pydantic_js_updates" and set(value) <= _HARMLESS_UPDATES:
-                        continue
-                    found.add(path or "/")
-            for key, value in node.items():
-                if key == "metadata":
+    for path, node in _core_nodes(model.__pydantic_core_schema__):
+        if node.get("type") in _REPLACING_VALIDATORS:
+            function = node.get("function")
+            target = function.get("function") if isinstance(function, Mapping) else None
+            if not (node.get("type") == "function-wrap" and _is_contract_rules(target)):
+                replacing.add(path or "/")
+        if node.get("type") in _SPLIT_SCHEMAS:
+            split.add(path or "/")
+        owner = node.get("cls")
+        if (
+            node.get("type") == "model"
+            and isinstance(owner, type)
+            and issubclass(owner, BaseModel)
+            and owner.model_config.get("json_schema_extra")
+        ):
+            found.add(path or "/")
+        metadata = node.get("metadata")
+        if isinstance(metadata, Mapping):
+            for key in _JS_HOOKS:
+                value = metadata.get(key)
+                if not value:
                     continue
-                if key == "fields" and isinstance(value, Mapping):
-                    for field_name, field_schema in value.items():
-                        visit(field_schema, f"{path}/{field_name}")
-                else:
-                    visit(value, path)
-        elif isinstance(node, list | tuple):
-            for item in node:
-                visit(item, path)
-
-    visit(model.__pydantic_core_schema__, "")
+                if key == "pydantic_js_functions" and all(map(_is_builtin_hook, value)):
+                    continue
+                if key == "pydantic_js_updates" and set(value) <= _HARMLESS_UPDATES:
+                    continue
+                found.add(path or "/")
     return (
         [
             f"{path}: JSON Schema personalizado (WithJsonSchema, json_schema_extra, Base64 o "

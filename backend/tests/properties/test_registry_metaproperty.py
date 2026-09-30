@@ -5,7 +5,8 @@ La metapropiedad recorre todos los esquemas registrados (hoy, los de U-02; U-03 
 los suyos al mismo registro) y el registro rechaza en el arranque, nombrando el tipo y la ruta,
 cualquier esquema generado que declare un campo de la lista prohibida (nombre, documento,
 empleado, ``track_id``, rostro, apariencia) o un texto libre no declarado, esté donde esté: en
-la raíz, anidado o dentro de una lista.
+la raíz, anidado o dentro de una lista. Tampoco un alias (VIG-129): el validador aceptaría una
+clave que el esquema no declara y el texto libre saltaría ``FreeTextPolicy``.
 """
 
 from __future__ import annotations
@@ -17,9 +18,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import (
     AfterValidator,
+    AliasChoices,
+    AliasPath,
     Base64Bytes,
     Base64Str,
     BaseModel,
+    ConfigDict,
     Field,
     StrictBool,
     StrictFloat,
@@ -31,6 +35,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic.alias_generators import to_camel
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pydantic_core import core_schema
 from vigia_contracts.models.common import UUID, Timestamp
 from vigia_contracts.models.finding import Finding
@@ -38,10 +44,12 @@ from vigia_contracts.models.finding import Finding
 from vigia_platform.ledger.record_types import register_u02_record_types
 from vigia_platform.ledger.registry import (
     ChainLevel,
+    CompiledType,
     ContentModel,
     RecordType,
     RecordTypeRegistry,
     RecordTypeRejected,
+    alias_problems,
     privacy_violations,
 )
 from vigia_platform.ledger.schema_rules import (
@@ -634,3 +642,114 @@ class _AfterValidator(ContentModel):
 def test_after_validators_are_accepted() -> None:
     """``after`` recibe el valor ya validado por el esquema: no puede ampliar lo admitido."""
     RecordTypeRegistry().register(_definition(_AfterValidator))
+
+
+class _NamedLikeContractRules(ContentModel):
+    """Un envolvente que se llama como el de ``ContractModel`` pero no es esa función."""
+
+    zone_id: UUID
+    note: _CLOSED
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def check_contract_rules(cls, data: Any, handler: Any) -> Any:
+        return cls.model_construct(**dict(data))
+
+
+def test_contract_rules_exemption_is_by_function_not_by_name() -> None:
+    """Seguimiento nº 2 de VIG-40: la excepción del envolvente del contrato se reconoce por
+    ``__func__``; otro validador con el mismo nombre se rechaza."""
+    assert _NamedLikeContractRules.model_validate({"zone_id": _ZONE, "note": _HOSTILE})
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(_NamedLikeContractRules))
+    assert "/: validador de función before, wrap o plain" in str(raised.value)
+
+
+# --- VIG-129: alias de validación (P3; seguimiento nº 3 de VIG-40) ----------------------------
+
+_ALIAS_FIELDS: dict[str, Any] = {
+    "alias": Field(alias="nota"),
+    "validation_alias": Field(validation_alias="nota"),
+    "alias_choices": Field(validation_alias=AliasChoices("note", "nota")),
+    "alias_path": Field(validation_alias=AliasPath("nota", 0)),
+    "alias_choices_of_paths": Field(validation_alias=AliasChoices("note", AliasPath("n", "t"))),
+    "serialization_alias": Field(serialization_alias="nota"),
+}
+
+
+def _aliased(how: str) -> Any:
+    return Annotated[StrictStr, Field(min_length=1, max_length=200), _ALIAS_FIELDS[how]]
+
+
+class _Generated(ContentModel):
+    model_config = ContentModel.model_config | {"alias_generator": to_camel}
+    zone_id: UUID
+    free_note: FreeText
+
+
+@pydantic_dataclass(config=ConfigDict(extra="forbid", strict=True))
+class _DataclassPart:
+    note: Annotated[FreeText, Field(alias="nota")]
+
+
+class _DataclassHolder(ContentModel):
+    zone_id: UUID
+    part: _DataclassPart
+
+
+def test_alias_choices_bypass_is_rejected_at_registration() -> None:
+    """El caso del revisor de VIG-53: ``{"nota": "<b>…</b>"}`` validaba sin pasar por ``/note``."""
+    model = _model(zone_id=(UUID, ...), note=(_aliased("alias_choices"), ...))
+    assert model.model_validate_json(f'{{"zone_id": "{_ZONE}", "nota": "<b>Juan</b>"}}')
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model, free_text_paths=("/note",)))
+    assert raised.value.record_type == "probe_recorded"
+    message = str(raised.value)
+    assert "«probe_recorded»" in message
+    assert "/note: el campo declara un alias" in message
+    assert "la plataforma no arranca" in message
+
+
+@pytest.mark.parametrize("model", [_Generated, _DataclassHolder], ids=["generator", "dataclass"])
+def test_generated_and_dataclass_aliases_are_rejected(model: type[ContentModel]) -> None:
+    path = "/free_note" if model is _Generated else "/part/note"
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model, free_text_paths=(path,)))
+    assert f"{path}: el campo declara un alias" in str(raised.value)
+
+
+@given(
+    data=st.data(),
+    words=st.lists(_safe_word, min_size=1, max_size=3, unique=True),
+    how=st.sampled_from(sorted(_ALIAS_FIELDS)),
+    declare=st.booleans(),
+)
+def test_any_alias_is_rejected_and_the_metaproperty_detects_it(
+    data: st.DataObject, words: list[str], how: str, declare: bool
+) -> None:
+    """Un alias, de cualquier forma y en cualquier lugar, impide registrar el tipo; y si un tipo
+    compilado llegara con él (sin pasar por ``register``), la metapropiedad lo señala."""
+    name = "_".join(words)
+    model, path = data.draw(_placements(name, _aliased(how)))
+    free_text = (path,) if declare else ()
+    with pytest.raises(RecordTypeRejected) as raised:
+        RecordTypeRegistry().register(_definition(model, free_text_paths=free_text))
+    assert "«probe_recorded»" in str(raised.value)
+    assert any(
+        problem.startswith(f"{path}: el campo declara un alias")
+        for problem in raised.value.problems
+    ), raised.value.problems
+
+    definition = _definition(model, free_text_paths=(path,))
+    forged = CompiledType(definition, model.model_json_schema(mode="validation"), {})
+    violations = privacy_violations([forged])
+    assert any(f"{path}: el campo declara un alias" in v for v in violations), violations
+    assert all(v.startswith("probe_recorded v1 ") for v in violations)
+
+
+def test_models_without_aliases_have_no_alias_problems() -> None:
+    registry = RecordTypeRegistry()
+    register_u02_record_types(registry)
+    for compiled in registry.all_versions():
+        assert alias_problems(compiled.definition.content_model) == []
+    assert alias_problems(Finding) == []
