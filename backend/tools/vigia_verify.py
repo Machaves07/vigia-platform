@@ -765,6 +765,10 @@ class ChainWalker:
             signature = base64.b64decode(signature_text, validate=True)
         except (binascii.Error, ValueError):
             return self._fail(entry, "checkpoint_malformed")
+        if base64.b64encode(signature).decode("ascii") != signature_text:
+            # Base64 no canónico: los bits de relleno del último carácter no son cero. Otro texto
+            # que decodifica a la misma firma no es la firma escrita (PR-NUC-21).
+            return self._fail(entry, "checkpoint_malformed", "firma en base64 no canónico")
         message = checkpoint_message(
             self.chain.kind,
             self.chain.organization_id,
@@ -1075,11 +1079,17 @@ def _public_keys(items: object) -> dict[str, bytes]:
         if key_id in keys:
             raise PackageError("manifest_invalid", f"key_id repetido {key_id!r}")
         try:
-            keys[key_id] = base64.b64decode(text, validate=True)
+            key = base64.b64decode(text, validate=True)
         except (binascii.Error, ValueError):
             raise PackageError(
                 "manifest_invalid", f"clave pública no válida para {key_id!r}"
             ) from None
+        if base64.b64encode(key).decode("ascii") != text:
+            # Base64 no canónico: otro texto para la misma clave no es la clave publicada.
+            raise PackageError(
+                "manifest_invalid", f"clave pública en base64 no canónico para {key_id!r}"
+            )
+        keys[key_id] = key
     return keys
 
 

@@ -625,6 +625,11 @@ class Database:
         self._sleep = sleep
         self._abandoned: set[asyncio.Future[Any]] = set()
 
+    @property
+    def process(self) -> ProcessKind:
+        """``api`` o ``worker``: de él dependen los pools y el ``statement_timeout``."""
+        return self._process
+
     @classmethod
     def create(
         cls,

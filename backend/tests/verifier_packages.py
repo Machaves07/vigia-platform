@@ -575,6 +575,8 @@ def _checkpoint_ok(
         return False
     try:
         signature = base64.b64decode(signature_text, validate=True)
+        if base64.b64encode(signature).decode("ascii") != signature_text:
+            return False  # base64 no canónico: no es la firma escrita
         key.verify(
             signature,
             signed_message(
