@@ -759,6 +759,39 @@ def test_page_two_neither_repeats_nor_omits_with_inserts_between_pages(
     assert set(list_ids(environment, context)) == set(original) | inserted
 
 
+async def _freeze_chain_clock(migrated: MigratedDatabase, place: Place) -> None:
+    """Adelanta la cabeza de la cadena de la planta: el disparador toma
+    ``greatest(reloj, updated_at)``, así que todo registro siguiente empata en ``received_at``."""
+    connection = await migrated.connect()
+    try:
+        await connection.execute(
+            "UPDATE ledger.chain_head SET updated_at = least("
+            " date_trunc('milliseconds', clock_timestamp()) + interval '5 minutes',"
+            " date_trunc('month', clock_timestamp())"
+            " + interval '1 month' - interval '1 millisecond')"
+            " WHERE organization_id = $1 AND plant_id = $2 AND kind = 'ledger'",
+            place.organization_id,
+            place.plant_id,
+        )
+    finally:
+        await connection.close()
+
+
+def test_keyset_breaks_ties_in_received_at_by_record_id(environment: ReaderEnvironment) -> None:
+    place = Place.new()
+    first = write_zone_created(environment, place)
+    environment.run(_freeze_chain_clock(environment.migrated, place))
+    tied = [write_zone_created(environment, place) for _ in range(7)]
+    context = scoped_context(place.organization_id, [zone_scope(place.zone_id)])
+    snapshot = list_ids(environment, context)
+    assert set(snapshot) == {first, *tied}
+    views = environment.run(environment.reader.list(context)).items
+    assert len({view.received_at for view in views if view.record_id in tied}) == 1
+    assert snapshot == [*sorted(tied, reverse=True), first]
+    pages, inserted = walk_with_inserts(environment, place, context, 2, [2, 1, 0, 1])
+    assert_walk(pages, snapshot, inserted, 2)
+
+
 @given(
     records=st.integers(min_value=0, max_value=8),
     size=st.integers(min_value=1, max_value=4),
