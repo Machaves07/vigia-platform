@@ -98,6 +98,7 @@ class MetricName(enum.StrEnum):
     DB_POOL_SIZE = "db_pool_size"
     CPU_POOL_WAIT_MS = "cpu_pool_wait_ms"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
+    SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
     OTEL_DROPPED_TOTAL = "otel_dropped_total"
 
 
@@ -201,6 +202,8 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "PAT-NUC-REN-05"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
+    _spec(_N.SECRETS_REFRESH_FAILED, _C, "{refresh}",
+          "Relecturas fallidas del gestor de secretos o de KMS.", "PAT-NUC-RES-03", "dependency"),
     _spec(_N.OTEL_DROPPED_TOTAL, _C, "{item}", "Tramos y métricas descartados.",
           "PAT-NUC-RES-03", "signal"),
 )  # fmt: skip
@@ -359,6 +362,7 @@ class PlatformMetrics:
         self.db_pool_size = gauge(_N.DB_POOL_SIZE)
         self.cpu_pool_wait_ms = histogram(_N.CPU_POOL_WAIT_MS)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
+        self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)
         self.otel_dropped_total = counter(_N.OTEL_DROPPED_TOTAL)
 
     def instrument(self, name: MetricName) -> Counter | Histogram | Gauge:
