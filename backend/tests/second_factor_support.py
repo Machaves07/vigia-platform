@@ -6,9 +6,10 @@ Solo datos generados (NFR-CTR-43).
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
@@ -24,10 +25,17 @@ from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.secrets import DataKey, Dependency, KmsPort, SecretsUnavailable
 
 
+def _binding(key_id: str, context: Mapping[str, str]) -> bytes:
+    """Lo que KMS liga a una clave envuelta: la clave maestra y el contexto de cifrado."""
+    return json.dumps([key_id, sorted(context.items())]).encode()
+
+
 class FakeKms:
     """``KmsPort`` en memoria: envuelve las claves de datos con AES-GCM y una clave maestra.
 
-    ``down = True`` simula KMS inaccesible: toda llamada lanza ``SecretsUnavailable``.
+    Como KMS, liga la clave envuelta a la clave maestra y al contexto de cifrado: descifrar con
+    otros lanza ``ValueError``. ``down = True`` simula KMS inaccesible: toda llamada lanza
+    ``SecretsUnavailable``.
     """
 
     def __init__(self) -> None:
@@ -36,21 +44,21 @@ class FakeKms:
         self.generate_calls = 0
         self.decrypt_calls = 0
 
-    async def generate_data_key(self, key_id: str) -> DataKey:
+    async def generate_data_key(self, key_id: str, *, context: Mapping[str, str]) -> DataKey:
         self._check("generate_data_key")
         self.generate_calls += 1
         plaintext = os.urandom(32)
         nonce = os.urandom(12)
-        wrapped = nonce + self._master.encrypt(nonce, plaintext, None)
+        wrapped = nonce + self._master.encrypt(nonce, plaintext, _binding(key_id, context))
         return DataKey(plaintext=plaintext, wrapped=wrapped, key_id=key_id)
 
-    async def decrypt(self, wrapped: bytes) -> bytes:
+    async def decrypt(self, wrapped: bytes, *, key_id: str, context: Mapping[str, str]) -> bytes:
         self._check("decrypt")
         self.decrypt_calls += 1
         try:
-            return self._master.decrypt(wrapped[:12], wrapped[12:], None)
+            return self._master.decrypt(wrapped[:12], wrapped[12:], _binding(key_id, context))
         except Exception:
-            raise SecretsUnavailable(Dependency.KMS, "decrypt") from None
+            raise ValueError("la clave envuelta no corresponde") from None
 
     async def sign(self, key_id: str, message: bytes) -> bytes:
         raise NotImplementedError
@@ -70,11 +78,11 @@ class SwitchableKms:
     def __init__(self, inner: KmsPort) -> None:
         self.inner = inner
 
-    async def generate_data_key(self, key_id: str) -> DataKey:
-        return await self.inner.generate_data_key(key_id)
+    async def generate_data_key(self, key_id: str, *, context: Mapping[str, str]) -> DataKey:
+        return await self.inner.generate_data_key(key_id, context=context)
 
-    async def decrypt(self, wrapped: bytes) -> bytes:
-        return await self.inner.decrypt(wrapped)
+    async def decrypt(self, wrapped: bytes, *, key_id: str, context: Mapping[str, str]) -> bytes:
+        return await self.inner.decrypt(wrapped, key_id=key_id, context=context)
 
     async def sign(self, key_id: str, message: bytes) -> bytes:
         return await self.inner.sign(key_id, message)

@@ -15,6 +15,9 @@ Toda consulta de datos pasa por aquí y solo con un ``ScopeContext``:
   reintenta (PR-NUC-41).
 - Sin contexto no existe forma de abrir una transacción: ``transaction`` y ``read`` lanzan
   ``ContextAbsent`` antes de pedir una conexión al pool (BR-NUC-02).
+- ``await db.health(timeout_seconds=…)``: la comprobación de ``/health/ready`` (NFR-NUC-13):
+  una lectura sin reintento con una organización inexistente fijada, que debe ver cero filas, y
+  la versión del esquema; no devuelve datos de cliente.
 
 Traducción de errores: ``lock_not_available`` (``lock_timeout``) → ``ChainLockedTimeout``;
 conexión perdida o imposible, tiempo de espera agotado, pool agotado, ``statement_timeout``,
@@ -57,6 +60,7 @@ import asyncio
 import contextlib
 import enum
 import ssl
+import uuid
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -83,12 +87,14 @@ from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 
 __all__ = [
+    "HEALTH_ORGANIZATION_ID",
     "MAX_READ_ATTEMPTS",
     "READ_RETRY_DELAY_SECONDS",
     "RETRY_AFTER_SECONDS",
     "ChainLockedTimeout",
     "ConnectionPort",
     "Database",
+    "DatabaseHealth",
     "DatabaseSettings",
     "PoolClass",
     "PoolPort",
@@ -894,7 +900,7 @@ class Database:
         abandoned = _Abandoned()
         try:
             return await self._within(
-                self._read_once(pool, context, statement, parameters, progress),
+                self._read_once(pool, scope_parameters(context), statement, parameters, progress),
                 self._attempt_timeout,
                 abandoned=abandoned,
             )
@@ -905,7 +911,7 @@ class Database:
     async def _read_once(
         self,
         pool: PoolPort,
-        context: ScopeContext,
+        scope: Mapping[str, str],
         statement: Executable,
         parameters: Mapping[str, Any] | None,
         progress: _Attempt,
@@ -914,7 +920,7 @@ class Database:
         try:
             connection = progress.connection = await pool.acquire()
             await connection.begin(read_only=True)
-            await connection.execute(_SET_SCOPE, scope_parameters(context))
+            await connection.execute(_SET_SCOPE, scope)
             rows = (await connection.execute(statement, parameters)).all()
             progress.committing = True
             await connection.commit()
@@ -942,6 +948,65 @@ class Database:
         progress.connection = None
         await self._release(connection)
         return rows
+
+    async def health(self, *, timeout_seconds: float) -> DatabaseHealth:
+        """Comprobación de ``/health/ready`` (NFR-NUC-13): una lectura, sin reintento, con tope.
+
+        Fija con ``SET LOCAL`` una organización inexistente (``HEALTH_ORGANIZATION_ID``) y cuenta
+        las filas visibles de ``identity.organization``, que con la seguridad a nivel de fila en
+        vigor deben ser cero; en la misma ida y vuelta lee la versión del esquema. No es una
+        operación de datos: no expone filas ni necesita un ``ScopeContext``.
+
+        Al vencer ``timeout_seconds`` el intento se abandona sin cancelarlo, como el resto del
+        adaptador, y aquí se lanza ``TemporarilyUnavailable``. Una base sin migrar (sin la
+        función o la tabla) sale como el error del controlador.
+        """
+        if not 0 < timeout_seconds <= self._attempt_timeout:
+            raise ValueError("timeout_seconds debe ser positivo y no superar el tope del intento")
+        progress = _Attempt()
+        abandoned = _Abandoned()
+        try:
+            return await self._within(
+                self._health_once(self._pool(), progress),
+                timeout_seconds,
+                abandoned=abandoned,
+            )
+        except TimeoutError as error:
+            raise TemporarilyUnavailable() from error
+        except _RetryableRead as failure:
+            raise TemporarilyUnavailable() from failure.__cause__
+        finally:
+            if abandoned.value and progress.connection is not None:
+                progress.connection.terminate()
+
+    async def _health_once(self, pool: PoolPort, progress: _Attempt) -> DatabaseHealth:
+        rows = await self._read_once(pool, _HEALTH_SCOPE, _HEALTH_STATEMENT, None, progress)
+        visible, version = rows[0]
+        if type(visible) is not int or (version is not None and type(version) is not int):
+            raise TypeError("la comprobación de salud devolvió tipos inesperados")
+        return DatabaseHealth(visible_organizations=visible, schema_version=version)
+
+
+HEALTH_ORGANIZATION_ID: Final = uuid.UUID(int=0)
+"""Organización inexistente de la comprobación de salud: las organizaciones son UUID v7."""
+
+_HEALTH_SCOPE: Final = {
+    "organization_id": str(HEALTH_ORGANIZATION_ID),
+    "actor_kind": "system",
+    "concession_id": "",
+}
+_HEALTH_STATEMENT: Final = text(
+    "SELECT (SELECT count(*) FROM identity.organization)::integer AS visible,"
+    " shared.vigia_schema_version() AS version"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseHealth:
+    """Resultado de ``Database.health``: filas visibles (deben ser 0) y versión del esquema."""
+
+    visible_organizations: int
+    schema_version: int | None
 
 
 class _RetryableRead(Exception):

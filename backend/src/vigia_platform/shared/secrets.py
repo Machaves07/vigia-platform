@@ -7,8 +7,10 @@ Dos puertos, cada uno con **un** adaptador sobre boto3:
   firma, BR-NUC-85: cada versión de clave es un secreto propio, nunca se sobrescribe ni se borra
   uno anterior). Los valores son bytes (``SecretBinary``); nunca aparecen en un ``repr``, un
   registro ni un mensaje de error.
-- ``KmsPort``: ``generate_data_key(key_id)`` y ``decrypt(wrapped)`` para el cifrado de sobre
-  (LC-NUC-27) con la clave simétrica ``vigia-secrets``, y ``sign(key_id, message)`` y
+- ``KmsPort``: ``generate_data_key(key_id, context=…)`` y ``decrypt(wrapped, key_id=…,
+  context=…)`` para el cifrado de sobre (LC-NUC-27) con la clave simétrica ``vigia-secrets``; el
+  contexto de cifrado liga cada clave de datos a su propósito y el descifrado fija la clave
+  maestra esperada. ``sign(key_id, message)`` y
   ``get_public_key(key_id)`` sobre la clave asimétrica ``vigia-node-ca`` (ECDSA P-256 con
   SHA-256, ``infrastructure-design.md`` §7.1). KMS no ofrece Ed25519 (cierre de R7): las claves
   Ed25519 de ``shared.signing`` viven en el gestor de secretos, no aquí.
@@ -84,6 +86,10 @@ _MAX_SECRET_BYTES: Final = 65_536
 """Tamaño máximo de un secreto en el servicio."""
 _MAX_SIGN_MESSAGE_BYTES: Final = 4_096
 """Mensaje máximo de ``kms:Sign`` con ``MessageType=RAW``."""
+_CONTEXT_TOKEN: Final = re.compile(r"[a-z][a-z0-9_:.-]{0,63}")
+_MAX_CONTEXT_PAIRS: Final = 8
+_KMS_REJECTED_CIPHERTEXT: Final = frozenset({"InvalidCiphertextException", "IncorrectKeyException"})
+"""Rechazos de ``kms:Decrypt`` por clave envuelta, clave maestra o contexto que no corresponden."""
 
 _log = get_logger("shared.secrets")
 
@@ -220,11 +226,18 @@ class SecretsPort(Protocol):
 
 
 class KmsPort(Protocol):
-    """Operaciones de KMS que usa la plataforma (LC-NUC-27, LC-NUC-28, U-03)."""
+    """Operaciones de KMS que usa la plataforma (LC-NUC-27, LC-NUC-28, U-03).
 
-    async def generate_data_key(self, key_id: str) -> DataKey: ...
+    Toda clave de datos va ligada a su propósito con un contexto de cifrado (``context``), y el
+    descifrado fija la clave maestra esperada (``key_id``): una clave envuelta de otro propósito,
+    o envuelta con otra clave maestra, no se descifra.
+    """
 
-    async def decrypt(self, wrapped: bytes) -> bytes: ...
+    async def generate_data_key(self, key_id: str, *, context: Mapping[str, str]) -> DataKey: ...
+
+    async def decrypt(
+        self, wrapped: bytes, *, key_id: str, context: Mapping[str, str]
+    ) -> bytes: ...
 
     async def sign(self, key_id: str, message: bytes) -> bytes: ...
 
@@ -432,12 +445,16 @@ class KmsAdapter:
         self._client = client if client is not None else settings.make_client("kms")
         self._executor = executor
 
-    async def generate_data_key(self, key_id: str) -> DataKey:
-        """Clave de datos AES-256 nueva, en claro y envuelta con ``key_id`` (``vigia-secrets``)."""
+    async def generate_data_key(self, key_id: str, *, context: Mapping[str, str]) -> DataKey:
+        """Clave de datos AES-256 nueva, en claro y envuelta con ``key_id`` (``vigia-secrets``),
+        ligada a ``context`` (contexto de cifrado de KMS)."""
         _require(_KMS_KEY_ID, key_id, "el identificador de la clave KMS")
+        encryption_context = _encryption_context(context)
 
         def generate() -> DataKey:
-            response = self._client.generate_data_key(KeyId=key_id, KeySpec=DATA_KEY_SPEC)
+            response = self._client.generate_data_key(
+                KeyId=key_id, KeySpec=DATA_KEY_SPEC, EncryptionContext=encryption_context
+            )
             return DataKey(
                 plaintext=_response_bytes(response, "Plaintext"),
                 wrapped=_response_bytes(response, "CiphertextBlob"),
@@ -446,12 +463,27 @@ class KmsAdapter:
 
         return await self._run("generate_data_key", generate)
 
-    async def decrypt(self, wrapped: bytes) -> bytes:
-        """La clave de datos en claro a partir de su forma envuelta."""
+    async def decrypt(self, wrapped: bytes, *, key_id: str, context: Mapping[str, str]) -> bytes:
+        """La clave de datos en claro, solo si ``wrapped`` se envolvió con ``key_id`` y ``context``.
+
+        Una clave envuelta con otra clave maestra, con otro contexto o alterada no es un fallo
+        transitorio: ``ValueError`` (nunca ``SecretsUnavailable``).
+        """
         _require_bytes(wrapped, "la clave envuelta", 6_144)
+        _require(_KMS_KEY_ID, key_id, "el identificador de la clave KMS")
+        encryption_context = _encryption_context(context)
 
         def decrypt() -> bytes:
-            response = self._client.decrypt(CiphertextBlob=wrapped)
+            try:
+                response = self._client.decrypt(
+                    CiphertextBlob=wrapped, KeyId=key_id, EncryptionContext=encryption_context
+                )
+            except botocore_exceptions.ClientError as error:
+                if _error_code(error) in _KMS_REJECTED_CIPHERTEXT:
+                    raise ValueError(
+                        "la clave envuelta no corresponde a la clave ni al contexto"
+                    ) from None
+                raise
             return _response_bytes(response, "Plaintext")
 
         return await self._run("decrypt", decrypt)
@@ -484,6 +516,16 @@ class KmsAdapter:
 
     async def _run[T](self, operation: str, function: Callable[[], T]) -> T:
         return await _call(self._settings, self._executor, Dependency.KMS, operation, function)
+
+
+def _encryption_context(context: object) -> dict[str, str]:
+    """Contexto de cifrado de KMS: de 1 a 8 pares de identificadores cortos, sin texto libre."""
+    if not isinstance(context, Mapping) or not 0 < len(context) <= _MAX_CONTEXT_PAIRS:
+        raise ValueError(f"el contexto de cifrado debe tener de 1 a {_MAX_CONTEXT_PAIRS} pares")
+    for key, value in context.items():
+        _require(_CONTEXT_TOKEN, key, "la clave del contexto de cifrado")
+        _require(_CONTEXT_TOKEN, value, "el valor del contexto de cifrado")
+    return dict(context)
 
 
 def _response_bytes(response: Mapping[str, Any], name: str) -> bytes:
