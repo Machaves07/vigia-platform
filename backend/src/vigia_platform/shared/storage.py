@@ -6,8 +6,10 @@ depósito (``vigia-evidence``, ``vigia-archive`` o ``vigia-edge``) y ofrece:
 - ``head_object(key)``: metadatos del objeto sin descargarlo, con ``ChecksumMode=ENABLED`` para
   obtener la suma SHA-256 que calculó el almacén (``x-amz-checksum-sha256``), el tamaño y los
   metadatos de usuario (``x-amz-meta-*``). Un objeto inexistente devuelve ``None``;
-- ``presign_get(key, ttl)``: URL de solo lectura vigente a lo sumo 5 minutos (BR-NUC-66);
-- ``get_object(key)``: los bytes, solo para la muestra diaria del worker (NFR-NUC-33);
+- ``presign_get(key, ttl, version_id=...)``: URL de solo lectura vigente a lo sumo 5 minutos
+  (BR-NUC-66), fijada a una versión concreta del objeto si se indica;
+- ``get_object(key, version_id=...)``: los bytes, solo para la muestra diaria del worker
+  (NFR-NUC-33), también de una versión concreta;
 - ``put_object(key, body, content_type)``: subida propia de la plataforma (archivado) con la
   suma SHA-256 y cifrado ``aws:kms`` con la clave indicada;
 - ``presign_put(key, content_type, checksum_sha256, required_headers, ttl)``: la URL de la
@@ -18,6 +20,10 @@ depósito (``vigia-evidence``, ``vigia-archive`` o ``vigia-edge``) y ofrece:
   subida por partes de U-04, con la suma SHA-256 de cada parte firmada en su URL.
 
 No existe listado de objetos (BR-NUC-66): el puerto no lo ofrece.
+
+Toda clave pasa por ``_require_key``: el juego de caracteres de ``StorageKey`` del contrato y,
+además, segmentos no vacíos y distintos de ``.`` y ``..`` (sin ``//``, sin ``/`` al principio ni
+al final): una clave nunca se parece a una ruta relativa.
 
 Las URL se firman contra el **punto de conexión regional fijo** ``s3.us-east-1.amazonaws.com``
 en estilo de host virtual (``https://<depósito>.s3.us-east-1.amazonaws.com/<clave>``), que es el
@@ -104,6 +110,9 @@ _METADATA_VALUE: Final = re.compile(r"[\x21-\x7e]{1,256}")
 
 _STORAGE_KEY: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9!_.*'()/=-]{0,511}")
 """Mismo patrón que ``StorageKey`` del contrato: caracteres seguros para claves de objeto."""
+_KEY_DOT_SEGMENTS: Final = frozenset({".", ".."})
+_VERSION_ID: Final = re.compile(r"[\x21-\x7e]{1,1024}")
+"""Identificador de versión de S3: ASCII visible, sin espacios."""
 _SHA256_HEX: Final = re.compile(r"[0-9a-f]{64}")
 _MAX_PART_NUMBER: Final = 10_000
 
@@ -268,10 +277,10 @@ class StoragePort(Protocol):
     async def head_object(self, key: str) -> ObjectHead | None: ...
 
     async def presign_get(
-        self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL
+        self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
     ) -> PresignedRequest: ...
 
-    async def get_object(self, key: str) -> bytes: ...
+    async def get_object(self, key: str, *, version_id: str | None = None) -> bytes: ...
 
     async def put_object(
         self,
@@ -328,8 +337,18 @@ def sha256_hex_to_b64(checksum_hex: str) -> str:
 
 
 def _require_key(key: str) -> None:
+    """Clave con el patrón de ``StorageKey`` y sin segmentos vacíos, ``.`` ni ``..``."""
     if not isinstance(key, str) or _STORAGE_KEY.fullmatch(key) is None:
         raise ValueError("clave de objeto no válida")
+    if any(not segment or segment in _KEY_DOT_SEGMENTS for segment in key.split("/")):
+        raise ValueError("clave de objeto no válida")
+
+
+def _require_version_id(version_id: str | None) -> None:
+    if version_id is not None and (
+        not isinstance(version_id, str) or _VERSION_ID.fullmatch(version_id) is None
+    ):
+        raise ValueError("identificador de versión no válido")
 
 
 def _require_ttl(ttl: timedelta, maximum: timedelta) -> int:
@@ -491,22 +510,37 @@ class S3Storage:
 
         return await self._call("head_object", head)
 
-    async def presign_get(self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL) -> PresignedRequest:
-        """URL de solo lectura, vigente a lo sumo 5 minutos (BR-NUC-66)."""
+    async def presign_get(
+        self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
+    ) -> PresignedRequest:
+        """URL de solo lectura, vigente a lo sumo 5 minutos (BR-NUC-66).
+
+        Con ``version_id`` la URL lee esa versión y ninguna otra, aunque después llegue otra.
+        """
         _require_key(key)
+        _require_version_id(version_id)
         seconds = _require_ttl(ttl, PRESIGN_GET_MAX_TTL)
         issued_at = self._clock.now()
-        url = self._presign("get_object", {"Bucket": self._settings.bucket, "Key": key}, seconds)
+        params: dict[str, Any] = {"Bucket": self._settings.bucket, "Key": key}
+        if version_id is not None:
+            params["VersionId"] = version_id
+        url = self._presign("get_object", params, seconds)
         return PresignedRequest("GET", url, {}, issued_at + timedelta(seconds=seconds))
 
-    async def get_object(self, key: str) -> bytes:
-        """Los bytes del objeto; boto3 valida la suma de la respuesta (``ChecksumMode``)."""
+    async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+        """Los bytes del objeto (o de ``version_id``); boto3 valida la suma de la respuesta."""
         _require_key(key)
+        _require_version_id(version_id)
+        params: dict[str, Any] = {
+            "Bucket": self._settings.bucket,
+            "Key": key,
+            "ChecksumMode": "ENABLED",
+        }
+        if version_id is not None:
+            params["VersionId"] = version_id
 
         def get() -> bytes:
-            response = self._client.get_object(
-                Bucket=self._settings.bucket, Key=key, ChecksumMode="ENABLED"
-            )
+            response = self._client.get_object(**params)
             body: bytes = response["Body"].read()
             return body
 
