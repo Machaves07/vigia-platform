@@ -484,6 +484,18 @@ class SigningService:
         if not self._ready:
             raise SigningNotReady
 
+    def has_active_key(self, purpose: SigningPurpose) -> bool:
+        """Hay clave ``active`` vigente con su material en memoria (``/health/ready``, NFR-NUC-13).
+
+        No llama al gestor de secretos: con el gestor caído en operación se sigue firmando con lo
+        que hay en memoria (FS-NUC-05 b), así que la salud tampoco depende de él.
+        """
+        try:
+            self._signer(purpose)
+        except (SigningNotReady, SigningKeyUnavailable):
+            return False
+        return True
+
     # --- rotación ------------------------------------------------------------------------------
 
     async def rotate(self, purpose: SigningPurpose, *, context: ScopeContext) -> RotationResult:

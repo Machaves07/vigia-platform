@@ -14,6 +14,10 @@
   (``Decrypt``) y la guarda en una caché en memoria de **5 minutos**; dentro de ese plazo no
   vuelve a llamar a KMS.
 
+Cada clave de datos se genera y se descifra con el contexto de cifrado ``{"vigia_purpose":
+<propósito>}`` y el descifrado fija la clave maestra (``KeyId``): una clave envuelta de otro
+propósito o de otra clave maestra termina en ``DecryptionFailed``.
+
 Formato de ``ciphertext``: versión (1 byte, ``0x01``) + nonce aleatorio de 12 bytes + texto
 cifrado con la etiqueta GCM de 16 bytes. Un ``ciphertext``, una clave envuelta o un ``aad`` que no
 corresponden (otra fila, bytes alterados) terminan en ``DecryptionFailed``: nunca se devuelve un
@@ -38,6 +42,7 @@ de error lleva una clave, un texto en claro ni un texto cifrado.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Final, NamedTuple, Protocol
@@ -86,6 +91,11 @@ MAX_PLAINTEXT_BYTES: Final = MAX_CIPHERTEXT_BYTES - 1 - NONCE_BYTES - TAG_BYTES
 """Lo más largo que cabe cifrado en ``MAX_CIPHERTEXT_BYTES``."""
 MAX_AAD_BYTES: Final = 256
 _MIN_CIPHERTEXT_BYTES: Final = 1 + NONCE_BYTES + TAG_BYTES
+
+PURPOSE_CONTEXT_KEY: Final = "vigia_purpose"
+"""Clave del contexto de cifrado de KMS que liga cada clave de datos a su propósito."""
+DEFAULT_PURPOSE: Final = "envelope"
+_PURPOSE: Final = re.compile(r"[a-z][a-z0-9_]{0,31}")
 
 _log = get_logger("shared.crypto")
 
@@ -148,9 +158,12 @@ class EnvelopeCipher:
         cache_ttl_seconds: float = DATA_KEY_CACHE_TTL_SECONDS,
         max_cached_keys: int = DATA_KEY_CACHE_MAX_ENTRIES,
         random_bytes: Callable[[int], bytes] = os.urandom,
+        purpose: str = DEFAULT_PURPOSE,
     ) -> None:
         if not isinstance(key_id, str) or not key_id:
             raise ValueError("key_id es obligatorio")
+        if not isinstance(purpose, str) or _PURPOSE.fullmatch(purpose) is None:
+            raise ValueError("purpose debe ser un identificador en minúsculas")
         if not 0 < cache_ttl_seconds <= DATA_KEY_CACHE_TTL_SECONDS:
             raise ValueError(f"la caché dura de 0 a {DATA_KEY_CACHE_TTL_SECONDS} s")
         if max_cached_keys < 1:
@@ -162,6 +175,7 @@ class EnvelopeCipher:
         self._ttl = cache_ttl_seconds
         self._max_cached = max_cached_keys
         self._random_bytes = random_bytes
+        self._context = {PURPOSE_CONTEXT_KEY: purpose}
         self._cache: dict[bytes, _CachedKey] = {}
 
     def __repr__(self) -> str:
@@ -176,7 +190,7 @@ class EnvelopeCipher:
         """
         _require_bytes(plaintext, "plaintext", 1, MAX_PLAINTEXT_BYTES)
         _require_bytes(aad, "aad", 1, MAX_AAD_BYTES)
-        data_key = await self._kms.generate_data_key(self._key_id)
+        data_key = await self._kms.generate_data_key(self._key_id, context=self._context)
         if len(data_key.plaintext) != DATA_KEY_BYTES or not (
             0 < len(data_key.wrapped) <= MAX_WRAPPED_KEY_BYTES
         ):
@@ -215,7 +229,12 @@ class EnvelopeCipher:
         if cached is not None and self._clock.monotonic() - cached.fetched_at < self._ttl:
             return cached.plaintext
         try:
-            plaintext = await self._kms.decrypt(wrapped_key)
+            plaintext = await self._kms.decrypt(
+                wrapped_key, key_id=self._key_id, context=self._context
+            )
+        except ValueError:
+            # Otra clave maestra, otro propósito o una clave envuelta alterada: no es transitorio.
+            raise DecryptionFailed() from None
         except SecretsUnavailable:
             if cached is None:
                 raise
