@@ -58,6 +58,7 @@ from vigia_platform.identity.auth.second_factor import (
     generate_recovery_codes,
     match_totp,
     normalize_recovery_code,
+    totp_code,
     totp_step,
     verify_recovery_code,
 )
@@ -155,8 +156,20 @@ def secret_of(challenge: EnrollmentChallenge) -> bytes:
     return base64.b32decode(encoded + "=" * (-len(encoded) % 8))
 
 
+def confirm(h: Harness, challenge: EnrollmentChallenge) -> TotpCredential:
+    """Confirma la inscripción con el código del paso actual y avanza el reloj un paso (el paso
+    de la confirmación ya no se acepta otra vez); devuelve la credencial confirmada guardada."""
+    now = h.clock.now()
+    code = independent_code(secret_of(challenge), totp_step(now))
+    assert run(h.service.confirm_enrollment(h.context, challenge.credential, code, now)) is True
+    h.clock.advance(TOTP_STEP_SECONDS)
+    credential = run(h.store.get_credential(h.context, challenge.credential.user_id))
+    assert credential is not None and credential.usable
+    return credential
+
+
 def seeded_credential(h: Harness, secret: bytes, codes: tuple[str, ...] = ()) -> TotpCredential:
-    """Credencial activa cifrada con el cifrado real y códigos con hash barato."""
+    """Credencial activa y confirmada, cifrada con el cifrado real y códigos con hash barato."""
     sealed = run(h.cipher.encrypt(secret, credential_aad(h.user.organization_id, h.user.user_id)))
     credential = TotpCredential(
         user_id=h.user.user_id,
@@ -176,7 +189,8 @@ def seeded_credential(h: Harness, secret: bytes, codes: tuple[str, ...] = ()) ->
         for code in codes
     ]
     run(h.store.save_enrollment(h.context, credential, records))
-    return credential
+    h.store.enrolled_at[credential.user_id] = credential.enrolled_at  # confirmada al sembrar
+    return dataclasses.replace(credential, confirmed=True)
 
 
 # --- PR-NUC-09: ventana de ±1 paso -------------------------------------------------------------
@@ -346,7 +360,9 @@ def test_real_enrollment_hashes_codes_with_argon2id_and_consumes_once() -> None:
         )
         assert all(code not in record.code_hash for code in challenge.recovery_codes)
     code = challenge.recovery_codes[3]
-    credential = challenge.credential
+    # Sin confirmar, la inscripción no vale: ni sus códigos de recuperación.
+    assert run(h.service.consume_recovery_code(h.context, challenge.credential, code)) is False
+    credential = confirm(h, challenge)
     assert run(h.service.consume_recovery_code(h.context, credential, code)) is True
     assert run(h.service.consume_recovery_code(h.context, credential, code)) is False
     assert run(h.service.consume_recovery_code(h.context, credential, code.lower())) is False
@@ -357,6 +373,7 @@ def test_old_enrollment_codes_and_secret_stop_working_after_reset() -> None:
     h = harness()
     first = run(h.service.enroll(h.context, h.user))
     old_secret = secret_of(first)
+    confirm(h, first)
     generated = h.kms.generate_calls
     with pytest.raises(AlreadyEnrolled):
         run(h.service.enroll(h.context, h.user))
@@ -380,7 +397,7 @@ def test_old_enrollment_codes_and_secret_stop_working_after_reset() -> None:
     h.clock.advance(1)
     second = run(h.service.enroll(h.context, h.user))
     assert secret_of(second) != old_secret
-    current = second.credential
+    current = confirm(h, second)
     assert run(h.service.verify_totp(h.context, current, code, now)) is False
     for old_code in first.recovery_codes[:3]:
         assert run(h.service.consume_recovery_code(h.context, current, old_code)) is False
@@ -534,13 +551,12 @@ def test_without_kms_verification_continues_and_enrollment_is_unavailable() -> N
     h = harness()
     challenge = run(h.service.enroll(h.context, h.user))
     secret = secret_of(challenge)
+    confirmed = confirm(h, challenge)
     # Otro proceso ya había verificado antes de la caída: tiene la clave de datos en memoria.
     api = h.fresh_process()
     now = h.clock.now()
     assert run(
-        api.service.verify_totp(
-            h.context, challenge.credential, independent_code(secret, totp_step(now)), now
-        )
+        api.service.verify_totp(h.context, confirmed, independent_code(secret, totp_step(now)), now)
     )
     h.kms.down = True
     h.clock.advance(10 * 60)
@@ -612,7 +628,7 @@ def test_credential_dump_contains_no_plain_secret(caplog: pytest.LogCaptureFixtu
 
 def test_reset_is_limited_to_people_of_the_same_organization() -> None:
     h = harness()
-    run(h.service.enroll(h.context, h.user))
+    confirm(h, run(h.service.enroll(h.context, h.user)))
     stranger = make_context(kind=ActorKind.USER, organization_id=uuid.uuid4())
     with pytest.raises(SecondFactorNotFound):
         run(h.service.reset(stranger, h.user.user_id))
@@ -623,3 +639,138 @@ def test_reset_is_limited_to_people_of_the_same_organization() -> None:
         run(h.service.enroll(stranger, h.user))
     credential = run(h.store.get_credential(h.context, h.user.user_id))
     assert credential is not None and credential.active
+
+
+# --- Confirmación de la inscripción (BR-NUC-22; seguimiento nº 1 de VIG-66) --------------------
+
+
+def test_enrollment_counts_only_after_a_first_valid_code() -> None:
+    h = harness()
+    first = run(h.service.enroll(h.context, h.user))
+    now = h.clock.now()
+    code = independent_code(secret_of(first), totp_step(now))
+    # Sin confirmar: no está inscrito, no verifica y no se audita nada.
+    assert h.store.enrolled_at.get(h.user.user_id) is None and h.store.audit == []
+    assert run(h.service.verify_totp(h.context, first.credential, code, now)) is False
+    # Quien no escaneó el QR se reinscribe sin reset: la credencial sin confirmar se sustituye.
+    h.clock.advance(1)
+    second = run(h.service.enroll(h.context, h.user))
+    assert secret_of(second) != secret_of(first)
+    now = h.clock.now()
+    stale = independent_code(secret_of(first), totp_step(now))
+    assert run(h.service.confirm_enrollment(h.context, second.credential, stale, now)) is False
+    assert run(h.service.confirm_enrollment(h.context, first.credential, code, now)) is False
+    assert h.store.enrolled_at.get(h.user.user_id) is None
+    confirmed = confirm(h, second)
+    assert h.store.enrolled_at[h.user.user_id] == second.credential.enrolled_at
+    assert h.store.audit == [("second_factor_enrolled", h.user.user_id)]
+    # Ya confirmada: no se confirma dos veces ni se reinscribe sin reset.
+    now = h.clock.now()
+    again = independent_code(secret_of(second), totp_step(now))
+    assert run(h.service.confirm_enrollment(h.context, confirmed, again, now)) is False
+    with pytest.raises(AlreadyEnrolled):
+        run(h.service.enroll(h.context, h.user))
+    assert run(h.service.verify_totp(h.context, confirmed, again, now)) is True
+
+
+class _AcceptingStore(InMemorySecondFactorStore):
+    """Almacén que aceptaría cualquier paso y cualquier código: aísla la guarda del servicio."""
+
+    async def advance_step(self, context: ScopeContext, user_id: uuid.UUID, step: int) -> bool:
+        return True
+
+    async def unused_recovery_codes(
+        self, context: ScopeContext, user_id: uuid.UUID
+    ) -> tuple[RecoveryCodeRecord, ...]:
+        self.recovery_queries += 1
+        return tuple(r for r in self.codes.values() if r.user_id == user_id)
+
+    async def mark_recovery_code_used(
+        self, context: ScopeContext, recovery_code_id: uuid.UUID, used_at: datetime
+    ) -> bool:
+        return True
+
+
+def test_service_refuses_an_unconfirmed_credential_on_its_own() -> None:
+    """La guarda del servicio no depende de la del almacén: sin confirmar no descifra nada."""
+    h = harness()
+    store = _AcceptingStore(h.store.organization_id, users={h.user.user_id})
+    service = SecondFactorService(store, h.cipher, _POOL, h.clock)
+    challenge = run(service.enroll(h.context, h.user))
+    cold = SecondFactorService(
+        store, h.fresh_process().cipher, _POOL, h.clock
+    )  # sin la clave de datos en memoria: cualquier descifrado iría a KMS
+    now = h.clock.now()
+    code = independent_code(secret_of(challenge), totp_step(now))
+    decrypts = h.kms.decrypt_calls
+    assert not challenge.credential.confirmed
+    assert run(cold.verify_totp(h.context, challenge.credential, code, now)) is False
+    assert (
+        run(
+            cold.consume_recovery_code(h.context, challenge.credential, challenge.recovery_codes[0])
+        )
+        is False
+    )
+    assert h.kms.decrypt_calls == decrypts and store.recovery_queries == 0
+
+
+# --- Credencial rancia, tiempo constante y vectores fijos (seguimientos nº 2 a 4 de VIG-66) -----
+
+
+def test_stale_credential_read_before_reset_verifies_nothing() -> None:
+    h = harness()
+    challenge = run(h.service.enroll(h.context, h.user))
+    stale = confirm(h, challenge)
+    run(h.service.reset(h.context, h.user.user_id))
+    now = h.clock.now()
+    code = independent_code(secret_of(challenge), totp_step(now))
+    assert stale.usable  # la instantánea en memoria sigue diciendo «activa»
+    assert run(h.service.verify_totp(h.context, stale, code, now)) is False
+    recovery = challenge.recovery_codes[0]
+    assert run(h.service.consume_recovery_code(h.context, stale, recovery)) is False
+
+
+def test_totp_comparison_is_constant_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``match_totp`` compara con ``hmac.compare_digest``; cambiarlo por ``==`` rompe la prueba."""
+    import vigia_platform.identity.auth.second_factor as module
+
+    calls: list[tuple[str, str]] = []
+    real = module.hmac.compare_digest
+
+    def spy(left: str, right: str) -> bool:
+        calls.append((left, right))
+        return real(left, right)
+
+    monkeypatch.setattr(module.hmac, "compare_digest", spy)
+    secret = b"c" * TOTP_SECRET_BYTES
+    now = at_step(55_000_000, 7)
+    code = independent_code(secret, 55_000_000)
+    assert match_totp(secret, code, now, None) == 55_000_000
+    # Los tres pasos candidatos se comparan siempre, también tras encontrar el bueno.
+    assert len(calls) == 3 and all(right == code for _, right in calls)
+    calls.clear()
+    assert match_totp(secret, "000000", now, None) in (None, 54_999_999, 55_000_000, 55_000_001)
+    assert len(calls) == 3
+
+
+RFC6238_SHA1_VECTORS = (
+    # (T en segundos, código de 8 dígitos del apéndice B de RFC 6238 con SHA-1)
+    (59, "94287082"),
+    (1111111109, "07081804"),
+    (1111111111, "14050471"),
+    (1234567890, "89005924"),
+    (2000000000, "69279037"),
+    (20000000000, "65353130"),
+)
+
+
+@pytest.mark.parametrize(("seconds", "eight_digits"), RFC6238_SHA1_VECTORS)
+def test_rfc6238_vectors_reduced_to_six_digits(seconds: int, eight_digits: str) -> None:
+    """Vectores fijos de RFC 6238 (secreto ASCII ``12345678901234567890``), sin pyotp como
+    oráculo: el código de 6 dígitos son los 6 últimos del de 8 (mismo truncado dinámico)."""
+    secret = b"12345678901234567890"
+    step = seconds // TOTP_STEP_SECONDS
+    assert totp_code(secret, step) == eight_digits[-6:]
+    now = EPOCH + timedelta(seconds=seconds)
+    assert totp_step(now) == step
+    assert match_totp(secret, eight_digits[-6:], now, None) == step

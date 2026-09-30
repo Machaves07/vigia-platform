@@ -111,12 +111,18 @@ class InMemorySecondFactorStore:
     def _visible(self, context: ScopeContext, user_id: uuid.UUID) -> bool:
         return context.organization_id == self.organization_id and user_id in self.users
 
+    def _confirmed(self, credential: TotpCredential) -> bool:
+        return self.enrolled_at.get(credential.user_id) == credential.enrolled_at
+
     async def get_credential(
         self, context: ScopeContext, user_id: uuid.UUID
     ) -> TotpCredential | None:
         if not self._visible(context, user_id):
             return None
-        return self.credentials.get(user_id)
+        credential = self.credentials.get(user_id)
+        if credential is None:
+            return None
+        return replace(credential, confirmed=self._confirmed(credential))
 
     async def save_enrollment(
         self,
@@ -127,23 +133,39 @@ class InMemorySecondFactorStore:
         if not self._visible(context, credential.user_id):
             raise SecondFactorNotFound()
         existing = self.credentials.get(credential.user_id)
-        if existing is not None and existing.active:
+        if existing is not None and existing.active and self._confirmed(existing):
             raise AlreadyEnrolled()
         self.credentials[credential.user_id] = replace(
-            credential, last_accepted_step=None, disabled_at=None
+            credential, last_accepted_step=None, disabled_at=None, confirmed=False
         )
         for record in recovery_codes:
             self.codes[record.recovery_code_id] = record
-        self.enrolled_at[credential.user_id] = credential.enrolled_at
-        self.audit.append(("second_factor_enrolled", credential.user_id))
+
+    async def confirm_enrollment(
+        self, context: ScopeContext, user_id: uuid.UUID, enrolled_at: datetime, step: int
+    ) -> bool:
+        credential = await self.get_credential(context, user_id)
+        if (
+            credential is None
+            or not credential.active
+            or credential.confirmed
+            or credential.enrolled_at != enrolled_at
+            or (credential.last_accepted_step is not None and credential.last_accepted_step >= step)
+            or self.enrolled_at.get(user_id) is not None
+        ):
+            return False
+        self.credentials[user_id] = replace(credential, last_accepted_step=step, confirmed=False)
+        self.enrolled_at[user_id] = enrolled_at
+        self.audit.append(("second_factor_enrolled", user_id))
+        return True
 
     async def advance_step(self, context: ScopeContext, user_id: uuid.UUID, step: int) -> bool:
         credential = await self.get_credential(context, user_id)
-        if credential is None or not credential.active:
+        if credential is None or not credential.usable:
             return False
         if credential.last_accepted_step is not None and credential.last_accepted_step >= step:
             return False
-        self.credentials[user_id] = replace(credential, last_accepted_step=step)
+        self.credentials[user_id] = replace(credential, last_accepted_step=step, confirmed=False)
         return True
 
     def _current(self, record: RecoveryCodeRecord) -> bool:
@@ -151,6 +173,7 @@ class InMemorySecondFactorStore:
         return (
             credential is not None
             and credential.active
+            and self._confirmed(credential)
             and record.generated_at == credential.enrolled_at
         )
 
