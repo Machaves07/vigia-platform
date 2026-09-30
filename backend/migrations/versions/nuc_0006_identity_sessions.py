@@ -1,6 +1,6 @@
 """Sesiones e inicio de sesión (TASK-124, LC-NUC-03; BR-NUC-22 a 27; PAT-NUC-SEG-03).
 
-Revisión nuc_0005. Completa el esquema de ``nuc_0004`` con lo que necesita el inicio de sesión:
+Revisión nuc_0006. Completa el esquema de ``nuc_0004`` con lo que necesita el inicio de sesión:
 
 - ``session_idle_expiry``: ``idle_expires_at = last_seen_at + 30 min`` (``domain-entities.md``
   §2.8). ``nuc_0004`` ya exigía las 12 h absolutas; sin esta restricción una sesión podía
@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0005"
-down_revision: str | None = "nuc_0004"
+revision: str = "nuc_0006"
+down_revision: str | None = "nuc_0005"
 branch_labels: None = None
 depends_on: None = None
 

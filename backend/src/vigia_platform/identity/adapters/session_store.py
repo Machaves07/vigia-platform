@@ -15,7 +15,7 @@ contador de otra organización no existen para el almacén.
   a la vez se serializan en la fila: ningún fallo se pierde y el retardo es el mismo desde
   cualquier instancia. La alerta ``security_alert`` se publica en la bandeja dentro de esa
   transacción, una vez por ventana.
-- **Correo → organización**: ``identity.login_organization`` (``nuc_0005``), la única búsqueda
+- **Correo → organización**: ``identity.login_organization`` (``nuc_0006``), la única búsqueda
   previa al contexto de la organización.
 - **Auditoría**: todo evento de autenticación y todo fin de sesión, con su motivo en
   ``filters.end_reason``; sin cuenta, en la cadena de la proveedora (BR-NUC-61). Ninguna entrada

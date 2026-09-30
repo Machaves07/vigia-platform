@@ -32,9 +32,11 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 5
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0005`` (la columna
-``ledger.record_type.chain_follows_scope`` y la guarda de puntos de control del encadenado)."""
+MINIMUM_SCHEMA_VERSION: Final = 6
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0006``
+(``identity.login_organization`` y ``session_idle_expiry`` del inicio de sesión), que incluye
+``nuc_0005`` (la columna ``ledger.record_type.chain_follows_scope`` y la guarda de puntos de
+control del encadenado)."""
 
 _READ_VERSION: Final = text("SELECT shared.vigia_schema_version()")
 _MISSING_SQLSTATES: Final = frozenset({"3F000", "42883", "42P01"})
