@@ -400,6 +400,24 @@ def test_sequence_beyond_ijson_range_is_never_signed_nor_verified(world: Signing
         asyncio.run(service.write_checkpoints_now(u02_context(organization_id), [chain]))
     assert isinstance(caught.value.failures[0][1], ValueError)
     assert store.events == []
+
+    # La guarda es del servicio, no del firmante: uno que aceptara cualquier entero no llega a
+    # firmar (un punto de control así nunca verificaría en el paquete del cliente).
+    class Permissive:
+        calls = 0
+
+        def sign(self, purpose: SigningPurpose, payload: Any) -> Any:
+            Permissive.calls += 1
+            return world.service.sign(purpose, {**payload, "covered_sequence": 1})
+
+        def public_keys(self, purpose: SigningPurpose) -> tuple[Any, ...]:
+            return world.service.public_keys(purpose)
+
+    permissive = CheckpointService(store=store, signer=Permissive(), clock=world.clock)
+    with pytest.raises(CheckpointWriteFailed):
+        asyncio.run(permissive.write_checkpoints_now(u02_context(organization_id), [chain]))
+    assert Permissive.calls == 0
+    assert store.events == []
     # Un contenido con esa secuencia y una clave publicada no verifica ni lanza.
     key_id = service.checkpoint_public_keys()[0].key_id
     content = CheckpointContent(

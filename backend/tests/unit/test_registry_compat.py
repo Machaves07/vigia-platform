@@ -359,6 +359,20 @@ def test_persisted_writer_unit_mismatch_blocks_startup() -> None:
         _run(registry.synchronize(store))
 
 
+@pytest.mark.parametrize(("declared", "persisted"), [(True, False), (False, True)])
+def test_persisted_chain_follows_scope_mismatch_blocks_startup(
+    declared: bool, persisted: bool
+) -> None:
+    """La columna de ``nuc_0005`` debe coincidir con el código: el disparador la usa (BR-NUC-45)."""
+    registry = RecordTypeRegistry()
+    registry.register(_type(SampleV1, chain_follows_scope=declared))
+    assert registry.get("sample_recorded").to_persisted().chain_follows_scope is declared
+    store = InMemoryRecordTypeStore(_persisted(registry, chain_follows_scope=persisted))
+    with pytest.raises(RegistryStartupError, match="«chain_follows_scope» cambió"):
+        _run(registry.synchronize(store))
+    assert not registry.sealed
+
+
 def test_persisted_schema_round_trips_through_json_and_resynchronizes() -> None:
     """La fila vuelve de ``jsonb`` con otro orden de claves: sigue siendo la misma versión."""
     registry = RecordTypeRegistry()
