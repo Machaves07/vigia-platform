@@ -502,6 +502,10 @@ class EscritorExpediente:
         if not isinstance(context, ScopeContext):
             _log.warning("escritura del expediente sin contexto rechazada")
             return LedgerRejection.of(LedgerRejectionCode.CONTEXT_ABSENT)
+        if occurred_at is not None and (
+            not isinstance(occurred_at, datetime) or occurred_at.utcoffset() is None
+        ):
+            raise TypeError("occurred_at debe ser una marca con zona horaria")
         try:
             prepared = await self._prepare(context, record_type, content, scope, events)
         except _Rejected as rejected:
