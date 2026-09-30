@@ -5,7 +5,7 @@ Contexto persistente para agentes que trabajan en este repositorio (U-02 a U-05 
 ## Lectura obligatoria antes de tocar código
 
 1. `AGENTS.md` del workspace (reglas del proyecto, principios P1–P10, invariantes, convenciones, comandos estándar):
-   `/mnt/c/Users/manu_/Documents/Capacitaciones/Hare Core IA/Estación 7/Vigia/AGENTS.md`
+   (el orquestador lo copia como `../CLAUDE.md` junto al workspace; su ruta original está en el prompt de la tarea)
 2. El issue de Linear asignado y su archivo local `docs/tasks/NNN-*.md` (Scope, Deliverables, Acceptance Criteria, Test Plan, Context). Si difieren, manda el archivo local.
 3. `docs/decisions/adenda-al-diseno.md` del plan: manda sobre `aidlc-docs` donde difieran.
 4. Solo los archivos que la sección *Context* del issue cita.
@@ -14,9 +14,9 @@ Contexto persistente para agentes que trabajan en este repositorio (U-02 a U-05 
 
 | Ruta en la tarea | Úsala así |
 |---|---|
-| `C:\Users\manu_\Documents\Capacitaciones\Hare Core IA\Estación 7\Vigia\vigia-platform` | la raíz de este repositorio; **aquí** se escribe el código |
+| `<carpeta del plan>\vigia-platform` (ruta de Windows que citan las tareas) | la raíz de este repositorio; **aquí** se escribe el código |
 | `...\vigia-platform\backend` | `backend/` |
-| `C:\Users\manu_\Documents\Capacitaciones\Hare Core IA\Estación 7\Vigia\<resto>` | `/mnt/c/Users/manu_/Documents/Capacitaciones/Hare Core IA/Estación 7/Vigia/<resto>` — **solo lectura** |
+| `<carpeta del plan>\<resto>` | la misma ruta vista desde WSL (`/mnt/c/...`, con `/`) — **solo lectura**; la traducción exacta está en el prompt de la tarea |
 | `cd "C:\...\vigia-platform\backend" && <cmd>` | ejecuta `<cmd>` en `backend/` |
 
 Nunca escribas fuera del workspace del issue. Las carpetas `registros/` del workspace contienen **datos personales**: no copiar a este repositorio, a la canalización ni a un prompt. Las pruebas usan solo datos sintéticos.

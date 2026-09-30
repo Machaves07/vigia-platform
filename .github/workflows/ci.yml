@@ -1,0 +1,103 @@
+# CI de vigia-platform (U-02). Replica scripts/revisor/ci_local_platform.sh de la sesión de control.
+# Seguridad: solo pull_request del mismo repositorio y push a main (sin pull_request_target), permisos de
+# solo lectura, acciones fijadas por hash completo, gitleaks verificado por suma SHA-256 y la clave de
+# despliegue de vigia-contracts (solo lectura, ADR-004) solo en el trabajo que la necesita.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secretos:
+    name: escaneo de secretos
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks 8.30.1 (suma verificada)
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: commits nuevos
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then RANGO="$HEAD"; else RANGO="$BASE..$HEAD"; fi
+          ./gitleaks detect --source . --no-banner --redact --log-opts="$RANGO"
+
+  backend:
+    name: backend (lint, tipos y pruebas con integración)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: ruff
+        run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
+      - name: reglas propias (VIG001 a VIG004)
+        run: uv run --frozen python tools/lint_rules.py
+      - name: mypy --strict
+        run: uv run --frozen mypy --strict src
+      - name: pruebas perfil ci (con integration; Docker del runner)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci
+      - name: borrar la clave
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+
+  infra:
+    name: infra (pruebas y cdk synth)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: pruebas
+        run: uv run --frozen pytest -q -p no:cacheprovider
+      - name: cdk synth (sin credenciales AWS)
+        run: npx --yes aws-cdk synth --quiet
