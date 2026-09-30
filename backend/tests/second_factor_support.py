@@ -97,6 +97,8 @@ class InMemorySecondFactorStore:
     enrolled_at: dict[uuid.UUID, datetime | None] = field(default_factory=dict)
     sessions: dict[uuid.UUID, int] = field(default_factory=dict)
     audit: list[tuple[str, uuid.UUID]] = field(default_factory=list)
+    recovery_queries: int = 0
+    """Llamadas a ``unused_recovery_codes`` (para ver que el servicio no consulta sin motivo)."""
 
     def _visible(self, context: ScopeContext, user_id: uuid.UUID) -> bool:
         return context.organization_id == self.organization_id and user_id in self.users
@@ -147,6 +149,7 @@ class InMemorySecondFactorStore:
     async def unused_recovery_codes(
         self, context: ScopeContext, user_id: uuid.UUID
     ) -> Sequence[RecoveryCodeRecord]:
+        self.recovery_queries += 1
         if not self._visible(context, user_id):
             return ()
         return tuple(

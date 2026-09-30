@@ -324,7 +324,7 @@ def credential_aad(organization_id: uuid.UUID, user_id: uuid.UUID) -> bytes:
 
     Un texto cifrado copiado a la fila de otro usuario u otra organización no se descifra.
     """
-    if type(organization_id) is not uuid.UUID or type(user_id) is not uuid.UUID:
+    if not isinstance(organization_id, uuid.UUID) or not isinstance(user_id, uuid.UUID):
         raise TypeError("organization_id y user_id deben ser uuid.UUID")
     return _AAD_PREFIX + organization_id.bytes + user_id.bytes
 

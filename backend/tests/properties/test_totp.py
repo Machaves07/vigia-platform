@@ -319,6 +319,9 @@ def test_recovery_codes_are_ten_distinct_crockford_codes() -> None:
         "ABCDE-FGHJK\u200b",
         "\uff21BCDE-FGHJK",  # ancho completo
         "A" * 65,
+        # En mayúsculas pasan a ASCII válido (``SS``, ``FF``): se rechazan antes de ``upper``.
+        "ABCDE-FGHß",
+        "ABCDE-FGHﬀ",
     ],
 )
 def test_malformed_recovery_codes_never_normalize(attempt: str) -> None:
@@ -354,8 +357,10 @@ def test_old_enrollment_codes_and_secret_stop_working_after_reset() -> None:
     h = harness()
     first = run(h.service.enroll(h.context, h.user))
     old_secret = secret_of(first)
+    generated = h.kms.generate_calls
     with pytest.raises(AlreadyEnrolled):
         run(h.service.enroll(h.context, h.user))
+    assert h.kms.generate_calls == generated  # rechazada antes de pedir clave a KMS
     h.store.sessions[h.user.user_id] = 2
     assert run(h.service.reset(h.context, h.user.user_id)) == 2
     assert h.store.enrolled_at[h.user.user_id] is None
@@ -363,7 +368,15 @@ def test_old_enrollment_codes_and_secret_stop_working_after_reset() -> None:
     assert disabled is not None and not disabled.active
     now = h.clock.now()
     code = independent_code(old_secret, totp_step(now))
-    assert run(h.service.verify_totp(h.context, disabled, code, now)) is False
+    # Con la credencial desactivada no se descifra ni se consulta nada.
+    cold = h.fresh_process()
+    queries = h.store.recovery_queries
+    assert run(cold.service.verify_totp(h.context, disabled, code, now)) is False
+    assert (
+        run(cold.service.consume_recovery_code(h.context, disabled, first.recovery_codes[0]))
+        is False
+    )
+    assert (h.kms.decrypt_calls, h.store.recovery_queries) == (0, queries)
     h.clock.advance(1)
     second = run(h.service.enroll(h.context, h.user))
     assert secret_of(second) != old_secret

@@ -31,7 +31,7 @@ import secrets
 import socket
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -365,15 +365,40 @@ def test_same_code_is_accepted_once_even_concurrently(env: Environment) -> None:
         "SELECT last_accepted_step FROM identity.totp_credential WHERE user_id = $1", user.user_id
     )[0]["last_accepted_step"]
     assert stored == totp_step(now)
-    code_ = challenge.recovery_codes[5]
-    assert env.run(service.consume_recovery_code(context, challenge.credential, code_)) is True
-    assert env.run(service.consume_recovery_code(context, challenge.credential, code_)) is False
+    recovery = challenge.recovery_codes[5]
+
+    async def consume_twice() -> list[bool]:
+        return list(
+            await asyncio.gather(
+                service.consume_recovery_code(context, challenge.credential, recovery),
+                service.consume_recovery_code(context, challenge.credential, recovery),
+            )
+        )
+
+    assert sorted(env.run(consume_twice())) == [False, True]
+    assert env.run(service.consume_recovery_code(context, challenge.credential, recovery)) is False
+    # La base es la que decide: marcar dos veces el mismo código a la vez cambia una sola fila.
+    store = PostgresSecondFactorStore(env.database, env.audit)
+    unused = env.run(store.unused_recovery_codes(context, user.user_id))
+    assert len(unused) == 9
+    target = unused[0].recovery_code_id
+
+    async def mark_twice() -> list[bool]:
+        at = env.clock.now()
+        return list(
+            await asyncio.gather(
+                store.mark_recovery_code_used(context, target, at),
+                store.mark_recovery_code_used(context, target, at),
+            )
+        )
+
+    assert sorted(env.run(mark_twice())) == [False, True]
     used = env.query(
         "SELECT count(*) FILTER (WHERE used_at IS NOT NULL) AS used, count(*) AS total"
         " FROM identity.recovery_code WHERE user_id = $1",
         user.user_id,
     )[0]
-    assert (used["used"], used["total"]) == (1, 10)
+    assert (used["used"], used["total"]) == (2, 10)
 
 
 # --- BR-NUC-29 ---------------------------------------------------------------------------------
@@ -386,6 +411,13 @@ def test_reset_closes_sessions_audits_and_forces_reenrollment(env: Environment) 
     first = env.run(service.enroll(context, user))
     with pytest.raises(AlreadyEnrolled):
         env.run(service.enroll(context, user))
+    # La base tampoco deja sustituir una credencial activa (carrera entre dos inscripciones).
+    store = PostgresSecondFactorStore(env.database, env.audit)
+    intruder = replace(first.credential, secret_encrypted=b"\x01" + b"x" * 40)
+    with pytest.raises(AlreadyEnrolled):
+        env.run(store.save_enrollment(context, intruder, ()))
+    kept = env.run(store.get_credential(context, user.user_id))
+    assert kept is not None and kept.secret_encrypted == first.credential.secret_encrypted
     other_admin = env.context(env.seed.b.organization_id)
     with pytest.raises(SecondFactorNotFound):
         env.run(service.reset(other_admin, user.user_id))

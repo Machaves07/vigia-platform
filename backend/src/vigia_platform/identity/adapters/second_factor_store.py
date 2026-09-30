@@ -101,6 +101,11 @@ _CLOSE_SESSIONS: Final = text(
 )
 
 
+def _uuid(value: uuid.UUID) -> uuid.UUID:
+    """asyncpg devuelve su propia subclase de ``UUID``: el dominio recibe ``uuid.UUID``."""
+    return uuid.UUID(bytes=value.bytes)
+
+
 class PostgresSecondFactorStore:
     """``SecondFactorStore`` con ``shared.db`` y la auditoría en la misma transacción."""
 
@@ -116,8 +121,8 @@ class PostgresSecondFactorStore:
         if row is None:
             return None
         return TotpCredential(
-            user_id=row.user_id,
-            organization_id=row.organization_id,
+            user_id=_uuid(row.user_id),
+            organization_id=_uuid(row.organization_id),
             secret_encrypted=bytes(row.secret_encrypted),
             data_key_wrapped=bytes(row.data_key_wrapped),
             enrolled_at=row.enrolled_at,
@@ -184,9 +189,9 @@ class PostgresSecondFactorStore:
             rows = (await transaction.execute(_UNUSED_RECOVERY_CODES, {"user_id": user_id})).all()
         return tuple(
             RecoveryCodeRecord(
-                recovery_code_id=row.recovery_code_id,
-                user_id=row.user_id,
-                organization_id=row.organization_id,
+                recovery_code_id=_uuid(row.recovery_code_id),
+                user_id=_uuid(row.user_id),
+                organization_id=_uuid(row.organization_id),
                 code_hash=row.code_hash,
                 generated_at=row.generated_at,
                 used_at=row.used_at,
