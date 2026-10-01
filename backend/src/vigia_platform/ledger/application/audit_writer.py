@@ -114,6 +114,8 @@ class AuditOperation(enum.StrEnum):
     CONTEXT_ABSENT_ATTEMPT = "context_absent_attempt"
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto
+    PRIVACY_NOTICE_ACCEPTED = "privacy_notice_accepted"
+    """Nota fechada de §2.9 (NFR-NUC-29): aceptación del aviso, con la versión aceptada."""
 
 
 class AuditOutcome(enum.StrEnum):

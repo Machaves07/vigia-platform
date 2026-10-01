@@ -38,6 +38,7 @@ from vigia_platform.identity.auth.second_factor import (
     TotpCredential,
 )
 from vigia_platform.identity.auth.sessions import SessionService
+from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import (
@@ -231,8 +232,13 @@ class SessionEnvironment:
         status: str = "active",
         password_hash: str | None = None,
         with_password: bool = True,
+        privacy_notice: str | None = CURRENT_PRIVACY_NOTICE_VERSION,
     ) -> User:
-        """Usuario nuevo; su hash es el de ``FakePasswords`` salvo que se dé ``password_hash``."""
+        """Usuario nuevo; su hash es el de ``FakePasswords`` salvo que se dé ``password_hash``.
+
+        Por defecto ya aceptó la versión vigente del aviso (sin ella no hay contexto de sesión,
+        NFR-NUC-29); ``privacy_notice=None`` lo deja sin aceptar.
+        """
         user_id = uuid.uuid4()
         email = f"persona-{secrets.token_hex(6)}@example.test"
         password = f"clave-{secrets.token_hex(6)}"
@@ -242,9 +248,9 @@ class SessionEnvironment:
                 await self.admin.execute(
                     "INSERT INTO identity.user_account (user_id, organization_id, email,"
                     " display_name, status, second_factor_required, second_factor_enrolled_at,"
-                    " created_at, deactivated_at)"
+                    " created_at, deactivated_at, privacy_notice_version_accepted)"
                     " VALUES ($1, $2, $3, 'Persona sintética', $4, $5, $6, $7,"
-                    " CASE WHEN $4 = 'deactivated' THEN $7::timestamptz END)",
+                    " CASE WHEN $4 = 'deactivated' THEN $7::timestamptz END, $8)",
                     user_id,
                     organization_id,
                     email,
@@ -252,6 +258,7 @@ class SessionEnvironment:
                     required,
                     BASE_TIME if enrolled else None,
                     BASE_TIME,
+                    privacy_notice,
                 )
                 if with_password:
                     await self.admin.execute(

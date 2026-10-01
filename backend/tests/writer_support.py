@@ -24,11 +24,13 @@ Solo datos generados: los clips son bytes aleatorios que nunca se suben (solo su
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
 import json
 import os
+import threading
 import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
@@ -485,14 +487,161 @@ def writer_environment(
         clock=clock,
     )
     audit = AuditWriter(database=probed, clock=clock, provider_organization_id=provider)
+    seeder = PlaceSeeder(migrated)
+    _PLACE_SEEDERS.append(seeder)
     try:
         loop.run(synchronize())
         yield WriterEnvironment(
             loop, migrated, probed, storage, registry, writer, audit, clock, provider, outbox
         )
     finally:
+        _PLACE_SEEDERS.remove(seeder)
+        seeder.close()
         loop.run(database.dispose())
         loop.close()
+
+
+# --- Filas de identidad de cada lugar ----------------------------------------------------------
+
+
+class PlaceSeeder:
+    """Da de alta en ``identity`` la organización, la planta y la zona de cada ``Place``.
+
+    Con una sesión, el escritor comprueba en ``identity.zone`` que la zona del registro existe y
+    es de su planta (BR-NUC-45; TASK-126). Mientras hay un ``writer_environment`` activo, cada
+    ``Place`` que se crea queda dado de alta (idempotente, como superusuario, datos generados), así
+    que las pruebas escriben con lugares reales; una prueba que combina la planta de un lugar con
+    la zona de otro sigue siendo incoherente para el escritor. Corre en un hilo con su propio
+    bucle: ``Place`` se construye también dentro de las corridas del bucle de la prueba.
+    """
+
+    def __init__(self, migrated: MigratedDatabase) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._connection: Any = self._call(migrated.connect())
+
+    def _call(self, awaitable: Any) -> Any:
+        return asyncio.run_coroutine_threadsafe(awaitable, self._loop).result(timeout=60)
+
+    def seed(self, place: Place) -> None:
+        self._call(self._seed(place))
+
+    async def _seed(self, place: Place) -> None:
+        connection = self._connection
+        owner = uuid.uuid5(place.organization_id, "seed-user")
+        async with connection.transaction():
+            await connection.execute(
+                "INSERT INTO identity.organization (organization_id, code, name, kind,"
+                " created_at, created_by) VALUES ($1, $2, 'Organización sintética', 'client',"
+                " $3, $4) ON CONFLICT DO NOTHING",
+                place.organization_id,
+                f"ORG-{place.organization_id.hex[:20].upper()}",
+                NOW,
+                owner,
+            )
+            await connection.execute(
+                "INSERT INTO identity.user_account (user_id, organization_id, email,"
+                " display_name, status, created_at) VALUES ($1, $2, $3, 'Persona sintética',"
+                " 'active', $4) ON CONFLICT DO NOTHING",
+                owner,
+                place.organization_id,
+                f"semilla-{owner.hex}@example.test",
+                NOW,
+            )
+            await connection.execute(
+                "INSERT INTO identity.plant (plant_id, organization_id, code, name, country,"
+                " data_region, timezone, created_at, created_by) SELECT $1, $2, $3,"
+                " 'Planta sintética', 'CO', 'us-east-1', 'UTC', $4, u.user_id"
+                " FROM identity.user_account u WHERE u.organization_id = $2"
+                " ORDER BY u.created_at, u.user_id LIMIT 1 ON CONFLICT DO NOTHING",
+                place.plant_id,
+                place.organization_id,
+                f"PL-{place.plant_id.hex[:20].upper()}",
+                NOW,
+            )
+            await connection.execute(
+                "INSERT INTO identity.zone (zone_id, organization_id, plant_id, code, name,"
+                " created_at, created_by) SELECT $1, p.organization_id, p.plant_id, $3,"
+                " 'Zona sintética', $4, p.created_by FROM identity.plant p"
+                " WHERE p.plant_id = $2 ON CONFLICT DO NOTHING",
+                place.zone_id,
+                place.plant_id,
+                f"ZN-{place.zone_id.hex[:20].upper()}",
+                NOW,
+            )
+
+    def concession(self, place: Place) -> uuid.UUID:
+        """Una concesión vigente de toda la organización del lugar, del proveedor de la base."""
+        result: uuid.UUID = self._call(self._concession(place))
+        return result
+
+    async def _concession(self, place: Place) -> uuid.UUID:
+        connection = self._connection
+        async with connection.transaction():
+            provider = await connection.fetchval(
+                "SELECT organization_id FROM identity.organization WHERE kind = 'provider'"
+            )
+            if provider is None:
+                provider, operator = uuid.uuid4(), uuid.uuid4()
+                await connection.execute(
+                    "INSERT INTO identity.organization (organization_id, code, name, kind,"
+                    " created_at, created_by) VALUES ($1, $2, 'Proveedora sintética',"
+                    " 'provider', $3, $4)",
+                    provider,
+                    f"PRV-{provider.hex[:20].upper()}",
+                    NOW,
+                    operator,
+                )
+                await connection.execute(
+                    "INSERT INTO identity.user_account (user_id, organization_id, email,"
+                    " display_name, status, created_at) VALUES ($1, $2, $3,"
+                    " 'Instalación sintética', 'active', $4)",
+                    operator,
+                    provider,
+                    f"proveedor-{operator.hex}@example.test",
+                    NOW,
+                )
+            installer = await connection.fetchval(
+                "SELECT user_id FROM identity.user_account WHERE organization_id = $1"
+                " ORDER BY created_at, user_id LIMIT 1",
+                provider,
+            )
+            concession_id = uuid.uuid4()
+            # Vigente según el now() de la base, que es el que mira la seguridad a nivel de fila.
+            await connection.execute(
+                "INSERT INTO identity.provider_concession (concession_id, organization_id,"
+                " provider_user_id, provider_organization_id, scope_level, scope_id, reason,"
+                " granted_at, expires_at, status) VALUES ($1, $2, $3, $4, 'organization', $2,"
+                " 'Mantenimiento sintético del nodo', now() - interval '1 hour',"
+                " now() + interval '6 days', 'active')",
+                concession_id,
+                place.organization_id,
+                installer,
+                provider,
+            )
+        return concession_id
+
+    def close(self) -> None:
+        self._call(self._connection.close())
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=10)
+        self._loop.close()
+
+
+_PLACE_SEEDERS: list[PlaceSeeder] = []
+"""Los ``PlaceSeeder`` de los ``writer_environment`` activos (el último manda)."""
+
+
+def real_concession(place: Place) -> uuid.UUID:
+    """Concesión vigente sobre la organización de ``place`` (para un actor del proveedor).
+
+    Desde ``nuc_0009`` (A-46) un contexto del proveedor solo ve ``identity`` con una concesión
+    vigente: con una inventada, la zona del registro no existe para él y el escritor lo rechaza.
+    """
+    if not _PLACE_SEEDERS:
+        raise RuntimeError("real_concession necesita un writer_environment activo")
+    return _PLACE_SEEDERS[-1].concession(place)
 
 
 # --- Contenidos -------------------------------------------------------------------------------
@@ -506,6 +655,11 @@ class Place:
     plant_id: uuid.UUID
     zone_id: uuid.UUID
     node_id: uuid.UUID
+
+    def __post_init__(self) -> None:
+        # Con un ``writer_environment`` activo, el lugar existe en ``identity`` (``PlaceSeeder``).
+        if _PLACE_SEEDERS:
+            _PLACE_SEEDERS[-1].seed(self)
 
     @classmethod
     def new(cls, organization_id: uuid.UUID | None = None) -> Place:
@@ -558,8 +712,10 @@ def order_document(
 
 
 def zone_document(place: Place, name: str = "Zona de prensas") -> dict[str, Any]:
+    """``zone_created`` de la zona del lugar: la zona existe en ``identity`` (``PlaceSeeder``),
+    como en producción, donde la fila y su registro van en la misma transacción."""
     return {
-        "zone_id": str(uuid.uuid4()),
+        "zone_id": str(place.zone_id),
         "plant_id": str(place.plant_id),
         "code": "Z-01",
         "name": name,

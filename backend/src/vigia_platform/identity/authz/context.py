@@ -21,6 +21,13 @@ Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los cons
   tarea periódica, con el actor del sistema.
 - ``context_from_operator(operator_id)``: orden administrativa; el operador tiene que ser un
   usuario activo de la organización proveedora con ``platform_operator`` vigente (una sentencia).
+  ``operator_in_organization(operator_context, organization_id, …)`` es la misma orden actuando
+  sobre la organización cliente que el operador da de alta (génesis, TASK-126): mismo actor y
+  correlación, sin asignaciones en ese cliente.
+
+``with_unit(context, unit)`` es el mismo contexto escrito por otra unidad: los puertos de U-02
+que U-03 y U-04 llaman en proceso (``IdentityCommandPort``) escriben sus propios tipos de
+registro (``node_declared``…) con la unidad U-02, sin cambiar actor, alcance ni correlación.
 
 Los contextos de evento e iteración no tienen asignaciones: ``authorize`` nunca les concede una
 clave; operan sobre su organización por construcción.
@@ -96,8 +103,10 @@ __all__ = [
     "SecurityAudit",
     "SessionRow",
     "SessionScope",
+    "operator_in_organization",
     "record_provider_query",
     "with_role_in_use",
+    "with_unit",
 ]
 
 _log = get_logger("identity.authz")
@@ -242,6 +251,66 @@ def with_role_in_use(context: ScopeContext, role: Role) -> ScopeContext:
         allowed_scopes=context.allowed_scopes,
         correlation_id=context.correlation_id,
         session_id_hash=context.session_id_hash,
+    )
+
+
+def with_unit(context: ScopeContext, unit: ActorUnit) -> ScopeContext:
+    """El mismo contexto con ``actor.unit = unit`` (un puerto de U-02 que escribe sus tipos)."""
+    if not isinstance(context, ScopeContext):
+        raise TypeError("context debe ser ScopeContext")
+    actor = context.actor
+    return _seal_scope_context(
+        organization_id=context.organization_id,
+        actor=Actor(
+            kind=actor.kind,
+            id=actor.id,
+            display_name_snapshot=actor.display_name_snapshot,
+            unit=ActorUnit(unit),
+            role_in_use=actor.role_in_use,
+            concession_id=actor.concession_id,
+        ),
+        origin=context.origin,
+        allowed_scopes=context.allowed_scopes,
+        correlation_id=context.correlation_id,
+        session_id_hash=context.session_id_hash,
+    )
+
+
+def operator_in_organization(
+    operator_context: ScopeContext,
+    organization_id: uuid.UUID,
+    *,
+    provider_organization_id: uuid.UUID,
+) -> ScopeContext:
+    """La orden administrativa de ``operator_context`` actuando sobre ``organization_id``.
+
+    Solo para la génesis de una organización cliente (BR-NUC-06): mismo actor ``operator``,
+    mismo origen y correlación, **sin asignaciones** en el cliente (``authorize`` no le concede
+    nada allí). ``operator_context`` tiene que salir de ``context_from_operator``: orden
+    administrativa de un operador en la proveedora.
+    """
+    if not isinstance(operator_context, ScopeContext):
+        raise TypeError("operator_context debe ser ScopeContext")
+    for name, value in (
+        ("organization_id", organization_id),
+        ("provider_organization_id", provider_organization_id),
+    ):
+        if type(value) is not uuid.UUID:
+            raise TypeError(f"{name} debe ser uuid.UUID")
+    actor = operator_context.actor
+    if (
+        operator_context.origin is not ContextOrigin.ADMIN_COMMAND
+        or actor.kind is not ActorKind.OPERATOR
+        or operator_context.organization_id != provider_organization_id
+        or organization_id == provider_organization_id
+    ):
+        raise ContextUnavailable(ContextUnavailableReason.OPERATOR_INVALID)
+    return _seal_scope_context(
+        organization_id=organization_id,
+        actor=actor,
+        origin=ContextOrigin.ADMIN_COMMAND,
+        allowed_scopes=(),
+        correlation_id=operator_context.correlation_id,
     )
 
 

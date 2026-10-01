@@ -108,6 +108,24 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # pone la guarda en cada consulta.
         "vigia_platform.identity.authz.context.record_provider_query",
         "vigia_platform.ledger.chain.verify.sql_pass",
+        # identity.application (TASK-126): piezas de las operaciones de jerarquía, cuentas y
+        # roles. Las que reciben una ``Transaction`` consultan solo a través de ella; las que
+        # reciben un ``ScopeContext`` abren su transacción o leen con ``shared.db`` (guardado) o
+        # escriben con ``AuditWriter`` y ``EscritorExpediente`` (registrados).
+        "vigia_platform.identity.application.common.lock_organization",
+        "vigia_platform.identity.application.common.resolve_scope",
+        "vigia_platform.identity.application.common.write_record",
+        "vigia_platform.identity.application.hierarchy.insert_plant",
+        "vigia_platform.identity.application.invitations.deliver",
+        "vigia_platform.identity.application.invitations.issue_invitation",
+        "vigia_platform.identity.application.privacy_notice.record_acceptance",
+        "vigia_platform.identity.application.roles.active_org_administrators",
+        "vigia_platform.identity.application.roles.audit_rejection",
+        "vigia_platform.identity.application.roles.insert_assignment",
+        "vigia_platform.identity.application.roles.load_assignments",
+        "vigia_platform.identity.application.roles.refresh_second_factor_required",
+        "vigia_platform.identity.application.roles.remove_assignment",
+        "vigia_platform.identity.application.users.create_invited_user",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.
