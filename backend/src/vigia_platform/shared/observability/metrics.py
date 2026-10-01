@@ -100,6 +100,8 @@ class MetricName(enum.StrEnum):
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
     OTEL_DROPPED_TOTAL = "otel_dropped_total"
+    # Salud del proceso
+    HEALTH_READY = "health_ready"
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +208,9 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "Relecturas fallidas del gestor de secretos o de KMS.", "PAT-NUC-RES-03", "dependency"),
     _spec(_N.OTEL_DROPPED_TOTAL, _C, "{item}", "Tramos y métricas descartados.",
           "PAT-NUC-RES-03", "signal"),
+    # Salud de vigia-api con la versión desplegada (LC-NUC-31, pendiente nº 12 de U-05).
+    _spec(_N.HEALTH_READY, _G, "1", "Salud profunda: lista (1) o no (0), por versión desplegada.",
+          "LC-NUC-31", "app_version"),
 )  # fmt: skip
 
 
@@ -364,6 +369,7 @@ class PlatformMetrics:
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)
         self.otel_dropped_total = counter(_N.OTEL_DROPPED_TOTAL)
+        self.health_ready = gauge(_N.HEALTH_READY)
 
     def instrument(self, name: MetricName) -> Counter | Histogram | Gauge:
         """Instrumento de ``name`` (el atributo con el nombre publicado)."""
