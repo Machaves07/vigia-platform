@@ -61,6 +61,7 @@ class MetricName(enum.StrEnum):
     HTTP_SERVER_ERRORS_TOTAL = "http_server_errors_total"
     HTTP_SERVER_DURATION_MS = "http_server_duration_ms"
     OPERATION_DURATION_MS = "operation_duration_ms"
+    RATE_LIMITED_TOTAL = "rate_limited_total"
     # Expediente
     LEDGER_WRITES_TOTAL = "ledger_writes_total"
     LEDGER_RECORD_SIZE_BYTES = "ledger_record_size_bytes"
@@ -139,6 +140,8 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.HTTP_SERVER_ERRORS_TOTAL, _C, "{request}", "Respuestas de error por código.", "route",
           "route", "status_class", "code"),
     _spec(_N.HTTP_SERVER_DURATION_MS, _H, "ms", "Latencia por ruta.", "route", "route", "method"),
+    _spec(_N.RATE_LIMITED_TOTAL, _C, "{request}", "Respuestas rate_limited por ruta y límite.",
+          "PAT-NUC-ESC-03", "route", "rate_limit"),
     _spec(_N.OPERATION_DURATION_MS, _H, "ms", "Latencia de las operaciones de NFR-NUC-01.",
           "NFR-NUC-01", "operation"),
     # NFR-NUC-42 · expediente.
@@ -336,6 +339,7 @@ class PlatformMetrics:
         self.http_server_errors_total = counter(_N.HTTP_SERVER_ERRORS_TOTAL)
         self.http_server_duration_ms = histogram(_N.HTTP_SERVER_DURATION_MS)
         self.operation_duration_ms = histogram(_N.OPERATION_DURATION_MS)
+        self.rate_limited_total = counter(_N.RATE_LIMITED_TOTAL)
         self.ledger_writes_total = counter(_N.LEDGER_WRITES_TOTAL)
         self.ledger_record_size_bytes = histogram(_N.LEDGER_RECORD_SIZE_BYTES)
         self.chain_lock_wait_ms = histogram(_N.CHAIN_LOCK_WAIT_MS)

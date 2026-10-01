@@ -21,6 +21,18 @@ Starlette sin declarar). La fábrica no arranca si hay alguno. Cada declaración
 En la petición, ``requires`` delega en el ``Authorizer`` de la aplicación (cadena de middleware,
 TASK-134, y ``identity.authz.authorize``, TASK-125). Sin autorizador instalado **deniega** con
 ``unauthenticated``: nunca deja pasar.
+
+La declaración es el último eslabón de la cadena fija (``request_state.ChainStep.AUTHORIZATION``):
+antes de autorizar, toda ruta (también las públicas) exige que la petición haya pasado por los
+diez eslabones anteriores en su orden y que la ruta que resolvió la cadena sea esta. Si no,
+``internal_error``: una cadena desordenada, incompleta o que resolvió otra ruta nunca deja pasar.
+
+``body_limit(n)`` (opcional, una por ruta) declara un límite de cuerpo propio en bytes para las
+rutas del contrato de U-03 (BR-CTR-12); sin ella rige el de 1 MB de la cadena.
+
+``APP_SCREEN`` (``/{screen_path:path}``) solo se admite en una ruta que coincide únicamente con
+navegaciones a pantallas (``navigation_only``, la ruta de ``shared.api.static``): en cualquier
+otra sería un comodín público delante de la API.
 """
 
 from __future__ import annotations
@@ -28,7 +40,7 @@ from __future__ import annotations
 import enum
 import re
 from collections.abc import Collection, Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final, Protocol
 
 from fastapi import Depends, Request
@@ -37,8 +49,11 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.routing import BaseRoute
 
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode, DetailCodeRegistry
+from vigia_platform.shared.api.request_state import MIDDLEWARE_CHAIN, request_state
+from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
+    "MAX_ROUTE_BODY_LIMIT_BYTES",
     "PERMISSION_KEY",
     "Authorizer",
     "DeclaredRoute",
@@ -46,6 +61,7 @@ __all__ = [
     "Exposure",
     "RouteDeclaration",
     "UnauthenticatedRoute",
+    "body_limit",
     "check_routes",
     "iter_declared_routes",
     "requires",
@@ -54,6 +70,10 @@ __all__ = [
 
 PERMISSION_KEY: Final = re.compile(r"[a-z][a-z_]{0,31}(?:\.[a-z][a-z_]{0,31}){1,3}")
 """Forma de una clave de permiso (``ledger.read``, ``platform.keys.rotate``)."""
+MAX_ROUTE_BODY_LIMIT_BYTES: Final = 16 * 1024 * 1024
+"""Tope de un límite de cuerpo propio (``body_limit``) ``[objetivo propio]``."""
+
+_log = get_logger("shared.api.declarations")
 
 _DOCS_PATHS: Final = frozenset({"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"})
 """Rutas de documentación que FastAPI añade por su cuenta; solo existen fuera de producción."""
@@ -134,7 +154,20 @@ class _Declared:
     def __init__(self, declaration: RouteDeclaration) -> None:
         self.declaration = declaration
 
+    def _chain_completed(self, request: Request) -> bool:
+        """¿Pasó la petición por los diez eslabones, en orden, y resolvió esta misma ruta?"""
+        state = request_state(request.scope)
+        route = state.route
+        return (
+            tuple(state.trace) == MIDDLEWARE_CHAIN
+            and route is not None
+            and any(found is self.declaration for found in route.declarations)
+        )
+
     async def __call__(self, request: Request) -> None:
+        if not self._chain_completed(request):
+            _log.error("petición sin la cadena de middleware completa: se deniega")
+            raise ApiError(ApiErrorCode.INTERNAL_ERROR)
         permission = self.declaration.permission
         if permission is None:
             return
@@ -156,6 +189,23 @@ def unauthenticated(route: UnauthenticatedRoute, *, detail_codes: Iterable[str] 
     return Depends(_Declared(RouteDeclaration(None, route, tuple(detail_codes))))
 
 
+class _BodyLimit:
+    """Dependencia marcada con el límite de cuerpo propio de una ruta; no hace nada al llamarla."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max_bytes
+
+    async def __call__(self) -> None:
+        return None
+
+
+def body_limit(max_bytes: int) -> Any:
+    """Dependencia que declara el límite de cuerpo propio de la ruta (rutas del contrato)."""
+    if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_ROUTE_BODY_LIMIT_BYTES:
+        raise ValueError(f"el límite de cuerpo debe ser de 1 a {MAX_ROUTE_BODY_LIMIT_BYTES} bytes")
+    return Depends(_BodyLimit(max_bytes))
+
+
 def _walk(dependant: Dependant | None) -> Iterator[Dependant]:
     if dependant is None:
         return
@@ -172,6 +222,12 @@ class DeclaredRoute:
     methods: frozenset[str]
     is_api_route: bool
     declarations: tuple[RouteDeclaration, ...]
+    body_limits: tuple[int, ...] = ()
+    """Límites de cuerpo propios declarados (``body_limit``); como mucho uno es válido."""
+    navigation_only: bool = False
+    """La ruta solo coincide con navegaciones a pantallas (``shared.api.static``)."""
+    route: BaseRoute | None = field(default=None, compare=False, repr=False)
+    """La ruta original de FastAPI o Starlette."""
 
 
 def iter_declared_routes(routes: Sequence[BaseRoute]) -> Iterator[DeclaredRoute]:
@@ -183,6 +239,7 @@ def iter_declared_routes(routes: Sequence[BaseRoute]) -> Iterator[DeclaredRoute]
     for context in iter_route_contexts(routes):
         original = context.original_route
         found: dict[int, RouteDeclaration] = {}
+        limits: dict[int, int] = {}
         dependants = [original.dependant if isinstance(original, APIRoute) else None]
         effective = getattr(context, "dependant", None)
         if effective is not None and effective is not dependants[0]:
@@ -191,11 +248,16 @@ def iter_declared_routes(routes: Sequence[BaseRoute]) -> Iterator[DeclaredRoute]
             for node in _walk(dependant):
                 if isinstance(node.call, _Declared):
                     found.setdefault(id(node.call), node.call.declaration)
+                elif isinstance(node.call, _BodyLimit):
+                    limits.setdefault(id(node.call), node.call.max_bytes)
         yield DeclaredRoute(
             path=str(context.path or getattr(original, "path", "") or "?"),
             methods=frozenset(context.methods or ()),
             is_api_route=isinstance(original, APIRoute),
             declarations=tuple(found.values()),
+            body_limits=tuple(limits.values()),
+            navigation_only=getattr(original, "navigation_only", False) is True,
+            route=original,
         )
 
 
@@ -216,6 +278,13 @@ def _route_problems(
         return [f"la ruta {where} tiene {len(declarations)} declaraciones; debe tener una"]
     declaration = declarations[0]
     problems: list[str] = []
+    if len(route.body_limits) > 1:
+        problems.append(f"la ruta {where} declara {len(route.body_limits)} límites de cuerpo")
+    if (declaration.unauthenticated is UnauthenticatedRoute.APP_SCREEN) != route.navigation_only:
+        problems.append(
+            f"la ruta {where}: «APP_SCREEN» solo se admite en la ruta de pantallas, que coincide "
+            "únicamente con navegaciones (D-3)"
+        )
     if declaration.permission is not None:
         key = declaration.permission
         if not isinstance(key, str) or PERMISSION_KEY.fullmatch(key) is None:

@@ -58,6 +58,7 @@ __all__ = [
     "ResourceNotFound",
     "decide",
     "role_in_use",
+    "route_role",
 ]
 
 _SPECIFICITY: Final = {ScopeLevel.ZONE: 0, ScopeLevel.PLANT: 1, ScopeLevel.ORGANIZATION: 2}
@@ -186,6 +187,30 @@ def decide(
         and scope.covers(resource.organization_id, resource.plant_id, resource.zone_id)
     ]
     return Decision(role_in_use(candidates))
+
+
+def route_role(
+    context: ScopeContext, key: PermissionKey | str, *, provider_organization_id: uuid.UUID
+) -> Role | None:
+    """El rol con el que ``context`` puede usar una ruta que exige ``key``, o ``None``.
+
+    Es la autorización **por ruta** de la cadena de middleware (paso 10 de PAT-NUC-SEG-06): aún
+    no hay recurso, así que basta con que alguna asignación que cuenta en este contexto tenga la
+    clave en la matriz, con las mismas reglas de proveedor y de concesión que ``decide``. El
+    servicio vuelve a autorizar sobre el recurso real (``Authorizer.authorize``) antes de tocarlo.
+    """
+    if not isinstance(context, ScopeContext):
+        raise ContextAbsent("route_role")
+    key = permission_key(key)
+    if is_platform_key(key) and (
+        context.organization_id != provider_organization_id or context.concession_id is not None
+    ):
+        return None
+    return role_in_use(
+        scope
+        for scope in context.allowed_scopes
+        if key in MATRIX[scope.role] and _counts(scope, context, provider_organization_id)
+    )
 
 
 class AuthorizationAudit(Protocol):
