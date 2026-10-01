@@ -70,11 +70,15 @@ def make_context(
         role_in_use=Role.COORDINATOR_SST if kind is ActorKind.USER else None,
         concession_id=concession_id,
     )
+    organization_id = organization_id or uuid.uuid4()
     return _seal_scope_context(
-        organization_id=organization_id or uuid.uuid4(),
+        organization_id=organization_id,
         actor=actor,
         origin=origin,
-        allowed_scopes=[AllowedScope(ScopeLevel.ORGANIZATION, uuid.uuid4(), Role.COORDINATOR_SST)],
+        # Un alcance de organización tiene ``scope_id = organization_id`` (role_assignment).
+        allowed_scopes=[
+            AllowedScope(ScopeLevel.ORGANIZATION, organization_id, Role.COORDINATOR_SST)
+        ],
         correlation_id=uuid7(),
         session_id_hash=session_hash() if origin is ContextOrigin.SESSION else None,
     )

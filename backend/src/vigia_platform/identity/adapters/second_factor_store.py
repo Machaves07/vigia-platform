@@ -41,7 +41,7 @@ from vigia_platform.identity.auth.second_factor import (
 from vigia_platform.identity.auth.sessions import SessionEndReason
 from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter, ResourceRef
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 
 __all__ = ["PostgresSecondFactorStore"]
 
@@ -131,6 +131,7 @@ def _uuid(value: uuid.UUID) -> uuid.UUID:
     return uuid.UUID(bytes=value.bytes)
 
 
+@repository
 class PostgresSecondFactorStore:
     """``SecondFactorStore`` con ``shared.db`` y la auditoría en la misma transacción."""
 
