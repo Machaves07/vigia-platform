@@ -614,7 +614,9 @@ class EscritorExpediente:
         ):
             raise TypeError("transaction debe ser una Transaction de la organización del contexto")
         try:
-            prepared = await self._prepare(context, record_type, content, scope, events)
+            prepared = await self._prepare(
+                context, record_type, content, scope, events, transaction
+            )
         except _Rejected as rejected:
             return rejected.rejection
         if isinstance(prepared, Receipt):
@@ -640,6 +642,7 @@ class EscritorExpediente:
         content: object,
         scope: RecordScope | None,
         events: Sequence[NewEvent],
+        transaction: Transaction | None = None,
     ) -> _Prepared | Receipt:
         document = _document(content)
         # (1) contexto de la organización del contenido.
@@ -647,9 +650,9 @@ class EscritorExpediente:
             organization = _uuid_or_none(document["organization_id"])
             if organization is not None and organization != context.organization_id:
                 raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/organization_id")
-        # (1) y la planta o zona del registro, dentro del alcance de la sesión (BR-NUC-45).
+        # (1) y la planta o zona del registro, dentro del alcance de la sesión (BR-NUC-45). La
+        # coherencia zona → planta, que consulta la base, va al empezar el paso 5.
         _require_scope_within_context(context, document, scope)
-        await self._require_zone_of_plant(context, document, scope)
         # (2) tipo registrado y unidad autorizada.
         compiled = self._compiled(context, record_type)
         # (3) esquema y tamaño, con todo lo que se exige al contenido: la clave de idempotencia
@@ -662,6 +665,9 @@ class EscritorExpediente:
         self._apply_free_text(compiled, document)
         content_bytes = await self._canonical(document)
         content_hash = hashlib.sha256(content_bytes).hexdigest()
+        # (1) con la base: la zona de una sesión existe y es de la planta del registro. Es la
+        # primera consulta: los pasos 1 a 4 nunca la alcanzan con un contenido inválido.
+        await self._require_zone_of_plant(context, document, scope, transaction)
         # (5) idempotencia.
         if source_key is not None:
             existing = await self._by_source_key(context, compiled, source_key)
@@ -685,26 +691,34 @@ class EscritorExpediente:
         )
 
     async def _require_zone_of_plant(
-        self, context: ScopeContext, document: object, scope: RecordScope | None
+        self,
+        context: ScopeContext,
+        document: object,
+        scope: RecordScope | None,
+        transaction: Transaction | None = None,
     ) -> None:
-        """Si la sesión cubre el registro solo por su zona, la zona es de la planta (BR-NUC-45).
+        """Con una sesión, la zona del registro existe y es de su planta (BR-NUC-45).
 
         ``AllowedScope.covers`` de zona no mira la planta: sin esta comprobación, quien tiene
         una zona escribiría con su zona y la planta de otro, y el registro entraría en la cadena
-        de esa planta. Con la planta cubierta por sí misma (alcance de planta u organización) no
-        hace falta consultar. Zona inexistente o de otra planta → ``context_absent`` en
-        ``/plant_id``.
+        de esa planta. Con alcance de planta pasa lo simétrico: quien tiene la planta P escribiría
+        en la cadena de P un registro con una zona de otra planta (o inexistente), y quien tiene
+        esa zona lo vería (seguimiento de VIG-73 cerrado en TASK-126). Por eso se consulta
+        ``identity.zone`` siempre que una sesión escribe planta y zona, cubra lo que cubra. Con la
+        transacción del llamador la consulta va en ella: ve la zona que el llamador acaba de crear
+        (``zone_created``). Zona inexistente o de otra planta → ``context_absent`` en
+        ``/plant_id`` (la pareja planta-zona no es coherente; el puntero es el de VIG-73).
         """
         if context.origin is not ContextOrigin.SESSION or not isinstance(document, Mapping):
             return
         plant_id, zone_id = _record_place(document, scope)
-        if plant_id is None or zone_id is None or context.covers(plant_id):
+        if plant_id is None or zone_id is None:
             return
-        rows = await self._database.read(
-            context,
-            _ZONE_PLANT,
-            {"organization_id": context.organization_id, "zone_id": zone_id},
-        )
+        parameters = {"organization_id": context.organization_id, "zone_id": zone_id}
+        if transaction is not None:
+            rows: Sequence[Row[Any]] = (await transaction.execute(_ZONE_PLANT, parameters)).all()
+        else:
+            rows = await self._database.read(context, _ZONE_PLANT, parameters)
         if not rows or rows[0].plant_id != plant_id:
             raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
 

@@ -8,10 +8,11 @@
   ``privacy_notice_accepted`` con la versión. La usan la activación de la cuenta
   (``identity.application.invitations``) y la aceptación de una versión nueva.
 - ``PrivacyNoticeService.accept``: la aceptación de una versión nueva en el siguiente inicio de
-  sesión (ruta ``POST /privacy-notice/accept``, TASK-135). Recibe el ``SessionScope`` que el
+  sesión (ruta ``POST /privacy-notice/accept``, TASK-135). Recibe el contexto que el
   constructor de contextos entrega **solo** a esa ruta (``privacy_notice_acceptance=True``):
   sin la aceptación vigente, cualquier otra ruta recibe ``privacy_notice_required`` y este
-  contexto no lleva asignaciones, así que no sirve para nada más.
+  contexto no lleva asignaciones, así que no sirve para nada más. Es un repositorio registrado
+  (``@repository``): sin contexto, ``ContextAbsent`` y ``context_absent_attempt`` (PR-NUC-02).
 
 Solo se acepta la versión vigente: aceptar otra es ``privacy_notice_outdated``.
 """
@@ -32,13 +33,13 @@ from vigia_platform.identity.application.common import (
     IdentityRejected,
     IdentityRejection,
 )
-from vigia_platform.identity.authz.context import SessionScope
 from vigia_platform.identity.domain.privacy_notice import (
     CURRENT_PRIVACY_NOTICE_VERSION,
     PRIVACY_NOTICE_PENDING_LEGAL_TEXT,
     PRIVACY_NOTICE_VERSION_PATTERN,
 )
 from vigia_platform.ledger.application.audit_writer import AuditOperation, ResourceRef
+from vigia_platform.shared.context import ActorKind, ContextOrigin, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 
@@ -142,32 +143,34 @@ async def record_acceptance(
     return acceptance_id
 
 
+@repository
 class PrivacyNoticeService:
     """Aceptación de la versión vigente con sesión (``POST /privacy-notice/accept``)."""
 
     def __init__(self, deps: IdentityDependencies) -> None:
         self._deps = deps
 
-    async def accept(self, session: SessionScope, version: str) -> bool:
+    async def accept(self, context: ScopeContext, version: str) -> bool:
         """Acepta ``version`` (la vigente); ``False`` si ya estaba aceptada (sin escribir nada).
 
-        ``session`` es el de ``context_from_session(..., privacy_notice_acceptance=True)``: la
-        persona de la sesión acepta por sí misma, nunca bajo concesión.
+        ``context`` es el de ``context_from_session(..., privacy_notice_acceptance=True)``
+        (``SessionScope.context``): la persona de la sesión acepta por sí misma, nunca bajo
+        concesión ni desde un contexto que no sea de sesión.
         """
-        if not isinstance(session, SessionScope):
-            raise TypeError("session debe ser SessionScope")
-        context = session.context
-        if context.concession_id is not None or context.actor.id != session.user_id:
+        if (
+            context.origin is not ContextOrigin.SESSION
+            or context.actor.kind is not ActorKind.USER
+            or context.concession_id is not None
+        ):
             raise IdentityRejected(IdentityRejection.USER_STATE)
+        user_id = context.actor.id
         accepted = require_current_version(version)
         deps = self._deps
         async with deps.database.transaction(context) as transaction:
-            row = (
-                await transaction.execute(_USER_FOR_ACCEPTANCE, {"user_id": session.user_id})
-            ).first()
+            row = (await transaction.execute(_USER_FOR_ACCEPTANCE, {"user_id": user_id})).first()
             if row is None or row.status != "active":
                 raise IdentityRejected(IdentityRejection.USER_STATE)
             if row.privacy_notice_version_accepted == accepted:
                 return False
-            await record_acceptance(deps, transaction, session.user_id, accepted, deps.clock.now())
+            await record_acceptance(deps, transaction, user_id, accepted, deps.clock.now())
         return True

@@ -20,8 +20,10 @@ valor concreto:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -52,6 +54,11 @@ from vigia_platform.identity.application.users import InviteRequest, ProfileChan
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
+from vigia_platform.ledger.application.writer import (
+    LedgerRejection,
+    LedgerRejectionCode,
+    RecordScope,
+)
 from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 
 pytestmark = pytest.mark.integration
@@ -328,10 +335,11 @@ def test_without_current_notice_there_is_no_usable_context_except_to_accept(
         env.run(env.users().update_profile(pending.context, user, ProfileChange(display_name="X")))
     # Una versión vieja no vale; la vigente sí, y desde ahí hay contexto con sus asignaciones.
     with pytest.raises(IdentityRejected) as outdated:
-        env.run(env.privacy_notice().accept(pending, "v0-anterior"))
+        env.run(env.privacy_notice().accept(pending.context, "v0-anterior"))
     assert outdated.value.code is IdentityRejection.PRIVACY_NOTICE_OUTDATED
-    assert env.run(env.privacy_notice().accept(pending, CURRENT_PRIVACY_NOTICE_VERSION)) is True
-    assert env.run(env.privacy_notice().accept(pending, CURRENT_PRIVACY_NOTICE_VERSION)) is False
+    notice = env.privacy_notice()
+    assert env.run(notice.accept(pending.context, CURRENT_PRIVACY_NOTICE_VERSION)) is True
+    assert env.run(notice.accept(pending.context, CURRENT_PRIVACY_NOTICE_VERSION)) is False
     usable = env.run(contexts.context_from_session(cookie))
     assert usable.context.allowed_scopes
     (acceptance,) = env.fetch(
@@ -461,10 +469,24 @@ def test_deactivation_closes_sessions_and_reactivation_discards_credentials(
     env.run(env.users().deactivate_user(org.admin(), outcome.user_id))
     with pytest.raises(ContextUnavailable):
         env.run(env.authz.contexts.context_from_session(cookie))
+    # BR-NUC-33: la sesión queda cerrada en la base con su motivo, no solo inutilizable.
+    (session,) = env.fetch(
+        "SELECT status, end_reason, ended_at FROM identity.session WHERE session_id_hash = $1",
+        cookie.session_id_hash,
+    )
+    assert (session["status"], session["end_reason"]) == ("revoked", "user_deactivated")
+    assert session["ended_at"] is not None
     rows = env.fetch(
         "SELECT removed_at FROM identity.role_assignment WHERE user_id = $1", outcome.user_id
     )
     assert rows and all(row["removed_at"] is not None for row in rows)
+    # BR-NUC-33: la invitación pendiente de una cuenta desactivada queda cancelada.
+    pending = _invite(env, org, new_email())
+    env.run(env.users().deactivate_user(org.admin(), pending.user_id))
+    (invitation,) = env.fetch(
+        "SELECT status FROM identity.invitation WHERE invitation_id = $1", pending.invitation_id
+    )
+    assert invitation["status"] == "cancelled"
     with pytest.raises(IdentityRejected) as again:
         env.run(env.users().deactivate_user(org.admin(), outcome.user_id))
     assert again.value.code is IdentityRejection.USER_STATE
@@ -674,3 +696,260 @@ def test_database_rejects_an_assignment_scoped_to_another_organization(
         with pytest.raises(asyncpg.exceptions.CheckViolationError, match="no es de su"):
             env.run(insert(level, scope_id))
     env.run(insert("plant", first.plant_id))
+
+
+# --- Guardas de alcance de sesión (revisión ronda 1, bloqueantes 1 y 2) -------------------------
+
+
+@dataclass(frozen=True)
+class TwoPlants:
+    """Una organización con dos plantas, una zona y un nodo asignado en cada una."""
+
+    org: Organization
+    own_plant: uuid.UUID
+    other_plant: uuid.UUID
+    own_zone: uuid.UUID
+    other_zone: uuid.UUID
+    own_node: uuid.UUID
+    other_node: uuid.UUID
+    other_user: uuid.UUID
+    other_assignment: uuid.UUID
+
+
+def _two_plants(env: HierarchyEnvironment) -> TwoPlants:
+    org = Organization(env)
+    hierarchy = env.hierarchy()
+    admin = org.admin()
+    other = env.run(hierarchy.create_plant(admin, _plant())).plant_id
+    zones, nodes = {}, {}
+    for plant in (org.plant_id, other):
+        zones[plant] = env.run(
+            hierarchy.create_zone(admin, plant, ZoneSpec(new_code("ZN"), "Zona"))
+        ).zone_id
+        nodes[plant] = env.run(hierarchy.declare_node(admin, plant, new_code("ND"))).node_id
+        env.run(hierarchy.assign_node_to_zone(admin, nodes[plant], zones[plant]))
+    other_user = env.authz.sessions.add_user(org.organization_id).user_id
+    other_assignment = env.authz.assign(
+        org.organization_id, other_user, Role.COPASST, ScopeLevel.ZONE, zones[other]
+    )
+    env.advance(1)
+    return TwoPlants(
+        org,
+        org.plant_id,
+        other,
+        zones[org.plant_id],
+        zones[other],
+        nodes[org.plant_id],
+        nodes[other],
+        other_user,
+        other_assignment,
+    )
+
+
+def test_a_plant_session_cannot_reach_another_plant(env: HierarchyEnvironment) -> None:
+    """Un administrador de planta no llega a la otra planta por ningún puerto (BR-NUC-09, 12)."""
+    site = _two_plants(env)
+    plant_admin = env.authz.sessions.add_user(site.org.organization_id).user_id
+    env.authz.assign(
+        site.org.organization_id, plant_admin, Role.ADMINISTRATOR, ScopeLevel.PLANT, site.own_plant
+    )
+    # Otro administrador de la otra planta: nunca es destinatario de lo de la planta propia.
+    foreign_admin = env.authz.sessions.add_user(site.org.organization_id).user_id
+    env.authz.assign(
+        site.org.organization_id,
+        foreign_admin,
+        Role.ADMINISTRATOR,
+        ScopeLevel.PLANT,
+        site.other_plant,
+    )
+    context = env.session_context(site.org.organization_id, plant_admin)
+    hierarchy, roles = env.hierarchy(), env.roles()
+    not_found = (
+        hierarchy.create_zone(context, site.other_plant, ZoneSpec(new_code("ZN"), "Z")),
+        hierarchy.declare_node(context, site.other_plant, new_code("ND")),
+        hierarchy.update_node(context, site.other_node, "enrolled", None),
+        hierarchy.assign_node_to_zone(context, site.own_node, site.other_zone),
+        hierarchy.unassign_node(context, site.other_zone),
+        roles.assign_role(
+            context,
+            site.other_user,
+            AssignmentRequest(Role.COORDINATOR_SST, ScopeLevel.ZONE, site.other_zone),
+        ),
+        roles.remove_role(context, site.other_user, site.other_assignment),
+        hierarchy.users_by_role_and_scope(
+            context, [Role.COPASST], ScopeLevel.PLANT, site.other_plant
+        ),
+        hierarchy.users_by_role_and_scope(
+            context, [Role.COPASST], ScopeLevel.ZONE, site.other_zone
+        ),
+        hierarchy.users_by_role_and_scope(
+            context, [Role.ADMINISTRATOR], ScopeLevel.ORGANIZATION, site.org.organization_id
+        ),
+    )
+    for call in not_found:
+        with pytest.raises(ResourceNotFound):
+            env.run(call)
+    assert env.run(hierarchy.node_identity(context, site.other_node)) is None
+    assert env.run(hierarchy.assigned_node(context, site.other_zone)) is None
+    view = env.run(hierarchy.hierarchy(context))
+    assert [plant.plant_id for plant in view.plants] == [site.own_plant]
+    assert [zone.zone_id for zone in view.plants[0].zones] == [site.own_zone]
+    assert [node.node_id for node in view.nodes] == [site.own_node]
+    # Lo propio sí lo alcanza.
+    assert env.run(hierarchy.node_identity(context, site.own_node)) is not None
+    assert env.run(hierarchy.assigned_node(context, site.own_zone)).node_id == site.own_node
+    recipients = env.run(
+        hierarchy.users_by_role_and_scope(
+            context, [Role.ADMINISTRATOR], ScopeLevel.ZONE, site.own_zone
+        )
+    )
+    assert {r.user_id for r in recipients} == {plant_admin, site.org.admin_id}
+    # Nada cambió en la otra planta.
+    (current,) = env.fetch(
+        "SELECT node_id FROM identity.zone_node_assignment WHERE zone_id = $1"
+        " AND unassigned_at IS NULL",
+        site.other_zone,
+    )
+    assert current["node_id"] == site.other_node
+
+
+def test_a_zone_session_and_a_pending_notice_see_only_their_scope(
+    env: HierarchyEnvironment,
+) -> None:
+    site = _two_plants(env)
+    hierarchy = env.hierarchy()
+    zone_context = env.session_context(site.org.organization_id, site.other_user)
+    view = env.run(hierarchy.hierarchy(zone_context))
+    assert [plant.plant_id for plant in view.plants] == [site.other_plant]
+    assert [zone.zone_id for zone in view.plants[0].zones] == [site.other_zone]
+    assert view.nodes == ()  # una zona no cubre su planta: no ve la flota
+    assert env.run(hierarchy.node_identity(zone_context, site.other_node)) is None
+    assert env.run(hierarchy.assigned_node(zone_context, site.own_zone)) is None
+    assert env.run(hierarchy.assigned_node(zone_context, site.other_zone)).node_id == (
+        site.other_node
+    )
+    for level, scope_id in (
+        (ScopeLevel.PLANT, site.own_plant),
+        (ScopeLevel.PLANT, site.other_plant),
+        (ScopeLevel.ZONE, site.own_zone),
+        (ScopeLevel.ORGANIZATION, site.org.organization_id),
+    ):
+        with pytest.raises(ResourceNotFound):
+            env.run(
+                hierarchy.users_by_role_and_scope(
+                    zone_context, [Role.ADMINISTRATOR], level, scope_id
+                )
+            )
+    own = env.run(
+        hierarchy.users_by_role_and_scope(
+            zone_context, [Role.COPASST], ScopeLevel.ZONE, site.other_zone
+        )
+    )
+    assert [r.user_id for r in own] == [site.other_user]
+    # El contexto del aviso pendiente no tiene asignaciones: no obtiene ningún destinatario.
+    pending_user = env.authz.sessions.add_user(site.org.organization_id, privacy_notice=None)
+    env.authz.assign(site.org.organization_id, pending_user.user_id, Role.ADMINISTRATOR)
+    cookie = env.authz.open_session(site.org.organization_id, pending_user.user_id)
+    pending = env.run(
+        env.authz.contexts.context_from_session(cookie, privacy_notice_acceptance=True)
+    ).context
+    for level, scope_id in (
+        (ScopeLevel.ORGANIZATION, site.org.organization_id),
+        (ScopeLevel.PLANT, site.own_plant),
+        (ScopeLevel.ZONE, site.own_zone),
+    ):
+        with pytest.raises(ResourceNotFound):
+            env.run(
+                hierarchy.users_by_role_and_scope(pending, [Role.ADMINISTRATOR], level, scope_id)
+            )
+    assert env.run(hierarchy.hierarchy(pending)).plants == ()
+
+
+# --- Escritor: la zona es de la planta también con alcance de planta (menor a) ------------------
+
+
+def _node_zone_assigned(zone_id: uuid.UUID, node_id: uuid.UUID, actor: uuid.UUID) -> dict[str, Any]:
+    return {
+        "assignment_id": str(uuid.uuid4()),
+        "zone_id": str(zone_id),
+        "node_id": str(node_id),
+        "assigned_at": "2026-10-01T08:00:00.000Z",
+        "assigned_by": str(actor),
+    }
+
+
+def test_writer_rejects_a_foreign_or_missing_zone_under_a_covered_plant(
+    env: HierarchyEnvironment,
+) -> None:
+    """Seguimiento de VIG-73 (S7, variante de planta): con la planta cubierta, la zona tiene que
+    existir y ser de esa planta; si no, ``context_absent`` y nada en la cadena."""
+    site = _two_plants(env)
+    plant_admin = env.authz.sessions.add_user(site.org.organization_id).user_id
+    env.authz.assign(
+        site.org.organization_id, plant_admin, Role.ADMINISTRATOR, ScopeLevel.PLANT, site.own_plant
+    )
+    for context in (
+        env.session_context(site.org.organization_id, plant_admin),  # alcance de planta
+        site.org.admin(),  # alcance de organización
+    ):
+        for zone_id in (site.other_zone, uuid.uuid4()):
+            result = env.run(
+                env.writer.write(
+                    context,
+                    "node_zone_assigned",
+                    _node_zone_assigned(zone_id, site.own_node, context.actor.id),
+                    scope=RecordScope(plant_id=site.own_plant),
+                )
+            )
+            assert isinstance(result, LedgerRejection), zone_id
+            assert result.code is LedgerRejectionCode.CONTEXT_ABSENT
+            assert result.field == "/plant_id"
+        accepted = env.run(
+            env.writer.write(
+                context,
+                "node_zone_assigned",
+                _node_zone_assigned(site.own_zone, site.own_node, context.actor.id),
+                scope=RecordScope(plant_id=site.own_plant),
+            )
+        )
+        assert not isinstance(accepted, LedgerRejection)
+    # Ningún registro cita la zona ajena en la cadena de la planta propia.
+    assert not env.fetch(
+        "SELECT 1 FROM ledger.ledger_record WHERE organization_id = $1 AND plant_id = $2"
+        " AND scope_zone_id <> ALL($3::uuid[])",
+        site.org.organization_id,
+        site.own_plant,
+        [site.own_zone],
+    )
+
+
+# --- BR-NUC-31 con desactivaciones cruzadas concurrentes (menor 2) -------------------------------
+
+
+def test_crossed_concurrent_deactivations_keep_an_active_administrator(
+    env: HierarchyEnvironment,
+) -> None:
+    org = Organization(env)
+    second = env.authz.sessions.add_user(org.organization_id).user_id
+    env.authz.assign(org.organization_id, second, Role.ADMINISTRATOR)
+    first_context = org.admin()
+    second_context = env.session_context(org.organization_id, second)
+    users = env.users()
+
+    async def both() -> list[object]:
+        return await asyncio.gather(
+            users.deactivate_user(first_context, second),
+            users.deactivate_user(second_context, org.admin_id),
+            return_exceptions=True,
+        )
+
+    results = env.run(both())
+    assert sum(result is None for result in results) == 1, results
+    active = env.fetch(
+        "SELECT count(*) FROM identity.user_account u JOIN identity.role_assignment r"
+        " ON r.user_id = u.user_id AND r.removed_at IS NULL AND r.role = 'administrator'"
+        " AND r.scope_level = 'organization' WHERE u.organization_id = $1"
+        " AND u.status = 'active'",
+        org.organization_id,
+    )
+    assert active[0][0] == 1

@@ -1251,7 +1251,8 @@ def test_writer_rejects_a_plant_or_zone_outside_the_session_scope(
     before = writer.database.probe.opened
     for scopes, pointer in (
         ([AllowedScope(ScopeLevel.PLANT, uuid.uuid4(), Role.ADMINISTRATOR)], "/plant_id"),
-        ([AllowedScope(ScopeLevel.ZONE, place.zone_id, Role.ADMINISTRATOR)], "/zone_id"),
+        # Una zona que no es la del registro (el documento cita la zona del lugar).
+        ([AllowedScope(ScopeLevel.ZONE, uuid.uuid4(), Role.ADMINISTRATOR)], "/zone_id"),
         ([], "/plant_id"),
     ):
         rejection = _write(writer, sealed_context(organization, scopes), zone_document(place))
@@ -1275,7 +1276,10 @@ def test_writer_rejects_a_plant_or_zone_outside_the_session_scope(
 def _insert_hierarchy(
     env: WriterEnvironment, organization_id: uuid.UUID, layout: Mapping[uuid.UUID, uuid.UUID]
 ) -> None:
-    """Organización, una persona y, por cada planta, su zona (``layout``: planta → zona)."""
+    """Organización, una persona y, por cada planta, su zona (``layout``: planta → zona).
+
+    Idempotente: lo que ``PlaceSeeder`` ya dio de alta para un ``Place`` se conserva.
+    """
 
     async def insert() -> None:
         user_id = uuid.uuid4()
@@ -1288,7 +1292,8 @@ def _insert_hierarchy(
             await connection.execute(
                 "INSERT INTO identity.organization"
                 " (organization_id, code, name, kind, created_at, created_by)"
-                " VALUES ($1, $2, 'Organización sintética', 'client', $3, $4)",
+                " VALUES ($1, $2, 'Organización sintética', 'client', $3, $4)"
+                " ON CONFLICT DO NOTHING",
                 organization_id,
                 f"ORG-{organization_id.hex[:8].upper()}",
                 created,
@@ -1307,7 +1312,8 @@ def _insert_hierarchy(
                 await connection.execute(
                     "INSERT INTO identity.plant (plant_id, organization_id, code, name, country,"
                     " data_region, timezone, created_at, created_by) VALUES ($1, $2, $3,"
-                    " 'Planta sintética', 'CO', 'us-east-1', 'America/Bogota', $4, $5)",
+                    " 'Planta sintética', 'CO', 'us-east-1', 'America/Bogota', $4, $5)"
+                    " ON CONFLICT DO NOTHING",
                     plant_id,
                     organization_id,
                     f"PL-{plant_id.hex[:6].upper()}",
@@ -1316,7 +1322,8 @@ def _insert_hierarchy(
                 )
                 await connection.execute(
                     "INSERT INTO identity.zone (zone_id, organization_id, plant_id, code, name,"
-                    " created_at, created_by) VALUES ($1, $2, $3, $4, 'Zona sintética', $5, $6)",
+                    " created_at, created_by) VALUES ($1, $2, $3, $4, 'Zona sintética', $5, $6)"
+                    " ON CONFLICT DO NOTHING",
                     zone_id,
                     organization_id,
                     plant_id,
@@ -1365,12 +1372,16 @@ def test_writer_rejects_an_own_zone_under_a_foreign_plant(writer: WriterEnvironm
     # Con su planta real se escribe.
     receipt = _write(writer, context, document(place.plant_id, place.zone_id))
     assert isinstance(receipt, Receipt), receipt
-    # Con la planta cubierta por sí misma (alcance de planta) no se consulta la zona.
+    # Con la planta cubierta por sí misma (alcance de planta) también se comprueba la zona
+    # (variante de planta del seguimiento, TASK-126): la zona propia se acepta y la ajena, no.
     plant_context = sealed_context(
         organization, [AllowedScope(ScopeLevel.PLANT, place.plant_id, Role.ADMINISTRATOR)]
     )
     receipt = _write(writer, plant_context, document(place.plant_id, place.zone_id))
     assert isinstance(receipt, Receipt), receipt
+    rejection = _write(writer, plant_context, document(place.plant_id, foreign_zone))
+    assert isinstance(rejection, LedgerRejection), rejection
+    assert (rejection.code, rejection.field) == (LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
 
 
 def test_scope_containment_edges() -> None:

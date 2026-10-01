@@ -48,6 +48,7 @@ from tests.writer_support import (
     localize_finding,
     order_document,
     organization_counts,
+    real_concession,
     unit_context,
     writer_environment,
     zone_document,
@@ -257,8 +258,15 @@ def test_valid_content_is_accepted_with_the_actor_snapshot(
 ) -> None:
     kind, role = actor
     place = Place.new()
+    # El actor del proveedor escribe bajo una concesión real: sin ella no ve la zona (nuc_0009).
+    concession = real_concession(place) if kind is ActorKind.PROVIDER_USER else None
     context = unit_context(
-        place.organization_id, ActorUnit.U02, kind=kind, role=role, display_name=display
+        place.organization_id,
+        ActorUnit.U02,
+        kind=kind,
+        role=role,
+        display_name=display,
+        concession_id=concession,
     )
     receipt = _accepted(_write(environment, context, ZONE_TYPE, zone_document(place, name)))
     row = environment.loop.run(fetch_record(environment.migrated, receipt.record_id))

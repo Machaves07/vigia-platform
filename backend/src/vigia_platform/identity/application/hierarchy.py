@@ -614,6 +614,13 @@ class HierarchyService:
         deps = self._deps
         wanted = sorted({Role(role).value for role in roles})
         target = await resolve_scope(deps, context, scope_level, scope_id)
+        # Con una sesión, el alcance pedido tiene que estar cubierto por sus asignaciones
+        # (BR-NUC-09, 12): si no, como inexistente. Un alcance de organización solo lo cubre una
+        # asignación de organización; el contexto del aviso pendiente, sin asignaciones, no cubre
+        # nada.
+        zone_id = target.scope_id if target.level is ScopeLevel.ZONE else None
+        if not _whole_organization(context) and not context.covers(target.plant_id, zone_id):
+            raise ResourceNotFound()
         if not wanted:
             return ()
         rows = await deps.database.read(context, _RECIPIENTS, {"roles": wanted})
