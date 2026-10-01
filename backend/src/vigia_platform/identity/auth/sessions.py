@@ -69,7 +69,7 @@ from datetime import datetime, timedelta
 from typing import Final, Protocol
 
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ContextAbsent, ScopeContext, repository
 
 __all__ = [
     "ABSOLUTE_TIMEOUT",
@@ -418,6 +418,7 @@ class SessionContexts(Protocol):
         ...
 
 
+@repository
 class SessionService:
     """Validación, cierre, ``close_others`` e invalidación de sesiones (LC-NUC-03)."""
 

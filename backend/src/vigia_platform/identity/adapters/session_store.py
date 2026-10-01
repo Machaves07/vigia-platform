@@ -66,7 +66,7 @@ from vigia_platform.ledger.application.audit_writer import (
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
@@ -383,6 +383,7 @@ def register_session_tasks(
     )
 
 
+@repository
 class PostgresSessionStore:
     """``SessionStore`` y ``LoginStore`` con ``shared.db``, la auditoría y la bandeja."""
 

@@ -68,6 +68,7 @@ from vigia_platform.shared.context import (
     Actor,
     ActorKind,
     ActorUnit,
+    ContextAbsent,
     ContextOrigin,
     ScopeContext,
     _seal_scope_context,
@@ -662,7 +663,8 @@ def test_other_unit_context_is_rejected_before_touching_the_store(
     service = service_for(world, store)
     with pytest.raises(CheckpointContextRejected):
         asyncio.run(service.write_checkpoints_now(unit_context(organization_id, unit)))
-    with pytest.raises(CheckpointContextRejected):
+    # Sin contexto: la guarda del registro de repositorios (BR-NUC-02) antes que nada.
+    with pytest.raises(ContextAbsent):
         asyncio.run(service.write_checkpoints_now(None))  # type: ignore[arg-type]
     assert store.calls == 0
 

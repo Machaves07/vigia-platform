@@ -154,6 +154,16 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             ), dict(row)
             assert "vigia.login_lookup" in row["qual"], dict(row)
             continue
+        if row["policyname"] == "concession_lookup":
+            # nuc_0008 (TASK-125): igual, solo dentro de identity.session_concession.
+            assert row["tablename"] in {"provider_concession", "organization"}, dict(row)
+            assert (row["cmd"], row["roles"], row["permissive"]) == (
+                "SELECT",
+                ["vigia_migrate"],
+                "PERMISSIVE",
+            ), dict(row)
+            assert "vigia.concession_lookup" in row["qual"], dict(row)
+            continue
         assert row["cmd"] == "ALL" and row["roles"] == ["public"], dict(row)
         policies.setdefault(row["tablename"], {})[row["policyname"]] = row["permissive"]
     with_plant_or_zone = {

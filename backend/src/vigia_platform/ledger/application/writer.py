@@ -98,7 +98,14 @@ from vigia_platform.ledger.registry import (
     RecordTypeUnknown,
 )
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import (
+    ContextOrigin,
+    ScopeContext,
+    ScopeLevel,
+    handles_absent_context,
+    report_context_absent,
+    repository,
+)
 from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
 from vigia_platform.shared.db import ChainLockedTimeout, Transaction
 from vigia_platform.shared.ids import uuid7
@@ -362,6 +369,11 @@ _BY_SOURCE_KEY: Final = text(
     " AND k.source_key = :source_key"
 )
 
+_ZONE_PLANT: Final = text(
+    "SELECT z.plant_id FROM identity.zone AS z"
+    " WHERE z.organization_id = :organization_id AND z.zone_id = :zone_id"
+)
+
 
 # --- Preparación (todo antes de abrir la transacción) ----------------------------------------
 
@@ -491,12 +503,48 @@ def _resolve_scope(
     return record_scope, chain_plant
 
 
+def _record_place(
+    document: Mapping[str, Any], scope: RecordScope | None
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Planta y zona del registro: lo que lleva el contenido manda sobre ``scope``."""
+    given = scope or RecordScope()
+    plant_id = _uuid_or_none(document.get("plant_id")) or given.plant_id
+    zone_id = _uuid_or_none(document.get("zone_id")) or given.zone_id
+    return plant_id, zone_id
+
+
+def _require_scope_within_context(
+    context: ScopeContext, document: object, scope: RecordScope | None
+) -> None:
+    """Con un contexto de sesión, la planta y la zona del registro están en ``allowed_scopes``.
+
+    Lo que lleva el contenido manda sobre ``scope`` (como en ``_resolve_scope``). Un registro sin
+    planta ni zona (de organización) no se comprueba aquí; tampoco los contextos de evento,
+    iteración u orden administrativa, que actúan sobre su organización entera. Fuera de alcance
+    → ``context_absent`` con el puntero del campo, igual que otra organización.
+    """
+    if context.origin is not ContextOrigin.SESSION or not isinstance(document, Mapping):
+        return
+    plant_id, zone_id = _record_place(document, scope)
+    if plant_id is None and zone_id is None:
+        return
+    if not context.covers(plant_id, zone_id):
+        # Una planta cubierta cubre sus zonas: si falla, es la planta, salvo que el contexto
+        # solo tenga zonas (entonces es la zona).
+        zone_only = zone_id is not None and any(
+            scope.scope_level is ScopeLevel.ZONE for scope in context.allowed_scopes
+        )
+        pointer = "/zone_id" if zone_only or plant_id is None else "/plant_id"
+        raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, pointer)
+
+
 def _parse_timestamp(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+@repository
 class EscritorExpediente:
     """El puerto ``EscritorExpediente`` (business-logic-model §10.1) sobre PostgreSQL."""
 
@@ -521,6 +569,7 @@ class EscritorExpediente:
         self._cpu_pool = cpu_pool
         self._random_bytes = random_bytes
 
+    @handles_absent_context
     async def write(
         self,
         context: ScopeContext | None,
@@ -539,7 +588,7 @@ class EscritorExpediente:
         (fuera del sobre).
         """
         if not isinstance(context, ScopeContext):
-            _log.warning("escritura del expediente sin contexto rechazada")
+            report_context_absent("EscritorExpediente.write")
             return LedgerRejection.of(LedgerRejectionCode.CONTEXT_ABSENT)
         if occurred_at is not None and (
             not isinstance(occurred_at, datetime) or occurred_at.utcoffset() is None
@@ -569,6 +618,9 @@ class EscritorExpediente:
             organization = _uuid_or_none(document["organization_id"])
             if organization is not None and organization != context.organization_id:
                 raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/organization_id")
+        # (1) y la planta o zona del registro, dentro del alcance de la sesión (BR-NUC-45).
+        _require_scope_within_context(context, document, scope)
+        await self._require_zone_of_plant(context, document, scope)
         # (2) tipo registrado y unidad autorizada.
         compiled = self._compiled(context, record_type)
         # (3) esquema y tamaño, con todo lo que se exige al contenido: la clave de idempotencia
@@ -602,6 +654,30 @@ class EscritorExpediente:
             label_evidence_ids=label_evidence,
             events=self._events(compiled, events),
         )
+
+    async def _require_zone_of_plant(
+        self, context: ScopeContext, document: object, scope: RecordScope | None
+    ) -> None:
+        """Si la sesión cubre el registro solo por su zona, la zona es de la planta (BR-NUC-45).
+
+        ``AllowedScope.covers`` de zona no mira la planta: sin esta comprobación, quien tiene
+        una zona escribiría con su zona y la planta de otro, y el registro entraría en la cadena
+        de esa planta. Con la planta cubierta por sí misma (alcance de planta u organización) no
+        hace falta consultar. Zona inexistente o de otra planta → ``context_absent`` en
+        ``/plant_id``.
+        """
+        if context.origin is not ContextOrigin.SESSION or not isinstance(document, Mapping):
+            return
+        plant_id, zone_id = _record_place(document, scope)
+        if plant_id is None or zone_id is None or context.covers(plant_id):
+            return
+        rows = await self._database.read(
+            context,
+            _ZONE_PLANT,
+            {"organization_id": context.organization_id, "zone_id": zone_id},
+        )
+        if not rows or rows[0].plant_id != plant_id:
+            raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
 
     def _compiled(self, context: ScopeContext, record_type: object) -> CompiledType:
         if not isinstance(record_type, str):

@@ -68,7 +68,7 @@ from vigia_platform.ledger.chain.verify import (
     IntegrityResult,
     VerifiedPoint,
 )
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import ProcessKind
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 
@@ -347,6 +347,7 @@ def _pick(chain: CheckpointChain, ledger: TextClause, audit: TextClause) -> Text
     return audit if chain.kind is ChainKind.AUDIT else ledger
 
 
+@repository
 class SqlIntegrityStore:
     """``IntegrityStore`` sobre ``shared.db`` (solo en el worker), ``AuditWriter`` y la bandeja."""
 
