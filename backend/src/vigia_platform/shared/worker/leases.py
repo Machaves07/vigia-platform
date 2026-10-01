@@ -52,7 +52,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
 
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 
 __all__ = [
@@ -303,6 +303,7 @@ def _uuid(value: object) -> uuid.UUID | None:
     return None if value is None else uuid.UUID(str(value))
 
 
+@repository
 class SqlLeaseStore:
     """Arrendamientos sobre ``shared.periodic_task``, cada operación en su transacción.
 
