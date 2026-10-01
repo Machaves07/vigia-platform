@@ -81,9 +81,17 @@ class Spec:
 PUBLIC_CANDIDATES = [
     entry
     for entry in UnauthenticatedRoute
-    if entry not in (UnauthenticatedRoute.HEALTH_LIVE, UnauthenticatedRoute.HEALTH_READY)
+    if entry
+    not in (
+        UnauthenticatedRoute.HEALTH_LIVE,
+        UnauthenticatedRoute.HEALTH_READY,
+        UnauthenticatedRoute.APP_ASSET,
+        UnauthenticatedRoute.APP_VERSION,
+        UnauthenticatedRoute.ROBOTS,
+    )
 ]
-"""Las rutas de salud ya las registra la unidad ``shared``."""
+"""Las rutas de salud ya las registra la unidad ``shared`` y los archivos estáticos la fábrica
+(``shared.api.static``); la pantalla solo existe si la construcción trae ``index.html``."""
 
 
 def _declaration(spec: Spec) -> list[Any]:

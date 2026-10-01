@@ -10,7 +10,9 @@
 - toda ruta declara su clave de permiso, que existe en la matriz, o está en la lista pública
   cerrada (BR-NUC-91, PR-NUC-37), y sus ``detail_code`` están registrados;
 - ``/docs`` y ``/openapi.json`` solo existen en ``local`` y ``test``; en cualquier otro entorno
-  (``pilot``, ``staging-<n>``) responden ``not_found`` (NFR-NUC-23).
+  (``pilot``, ``staging-<n>``) responden ``not_found`` (NFR-NUC-23);
+- la aplicación de página única de ``static_dir`` es servible (``shared.api.static``): su ruta
+  de pantalla va delante de las de la API (solo navegaciones) y sus archivos detrás.
 
 **Al arrancar** (en segundo plano, ``StartupSupervisor``), la lista fija de PAT-NUC-RES-02, en
 este orden: base con la seguridad a nivel de fila en vigor y versión mínima del esquema
@@ -76,6 +78,7 @@ from vigia_platform.shared.api.errors import (
     install_error_handlers,
 )
 from vigia_platform.shared.api.health import (
+    HEALTH_RECORDER_STATE_KEY,
     READINESS_STATE_KEY,
     DatabaseHealthPort,
     ReadinessCheck,
@@ -84,9 +87,16 @@ from vigia_platform.shared.api.health import (
     health_router,
 )
 from vigia_platform.shared.api.labels import DEFAULT_LABELS_PATH, LabelsInvalid, PlatformLabels
+from vigia_platform.shared.api.static import (
+    DEFAULT_STATIC_DIR,
+    StaticSite,
+    StaticSiteInvalid,
+    static_routers,
+)
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeLevel
 from vigia_platform.shared.observability.logging import get_logger
+from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.observability.redaction import (
     DEFAULT_POLICY,
     AttributePolicy,
@@ -166,6 +176,8 @@ class AppConfig(BaseModel):
     health_sentinel_key: str = Field(default="health/ready-sentinel", pattern=_SENTINEL_KEY)
     """Objeto centinela del depósito de evidencias que consulta ``/health/ready``."""
     labels_path: Path = DEFAULT_LABELS_PATH
+    static_dir: Path = DEFAULT_STATIC_DIR
+    """Construcción de la aplicación de página única (``shared.api.static``)."""
     startup_deadline_seconds: float = Field(default=60.0, gt=0, le=600)
     startup_retry_seconds: float = Field(default=5.0, gt=0, le=60)
 
@@ -176,8 +188,9 @@ class AppConfig(BaseModel):
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> AppConfig:
-        """Lee ``VIGIA_ENVIRONMENT``, ``VIGIA_SECRETS_KEY_ARN`` y, si está,
-        ``VIGIA_HEALTH_SENTINEL_KEY``; ``ValueError`` (de Pydantic) si falta o no es válida."""
+        """Lee ``VIGIA_ENVIRONMENT``, ``VIGIA_SECRETS_KEY_ARN`` y, si están,
+        ``VIGIA_HEALTH_SENTINEL_KEY`` y ``VIGIA_STATIC_DIR``; ``ValueError`` (de Pydantic) si
+        falta o no es válida."""
         values: dict[str, Any] = {
             "environment": environ.get("VIGIA_ENVIRONMENT", ""),
             "data_key_id": environ.get("VIGIA_SECRETS_KEY_ARN", ""),
@@ -185,6 +198,9 @@ class AppConfig(BaseModel):
         sentinel = environ.get("VIGIA_HEALTH_SENTINEL_KEY")
         if sentinel is not None:
             values["health_sentinel_key"] = sentinel
+        static_dir = environ.get("VIGIA_STATIC_DIR")
+        if static_dir is not None:
+            values["static_dir"] = Path(static_dir)
         return cls(**values)
 
 
@@ -230,6 +246,8 @@ class AppRuntime:
     on_startup_failure: Callable[[int], None] = _terminate
     attribute_policy: AttributePolicy = DEFAULT_POLICY
     """Política de redacción que amplía la fábrica con las rutas y los motivos de salud."""
+    metrics: PlatformMetrics | None = None
+    """Métricas de la salud (``health_ready``); por defecto, las del proveedor global."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -462,6 +480,7 @@ def _assemble(
     units: tuple[UnitRegistration, ...],
     permissions: Collection[str],
     lifespan: Callable[[FastAPI], contextlib.AbstractAsyncContextManager[None]] | None,
+    site: StaticSite,
 ) -> FastAPI:
     labels = _labels(config)
     detail_codes = _detail_codes(units)
@@ -476,9 +495,13 @@ def _assemble(
         swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect" if docs else None,
         lifespan=lifespan,
     )
+    # Pantallas delante (solo navegaciones, D-3), API en medio, archivos estáticos detrás.
+    screens, files = static_routers(site)
+    app.include_router(screens)
     for unit in units:
         for router in unit.routers:
             app.include_router(router)
+    app.include_router(files)
     problems = check_routes(app.routes, permissions, detail_codes, docs_enabled=docs)
     if problems:
         raise ApiStartupError(problems)
@@ -506,6 +529,27 @@ def _register_observability(app: FastAPI, policy: AttributePolicy) -> None:
     )
 
 
+def _static_site(config: AppConfig) -> StaticSite:
+    try:
+        return StaticSite.load(config.static_dir)
+    except StaticSiteInvalid as error:
+        raise ApiStartupError(error.problems) from None
+
+
+def _health_recorder(
+    site: StaticSite, policy: AttributePolicy, metrics: PlatformMetrics | None
+) -> Callable[[bool], None]:
+    """Publica ``health_ready`` con la dimensión ``app_version`` (LC-NUC-31, pendiente nº 12)."""
+    version = site.metric_version
+    policy.register("app_version", [version])
+
+    def record(ready: bool) -> None:
+        instruments = metrics if metrics is not None else get_metrics()
+        instruments.health_ready.set(1 if ready else 0, {"app_version": version})
+
+    return record
+
+
 def create_app(
     config: AppConfig,
     *,
@@ -531,16 +575,20 @@ def create_app(
         finally:
             await supervisor.stop()
 
+    site = _static_site(config)
     app = _assemble(
         config,
         clock=runtime.clock,
         units=platform_units() if units is None else units,
         permissions=platform_permissions() if permissions is None else permissions,
         lifespan=lifespan,
+        site=site,
     )
     _register_observability(app, runtime.attribute_policy)
+    recorder = _health_recorder(site, runtime.attribute_policy, runtime.metrics)
     setattr(app.state, AUTHORIZER_STATE_KEY, runtime.authorizer)
     setattr(app.state, READINESS_STATE_KEY, supervisor)
+    setattr(app.state, HEALTH_RECORDER_STATE_KEY, recorder)
     return app
 
 
@@ -559,4 +607,5 @@ def build_openapi_app(
         units=platform_units() if units is None else units,
         permissions=platform_permissions() if permissions is None else permissions,
         lifespan=None,
+        site=StaticSite(),
     )

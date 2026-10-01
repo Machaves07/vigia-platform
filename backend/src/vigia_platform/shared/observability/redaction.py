@@ -168,6 +168,7 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "consumer": (),
     "audit_operation": (),
     "table": (),
+    "app_version": ("unknown",),
     # Convenciones semánticas de OpenTelemetry (instrumentación automática).
     "http.route": (),
     "http.method": _HTTP_METHODS,
