@@ -264,15 +264,25 @@ def test_only_one_of_two_dispatchers_wins_the_probe(env: DispatchEnvironment) ->
     first, second = env.dispatcher(), env.dispatcher(env.new_database())
     env.run(first.dispatch_once(EXTERNAL))
     env.clock.advance(60)
+    # Los dos leyeron el mismo circuito abierto y reclaman la sonda a la vez: gana uno.
+    stale = env.run(first._read_breaker(EXTERNAL))
+    now = env.clock.now()
 
-    async def both() -> list[Any]:
+    async def both_claim() -> list[Any]:
         return list(
-            await asyncio.gather(first.dispatch_once(EXTERNAL), second.dispatch_once(EXTERNAL))
+            await asyncio.gather(
+                first._claim_probe(EXTERNAL, stale, now),
+                second._claim_probe(EXTERNAL, stale, now),
+            )
         )
 
-    reports = env.run(both())
-    assert sorted(report.probed for report in reports) == [False, True]
-    assert len(handler.invocations) == 2
+    claims = env.run(both_claim())
+    assert sorted(claim is not None for claim in claims) == [False, True]
+    assert env.run(env.circuit(EXTERNAL)) == ("half_open", now)
+    # La sonda ya está en curso: ninguna ronda entrega hasta el siguiente intervalo.
+    reports = [env.run(d.dispatch_once(EXTERNAL)) for d in (first, second)]
+    assert not any(report.probed for report in reports)
+    assert len(handler.invocations) == 1
 
 
 # --- reproceso -----------------------------------------------------------------------------------
