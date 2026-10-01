@@ -31,8 +31,12 @@ autorizador): la fábrica no abre conexiones al construir, así que ``build_open
 especificación sin red (NFR-NUC-52).
 
 Las unidades registran sus enrutadores y sus ``detail_code`` en ``platform_units()``; la matriz
-de permisos llega en ``permissions`` (``identity.authz``, TASK-125). La cadena de middleware es de
-TASK-134: aquí solo se instala el manejador global de errores (``ErrorBoundary``).
+de permisos llega en ``permissions`` (``identity.authz``, TASK-125). La fábrica instala la cadena
+fija de middleware (``shared.api.middleware``, TASK-134) y no arranca si su orden no es el de
+PAT-NUC-SEG-06. La sesión, la auditoría de ``csrf_rejected``, la versión vigente del aviso de
+tratamiento y el autorizador por ruta llegan en ``AppRuntime``; el origen de la aplicación
+(``VIGIA_PUBLIC_ORIGIN``) y los del almacén para la política de contenido
+(``VIGIA_CSP_STORE_ORIGINS``) en ``AppConfig``.
 """
 
 from __future__ import annotations
@@ -51,7 +55,7 @@ from typing import Any, Final, Protocol
 
 from fastapi import APIRouter, FastAPI
 from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vigia_platform.ledger.application.audit_writer import AuditOutcome
 from vigia_platform.ledger.domain.coverage import (
@@ -73,7 +77,6 @@ from vigia_platform.shared.api.errors import (
     ApiErrorCode,
     ApiStartupError,
     DetailCodeRegistry,
-    ErrorBoundary,
     ErrorCatalog,
     install_error_handlers,
 )
@@ -87,6 +90,17 @@ from vigia_platform.shared.api.health import (
     health_router,
 )
 from vigia_platform.shared.api.labels import DEFAULT_LABELS_PATH, LabelsInvalid, PlatformLabels
+from vigia_platform.shared.api.middleware import (
+    ChainSettings,
+    CsrfAuditPort,
+    RouteTable,
+    SecurityHeaders,
+    SessionContextPort,
+    install_chain,
+    verify_chain,
+)
+from vigia_platform.shared.api.middleware.headers import MAX_STORE_ORIGINS, store_origin
+from vigia_platform.shared.api.middleware.steps import UNMATCHED_ROUTE
 from vigia_platform.shared.api.static import (
     DEFAULT_STATIC_DIR,
     StaticSite,
@@ -102,6 +116,7 @@ from vigia_platform.shared.observability.redaction import (
     AttributePolicy,
     redact_text,
 )
+from vigia_platform.shared.ratelimit import RateLimiter
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
@@ -180,16 +195,41 @@ class AppConfig(BaseModel):
     """Construcción de la aplicación de página única (``shared.api.static``)."""
     startup_deadline_seconds: float = Field(default=60.0, gt=0, le=600)
     startup_retry_seconds: float = Field(default=5.0, gt=0, le=60)
+    public_origin: str | None = None
+    """Origen de la aplicación (``https://app.<dominio>``): la barrera anti-falsificación exige
+    que un ``Origin`` presente sea este. Sin él, toda petición que cambia estado con ``Origin``
+    se rechaza (fallo cerrado)."""
+    csp_store_origins: tuple[str, ...] = ()
+    """Orígenes del almacén (``VIGIA_CSP_STORE_ORIGINS``) para ``media-src`` y ``connect-src``."""
 
     @property
     def docs_enabled(self) -> bool:
         """``/docs`` y ``/openapi.json`` solo fuera de producción y de ``staging`` (NFR-NUC-23)."""
         return self.environment in _DOCS_ENVIRONMENTS
 
+    @property
+    def allows_local_origins(self) -> bool:
+        """``http://localhost`` y ``http://127.0.0.1`` solo en ``local`` y ``test``."""
+        return self.environment in _DOCS_ENVIRONMENTS
+
+    @model_validator(mode="after")
+    def _origins(self) -> AppConfig:
+        local = self.allows_local_origins
+        if self.public_origin is not None:
+            store_origin(self.public_origin, allow_local=local)
+        for origin in self.csp_store_origins:
+            store_origin(origin, allow_local=local)
+        if len(set(self.csp_store_origins)) != len(self.csp_store_origins):
+            raise ValueError("VIGIA_CSP_STORE_ORIGINS tiene orígenes repetidos")
+        if len(self.csp_store_origins) > MAX_STORE_ORIGINS:
+            raise ValueError(f"VIGIA_CSP_STORE_ORIGINS admite como mucho {MAX_STORE_ORIGINS}")
+        return self
+
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> AppConfig:
         """Lee ``VIGIA_ENVIRONMENT``, ``VIGIA_SECRETS_KEY_ARN`` y, si están,
-        ``VIGIA_HEALTH_SENTINEL_KEY`` y ``VIGIA_STATIC_DIR``; ``ValueError`` (de Pydantic) si
+        ``VIGIA_HEALTH_SENTINEL_KEY``, ``VIGIA_STATIC_DIR``, ``VIGIA_PUBLIC_ORIGIN`` y
+        ``VIGIA_CSP_STORE_ORIGINS`` (separados por espacios); ``ValueError`` (de Pydantic) si
         falta o no es válida."""
         values: dict[str, Any] = {
             "environment": environ.get("VIGIA_ENVIRONMENT", ""),
@@ -201,6 +241,12 @@ class AppConfig(BaseModel):
         static_dir = environ.get("VIGIA_STATIC_DIR")
         if static_dir is not None:
             values["static_dir"] = Path(static_dir)
+        public_origin = environ.get("VIGIA_PUBLIC_ORIGIN")
+        if public_origin is not None:
+            values["public_origin"] = public_origin
+        store_origins = environ.get("VIGIA_CSP_STORE_ORIGINS")
+        if store_origins is not None:
+            values["csp_store_origins"] = tuple(store_origins.split())
         return cls(**values)
 
 
@@ -247,7 +293,19 @@ class AppRuntime:
     attribute_policy: AttributePolicy = DEFAULT_POLICY
     """Política de redacción que amplía la fábrica con las rutas y los motivos de salud."""
     metrics: PlatformMetrics | None = None
-    """Métricas de la salud (``health_ready``); por defecto, las del proveedor global."""
+    """Métricas de la salud (``health_ready``) y de la cadena; por defecto, las del proveedor
+    global."""
+    sessions: SessionContextPort | None = None
+    """``ScopeContexts`` (``context_from_session``) del paso 6; sin él no hay contexto y la
+    autorización por ruta responde ``unauthenticated``."""
+    csrf_audit: CsrfAuditPort | None = None
+    """Auditoría de ``csrf_rejected`` (``AuditCsrfRejections``)."""
+    origin_secret: bytes | None = None
+    """Clave del HMAC del origen de red en ``csrf_rejected`` (la del retardo de fallos)."""
+    privacy_notice_version: str | None = None
+    """Versión vigente del aviso de tratamiento (TASK-126); sin ella, fallo cerrado."""
+    rate_limiter: RateLimiter | None = None
+    """Cubos de fichas del proceso; por defecto, uno nuevo con ``clock``."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -481,6 +539,7 @@ def _assemble(
     permissions: Collection[str],
     lifespan: Callable[[FastAPI], contextlib.AbstractAsyncContextManager[None]] | None,
     site: StaticSite,
+    runtime: AppRuntime | None = None,
 ) -> FastAPI:
     labels = _labels(config)
     detail_codes = _detail_codes(units)
@@ -506,9 +565,40 @@ def _assemble(
     if problems:
         raise ApiStartupError(problems)
     install_error_handlers(app, catalog, clock)
-    app.add_middleware(ErrorBoundary, catalog=catalog, clock=clock)
+    install_chain(app, _chain_settings(config, clock, catalog, app, runtime))
+    problems = verify_chain(app)
+    if problems:
+        raise ApiStartupError(problems)
     app.openapi = lambda: _openapi(app)  # type: ignore[method-assign]
     return app
+
+
+def _chain_settings(
+    config: AppConfig,
+    clock: Clock,
+    catalog: ErrorCatalog,
+    app: FastAPI,
+    runtime: AppRuntime | None,
+) -> ChainSettings:
+    """Los ajustes de la cadena de middleware para ``app`` (PAT-NUC-SEG-06)."""
+    if config.public_origin is None and not config.allows_local_origins:
+        _log.error(
+            "sin VIGIA_PUBLIC_ORIGIN: toda petición que cambia estado con Origin se rechazará"
+        )
+    limiter = runtime.rate_limiter if runtime is not None else None
+    return ChainSettings(
+        clock=clock,
+        catalog=catalog,
+        headers=SecurityHeaders(config.csp_store_origins, allow_local=config.allows_local_origins),
+        routes=RouteTable(app.routes),
+        limiter=limiter if limiter is not None else RateLimiter(clock),
+        public_origin=config.public_origin,
+        sessions=runtime.sessions if runtime is not None else None,
+        csrf_audit=runtime.csrf_audit if runtime is not None else None,
+        origin_secret=runtime.origin_secret if runtime is not None else None,
+        privacy_notice_version=runtime.privacy_notice_version if runtime is not None else None,
+        metrics=runtime.metrics if runtime is not None else None,
+    )
 
 
 def _registrable(values: Iterable[str]) -> list[str]:
@@ -523,6 +613,7 @@ def _register_observability(app: FastAPI, policy: AttributePolicy) -> None:
     los registros como ``[redactado]``: la política no la admite y aquí no se registra.
     """
     templates = [route.path for route in iter_declared_routes(app.routes) if route.is_api_route]
+    templates.append(UNMATCHED_ROUTE)
     policy.register("route", _registrable(templates))
     policy.register(
         "reason", _registrable([c.value for c in ReadinessCheck] + [c.value for c in StartupCheck])
@@ -583,6 +674,7 @@ def create_app(
         permissions=platform_permissions() if permissions is None else permissions,
         lifespan=lifespan,
         site=site,
+        runtime=runtime,
     )
     _register_observability(app, runtime.attribute_policy)
     recorder = _health_recorder(site, runtime.attribute_policy, runtime.metrics)

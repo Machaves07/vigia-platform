@@ -128,6 +128,7 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "method": _HTTP_METHODS,
     "chain_kind": ("plant", "organization", "audit"),
     "pool_class": ("node", "person", "worker"),
+    "rate_limit": ("session", "origin", "public", "node"),
     "signal": ("traces", "metrics"),
     "task": (
         "write_checkpoints",

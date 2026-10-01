@@ -32,10 +32,12 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 9
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0009``
+MINIMUM_SCHEMA_VERSION: Final = 10
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0010`` (el despacho de
+la bandeja: ``outbox_event.publish_seq``, ``trace_id`` y ``span_id``,
+``shared.vigia_outbox_due_heads`` y ``shared.vigia_outbox_replay``), que incluye ``nuc_0009``
 (``identity.concession_terms`` e ``identity.provider_concession_of`` de las concesiones del
-proveedor, y la RLS de proveedor en todo ``identity``), que incluye ``nuc_0008``
+proveedor, y la RLS de proveedor en todo ``identity``), ``nuc_0008``
 (``identity.session_concession``, la concesión vigente dentro de la sentencia única del contexto),
 ``nuc_0007`` (``identity.login_organization`` y ``session_idle_expiry`` del inicio de
 sesión), ``nuc_0006`` (las columnas de la verificación diferida de la marca en ``ledger.evidence`` y

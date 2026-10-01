@@ -16,10 +16,24 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta, timezone
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, WithJsonSchema
+from pydantic import (
+    AliasChoices,
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    WithJsonSchema,
+    create_model,
+)
+from pydantic.alias_generators import to_camel
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+from typing_extensions import TypedDict
 from vigia_contracts.models.common import UUID, Timestamp
 
 from vigia_platform.shared.clock import SimulatedClock
@@ -290,6 +304,91 @@ def test_duplicate_event_and_registration_after_sealing_are_rejected() -> None:
     assert "ya está registrado" in _rejected(catalog, _event())
     catalog.seal()
     assert "sellado" in _rejected(catalog, _event("other_probe"))
+
+
+def test_consumers_and_periodic_tasks_cannot_register_after_sealing() -> None:
+    """Seguimiento 2 de VIG-47: sin la guarda del sello, esta prueba falla."""
+    catalog = OutboxCatalog()
+    catalog.event_types.register(_event())
+    catalog.consumers.register(_consumer())
+    catalog.periodic_tasks.register("probe_task", Schedule.every(60), _noop, unit=ActorUnit.U02)
+    catalog.seal()
+    assert catalog.consumers.sealed and catalog.periodic_tasks.sealed
+    with pytest.raises(OutboxRegistrationRejected, match="sellado"):
+        catalog.consumers.register(_consumer("late_consumer"))
+    with pytest.raises(OutboxRegistrationRejected, match="sellado"):
+        catalog.periodic_tasks.register("late_task", Schedule.every(60), _noop, unit=ActorUnit.U02)
+    assert [c.consumer_name for c in catalog.consumers.consumers()] == ["probe_consumer"]
+    assert [t.task_name for t in catalog.periodic_tasks.tasks()] == ["probe_task"]
+
+
+# --- Alias en la carga (seguimiento de VIG-129, P3) -----------------------------------------
+
+Zone = Annotated[UUID, Field(alias="zona")]
+
+
+class _AliasedTyped(TypedDict):
+    zone_id: Zone
+
+
+class _AliasedTuple(NamedTuple):
+    zone_id: Zone
+
+
+@pydantic_dataclass(config=ConfigDict(extra="forbid", strict=True))
+class _AliasedPart:
+    zone_id: Zone
+
+
+class _Inner(PayloadModel):
+    zone_id: Zone
+
+
+class _Generated(PayloadModel):
+    model_config = PayloadModel.model_config | {"alias_generator": to_camel}
+    zone_id: UUID
+
+
+def _payload_with(annotation: Any) -> type[BaseModel]:
+    return create_model("AliasProbe", __base__=PayloadModel, part=(annotation, ...))
+
+
+_ALIASED_PAYLOADS: dict[str, tuple[type[BaseModel], str]] = {
+    "alias": (_payload_with(Zone), "/part"),
+    "validation_alias": (
+        _payload_with(Annotated[UUID, Field(validation_alias="zona")]),
+        "/part",
+    ),
+    "alias_choices": (
+        _payload_with(Annotated[UUID, Field(validation_alias=AliasChoices("part", "zona"))]),
+        "/part",
+    ),
+    "alias_path": (
+        _payload_with(Annotated[UUID, Field(validation_alias=AliasPath("zona", 0))]),
+        "/part",
+    ),
+    "serialization_alias": (
+        _payload_with(Annotated[UUID, Field(serialization_alias="zona")]),
+        "/part",
+    ),
+    "alias_generator": (_Generated, "/zone_id"),
+    "nested_model": (_payload_with(_Inner), "/part/zone_id"),
+    "typed_dict": (_payload_with(_AliasedTyped), "/part/zone_id"),
+    "named_tuple": (_payload_with(_AliasedTuple), "/part/zone_id"),
+    "dataclass": (_payload_with(_AliasedPart), "/part/zone_id"),
+}
+
+
+@pytest.mark.parametrize("how", sorted(_ALIASED_PAYLOADS))
+def test_payload_fields_with_aliases_are_rejected_at_registration(how: str) -> None:
+    """Con alias, la carga se validaría con claves que el esquema persistido no declara."""
+    model, path = _ALIASED_PAYLOADS[how]
+    with pytest.raises(OutboxRegistrationRejected) as caught:
+        OutboxCatalog().event_types.register(_event(model=model))
+    assert any(
+        problem.startswith(f"{path}: el campo declara un alias")
+        for problem in caught.value.problems
+    ), caught.value.problems
 
 
 # --- Consumer y arranque ------------------------------------------------------------------

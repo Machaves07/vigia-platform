@@ -21,7 +21,9 @@ Antes de la primera sentencia se valida todo, en este orden, y cualquier fallo l
    separadores ``", "`` y ``": "`` de ``jsonb``), el mismo que limita la restricción de la tabla.
 
 ``event_id`` es un UUID v7 y ``created_at`` la hora del ``Clock`` inyectado, en milisegundos; la
-entrega nace vencida (``next_attempt_at = created_at``). ``correlation_id`` sale del contexto.
+entrega nace vencida (``next_attempt_at = created_at``). ``correlation_id`` sale del contexto, y
+``trace_id``/``span_id`` del tramo de OpenTelemetry en curso, si lo hay: el despachador enlaza
+con él el tramo de la entrega (PAT-NUC-MAN-01). ``publish_seq`` lo asigna la base al insertar.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
 
@@ -66,9 +69,9 @@ _ORGANIZATION_PARTITION: Final = "organization"
 
 _INSERT_EVENT: Final = text(
     "INSERT INTO shared.outbox_event (event_id, organization_id, plant_id, event_name,"
-    " ledger_sequence, payload, correlation_id, created_at)"
+    " ledger_sequence, payload, correlation_id, created_at, trace_id, span_id)"
     " VALUES (:event_id, :organization_id, :plant_id, :event_name, :ledger_sequence,"
-    " CAST(:payload AS jsonb), :correlation_id, :created_at)"
+    " CAST(:payload AS jsonb), :correlation_id, :created_at, :trace_id, :span_id)"
 )
 
 _INSERT_DELIVERIES: Final = text(
@@ -112,6 +115,10 @@ class OutboxEvent:
     payload: Mapping[str, Any]
     correlation_id: uuid.UUID
     created_at: datetime
+    trace_id: str | None = None
+    """Traza W3C (32 hexadecimales) del tramo que publicó, o nada."""
+    span_id: str | None = None
+    """Tramo W3C (16 hexadecimales) que publicó, o nada."""
 
 
 @dataclass(frozen=True)
@@ -123,7 +130,7 @@ class Publication:
 
 
 class OutboxPort(Protocol):
-    """Puerto de la bandeja (business-logic-model §10.1); ``replay`` llega con TASK-129."""
+    """Puerto de la bandeja (business-logic-model §10.1); el reproceso es ``outbox.replay``."""
 
     async def publish(self, transaction: Transaction, event: NewEvent) -> Publication: ...
 
@@ -139,6 +146,14 @@ def stored_payload_size(document: Mapping[str, Any]) -> int:
     return len(
         json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(", ", ": ")).encode()
     )
+
+
+def _current_trace() -> tuple[str | None, str | None]:
+    """``(trace_id, span_id)`` del tramo en curso en hexadecimal W3C, o ``(None, None)``."""
+    span_context = otel_trace.get_current_span().get_span_context()
+    if not span_context.is_valid:
+        return None, None
+    return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
 
 
 def _uuid7(milliseconds: int, random: bytes) -> uuid.UUID:
@@ -239,6 +254,7 @@ class Outbox:
         now = now.astimezone(UTC)
         created_at = now.replace(microsecond=now.microsecond // 1000 * 1000)
         milliseconds = (created_at - _EPOCH) // timedelta(milliseconds=1)
+        trace_id, span_id = _current_trace()
         outbox_event = OutboxEvent(
             event_id=_uuid7(milliseconds, self._random_bytes(10)),
             organization_id=context.organization_id,
@@ -249,6 +265,8 @@ class Outbox:
             payload=payload,
             correlation_id=context.correlation_id,
             created_at=created_at,
+            trace_id=trace_id,
+            span_id=span_id,
         )
         return Publication(outbox_event, self._catalog.consumers.subscribers(compiled.event_name))
 
@@ -267,6 +285,8 @@ class Outbox:
                 "payload": json.dumps(inserted.payload, ensure_ascii=False, allow_nan=False),
                 "correlation_id": inserted.correlation_id,
                 "created_at": inserted.created_at,
+                "trace_id": inserted.trace_id,
+                "span_id": inserted.span_id,
             },
         )
         if publication.consumers:

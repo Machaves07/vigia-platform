@@ -565,6 +565,16 @@ _FIELD_NODES: Final = frozenset({"model-field", "typed-dict-field", "dataclass-f
 _ALIAS_KEYS: Final = ("validation_alias", "serialization_alias")
 
 
+def _is_aliased_parameter(node: Mapping[str, Any]) -> bool:
+    """Un ``arguments-parameter`` del núcleo (``NamedTuple``, funciones) con alias."""
+    return (
+        "type" not in node
+        and isinstance(node.get("name"), str)
+        and "schema" in node
+        and node.get("alias") is not None
+    )
+
+
 def alias_problems(model: type[BaseModel]) -> list[str]:
     """Ningún campo del contenido puede tener alias (P3; seguimiento nº 3 de VIG-40).
 
@@ -576,6 +586,11 @@ def alias_problems(model: type[BaseModel]) -> list[str]:
     """
     aliased: set[str] = set()
     for path, node in _core_nodes(model.__pydantic_core_schema__):
+        if _is_aliased_parameter(node):
+            # Parámetro de un ``NamedTuple`` (``arguments``): sin ``type``, con ``name`` y
+            # ``alias`` (seguimiento de VIG-129).
+            aliased.add(f"{path}/{node['name']}")
+            continue
         if node.get("type") not in _FIELD_NODES:
             continue
         if any(node.get(key) is not None for key in _ALIAS_KEYS):

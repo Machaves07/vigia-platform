@@ -183,10 +183,13 @@ async def _snapshot(superuser: Any) -> dict[str, str]:
 
 
 async def _columns(superuser: Any, table: str) -> list[str]:
+    """Columnas que se pueden asignar: ni generadas ni de identidad ``ALWAYS`` (la base las
+    rechaza antes del disparador con 428C9, p. ej. ``outbox_event.publish_seq`` de nuc_0010)."""
     schema, name = table.split(".")
     rows = await superuser.fetch(
         "SELECT column_name FROM information_schema.columns WHERE table_schema = $1"
-        " AND table_name = $2 AND is_generated = 'NEVER' ORDER BY ordinal_position",
+        " AND table_name = $2 AND is_generated = 'NEVER'"
+        " AND coalesce(identity_generation, '') <> 'ALWAYS' ORDER BY ordinal_position",
         schema,
         name,
     )
