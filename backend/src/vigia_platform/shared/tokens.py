@@ -40,9 +40,10 @@ inválido no se incorpora. Si su ``jti`` es de una emisión de **este** nodo con
 usuario y rol, se audita ``live_view_access_local`` con apertura, cierre y resultado; si no
 existe (o es de otra organización, que la seguridad a nivel de fila no deja ver), es de otro nodo o
 sus reclamos no coinciden, ``unknown_token_reported`` y ``security_alert`` en la bandeja, en la
-misma transacción (BR-NUC-89). Un acceso ya incorporado con el mismo contenido no se duplica (el
-latido lo puede repetir): bajo una exclusión por nodo se busca la entrada con los mismos
-``filters``.
+misma transacción (BR-NUC-89). Los accesos se incorporan **por ``access_id`` sin duplicar**
+(adenda A-02): bajo una exclusión por nodo, un ``access_id`` de ese nodo que ya tiene entrada
+(incorporada o alertada) no se vuelve a escribir, aunque el latido lo repita o lo traiga con
+otro resultado.
 
 **El token completo nunca se persiste ni se registra** (BR-NUC-88): ni en la tabla, ni en la
 auditoría, ni en la bandeja, ni en el registro de errores; ``IssuedLiveViewToken`` no lo muestra
@@ -79,7 +80,6 @@ from vigia_platform.ledger.application.audit_writer import (
     ResourceRef,
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.ledger.canonical import canonical_bytes_sync
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import (
     ActorKind,
@@ -289,10 +289,12 @@ _ISSUANCE: Final = text(
     "SELECT node_id, plant_id, zone_id, user_id, role_in_use"
     " FROM identity.live_view_token_issuance WHERE jti = :jti"
 )
-_ALREADY_AUDITED: Final = text(
+_ALREADY_INCORPORATED: Final = text(
     "SELECT 1 FROM shared.audit_entry WHERE organization_id = :organization_id"
-    " AND operation = :operation AND resource_kind = :resource_kind"
-    " AND resource_id = :resource_id AND filters = :filters LIMIT 1"
+    " AND operation IN ('live_view_access_local', 'unknown_token_reported')"
+    " AND resource_kind = :resource_kind"
+    " AND filters_json ->> 'node_id' = :node_id AND filters_json ->> 'access_id' = :access_id"
+    " LIMIT 1"
 )
 
 
@@ -517,6 +519,8 @@ class LiveViewTokenService:
         access: LiveViewAccess,
     ) -> bool | None:
         """``True`` incorporado, ``False`` token desconocido, ``None`` ya estaba."""
+        if await self._already_incorporated(transaction, node_id, access):
+            return None
         jti = uuid.UUID(access.jti)
         issuance = (await transaction.execute(_ISSUANCE, {"jti": jti})).first()
         reason = self._unknown_reason(issuance, node_id, access)
@@ -534,8 +538,6 @@ class LiveViewTokenService:
         else:
             operation = AuditOperation.UNKNOWN_TOKEN_REPORTED
             details["reason"] = reason.value
-        if await self._already_audited(transaction, operation, jti, details):
-            return None
         if reason is None and issuance is not None:
             await self._audit.append(
                 transaction.context,
@@ -586,23 +588,19 @@ class LiveViewTokenService:
             return UnknownTokenReason.CLAIMS_MISMATCH
         return None
 
-    async def _already_audited(
-        self,
-        transaction: Transaction,
-        operation: AuditOperation,
-        jti: uuid.UUID,
-        details: Mapping[str, JsonValue],
+    @staticmethod
+    async def _already_incorporated(
+        transaction: Transaction, node_id: uuid.UUID, access: LiveViewAccess
     ) -> bool:
-        """¿Ya hay una entrada de ``operation`` para ``jti`` con los mismos ``filters``?"""
+        """¿Ya se incorporó (o se alertó) el ``access_id`` de este nodo? (adenda A-02)."""
         row = (
             await transaction.execute(
-                _ALREADY_AUDITED,
+                _ALREADY_INCORPORATED,
                 {
                     "organization_id": transaction.context.organization_id,
-                    "operation": operation.value,
                     "resource_kind": _TOKEN_RESOURCE,
-                    "resource_id": jti,
-                    "filters": canonical_bytes_sync(dict(details)),
+                    "node_id": str(node_id),
+                    "access_id": access.access_id,
                 },
             )
         ).first()

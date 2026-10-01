@@ -454,14 +454,22 @@ def test_access_from_the_issued_node_is_incorporated_once(
     assert details["opened_at"] == record["opened_at"]
     assert details["closed_at"] == record["closed_at"]
     assert details["outcome"] == "closed_expired"
-    # El latido repite el mismo acceso: no se duplica. Un cambio (cierre) sí se anota.
+    # Por access_id sin duplicar (adenda A-02): el latido lo repite, con otro resultado o dos
+    # veces en el mismo lote, y sigue habiendo una sola entrada.
     again = _incorporate(env, site.organization_id, node_id, [record])
     assert again == AccessReport(duplicates=1)
     opened = _access(issued, access_id=record["access_id"], closed_at=None, outcome="opened")
-    assert _incorporate(env, site.organization_id, node_id, [opened]).incorporated == 1
+    assert _incorporate(env, site.organization_id, node_id, [opened]) == AccessReport(duplicates=1)
+    twice = _access(issued)
+    assert _incorporate(env, site.organization_id, node_id, [twice, twice]) == AccessReport(
+        incorporated=1, duplicates=1
+    )
     assert len(_entries(env, record["jti"], "live_view_access_local")) == 2
     assert not _entries(env, record["jti"], "unknown_token_reported")
     assert not _alerts(env, node_id)
+    # El mismo access_id desde otro nodo no se toma por repetido: es otro acceso, y alerta.
+    other_node = env.add_node(site.organization_id, plant_id)
+    assert _incorporate(env, site.organization_id, other_node, [record]) == AccessReport(unknown=1)
 
 
 def test_access_with_a_jti_issued_for_another_node_alerts(
@@ -487,6 +495,7 @@ def test_access_with_a_jti_issued_for_another_node_alerts(
     # Repetido, no vuelve a alertar.
     assert _incorporate(env, site.organization_id, other_node, [record]).duplicates == 1
     assert len(_alerts(env, other_node)) == 1
+    assert len(_entries(env, record["jti"], "unknown_token_reported")) == 1
 
 
 @pytest.mark.parametrize(
