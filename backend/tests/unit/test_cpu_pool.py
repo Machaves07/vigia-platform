@@ -167,6 +167,11 @@ async def test_task_cancelled_before_starting_never_runs(metrics: PlatformMetric
         queued = asyncio.ensure_future(single.run(lambda: ran.append("no")))
         await asyncio.sleep(0)
         queued.cancel()
+        # La cancelación llega al futuro del pool una vuelta del bucle después
+        # (``_chain_future`` la programa con ``call_soon``): se libera el hilo solo cuando la
+        # tarea terminó cancelada y pasó una vuelta más, nunca antes (VIG-130).
+        await asyncio.wait([queued])
+        await asyncio.sleep(0)
         release.set()
         await first
         with pytest.raises(asyncio.CancelledError):
