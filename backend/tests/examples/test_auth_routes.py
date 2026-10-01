@@ -232,7 +232,7 @@ def api(postgres_endpoint: PostgresEndpoint) -> Iterator[Api]:
             public_origin=ORIGIN,
         )
         client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=10.0
         )
         try:
             yield Api(env, client)
