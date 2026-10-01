@@ -22,8 +22,11 @@ Reglas:
   de las rutas de la API. Un archivo de ``static/`` fuera de ``assets/`` nunca se sirve, así que
   un ``static/me`` no oculta ``GET /me``.
 - Solo se sirve lo que ``StaticSite.load`` catalogó al construir la aplicación (archivos
-  regulares, sin enlaces simbólicos, con nombres de la forma cerrada); cualquier otro recurso
-  responde ``not_found``. La raíz de la tarea es de solo lectura, así que el catálogo no cambia.
+  regulares, sin enlaces simbólicos, con nombres de la forma cerrada y sin mapas de fuentes
+  ``.map``); cualquier otro recurso responde ``not_found``. La raíz de la tarea es de solo
+  lectura, así que el catálogo no cambia.
+- Las cabeceras de seguridad (política de contenido, ``nosniff``…) las pone la cadena de
+  middleware en toda respuesta, también en estas (``shared.api.middleware``).
 - Las cuatro rutas están en la lista pública cerrada de BR-NUC-91 (``UnauthenticatedRoute``).
 - ``/assets/*`` no deja línea en el registro JSON de la aplicación (``is_request_logged``): queda
   en el registro de acceso del balanceador. Ninguna ruta de este módulo escribe la ruta pedida
@@ -165,6 +168,9 @@ _CONTENT_TYPES: Final[Mapping[str, str]] = {
 _OCTET_STREAM: Final = "application/octet-stream"
 
 _UNLOGGED_PREFIXES: Final = ("/assets/",)
+_SOURCE_MAP_SUFFIX: Final = ".map"
+"""Mapas de fuentes (``.js.map``, ``.css.map``…): fuera del catálogo aunque la construcción los
+deje en ``assets/`` (seguimiento de la revisión de VIG-71)."""
 
 _log = get_logger("shared.api.static")
 
@@ -451,6 +457,9 @@ def _catalog(directory: Path, problems: list[str]) -> dict[str, _Asset]:
         for relative, stat_result in files.items():
             if relative.endswith(tuple(_SUFFIXES.values())):
                 continue
+            if relative.lower().endswith(_SOURCE_MAP_SUFFIX):
+                # Un mapa de fuentes revela el código original: nunca se sirve (``not_found``).
+                continue
             path = directory / relative
             variants = {Encoding.IDENTITY: _Variant(path, _etag(path), stat_result)}
             for encoding, suffix in _SUFFIXES.items():
@@ -487,6 +496,9 @@ class _NavigationRoute(APIRoute):
     enrutador sigue con la API, así que ``/concessions`` con ``Accept: application/json`` llega a
     su ruta de la API y nunca recibe ``405`` por culpa de la pantalla.
     """
+
+    navigation_only = True
+    """Marca que ``check_routes`` exige a la única ruta que declara ``APP_SCREEN``."""
 
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
         if scope.get("type") != "http" or scope.get("method") not in ("GET", "HEAD"):

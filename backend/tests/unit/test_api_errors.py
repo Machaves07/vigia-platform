@@ -65,6 +65,8 @@ from vigia_platform.shared.storage import StorageUnavailable
 KNOWN = frozenset({"ledger.read"})
 LABELS = PlatformLabels.load()
 INTERNAL_DETAIL = "SELECT hash FROM identity.user_account -- /srv/vigia/app.py:42 eyJhbGciOi"
+SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
+"""Lo que exige la barrera anti-falsificación (TASK-134) a un método que cambia estado."""
 
 
 class AllowAll:
@@ -239,7 +241,7 @@ def test_unknown_paths_methods_and_validation_are_generic() -> None:
     router.add_api_route("/falla", typed, methods=["GET"], dependencies=[requires("ledger.read")])
     with TestClient(_app(router), raise_server_exceptions=False) as client:
         missing = client.get("/no-existe/../../etc/passwd")
-        method = client.post("/health/live")
+        method = client.post("/health/live", headers=SAME_ORIGIN)
         invalid = client.get("/falla", params={"limit": "diez"})
         valid = client.get("/falla", params={"limit": "10"})
     assert _body(missing).code is ApiErrorCode.NOT_FOUND
@@ -300,7 +302,7 @@ def test_a_failing_route_rolls_back_and_releases_its_connection(error: BaseExcep
 
     router.add_api_route("/falla", writes, methods=["POST"], dependencies=[requires("ledger.read")])
     with TestClient(_app(router), raise_server_exceptions=False) as client:
-        response = client.post("/falla")
+        response = client.post("/falla", headers=SAME_ORIGIN)
     assert response.status_code in (409, 500)
     assert journal.commits_sent == 0 and journal.effects_applied == 0
     assert journal.released + journal.discarded == 1
