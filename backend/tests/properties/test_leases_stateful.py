@@ -10,9 +10,11 @@ Para cualquier secuencia de ``acquire(worker, t)``, ``renew``, ``release``, ``ad
 - **tras ``crash``, otro solo la adquiere después de ``lease_until``**: ``acquire`` gana si y solo
   si la tarea vence y nadie tiene un arrendamiento sin vencer (``lease_until < ahora``);
 - ``renew`` solo alarga un arrendamiento propio **sin vencer**; ``release`` solo libera uno propio;
-- ``advance`` (la valla de cada organización) solo avanza con el arrendamiento vigente y en la
-  misma ejecución; una retoma de la misma ejecución continúa por la organización siguiente a la
-  última confirmada (``resume_after``), y una ejecución nueva empieza de cero.
+- ``holds`` y ``advance`` (la valla de cada organización) solo aceptan el arrendamiento vigente y
+  de la misma ejecución, también frente al arrendamiento de una ejecución ya liberada del mismo
+  proceso (``holds`` solo en la base: en memoria no hay transacción que vallar); una retoma de
+  la misma ejecución continúa por la organización siguiente a la última confirmada
+  (``resume_after``), y una ejecución nueva empieza de cero.
 
 El modelo es independiente del código (unas pocas líneas por regla). La máquina corre contra
 ``InMemoryLeaseStore`` y contra ``SqlLeaseStore`` sobre PostgreSQL 16 real como ``vigia_app``;
@@ -89,6 +91,10 @@ class Backend(Protocol):
         self, lease: Lease, organization_id: uuid.UUID, now: datetime
     ) -> Lease | None: ...
 
+    async def holds(self, lease: Lease, now: datetime) -> bool | None:
+        """``None``: el almacén no tiene valla de apertura (en memoria)."""
+        ...
+
     async def reset(self, now: datetime) -> None: ...
 
     async def row(self, task: str) -> tuple[Any, ...]: ...
@@ -111,6 +117,8 @@ class ModelWorker:
     owner: str
     held: dict[str, Lease] = field(default_factory=dict)
     """Lo que el proceso cree tener (lo que devolvió su último ``acquire`` o ``renew``)."""
+    stale: dict[str, Lease] = field(default_factory=dict)
+    """El último arrendamiento que liberó: una transacción rezagada de esa ejecución."""
 
 
 # --- Adaptadores -----------------------------------------------------------------------------
@@ -140,6 +148,9 @@ class MemoryBackend:
         self, lease: Lease, organization_id: uuid.UUID, now: datetime
     ) -> Lease | None:
         return await self.store.advance(lease, organization_id, failed=False, now=now)
+
+    async def holds(self, lease: Lease, now: datetime) -> bool | None:
+        return None
 
     async def row(self, task: str) -> tuple[Any, ...]:
         row = self.store.rows[task]
@@ -182,6 +193,11 @@ class SqlBackend:
             return await self.store.advance(
                 transaction, lease, organization_id, failed=False, now=now
             )
+
+    async def holds(self, lease: Lease, now: datetime) -> bool | None:
+        context = self.env.contexts.context_for_organization(_Task(lease.task_name), uuid.uuid4())
+        async with self.env.database.transaction(context) as transaction:
+            return await self.store.holds(transaction, lease, now)
 
     async def row(self, task: str) -> tuple[Any, ...]:
         row = await self.env.task_row(task)
@@ -268,7 +284,7 @@ class LeaseMachine(RuleBasedStateMachine):
     def release(self, data: st.DataObject, finished: bool) -> None:
         worker, task = self._pick_held(data)
         state, model = self.workers[worker], self.tasks[task]
-        lease = state.held.pop(task)
+        lease = state.stale[task] = state.held.pop(task)
         next_run_at = self.now + timedelta(seconds=30) if finished else lease.run_at
         outcome = TaskOutcome.SUCCEEDED if finished else TaskOutcome.INTERRUPTED
         released = self.run(
@@ -287,17 +303,29 @@ class LeaseMachine(RuleBasedStateMachine):
         lease = state.held[task]
         organization_id = uuid.uuid4()
         advanced = self.run(self.backend.advance(lease, organization_id, self.now))
-        allowed = (
-            model.owner == state.owner
-            and model.until is not None
-            and model.until >= self.now
-            and model.run_at == lease.run_at
-        )
+        allowed = self._fenced(model, state, lease)
         assert (advanced is not None) == allowed, (task, worker, model, self.now)
         if advanced is not None:
             assert advanced.resume_after == organization_id
             model.cursor = organization_id
             state.held[task] = advanced
+
+    @precondition(lambda self: any(w.held or w.stale for w in self.workers.values()))
+    @rule(data=st.data())
+    def holds(self, data: st.DataObject) -> None:
+        """La valla al abrir una organización, con el arrendamiento vigente o con uno liberado."""
+        choices = sorted(
+            (name, task, kind)
+            for name, state in self.workers.items()
+            for kind, leases in (("held", state.held), ("stale", state.stale))
+            for task in leases
+        )
+        worker, task, kind = data.draw(st.sampled_from(choices))
+        state, model = self.workers[worker], self.tasks[task]
+        lease = (state.held if kind == "held" else state.stale)[task]
+        holds = self.run(self.backend.holds(lease, self.now))
+        if holds is not None:
+            assert holds == self._fenced(model, state, lease), (task, worker, kind, model)
 
     @rule(worker=st.sampled_from(WORKERS))
     def crash(self, worker: str) -> None:
@@ -307,6 +335,14 @@ class LeaseMachine(RuleBasedStateMachine):
     @rule(delta=seconds)
     def tick(self, delta: float) -> None:
         self.now += timedelta(seconds=delta)
+
+    def _fenced(self, model: ModelTask, state: ModelWorker, lease: Lease) -> bool:
+        return (
+            model.owner == state.owner
+            and model.until is not None
+            and model.until >= self.now
+            and model.run_at == lease.run_at
+        )
 
     def _pick_held(self, data: st.DataObject) -> tuple[str, str]:
         choices = sorted(
@@ -367,3 +403,30 @@ def test_pr_nuc_42_sql_leases_match_the_model(environment: WorkerEnvironment) ->
     LeaseMachine.backend = SqlBackend(environment)
     LeaseMachine.loop = environment
     _run_machine(SQL_STEPS)
+
+
+@pytest.mark.integration
+def test_the_fence_rejects_a_previous_run_of_the_same_process(
+    environment: WorkerEnvironment,
+) -> None:
+    """Mismo proceso, ejecución nueva: una transacción rezagada de la anterior no pasa la valla."""
+    backend = SqlBackend(environment)
+    now = START + timedelta(days=10_000)
+
+    async def scenario() -> tuple[bool | None, bool | None, Lease | None]:
+        await backend.reset(now)
+        first = await backend.acquire("alpha", "w0:fence", now)
+        assert first is not None
+        later = now + timedelta(seconds=30)
+        assert await backend.release(
+            first, now=now, next_run_at=later, outcome=TaskOutcome.SUCCEEDED
+        )
+        second = await backend.acquire("alpha", "w0:fence", later)
+        assert second is not None and second.run_at != first.run_at
+        return (
+            await backend.holds(first, later),
+            await backend.holds(second, later),
+            await backend.advance(first, uuid.uuid4(), later),
+        )
+
+    assert environment.run(scenario()) == (False, True, None)
