@@ -208,6 +208,28 @@ _SAVE_RECORD_TYPE = text(
 )
 
 
+async def save_record_types(transaction: Any, registry: RecordTypeRegistry) -> None:
+    """Persiste en ``ledger.record_type`` los tipos de ``registry`` (lo que hace el arranque)."""
+    for compiled in registry.latest():
+        row = compiled.to_persisted()
+        await transaction.execute(
+            _SAVE_RECORD_TYPE,
+            {
+                "record_type": row.record_type,
+                "writer_unit": row.writer_unit,
+                "chain_level": row.chain_level,
+                "schema_version": row.schema_version,
+                "content_schema": json.dumps(row.content_schema),
+                "source_key_path": row.source_key_path,
+                "free_text_paths": list(row.free_text_paths),
+                "evidence_paths": list(row.evidence_paths),
+                "label_rule": None if row.label_rule is None else json.dumps(row.label_rule),
+                "outbox_events": list(row.outbox_events),
+                "chain_follows_scope": row.chain_follows_scope,
+            },
+        )
+
+
 # --- Contextos --------------------------------------------------------------------------------
 
 
@@ -448,26 +470,7 @@ def writer_environment(
     async def synchronize() -> None:
         async with database.transaction(system) as transaction:
             await catalog.synchronize(SqlOutboxCatalogStore(transaction), clock)
-            for compiled in registry.latest():
-                row = compiled.to_persisted()
-                await transaction.execute(
-                    _SAVE_RECORD_TYPE,
-                    {
-                        "record_type": row.record_type,
-                        "writer_unit": row.writer_unit,
-                        "chain_level": row.chain_level,
-                        "schema_version": row.schema_version,
-                        "content_schema": json.dumps(row.content_schema),
-                        "source_key_path": row.source_key_path,
-                        "free_text_paths": list(row.free_text_paths),
-                        "evidence_paths": list(row.evidence_paths),
-                        "label_rule": None
-                        if row.label_rule is None
-                        else json.dumps(row.label_rule),
-                        "outbox_events": list(row.outbox_events),
-                        "chain_follows_scope": row.chain_follows_scope,
-                    },
-                )
+            await save_record_types(transaction, registry)
         registry.seal()
 
     storage = InstrumentedStorage(probed.probe)

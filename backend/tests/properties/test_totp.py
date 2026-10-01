@@ -492,6 +492,29 @@ def test_any_tampering_fails_closed(plaintext: bytes, aad: bytes, data: st.DataO
             run(h.cipher.decrypt(ciphertext, wrapped, associated))
 
 
+@pytest.mark.parametrize(
+    ("key_id", "purpose"),
+    [(KEY_ID, "other_purpose"), ("alias/otra-clave-maestra", None)],
+)
+def test_wrapped_key_of_another_purpose_or_master_key_fails_closed(
+    key_id: str, purpose: str | None
+) -> None:
+    """Revisión de VIG-67: el contexto de cifrado y la clave maestra atan la clave envuelta.
+
+    Otro proceso (sin la clave de datos en caché) con el mismo KMS pero otro propósito u otra
+    clave maestra no la descifra: ``DecryptionFailed``, nunca el texto ni un error transitorio.
+    """
+    h = harness()
+    sealed = run(h.cipher.encrypt(b"secreto", b"aad"))
+    options = {} if purpose is None else {"purpose": purpose}
+    other = EnvelopeCipher(h.kms, key_id, h.clock, **options)
+    with pytest.raises(DecryptionFailed):
+        run(other.decrypt(sealed.ciphertext, sealed.wrapped_key, b"aad"))
+    # Control: el mismo propósito y la misma clave maestra, en otro proceso, sí.
+    same = EnvelopeCipher(h.kms, KEY_ID, h.clock)
+    assert run(same.decrypt(sealed.ciphertext, sealed.wrapped_key, b"aad")) == b"secreto"
+
+
 def test_envelope_rejects_bad_inputs() -> None:
     h = harness()
     for plaintext, aad in (
