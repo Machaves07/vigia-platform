@@ -52,7 +52,7 @@ from vigia_platform.ledger.application.audit_writer import (
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.ledger.canonical import CanonicalFormError, canonical_bytes_sync
-from vigia_platform.shared.context import ContextAbsent, Role, ScopeContext, ScopeLevel
+from vigia_platform.shared.context import ContextAbsent, Role, ScopeContext, ScopeLevel, repository
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
@@ -375,6 +375,7 @@ def _label(row: Row[Any]) -> LabelView:
 # --- El puerto --------------------------------------------------------------------------------
 
 
+@repository
 class LabelService:
     """``LabelPort`` sobre PostgreSQL."""
 

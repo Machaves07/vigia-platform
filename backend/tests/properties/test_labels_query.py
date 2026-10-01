@@ -86,6 +86,8 @@ from vigia_platform.shared.context import (
     ScopeContext,
     ScopeLevel,
     _seal_scope_context,
+    install_context_absent_reporter,
+    registered_repositories,
 )
 
 pytestmark = pytest.mark.integration
@@ -1047,8 +1049,19 @@ def test_an_invalid_query_neither_reads_nor_audits(
 
 
 def test_without_context_nothing_is_read(environment: LabelEnvironment) -> None:
-    with pytest.raises(ContextAbsent):
-        environment.run(environment.labels.consultar(None, _all_time()))  # type: ignore[arg-type]
+    """La guarda del registro (PR-NUC-02) corre antes que nada: sin conexión y con aviso."""
+    assert LabelService in registered_repositories()
+    opened = environment.env.database.probe.opened
+    reported: list[str] = []
+    previous = install_context_absent_reporter(reported.append)
+    try:
+        with pytest.raises(ContextAbsent) as raised:
+            environment.run(environment.labels.consultar(None, _all_time()))  # type: ignore[arg-type]
+    finally:
+        install_context_absent_reporter(previous)
+    assert raised.value.operation == "LabelService.consultar"
+    assert reported == ["LabelService.consultar"]
+    assert environment.env.database.probe.opened == opened
 
 
 async def _insert_label(migrated: MigratedDatabase, tenant: Tenant, labeled_by: Any) -> None:
