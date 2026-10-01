@@ -9,8 +9,9 @@ publicarse y a quién se entrega:
   ``extra="forbid"``, ``strict=True``) cuyo JSON Schema es el ``payload_schema`` que se persiste.
   La carga solo lleva identificadores, enumeraciones y marcas (BR-NUC-75): se exigen las reglas de
   estructura del expediente (``ledger.schema_rules``), la metapropiedad de privacidad **sin
-  ninguna ruta de texto libre** (una cadena sin lista cerrada ni patrón cerrado se rechaza) y
-  ningún número con decimales. Un tipo que no cumple lanza ``OutboxRegistrationRejected``.
+  ninguna ruta de texto libre** (una cadena sin lista cerrada ni patrón cerrado se rechaza),
+  ningún número con decimales y ningún campo con alias (``ledger.registry.alias_problems``). Un
+  tipo que no cumple lanza ``OutboxRegistrationRejected``.
 - ``ConsumerRegistry.register(Consumer)``: nombre, unidad, eventos suscritos, manejador y
   ``has_external_dependency`` (el que declara cortacircuito, BR-NUC-79).
 - ``PeriodicTaskRegistry.register(task_name, schedule, handler, unit=...)``: el horario es un
@@ -36,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from vigia_platform.ledger.registry import custom_json_schema_problems
+from vigia_platform.ledger.registry import alias_problems, custom_json_schema_problems
 from vigia_platform.ledger.schema_rules import (
     SchemaProblem,
     compatibility_problems,
@@ -227,6 +228,9 @@ def _event_type_problems(definition: EventType) -> list[SchemaProblem | str]:
             "payload_model debe ser estricto: extra='forbid' y strict=True (PAT-NUC-SEG-07)"
         )
     problems.extend(custom_json_schema_problems(model))
+    # Con alias la carga se validaría con claves que el esquema persistido no declara: un
+    # «nota» de texto libre entraría por una clave que la metapropiedad no ve (P3).
+    problems.extend(alias_problems(model))
     try:
         schema = _payload_schema(model)
     except Exception as error:  # un tipo sin JSON Schema, o con valores no representables

@@ -13,6 +13,9 @@ Toda consulta de datos pasa por aquí y solo con un ``ScopeContext``:
   si falla por conexión antes del ``COMMIT`` se reintenta **una sola vez** tras 100 ms con otra
   conexión; si vuelve a fallar, ``TemporarilyUnavailable``. Tras enviar el ``COMMIT`` nunca se
   reintenta (PR-NUC-41).
+- ``async with tx.savepoint()``: subtransacción; si el bloque falla se deshace solo lo suyo y la
+  transacción sigue usable (el despachador de la bandeja marca así el intento fallido de un
+  manejador en la misma transacción, TASK-129).
 - Sin contexto no existe forma de abrir una transacción: ``transaction`` y ``read`` lanzan
   ``ContextAbsent`` antes de pedir una conexión al pool (BR-NUC-02).
 - ``await db.health(timeout_seconds=…)``: la comprobación de ``/health/ready`` (NFR-NUC-13):
@@ -545,7 +548,15 @@ class _Abandoned:
 class Transaction:
     """La transacción abierta por ``Database.transaction``: solo ejecuta sentencias."""
 
-    __slots__ = ("_broken", "_connection", "_context", "_database", "_failed", "_retired")
+    __slots__ = (
+        "_broken",
+        "_connection",
+        "_context",
+        "_database",
+        "_failed",
+        "_in_savepoint",
+        "_retired",
+    )
 
     def __init__(
         self, connection: ConnectionPort, database: Database, context: ScopeContext
@@ -555,6 +566,7 @@ class Transaction:
         self._context = context
         self._failed = False
         self._broken = False
+        self._in_savepoint = False
         self._retired = _Abandoned()
 
     @property
@@ -600,6 +612,44 @@ class Transaction:
         except BaseException:
             self._failed = self._broken = True
             raise
+
+    @contextlib.asynccontextmanager
+    async def savepoint(self) -> AsyncIterator[None]:
+        """Subtransacción (``SAVEPOINT``): si el bloque falla, se deshace solo lo suyo.
+
+        Si el bloque lanza una excepción, o una de sus sentencias falló aunque el bloque la
+        capturara, se vuelve al punto (``ROLLBACK TO SAVEPOINT``), la transacción sigue usable y
+        la excepción sale (``TransactionAborted`` si el bloque no lanzó nada). Con la conexión
+        rota o un paso abandonado no hay vuelta: la transacción queda fallida y no confirma. Una
+        interrupción (``BaseException``) sale sin tocar la base. No se anida.
+        """
+        if self._in_savepoint:
+            raise RuntimeError("savepoint no se anida")
+        await self.execute(_SAVEPOINT)
+        self._in_savepoint = True
+        try:
+            try:
+                yield
+            except Exception:
+                await self._rollback_to_savepoint()
+                raise
+            if self._failed:
+                await self._rollback_to_savepoint()
+                raise TransactionAborted()
+            await self.execute(_RELEASE_SAVEPOINT)
+        finally:
+            self._in_savepoint = False
+
+    async def _rollback_to_savepoint(self) -> None:
+        if self._broken or self._retired.value:
+            return
+        self._failed = False
+        await self.execute(_ROLLBACK_TO_SAVEPOINT)
+
+
+_SAVEPOINT: Final = text("SAVEPOINT vigia_savepoint")
+_RELEASE_SAVEPOINT: Final = text("RELEASE SAVEPOINT vigia_savepoint")
+_ROLLBACK_TO_SAVEPOINT: Final = text("ROLLBACK TO SAVEPOINT vigia_savepoint")
 
 
 @repository
