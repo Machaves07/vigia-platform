@@ -15,12 +15,23 @@ Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los cons
   ``expire_concessions``), y el usuario tiene que conservar en la proveedora una asignación con
   ``concessions.grant``. Nada se guarda entre peticiones: una revocación, un cierre, una
   desactivación o una suspensión surten efecto en la siguiente (BR-NUC-18, PR-NUC-50).
+  **Aviso de tratamiento de datos** (NFR-NUC-29, BR-NUC-32): si el usuario no aceptó la versión
+  vigente, no hay contexto (``privacy_notice_required``) salvo que la petición sea la de aceptarla
+  (``privacy_notice_acceptance=True``); entonces el contexto no lleva ninguna asignación ni
+  concesión, así que ``authorize`` no le concede nada: solo sirve para aceptar el aviso.
 - ``context_from_event(event)``: la organización emisora del evento y su ``correlation_id``, con
   el actor del sistema del proceso de trabajo.
 - ``context_for_organization(task, organization_id)``: una organización por iteración de una
   tarea periódica, con el actor del sistema.
 - ``context_from_operator(operator_id)``: orden administrativa; el operador tiene que ser un
   usuario activo de la organización proveedora con ``platform_operator`` vigente (una sentencia).
+  ``operator_in_organization(operator_context, organization_id, …)`` es la misma orden actuando
+  sobre la organización cliente que el operador da de alta (génesis, TASK-126): mismo actor y
+  correlación, sin asignaciones en ese cliente.
+
+``with_unit(context, unit)`` es el mismo contexto escrito por otra unidad: los puertos de U-02
+que U-03 y U-04 llaman en proceso (``IdentityCommandPort``) escriben sus propios tipos de
+registro (``node_declared``…) con la unidad U-02, sin cambiar actor, alcance ni correlación.
 
 Los contextos de evento e iteración no tienen asignaciones: ``authorize`` nunca les concede una
 clave; operan sobre su organización por construcción.
@@ -58,6 +69,7 @@ from typing import Final, Literal, Protocol
 
 from vigia_platform.identity.auth.sessions import SessionCookie
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
+from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import (
     Actor,
@@ -90,8 +102,10 @@ __all__ = [
     "SecurityAudit",
     "SessionRow",
     "SessionScope",
+    "operator_in_organization",
     "record_provider_query",
     "with_role_in_use",
+    "with_unit",
 ]
 
 _log = get_logger("identity.authz")
@@ -114,6 +128,9 @@ class ContextUnavailableReason(enum.StrEnum):
     ``not_found``: igual que una organización inexistente."""
     OPERATOR_INVALID = "operator_invalid"
     """El operador no es un usuario activo de la proveedora con ``platform_operator`` vigente."""
+    PRIVACY_NOTICE_REQUIRED = "privacy_notice_required"
+    """La sesión es válida pero el usuario no aceptó la versión vigente del aviso (NFR-NUC-29).
+    Hacia el cliente, ``privacy_notice_required``: solo puede aceptarlo."""
 
 
 class ContextUnavailable(Exception):
@@ -209,6 +226,9 @@ class SessionScope:
     session_organization_id: uuid.UUID
     """La organización de la sesión (bajo concesión, la proveedora)."""
     privacy_notice_version_accepted: str | None
+    privacy_notice_pending: bool = False
+    """``True`` si el usuario no aceptó la versión vigente: el contexto solo sirve para aceptarla
+    (sin asignaciones)."""
 
 
 def with_role_in_use(context: ScopeContext, role: Role) -> ScopeContext:
@@ -239,6 +259,66 @@ def with_role_in_use(context: ScopeContext, role: Role) -> ScopeContext:
     )
 
 
+def with_unit(context: ScopeContext, unit: ActorUnit) -> ScopeContext:
+    """El mismo contexto con ``actor.unit = unit`` (un puerto de U-02 que escribe sus tipos)."""
+    if not isinstance(context, ScopeContext):
+        raise TypeError("context debe ser ScopeContext")
+    actor = context.actor
+    return _seal_scope_context(
+        organization_id=context.organization_id,
+        actor=Actor(
+            kind=actor.kind,
+            id=actor.id,
+            display_name_snapshot=actor.display_name_snapshot,
+            unit=ActorUnit(unit),
+            role_in_use=actor.role_in_use,
+            concession_id=actor.concession_id,
+        ),
+        origin=context.origin,
+        allowed_scopes=context.allowed_scopes,
+        correlation_id=context.correlation_id,
+        session_id_hash=context.session_id_hash,
+    )
+
+
+def operator_in_organization(
+    operator_context: ScopeContext,
+    organization_id: uuid.UUID,
+    *,
+    provider_organization_id: uuid.UUID,
+) -> ScopeContext:
+    """La orden administrativa de ``operator_context`` actuando sobre ``organization_id``.
+
+    Solo para la génesis de una organización cliente (BR-NUC-06): mismo actor ``operator``,
+    mismo origen y correlación, **sin asignaciones** en el cliente (``authorize`` no le concede
+    nada allí). ``operator_context`` tiene que salir de ``context_from_operator``: orden
+    administrativa de un operador en la proveedora.
+    """
+    if not isinstance(operator_context, ScopeContext):
+        raise TypeError("operator_context debe ser ScopeContext")
+    for name, value in (
+        ("organization_id", organization_id),
+        ("provider_organization_id", provider_organization_id),
+    ):
+        if type(value) is not uuid.UUID:
+            raise TypeError(f"{name} debe ser uuid.UUID")
+    actor = operator_context.actor
+    if (
+        operator_context.origin is not ContextOrigin.ADMIN_COMMAND
+        or actor.kind is not ActorKind.OPERATOR
+        or operator_context.organization_id != provider_organization_id
+        or organization_id == provider_organization_id
+    ):
+        raise ContextUnavailable(ContextUnavailableReason.OPERATOR_INVALID)
+    return _seal_scope_context(
+        organization_id=organization_id,
+        actor=actor,
+        origin=ContextOrigin.ADMIN_COMMAND,
+        allowed_scopes=(),
+        correlation_id=operator_context.correlation_id,
+    )
+
+
 def _display_name(value: str) -> str:
     """La instantánea del nombre, recortada al máximo de ``Actor`` (§3.2)."""
     return value[:120] if value else SYSTEM_DISPLAY_NAME
@@ -255,6 +335,7 @@ class ScopeContexts:
         provider_organization_id: uuid.UUID,
         system_actor_id: uuid.UUID,
         random_bytes: Callable[[int], bytes] = os.urandom,
+        privacy_notice_version: str = CURRENT_PRIVACY_NOTICE_VERSION,
     ) -> None:
         for name, value in (
             ("provider_organization_id", provider_organization_id),
@@ -262,11 +343,14 @@ class ScopeContexts:
         ):
             if type(value) is not uuid.UUID:
                 raise TypeError(f"{name} debe ser uuid.UUID")
+        if not isinstance(privacy_notice_version, str) or not privacy_notice_version:
+            raise ValueError("privacy_notice_version debe ser la versión vigente del aviso")
         self._store = store
         self._clock = clock
         self._provider_organization_id = provider_organization_id
         self._system_actor_id = system_actor_id
         self._random_bytes = random_bytes
+        self._privacy_notice_version = privacy_notice_version
 
     def __repr__(self) -> str:
         return "ScopeContexts()"
@@ -313,8 +397,14 @@ class ScopeContexts:
         concession_id: uuid.UUID | None = None,
         correlation_id: uuid.UUID | None = None,
         unit: ActorUnit = ActorUnit.U02,
+        privacy_notice_acceptance: bool = False,
     ) -> SessionScope:
-        """El contexto de la petición con ``cookie``; ``ContextUnavailable`` si no hay."""
+        """El contexto de la petición con ``cookie``; ``ContextUnavailable`` si no hay.
+
+        ``privacy_notice_acceptance`` solo lo pasa la ruta de aceptación del aviso: si falta la
+        aceptación de la versión vigente, entrega un contexto **sin asignaciones** (y sin
+        concesión) en lugar de ``privacy_notice_required``.
+        """
         if not isinstance(cookie, SessionCookie):
             raise ContextUnavailable(ContextUnavailableReason.SESSION_INVALID)
         if concession_id is not None and type(concession_id) is not uuid.UUID:
@@ -328,6 +418,28 @@ class ScopeContexts:
         row = await self._store.session_row(lookup, session_id_hash, now, concession_id)
         if row is None or row.organization_id != cookie.organization_id:
             raise ContextUnavailable(ContextUnavailableReason.SESSION_INVALID)
+        if row.privacy_notice_version_accepted != self._privacy_notice_version:
+            if privacy_notice_acceptance is not True or concession_id is not None:
+                raise ContextUnavailable(ContextUnavailableReason.PRIVACY_NOTICE_REQUIRED)
+            return SessionScope(
+                context=_seal_scope_context(
+                    organization_id=row.organization_id,
+                    actor=Actor(
+                        kind=ActorKind.USER,
+                        id=row.user_id,
+                        display_name_snapshot=_display_name(row.display_name),
+                        unit=unit,
+                    ),
+                    origin=ContextOrigin.SESSION,
+                    allowed_scopes=(),
+                    correlation_id=correlation,
+                    session_id_hash=session_id_hash,
+                ),
+                user_id=row.user_id,
+                session_organization_id=row.organization_id,
+                privacy_notice_version_accepted=row.privacy_notice_version_accepted,
+                privacy_notice_pending=True,
+            )
         if concession_id is None:
             context = _seal_scope_context(
                 organization_id=row.organization_id,

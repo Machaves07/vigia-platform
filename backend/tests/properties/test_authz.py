@@ -76,6 +76,7 @@ from vigia_platform.identity.authz.matrix import (
     permission_key,
     roles_with,
 )
+from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.application.writer import (
     LedgerRejection,
     LedgerRejectionCode,
@@ -697,7 +698,7 @@ def test_concession_conditions_are_checked_in_python_too() -> None:
             "organization_id": PROVIDER,
             "organization_kind": "provider",
             "display_name": "Instalador sintético",
-            "privacy_notice_version_accepted": None,
+            "privacy_notice_version_accepted": CURRENT_PRIVACY_NOTICE_VERSION,
             "assignments": (installer,),
             "concession": concession,
         }
@@ -838,9 +839,9 @@ def test_session_context_is_one_statement_with_assignments(environment: AuthzEnv
     removed = env.assign(site.organization_id, user, Role.PLANT_MANAGER)
     env.remove_assignment(removed)
     env.execute(
-        "UPDATE identity.user_account SET privacy_notice_version_accepted = '2026-09'"
-        " WHERE user_id = $1",
+        "UPDATE identity.user_account SET privacy_notice_version_accepted = $2 WHERE user_id = $1",
         user,
+        CURRENT_PRIVACY_NOTICE_VERSION,
     )
     cookie = env.open_session(site.organization_id, user, at=env.now() - timedelta(minutes=10))
     env.log.statements.clear()
@@ -856,7 +857,8 @@ def test_session_context_is_one_statement_with_assignments(environment: AuthzEnv
         AllowedScope(ScopeLevel.PLANT, plant, Role.COORDINATOR_SST),
         AllowedScope(ScopeLevel.ZONE, zones[0], Role.COPASST),
     }
-    assert scope.privacy_notice_version_accepted == "2026-09"
+    assert scope.privacy_notice_version_accepted == CURRENT_PRIVACY_NOTICE_VERSION
+    assert scope.privacy_notice_pending is False
     # La misma sentencia prolongó la sesión.
     (row,) = env.fetch(
         "SELECT last_seen_at, idle_expires_at FROM identity.session WHERE session_id_hash = $1",

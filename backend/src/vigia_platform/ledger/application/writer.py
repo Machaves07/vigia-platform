@@ -579,6 +579,7 @@ class EscritorExpediente:
         scope: RecordScope | None = None,
         events: Sequence[NewEvent] = (),
         occurred_at: datetime | None = None,
+        transaction: Transaction | None = None,
     ) -> Receipt | LedgerRejection:
         """Escribe un registro; ``Receipt`` tras confirmar, o el rechazo del primer fallo.
 
@@ -586,6 +587,12 @@ class EscritorExpediente:
         en ``outbox_events`` del tipo); el escritor les fija la planta de la cadena y la
         secuencia del registro. ``occurred_at`` es la marca del hecho para la línea de tiempo
         (fuera del sobre).
+
+        Con ``transaction`` (de la organización del contexto) el paso 7 va en la transacción del
+        llamador: el registro solo existe si ella confirma, junto con lo que el llamador escribió
+        (p. ej. la planta y su registro ``plant_created``, TASK-126). Los pasos 1 a 6 no cambian.
+        El ``Receipt`` llega antes de confirmar y vale solo si el llamador confirma; un fallo de
+        la escritura (cadena ocupada, disparador) sale como excepción y revierte su transacción.
         """
         if not isinstance(context, ScopeContext):
             report_context_absent("EscritorExpediente.write")
@@ -594,12 +601,25 @@ class EscritorExpediente:
             not isinstance(occurred_at, datetime) or occurred_at.utcoffset() is None
         ):
             raise TypeError("occurred_at debe ser una marca con zona horaria")
+        if transaction is not None and (
+            not isinstance(transaction, Transaction)
+            or transaction.context.organization_id != context.organization_id
+        ):
+            raise TypeError("transaction debe ser una Transaction de la organización del contexto")
         try:
             prepared = await self._prepare(context, record_type, content, scope, events)
         except _Rejected as rejected:
             return rejected.rejection
         if isinstance(prepared, Receipt):
             return prepared
+        if transaction is not None:
+            record_id = uuid7(self._clock, self._random_bytes)
+            inserted = await self._insert(transaction, context, prepared, record_id, occurred_at)
+            return Receipt(
+                record_id=inserted.record_id,
+                received_at=inserted.received_at,
+                status=AcceptanceStatus.ACCEPTED,
+            )
         return await self._commit(context, prepared, occurred_at)
 
     # --- pasos 1 a 6 ---------------------------------------------------------------------------

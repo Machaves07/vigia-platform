@@ -38,6 +38,7 @@ from vigia_platform.identity.auth.sessions import (
 )
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.identity.authz.context import ScopeContexts
+from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.shared.context import (
     Actor,
     ActorKind,
@@ -328,6 +329,15 @@ def _log_statements(database: Database, log: StatementLog) -> None:
 def authz_environment(endpoint: PostgresEndpoint, prefix: str) -> Iterator[AuthzEnvironment]:
     """``session_environment`` con los constructores reales y el ``Authorizer``."""
     with session_environment(endpoint, prefix) as sessions:
+        # Los usuarios sembrados ya aceptaron el aviso vigente: sin él no hay contexto de sesión
+        # (NFR-NUC-29); las pruebas del aviso crean sus propios usuarios sin aceptarlo.
+        sessions.run(
+            sessions.admin.execute(
+                "UPDATE identity.user_account SET privacy_notice_version_accepted = $1"
+                " WHERE privacy_notice_version_accepted IS NULL",
+                CURRENT_PRIVACY_NOTICE_VERSION,
+            )
+        )
         store = PostgresContextStore(sessions.database)
         contexts = ScopeContexts(
             store=store,
