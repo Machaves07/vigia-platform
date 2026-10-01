@@ -359,9 +359,6 @@ def translate(error: BaseException) -> ApiError:
         if error.reason is ContextUnavailableReason.CONCESSION_INVALID:
             # Concesión inexistente, ajena, vencida o revocada: como una organización inexistente.
             return ApiError(ApiErrorCode.NOT_FOUND)
-        if error.reason is ContextUnavailableReason.PRIVACY_NOTICE_REQUIRED:
-            # Sesión válida sin la aceptación del aviso vigente: solo puede aceptarlo (NFR-NUC-29).
-            return ApiError(ApiErrorCode.PRIVACY_NOTICE_REQUIRED)
         return ApiError(ApiErrorCode.UNAUTHENTICATED)
     if isinstance(error, ContextAbsent):
         # Operación de datos sin contexto: se deniega sin decir por qué; el intento ya lo auditó

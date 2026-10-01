@@ -180,7 +180,7 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             assert "vigia.concession_lookup" in row["qual"], dict(row)
             continue
         if (row["tablename"], row["policyname"]) == ("invitation", "invitation_lookup"):
-            # nuc_0010 (TASK-126): igual, solo dentro de identity.invitation_organization.
+            # nuc_0011 (TASK-126): igual, solo dentro de identity.invitation_organization.
             assert (row["cmd"], row["roles"], row["permissive"]) == (
                 "SELECT",
                 ["vigia_migrate"],

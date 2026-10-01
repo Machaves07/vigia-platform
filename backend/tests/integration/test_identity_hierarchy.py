@@ -9,13 +9,14 @@ valor concreto:
 - BR-NUC-32 y la nota de §10.1: sin ``EmailSenderPort`` (o con él ``unavailable`` o caído) el
   enlace vuelve **una sola vez** y queda ``invitation_link_disclosed``; con él ``queued`` el
   enlace no vuelve y no hay divulgación; el evento ``user_invited`` se publica igual.
-- NFR-NUC-29: un usuario sin la aceptación de la versión vigente no obtiene contexto
-  (``privacy_notice_required``) salvo para aceptarla, y ese contexto no tiene asignaciones.
+- NFR-NUC-29: la aceptación de la versión vigente es lo único que cambia la versión que el paso
+  ``PrivacyNoticeStep`` de la cadena (VIG-78) exige a toda ruta salvo la de aceptación; solo la
+  persona de la sesión acepta, y queda ``privacy_notice_accepted`` con la versión.
 - Génesis: ``organization_created`` es la secuencia 1 de la cadena de la organización y
   ``plant_created`` la de la planta.
 - Activación: token usado, vencido, cancelado o inexistente responden igual; el administrador no
   se activa sin confirmar el segundo factor; la aceptación del aviso queda con su versión.
-- ``nuc_0010``: una asignación con planta o zona de otra organización se rechaza en la base.
+- ``nuc_0011``: una asignación con planta o zona de otra organización se rechaza en la base.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ from vigia_platform.identity.application.invitations import (
 from vigia_platform.identity.application.roles import AssignmentRequest
 from vigia_platform.identity.application.users import InviteRequest, ProfileChange
 from vigia_platform.identity.authz.authorize import ResourceNotFound
-from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
+from vigia_platform.identity.authz.context import ContextUnavailable
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.application.writer import (
     LedgerRejection,
@@ -316,32 +317,29 @@ def test_registry_accepts_a_single_sender() -> None:
 # --- Aviso de tratamiento de datos (NFR-NUC-29) ------------------------------------------------
 
 
-def test_without_current_notice_there_is_no_usable_context_except_to_accept(
+def test_accepting_the_current_notice_lets_the_session_past_the_gate(
     env: HierarchyEnvironment,
 ) -> None:
+    """NFR-NUC-29. El paso ``PrivacyNoticeStep`` de la cadena (VIG-78) deja pasar solo la ruta de
+    aceptación mientras ``SessionScope.privacy_notice_version_accepted`` no sea la vigente; esta
+    prueba fija la otra mitad: la aceptación es lo único que cambia esa versión."""
     org = Organization(env)
     contexts = env.authz.contexts
     user = env.authz.sessions.add_user(org.organization_id, privacy_notice=None).user_id
     env.authz.assign(org.organization_id, user, Role.COORDINATOR_SST)
     cookie = env.authz.open_session(org.organization_id, user)
-    with pytest.raises(ContextUnavailable) as raised:
-        env.run(contexts.context_from_session(cookie))
-    assert raised.value.reason is ContextUnavailableReason.PRIVACY_NOTICE_REQUIRED
-    pending = env.run(contexts.context_from_session(cookie, privacy_notice_acceptance=True))
-    assert pending.privacy_notice_pending is True
-    assert pending.context.allowed_scopes == ()
-    # Ese contexto no autoriza nada: ni leer la jerarquía de su propia organización.
-    with pytest.raises(ResourceNotFound):
-        env.run(env.users().update_profile(pending.context, user, ProfileChange(display_name="X")))
-    # Una versión vieja no vale; la vigente sí, y desde ahí hay contexto con sus asignaciones.
-    with pytest.raises(IdentityRejected) as outdated:
-        env.run(env.privacy_notice().accept(pending.context, "v0-anterior"))
-    assert outdated.value.code is IdentityRejection.PRIVACY_NOTICE_OUTDATED
+    pending = env.run(contexts.context_from_session(cookie))
+    assert pending.privacy_notice_version_accepted is None  # la cadena responde el 403
     notice = env.privacy_notice()
+    # Una versión vieja (o inventada) no vale; la vigente sí, una sola vez.
+    for version in ("v0-anterior", CURRENT_PRIVACY_NOTICE_VERSION + "x", ""):
+        with pytest.raises(IdentityRejected) as outdated:
+            env.run(notice.accept(pending.context, version))
+        assert outdated.value.code is IdentityRejection.PRIVACY_NOTICE_OUTDATED
     assert env.run(notice.accept(pending.context, CURRENT_PRIVACY_NOTICE_VERSION)) is True
     assert env.run(notice.accept(pending.context, CURRENT_PRIVACY_NOTICE_VERSION)) is False
-    usable = env.run(contexts.context_from_session(cookie))
-    assert usable.context.allowed_scopes
+    accepted = env.run(contexts.context_from_session(cookie))
+    assert accepted.privacy_notice_version_accepted == CURRENT_PRIVACY_NOTICE_VERSION
     (acceptance,) = env.fetch(
         "SELECT notice_version FROM identity.privacy_notice_acceptance WHERE user_id = $1", user
     )
@@ -354,22 +352,28 @@ def test_without_current_notice_there_is_no_usable_context_except_to_accept(
     assert CURRENT_PRIVACY_NOTICE_VERSION in bytes(audit["filters"]).decode()
 
 
-def test_an_outdated_acceptance_also_blocks_and_a_concession_cannot_accept(
-    env: HierarchyEnvironment,
-) -> None:
+def test_only_the_person_of_the_session_accepts_the_notice(env: HierarchyEnvironment) -> None:
+    """Ni una orden administrativa ni un contexto sin sesión aceptan el aviso por alguien."""
     org = Organization(env)
-    contexts = env.authz.contexts
-    user = env.authz.sessions.add_user(org.organization_id, privacy_notice="v0-anterior").user_id
-    cookie = env.authz.open_session(org.organization_id, user)
-    with pytest.raises(ContextUnavailable):
-        env.run(contexts.context_from_session(cookie))
-    with pytest.raises(ContextUnavailable) as raised:
-        env.run(
-            contexts.context_from_session(
-                cookie, concession_id=uuid.uuid4(), privacy_notice_acceptance=True
-            )
-        )
-    assert raised.value.reason is ContextUnavailableReason.PRIVACY_NOTICE_REQUIRED
+    notice = env.privacy_notice()
+    for context in (
+        env.operator_context(),  # orden administrativa del operador
+        env.authz.contexts.anonymous(org.organization_id),  # sistema, sin persona
+    ):
+        with pytest.raises(IdentityRejected) as raised:
+            env.run(notice.accept(context, CURRENT_PRIVACY_NOTICE_VERSION))
+        assert raised.value.code is IdentityRejection.USER_STATE
+    # Una cuenta desactivada tampoco acepta, aunque su sesión siga en la tabla.
+    user = env.authz.sessions.add_user(org.organization_id, privacy_notice=None).user_id
+    env.authz.assign(org.organization_id, user, Role.COPASST)
+    context = env.session_context(org.organization_id, user)
+    env.authz.set_user_status(user, "deactivated")
+    with pytest.raises(IdentityRejected) as deactivated:
+        env.run(notice.accept(context, CURRENT_PRIVACY_NOTICE_VERSION))
+    assert deactivated.value.code is IdentityRejection.USER_STATE
+    assert not env.fetch(
+        "SELECT 1 FROM identity.privacy_notice_acceptance WHERE user_id = $1", user
+    )
 
 
 # --- Activación ---------------------------------------------------------------------------------
@@ -655,7 +659,7 @@ def _replace(spec: PlantSpec, name: str, value: str) -> PlantSpec:
     return PlantSpec(**values)
 
 
-# --- nuc_0010 -----------------------------------------------------------------------------------
+# --- nuc_0011 -----------------------------------------------------------------------------------
 
 
 def test_database_rejects_an_assignment_scoped_to_another_organization(
@@ -813,7 +817,7 @@ def test_a_plant_session_cannot_reach_another_plant(env: HierarchyEnvironment) -
     assert current["node_id"] == site.other_node
 
 
-def test_a_zone_session_and_a_pending_notice_see_only_their_scope(
+def test_a_zone_session_and_a_bare_session_see_only_their_scope(
     env: HierarchyEnvironment,
 ) -> None:
     site = _two_plants(env)
@@ -846,23 +850,18 @@ def test_a_zone_session_and_a_pending_notice_see_only_their_scope(
         )
     )
     assert [r.user_id for r in own] == [site.other_user]
-    # El contexto del aviso pendiente no tiene asignaciones: no obtiene ningún destinatario.
-    pending_user = env.authz.sessions.add_user(site.org.organization_id, privacy_notice=None)
-    env.authz.assign(site.org.organization_id, pending_user.user_id, Role.ADMINISTRATOR)
-    cookie = env.authz.open_session(site.org.organization_id, pending_user.user_id)
-    pending = env.run(
-        env.authz.contexts.context_from_session(cookie, privacy_notice_acceptance=True)
-    ).context
+    # Una sesión válida sin asignaciones no cubre nada: ningún destinatario ni planta.
+    bare_user = env.authz.sessions.add_user(site.org.organization_id).user_id
+    bare = env.session_context(site.org.organization_id, bare_user)
+    assert bare.allowed_scopes == ()
     for level, scope_id in (
         (ScopeLevel.ORGANIZATION, site.org.organization_id),
         (ScopeLevel.PLANT, site.own_plant),
         (ScopeLevel.ZONE, site.own_zone),
     ):
         with pytest.raises(ResourceNotFound):
-            env.run(
-                hierarchy.users_by_role_and_scope(pending, [Role.ADMINISTRATOR], level, scope_id)
-            )
-    assert env.run(hierarchy.hierarchy(pending)).plants == ()
+            env.run(hierarchy.users_by_role_and_scope(bare, [Role.ADMINISTRATOR], level, scope_id))
+    assert env.run(hierarchy.hierarchy(bare)).plants == ()
 
 
 # --- Escritor: la zona es de la planta también con alcance de planta (menor a) ------------------

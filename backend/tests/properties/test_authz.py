@@ -858,7 +858,7 @@ def test_session_context_is_one_statement_with_assignments(environment: AuthzEnv
         AllowedScope(ScopeLevel.ZONE, zones[0], Role.COPASST),
     }
     assert scope.privacy_notice_version_accepted == CURRENT_PRIVACY_NOTICE_VERSION
-    assert scope.privacy_notice_pending is False
+
     # La misma sentencia prolongó la sesión.
     (row,) = env.fetch(
         "SELECT last_seen_at, idle_expires_at FROM identity.session WHERE session_id_hash = $1",

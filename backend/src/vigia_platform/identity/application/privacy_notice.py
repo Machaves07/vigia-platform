@@ -8,11 +8,12 @@
   ``privacy_notice_accepted`` con la versión. La usan la activación de la cuenta
   (``identity.application.invitations``) y la aceptación de una versión nueva.
 - ``PrivacyNoticeService.accept``: la aceptación de una versión nueva en el siguiente inicio de
-  sesión (ruta ``POST /privacy-notice/accept``, TASK-135). Recibe el contexto que el
-  constructor de contextos entrega **solo** a esa ruta (``privacy_notice_acceptance=True``):
-  sin la aceptación vigente, cualquier otra ruta recibe ``privacy_notice_required`` y este
-  contexto no lleva asignaciones, así que no sirve para nada más. Es un repositorio registrado
-  (``@repository``): sin contexto, ``ContextAbsent`` y ``context_absent_attempt`` (PR-NUC-02).
+  sesión (ruta ``POST /privacy-notice/accept``, TASK-135). La puerta es el paso
+  ``PrivacyNoticeStep`` de la cadena de middleware (LC-NUC-20, VIG-78): mientras
+  ``SessionScope.privacy_notice_version_accepted`` no sea la vigente, toda ruta con sesión salvo
+  la de aceptación responde ``privacy_notice_required``. Este servicio es lo único que cambia esa
+  versión. Es un repositorio registrado (``@repository``): sin contexto, ``ContextAbsent`` y
+  ``context_absent_attempt`` (PR-NUC-02).
 
 Solo se acepta la versión vigente: aceptar otra es ``privacy_notice_outdated``.
 """
@@ -153,9 +154,9 @@ class PrivacyNoticeService:
     async def accept(self, context: ScopeContext, version: str) -> bool:
         """Acepta ``version`` (la vigente); ``False`` si ya estaba aceptada (sin escribir nada).
 
-        ``context`` es el de ``context_from_session(..., privacy_notice_acceptance=True)``
-        (``SessionScope.context``): la persona de la sesión acepta por sí misma, nunca bajo
-        concesión ni desde un contexto que no sea de sesión.
+        ``context`` es el de la sesión de la ruta de aceptación (``SessionScope.context``): la
+        persona de la sesión acepta por sí misma, nunca bajo concesión ni desde un contexto que
+        no sea de sesión.
         """
         if (
             context.origin is not ContextOrigin.SESSION

@@ -15,10 +15,6 @@ Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los cons
   ``expire_concessions``), y el usuario tiene que conservar en la proveedora una asignación con
   ``concessions.grant``. Nada se guarda entre peticiones: una revocación, un cierre, una
   desactivación o una suspensión surten efecto en la siguiente (BR-NUC-18, PR-NUC-50).
-  **Aviso de tratamiento de datos** (NFR-NUC-29, BR-NUC-32): si el usuario no aceptó la versión
-  vigente, no hay contexto (``privacy_notice_required``) salvo que la petición sea la de aceptarla
-  (``privacy_notice_acceptance=True``); entonces el contexto no lleva ninguna asignación ni
-  concesión, así que ``authorize`` no le concede nada: solo sirve para aceptar el aviso.
 - ``context_from_event(event)``: la organización emisora del evento y su ``correlation_id``, con
   el actor del sistema del proceso de trabajo.
 - ``context_for_organization(task, organization_id)``: una organización por iteración de una
@@ -74,7 +70,6 @@ from typing import Final, Literal, Protocol
 
 from vigia_platform.identity.auth.sessions import SessionCookie
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
-from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import (
     Actor,
@@ -134,9 +129,6 @@ class ContextUnavailableReason(enum.StrEnum):
     ``not_found``: igual que una organización inexistente."""
     OPERATOR_INVALID = "operator_invalid"
     """El operador no es un usuario activo de la proveedora con ``platform_operator`` vigente."""
-    PRIVACY_NOTICE_REQUIRED = "privacy_notice_required"
-    """La sesión es válida pero el usuario no aceptó la versión vigente del aviso (NFR-NUC-29).
-    Hacia el cliente, ``privacy_notice_required``: solo puede aceptarlo."""
 
 
 class ContextUnavailable(Exception):
@@ -232,9 +224,6 @@ class SessionScope:
     session_organization_id: uuid.UUID
     """La organización de la sesión (bajo concesión, la proveedora)."""
     privacy_notice_version_accepted: str | None
-    privacy_notice_pending: bool = False
-    """``True`` si el usuario no aceptó la versión vigente: el contexto solo sirve para aceptarla
-    (sin asignaciones)."""
 
 
 def with_role_in_use(context: ScopeContext, role: Role) -> ScopeContext:
@@ -342,7 +331,6 @@ class ScopeContexts:
         provider_organization_id: uuid.UUID,
         system_actor_id: uuid.UUID,
         random_bytes: Callable[[int], bytes] = os.urandom,
-        privacy_notice_version: str = CURRENT_PRIVACY_NOTICE_VERSION,
     ) -> None:
         for name, value in (
             ("provider_organization_id", provider_organization_id),
@@ -350,14 +338,11 @@ class ScopeContexts:
         ):
             if type(value) is not uuid.UUID:
                 raise TypeError(f"{name} debe ser uuid.UUID")
-        if not isinstance(privacy_notice_version, str) or not privacy_notice_version:
-            raise ValueError("privacy_notice_version debe ser la versión vigente del aviso")
         self._store = store
         self._clock = clock
         self._provider_organization_id = provider_organization_id
         self._system_actor_id = system_actor_id
         self._random_bytes = random_bytes
-        self._privacy_notice_version = privacy_notice_version
 
     def __repr__(self) -> str:
         return "ScopeContexts()"
@@ -404,14 +389,8 @@ class ScopeContexts:
         concession_id: uuid.UUID | None = None,
         correlation_id: uuid.UUID | None = None,
         unit: ActorUnit = ActorUnit.U02,
-        privacy_notice_acceptance: bool = False,
     ) -> SessionScope:
-        """El contexto de la petición con ``cookie``; ``ContextUnavailable`` si no hay.
-
-        ``privacy_notice_acceptance`` solo lo pasa la ruta de aceptación del aviso: si falta la
-        aceptación de la versión vigente, entrega un contexto **sin asignaciones** (y sin
-        concesión) en lugar de ``privacy_notice_required``.
-        """
+        """El contexto de la petición con ``cookie``; ``ContextUnavailable`` si no hay."""
         if not isinstance(cookie, SessionCookie):
             raise ContextUnavailable(ContextUnavailableReason.SESSION_INVALID)
         if concession_id is not None and type(concession_id) is not uuid.UUID:
@@ -425,28 +404,6 @@ class ScopeContexts:
         row = await self._store.session_row(lookup, session_id_hash, now, concession_id)
         if row is None or row.organization_id != cookie.organization_id:
             raise ContextUnavailable(ContextUnavailableReason.SESSION_INVALID)
-        if row.privacy_notice_version_accepted != self._privacy_notice_version:
-            if privacy_notice_acceptance is not True or concession_id is not None:
-                raise ContextUnavailable(ContextUnavailableReason.PRIVACY_NOTICE_REQUIRED)
-            return SessionScope(
-                context=_seal_scope_context(
-                    organization_id=row.organization_id,
-                    actor=Actor(
-                        kind=ActorKind.USER,
-                        id=row.user_id,
-                        display_name_snapshot=_display_name(row.display_name),
-                        unit=unit,
-                    ),
-                    origin=ContextOrigin.SESSION,
-                    allowed_scopes=(),
-                    correlation_id=correlation,
-                    session_id_hash=session_id_hash,
-                ),
-                user_id=row.user_id,
-                session_organization_id=row.organization_id,
-                privacy_notice_version_accepted=row.privacy_notice_version_accepted,
-                privacy_notice_pending=True,
-            )
         if concession_id is None:
             context = _seal_scope_context(
                 organization_id=row.organization_id,
