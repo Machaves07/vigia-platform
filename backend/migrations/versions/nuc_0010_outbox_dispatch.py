@@ -1,6 +1,6 @@
 """Despacho de la bandeja de salida (TASK-129, LC-NUC-23 parte 2; BR-NUC-76 a 82; PAT-NUC-ESC-05).
 
-Revisión nuc_0009. Lo que el despachador y el reproceso necesitan sobre las tablas de nuc_0003:
+Revisión nuc_0010. Lo que el despachador y el reproceso necesitan sobre las tablas de nuc_0003:
 
 - ``shared.outbox_event.publish_seq``: identidad ``bigint`` que la base asigna al insertar. Dos
   eventos de una partición publicados en el mismo milisegundo, sin ``ledger_sequence``, quedaban
@@ -35,8 +35,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0009"
-down_revision: str | None = "nuc_0008"
+revision: str = "nuc_0010"
+down_revision: str | None = "nuc_0009"
 branch_labels: None = None
 depends_on: None = None
 

@@ -132,7 +132,7 @@ async def test_two_subscribed_consumers_get_exactly_two_pending_deliveries(
     assert len(events) == 1
     event = events[0]
     created_at = datetime(2026, 9, 29, 10, 30, 0, 123000, tzinfo=UTC)
-    # nuc_0009: la base numera cada inserción; sin tramo en curso no hay enlace de traza.
+    # nuc_0010: la base numera cada inserción; sin tramo en curso no hay enlace de traza.
     assert isinstance(event.pop("publish_seq"), int)
     assert (event.pop("trace_id"), event.pop("span_id")) == (None, None)
     assert event == {

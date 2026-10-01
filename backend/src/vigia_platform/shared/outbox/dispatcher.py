@@ -13,7 +13,7 @@ Una ronda:
    **una** cabeza, la más antigua (BR-NUC-79, PAT-NUC-RES-04).
 2. Pide a ``shared.vigia_outbox_due_heads`` la cabeza vencida de cada partición: solo
    identificadores, porque con ``FORCE ROW LEVEL SECURITY`` el proceso no ve entregas sin una
-   organización fijada (nuc_0009).
+   organización fijada (nuc_0010).
 3. Por cada cabeza, una transacción con ``context_from_event`` (la organización emisora y su
    ``correlation_id``, BR-NUC-80):
 

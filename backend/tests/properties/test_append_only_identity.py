@@ -489,6 +489,19 @@ async def test_role_is_removed_once_with_its_author(append_only: AppendOnly, app
 async def test_concession_is_closed_once(append_only: AppendOnly, app: Any, closing: str) -> None:
     seed = append_only.seed
     concession = seed.concessions[seed.a.organization_id]
+    if closing == "expired":
+        # nuc_0009 (TASK-127): solo vence lo que ya pasó su expires_at.
+        superuser = await append_only.database.connect()
+        try:
+            concession = await insert_concession(
+                superuser,
+                seed,
+                seed.a.organization_id,
+                granted_offset=-dt.timedelta(days=2),
+                duration=dt.timedelta(days=1),
+            )
+        finally:
+            await superuser.close()
     revoke = (
         "UPDATE identity.provider_concession SET status = 'revoked', revoked_at = now(),"
         " revoked_by = $2, revoked_by_side = 'client' WHERE concession_id = $1"

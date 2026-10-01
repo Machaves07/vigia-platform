@@ -170,6 +170,8 @@ class RevocationMachine(RuleBasedStateMachine):
         self.env.set_organization_status(self.site.organization_id, "active")
         self.organization_active = True
 
+    # nuc_0009 (TASK-127): sobre un cliente suspendido no se concede (la base lo rechaza).
+    @precondition(lambda self: self.organization_active)
     @rule(data=st.data())
     def grant_concession(self, data: st.DataObject) -> None:
         level, scope_id = data.draw(
