@@ -188,6 +188,15 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             ), dict(row)
             assert "vigia.invitation_lookup" in row["qual"], dict(row)
             continue
+        if (row["tablename"], row["policyname"]) == ("organization", "periodic_iteration"):
+            # nuc_0012 (TASK-130): igual, solo dentro de shared.vigia_active_organizations.
+            assert (row["cmd"], row["roles"], row["permissive"]) == (
+                "SELECT",
+                ["vigia_migrate"],
+                "PERMISSIVE",
+            ), dict(row)
+            assert "vigia.periodic_iteration" in row["qual"], dict(row)
+            continue
         assert row["roles"] == ["public"], dict(row)
         policies.setdefault(row["tablename"], {})[row["policyname"]] = (
             f"{row['permissive']} {row['cmd']}"

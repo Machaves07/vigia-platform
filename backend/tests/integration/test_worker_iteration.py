@@ -60,7 +60,6 @@ from tests.worker_support import (
 )
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import ActorKind, ContextOrigin
-from vigia_platform.shared.observability.alerts_consumer import register_alerts_consumer
 from vigia_platform.shared.observability.metrics import MetricName, PlatformMetrics
 from vigia_platform.shared.outbox.publish import NewEvent, Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
@@ -243,7 +242,6 @@ def test_the_worker_functions_only_answer_the_system_actor(environment: WorkerEn
     env.run(env.add_organizations(1, status="suspended"))
     probe = ProbeTask()
     catalog = worker_catalog(probe)
-    register_alerts_consumer(catalog.consumers)
     env.run(synchronize(env.database, catalog, env.clock))
     outbox = Outbox(catalog, env.clock)
     published_at = env.clock.now()

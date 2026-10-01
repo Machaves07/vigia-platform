@@ -39,6 +39,7 @@ from vigia_platform.identity.authz.context import ScopeContexts
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorKind, ActorUnit, ContextOrigin
 from vigia_platform.shared.db import Database, Transaction
+from vigia_platform.shared.observability.alerts_consumer import register_alerts_consumer
 from vigia_platform.shared.outbox.publish import NewEvent, Outbox
 from vigia_platform.shared.outbox.registries import (
     EventType,
@@ -126,9 +127,12 @@ class ProbeTask:
 
 
 def worker_catalog(probe: ProbeTask, schedule: Schedule | None = None) -> OutboxCatalog:
-    """Los eventos de U-02, el del efecto de prueba y la tarea ``worker_probe`` (sin sellar)."""
+    """Los eventos y el consumidor de U-02 (``alert_metrics``, como el worker real), el evento del
+    efecto de prueba y la tarea ``worker_probe`` (sin sellar). Todas las pruebas de una base
+    sincronizan el mismo catálogo: un consumidor persistido sin registrar no arranca."""
     catalog = OutboxCatalog()
     register_u02_event_types(catalog.event_types)
+    register_alerts_consumer(catalog.consumers)
     catalog.event_types.register(
         EventType(
             event_name=EFFECT_EVENT,

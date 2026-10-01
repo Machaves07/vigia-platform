@@ -38,7 +38,6 @@ from tests.worker_support import (
 )
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode, Transaction
-from vigia_platform.shared.observability.alerts_consumer import register_alerts_consumer
 from vigia_platform.shared.observability.logging import configure_logging
 from vigia_platform.shared.outbox.dispatcher import Dispatcher
 from vigia_platform.shared.outbox.publish import Outbox
@@ -112,7 +111,6 @@ async def build_runtime(config: WorkerConfig, environ: Mapping[str, str]) -> Wor
         seconds=float(environ["VIGIA_TEST_WORKER_ORG_SECONDS"]),
     )
     catalog = worker_catalog(probe, Schedule.every(3600))
-    register_alerts_consumer(catalog.consumers)
     outbox = Outbox(catalog, _CLOCK)
     probe.outbox = outbox
 
