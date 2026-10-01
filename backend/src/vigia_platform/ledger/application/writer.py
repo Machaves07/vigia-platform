@@ -369,6 +369,11 @@ _BY_SOURCE_KEY: Final = text(
     " AND k.source_key = :source_key"
 )
 
+_ZONE_PLANT: Final = text(
+    "SELECT z.plant_id FROM identity.zone AS z"
+    " WHERE z.organization_id = :organization_id AND z.zone_id = :zone_id"
+)
+
 
 # --- Preparación (todo antes de abrir la transacción) ----------------------------------------
 
@@ -498,6 +503,16 @@ def _resolve_scope(
     return record_scope, chain_plant
 
 
+def _record_place(
+    document: Mapping[str, Any], scope: RecordScope | None
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Planta y zona del registro: lo que lleva el contenido manda sobre ``scope``."""
+    given = scope or RecordScope()
+    plant_id = _uuid_or_none(document.get("plant_id")) or given.plant_id
+    zone_id = _uuid_or_none(document.get("zone_id")) or given.zone_id
+    return plant_id, zone_id
+
+
 def _require_scope_within_context(
     context: ScopeContext, document: object, scope: RecordScope | None
 ) -> None:
@@ -510,9 +525,7 @@ def _require_scope_within_context(
     """
     if context.origin is not ContextOrigin.SESSION or not isinstance(document, Mapping):
         return
-    given = scope or RecordScope()
-    plant_id = _uuid_or_none(document.get("plant_id")) or given.plant_id
-    zone_id = _uuid_or_none(document.get("zone_id")) or given.zone_id
+    plant_id, zone_id = _record_place(document, scope)
     if plant_id is None and zone_id is None:
         return
     if not context.covers(plant_id, zone_id):
@@ -607,6 +620,7 @@ class EscritorExpediente:
                 raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/organization_id")
         # (1) y la planta o zona del registro, dentro del alcance de la sesión (BR-NUC-45).
         _require_scope_within_context(context, document, scope)
+        await self._require_zone_of_plant(context, document, scope)
         # (2) tipo registrado y unidad autorizada.
         compiled = self._compiled(context, record_type)
         # (3) esquema y tamaño, con todo lo que se exige al contenido: la clave de idempotencia
@@ -640,6 +654,30 @@ class EscritorExpediente:
             label_evidence_ids=label_evidence,
             events=self._events(compiled, events),
         )
+
+    async def _require_zone_of_plant(
+        self, context: ScopeContext, document: object, scope: RecordScope | None
+    ) -> None:
+        """Si la sesión cubre el registro solo por su zona, la zona es de la planta (BR-NUC-45).
+
+        ``AllowedScope.covers`` de zona no mira la planta: sin esta comprobación, quien tiene
+        una zona escribiría con su zona y la planta de otro, y el registro entraría en la cadena
+        de esa planta. Con la planta cubierta por sí misma (alcance de planta u organización) no
+        hace falta consultar. Zona inexistente o de otra planta → ``context_absent`` en
+        ``/plant_id``.
+        """
+        if context.origin is not ContextOrigin.SESSION or not isinstance(document, Mapping):
+            return
+        plant_id, zone_id = _record_place(document, scope)
+        if plant_id is None or zone_id is None or context.covers(plant_id):
+            return
+        rows = await self._database.read(
+            context,
+            _ZONE_PLANT,
+            {"organization_id": context.organization_id, "zone_id": zone_id},
+        )
+        if not rows or rows[0].plant_id != plant_id:
+            raise _reject(LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
 
     def _compiled(self, context: ScopeContext, record_type: object) -> CompiledType:
         if not isinstance(record_type, str):

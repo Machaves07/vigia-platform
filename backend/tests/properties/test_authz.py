@@ -29,7 +29,7 @@ import itertools
 import re
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -1262,6 +1262,107 @@ def test_writer_rejects_a_plant_or_zone_outside_the_session_scope(
         organization, [], kind=ActorKind.SYSTEM, origin=ContextOrigin.OUTBOX_EVENT
     )
     assert isinstance(_write(writer, system, zone_document(place)), Receipt)
+
+
+def _insert_hierarchy(
+    env: WriterEnvironment, organization_id: uuid.UUID, layout: Mapping[uuid.UUID, uuid.UUID]
+) -> None:
+    """Organización, una persona y, por cada planta, su zona (``layout``: planta → zona)."""
+
+    async def insert() -> None:
+        user_id = uuid.uuid4()
+        created = datetime(2026, 1, 1, tzinfo=UTC)
+        connection = await env.migrated.connect()
+        try:
+            # La organización y su persona van juntas: ``created_by`` es diferible.
+            transaction = connection.transaction()
+            await transaction.start()
+            await connection.execute(
+                "INSERT INTO identity.organization"
+                " (organization_id, code, name, kind, created_at, created_by)"
+                " VALUES ($1, $2, 'Organización sintética', 'client', $3, $4)",
+                organization_id,
+                f"ORG-{organization_id.hex[:8].upper()}",
+                created,
+                user_id,
+            )
+            await connection.execute(
+                "INSERT INTO identity.user_account (user_id, organization_id, email,"
+                " display_name, status, second_factor_required, created_at)"
+                " VALUES ($1, $2, $3, 'Persona sintética', 'active', false, $4)",
+                user_id,
+                organization_id,
+                f"persona-{user_id.hex[:12]}@example.test",
+                created,
+            )
+            for plant_id, zone_id in layout.items():
+                await connection.execute(
+                    "INSERT INTO identity.plant (plant_id, organization_id, code, name, country,"
+                    " data_region, timezone, created_at, created_by) VALUES ($1, $2, $3,"
+                    " 'Planta sintética', 'CO', 'us-east-1', 'America/Bogota', $4, $5)",
+                    plant_id,
+                    organization_id,
+                    f"PL-{plant_id.hex[:6].upper()}",
+                    created,
+                    user_id,
+                )
+                await connection.execute(
+                    "INSERT INTO identity.zone (zone_id, organization_id, plant_id, code, name,"
+                    " created_at, created_by) VALUES ($1, $2, $3, $4, 'Zona sintética', $5, $6)",
+                    zone_id,
+                    organization_id,
+                    plant_id,
+                    f"ZN-{zone_id.hex[:6].upper()}",
+                    created,
+                    user_id,
+                )
+            await transaction.commit()
+        finally:
+            await connection.close()
+
+    env.loop.run(insert())
+
+
+@pytest.mark.integration
+def test_writer_rejects_an_own_zone_under_a_foreign_plant(writer: WriterEnvironment) -> None:
+    """BR-NUC-45 (S7 de la revisión): con solo un alcance de zona, la zona es de la planta.
+
+    Quien tiene la zona Z de la planta P no escribe un registro con ``zone_id = Z`` y la planta
+    P' (el registro entraría en la cadena de P'); con su planta real, sí.
+    """
+    place = Place.new()
+    organization = place.organization_id
+    foreign_plant, foreign_zone = uuid.uuid4(), uuid.uuid4()
+    _insert_hierarchy(
+        writer, organization, {place.plant_id: place.zone_id, foreign_plant: foreign_zone}
+    )
+    context = sealed_context(
+        organization, [AllowedScope(ScopeLevel.ZONE, place.zone_id, Role.ADMINISTRATOR)]
+    )
+
+    def document(plant_id: uuid.UUID, zone_id: uuid.UUID) -> dict[str, Any]:
+        return {**zone_document(place), "plant_id": str(plant_id), "zone_id": str(zone_id)}
+
+    rejection = _write(writer, context, document(foreign_plant, place.zone_id))
+    assert isinstance(rejection, LedgerRejection), rejection
+    assert (rejection.code, rejection.field) == (LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
+    # Una zona que no existe en la organización tampoco vale con la planta propia.
+    unknown = sealed_context(
+        organization, [AllowedScope(ScopeLevel.ZONE, uuid.uuid4(), Role.ADMINISTRATOR)]
+    )
+    (unknown_zone,) = (scope.scope_id for scope in unknown.allowed_scopes)
+    rejection = _write(writer, unknown, document(place.plant_id, unknown_zone))
+    assert isinstance(rejection, LedgerRejection), rejection
+    assert (rejection.code, rejection.field) == (LedgerRejectionCode.CONTEXT_ABSENT, "/plant_id")
+    # Con su planta real se escribe.
+    receipt = _write(writer, context, document(place.plant_id, place.zone_id))
+    assert isinstance(receipt, Receipt), receipt
+    # Con la planta cubierta por sí misma (alcance de planta) no se consulta la zona.
+    plant_context = sealed_context(
+        organization, [AllowedScope(ScopeLevel.PLANT, place.plant_id, Role.ADMINISTRATOR)]
+    )
+    receipt = _write(writer, plant_context, document(place.plant_id, place.zone_id))
+    assert isinstance(receipt, Receipt), receipt
 
 
 def test_scope_containment_edges() -> None:
