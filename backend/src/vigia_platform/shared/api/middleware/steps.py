@@ -15,11 +15,13 @@ convierte en la respuesta genérica, con las cabeceras de seguridad y el ``corre
 4. ``BodyLimitStep``: 1 MB (o el ``body_limit`` de la ruta); lee el cuerpo entero antes de
    seguir, así que un cuerpo excedido es siempre ``payload_too_large``, con o sin
    ``Content-Length``.
-5. ``OriginRateLimitStep``: 1 200 por minuto por origen en rutas con permiso; 60 en las públicas
-   y en lo que no es ninguna ruta; fuera, los estáticos y las rutas de nodos.
-6. ``SessionStep``: en las rutas con permiso, el ``ScopeContext`` de la cookie de sesión con el
+5. ``OriginRateLimitStep``: 1 200 por minuto por origen en rutas con sesión (con permiso o de
+   ``SessionRoute``); 60 en las públicas y en lo que no es ninguna ruta; fuera, los estáticos y
+   las rutas de nodos.
+6. ``SessionStep``: en las rutas con sesión, el ``ScopeContext`` de la cookie de sesión con el
    ``correlation_id`` de la petición (``context_from_session``). Cookie mal formada o repetida:
-   ``unauthenticated``.
+   ``unauthenticated``. ``read_session_cookie`` es el mismo lector para las rutas públicas que
+   actúan sobre la cookie (segundo factor, su inscripción y el cierre de sesión).
 7. ``SessionRateLimitStep``: 600 por minuto por sesión.
 8. ``CsrfStep``: métodos que cambian estado exigen ``Sec-Fetch-Site: same-origin`` y, si viene,
    ``Origin`` igual al configurado; si no, ``forbidden`` y ``csrf_rejected`` en la auditoría.
@@ -96,6 +98,7 @@ __all__ = [
     "SessionContextPort",
     "SessionRateLimitStep",
     "SessionStep",
+    "read_session_cookie",
 ]
 
 DEFAULT_BODY_LIMIT_BYTES: Final = 1024 * 1024
@@ -455,7 +458,7 @@ class OriginRateLimitStep(_Step):
         )
         if state.route_class is RouteClass.PERSON and not exempt:
             address = _client_address(scope)
-            if _requires_permission(state):
+            if _requires_session(state):
                 self._limit(origin_key(address), AUTHENTICATED_ORIGIN_BUDGET, state, "origin")
             else:
                 self._limit(public_key(address), PUBLIC_ORIGIN_BUDGET, state, "public")
@@ -476,15 +479,15 @@ class SessionRateLimitStep(_Step):
         await self._app(scope, receive, send)
 
 
-def _requires_permission(state: RequestState) -> bool:
+def _requires_session(state: RequestState) -> bool:
     route = state.route
-    return route is not None and any(d.permission is not None for d in route.declarations)
+    return route is not None and any(d.requires_session for d in route.declarations)
 
 
 # --- (6) sesión y contexto ----------------------------------------------------------------------
 
 
-def _session_cookie(scope: MutableMapping[str, Any]) -> tuple[bool, SessionCookie | None]:
+def read_session_cookie(scope: MutableMapping[str, Any]) -> tuple[bool, SessionCookie | None]:
     """``(presente, cookie)``: la cookie de sesión si aparece exactamente una vez y bien formada."""
     values: list[str] = []
     prefix = SESSION_COOKIE_NAME + "="
@@ -518,14 +521,10 @@ class SessionStep(_Step):
         self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
     ) -> None:
         sessions = self._chain.sessions
-        if (
-            state.route_class is RouteClass.NODE
-            or sessions is None
-            or not _requires_permission(state)
-        ):
+        if state.route_class is RouteClass.NODE or sessions is None or not _requires_session(state):
             await self._app(scope, receive, send)
             return
-        present, cookie = _session_cookie(scope)
+        present, cookie = read_session_cookie(scope)
         if not present:
             # Sin cookie no hay contexto: la autorización de la ruta responde ``unauthenticated``.
             await self._app(scope, receive, send)

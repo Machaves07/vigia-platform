@@ -1,16 +1,21 @@
 """Declaración obligatoria de cada ruta (BR-NUC-91, BR-NUC-15; PR-NUC-37; PAT-NUC-SEG-06).
 
-Denegación por defecto: toda ruta declara **exactamente una** de estas dos cosas, como
+Denegación por defecto: toda ruta declara **exactamente una** de estas tres cosas, como
 dependencia de FastAPI:
 
 - ``requires(clave)``: la clave de permiso que exige (``users.manage``…), que debe existir en la
   matriz de permisos que recibe la fábrica (TASK-125 la aporta desde ``identity.authz``);
+- ``authenticated(SessionRoute.X)``: la ruta solo exige una **sesión utilizable**, sin clave de la
+  matriz (``business-logic-model.md`` §10.2, «sesión»: ``GET /me``, las sesiones propias, el cambio
+  de contraseña y la aceptación del aviso). Es otra **lista cerrada** (``SessionRoute``): lo que
+  hace cada una solo afecta a la persona de la sesión. La cadena valida la sesión igual que en una
+  ruta con permiso; sin sesión válida, ``unauthenticated``;
 - ``unauthenticated(UnauthenticatedRoute.X)``: la ruta está en la **lista cerrada**
-  ``UnauthenticatedRoute`` (inicio de sesión y segundo factor, aceptación de invitación, salud
-  superficial, claves públicas de ``checkpoint`` y hash del verificador, la salud profunda,
-  que es interna, y los estáticos de la aplicación de página única: pantallas, ``/assets/*``,
-  ``/version.json`` y ``/robots.txt``); método y plantilla de la ruta deben coincidir con los de
-  la lista.
+  ``UnauthenticatedRoute`` (inicio de sesión, segundo factor y su inscripción con la sesión
+  pendiente, cierre de sesión, aceptación de invitación, salud superficial, claves públicas de
+  ``checkpoint`` y hash del verificador, la salud profunda, que es interna, y los estáticos de la
+  aplicación de página única: pantallas, ``/assets/*``, ``/version.json`` y ``/robots.txt``);
+  método y plantilla de la ruta deben coincidir con los de la lista.
 
 ``check_routes`` recorre las rutas de la aplicación al construirla y devuelve un problema en
 español por cada ruta sin declaración, con dos declaraciones, con una clave inexistente, que no
@@ -60,7 +65,9 @@ __all__ = [
     "DenyAll",
     "Exposure",
     "RouteDeclaration",
+    "SessionRoute",
     "UnauthenticatedRoute",
+    "authenticated",
     "body_limit",
     "check_routes",
     "iter_declared_routes",
@@ -95,6 +102,10 @@ class UnauthenticatedRoute(enum.Enum):
 
     AUTH_LOGIN = ("POST", "/auth/login", Exposure.PUBLIC)
     AUTH_SECOND_FACTOR = ("POST", "/auth/second-factor", Exposure.PUBLIC)
+    # Solo con la sesión **pendiente** (BR-NUC-22): la ruta la valida para ese fin y nada más.
+    AUTH_SECOND_FACTOR_ENROLL = ("POST", "/auth/second-factor/enroll", Exposure.PUBLIC)
+    # Cierra la sesión de la cookie aunque ya haya vencido o falte el aviso (BR-NUC-27).
+    AUTH_LOGOUT = ("POST", "/auth/logout", Exposure.PUBLIC)
     INVITATION_ACCEPT = ("POST", "/invitations/{token}/accept", Exposure.PUBLIC)
     HEALTH_LIVE = ("GET", "/health/live", Exposure.PUBLIC)
     CHECKPOINT_KEYS = ("GET", "/.well-known/vigia-checkpoint-keys", Exposure.PUBLIC)
@@ -120,6 +131,28 @@ class UnauthenticatedRoute(enum.Enum):
         return Exposure(self.value[2])
 
 
+class SessionRoute(enum.Enum):
+    """Rutas que exigen una sesión utilizable y ninguna clave de la matriz (§10.2, «sesión»).
+
+    Lista cerrada: cada una actúa solo sobre la persona de la sesión (sus datos, sus sesiones, su
+    contraseña, su aceptación del aviso). Añadir una entrada es un cambio revisado del código.
+    """
+
+    ME = ("GET", "/me")
+    AUTH_SESSIONS = ("GET", "/auth/sessions")
+    AUTH_SESSIONS_CLOSE_OTHERS = ("POST", "/auth/sessions/close-others")
+    AUTH_PASSWORD = ("POST", "/auth/password")
+    PRIVACY_NOTICE_ACCEPT = ("POST", "/privacy-notice/accept")
+
+    @property
+    def method(self) -> str:
+        return str(self.value[0])
+
+    @property
+    def path(self) -> str:
+        return str(self.value[1])
+
+
 class Authorizer(Protocol):
     """Autorización de una petición para una clave (TASK-134 y TASK-125 la implementan).
 
@@ -141,11 +174,17 @@ AUTHORIZER_STATE_KEY: Final = "vigia_authorizer"
 
 @dataclass(frozen=True, slots=True)
 class RouteDeclaration:
-    """Lo que declara una ruta: su clave o su entrada de la lista cerrada, y sus ``detail_code``."""
+    """Lo que declara una ruta: su clave o su entrada de una lista cerrada, y sus detail_code."""
 
     permission: str | None
     unauthenticated: UnauthenticatedRoute | None
     detail_codes: tuple[str, ...]
+    session: SessionRoute | None = None
+
+    @property
+    def requires_session(self) -> bool:
+        """La cadena construye el contexto de la sesión: clave de permiso o ``SessionRoute``."""
+        return self.permission is not None or self.session is not None
 
 
 class _Declared:
@@ -168,6 +207,10 @@ class _Declared:
         if not self._chain_completed(request):
             _log.error("petición sin la cadena de middleware completa: se deniega")
             raise ApiError(ApiErrorCode.INTERNAL_ERROR)
+        if self.declaration.session is not None:
+            if request_state(request.scope).session is None:
+                raise ApiError(ApiErrorCode.UNAUTHENTICATED)
+            return
         permission = self.declaration.permission
         if permission is None:
             return
@@ -187,6 +230,13 @@ def unauthenticated(route: UnauthenticatedRoute, *, detail_codes: Iterable[str] 
     if not isinstance(route, UnauthenticatedRoute):
         raise TypeError("route debe ser UnauthenticatedRoute")
     return Depends(_Declared(RouteDeclaration(None, route, tuple(detail_codes))))
+
+
+def authenticated(route: SessionRoute, *, detail_codes: Iterable[str] = ()) -> Any:
+    """Dependencia que declara la ruta como entrada ``route`` de las rutas de sesión."""
+    if not isinstance(route, SessionRoute):
+        raise TypeError("route debe ser SessionRoute")
+    return Depends(_Declared(RouteDeclaration(None, None, tuple(detail_codes), session=route)))
 
 
 class _BodyLimit:
@@ -301,6 +351,13 @@ def _route_problems(
             f"la ruta {where} dice ser «{entry.name}» de la lista pública, que es "
             f"{entry.method} {entry.path}"
         )
+    elif (session := declaration.session) is not None and (
+        route.path != session.path or set(methods) - {"HEAD"} != {session.method}
+    ):
+        problems.append(
+            f"la ruta {where} dice ser «{session.name}» de las rutas de sesión, que es "
+            f"{session.method} {session.path}"
+        )
     problems.extend(
         f"la ruta {where} responde el detail_code «{code}», que ninguna unidad registró"
         for code in declaration.detail_codes
@@ -318,7 +375,7 @@ def check_routes(
 ) -> list[str]:
     """Problemas de declaración de ``routes`` (vacío si todas cumplen BR-NUC-91)."""
     problems: list[str] = []
-    seen: set[UnauthenticatedRoute] = set()
+    seen: set[UnauthenticatedRoute | SessionRoute] = set()
     for route in iter_declared_routes(routes):
         if not route.is_api_route:
             if docs_enabled and route.path in _DOCS_PATHS and not route.declarations:
@@ -330,9 +387,9 @@ def check_routes(
             continue
         problems.extend(_route_problems(route, known_permissions, detail_codes))
         for declaration in route.declarations[:1]:
-            entry = declaration.unauthenticated
+            entry = declaration.unauthenticated or declaration.session
             if entry is not None and entry in seen:
-                problems.append(f"la entrada «{entry.name}» de la lista pública está repetida")
+                problems.append(f"la entrada «{entry.name}» de una lista cerrada está repetida")
             if entry is not None:
                 seen.add(entry)
     return problems

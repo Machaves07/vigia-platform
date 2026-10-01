@@ -5,7 +5,8 @@ generado; (2) manejador global de errores; (3) cabeceras de seguridad; el eslab�
 ``node``/``person`` del pendiente nº 37, que fija el pool de la base; (4) límite de cuerpo;
 (5) tasa por origen; (6) sesión y contexto; (7) tasa por sesión; (8) barrera anti-falsificación;
 (9) aviso de tratamiento; y (10) autorización por ruta, la dependencia obligatoria de cada ruta
-(``declarations.requires``/``unauthenticated``). Los detalles de cada uno están en ``steps``.
+(``declarations.requires``/``authenticated``/``unauthenticated``). Los detalles de cada uno
+están en ``steps``.
 
 ``install_chain`` instala los diez middleware en ese orden; ``verify_chain`` es la prueba de
 arranque: la fábrica no arranca (``ApiStartupError``) si el orden instalado no es exactamente
@@ -44,6 +45,7 @@ from vigia_platform.shared.api.middleware.steps import (
     CsrfReason,
     CsrfRejection,
     SessionContextPort,
+    read_session_cookie,
 )
 from vigia_platform.shared.api.request_state import CHAIN, MIDDLEWARE_CHAIN, ChainStep
 
@@ -66,6 +68,7 @@ __all__ = [
     "install_chain",
     "installed_chain",
     "parse_store_origins",
+    "read_session_cookie",
     "request_context",
     "request_session",
     "route_class_of",
