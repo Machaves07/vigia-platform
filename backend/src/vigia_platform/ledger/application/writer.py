@@ -46,7 +46,7 @@ import hashlib
 import json
 import os
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Final, Protocol, cast
@@ -579,6 +579,7 @@ class EscritorExpediente:
         scope: RecordScope | None = None,
         events: Sequence[NewEvent] = (),
         occurred_at: datetime | None = None,
+        projection: Callable[[Transaction], Awaitable[None]] | None = None,
         transaction: Transaction | None = None,
     ) -> Receipt | LedgerRejection:
         """Escribe un registro; ``Receipt`` tras confirmar, o el rechazo del primer fallo.
@@ -587,6 +588,12 @@ class EscritorExpediente:
         en ``outbox_events`` del tipo); el escritor les fija la planta de la cadena y la
         secuencia del registro. ``occurred_at`` es la marca del hecho para la línea de tiempo
         (fuera del sobre).
+
+        ``projection`` es la proyección que el registro respalda (p. ej. la fila de
+        ``identity.provider_concession``, domain-entities §2.11): corre dentro de la transacción
+        del paso 7, antes del ``INSERT`` del registro, así que la fila y el registro se confirman
+        o se revierten juntos. Solo corre si el registro se escribe (no en un rechazo ni en un
+        ``accepted_duplicate``); lo que lance sale tal cual, con la transacción revertida.
 
         Con ``transaction`` (de la organización del contexto) el paso 7 va en la transacción del
         llamador: el registro solo existe si ella confirma, junto con lo que el llamador escribió
@@ -613,6 +620,8 @@ class EscritorExpediente:
         if isinstance(prepared, Receipt):
             return prepared
         if transaction is not None:
+            if projection is not None:
+                await projection(transaction)
             record_id = uuid7(self._clock, self._random_bytes)
             inserted = await self._insert(transaction, context, prepared, record_id, occurred_at)
             return Receipt(
@@ -620,7 +629,7 @@ class EscritorExpediente:
                 received_at=inserted.received_at,
                 status=AcceptanceStatus.ACCEPTED,
             )
-        return await self._commit(context, prepared, occurred_at)
+        return await self._commit(context, prepared, occurred_at, projection)
 
     # --- pasos 1 a 6 ---------------------------------------------------------------------------
 
@@ -864,11 +873,17 @@ class EscritorExpediente:
     # --- paso 7 --------------------------------------------------------------------------------
 
     async def _commit(
-        self, context: ScopeContext, prepared: _Prepared, occurred_at: datetime | None
+        self,
+        context: ScopeContext,
+        prepared: _Prepared,
+        occurred_at: datetime | None,
+        projection: Callable[[Transaction], Awaitable[None]] | None = None,
     ) -> Receipt | LedgerRejection:
         record_id = uuid7(self._clock, self._random_bytes)
         try:
             async with self._database.transaction(context) as transaction:
+                if projection is not None:
+                    await projection(transaction)
                 inserted = await self._insert(
                     transaction, context, prepared, record_id, occurred_at
                 )

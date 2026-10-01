@@ -15,7 +15,7 @@ valor concreto:
   ``plant_created`` la de la planta.
 - Activación: token usado, vencido, cancelado o inexistente responden igual; el administrador no
   se activa sin confirmar el segundo factor; la aceptación del aviso queda con su versión.
-- ``nuc_0009``: una asignación con planta o zona de otra organización se rechaza en la base.
+- ``nuc_0010``: una asignación con planta o zona de otra organización se rechaza en la base.
 """
 
 from __future__ import annotations
@@ -633,7 +633,7 @@ def _replace(spec: PlantSpec, name: str, value: str) -> PlantSpec:
     return PlantSpec(**values)
 
 
-# --- nuc_0009 -----------------------------------------------------------------------------------
+# --- nuc_0010 -----------------------------------------------------------------------------------
 
 
 def test_database_rejects_an_assignment_scoped_to_another_organization(

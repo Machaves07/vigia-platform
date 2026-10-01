@@ -1,6 +1,6 @@
 """Alcance de las asignaciones y búsqueda de la invitación (TASK-126, LC-NUC-05).
 
-Revisión nuc_0009. Dos piezas del esquema que la jerarquía y las invitaciones necesitan:
+Revisión nuc_0010. Dos piezas del esquema que la jerarquía y las invitaciones necesitan:
 
 **Alcance de la asignación.** ``identity.role_assignment.scope_id`` no tiene clave foránea,
 porque apunta a una organización, una planta o una zona según ``scope_level``. ``nuc_0004`` ya
@@ -32,8 +32,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0009"
-down_revision: str | None = "nuc_0008"
+revision: str = "nuc_0010"
+down_revision: str | None = "nuc_0009"
 branch_labels: None = None
 depends_on: None = None
 

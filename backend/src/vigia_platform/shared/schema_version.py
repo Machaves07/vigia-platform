@@ -32,10 +32,12 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 8
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0008``
+MINIMUM_SCHEMA_VERSION: Final = 9
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0009``
+(``identity.concession_terms`` e ``identity.provider_concession_of`` de las concesiones del
+proveedor, y la RLS de proveedor en todo ``identity``), que incluye ``nuc_0008``
 (``identity.session_concession``, la concesión vigente dentro de la sentencia única del contexto),
-que incluye ``nuc_0007`` (``identity.login_organization`` y ``session_idle_expiry`` del inicio de
+``nuc_0007`` (``identity.login_organization`` y ``session_idle_expiry`` del inicio de
 sesión), ``nuc_0006`` (las columnas de la verificación diferida de la marca en ``ledger.evidence`` y
 ``ledger.evidence_sample_run``) y ``nuc_0005`` (la columna
 ``ledger.record_type.chain_follows_scope`` y la guarda de puntos de control del encadenado)."""

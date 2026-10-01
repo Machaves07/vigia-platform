@@ -27,7 +27,7 @@ token inexistente, usado, vencido o cancelado, de una cuenta que no está invita
 organización suspendida responde **igual**: ``invitation_invalid``.
 
 Antes de conocer la organización, la única búsqueda es ``identity.invitation_organization``
-(``nuc_0009``), que solo devuelve el identificador de la organización del hash.
+(``nuc_0010``), que solo devuelve el identificador de la organización del hash.
 """
 
 from __future__ import annotations

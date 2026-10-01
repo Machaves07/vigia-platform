@@ -49,6 +49,20 @@ pytestmark = pytest.mark.integration
 
 ROLES = ("vigia_app", "vigia_migrate")
 
+PROVIDER_DENIED_TABLES = frozenset(
+    {
+        "password_credential",
+        "totp_credential",
+        "recovery_code",
+        "session",
+        "invitation",
+        "auth_throttle",
+        "signing_key",
+        "key_set_publication",
+    }
+)
+"""Secretos y credenciales: ninguna fila con un contexto de proveedor (nuc_0009, A-46)."""
+
 CLOSING_COLUMNS = {
     "zone_node_assignment": {"unassigned_at"},
     "role_assignment": {"removed_at", "removed_by"},
@@ -155,8 +169,9 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             assert "vigia.login_lookup" in row["qual"], dict(row)
             continue
         if row["policyname"] == "concession_lookup":
-            # nuc_0008 (TASK-125): igual, solo dentro de identity.session_concession.
-            assert row["tablename"] in {"provider_concession", "organization"}, dict(row)
+            # nuc_0008 (TASK-125) y nuc_0009 (TASK-127, la planta): igual, solo dentro de las
+            # funciones de búsqueda de las concesiones.
+            assert row["tablename"] in {"provider_concession", "organization", "plant"}, dict(row)
             assert (row["cmd"], row["roles"], row["permissive"]) == (
                 "SELECT",
                 ["vigia_migrate"],
@@ -165,7 +180,7 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             assert "vigia.concession_lookup" in row["qual"], dict(row)
             continue
         if (row["tablename"], row["policyname"]) == ("invitation", "invitation_lookup"):
-            # nuc_0009 (TASK-126): igual, solo dentro de identity.invitation_organization.
+            # nuc_0010 (TASK-126): igual, solo dentro de identity.invitation_organization.
             assert (row["cmd"], row["roles"], row["permissive"]) == (
                 "SELECT",
                 ["vigia_migrate"],
@@ -173,8 +188,10 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             ), dict(row)
             assert "vigia.invitation_lookup" in row["qual"], dict(row)
             continue
-        assert row["cmd"] == "ALL" and row["roles"] == ["public"], dict(row)
-        policies.setdefault(row["tablename"], {})[row["policyname"]] = row["permissive"]
+        assert row["roles"] == ["public"], dict(row)
+        policies.setdefault(row["tablename"], {})[row["policyname"]] = (
+            f"{row['permissive']} {row['cmd']}"
+        )
     with_plant_or_zone = {
         row[0]
         for row in await superuser.fetch(
@@ -183,10 +200,27 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
         )
     }
     assert with_plant_or_zone == set(PROVIDER_SCOPED_TABLES)
+    # nuc_0009 (adenda A-46): toda tabla de identity acota además un contexto de proveedor.
+    read_only = {
+        "provider_concession_read": "RESTRICTIVE SELECT",
+        "provider_context_read_only": "RESTRICTIVE INSERT",
+        "provider_context_no_update": "RESTRICTIVE UPDATE",
+        "provider_context_no_delete": "RESTRICTIVE DELETE",
+    }
     for name in TENANT_TABLES:
-        expected = {"organization_isolation": "PERMISSIVE"}
+        expected = {"organization_isolation": "PERMISSIVE ALL"}
         if name in with_plant_or_zone:
-            expected["provider_concession_scope"] = "RESTRICTIVE"
+            expected["provider_concession_scope"] = "RESTRICTIVE ALL"
+        elif name in PROVIDER_DENIED_TABLES:
+            expected["provider_context_denied"] = "RESTRICTIVE ALL"
+        elif name == "provider_concession":
+            expected |= {
+                "provider_concession_own": "RESTRICTIVE SELECT",
+                "provider_concession_grant": "RESTRICTIVE INSERT",
+                "provider_concession_close": "RESTRICTIVE UPDATE",
+            }
+        else:
+            expected |= read_only
         assert policies.get(name) == expected, name
 
 
@@ -616,18 +650,22 @@ async def test_concession_only_on_a_client_organization(identity: Identity, app:
                 seed.a.organization_id,
                 BASE_TIME,
             )
-    # Control: la misma forma sobre un cliente entra.
+    # Control: la misma forma sobre un cliente entra, desde el contexto de esa concesión
+    # (nuc_0009: una concesión solo nace en el contexto de concesión de su propia fila) y vigente.
     transaction = app.transaction()
     await transaction.start()
     try:
-        await set_scope(app, seed.b.organization_id)
+        concession_id = uuid.uuid4()
+        await set_scope(
+            app, seed.b.organization_id, actor_kind="provider_user", concession_id=concession_id
+        )
         await app.execute(
             insert,
-            uuid.uuid4(),
+            concession_id,
             seed.b.organization_id,
             seed.installer_id,
             seed.provider_organization_id,
-            BASE_TIME,
+            await app.fetchval("SELECT now()"),
         )
     finally:
         await transaction.rollback()

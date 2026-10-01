@@ -36,6 +36,11 @@ registro (``node_declared``…) con la unidad U-02, sin cambiar actor, alcance n
 Los contextos de evento e iteración no tienen asignaciones: ``authorize`` nunca les concede una
 clave; operan sobre su organización por construcción.
 
+``provider_concession_context(base, …)`` deriva del contexto de sesión de un usuario de la
+proveedora el de **una** concesión sobre el cliente, para concederla o revocarla desde la
+proveedora (TASK-127, ``business-logic-model.md`` §3); el servicio de concesiones lo pide después
+de autorizar.
+
 ``ScopeContexts`` también implementa ``LoginContexts`` y ``SessionContexts`` del inicio de sesión
 (TASK-124): ``anonymous`` (la organización antes de conocer a la persona) y ``for_user`` (la
 persona recién acreditada, aún sin asignaciones).
@@ -83,6 +88,7 @@ from vigia_platform.shared.context import (
     ScopeLevel,
     _seal_scope_context,
     install_context_absent_reporter,
+    repository,
 )
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
@@ -324,6 +330,7 @@ def _display_name(value: str) -> str:
     return value[:120] if value else SYSTEM_DISPLAY_NAME
 
 
+@repository
 class ScopeContexts:
     """``AuthorizationPort.build_context`` (sesión, evento, organización, operador)."""
 
@@ -588,6 +595,63 @@ class ScopeContexts:
             allowed_scopes=(),
             correlation_id=self._correlation(None),
             session_id_hash=session_id_hash,
+        )
+
+    # --- Contexto derivado de la concesión (TASK-127) ------------------------------------------
+
+    def provider_concession_context(
+        self,
+        base: ScopeContext,
+        *,
+        concession_id: uuid.UUID,
+        client_organization_id: uuid.UUID,
+        scope_level: ScopeLevel,
+        scope_id: uuid.UUID,
+    ) -> ScopeContext:
+        """El contexto del cliente con el que el proveedor concede o revoca **esa** concesión.
+
+        ``business-logic-model.md`` §3: conceder es la única escritura de un contexto del proveedor
+        en un cliente sin concesión previa, y solo de ese tipo. ``base`` es el contexto de la sesión
+        del usuario en la proveedora (sin concesión) ya autorizado por el servicio de concesiones;
+        el resultado es el de la concesión ``concession_id`` sobre el cliente, como el que
+        construye ``context_from_session`` (mismo actor, sesión y correlación). En la base, con él
+        solo se puede insertar o revocar la fila de esa concesión (``nuc_0009``). Sin ``base``,
+        ``ContextAbsent`` (la guarda de ``@repository``).
+        """
+        for name, value in (
+            ("concession_id", concession_id),
+            ("client_organization_id", client_organization_id),
+            ("scope_id", scope_id),
+        ):
+            if type(value) is not uuid.UUID:
+                raise TypeError(f"{name} debe ser uuid.UUID")
+        level = ScopeLevel(scope_level)
+        if (
+            base.origin is not ContextOrigin.SESSION
+            or base.organization_id != self._provider_organization_id
+            or base.concession_id is not None
+            or base.actor.kind is not ActorKind.USER
+            or base.session_id_hash is None
+            or client_organization_id == self._provider_organization_id
+            or level is ScopeLevel.ZONE
+            or (level is ScopeLevel.ORGANIZATION and scope_id != client_organization_id)
+        ):
+            raise ContextUnavailable(ContextUnavailableReason.CONCESSION_INVALID)
+        actor = base.actor
+        return _seal_scope_context(
+            organization_id=client_organization_id,
+            actor=Actor(
+                kind=ActorKind.PROVIDER_USER,
+                id=actor.id,
+                display_name_snapshot=actor.display_name_snapshot,
+                unit=actor.unit,
+                role_in_use=actor.role_in_use,
+                concession_id=concession_id,
+            ),
+            origin=ContextOrigin.SESSION,
+            allowed_scopes=(AllowedScope(level, scope_id, Role.PROVIDER_INSTALLER),),
+            correlation_id=base.correlation_id,
+            session_id_hash=base.session_id_hash,
         )
 
     def provider_audit_context(self) -> ScopeContext:

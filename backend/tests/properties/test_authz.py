@@ -985,7 +985,13 @@ def concession_timelines(draw: st.DrawFn) -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def concession_site(environment: AuthzEnvironment) -> Any:
-    return environment.add_site(plants=2, zones_per_plant=1)
+    site = environment.add_site(plants=2, zones_per_plant=1)
+    # nuc_0009 (TASK-127) impone el tope del cliente: las líneas de tiempo llegan a 90 días.
+    environment.execute(
+        "UPDATE identity.organization SET concession_max_days = 90 WHERE organization_id = $1",
+        site.organization_id,
+    )
+    return site
 
 
 @pytest.mark.integration
