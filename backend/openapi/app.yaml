@@ -24,8 +24,291 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/login":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Inicio de sesión: primer paso (correo y contraseña)"
+      "operationId": "login_auth_login_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/LoginRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LoginResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/second-factor":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Inicio de sesión: segundo paso (TOTP o código de recuperación)"
+      "operationId": "second_factor_auth_second_factor_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SecondFactorRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LoginResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/second-factor/enroll":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Inscripción obligatoria del segundo factor con la sesión pendiente"
+      "operationId": "enroll_auth_second_factor_enroll_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/EnrollRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EnrollResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/logout":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Cierre de sesión"
+      "operationId": "logout_auth_logout_post"
+      "responses":
+        "204":
+          "description": "Successful Response"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/sessions":
+    "get":
+      "tags":
+        - "sesión"
+      "summary": "Sesiones activas de la persona"
+      "operationId": "sessions_auth_sessions_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SessionsResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/sessions/close-others":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Cerrar las demás sesiones"
+      "operationId": "close_others_auth_sessions_close_others_post"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SessionsClosedResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/auth/password":
+    "post":
+      "tags":
+        - "sesión"
+      "summary": "Cambio de la contraseña propia"
+      "operationId": "change_password_auth_password_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/PasswordChangeRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SessionsClosedResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/invitations/{token}/accept":
+    "post":
+      "tags":
+        - "invitación"
+      "summary": "Activación de la cuenta con el enlace de invitación"
+      "operationId": "accept_invitations__token__accept_post"
+      "parameters":
+        - "name": "token"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Token"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "oneOf":
+                - "$ref": "#/components/schemas/BeginActivation"
+                - "$ref": "#/components/schemas/CompleteActivation"
+              "discriminator":
+                "propertyName": "step"
+                "mapping":
+                  "begin": "#/components/schemas/BeginActivation"
+                  "complete": "#/components/schemas/CompleteActivation"
+              "title": "Body"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ActivationResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/me":
+    "get":
+      "tags":
+        - "yo"
+      "summary": "La persona de la sesión: identidad, asignaciones, permisos y vencimientos"
+      "operationId": "me_me_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/MeResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/privacy-notice/accept":
+    "post":
+      "tags":
+        - "yo"
+      "summary": "Aceptación de la versión vigente del aviso de tratamiento"
+      "operationId": "accept_notice_privacy_notice_accept_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NoticeAcceptRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NoticeAcceptResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
+    "ActivationEnrollment":
+      "properties":
+        "provisioning_uri":
+          "type": "string"
+          "title": "Provisioning Uri"
+        "qr_svg":
+          "type": "string"
+          "title": "Qr Svg"
+        "recovery_codes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Recovery Codes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "provisioning_uri"
+        - "qr_svg"
+        - "recovery_codes"
+      "title": "ActivationEnrollment"
+    "ActivationResponse":
+      "properties":
+        "status":
+          "type": "string"
+          "enum":
+            - "pending"
+            - "activated"
+          "title": "Status"
+        "second_factor_required":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Second Factor Required"
+        "enrollment":
+          "anyOf":
+            - "$ref": "#/components/schemas/ActivationEnrollment"
+            - "type": "null"
+        "notice":
+          "anyOf":
+            - "$ref": "#/components/schemas/NoticeView"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "ActivationResponse"
     "ApiErrorBody":
       "additionalProperties": false
       "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."
@@ -83,6 +366,114 @@
         - "storage_unavailable"
       "title": "ApiErrorCode"
       "type": "string"
+    "AssignmentView":
+      "properties":
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "role"
+        - "scope_level"
+        - "scope_id"
+      "title": "AssignmentView"
+    "BeginActivation":
+      "properties":
+        "step":
+          "type": "string"
+          "const": "begin"
+          "title": "Step"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "step"
+      "title": "BeginActivation"
+    "CompleteActivation":
+      "properties":
+        "step":
+          "type": "string"
+          "const": "complete"
+          "title": "Step"
+        "password":
+          "type": "string"
+          "maxLength": 1024
+          "minLength": 1
+          "title": "Password"
+        "notice_version":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 1
+          "title": "Notice Version"
+        "second_factor_code":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 16
+              "minLength": 1
+            - "type": "null"
+          "title": "Second Factor Code"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "step"
+        - "password"
+        - "notice_version"
+      "title": "CompleteActivation"
+    "EnrollRequest":
+      "properties":
+        "code":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+              "minLength": 1
+            - "type": "null"
+          "title": "Code"
+      "additionalProperties": false
+      "type": "object"
+      "title": "EnrollRequest"
+    "EnrollResponse":
+      "properties":
+        "status":
+          "type": "string"
+          "enum":
+            - "enrollment_started"
+            - "authenticated"
+          "title": "Status"
+        "enrollment":
+          "anyOf":
+            - "$ref": "#/components/schemas/EnrollmentView"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "EnrollResponse"
+    "EnrollmentView":
+      "properties":
+        "provisioning_uri":
+          "type": "string"
+          "title": "Provisioning Uri"
+        "qr_svg":
+          "type": "string"
+          "title": "Qr Svg"
+        "recovery_codes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Recovery Codes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "provisioning_uri"
+        - "qr_svg"
+        - "recovery_codes"
+      "title": "EnrollmentView"
+      "description": "Lo que se muestra **una sola vez** al inscribirse; nada de esto se guarda en claro."
     "LiveStatus":
       "properties":
         "status":
@@ -95,3 +486,267 @@
         - "status"
       "title": "LiveStatus"
       "description": "Respuesta de ``/health/live``."
+    "LoginRequest":
+      "properties":
+        "email":
+          "type": "string"
+          "maxLength": 254
+          "minLength": 1
+          "title": "Email"
+        "password":
+          "type": "string"
+          "maxLength": 128
+          "minLength": 1
+          "title": "Password"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email"
+        - "password"
+      "title": "LoginRequest"
+    "LoginResponse":
+      "properties":
+        "status":
+          "type": "string"
+          "enum":
+            - "authenticated"
+            - "second_factor_required"
+            - "second_factor_enrollment_required"
+          "title": "Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "LoginResponse"
+    "MeResponse":
+      "properties":
+        "user":
+          "$ref": "#/components/schemas/UserView"
+        "organization":
+          "$ref": "#/components/schemas/OrganizationView"
+        "assignments":
+          "items":
+            "$ref": "#/components/schemas/AssignmentView"
+          "type": "array"
+          "title": "Assignments"
+        "effective_permissions":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Effective Permissions"
+        "concession_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Concession Id"
+        "idle_expires_at":
+          "type": "string"
+          "title": "Idle Expires At"
+        "absolute_expires_at":
+          "type": "string"
+          "title": "Absolute Expires At"
+        "privacy_notice_version":
+          "type": "string"
+          "title": "Privacy Notice Version"
+        "api_version":
+          "type": "string"
+          "title": "Api Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user"
+        - "organization"
+        - "assignments"
+        - "effective_permissions"
+        - "concession_id"
+        - "idle_expires_at"
+        - "absolute_expires_at"
+        - "privacy_notice_version"
+        - "api_version"
+      "title": "MeResponse"
+    "NoticeAcceptRequest":
+      "properties":
+        "notice_version":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 1
+          "title": "Notice Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "notice_version"
+      "title": "NoticeAcceptRequest"
+    "NoticeAcceptResponse":
+      "properties":
+        "notice_version":
+          "type": "string"
+          "title": "Notice Version"
+        "newly_accepted":
+          "type": "boolean"
+          "title": "Newly Accepted"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "notice_version"
+        - "newly_accepted"
+      "title": "NoticeAcceptResponse"
+    "NoticeView":
+      "properties":
+        "version":
+          "type": "string"
+          "title": "Version"
+        "text":
+          "type": "string"
+          "title": "Text"
+        "pending_legal_text":
+          "type": "boolean"
+          "title": "Pending Legal Text"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "version"
+        - "text"
+        - "pending_legal_text"
+      "title": "NoticeView"
+    "OrganizationView":
+      "properties":
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization_id"
+        - "code"
+        - "name"
+        - "kind"
+      "title": "OrganizationView"
+    "PasswordChangeRequest":
+      "properties":
+        "current_password":
+          "type": "string"
+          "maxLength": 128
+          "minLength": 1
+          "title": "Current Password"
+        "new_password":
+          "type": "string"
+          "maxLength": 1024
+          "minLength": 1
+          "title": "New Password"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "current_password"
+        - "new_password"
+      "title": "PasswordChangeRequest"
+    "Role":
+      "type": "string"
+      "enum":
+        - "coordinator_sst"
+        - "line_manager"
+        - "plant_manager"
+        - "administrator"
+        - "provider_installer"
+        - "copasst"
+        - "platform_operator"
+      "title": "Role"
+    "ScopeLevel":
+      "type": "string"
+      "enum":
+        - "organization"
+        - "plant"
+        - "zone"
+      "title": "ScopeLevel"
+    "SecondFactorRequest":
+      "properties":
+        "code":
+          "type": "string"
+          "maxLength": 64
+          "minLength": 1
+          "title": "Code"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+      "title": "SecondFactorRequest"
+    "SessionView":
+      "properties":
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "last_seen_at":
+          "type": "string"
+          "title": "Last Seen At"
+        "client_hint":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Client Hint"
+        "current":
+          "type": "boolean"
+          "title": "Current"
+        "usable":
+          "type": "boolean"
+          "title": "Usable"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "created_at"
+        - "last_seen_at"
+        - "client_hint"
+        - "current"
+        - "usable"
+      "title": "SessionView"
+      "description": "Una sesión activa de la persona (sin identificador ni hash)."
+    "SessionsClosedResponse":
+      "properties":
+        "sessions_closed":
+          "type": "integer"
+          "title": "Sessions Closed"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sessions_closed"
+      "title": "SessionsClosedResponse"
+    "SessionsResponse":
+      "properties":
+        "sessions":
+          "items":
+            "$ref": "#/components/schemas/SessionView"
+          "type": "array"
+          "title": "Sessions"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sessions"
+      "title": "SessionsResponse"
+    "UserView":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "email":
+          "type": "string"
+          "title": "Email"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "email"
+      "title": "UserView"

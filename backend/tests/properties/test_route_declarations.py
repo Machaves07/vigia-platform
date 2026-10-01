@@ -1,9 +1,11 @@
-"""PR-NUC-37: toda ruta declara una clave de permiso existente o está en la lista pública cerrada;
-el arranque falla ante cualquier ruta sin declaración (BR-NUC-91, BR-NUC-15; TASK-133).
+"""PR-NUC-37: toda ruta declara una clave de permiso existente o está en una lista cerrada (la
+pública o la de rutas de sesión, TASK-135); el arranque falla ante cualquier ruta sin declaración
+(BR-NUC-91, BR-NUC-15; TASK-133).
 
 - Metapropiedad sobre aplicaciones generadas: con cualquier mezcla de rutas (clave existente,
-  inexistente o mal formada, entrada de la lista pública que coincide o no, ninguna o dos
-  declaraciones, en la firma, en ``dependencies=`` o en el ``include_router``, anidadas), la
+  inexistente o mal formada, entrada de la lista pública o de la de sesión que coincide o no,
+  ninguna o dos declaraciones, en la firma, en ``dependencies=`` o en el ``include_router``,
+  anidadas), la
   fábrica lanza ``ApiStartupError`` **si y solo si** alguna ruta no cumple, y el mensaje, en
   español, nombra cada ruta que no cumple.
 - ``detail_code`` (pendiente nº 33): una unidad que registra un valor sin prefijo registrado o que
@@ -30,9 +32,12 @@ from hypothesis import strategies as st
 from starlette.routing import Mount
 
 from tests.api_support import World
+from tests.middleware_support import chain_units
 from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.shared.api.declarations import (
+    SessionRoute,
     UnauthenticatedRoute,
+    authenticated,
     requires,
     unauthenticated,
 )
@@ -54,12 +59,14 @@ class Kind(enum.Enum):
     MALFORMED = "malformed"
     PUBLIC_MATCH = "public_match"
     PUBLIC_WRONG_PATH = "public_wrong_path"
+    SESSION_MATCH = "session_match"
+    SESSION_WRONG_PATH = "session_wrong_path"
     NONE = "none"
     DOUBLE = "double"
     UNREGISTERED_DETAIL = "unregistered_detail"
 
 
-VALID_KINDS = frozenset({Kind.KNOWN, Kind.PUBLIC_MATCH})
+VALID_KINDS = frozenset({Kind.KNOWN, Kind.PUBLIC_MATCH, Kind.SESSION_MATCH})
 
 
 class Where(enum.Enum):
@@ -76,6 +83,7 @@ class Spec:
     method: str
     path: str
     public: UnauthenticatedRoute | None
+    session: SessionRoute | None = None
 
 
 PUBLIC_CANDIDATES = [
@@ -109,6 +117,11 @@ def _declaration(spec: Spec) -> list[Any]:
         return [unauthenticated(spec.public)]
     if kind is Kind.PUBLIC_WRONG_PATH:
         return [unauthenticated(UnauthenticatedRoute.AUTH_LOGIN)]
+    if kind is Kind.SESSION_MATCH:
+        assert spec.session is not None
+        return [authenticated(spec.session)]
+    if kind is Kind.SESSION_WRONG_PATH:
+        return [authenticated(SessionRoute.ME)]
     if kind is Kind.DOUBLE:
         return [requires("ledger.read"), requires("users.manage")]
     if kind is Kind.UNREGISTERED_DETAIL:
@@ -162,6 +175,7 @@ def _routers(specs: list[Spec]) -> tuple[APIRouter, ...]:
 def route_specs(draw: st.DrawFn) -> list[Spec]:
     count = draw(st.integers(1, 6))
     publics = draw(st.permutations(PUBLIC_CANDIDATES))
+    sessions = draw(st.permutations(list(SessionRoute)))
     specs: list[Spec] = []
     for index in range(count):
         kind = draw(st.sampled_from(list(Kind)))
@@ -170,7 +184,11 @@ def route_specs(draw: st.DrawFn) -> list[Spec]:
             entry = publics[index]
             specs.append(Spec(kind, where, entry.method, entry.path, entry))
             continue
-        if kind is Kind.PUBLIC_MATCH:
+        if kind is Kind.SESSION_MATCH and index < len(sessions):
+            session = sessions[index]
+            specs.append(Spec(kind, where, session.method, session.path, None, session))
+            continue
+        if kind in (Kind.PUBLIC_MATCH, Kind.SESSION_MATCH):
             kind = Kind.NONE
         method = draw(st.sampled_from(["GET", "POST", "PUT", "PATCH", "DELETE"]))
         segment = draw(st.text(string.ascii_lowercase, min_size=1, max_size=8))
@@ -180,7 +198,8 @@ def route_specs(draw: st.DrawFn) -> list[Spec]:
 
 def _build(specs: list[Spec], *, detail_codes: tuple[str, ...] = (REGISTERED_DETAIL,)) -> Any:
     unit = UnitRegistration("prueba", routers=_routers(specs), detail_codes=detail_codes)
-    return World().app(units=(*platform_units(), unit), permissions=KNOWN)
+    # Sin las rutas reales de ``identity``: las generadas ocupan sus entradas de las listas.
+    return World().app(units=(*chain_units(), unit), permissions=KNOWN)
 
 
 @given(specs=route_specs())
@@ -338,8 +357,58 @@ def test_a_public_entry_cannot_be_declared_twice() -> None:
             dependencies=[unauthenticated(UnauthenticatedRoute.AUTH_LOGIN)],
         )
     unit = UnitRegistration("prueba", routers=(first, second))
-    with pytest.raises(ApiStartupError, match="AUTH_LOGIN» de la lista pública está repetida"):
+    with pytest.raises(ApiStartupError, match="AUTH_LOGIN» de una lista cerrada está repetida"):
+        World().app(units=(*chain_units(), unit))
+
+
+def test_a_real_public_route_cannot_be_declared_again_by_another_unit() -> None:
+    # La unidad ``identity`` ya declara ``POST /auth/login``: nadie más puede.
+    router = APIRouter()
+    router.add_api_route(
+        "/auth/login",
+        _endpoint("login"),
+        methods=["POST"],
+        dependencies=[unauthenticated(UnauthenticatedRoute.AUTH_LOGIN)],
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    with pytest.raises(ApiStartupError, match="AUTH_LOGIN» de una lista cerrada está repetida"):
         World().app(units=(*platform_units(), unit))
+
+
+def test_a_session_entry_cannot_be_declared_twice() -> None:
+    router = APIRouter()
+    router.add_api_route(
+        "/me", _endpoint("me"), methods=["GET"], dependencies=[authenticated(SessionRoute.ME)]
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    with pytest.raises(ApiStartupError, match="«ME» de una lista cerrada está repetida"):
+        World().app(units=(*platform_units(), unit))
+
+
+def test_a_session_entry_on_another_path_prevents_startup() -> None:
+    router = APIRouter()
+    router.add_api_route(
+        "/users",
+        _endpoint("users"),
+        methods=["GET"],
+        dependencies=[authenticated(SessionRoute.ME)],
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    with pytest.raises(ApiStartupError, match="dice ser «ME» de las rutas de sesión"):
+        World().app(units=(*chain_units(), unit))
+
+
+def test_a_session_route_without_a_session_denies_even_if_the_authorizer_allows() -> None:
+    # ``authenticated`` no consulta al autorizador: sin sesión validada por la cadena, 401.
+    router = APIRouter()
+    router.add_api_route(
+        "/me", _endpoint("me"), methods=["GET"], dependencies=[authenticated(SessionRoute.ME)]
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    app = World().app(units=(*chain_units(), unit), runtime={"authorizer": AllowOnly("x.y")})
+    with TestClient(app) as client:
+        response = client.get("/me")
+    assert response.status_code == 401 and response.json()["code"] == "unauthenticated"
 
 
 # --- En la petición: denegación por defecto ------------------------------------------------
