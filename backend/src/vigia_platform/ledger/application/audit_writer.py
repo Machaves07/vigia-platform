@@ -109,6 +109,8 @@ class AuditOperation(enum.StrEnum):
     LIVE_VIEW_TOKEN_ISSUED = "live_view_token_issued"  # noqa: S105 - operación, no un secreto
     LIVE_VIEW_ACCESS_LOCAL = "live_view_access_local"
     AUTHORIZATION_DENIED = "authorization_denied"
+    CSRF_REJECTED = "csrf_rejected"
+    """Solo auditoría: la respuesta es ``forbidden`` (PAT-NUC-SEG-02, nota del 2026-09-23)."""
     CONTEXT_ABSENT_ATTEMPT = "context_absent_attempt"
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto

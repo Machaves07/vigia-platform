@@ -280,6 +280,38 @@ def test_hidden_files_symlinks_and_files_outside_assets_are_never_served(tmp_pat
     assert nested.status_code == 200 and nested.content == b"export {};\n"
 
 
+def test_source_maps_are_never_served(tmp_path: Path) -> None:
+    # Seguimiento de la revisión de VIG-71: un .map en assets/ revelaría el código original.
+    static = _copy_fixture(tmp_path)
+    for name in ("index-3f9a1c2b.js.map", "index-7d2e4f10.css.map", "VENDOR-1a2b.JS.MAP"):
+        (static / "assets" / name).write_text('{"version":3,"sources":["src/app.tsx"]}')
+    (static / "assets" / "index-3f9a1c2b.js.map.br").write_bytes(b"\x0b\x02\x80{}\x03")
+    (static / "assets" / "nested").mkdir()
+    (static / "assets" / "nested" / "chunk-1a2b.js.map").write_text("{}")
+    client = TestClient(_app(static))
+    for path in (
+        "/assets/index-3f9a1c2b.js.map",
+        "/assets/index-7d2e4f10.css.map",
+        "/assets/VENDOR-1a2b.JS.MAP",
+        "/assets/nested/chunk-1a2b.js.map",
+    ):
+        response = client.get(path, headers={"Accept-Encoding": "br, gzip"})
+        _not_found(response)
+        assert "immutable" not in response.headers.get("cache-control", "")
+    assert client.get(JS).status_code == 200
+
+
+def test_an_assets_directory_that_is_a_symlink_serves_nothing(tmp_path: Path) -> None:
+    # Seguimiento de la revisión de VIG-71 (mutación M21): ``assets/`` como enlace simbólico a un
+    # directorio con recursos válidos no se recorre.
+    static = _copy_fixture(tmp_path)
+    real = tmp_path / "otros-recursos"
+    shutil.move(static / "assets", real)
+    (static / "assets").symlink_to(real, target_is_directory=True)
+    with pytest.raises(ApiStartupError, match="assets/ no es un directorio"):
+        _app(static)
+
+
 # --- Criterio 2: index.html, version.json y robots.txt sin caché -------------------------------
 
 
@@ -380,7 +412,8 @@ def test_navigation_rule_decides_between_index_and_api(
 
 
 def test_a_navigation_post_still_reaches_the_api(client: TestClient) -> None:
-    response = client.post("/concessions", headers=NAVIGATE)
+    # ``Sec-Fetch-Site`` lo exige la barrera anti-falsificación de la cadena (TASK-134).
+    response = client.post("/concessions", headers={**NAVIGATE, "Sec-Fetch-Site": "same-origin"})
     assert response.json() == {"source": "api", "route": "concessions.create"}
 
 
@@ -493,7 +526,9 @@ def test_assets_leave_no_line_in_the_application_json_log(
     assert application_lines() == []
     client.get("/concessions", headers=NAVIGATE)
     assert [record.getMessage() for record in application_lines()] == [
-        "aplicación de página única servida a una navegación"
+        "aplicación de página única servida a una navegación",
+        # Línea por petición de la cadena (TASK-134): la plantilla, nunca la ruta pedida.
+        "petición atendida",
     ]
     assert all("/concessions" not in str(vars(record)) for record in application_lines())
     assert not is_request_logged(JS) and not is_request_logged("/assets/missing")

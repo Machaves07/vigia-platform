@@ -85,13 +85,15 @@ PUBLIC_CANDIDATES = [
     not in (
         UnauthenticatedRoute.HEALTH_LIVE,
         UnauthenticatedRoute.HEALTH_READY,
+        UnauthenticatedRoute.APP_SCREEN,
         UnauthenticatedRoute.APP_ASSET,
         UnauthenticatedRoute.APP_VERSION,
         UnauthenticatedRoute.ROBOTS,
     )
 ]
 """Las rutas de salud ya las registra la unidad ``shared`` y los archivos estáticos la fábrica
-(``shared.api.static``); la pantalla solo existe si la construcción trae ``index.html``."""
+(``shared.api.static``); la pantalla solo existe si la construcción trae ``index.html`` y solo en
+la ruta de navegación (``test_app_screen_is_only_admitted_on_the_navigation_route``)."""
 
 
 def _declaration(spec: Spec) -> list[Any]:
@@ -195,6 +197,23 @@ def test_pr_nuc_37_startup_fails_iff_some_route_is_not_declared(specs: list[Spec
     for spec in invalid:
         assert spec.path in message or UnauthenticatedRoute.AUTH_LOGIN.path in message
     assert len(raised.value.problems) >= len(invalid)
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_app_screen_is_only_admitted_on_the_navigation_route(method: str) -> None:
+    # Seguimiento de la revisión de VIG-71: sin ``index.html`` la fábrica no registra la pantalla,
+    # y una unidad no puede declarar ``APP_SCREEN`` en una ruta comodín corriente.
+    router = APIRouter()
+    router.add_api_route(
+        UnauthenticatedRoute.APP_SCREEN.path,
+        _endpoint("wildcard"),
+        methods=[method],
+        dependencies=[unauthenticated(UnauthenticatedRoute.APP_SCREEN)],
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    with pytest.raises(ApiStartupError) as raised:
+        World().app(units=(*platform_units(), unit), permissions=KNOWN)
+    assert "«APP_SCREEN» solo se admite en la ruta de pantallas" in str(raised.value)
 
 
 def test_a_route_without_declaration_prevents_startup_with_a_spanish_message() -> None:
