@@ -7,8 +7,10 @@ dependencia de FastAPI:
   matriz de permisos que recibe la fábrica (TASK-125 la aporta desde ``identity.authz``);
 - ``unauthenticated(UnauthenticatedRoute.X)``: la ruta está en la **lista cerrada**
   ``UnauthenticatedRoute`` (inicio de sesión y segundo factor, aceptación de invitación, salud
-  superficial, claves públicas de ``checkpoint`` y hash del verificador, y la salud profunda,
-  que es interna); método y plantilla de la ruta deben coincidir con los de la lista.
+  superficial, claves públicas de ``checkpoint`` y hash del verificador, la salud profunda,
+  que es interna, y los estáticos de la aplicación de página única: pantallas, ``/assets/*``,
+  ``/version.json`` y ``/robots.txt``); método y plantilla de la ruta deben coincidir con los de
+  la lista.
 
 ``check_routes`` recorre las rutas de la aplicación al construirla y devuelve un problema en
 español por cada ruta sin declaración, con dos declaraciones, con una clave inexistente, que no
@@ -78,6 +80,12 @@ class UnauthenticatedRoute(enum.Enum):
     CHECKPOINT_KEYS = ("GET", "/.well-known/vigia-checkpoint-keys", Exposure.PUBLIC)
     VERIFIER_HASH = ("GET", "/.well-known/vigia-verifier", Exposure.PUBLIC)
     HEALTH_READY = ("GET", "/health/ready", Exposure.INTERNAL)
+    # Aplicación de página única (pendiente nº 10 ampliado, D-3; ``shared.api.static``). La
+    # pantalla solo responde a navegaciones y a las rutas de ``static.SCREEN_ROUTES``.
+    APP_SCREEN = ("GET", "/{screen_path:path}", Exposure.PUBLIC)
+    APP_ASSET = ("GET", "/assets/{asset_path:path}", Exposure.PUBLIC)
+    APP_VERSION = ("GET", "/version.json", Exposure.PUBLIC)
+    ROBOTS = ("GET", "/robots.txt", Exposure.PUBLIC)
 
     @property
     def method(self) -> str:

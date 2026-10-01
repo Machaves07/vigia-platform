@@ -18,6 +18,9 @@
   responde a tiempo cuenta como fallida; la respuesta nunca espera más del presupuesto. Si falla,
   503 con un ``ApiError`` genérico (``temporarily_unavailable``): qué comprobación falló va al
   registro, nunca a la respuesta.
+
+Cada sonda de ``/health/ready`` publica la métrica ``health_ready`` (1 lista, 0 no) con la
+dimensión ``app_version`` de la aplicación servida (LC-NUC-31, pendiente nº 12 de U-05).
 """
 
 from __future__ import annotations
@@ -191,6 +194,21 @@ class ReadinessSource(Protocol):
 
 
 READINESS_STATE_KEY: Final = "vigia_readiness"
+HEALTH_RECORDER_STATE_KEY: Final = "vigia_health_recorder"
+"""Publicador de ``health_ready`` (con ``app_version``) que instala la fábrica."""
+
+
+def _record(request: Request, ready: bool) -> None:
+    """Publica el resultado de la salud profunda; un fallo de la métrica no cambia la respuesta."""
+    recorder: Callable[[bool], None] | None = getattr(
+        request.app.state, HEALTH_RECORDER_STATE_KEY, None
+    )
+    if recorder is None:
+        return
+    try:
+        recorder(ready)
+    except Exception:  # la telemetría nunca tumba la salud
+        _log.warning("no se pudo publicar la métrica de salud")
 
 
 class LiveStatus(BaseModel):
@@ -229,12 +247,14 @@ def health_router() -> APIRouter:
         probe = None if source is None else source.probe
         if source is None or not source.started or probe is None:
             _log.warning("salud profunda: el arranque no ha terminado")
+            _record(request, False)
             raise ApiError(ApiErrorCode.TEMPORARILY_UNAVAILABLE)
         try:
             async with asyncio.timeout(READINESS_BUDGET_SECONDS):
                 report = await probe.check()
         except TimeoutError:
             report = ReadinessReport({ReadinessCheck.STARTUP: False})
+        _record(request, report.ready)
         if not report.ready:
             for check in report.failed:
                 _log.warning("salud profunda fallida", reason=check.value)
