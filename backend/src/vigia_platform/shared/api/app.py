@@ -37,6 +37,13 @@ PAT-NUC-SEG-06. La sesión, la auditoría de ``csrf_rejected``, la versión vige
 tratamiento y el autorizador por ruta llegan en ``AppRuntime``; el origen de la aplicación
 (``VIGIA_PUBLIC_ORIGIN``) y los del almacén para la política de contenido
 (``VIGIA_CSP_STORE_ORIGINS``) en ``AppConfig``.
+
+La versión vigente del aviso es, por defecto, la del código (``identity.domain.privacy_notice``):
+la misma que acepta ``POST /privacy-notice/accept``. Solo ``None`` explícito la deja sin fijar, y
+entonces ninguna sesión sirve (fallo cerrado). Los servicios de las rutas de ``identity``
+(TASK-135) llegan en ``AppRuntime.identity``; la fábrica deja en ``app.state`` esos servicios, la
+versión del aviso y la de la release servida (``api_version``: la ``app_version`` de
+``/version.json``, pendiente nº 7).
 """
 
 from __future__ import annotations
@@ -57,6 +64,8 @@ from fastapi import APIRouter, FastAPI
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp, identity_routers
+from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.application.audit_writer import AuditOutcome
 from vigia_platform.ledger.domain.coverage import (
     CommunicationState,
@@ -65,6 +74,7 @@ from vigia_platform.ledger.domain.coverage import (
     PlatformCause,
 )
 from vigia_platform.ledger.registry import ChainLevel
+from vigia_platform.shared.api.app_state import API_VERSION_STATE_KEY, PRIVACY_NOTICE_STATE_KEY
 from vigia_platform.shared.api.declarations import (
     AUTHORIZER_STATE_KEY,
     Authorizer,
@@ -302,10 +312,13 @@ class AppRuntime:
     """Auditoría de ``csrf_rejected`` (``AuditCsrfRejections``)."""
     origin_secret: bytes | None = None
     """Clave del HMAC del origen de red en ``csrf_rejected`` (la del retardo de fallos)."""
-    privacy_notice_version: str | None = None
-    """Versión vigente del aviso de tratamiento (TASK-126); sin ella, fallo cerrado."""
+    privacy_notice_version: str | None = CURRENT_PRIVACY_NOTICE_VERSION
+    """Versión vigente del aviso de tratamiento (TASK-126): por defecto la del código; ``None``
+    explícito, fallo cerrado (ninguna sesión la tiene aceptada)."""
     rate_limiter: RateLimiter | None = None
     """Cubos de fichas del proceso; por defecto, uno nuevo con ``clock``."""
+    identity: IdentityHttp | None = None
+    """Servicios de las rutas de sesión, invitación y ``GET /me``; sin ellos, ``internal_error``."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -466,7 +479,7 @@ def platform_units() -> tuple[UnitRegistration, ...]:
     """
     return (
         UnitRegistration("shared", routers=(health_router(),)),
-        UnitRegistration("identity"),
+        UnitRegistration("identity", routers=identity_routers()),
         UnitRegistration("ledger"),
     )
 
@@ -679,6 +692,9 @@ def create_app(
     _register_observability(app, runtime.attribute_policy)
     recorder = _health_recorder(site, runtime.attribute_policy, runtime.metrics)
     setattr(app.state, AUTHORIZER_STATE_KEY, runtime.authorizer)
+    setattr(app.state, IDENTITY_STATE_KEY, runtime.identity)
+    setattr(app.state, PRIVACY_NOTICE_STATE_KEY, runtime.privacy_notice_version)
+    setattr(app.state, API_VERSION_STATE_KEY, site.app_version)
     setattr(app.state, READINESS_STATE_KEY, supervisor)
     setattr(app.state, HEALTH_RECORDER_STATE_KEY, recorder)
     return app
