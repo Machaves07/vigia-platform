@@ -74,7 +74,7 @@ from vigia_platform.ledger.chain.pure_rfc8785 import (
     canonicalize,
 )
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.signing.keys import format_timestamp
@@ -563,6 +563,7 @@ class _Progress:
     checkpoints: int = 0
 
 
+@repository
 class IntegrityService:
     """``IntegrityPort`` (LC-NUC-13)."""
 

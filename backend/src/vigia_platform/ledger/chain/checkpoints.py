@@ -59,7 +59,7 @@ from vigia_platform.ledger.chain.chain_walk import checkpoint_message
 from vigia_platform.ledger.chain.pure_ed25519 import ed25519_verify
 from vigia_platform.ledger.chain.pure_rfc8785 import CanonicalizationError
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.signing.keys import (
     KeyStatus,
@@ -438,6 +438,7 @@ def _require_u02(context: ScopeContext) -> ScopeContext:
 # --- Servicio -----------------------------------------------------------------------------------
 
 
+@repository
 class CheckpointService:
     """``CheckpointPort`` (LC-NUC-14)."""
 

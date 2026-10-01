@@ -22,7 +22,7 @@ from typing import Any, Final
 
 from vigia_platform.ledger.application.writer import EscritorExpediente, LedgerRejection
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
@@ -62,6 +62,7 @@ class KeyEventRejected(Exception):
         self.rejection = rejection
 
 
+@repository
 class LedgerKeyEventWriter:
     """``KeyEventWriter`` sobre ``EscritorExpediente``."""
 

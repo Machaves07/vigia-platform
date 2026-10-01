@@ -36,9 +36,12 @@ from vigia_platform.shared.context import (
 BACKEND = Path(__file__).resolve().parents[2]
 SRC = BACKEND / "src" / "vigia_platform"
 PRIVATE_BUILDER = "_seal_scope_context"
-ALLOWED_BUILDER_MODULES = {SRC / "shared" / "context.py"}
-"""Módulos de ``src/`` que pueden nombrar el constructor privado; TASK-125 añade
-``identity/authz/context.py``."""
+ALLOWED_BUILDER_MODULES = {
+    SRC / "shared" / "context.py",
+    SRC / "identity" / "authz" / "context.py",
+}
+"""Módulos de ``src/`` que pueden nombrar el constructor privado: su definición y los cuatro
+constructores de TASK-125 (BR-NUC-03)."""
 
 
 def _actor(kind: ActorKind = ActorKind.USER, **changes: Any) -> Actor:

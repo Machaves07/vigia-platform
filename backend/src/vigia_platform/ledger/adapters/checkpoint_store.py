@@ -50,7 +50,7 @@ from vigia_platform.ledger.chain.checkpoints import (
     StoredCheckpoint,
     event_payload,
 )
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 
 __all__ = ["CheckpointRejected", "SqlCheckpointStore"]
@@ -129,6 +129,7 @@ def _stored(chain: CheckpointChain, row: Row[Any]) -> StoredCheckpoint:
     )
 
 
+@repository
 class SqlCheckpointStore:
     """``CheckpointStore`` sobre ``shared.db``, ``EscritorExpediente`` y ``AuditWriter``."""
 
