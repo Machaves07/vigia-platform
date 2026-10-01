@@ -883,6 +883,24 @@ def test_session_context_refuses_what_validation_refuses(environment: AuthzEnvir
     # Vencida por inactividad: en el instante exacto ya no sirve.
     idle = env.open_session(site.organization_id, user, at=env.now() - timedelta(minutes=30))
     assert _unavailable(env, idle) is ContextUnavailableReason.SESSION_INVALID
+    # Vencida por el tope absoluto (12 h) con la inactividad aún vigente: en el instante exacto
+    # ya no sirve, y un milisegundo antes sí.
+    for offset, usable in ((timedelta(0), False), (timedelta(milliseconds=1), True)):
+        absolute = env.open_session(
+            site.organization_id, user, at=env.now() - timedelta(hours=12) + offset
+        )
+        # Visto hace un minuto: la inactividad vence dentro de 29 minutos.
+        env.execute(
+            "UPDATE identity.session SET last_seen_at = $2::timestamptz,"
+            " idle_expires_at = $2::timestamptz + interval '30 minutes'"
+            " WHERE session_id_hash = $1",
+            absolute.session_id_hash,
+            env.now() - timedelta(minutes=1),
+        )
+        if usable:
+            assert _session_scope(env, absolute).context.organization_id == site.organization_id
+        else:
+            assert _unavailable(env, absolute) is ContextUnavailableReason.SESSION_INVALID
     # Una sesión válida sin asignaciones da un contexto que no concede nada.
     bare = env.add_user(site.organization_id)
     context = _session_scope(env, env.open_session(site.organization_id, bare)).context
@@ -907,14 +925,16 @@ def test_authorization_denied_is_audited_in_the_database(environment: AuthzEnvir
     with pytest.raises(ResourceNotFound):
         env.run(env.authorizer.authorize(context, PermissionKey.FINDINGS_READ, resource))
     rows = env.fetch(
-        "SELECT operation, outcome, actor_id, scope_zone_id, resource_kind, resource_id,"
-        " convert_from(filters, 'UTF8') AS filters, correlation_id FROM shared.audit_entry"
+        "SELECT operation, outcome, actor_id, scope_plant_id, scope_zone_id, resource_kind,"
+        " resource_id, convert_from(filters, 'UTF8') AS filters, correlation_id"
+        " FROM shared.audit_entry"
         " WHERE organization_id = $1 AND operation = 'authorization_denied'",
         site.organization_id,
     )
     assert len(rows) == 1
     (row,) = rows
-    assert (row["outcome"], row["actor_id"], row["scope_zone_id"]) == ("denied", user, zones[0])
+    assert (row["outcome"], row["actor_id"]) == ("denied", user)
+    assert (row["scope_plant_id"], row["scope_zone_id"]) == (plant, zones[0])
     assert (row["resource_kind"], row["resource_id"]) == ("zone", zones[0])
     assert row["filters"] == '{"permission_key":"findings.read"}'
     assert row["correlation_id"] == context.correlation_id

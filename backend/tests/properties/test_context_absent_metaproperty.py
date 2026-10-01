@@ -96,6 +96,48 @@ def unregistered_data_classes(modules: list[Any]) -> list[str]:
     return missing
 
 
+DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        # Reciben una ``Transaction`` ya abierta (solo la da ``Database.transaction``, guardada)
+        # y consultan a través de ella o de repositorios registrados.
+        "vigia_platform.identity.adapters.session_store.end_user_sessions",
+        "vigia_platform.identity.adapters.session_store.expire_sessions",
+        "vigia_platform.identity.adapters.session_store.cleanup_throttle_windows",
+        "vigia_platform.ledger.labels_projection.insert_label",
+        # Solo llaman a un puerto registrado (``ProviderQueryLedger``, ``IntegrityStore``), que
+        # pone la guarda en cada consulta.
+        "vigia_platform.identity.authz.context.record_provider_query",
+        "vigia_platform.ledger.chain.verify.sql_pass",
+    }
+)
+"""Funciones de módulo con operación de datos que delegan en una operación guardada.
+
+Una función de módulo no puede registrarse con ``@repository``: si recibe un ``ScopeContext`` o
+una ``Transaction`` y es asíncrona (puede consultar), o está aquí tras comprobar que solo delega
+en operaciones guardadas, o la prueba falla. Las síncronas son puras (no hay E/S síncrona a la
+base en la plataforma).
+"""
+
+
+def unlisted_data_functions(modules: list[Any]) -> list[str]:
+    """Funciones públicas asíncronas de módulo con operación de datos fuera de la lista."""
+    missing: list[str] = []
+    for module in modules:
+        for name, function in vars(module).items():
+            if (
+                not inspect.isfunction(function)
+                or function.__module__ != module.__name__
+                or name.startswith("_")
+                or not inspect.iscoroutinefunction(function)
+                or not _is_data_operation(function)
+            ):
+                continue
+            qualified = f"{module.__name__}.{name}"
+            if qualified not in DELEGATING_FUNCTIONS:
+                missing.append(qualified)
+    return missing
+
+
 def _platform_modules() -> list[Any]:
     return [
         importlib.import_module(module.name)
@@ -105,6 +147,33 @@ def _platform_modules() -> list[Any]:
 
 def test_every_class_with_data_operations_is_registered() -> None:
     assert unregistered_data_classes(_platform_modules()) == []
+
+
+def test_every_module_function_with_data_operations_is_reviewed() -> None:
+    """Las funciones de módulo también: ninguna consulta queda fuera de la guarda sin revisar."""
+    assert unlisted_data_functions(_platform_modules()) == []
+    # La lista no guarda nombres que ya no existen (se revisaría una función que no está).
+    present = {
+        f"{module.__name__}.{name}"
+        for module in _platform_modules()
+        for name, function in vars(module).items()
+        if inspect.isfunction(function) and function.__module__ == module.__name__
+    }
+    assert present >= DELEGATING_FUNCTIONS
+
+
+def test_the_scan_detects_an_unreviewed_module_function() -> None:
+    """Sonda negativa: una función de módulo asíncrona con contexto, fuera de la lista."""
+    import types
+
+    module = types.ModuleType("vigia_platform_probe")
+
+    async def stray_query(context: Any) -> None: ...
+
+    stray_query.__module__ = module.__name__
+    stray_query.__annotations__["context"] = "ScopeContext"
+    module.stray_query = stray_query  # type: ignore[attr-defined]
+    assert unlisted_data_functions([module]) == ["vigia_platform_probe.stray_query"]
 
 
 def test_the_scan_detects_an_unregistered_repository() -> None:

@@ -15,8 +15,8 @@ producción: el contexto no puede depender de ellos).
 
 **Invariante tras cada comando**: para cada sesión abierta (y, la del instalador, con cada
 concesión), ``context_from_session`` da exactamente lo que dice el modelo: sin contexto, o con los
-``allowed_scopes`` vigentes; y ``authorize`` concede exactamente las claves del modelo sobre cada
-planta y zona del cliente.
+``allowed_scopes`` vigentes; cada sesión ya cerrada da ``session_invalid``; y ``authorize``
+concede exactamente las claves del modelo sobre cada planta y zona del cliente.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from tests.conftest import _seeds_for_profile
 from tests.integration.conftest import PostgresEndpoint
 from vigia_platform.identity.auth.sessions import SessionCookie
 from vigia_platform.identity.authz.authorize import Resource, decide
-from vigia_platform.identity.authz.context import ContextUnavailable
+from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
 from vigia_platform.shared.context import AllowedScope, Role, ScopeLevel
 
@@ -74,6 +74,7 @@ class ModelPerson:
     active: bool = True
     assignments: dict[uuid.UUID, AllowedScope] = field(default_factory=dict)
     sessions: list[SessionCookie] = field(default_factory=list)
+    closed: list[SessionCookie] = field(default_factory=list)
 
 
 @dataclass
@@ -147,6 +148,7 @@ class RevocationMachine(RuleBasedStateMachine):
         cookie = data.draw(st.sampled_from(model.sessions))
         self.env.close_session(cookie)
         model.sessions.remove(cookie)
+        model.closed.append(cookie)
 
     @rule(person=st.sampled_from(PEOPLE))
     def deactivate(self, person: str) -> None:
@@ -219,6 +221,12 @@ class RevocationMachine(RuleBasedStateMachine):
         if not self.people:
             return
         for model in self.people.values():
+            # Una sesión cerrada no vuelve a dar contexto, aunque la persona y la organización
+            # sigan activas y conserven sus asignaciones.
+            for cookie in model.closed:
+                with pytest.raises(ContextUnavailable) as closed:
+                    self.env.run(self.env.contexts.context_from_session(cookie))
+                assert closed.value.reason is ContextUnavailableReason.SESSION_INVALID
             for cookie in model.sessions:
                 usable = model.active and self.organization_active
                 if not usable:
