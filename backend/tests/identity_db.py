@@ -250,10 +250,12 @@ class IdentitySeed:
 async def _insert_organization(
     connection: Any, organization_id: uuid.UUID, kind: str, created_by: uuid.UUID
 ) -> None:
+    # Tope de 90 días (el máximo del diseño): las pruebas de la RLS siembran concesiones largas y
+    # nuc_0009 impone el concession_max_days del cliente.
     await connection.execute(
         "INSERT INTO identity.organization"
-        " (organization_id, code, name, kind, created_at, created_by)"
-        " VALUES ($1, $2, $3, $4, $5, $6)",
+        " (organization_id, code, name, kind, created_at, created_by, concession_max_days)"
+        " VALUES ($1, $2, $3, $4, $5, $6, 90)",
         organization_id,
         _code("ORG"),
         f"Organización sintética {kind}",
