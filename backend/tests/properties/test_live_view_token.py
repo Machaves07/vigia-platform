@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -49,6 +49,7 @@ from vigia_platform.shared.tokens import (
     IssuedLiveViewToken,
     LiveViewRejection,
     LiveViewTokenRejected,
+    LiveViewTokenService,
     compact_jws,
 )
 
@@ -297,9 +298,11 @@ def test_full_token_is_never_persisted_nor_logged(
         " UNION ALL SELECT row_to_json(r)::text FROM ledger.ledger_record AS r"
     )
     assert dumps
+    # Los campos estructurados viajan en atributos del registro, no en el texto formateado.
+    logged = caplog.text + "".join(repr(vars(record)) for record in caplog.records)
     for piece in (issued.token, signature, payload, f"{header}.{payload}"):
         assert all(piece not in row["dump"] for row in dumps)
-        assert piece not in caplog.text
+        assert piece not in logged
     (audit,) = env.fetch(
         "SELECT operation, outcome, resource_kind, filters_json FROM shared.audit_entry"
         " WHERE resource_id = $1",
@@ -385,6 +388,35 @@ def test_system_context_cannot_open_the_view(env: LiveViewEnvironment, site: Any
     _, zone_id, _, _ = _fresh_zone(env, site)
     with pytest.raises(ResourceNotFound):
         _issue(env, env.node_context(site.organization_id), zone_id)
+
+
+class _GrantingAuthorizer:
+    """Concede todo y devuelve el contexto tal cual: deja sola a la guarda de persona con sesión."""
+
+    async def authorize(self, context: Any, key: Any, resource: Any) -> Any:
+        return context
+
+
+def test_person_guard_holds_even_if_the_authorizer_grants(
+    env: LiveViewEnvironment, site: Any
+) -> None:
+    """Aunque la matriz conceda, un contexto del sistema no obtiene token: ``sub`` es persona."""
+    _, zone_id, _, _ = _fresh_zone(env, site)
+    sessions = env.authz.sessions
+    service = LiveViewTokenService(
+        database=sessions.database,
+        authorizer=cast(Any, _GrantingAuthorizer()),
+        audit=sessions.audit,
+        outbox=sessions.outbox,
+        signer=env.signing,
+        clock=env.clock,
+    )
+    context = env.node_context(site.organization_id)
+    with pytest.raises(ResourceNotFound):
+        env.run(service.issue(context, zone_id))
+    assert not env.fetch(
+        "SELECT 1 FROM identity.live_view_token_issuance WHERE zone_id = $1", zone_id
+    )
 
 
 # --- BR-NUC-89: accesos locales ----------------------------------------------------------------
