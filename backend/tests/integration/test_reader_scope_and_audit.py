@@ -385,6 +385,96 @@ def test_scope_filter_matches_the_oracle(
         assert (view is not None) == (record_id in expected)
 
 
+# --- Seguimientos de VIG-59 (TASK-137): cursores forjados, dos plantas y lugar de la entrada ---
+
+_FORGED_MOMENTS = st.datetimes(
+    min_value=datetime(2026, 1, 1),  # noqa: DTZ001 - la zona la pone ``timezones``
+    max_value=datetime(2027, 1, 1),  # noqa: DTZ001
+    timezones=st.just(UTC),
+)
+
+
+@given(
+    forged=st.lists(
+        st.tuples(_FORGED_MOMENTS, st.one_of(st.uuids(), st.sampled_from(["real", "other"]))),
+        min_size=1,
+        max_size=4,
+    ),
+    size=st.integers(1, 3),
+)
+def test_forged_cursors_under_a_zone_scope_never_leak(
+    environment: ReaderEnvironment, tenant: Tenant, forged: list[tuple[datetime, Any]], size: int
+) -> None:
+    # Una clave inventada (marca cualquiera, identificador al azar, de un registro de otra zona o de
+    # otra organización) solo mueve el punto de partida: nunca amplía el alcance.
+    scopes = [zone_scope(tenant.z1.zone_id)]
+    context = scoped_context(tenant.organization_id, scopes)
+    allowed = tenant.visible(scopes)
+    foreign = next(r for r, (_, zone) in tenant.records.items() if zone == tenant.z3.zone_id)
+    for moment, identifier in forged:
+        record_id = {"real": foreign, "other": tenant.other_record}.get(identifier, identifier)
+        after = RecordCursor(moment, record_id if isinstance(record_id, uuid.UUID) else uuid7())
+        page = environment.run(
+            environment.reader.list(context, LedgerFilters(), PageRequest(size=size, after=after))
+        )
+        seen = {item.record_id for item in page.items}
+        while page.next_cursor is not None:
+            page = environment.run(
+                environment.reader.list(
+                    context, LedgerFilters(), PageRequest(size=size, after=page.next_cursor)
+                )
+            )
+            seen |= {item.record_id for item in page.items}
+        assert seen <= allowed
+
+
+def test_plant_filter_with_a_two_plant_scope(
+    environment: ReaderEnvironment, tenant: Tenant
+) -> None:
+    p1, p2 = tenant.z1.plant_id, tenant.z3.plant_id
+    context = scoped_context(tenant.organization_id, [plant_scope(p1), plant_scope(p2)])
+    by_plant = {
+        plant: {r for r, (owner, _) in tenant.records.items() if owner == plant}
+        for plant in (p1, p2)
+    }
+    assert set(list_ids(environment, context, LedgerFilters(plant_id=p1))) == by_plant[p1]
+    assert set(list_ids(environment, context, LedgerFilters(plant_id=p2))) == by_plant[p2]
+    assert set(list_ids(environment, context)) == by_plant[p1] | by_plant[p2]
+    # Una planta fuera del alcance (de otra organización o inventada) no devuelve nada.
+    for plant in (tenant.other.plant_id, uuid.uuid4()):
+        assert list_ids(environment, context, LedgerFilters(plant_id=plant)) == []
+    # Un solo alcance de planta con el filtro de la otra: nada (el filtro no amplía el alcance).
+    only_p1 = scoped_context(tenant.organization_id, [plant_scope(p1)])
+    assert list_ids(environment, only_p1, LedgerFilters(plant_id=p2)) == []
+
+
+def test_the_entry_place_follows_the_filter_or_the_actor(
+    environment: ReaderEnvironment, tenant: Tenant
+) -> None:
+    z1, z2, z3 = tenant.z1, tenant.z2, tenant.z3
+    cases = [
+        ([zone_scope(z1.zone_id)], LedgerFilters(), (z1.plant_id, z1.zone_id)),
+        ([zone_scope(z1.zone_id), zone_scope(z2.zone_id)], LedgerFilters(), (z1.plant_id, None)),
+        ([plant_scope(z1.plant_id), zone_scope(z2.zone_id)], LedgerFilters(), (z1.plant_id, None)),
+        ([plant_scope(z1.plant_id), plant_scope(z3.plant_id)], LedgerFilters(), (None, None)),
+        ([zone_scope(z1.zone_id), zone_scope(z3.zone_id)], LedgerFilters(), (None, None)),
+        ([organization_scope(tenant.organization_id)], LedgerFilters(), (None, None)),
+        # Con filtro de zona sin planta, la planta de esa zona.
+        (
+            [organization_scope(tenant.organization_id)],
+            LedgerFilters(zone_id=z3.zone_id),
+            (z3.plant_id, z3.zone_id),
+        ),
+    ]
+    for scopes, filters, place in cases:
+        before = len(audit_rows(environment, tenant.organization_id))
+        environment.run(
+            environment.reader.list(scoped_context(tenant.organization_id, scopes), filters)
+        )
+        (entry,) = new_entries(environment, tenant.organization_id, before)
+        assert (entry.scope_plant_id, entry.scope_zone_id) == place, scopes
+
+
 # --- Criterio 2: una entrada de auditoría por lectura -----------------------------------------
 
 
@@ -521,7 +611,10 @@ def test_list_audit_is_scoped_paginated_and_audited(
     assert [e.operation for e in entries] == ["audit_read"] * 3
     assert [e.result_count for e in entries] == [2, 2, 1]
     assert entries[1].filters == {"operations": ["ledger_read"], "page_size": 2}
-    assert entries[0].scope_zone_id is None
+    # Seguimiento de VIG-59: sin filtros, la entrada lleva el alcance del actor de zona (su planta
+    # y su zona), para que el plant_manager de esa planta la vea; la del actor de organización no.
+    assert (entries[0].scope_plant_id, entries[0].scope_zone_id) == (z1.plant_id, z1.zone_id)
+    assert all((e.scope_plant_id, e.scope_zone_id) == (None, None) for e in entries[1:])
 
 
 def test_the_audit_entry_is_in_the_same_transaction_as_the_read(

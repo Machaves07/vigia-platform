@@ -497,7 +497,7 @@ def test_read_url_outside_evidence_read_is_not_found_and_audited_as_denied(
     assert environment.run(environment.service.url_lectura(plant, clip.evidence_id))
 
 
-# --- Seguimientos de VIG-65 (TASK-137): versión ausente, auditoría caída y carreras ----------------
+# --- Seguimientos de VIG-65 (TASK-137): versión ausente, auditoría caída y carreras ---
 
 
 class _WithoutVersion:
@@ -528,8 +528,9 @@ def test_read_url_without_version_id_fails_closed(environment: Environment) -> N
     place = Place.new()
     (clip,) = register_clips(environment, place, [synthetic_clip("sin versión")])
     storage = _WithoutVersion(environment.storage)
-    service = EvidenceService(database=environment.env.database, audit=environment.env.audit,
-                              storage=storage)
+    service = EvidenceService(
+        database=environment.env.database, audit=environment.env.audit, storage=storage
+    )
     with pytest.raises(EvidenceUnreadable):
         environment.run(service.url_lectura(_coordinator(place), clip.evidence_id))
     # Ni siquiera se firma: una URL sin versión serviría cualquier versión posterior del objeto.

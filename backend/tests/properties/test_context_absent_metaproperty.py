@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import json
 import pkgutil
 import re
 import uuid
@@ -126,6 +127,11 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         "vigia_platform.identity.application.roles.refresh_second_factor_required",
         "vigia_platform.identity.application.roles.remove_assignment",
         "vigia_platform.identity.application.users.create_invited_user",
+        # ledger.adapters.http (TASK-137): sin consultas propias; ``narrowed_context`` reduce el
+        # contexto (función pura) y, si deniega, llama a ``Authorizer`` (registrado);
+        # ``provider_access`` llama a ``record_provider_query`` (arriba) con su puerto registrado.
+        "vigia_platform.ledger.adapters.http.services.narrowed_context",
+        "vigia_platform.ledger.adapters.http.services.provider_access",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.
@@ -416,6 +422,50 @@ def test_context_absent_attempt_is_audited_with_a_security_alert(
     with pytest.raises(ContextAbsent):
         env.run(database.read(None, text("SELECT 1")))  # type: ignore[arg-type]
     assert len(entries()) == before_entries + 1
+
+
+def test_a_context_absent_attempt_is_counted_once(
+    environment: AuthzEnvironment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Seguimiento de VIG-77: el adaptador sumaba security_alert_total al auditar y el consumidor
+    # alert_metrics la volvía a sumar al entregar el security_alert. Ahora solo la suma la entrega.
+    from vigia_platform.shared.observability.alerts_consumer import AlertsConsumer
+    from vigia_platform.shared.observability.metrics import get_metrics
+    from vigia_platform.shared.outbox.publish import OutboxEvent
+
+    env = environment
+    added: list[dict[str, Any]] = []
+    instrument = get_metrics().security_alert_total
+    monkeypatch.setattr(instrument, "add", lambda value, attributes=None: added.append(attributes))
+    audit = PostgresAuthorizationAudit(
+        database=env.sessions.database,
+        audit=env.sessions.audit,
+        outbox=env.sessions.outbox,
+        clock=env.sessions.clock,
+    )
+    provider_context = env.contexts.provider_audit_context()
+    env.run(audit.context_absent_attempt(provider_context, "Database.read"))
+    assert added == []  # auditar no cuenta
+    (row,) = env.fetch(
+        "SELECT * FROM shared.outbox_event WHERE organization_id = $1 AND event_name ="
+        " 'security_alert' ORDER BY publish_seq DESC LIMIT 1",
+        env.provider_organization_id,
+    )
+    event = OutboxEvent(
+        event_id=uuid.UUID(str(row["event_id"])),
+        organization_id=env.provider_organization_id,
+        plant_id=None,
+        event_name="security_alert",
+        partition_key=row["partition_key"],
+        ledger_sequence=None,
+        payload=json.loads(row["payload"]),
+        correlation_id=uuid.UUID(str(row["correlation_id"])),
+        created_at=row["created_at"],
+    )
+    consumer = AlertsConsumer()
+    env.run(consumer(event, None))  # type: ignore[arg-type]
+    env.run(consumer(event, None))  # type: ignore[arg-type]  # reentrega: no vuelve a sumar
+    assert [a["alert_type"] for a in added] == ["context_absent_attempt"]
 
 
 def test_auditor_outside_a_loop_only_logs() -> None:

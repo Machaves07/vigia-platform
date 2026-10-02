@@ -306,6 +306,69 @@ def _raw_request(
     return {"status": start["status"], "headers": start["headers"]}
 
 
+def _raw_stream_status(
+    app: Any, path: str, headers: list[tuple[bytes, bytes]], chunks: list[bytes]
+) -> int:
+    """``GET`` ASGI directo con el cuerpo en varios mensajes (como uno ``chunked``)."""
+    import asyncio
+
+    sent: list[dict[str, Any]] = []
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("203.0.113.10", 50000),
+        "server": ("testserver", 443),
+    }
+    messages = [
+        {"type": "http.request", "body": chunk, "more_body": index < len(chunks) - 1}
+        for index, chunk in enumerate(chunks)
+    ]
+
+    async def receive() -> dict[str, Any]:
+        return messages.pop(0) if messages else {"type": "http.disconnect"}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    status: int = start["status"]
+    return status
+
+
+def test_r10_one_byte_over_the_limit_while_reading_the_body(
+    world: tuple[Harness, Any, dict[str, str]],
+) -> None:
+    # Seguimiento de VIG-78 (R10): sin Content-Length, el tope se mide al leer el cuerpo. La ruta
+    # de salud responde 200 si el cuerpo pasa, así que 413 solo puede venir del límite.
+    _, client, _ = world
+    limit = DEFAULT_BODY_LIMIT_BYTES
+    exact = [b"x" * (limit - 1), b"y"]
+    over = [b"x" * (limit - 1), b"y", b"z"]
+    assert _raw_stream_status(client.app, "/health/live", [], exact) == 200
+    assert _raw_stream_status(client.app, "/health/live", [], over) == 413
+
+
+@pytest.mark.parametrize("values", [("10", "11"), ("11", "10"), ("0", str(2**20 + 1))])
+def test_r21_two_different_content_lengths_are_invalid(
+    world: tuple[Harness, Any, dict[str, str]], values: tuple[str, str]
+) -> None:
+    # Seguimiento de VIG-78 (R21): dos Content-Length distintos no se resuelven tomando uno.
+    _, client, _ = world
+    headers = [(b"content-length", value.encode()) for value in values]
+    assert _raw_stream_status(client.app, "/health/live", headers, [b"0123456789"]) == 400
+    same = [(b"content-length", b"10"), (b"content-length", b"10")]
+    assert _raw_stream_status(client.app, "/health/live", same, [b"0123456789"]) == 200
+
+
 # --- Cabeceras de seguridad en toda respuesta ----------------------------------------------------
 
 

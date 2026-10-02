@@ -58,8 +58,8 @@ from tests.live_view_support import (
     live_view_environment,
     node_verifies,
 )
-from tests.verifier_packages import PackageChain, row_to_entry, write_package
 from tests.signing_support import ENVIRONMENT
+from tests.verifier_packages import PackageChain, row_to_entry, write_package
 from tests.writer_support import save_record_types, unit_context
 from tools.build_verifier import build, sha256_text
 from vigia_platform.identity.adapters.authz_store import (
