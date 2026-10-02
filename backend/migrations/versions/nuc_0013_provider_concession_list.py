@@ -1,6 +1,6 @@
 """Concesiones propias del usuario del proveedor (TASK-136, LC-NUC-06; BR-NUC-35, 39).
 
-Revisión nuc_0012. ``GET /provider/concessions`` (``business-logic-model.md`` §10.2, lado
+Revisión nuc_0013. ``GET /provider/concessions`` (``business-logic-model.md`` §10.2, lado
 proveedor) lista las concesiones que un usuario de la proveedora se concedió, para elegir la que
 selecciona con ``X-Vigia-Concession`` y para ver su estado. Desde el contexto de la proveedora la
 seguridad a nivel de fila no deja ver ninguna fila de ``identity.provider_concession`` (son del
@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0012"
-down_revision: str | None = "nuc_0011"
+revision: str = "nuc_0013"
+down_revision: str | None = "nuc_0012"
 branch_labels: None = None
 depends_on: None = None
 

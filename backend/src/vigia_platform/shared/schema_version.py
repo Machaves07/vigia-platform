@@ -32,9 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 12
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0012``
+MINIMUM_SCHEMA_VERSION: Final = 13
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0013``
 (``identity.provider_concessions_of``, la lista de ``GET /provider/concessions``), que incluye
+``nuc_0012`` (``identity.live_view_issuances_since``, el límite de la vista en vivo),
 ``nuc_0011`` (el alcance de las asignaciones e ``identity.invitation_organization``),
 ``nuc_0010`` (el despacho de
 la bandeja: ``outbox_event.publish_seq``, ``trace_id`` y ``span_id``,

@@ -3,7 +3,7 @@
 - Desde la **proveedora** (su contexto de sesión, sin concesión): ``client_terms``,
   ``provider_concession`` y ``provider_concessions`` llaman a las funciones de búsqueda
   ``identity.concession_terms``, ``identity.provider_concession_of`` e
-  ``identity.provider_concessions_of`` (``nuc_0012``); la RLS no deja leer nada más del cliente.
+  ``identity.provider_concessions_of`` (``nuc_0013``); la RLS no deja leer nada más del cliente.
 - En la transacción del escritor del expediente (``projection``): ``insert``, ``revoke`` y
   ``expire``. Las reglas entre filas de la base (cliente activo de tipo ``client``, proveedora de
   tipo ``provider``, planta del cliente, tope ``concession_max_days``, cierre una sola vez) llegan
