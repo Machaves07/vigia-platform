@@ -33,7 +33,7 @@ from starlette.routing import Mount
 
 from tests.api_support import World
 from tests.middleware_support import chain_units
-from vigia_platform.shared.api.app import UnitRegistration, platform_units
+from vigia_platform.shared.api.app import UnitRegistration, platform_permissions, platform_units
 from vigia_platform.shared.api.declarations import (
     SessionRoute,
     UnauthenticatedRoute,
@@ -49,7 +49,8 @@ from vigia_platform.shared.api.errors import (
     DetailCodeRegistry,
 )
 
-KNOWN = frozenset({"users.manage", "ledger.read", "platform.keys.rotate"})
+KNOWN = platform_permissions() | {"ledger.read"}
+"""La matriz (las rutas de ``platform_units()`` exigen sus claves) y una clave de prueba."""
 REGISTERED_DETAIL = "fleet_node_mute"
 
 
