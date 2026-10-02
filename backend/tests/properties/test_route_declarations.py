@@ -51,7 +51,7 @@ from vigia_platform.shared.api.errors import (
 )
 
 KNOWN = platform_permissions() | {"ledger.read"}
-"""La matriz real (la usan las rutas de ``platform_units()``) y una clave de prueba."""
+"""La matriz (las rutas de ``platform_units()`` exigen sus claves) y una clave de prueba."""
 REGISTERED_DETAIL = "fleet_node_mute"
 
 

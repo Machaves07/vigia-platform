@@ -73,6 +73,7 @@ class MetricName(enum.StrEnum):
     AUDIT_ENTRIES_TOTAL = "audit_entries_total"
     # Bandeja de salida
     OUTBOX_PENDING = "outbox_pending"
+    OUTBOX_DELIVERIES_TOTAL = "outbox_deliveries_total"
     OUTBOX_RETRIES_TOTAL = "outbox_retries_total"
     DEAD_LETTER_CREATED_TOTAL = "dead_letter_created_total"
     OUTBOX_CIRCUIT_OPEN = "outbox_circuit_open"
@@ -163,6 +164,8 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     # NFR-NUC-42 · bandeja de salida.
     _spec(_N.OUTBOX_PENDING, _G, "{event}", "Pendientes por consumidor y partición.", "outbox",
           "consumer", "partition"),
+    _spec(_N.OUTBOX_DELIVERIES_TOTAL, _C, "{delivery}", "Entregas por consumidor y resultado.",
+          "outbox", "consumer", "result"),
     _spec(_N.OUTBOX_RETRIES_TOTAL, _C, "{attempt}", "Reintentos de entrega.", "outbox",
           "consumer"),
     _spec(_N.DEAD_LETTER_CREATED_TOTAL, _C, "{event}", "Eventos enviados a la cola muerta.",
@@ -348,6 +351,7 @@ class PlatformMetrics:
         self.default_partition_rows = gauge(_N.DEFAULT_PARTITION_ROWS)
         self.audit_entries_total = counter(_N.AUDIT_ENTRIES_TOTAL)
         self.outbox_pending = gauge(_N.OUTBOX_PENDING)
+        self.outbox_deliveries_total = counter(_N.OUTBOX_DELIVERIES_TOTAL)
         self.outbox_retries_total = counter(_N.OUTBOX_RETRIES_TOTAL)
         self.dead_letter_created_total = counter(_N.DEAD_LETTER_CREATED_TOTAL)
         self.outbox_circuit_open = gauge(_N.OUTBOX_CIRCUIT_OPEN)

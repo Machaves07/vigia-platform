@@ -1,8 +1,9 @@
 """``ConcessionStore`` de ``identity.concessions`` sobre PostgreSQL (LC-NUC-06; ``nuc_0009``).
 
-- Desde la **proveedora** (su contexto de sesión, sin concesión): ``client_terms`` y
-  ``provider_concession`` llaman a las funciones de búsqueda ``identity.concession_terms`` e
-  ``identity.provider_concession_of``; la RLS no deja leer nada más del cliente.
+- Desde la **proveedora** (su contexto de sesión, sin concesión): ``client_terms``,
+  ``provider_concession`` y ``provider_concessions`` llaman a las funciones de búsqueda
+  ``identity.concession_terms``, ``identity.provider_concession_of`` e
+  ``identity.provider_concessions_of`` (``nuc_0014``); la RLS no deja leer nada más del cliente.
 - En la transacción del escritor del expediente (``projection``): ``insert``, ``revoke`` y
   ``expire``. Las reglas entre filas de la base (cliente activo de tipo ``client``, proveedora de
   tipo ``provider``, planta del cliente, tope ``concession_max_days``, cierre una sola vez) llegan
@@ -80,6 +81,11 @@ _TERMS: Final = text(
 _PROVIDER_SIDE: Final = text(
     "SELECT concession_id, organization_id, provider_user_id, scope_level, scope_id, granted_at,"
     " expires_at, status, revoked_at FROM identity.provider_concession_of(CAST(:id AS uuid))"
+)
+_PROVIDER_LIST: Final = text(
+    "SELECT concession_id, organization_id, provider_user_id, scope_level, scope_id, granted_at,"
+    " expires_at, status, revoked_at, revoked_by_side"
+    " FROM identity.provider_concessions_of(CAST(:grantee AS uuid))"
 )
 _ONE: Final = text(
     "SELECT concession_id, organization_id, provider_user_id, provider_organization_id,"
@@ -209,6 +215,14 @@ class PostgresConcessionStore:
         if not rows:
             return None
         return _concession(rows[0], provider_organization_id=context.organization_id)
+
+    async def provider_concessions(
+        self, context: ScopeContext, grantee: uuid.UUID
+    ) -> tuple[Concession, ...]:
+        rows = await self._database.read(context, _PROVIDER_LIST, {"grantee": str(grantee)})
+        return tuple(
+            _concession(row, provider_organization_id=context.organization_id) for row in rows
+        )
 
     async def insert(self, transaction: Transaction, concession: Concession) -> None:
         try:

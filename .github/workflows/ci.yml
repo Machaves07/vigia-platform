@@ -42,11 +42,13 @@ jobs:
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then RANGO="$HEAD"; else RANGO="$BASE..$HEAD"; fi
           ./gitleaks detect --source . --no-banner --redact --log-opts="$RANGO"
 
+  # El backend va en dos jobs paralelos (2026-10-01): con ~2900 pruebas el job único tardaba 32-37 min de un tope
+  # de 45. Entre los dos cubren exactamente la suite: `-m "not integration"` ∪ `-m integration`.
   backend:
-    name: backend (lint, tipos y pruebas con integración)
+    name: backend (lint, tipos y pruebas sin integración)
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
@@ -74,8 +76,40 @@ jobs:
         run: uv run --frozen python tools/lint_rules.py
       - name: mypy --strict
         run: uv run --frozen mypy --strict src
-      - name: pruebas perfil ci (con integration; Docker del runner)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci
+      - name: pruebas perfil ci sin integration
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not integration"
+      - name: borrar la clave
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+
+  backend-integracion:
+    name: backend (pruebas de integración)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: pruebas perfil ci con integration (Docker del runner)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration
       - name: borrar la clave
         if: always()
         run: rm -f ~/.ssh/vigia_contracts

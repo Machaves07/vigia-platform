@@ -1410,6 +1410,15 @@ def test_platform_operations_are_only_for_the_operator(routes: Routes) -> None:
         "invalid_request",
         400,
     )
+    # El propio operador, bajo una concesión sobre un cliente, tampoco opera la plataforma.
+    authz = routes.env.authz
+    concession = authz.add_concession(site.organization_id, authz.operator_id)
+    headers = {"X-Vigia-Concession": str(concession)}
+    for path in (
+        "/platform/keys/checkpoint/rotate",
+        f"/platform/dead-letter/{uuid.uuid4()}/alert_metrics/replay",
+    ):
+        _error(routes.call("POST", path, cookie=operator, headers=headers), "not_found", 404)
 
 
 def test_dead_letter_replay_by_the_operator_keeps_the_event_id(routes: Routes) -> None:

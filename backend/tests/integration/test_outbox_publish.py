@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -204,6 +205,70 @@ async def test_under_concession_the_event_belongs_to_the_client_organization(
         )
     assert publication.event.organization_id == context.organization_id
     assert await outbox_counts(migrated, context.organization_id) == (1, 2)
+
+
+# --- orden con relojes desfasados ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_lagging_instance_never_publishes_ahead_in_the_partition(
+    database: Database, outbox: Outbox, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Revisión de VIG-77: dos instancias con relojes distintos encolan en la misma partición.
+
+    La adelantada (+10 s) publica primero; la atrasada, después. El despacho ordena por
+    ``(created_at, ledger_sequence, publish_seq)``: el segundo evento no puede quedar delante.
+    En otra partición, la atrasada conserva su propia hora.
+    """
+    catalog = await _synchronized(database)
+    ahead = Outbox(catalog, SimulatedClock(NOW + timedelta(seconds=10)))
+    lagging = Outbox(catalog, SimulatedClock(NOW))
+    context = make_context()
+    plant_id, other_plant_id = uuid.uuid4(), uuid.uuid4()
+    published = []
+    caplog.set_level(logging.WARNING)
+    for instance, plant, sequence in (
+        (ahead, plant_id, 1),
+        (lagging, plant_id, 2),
+        (lagging, plant_id, None),
+        (lagging, other_plant_id, 3),
+    ):
+        async with database.transaction(context) as transaction:
+            published.append(
+                await instance.publish(
+                    transaction,
+                    NewEvent(
+                        event_name=PROBE_EVENT,
+                        payload=probe_payload(),
+                        plant_id=plant,
+                        ledger_sequence=sequence,
+                    ),
+                )
+            )
+    rows = {row["event_id"]: row for row in await _rows(database, context, "outbox_event")}
+    deliveries = await _rows(database, context, "outbox_delivery")
+    # El mismo orden que el despachador (nuc_0010): ``ledger_sequence`` nulo va al final.
+    in_partition = [
+        rows[row.event_id]
+        for row in await database.read(
+            context,
+            text(
+                "SELECT event_id FROM shared.outbox_event WHERE plant_id = :plant_id"
+                " ORDER BY created_at, ledger_sequence, publish_seq"
+            ),
+            {"plant_id": plant_id},
+        )
+    ]
+    assert [row["event_id"] for row in in_partition] == [p.event.event_id for p in published[:3]]
+    ahead_at = datetime(2026, 9, 29, 10, 30, 10, 123000, tzinfo=UTC)
+    assert [row["created_at"] for row in in_partition] == [ahead_at] * 3
+    # Lo que devuelve el puerto y la hora de la entrega coinciden con lo guardado.
+    assert all(rows[p.event.event_id]["created_at"] == p.event.created_at for p in published)
+    assert all(d["next_attempt_at"] == rows[d["event_id"]]["created_at"] for d in deliveries)
+    assert published[3].event.created_at == datetime(2026, 9, 29, 10, 30, 0, 123000, tzinfo=UTC)
+    # 10 s de desfase (> CLOCK_SKEW_WARNING): queda registrado una vez por evento arrastrado.
+    skewed = [r for r in caplog.records if "reloj desfasado" in r.getMessage()]
+    assert len(skewed) == 2
 
 
 # --- reversión inyectada ------------------------------------------------------------------

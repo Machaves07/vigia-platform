@@ -27,8 +27,12 @@ cada transición escribe la fila **y** su registro en la misma transacción (``p
   historia completa (vigentes, vencidas, revocadas y cada ``provider_query`` con momento,
   operación y el motivo de la concesión), cada lectura auditada como ``ledger_read`` en su misma
   transacción (BR-NUC-41).
+- ``list_own_concessions``: el lado proveedor (``GET /provider/concessions``, TASK-136), las
+  concesiones que el actor se concedió, sin el motivo (``identity.provider_concessions_of`` de
+  ``nuc_0014``).
 
-Lo que no hace: las rutas (TASK-136) y la notificación al cliente (consumidor de U-04 de
+Lo que no hace: las rutas (TASK-136, ``identity.adapters.http.concessions``) y la notificación al
+cliente (consumidor de U-04 de
 ``concession_granted``). ``provider_query`` lo escribe ``identity.authz.context`` al terminar cada
 petición bajo concesión (BR-NUC-38).
 
@@ -338,6 +342,12 @@ class ConcessionStore(Protocol):
         """Todas (cualquier estado), de la organización o de una planta; audita la lectura."""
         ...
 
+    async def provider_concessions(
+        self, context: ScopeContext, grantee: uuid.UUID
+    ) -> tuple[Concession, ...]:
+        """Las concesiones de la proveedora concedidas a ``grantee``, sin el motivo."""
+        ...
+
     async def provider_queries(
         self,
         context: ScopeContext,
@@ -376,6 +386,10 @@ class ConcessionService:
 
     def __repr__(self) -> str:
         return "ConcessionService()"
+
+    def now(self) -> datetime:
+        """El instante del reloj inyectado, para mostrar ``effective_status`` (P5)."""
+        return self._clock.now()
 
     # --- grant ---------------------------------------------------------------------------------
 
@@ -633,6 +647,20 @@ class ConcessionService:
             context, PermissionKey.CONCESSIONS_READ, resource
         )
         return await self._store.list_concessions(authorized, plant_id)
+
+    async def list_own_concessions(self, context: ScopeContext) -> tuple[Concession, ...]:
+        """Las concesiones que el actor de la proveedora se concedió (lado proveedor, §10.2).
+
+        Solo desde la sesión de la proveedora sin concesión y con ``concessions.grant``; nunca
+        el motivo (lo guarda el expediente del cliente). La más reciente primero.
+        """
+        context = self._provider_session(context)
+        authorized = await self._authorizer.authorize(
+            context,
+            PermissionKey.CONCESSIONS_GRANT,
+            Resource.organization(self._provider_organization_id),
+        )
+        return await self._store.provider_concessions(authorized, authorized.actor.id)
 
     async def list_provider_queries(
         self,

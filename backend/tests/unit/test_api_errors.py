@@ -68,6 +68,7 @@ from vigia_platform.shared.secrets import Dependency, SecretsUnavailable
 from vigia_platform.shared.storage import StorageUnavailable
 
 KNOWN = platform_permissions() | {"ledger.read"}
+"""La matriz (las rutas de ``platform_units()`` exigen sus claves) y la clave de prueba."""
 LABELS = PlatformLabels.load()
 INTERNAL_DETAIL = "SELECT hash FROM identity.user_account -- /srv/vigia/app.py:42 eyJhbGciOi"
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
