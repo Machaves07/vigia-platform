@@ -70,9 +70,7 @@ class ChainOut(_Strict):
 
 class VerifyRequest(_Strict):
     """La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o
-    ``audit`` (sin planta)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    ``audit`` (sin planta). Sin campos de más; ``plant_id`` es un UUID en texto."""
 
     kind: Literal["ledger", "audit"]
     plant_id: uuid.UUID | None = None
