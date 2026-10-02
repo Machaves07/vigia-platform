@@ -57,6 +57,7 @@ from tests.hierarchy_support import (
 from tests.integration.conftest import PostgresEndpoint
 from tests.second_factor_support import FakeKms
 from tests.session_support import ORIGIN_KEY
+from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.http import IdentityHttp
 from vigia_platform.identity.adapters.http.me import API_VERSION_HEADER
 from vigia_platform.identity.adapters.second_factor_store import PostgresSecondFactorStore
@@ -224,7 +225,10 @@ def api(postgres_endpoint: PostgresEndpoint) -> Iterator[Api]:
             runtime={
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
-                    audit=authz.audit, provider_organization_id=provider
+                    audit=authz.audit,
+                    provider_organization_id=provider,
+                    provider_queries=LedgerProviderQueryLedger(env.writer),
+                    clock=sessions.clock,
                 ),
                 "identity": identity,
             },

@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -158,6 +159,23 @@ class RecordingAuthzAudit:
         self.denied.append((context, key, resource))
 
 
+@dataclass
+class RecordingProviderQueries:
+    """``ProviderQueryLedger`` que recuerda cada ``provider_query`` (y puede fallar)."""
+
+    written: list[tuple[ScopeContext, dict[str, str], uuid.UUID | None]] = field(
+        default_factory=list
+    )
+    fail: bool = False
+
+    async def write_provider_query(
+        self, context: ScopeContext, content: Mapping[str, str], plant_id: uuid.UUID | None
+    ) -> None:
+        if self.fail:
+            raise ConnectionError("base caída")
+        self.written.append((context, dict(content), plant_id))
+
+
 class UnlimitedRateLimiter(RateLimiter):
     """Limitador que siempre deja pasar: para las pruebas cuyo asunto no es la tasa."""
 
@@ -283,9 +301,12 @@ class Harness:
     store: FakeContextStore = field(default_factory=FakeContextStore)
     csrf_audit: RecordingCsrfAudit = field(default_factory=RecordingCsrfAudit)
     authz_audit: RecordingAuthzAudit = field(default_factory=RecordingAuthzAudit)
+    provider_queries: RecordingProviderQueries = field(default_factory=RecordingProviderQueries)
     observed: Observed = field(default_factory=Observed)
     privacy_notice_version: str | None = NOTICE
     public_origin: str | None = ORIGIN
+    extra_units: tuple[UnitRegistration, ...] = ()
+    """Unidades de prueba propias de un archivo, además de la de este arnés."""
 
     @property
     def contexts(self) -> ScopeContexts:
@@ -320,7 +341,12 @@ class Harness:
 
     def app(self, **runtime: Any) -> Any:
         authorizer = NodeAwareAuthorizer(
-            ContextAuthorizer(audit=self.authz_audit, provider_organization_id=PROVIDER_ORG)
+            ContextAuthorizer(
+                audit=self.authz_audit,
+                provider_organization_id=PROVIDER_ORG,
+                provider_queries=self.provider_queries,
+                clock=self.world.clock,
+            )
         )
         values: dict[str, Any] = {
             "sessions": self.contexts,
@@ -331,7 +357,7 @@ class Harness:
         }
         values.update(runtime)
         return self.world.app(
-            units=(*chain_units(), _unit(self.observed)),
+            units=(*chain_units(), _unit(self.observed), *self.extra_units),
             permissions=PERMISSIONS,
             runtime=values,
             public_origin=self.public_origin,
