@@ -33,7 +33,7 @@ from typing import Final
 from sqlalchemy import text
 
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit
+from vigia_platform.shared.context import ActorUnit, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import get_logger
@@ -130,6 +130,7 @@ def add_months(month: date, months: int) -> date:
     return date(index // 12, index % 12 + 1, 1)
 
 
+@repository
 class PartitionMaintenance:
     """Crea las particiones mensuales que falten y publica ``default_partition_rows``."""
 

@@ -82,7 +82,7 @@ from vigia_platform.ledger.chain.pure_rfc8785 import CanonicalizationError, cano
 from vigia_platform.ledger.chain.verify import audit_entry
 from vigia_platform.shared.archive.partitions import add_months, month_of
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction, TransientDatabaseError
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
@@ -932,6 +932,7 @@ def verify_download(
 # --- Servicio -----------------------------------------------------------------------------------
 
 
+@repository
 class AuditArchiver:
     """Archiva las particiones de auditoría vencidas (PAT-NUC-MAN-03)."""
 
