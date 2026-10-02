@@ -38,7 +38,13 @@ from tests.signing_support import BOOTSTRAP_ORDER, InMemorySecrets, RecordingEve
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import ActorKind, ScopeContext, _seal_scope_context
 from vigia_platform.shared.db import Database
-from vigia_platform.shared.signing.keys import NODE_PURPOSES, KeyStateConflict, SigningPurpose
+from vigia_platform.shared.signing.keys import (
+    NODE_PURPOSES,
+    KeyStateConflict,
+    KeyStatus,
+    KeyTransition,
+    SigningPurpose,
+)
 from vigia_platform.shared.signing.service import RotationCommit, SigningService
 from vigia_platform.shared.signing_store import SqlSigningKeyStore
 
@@ -282,3 +288,32 @@ def test_concurrent_rotations_never_lose_a_key(world: World) -> None:
     publications = _publications(world)
     assert len(publications) == 4 + 12  # alta: key_set y tres más; después, doce rotaciones
     assert conflicts >= 1, "las rotaciones no llegaron a solaparse: la prueba no ejerció nada"
+
+
+def test_a_transition_from_a_superseded_state_changes_nothing(world: World) -> None:
+    """``commit_transitions`` con un ``expected_status`` que ya no es el de la clave: conflicto y
+    ninguna fila cambia (la transición calculada desde un estado superado no se aplica)."""
+
+    async def scenario() -> None:
+        database = app_database(world.migrated, worker_pool_size=2)
+        store = SqlSigningKeyStore(database=database, context=world.context)
+        service = _service(world, database, InMemorySecrets(), store)
+        try:
+            await _bootstrap(service, world.operator_context())
+            checkpoint = next(
+                key for key in service.all_keys() if key.purpose is SigningPurpose.CHECKPOINT
+            )
+            stale = KeyTransition(
+                key_id=checkpoint.key_id,
+                status=KeyStatus.RETIRED,
+                valid_until=checkpoint.valid_until,
+                expected_status=KeyStatus.OVERLAPPING,  # en la base sigue active
+            )
+            with pytest.raises(KeyStateConflict):
+                await store.commit_transitions([stale])
+        finally:
+            await database.dispose()
+
+    asyncio.run(scenario())
+    (row,) = world.fetch("SELECT status FROM identity.signing_key WHERE purpose = 'checkpoint'")
+    assert row["status"] == "active"
