@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 from vigia_platform.shared.api import app as app_module
 from vigia_platform.shared.api import export_openapi
 from vigia_platform.shared.api.app import UnitRegistration, build_openapi_app, platform_units
-from vigia_platform.shared.api.declarations import UnauthenticatedRoute, unauthenticated
+from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.export_openapi import DEFAULT_OUTPUT, main, render, to_yaml
 
 
@@ -37,11 +37,9 @@ def test_check_passes_on_the_committed_file(capsys: pytest.CaptureFixture[str]) 
 def _extra_route_units() -> tuple[UnitRegistration, ...]:
     router = APIRouter()
 
-    @router.get(
-        UnauthenticatedRoute.CHECKPOINT_KEYS.path,
-        dependencies=[unauthenticated(UnauthenticatedRoute.CHECKPOINT_KEYS)],
-    )
-    async def keys() -> dict[str, str]:
+    # Una ruta nueva cualquiera (la de las claves públicas ya existe desde TASK-137).
+    @router.get("/generated/extra", dependencies=[requires("hierarchy.read")])
+    async def extra() -> dict[str, str]:
         return {}
 
     return (*platform_units(), UnitRegistration("prueba", routers=(router,)))

@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 from fastapi import APIRouter, FastAPI, Request, WebSocket
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from hypothesis import given
 from hypothesis import strategies as st
@@ -94,13 +95,16 @@ PUBLIC_CANDIDATES = [
     not in (
         UnauthenticatedRoute.HEALTH_LIVE,
         UnauthenticatedRoute.HEALTH_READY,
+        UnauthenticatedRoute.CHECKPOINT_KEYS,
+        UnauthenticatedRoute.VERIFIER_HASH,
         UnauthenticatedRoute.APP_SCREEN,
         UnauthenticatedRoute.APP_ASSET,
         UnauthenticatedRoute.APP_VERSION,
         UnauthenticatedRoute.ROBOTS,
     )
 ]
-"""Las rutas de salud ya las registra la unidad ``shared`` y los archivos estáticos la fábrica
+"""Las rutas de salud y las públicas de verificación (claves ``checkpoint`` y hash del
+verificador, TASK-137) ya las registra la unidad ``shared`` y los archivos estáticos la fábrica
 (``shared.api.static``); la pantalla solo existe si la construcción trae ``index.html`` y solo en
 la ruta de navegación (``test_app_screen_is_only_admitted_on_the_navigation_route``)."""
 
@@ -234,6 +238,70 @@ def test_app_screen_is_only_admitted_on_the_navigation_route(method: str) -> Non
     with pytest.raises(ApiStartupError) as raised:
         World().app(units=(*platform_units(), unit), permissions=KNOWN)
     assert "«APP_SCREEN» solo se admite en la ruta de pantallas" in str(raised.value)
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_a_copied_navigation_mark_does_not_admit_app_screen(method: str) -> None:
+    # Seguimiento de VIG-78: la ruta de pantallas se reconoce por su clase exacta. Una unidad que
+    # copia la marca ``navigation_only`` en su propia clase de ruta no puede declarar APP_SCREEN.
+    class Imitation(APIRoute):
+        navigation_only = True
+
+    router = APIRouter(route_class=Imitation)
+    router.add_api_route(
+        UnauthenticatedRoute.APP_SCREEN.path,
+        _endpoint("imitation"),
+        methods=[method],
+        dependencies=[unauthenticated(UnauthenticatedRoute.APP_SCREEN)],
+    )
+    unit = UnitRegistration("prueba", routers=(router,))
+    with pytest.raises(ApiStartupError, match="«APP_SCREEN» solo se admite en la ruta de"):
+        World().app(units=(*chain_units(), unit), permissions=KNOWN)
+
+
+def test_a_subclass_of_the_navigation_route_is_not_the_navigation_route() -> None:
+    from vigia_platform.shared.api.static import (
+        _NavigationRoute,
+        is_navigation_route,
+    )
+
+    class Heir(_NavigationRoute):
+        pass
+
+    route = Heir("/x", _endpoint("heir"), methods=["GET"])
+    assert not is_navigation_route(route)
+    assert is_navigation_route(_NavigationRoute("/x", _endpoint("screen"), methods=["GET"]))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        UnauthenticatedRoute.AUTH_LOGIN,
+        UnauthenticatedRoute.INVITATION_ACCEPT,
+        UnauthenticatedRoute.CHECKPOINT_KEYS,
+        UnauthenticatedRoute.VERIFIER_HASH,
+    ],
+)
+def test_a_public_entry_with_its_path_and_another_method_prevents_startup(
+    entry: UnauthenticatedRoute,
+) -> None:
+    # Seguimiento de VIG-67 (mutación P10): la plantilla coincide pero el método no.
+    other = "GET" if entry.method == "POST" else "POST"
+    router = APIRouter()
+    router.add_api_route(
+        entry.path,
+        _endpoint("other_method"),
+        methods=[other],
+        dependencies=[unauthenticated(entry)],
+    )
+    units = (
+        *(unit for unit in chain_units() if unit.name != "shared"),
+        UnitRegistration("prueba", routers=(router,)),
+    )
+    with pytest.raises(ApiStartupError) as raised:
+        World().app(units=units, permissions=KNOWN)
+    expected = f"dice ser «{entry.name}» de la lista pública, que es {entry.method}"
+    assert expected in str(raised.value)
 
 
 def test_a_route_without_declaration_prevents_startup_with_a_spanish_message() -> None:
@@ -429,7 +497,7 @@ class AllowOnly:
 def _protected_app(**runtime: Any) -> Any:
     router = APIRouter()
     router.add_api_route(
-        "/ledger/records",
+        "/generated/protected",
         _endpoint("records"),
         methods=["GET"],
         dependencies=[requires("ledger.read")],
@@ -440,7 +508,7 @@ def _protected_app(**runtime: Any) -> Any:
 
 def test_without_an_authorizer_a_protected_route_denies() -> None:
     with TestClient(_protected_app()) as client:
-        response = client.get("/ledger/records")
+        response = client.get("/generated/protected")
     assert response.status_code == 401
     assert response.json()["code"] == "unauthenticated"
 
@@ -448,9 +516,9 @@ def test_without_an_authorizer_a_protected_route_denies() -> None:
 def test_the_authorizer_decides_each_request() -> None:
     allow = AllowOnly("ledger.read")
     with TestClient(_protected_app(authorizer=allow)) as client:
-        assert client.get("/ledger/records").json() == {"ok": "records"}
+        assert client.get("/generated/protected").json() == {"ok": "records"}
     deny = AllowOnly("users.manage")
     with TestClient(_protected_app(authorizer=deny)) as client:
-        response = client.get("/ledger/records")
+        response = client.get("/generated/protected")
     assert response.status_code == 404 and response.json()["code"] == "not_found"
     assert allow.asked == deny.asked == ["ledger.read"]

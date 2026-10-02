@@ -11,8 +11,11 @@
   * ``operator_row``: el operador activo de la proveedora con sus asignaciones vigentes.
 
 - ``PostgresAuthorizationAudit``: ``authorization_denied`` (``outcome = denied``) en la cadena de
-  auditoría del contexto, con la clave pedida y el recurso; y ``context_absent_attempt`` en la de
-  la proveedora con ``security_alert`` en la bandeja, en la misma transacción (BR-NUC-02).
+  auditoría del contexto, con la clave pedida y el recurso, y ``security_alert``
+  (``authorization_denied_repeated``) cuando el actor pasa de 20 denegaciones en 10 minutos
+  (NFR-NUC-28); y ``context_absent_attempt`` en la de la proveedora con ``security_alert`` en la
+  bandeja, en la misma transacción (BR-NUC-02). Las alertas las cuenta el consumidor
+  ``alert_metrics`` al entregarlas, una vez cada una.
 - ``LedgerProviderQueryLedger``: ``provider_query`` por el único camino de escritura del
   expediente (``EscritorExpediente``); un rechazo sale como ``ProviderQueryRejected``.
 
@@ -24,7 +27,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Final, Literal
 
 from sqlalchemy import text
@@ -56,11 +59,12 @@ from vigia_platform.shared.context import (
     ScopeLevel,
     repository,
 )
-from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "DENIED_REPEATED_THRESHOLD",
+    "DENIED_REPEATED_WINDOW",
     "SESSION_CONTEXT_STATEMENT",
     "LedgerProviderQueryLedger",
     "PostgresAuthorizationAudit",
@@ -104,6 +108,18 @@ _OPERATOR: Final = text(
 )
 
 _CONTEXT_ABSENT_ALERT: Final = "context_absent_attempt"
+_DENIED_REPEATED_ALERT: Final = "authorization_denied_repeated"
+
+DENIED_REPEATED_THRESHOLD: Final = 20
+"""Denegaciones por actor en la ventana a partir de las cuales se alerta: «más de 20 por actor en
+10 minutos» ``[objetivo propio]`` (NFR-NUC-28, PAT-NUC-SEG-08)."""
+DENIED_REPEATED_WINDOW: Final = timedelta(minutes=10)
+
+_DENIALS_IN_WINDOW: Final = text(
+    "SELECT count(*) AS denials FROM shared.audit_entry"
+    " WHERE organization_id = :organization_id AND actor_id = :actor_id"
+    " AND operation = 'authorization_denied' AND occurred_at > :window_start"
+)
 
 
 def _uuid(value: object) -> uuid.UUID:
@@ -191,29 +207,63 @@ class PostgresAuthorizationAudit:
         audit: AuditWriter,
         outbox: OutboxPort,
         clock: Clock,
-        metrics: PlatformMetrics | None = None,
     ) -> None:
         self._database = database
         self._audit = audit
         self._outbox = outbox
         self._clock = clock
-        self._metrics = metrics or get_metrics()
 
     async def authorization_denied(
         self, context: ScopeContext, key: PermissionKey, resource: Resource
     ) -> None:
+        """La entrada ``authorization_denied`` y, al pasar el umbral, la alerta repetida.
+
+        En la misma transacción se cuentan las denegaciones del actor en los últimos 10 minutos
+        (con la propia): la que hace la número 21 publica ``security_alert`` con
+        ``alert_kind = authorization_denied_repeated`` (NFR-NUC-28; seguimiento de VIG-77). La
+        entrada toma la exclusión de la cabeza de la cadena de auditoría, así que dos denegaciones
+        concurrentes no ven la misma cuenta y la alerta sale una sola vez por cruce del umbral.
+        """
         in_organization = resource.organization_id == context.organization_id
-        await self._audit.append(
-            context,
-            AuditOperation.AUTHORIZATION_DENIED,
-            outcome=AuditOutcome.DENIED,
-            plant_id=resource.plant_id if in_organization else None,
-            zone_id=resource.zone_id if in_organization else None,
-            resource=ResourceRef(resource.kind, resource.id),
-            filters={"permission_key": PermissionKey(key).value},
-        )
+        now = self._clock.now()
+        async with self._database.transaction(context) as transaction:
+            await self._audit.append(
+                context,
+                AuditOperation.AUTHORIZATION_DENIED,
+                outcome=AuditOutcome.DENIED,
+                plant_id=resource.plant_id if in_organization else None,
+                zone_id=resource.zone_id if in_organization else None,
+                resource=ResourceRef(resource.kind, resource.id),
+                filters={"permission_key": PermissionKey(key).value},
+                transaction=transaction,
+            )
+            denials = (
+                await transaction.execute(
+                    _DENIALS_IN_WINDOW,
+                    {
+                        "organization_id": context.organization_id,
+                        "actor_id": context.actor.id,
+                        "window_start": now - DENIED_REPEATED_WINDOW,
+                    },
+                )
+            ).scalar_one()
+            if int(denials) == DENIED_REPEATED_THRESHOLD + 1:
+                await self._outbox.publish(
+                    transaction,
+                    NewEvent(
+                        event_name="security_alert",
+                        payload={
+                            "alert_kind": _DENIED_REPEATED_ALERT,
+                            "resource_kind": "user",
+                            "resource_id": str(context.actor.id),
+                            "occurred_at": format_timestamp(now),
+                        },
+                    ),
+                )
 
     async def context_absent_attempt(self, provider_context: ScopeContext, operation: str) -> None:
+        # La métrica ``security_alert_total`` la suma el consumidor ``alert_metrics`` al entregar
+        # el ``security_alert``: sumarla aquí también contaba cada intento dos veces (VIG-77).
         async with self._database.transaction(provider_context) as transaction:
             await self._audit.append_without_organization(
                 provider_context,
@@ -232,13 +282,6 @@ class PostgresAuthorizationAudit:
                     },
                 ),
             )
-        self._metrics.security_alert_total.add(
-            1,
-            {
-                "alert_type": "security_alert",
-                "organization_id": str(provider_context.organization_id),
-            },
-        )
 
 
 class ProviderQueryRejected(Exception):

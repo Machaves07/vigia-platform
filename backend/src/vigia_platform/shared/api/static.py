@@ -73,6 +73,7 @@ __all__ = [
     "StaticSiteInvalid",
     "choose_encoding",
     "is_navigation",
+    "is_navigation_route",
     "is_request_logged",
     "is_screen_path",
     "static_routers",
@@ -497,15 +498,22 @@ class _NavigationRoute(APIRoute):
     su ruta de la API y nunca recibe ``405`` por culpa de la pantalla.
     """
 
-    navigation_only = True
-    """Marca que ``check_routes`` exige a la única ruta que declara ``APP_SCREEN``."""
-
     def matches(self, scope: Scope) -> tuple[Match, Scope]:
         if scope.get("type") != "http" or scope.get("method") not in ("GET", "HEAD"):
             return Match.NONE, {}
         if not is_screen_path(_route_path(scope)) or not is_navigation(Headers(scope=scope)):
             return Match.NONE, {}
         return super().matches(scope)
+
+
+def is_navigation_route(route: object) -> bool:
+    """¿Es ``route`` exactamente la ruta de pantallas de este módulo?
+
+    ``check_routes`` solo admite ``APP_SCREEN`` en ella. Se reconoce por la **clase exacta**, no
+    por un atributo ni por herencia: ni copiar una marca ni heredar de ``_NavigationRoute``
+    convierte otra ruta en la de pantallas (seguimiento de VIG-78).
+    """
+    return type(route) is _NavigationRoute
 
 
 def _etag_matches(header: str, etag: str) -> bool:
