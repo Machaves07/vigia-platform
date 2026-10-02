@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 15
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0015`` (la política de
+MINIMUM_SCHEMA_VERSION: Final = 16
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0016`` (las funciones de
+``create_partitions`` y ``archive_audit_partitions``: crear particiones, contar la partición por
+defecto, leer y desprender una partición de auditoría), que incluye ``nuc_0015`` (la política de
 proveedor en el expediente, la auditoría y la bandeja: sin ella, un puerto que omitiera el filtro
 de ``allowed_scopes`` expondría al proveedor todas las plantas del cliente), que incluye
 ``nuc_0014``
