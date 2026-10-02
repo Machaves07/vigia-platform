@@ -351,7 +351,7 @@ def test_h58_the_administrator_needs_the_second_factor_and_the_session_ends_on_t
     assert response.json() == {"status": "second_factor_required"} and second is not None
     assert platform.call("GET", "/me", cookie=second).status_code == 401
     wrong = platform.call("POST", "/auth/second-factor", cookie=second, json_body={"code": "0"})
-    assert code_of(wrong) in ("unauthenticated", "invalid_request")
+    assert wrong.status_code == 401 and code_of(wrong) == "unauthenticated", wrong.text
     good = platform.call(
         "POST",
         "/auth/second-factor",
@@ -430,7 +430,7 @@ def test_h56_the_client_sees_when_why_and_until_when_and_revocation_is_immediate
         concession=concession,
         params={"from": stamp(T0), "to": stamp(T0 + HOUR)},
     )
-    assert code_of(again) in ("not_found", "unauthenticated")
+    assert again.status_code == 404 and code_of(again) == "not_found", again.text
 
 
 # --- H-38 --------------------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import pytest
 from tests.factories import uuid7
 from tests.identity_db import set_scope
 from tests.platform_support import T0, Platform, code_of, comparable
+from vigia_platform.identity.adapters.authz_store import DENIED_REPEATED_THRESHOLD
 from vigia_platform.shared.context import Role
 
 pytestmark = pytest.mark.integration
@@ -143,3 +144,33 @@ def test_n01_thirty_concurrent_probes_raise_exactly_one_repeated_denial_alert(
     assert len(platform.audit_entries(site.organization_id, "authorization_denied")) == 30
     alerts = platform.alerts(site.organization_id, "authorization_denied_repeated")
     assert [alert["resource_id"] for alert in alerts] == [str(prober)]
+
+
+@pytest.mark.parametrize("burst", [DENIED_REPEATED_THRESHOLD, DENIED_REPEATED_THRESHOLD + 1])
+@pytest.mark.parametrize("round_", range(3))
+def test_n01_a_concurrent_burst_alerts_exactly_at_the_crossing(
+    platform: Platform, burst: int, round_: int
+) -> None:
+    """La alerta sale en el cruce, no después: una ráfaga concurrente de exactamente umbral + 1
+    denegaciones alerta una vez, y una de exactamente el umbral no alerta (NFR-NUC-28).
+
+    Si la cuenta se leyera fuera de la exclusión de la cabeza de auditoría, las peticiones
+    encoladas verían cuentas atrasadas y la 21.ª no vería 20 previas: la ráfaga de 21 quedaría
+    sin alerta (revisión de PR #50, seguimiento 2 de VIG-86). Tres rondas por la carrera.
+    """
+    site = platform.site()
+    prober, cookie = platform.person(site.organization_id, Role.ADMINISTRATOR)
+
+    async def probes() -> list[Any]:
+        return list(
+            await asyncio.gather(
+                *(platform.send("GET", "/ledger/records", cookie=cookie) for _ in range(burst))
+            )
+        )
+
+    responses = platform.run(probes())
+    assert [code_of(r) for r in responses] == ["not_found"] * burst
+    assert len(platform.audit_entries(site.organization_id, "authorization_denied")) == burst
+    alerts = platform.alerts(site.organization_id, "authorization_denied_repeated")
+    expected = [str(prober)] if burst > DENIED_REPEATED_THRESHOLD else []
+    assert [alert["resource_id"] for alert in alerts] == expected

@@ -108,7 +108,7 @@ def test_n04_an_expired_concession_stops_before_the_periodic_task_runs(platform:
     )
     assert row["status"] == "active"
     response = _coverage(platform, installer, zone_id, expired)
-    assert code_of(response) in ("not_found", "unauthenticated"), response.text
+    assert response.status_code == 404 and code_of(response) == "not_found", response.text
     assert str(zone_id) not in response.text
 
 
@@ -138,7 +138,7 @@ def test_n04_every_provider_query_is_visible_and_revocation_is_immediate(
     revoked = platform.call("POST", f"/concessions/{concession}/revoke", cookie=client_admin)
     assert revoked.status_code == 200, revoked.text
     after = _coverage(platform, installer, zone_id, concession)
-    assert code_of(after) in ("not_found", "unauthenticated"), after.text
+    assert after.status_code == 404 and code_of(after) == "not_found", after.text
     # La sesión del proveedor sigue viva para su propia organización (BR-NUC-39).
     me = platform.call("GET", "/me", cookie=installer)
     assert me.status_code == 200 and me.json()["concession_id"] is None
