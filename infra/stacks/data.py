@@ -218,6 +218,52 @@ def lock_retention(lock: ObjectLock) -> s3.ObjectLockRetention:
     return s3.ObjectLockRetention.governance(days)
 
 
+def accept_load_balancer_logs(bucket: s3.Bucket) -> None:
+    """Entrega de los registros de ``vigia-alb-app`` y ``vigia-alb-nodes`` (o del balanceador
+    de red de la contingencia) en sus prefijos de ``vigia-logs``: el propio de esta pila o el
+    heredado de ``vigia-datasets``. ``vigia-edge`` importa el depósito por nombre y no toca esta
+    política, así que no cambia con ``nodes_tls_mode``."""
+    stack = Stack.of(bucket)
+    objects = [
+        bucket.arn_for_objects(f"{prefix}/AWSLogs/{stack.account}/*")
+        for prefix in LOAD_BALANCER_LOG_PREFIXES
+    ]
+    source_account = {"StringEquals": {"aws:SourceAccount": stack.account}}
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="LoadBalancerLogDelivery",
+            principals=[
+                iam.ArnPrincipal(f"arn:{stack.partition}:iam::{ELB_LOG_DELIVERY_ACCOUNT}:root")
+            ],
+            actions=["s3:PutObject"],
+            resources=objects,
+        )
+    )
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="NetworkLoadBalancerLogDelivery",
+            principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
+            actions=["s3:PutObject"],
+            resources=objects,
+            conditions={
+                "StringEquals": {
+                    "s3:x-amz-acl": "bucket-owner-full-control",
+                    "aws:SourceAccount": stack.account,
+                }
+            },
+        )
+    )
+    bucket.add_to_resource_policy(
+        iam.PolicyStatement(
+            sid="NetworkLoadBalancerLogAclCheck",
+            principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
+            actions=["s3:GetBucketAcl"],
+            resources=[bucket.bucket_arn],
+            conditions=source_account,
+        )
+    )
+
+
 class DataStack(VigiaStack):
     """Pila ``vigia-data`` (infrastructure-design §2.3)."""
 
@@ -275,51 +321,8 @@ class DataStack(VigiaStack):
             removal_policy=self.removal,
             auto_delete_objects=config.buckets_auto_delete_objects,
         )
-        self._accept_load_balancer_logs(bucket)
+        accept_load_balancer_logs(bucket)
         return bucket
-
-    def _accept_load_balancer_logs(self, bucket: s3.Bucket) -> None:
-        """Entrega de los registros de ``vigia-alb-app`` y ``vigia-alb-nodes`` (o del balanceador
-        de red de la contingencia) en sus prefijos. ``vigia-edge`` importa el depósito por nombre
-        y no toca esta política, así que no cambia con ``nodes_tls_mode``."""
-        objects = [
-            bucket.arn_for_objects(f"{prefix}/AWSLogs/{self.account}/*")
-            for prefix in LOAD_BALANCER_LOG_PREFIXES
-        ]
-        source_account = {"StringEquals": {"aws:SourceAccount": self.account}}
-        bucket.add_to_resource_policy(
-            iam.PolicyStatement(
-                sid="LoadBalancerLogDelivery",
-                principals=[
-                    iam.ArnPrincipal(f"arn:{self.partition}:iam::{ELB_LOG_DELIVERY_ACCOUNT}:root")
-                ],
-                actions=["s3:PutObject"],
-                resources=objects,
-            )
-        )
-        bucket.add_to_resource_policy(
-            iam.PolicyStatement(
-                sid="NetworkLoadBalancerLogDelivery",
-                principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
-                actions=["s3:PutObject"],
-                resources=objects,
-                conditions={
-                    "StringEquals": {
-                        "s3:x-amz-acl": "bucket-owner-full-control",
-                        "aws:SourceAccount": self.account,
-                    }
-                },
-            )
-        )
-        bucket.add_to_resource_policy(
-            iam.PolicyStatement(
-                sid="NetworkLoadBalancerLogAclCheck",
-                principals=[iam.ServicePrincipal("delivery.logs.amazonaws.com")],
-                actions=["s3:GetBucketAcl"],
-                resources=[bucket.bucket_arn],
-                conditions=source_account,
-            )
-        )
 
     def _bucket(self, usage: BucketUsage) -> s3.Bucket:
         config = self.config
@@ -631,6 +634,7 @@ __all__ = [
     "BucketUsage",
     "DataStack",
     "DbUser",
+    "accept_load_balancer_logs",
     "app_host",
     "db_identifier",
     "db_log_group_name",

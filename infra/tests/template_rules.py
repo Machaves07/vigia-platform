@@ -8,7 +8,7 @@ aplican a cada pila de cada despliegue y a recursos de prueba construidos a prop
 
 Reglas (infrastructure-design §2.3 y sus notas de 2026-09-23):
 
-- SECURITY-01: ningún almacenamiento sin cifrado con clave del cliente, salvo las dos
+- SECURITY-01: ningún almacenamiento sin cifrado con clave del cliente, salvo las tres
   excepciones declaradas por nombre (:data:`ENCRYPTION_EXCEPTIONS`).
 - SECURITY-02: ningún balanceador sin registro de acceso.
 - SECURITY-06: ninguna política con comodín no listado (:data:`RESOURCE_WILDCARDS`,
@@ -241,7 +241,8 @@ def _registry_service_aes(props: JsonObject) -> bool:
     return configuration is None or configuration.get("EncryptionType") == "AES256"
 
 
-# Nota U02-H-06 de §2.3: las dos únicas excepciones, listadas por nombre.
+# Nota U02-H-06 de §2.3: las dos excepciones de U-02, listadas por nombre, y el depósito del
+# conjunto sellado de U-01, que ``vigia-datasets`` trae de vigia-contracts con SSE-S3 (TASK-150).
 ENCRYPTION_EXCEPTIONS: tuple[EncryptionException, ...] = (
     EncryptionException(
         resource_type="AWS::ECR::Repository",
@@ -255,6 +256,13 @@ ENCRYPTION_EXCEPTIONS: tuple[EncryptionException, ...] = (
         name=re.compile(rf"^vigia-logs(-[a-z0-9-]+)?-{_ACCOUNT}-{REGION}$"),
         accepted=_bucket_sse_s3,
         reason="depósito heredado vigia-logs con SSE-S3 (§9.2, ciclo de vida de U-01)",
+    ),
+    EncryptionException(
+        resource_type="AWS::S3::Bucket",
+        # Único en la cuenta: solo pilot compartido, sin sufijo de despliegue (D-8).
+        name=re.compile(rf"^vigia-datasets-{_ACCOUNT}-{REGION}$"),
+        accepted=_bucket_sse_s3,
+        reason="depósito del conjunto sellado de U-01 con SSE-S3 (contrato §4.2, TASK-150)",
     ),
 )
 

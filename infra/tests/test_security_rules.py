@@ -133,12 +133,50 @@ def test_declared_logs_bucket_with_account_token_passes() -> None:
         ("vigia-logs-123456789012-us-east-1", s3.BucketEncryption.KMS_MANAGED),
         ("vigia-logsx-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
         ("vigia-logs-123456789012-eu-west-1", s3.BucketEncryption.S3_MANAGED),
-        ("vigia-datasets-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
         ("vigia-evidence-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
     ],
-    ids=["logs-default", "logs-aws-kms", "logsx", "logs-other-region", "datasets", "evidence"],
+    ids=["logs-default", "logs-aws-kms", "logsx", "logs-other-region", "evidence"],
 )
 def test_logs_exception_is_by_exact_name_and_sse_s3(
+    name: str, encryption: s3.BucketEncryption | None
+) -> None:
+    violations = _run(
+        check_storage_encryption,
+        lambda stack: s3.Bucket(stack, "Bucket", bucket_name=name, encryption=encryption),
+    )
+    assert [v.physical_name for v in violations] == [name]
+
+
+def test_declared_datasets_bucket_with_sse_s3_passes() -> None:
+    """El conjunto sellado de U-01 conserva SSE-S3 al trasladarse (TASK-150), con la cuenta
+    escrita o sin resolver (``vigia-datasets-${AWS::AccountId}-us-east-1``)."""
+
+    def build(stack: Stack) -> None:
+        for construct_id, name in (
+            ("Literal", "vigia-datasets-123456789012-us-east-1"),
+            ("Token", f"vigia-datasets-{stack.account}-{stack.region}"),
+        ):
+            s3.Bucket(
+                stack, construct_id, bucket_name=name, encryption=s3.BucketEncryption.S3_MANAGED
+            )
+
+    assert _run(check_storage_encryption, build) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "encryption"),
+    [
+        ("vigia-datasets-123456789012-us-east-1", None),
+        ("vigia-datasets-123456789012-us-east-1", s3.BucketEncryption.KMS_MANAGED),
+        # Solo en pilot compartido: ningún despliegue con sufijo tiene vigia-datasets (D-8).
+        ("vigia-datasets-staging-7-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
+        ("vigia-datasets-acme-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
+        ("vigia-datasetsx-123456789012-us-east-1", s3.BucketEncryption.S3_MANAGED),
+        ("vigia-datasets-123456789012-eu-west-1", s3.BucketEncryption.S3_MANAGED),
+    ],
+    ids=["default", "aws-kms", "staging", "dedicated", "datasetsx", "other-region"],
+)
+def test_datasets_exception_is_by_exact_name_and_sse_s3(
     name: str, encryption: s3.BucketEncryption | None
 ) -> None:
     violations = _run(
