@@ -544,6 +544,102 @@ def _zone_subject() -> Subject:
     return Subject("zone")
 
 
+def test_borders_of_estado_en_through_the_database(environment: Environment) -> None:
+    """Seguimiento de VIG-64: los bordes que la propiedad solo cubre por azar, fijos y por la base.
+
+    - compuerta en el instante ``a`` exacto (el periodo empieza ya en ``productive``);
+    - desasignación: ``[assigned_at, unassigned_at)`` es cerrado-abierto en ``estado_en``;
+    - tramo de zona: empieza en su ``started_at`` (``started_at <= t``), no después;
+    - ``state_at`` justo en el ``ended_at`` de un par: el tramo ya terminó.
+    """
+    zone: Zone = environment.run(_insert_zone(environment))
+    node = zone.nodes[0]
+    environment.run(
+        _insert_assignments(
+            environment, zone, [AssignmentInput(uuid.uuid4(), node, at(1_000), at(4_000))]
+        )
+    )
+    communication = _write(
+        environment,
+        "node_communication_state_changed",
+        {
+            "node_id": str(node),
+            "plant_id": str(environment.plant_id),
+            "state": "reachable",
+            "since": _stamp(at(0)),
+        },
+    )
+    environment.run(
+        _project_communication(
+            environment,
+            [CommunicationInput(communication, node, CommunicationState.REACHABLE, at(0))],
+        )
+    )
+    _write(
+        environment,
+        "gate_state_changed",
+        {
+            "zone_id": str(zone.zone_id),
+            "plant_id": str(environment.plant_id),
+            "gate": "use",
+            "status": "approved",
+            "resulting_mode": "productive",
+        },
+        occurred_at=at(2_000),
+    )
+    opened = ObservabilityInput(
+        uuid.uuid4(),
+        uuid7(),
+        _zone_subject(),
+        EventPhase.OPENED,
+        CoverageState.DEGRADED,
+        ("focus",),
+        at(2_500),
+        clock_offset_ms=0,
+    )
+    _write(environment, "observability_event_received", _event_document(environment, zone, opened))
+    closed = replace(
+        opened,
+        event_id=uuid7(),
+        phase=EventPhase.CLOSED,
+        state=CoverageState.OBSERVABLE,
+        causes=(),
+        ended_at=at(3_000),
+        opened_event_id=opened.event_id,
+    )
+    _write(environment, "observability_event_received", _event_document(environment, zone, closed))
+    context = whole(environment)
+
+    # Compuerta en ``a``: el primer milisegundo del periodo ya es productivo (sin reporte del nodo
+    # todavía: never_reported, no zone_not_active).
+    timeline = environment.run(
+        environment.coverage.linea_de_tiempo(
+            context, zone.zone_id, CoveragePeriod(at(2_000), at(4_500))
+        )
+    )
+    assert [
+        (ms_of(i.starts_at), ms_of(i.ends_at), i.state.value, i.causes) for i in timeline.intervals
+    ] == [
+        (2_000, 2_500, "not_observable", ("never_reported",)),
+        (2_500, 3_000, "degraded", ("focus",)),
+        (3_000, 4_000, "observable", ()),
+        (4_000, 4_500, "not_observable", ("never_reported",)),
+    ]
+    expected = {
+        1_999: ("not_observable", ("zone_not_active",)),  # la compuerta aún no regía
+        2_000: ("not_observable", ("never_reported",)),  # compuerta exacta en t
+        2_499: ("not_observable", ("never_reported",)),
+        2_500: ("degraded", ("focus",)),  # el tramo empieza en su started_at
+        2_999: ("degraded", ("focus",)),
+        3_000: ("observable", ()),  # justo en el ended_at del par: ya terminó
+        3_999: ("observable", ()),
+        4_000: ("not_observable", ("never_reported",)),  # unassigned_at excluido
+    }
+    for t, (state, causes) in expected.items():
+        status = environment.run(environment.coverage.estado_en(context, zone.zone_id, at(t)))
+        assert (status.state.value, status.causes) == (state, causes), t
+
+
 # --- Tope, alcance y auditoría ------------------------------------------------------------------
 
 
