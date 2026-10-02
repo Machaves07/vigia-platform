@@ -101,6 +101,8 @@ SIGNER_NAMES = ("CANARIO-NOMBRE Ana Pérez", "CANARIO-NOMBRE Luis Gómez")
 """Nombres del firmante: si alguno aparece en una respuesta, la consulta filtra texto libre."""
 
 _ALL_TIME = LabelPeriod(datetime(2000, 1, 1, tzinfo=UTC), datetime(2100, 1, 1, tzinfo=UTC))
+_EDGE_PICKS = 1_023
+"""Tope fijo de los índices de periodo: muy por encima del número de marcas de un ejemplo."""
 """Un periodo que contiene toda marca de la base de prueba (su reloj es el real)."""
 
 SnakeCode = Annotated[
@@ -645,8 +647,11 @@ def narrow_queries(
     earliest = stamps[0] if stamps else _ALL_TIME.start
     latest = stamps[-1] if stamps else earliest
     edges = [earliest - timedelta(seconds=1), *stamps, latest + timedelta(seconds=1)]
-    start_index = draw(st.integers(0, len(edges) - 2))
-    end_index = draw(st.integers(start_index + 1, len(edges) - 1))
+    # Las marcas salen del reloj de la base: dos ejecuciones de los mismos datos pueden empatar o
+    # no en el mismo milisegundo. Los límites de lo que se extrae no dependen de ellas (si no,
+    # Hypothesis lanza FlakyStrategyDefinition al repetir un ejemplo); el índice se reduce después.
+    start_index = draw(st.integers(0, _EDGE_PICKS)) % (len(edges) - 1)
+    end_index = start_index + 1 + draw(st.integers(0, _EDGE_PICKS)) % (len(edges) - 1 - start_index)
     return Query(
         scopes=scopes,
         period=LabelPeriod(edges[start_index], edges[end_index]),

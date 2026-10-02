@@ -20,8 +20,13 @@ Antes de la primera sentencia se valida todo, en este orden, y cualquier fallo l
    coerción. El tamaño se mide sobre el texto que guarda PostgreSQL (``payload::text``, con los
    separadores ``", "`` y ``": "`` de ``jsonb``), el mismo que limita la restricción de la tabla.
 
-``event_id`` es un UUID v7 y ``created_at`` la hora del ``Clock`` inyectado, en milisegundos; la
-entrega nace vencida (``next_attempt_at = created_at``). ``correlation_id`` sale del contexto, y
+``event_id`` es un UUID v7 y ``created_at`` la hora del ``Clock`` inyectado, en milisegundos,
+pero nunca anterior al ``created_at`` más reciente de su partición: el despacho ordena por
+``created_at`` y, con varias instancias, un reloj atrasado no debe colocar un evento delante de
+otro ya confirmado (el empate lo deshacen ``ledger_sequence`` y ``publish_seq``). Un reloj muy
+adelantado arrastra la hora de los siguientes; no se corrige (el orden manda) y, por encima de
+``CLOCK_SKEW_WARNING``, se registra. La entrega nace
+vencida (``next_attempt_at = created_at``). ``correlation_id`` sale del contexto, y
 ``trace_id``/``span_id`` del tramo de OpenTelemetry en curso, si lo hay: el despachador enlaza
 con él el tramo de la entrega (PAT-NUC-MAN-01). ``publish_seq`` lo asigna la base al insertar.
 """
@@ -32,7 +37,7 @@ import json
 import os
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
@@ -43,6 +48,7 @@ from sqlalchemy import text
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ContextAbsent, repository
 from vigia_platform.shared.db import Transaction
+from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.outbox.registries import CompiledEventType, OutboxCatalog
 
 __all__ = [
@@ -65,13 +71,25 @@ MAX_LEDGER_SEQUENCE: Final = 2**63 - 1
 
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
+CLOCK_SKEW_WARNING: Final = timedelta(seconds=5)
+"""Si ``created_at`` sube más que esto por encima del reloj propio, otra instancia escribió con un
+reloj adelantado: se registra para que operación lo vea ``[objetivo propio]``. El orden manda
+sobre la exactitud de la hora y no se corrige: bajar la marca pondría el evento delante."""
+
+_log = get_logger("shared.outbox")
+
 _ORGANIZATION_PARTITION: Final = "organization"
 
 _INSERT_EVENT: Final = text(
     "INSERT INTO shared.outbox_event (event_id, organization_id, plant_id, event_name,"
     " ledger_sequence, payload, correlation_id, created_at, trace_id, span_id)"
     " VALUES (:event_id, :organization_id, :plant_id, :event_name, :ledger_sequence,"
-    " CAST(:payload AS jsonb), :correlation_id, :created_at, :trace_id, :span_id)"
+    " CAST(:payload AS jsonb), :correlation_id,"
+    " GREATEST(CAST(:created_at AS timestamptz), (SELECT max(previous.created_at)"
+    " FROM shared.outbox_event AS previous WHERE previous.organization_id = :organization_id"
+    " AND previous.partition_key = :partition_key)),"
+    " :trace_id, :span_id)"
+    " RETURNING created_at"
 )
 
 _INSERT_DELIVERIES: Final = text(
@@ -274,11 +292,12 @@ class Outbox:
         """Inserta el evento y sus entregas en ``transaction``; no confirma."""
         publication = self.prepare(transaction, event)
         inserted = publication.event
-        await transaction.execute(
+        result = await transaction.execute(
             _INSERT_EVENT,
             {
                 "event_id": inserted.event_id,
                 "organization_id": inserted.organization_id,
+                "partition_key": inserted.partition_key,
                 "plant_id": inserted.plant_id,
                 "event_name": inserted.event_name,
                 "ledger_sequence": inserted.ledger_sequence,
@@ -289,6 +308,12 @@ class Outbox:
                 "span_id": inserted.span_id,
             },
         )
+        created_at: datetime = result.scalar_one()
+        if created_at != inserted.created_at:
+            if created_at - inserted.created_at > CLOCK_SKEW_WARNING:
+                _log.warning("reloj desfasado entre instancias: el evento hereda otra hora")
+            inserted = replace(inserted, created_at=created_at)
+            publication = Publication(inserted, publication.consumers)
         if publication.consumers:
             await transaction.execute(
                 _INSERT_DELIVERIES,

@@ -29,7 +29,7 @@ cada transición escribe la fila **y** su registro en la misma transacción (``p
   transacción (BR-NUC-41).
 - ``list_own_concessions``: el lado proveedor (``GET /provider/concessions``, TASK-136), las
   concesiones que el actor se concedió, sin el motivo (``identity.provider_concessions_of`` de
-  ``nuc_0013``).
+  ``nuc_0014``).
 
 Lo que no hace: las rutas (TASK-136, ``identity.adapters.http.concessions``) y la notificación al
 cliente (consumidor de U-04 de

@@ -41,6 +41,10 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-grpc>=1.45",
 ]
 
+[project.scripts]
+# Segundo punto de entrada de la imagen (LC-NUC-24, PAT-NUC-ESC-04; infra: WORKER_COMMAND).
+vigia-worker = "vigia_platform.shared.worker.main:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8",
