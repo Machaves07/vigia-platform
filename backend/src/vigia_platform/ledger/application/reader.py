@@ -24,7 +24,13 @@ qué lo decide ``authorize`` en la ruta (TASK-125, TASK-137), no este puerto.
 entrada ``ledger_read`` (filtros tal cual, en bytes canónicos de a lo sumo 4 KB, y
 ``result_count``) o ``ledger_detail_read`` (el identificador pedido) en **la misma transacción**
 que la consulta (PAT-NUC-ESC-07): si la entrada no puede escribirse, la lectura no devuelve nada.
-``list_audit`` escribe ``audit_read``. Los filtros se validan antes de abrir la transacción.
+``list_audit`` escribe ``audit_read``. Los filtros se validan antes de abrir la transacción. La
+planta y la zona de la entrada de una lista son las del filtro o, sin él, las del alcance del actor
+(su planta si es una sola, y su zona si solo tiene una), para que el ``plant_manager`` de esa planta
+vea quién leyó en ella (BR-NUC-63; seguimiento de VIG-59).
+
+``get(…, record_types=…)`` trata un registro de otro tipo como fuera del alcance: la ruta de
+lectura (TASK-137) lo usa para la vista de integridad, que solo ve los tipos de la cadena.
 
 ``by_source`` **no** escribe entrada ni filtra por alcance: es la comprobación de idempotencia del
 camino de escritura de U-03, que por definición es de toda la organización (la unicidad de
@@ -247,11 +253,15 @@ class AuditPageRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class Page[T]:
-    """Una página y la clave para pedir la siguiente (``None`` si no hay más)."""
+class Page[T, C]:
+    """Una página y la clave para pedir la siguiente (``None`` si no hay más).
+
+    ``C`` es la clave de su lista: ``RecordCursor`` en ``list`` y ``AuditCursor`` en
+    ``list_audit``, así que la de una página se pasa tal cual a la petición siguiente.
+    """
 
     items: tuple[T, ...]
-    next_cursor: RecordCursor | AuditCursor | None
+    next_cursor: C | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -437,6 +447,13 @@ _GET_RECORD: Final = text(
     " AND (CAST(:whole_organization AS boolean)"
     " OR r.scope_plant_id = ANY(CAST(:scope_plants AS uuid[]))"
     " OR r.scope_zone_id = ANY(CAST(:scope_zones AS uuid[])))"
+    " AND (CAST(:record_types AS text[]) IS NULL"
+    " OR r.record_type = ANY(CAST(:record_types AS text[])))"
+)
+
+_ZONE_PLANTS: Final = text(
+    "SELECT z.zone_id, z.plant_id FROM identity.zone AS z"
+    " WHERE z.organization_id = :organization_id AND z.zone_id = ANY(CAST(:zone_ids AS uuid[]))"
 )
 
 _EVIDENCE_OF_RECORDS: Final = text(
@@ -699,7 +716,7 @@ class LectorExpediente:
         context: ScopeContext,
         filters: LedgerFilters | None = None,
         page: PageRequest | None = None,
-    ) -> Page[LedgerRecordView]:
+    ) -> Page[LedgerRecordView, RecordCursor]:
         """Una página de registros con alcance; escribe una entrada ``ledger_read``."""
         context = _require_context(context)
         query = _record_query(filters or LedgerFilters(), page or PageRequest())
@@ -715,11 +732,12 @@ class LectorExpediente:
             evidences = await self._evidences(
                 transaction, context, [_id(row.record_id) for row in rows]
             )
+            plant_id, zone_id = await self._entry_place(transaction, context, query)
             await self._audit.append(
                 context,
                 AuditOperation.LEDGER_READ,
-                plant_id=query.plant_id,
-                zone_id=query.zone_id,
+                plant_id=plant_id,
+                zone_id=zone_id,
                 filters=query.audited,
                 result_count=len(rows),
                 transaction=transaction,
@@ -727,18 +745,29 @@ class LectorExpediente:
         items = tuple(_record(row, evidences.get(_id(row.record_id), ())) for row in rows)
         return Page(items=items, next_cursor=items[-1].cursor if more and items else None)
 
-    async def get(self, context: ScopeContext, record_id: uuid.UUID) -> LedgerRecordView | None:
+    async def get(
+        self,
+        context: ScopeContext,
+        record_id: uuid.UUID,
+        *,
+        record_types: tuple[str, ...] | None = None,
+    ) -> LedgerRecordView | None:
         """El registro, o ``None`` si no existe o está fuera del alcance (``not_found``).
 
-        Escribe una entrada ``ledger_detail_read`` con el identificador pedido y
-        ``result_count`` 1 o 0.
+        Con ``record_types``, un registro de otro tipo cuenta como fuera del alcance (la ruta de
+        lectura lo usa para la vista de integridad, que solo ve los tipos de la cadena). Escribe
+        una entrada ``ledger_detail_read`` con el identificador pedido y ``result_count`` 1 o 0.
         """
         context = _require_context(context)
         requested = _required_uuid(record_id, "record_id")
+        types = None if record_types is None else _codes(record_types, "record_types")
+        if types is not None and not types:
+            raise LedgerQueryInvalid("record_types no puede ser una tupla vacía")
         parameters = {
             **_Scopes.of(context).parameters(),
             "organization_id": context.organization_id,
             "record_id": requested,
+            "record_types": None if types is None else list(types),
         }
         async with self._database.transaction(context) as transaction:
             row = (await transaction.execute(_GET_RECORD, parameters)).first()
@@ -793,7 +822,7 @@ class LectorExpediente:
         context: ScopeContext,
         filters: AuditFilters | None = None,
         page: AuditPageRequest | None = None,
-    ) -> Page[AuditEntryView]:
+    ) -> Page[AuditEntryView, AuditCursor]:
         """Una página de la cadena de auditoría con alcance; escribe una entrada ``audit_read``."""
         context = _require_context(context)
         query = _audit_query(filters or AuditFilters(), page or AuditPageRequest())
@@ -806,17 +835,61 @@ class LectorExpediente:
             rows = list((await transaction.execute(_LIST_AUDIT, parameters)).all())
             more = len(rows) > query.size
             rows = rows[: query.size]
+            plant_id, zone_id = await self._entry_place(transaction, context, query)
             await self._audit.append(
                 context,
                 AuditOperation.AUDIT_READ,
-                plant_id=query.plant_id,
-                zone_id=query.zone_id,
+                plant_id=plant_id,
+                zone_id=zone_id,
                 filters=query.audited,
                 result_count=len(rows),
                 transaction=transaction,
             )
         items = tuple(_audit_entry(row) for row in rows)
         return Page(items=items, next_cursor=items[-1].cursor if more and items else None)
+
+    @staticmethod
+    async def _entry_place(
+        transaction: Transaction, context: ScopeContext, query: _RecordQuery
+    ) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+        """Planta y zona de la entrada de una lista (seguimiento de VIG-59).
+
+        Con filtro de planta o de zona, el del filtro (la planta de una zona filtrada sale de
+        ``identity.zone``). Sin ninguno, el alcance del propio actor: su planta si todas sus
+        asignaciones caen en una sola, y su zona si solo tiene una; así el ``plant_manager`` de esa
+        planta ve en ``list_audit`` quién leyó en ella. Un actor de organización, o de varias
+        plantas, deja la entrada sin planta. No añade ningún dato de personas observadas.
+        """
+        if query.plant_id is not None or query.zone_id is not None:
+            if query.plant_id is not None or query.zone_id is None:
+                return query.plant_id, query.zone_id
+            places = await LectorExpediente._zone_plants(transaction, context, [query.zone_id])
+            return places.get(query.zone_id), query.zone_id
+        if any(s.scope_level is ScopeLevel.ORGANIZATION for s in context.allowed_scopes):
+            return None, None
+        plants = set(_ids(context, ScopeLevel.PLANT))
+        zones = _ids(context, ScopeLevel.ZONE)
+        zone_plants = await LectorExpediente._zone_plants(transaction, context, zones)
+        plants.update(zone_plants.values())
+        if len(plants) != 1:
+            return None, None
+        (plant_id,) = plants
+        only_zone = len(zones) == 1 and not _ids(context, ScopeLevel.PLANT)
+        return plant_id, zones[0] if only_zone and zones[0] in zone_plants else None
+
+    @staticmethod
+    async def _zone_plants(
+        transaction: Transaction, context: ScopeContext, zone_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        if not zone_ids:
+            return {}
+        rows = (
+            await transaction.execute(
+                _ZONE_PLANTS,
+                {"organization_id": context.organization_id, "zone_ids": list(zone_ids)},
+            )
+        ).all()
+        return {_id(row.zone_id): _id(row.plant_id) for row in rows}
 
     @staticmethod
     async def _evidences(

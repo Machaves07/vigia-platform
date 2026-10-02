@@ -508,7 +508,7 @@ def test_list_audit_is_scoped_paginated_and_audited(
         environment.reader.list_audit(
             admin,
             AuditFilters(operations=("ledger_read",)),
-            AuditPageRequest(size=2, after=first.next_cursor),  # type: ignore[arg-type]
+            AuditPageRequest(size=2, after=first.next_cursor),
         )
     )
     seen = [e.entry_id for e in (*first.items, *rest.items)]

@@ -36,7 +36,12 @@ from tests.api_support import World
 from tests.factories import make_context
 from tests.properties.test_db_retry import FakeConnection, FakePool, Journal, Phase
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
-from vigia_platform.shared.api.app import LABEL_BINDINGS, UnitRegistration, platform_units
+from vigia_platform.shared.api.app import (
+    LABEL_BINDINGS,
+    UnitRegistration,
+    platform_permissions,
+    platform_units,
+)
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import (
     HTTP_STATUS,
@@ -62,7 +67,7 @@ from vigia_platform.shared.db import (
 from vigia_platform.shared.secrets import Dependency, SecretsUnavailable
 from vigia_platform.shared.storage import StorageUnavailable
 
-KNOWN = frozenset({"ledger.read"})
+KNOWN = platform_permissions() | {"ledger.read"}
 LABELS = PlatformLabels.load()
 INTERNAL_DETAIL = "SELECT hash FROM identity.user_account -- /srv/vigia/app.py:42 eyJhbGciOi"
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}

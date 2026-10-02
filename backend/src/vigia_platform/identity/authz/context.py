@@ -28,6 +28,8 @@ Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los cons
 ``with_unit(context, unit)`` es el mismo contexto escrito por otra unidad: los puertos de U-02
 que U-03 y U-04 llaman en proceso (``IdentityCommandPort``) escriben sus propios tipos de
 registro (``node_declared``…) con la unidad U-02, sin cambiar actor, alcance ni correlación.
+``with_scopes(context, scopes, role)`` es el mismo contexto **reducido** a las asignaciones que
+conceden una clave (``identity.authz.authorize.narrowed``); nunca amplía.
 
 Los contextos de evento e iteración no tienen asignaciones: ``authorize`` nunca les concede una
 clave; operan sobre su organización por construcción.
@@ -63,7 +65,7 @@ import enum
 import os
 import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Final, Literal, Protocol
@@ -106,6 +108,7 @@ __all__ = [
     "operator_in_organization",
     "record_provider_query",
     "with_role_in_use",
+    "with_scopes",
     "with_unit",
 ]
 
@@ -271,6 +274,43 @@ def with_unit(context: ScopeContext, unit: ActorUnit) -> ScopeContext:
         ),
         origin=context.origin,
         allowed_scopes=context.allowed_scopes,
+        correlation_id=context.correlation_id,
+        session_id_hash=context.session_id_hash,
+    )
+
+
+def with_scopes(context: ScopeContext, scopes: Iterable[AllowedScope], role: Role) -> ScopeContext:
+    """El mismo contexto reducido a ``scopes`` y con ``actor.role_in_use = role`` (TASK-137).
+
+    Lo usan las rutas que leen con un puerto que filtra por ``allowed_scopes`` sin mirar el rol
+    (``LectorExpediente``): el contexto reducido solo conserva las asignaciones que conceden la
+    clave de la ruta, así que una asignación de otro rol nunca amplía lo que se ve. Solo reduce:
+    cada alcance tiene que ser una asignación del contexto, no puede quedar vacío y ``role`` tiene
+    que ser el de una de ellas.
+    """
+    if not isinstance(context, ScopeContext):
+        raise TypeError("context debe ser ScopeContext")
+    kept = tuple(dict.fromkeys(scopes))
+    if not kept:
+        raise ValueError("el contexto reducido necesita al menos una asignación")
+    if any(scope not in context.allowed_scopes for scope in kept):
+        raise ValueError("solo se reduce: cada alcance tiene que ser una asignación del contexto")
+    role = Role(role)
+    if role not in {scope.role for scope in kept}:
+        raise ValueError("role_in_use debe ser el rol de una asignación conservada")
+    actor = context.actor
+    return _seal_scope_context(
+        organization_id=context.organization_id,
+        actor=Actor(
+            kind=actor.kind,
+            id=actor.id,
+            display_name_snapshot=actor.display_name_snapshot,
+            unit=actor.unit,
+            role_in_use=role,
+            concession_id=actor.concession_id,
+        ),
+        origin=context.origin,
+        allowed_scopes=kept,
         correlation_id=context.correlation_id,
         session_id_hash=context.session_id_hash,
     )

@@ -50,7 +50,12 @@ BODIES: dict[str, dict[str, Any]] = {
     "/users/{user_id}": {"display_name": "Nombre sintético", "active": True},
     "/auth/login": {"email": "a@b.co", "password": "contraseña-sintética"},
     "/privacy-notice/accept": {},
+    "/platform/dead-letter/{event_id}/{consumer}/replay": {},
+    "/platform/keys/{purpose}/rotate": {},
 }
+OPERATION_PREFIX = "/platform/"
+"""Rutas reales de operación (TASK-137): sin servicios en el arnés no tienen efecto observable, así
+que entran en las falsificadas (``forbidden`` sin efecto) y no en las que se procesan."""
 
 
 def _state_changing_routes(app: Any) -> list[tuple[str, str]]:
@@ -65,7 +70,12 @@ def _state_changing_routes(app: Any) -> list[tuple[str, str]]:
 
 
 def _url(path: str) -> str:
-    return path.replace("{user_id}", str(uuid.uuid4()))
+    return (
+        path.replace("{user_id}", str(uuid.uuid4()))
+        .replace("{event_id}", str(uuid.uuid4()))
+        .replace("{consumer}", "alert_metrics")
+        .replace("{purpose}", "checkpoint")
+    )
 
 
 def _forbidden(response: Any) -> None:
@@ -83,7 +93,10 @@ def harness() -> Harness:
 
 def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
     routes = _state_changing_routes(harness.app())
+    # Las de operación de la plataforma (TASK-137) son de la unidad ``shared``.
     assert routes == [
+        ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"),
+        ("POST", "/platform/keys/{purpose}/rotate"),
         ("POST", "/users"),
         ("PATCH", "/users/{user_id}"),
         ("POST", "/privacy-notice/accept"),
@@ -174,7 +187,8 @@ def test_pr_nuc_53_with_both_headers_right_the_request_is_processed(
     harness = Harness()
     cookie = harness.session("pr-nuc-53-ok")
     app = harness.app(rate_limiter=UnlimitedRateLimiter())
-    method, path = data.draw(st.sampled_from(_state_changing_routes(app)))
+    processed = [r for r in _state_changing_routes(app) if not r[1].startswith(OPERATION_PREFIX)]
+    method, path = data.draw(st.sampled_from(processed))
     headers = {**cookie_header(cookie), **SAME_ORIGIN}
     if with_origin:
         headers["Origin"] = ORIGIN

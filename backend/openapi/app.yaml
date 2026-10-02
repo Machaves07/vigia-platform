@@ -24,6 +24,102 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/.well-known/vigia-checkpoint-keys":
+    "get":
+      "tags":
+        - "verificación pública"
+      "summary": "Claves públicas de los puntos de control, también las retiradas (público)"
+      "operationId": "checkpoint_keys__well_known_vigia_checkpoint_keys_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CheckpointKeysOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/.well-known/vigia-verifier":
+    "get":
+      "tags":
+        - "verificación pública"
+      "summary": "SHA-256 del verificador de paquetes vigia_verify.py (público)"
+      "operationId": "verifier__well_known_vigia_verifier_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/VerifierOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/platform/dead-letter/{event_id}/{consumer}/replay":
+    "post":
+      "tags":
+        - "operación"
+      "summary": "Reentrega desde la cola muerta con el mismo event_id (solo el operador)"
+      "operationId": "replay_platform_dead_letter__event_id___consumer__replay_post"
+      "parameters":
+        - "name": "event_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Event Id"
+        - "name": "consumer"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Consumer"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReplayOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/platform/keys/{purpose}/rotate":
+    "post":
+      "tags":
+        - "operación"
+      "summary": "Rota la clave de firma de un propósito (solo el operador)"
+      "operationId": "rotate_platform_keys__purpose__rotate_post"
+      "parameters":
+        - "name": "purpose"
+          "in": "path"
+          "required": true
+          "schema":
+            "$ref": "#/components/schemas/SigningPurpose"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/KeyRotatedOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/auth/login":
     "post":
       "tags":
@@ -261,6 +357,509 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/ledger/records":
+    "get":
+      "tags":
+        - "expediente"
+      "summary": "Registros del expediente con alcance, paginados por clave (lectura auditada)"
+      "operationId": "list_records_ledger_records_get"
+      "parameters":
+        - "name": "record_type"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                "maxItems": 32
+              - "type": "null"
+            "title": "Record Type"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "node_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Node Id"
+        - "name": "received_from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "Received From"
+        - "name": "received_before"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "Received Before"
+        - "name": "page_size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Page Size"
+        - "name": "after_received_at"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "After Received At"
+        - "name": "after_record_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "After Record Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LedgerRecordPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/ledger/records/{record_id}":
+    "get":
+      "tags":
+        - "expediente"
+      "summary": "Un registro del expediente (lectura auditada); fuera de alcance, not_found"
+      "operationId": "get_record_ledger_records__record_id__get"
+      "parameters":
+        - "name": "record_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Record Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LedgerRecordOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/audit/entries":
+    "get":
+      "tags":
+        - "expediente"
+      "summary": "Entradas de la cadena de auditoría con alcance (lectura auditada)"
+      "operationId": "list_audit_entries_audit_entries_get"
+      "parameters":
+        - "name": "operation"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                "maxItems": 32
+              - "type": "null"
+            "title": "Operation"
+        - "name": "actor_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Actor Id"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "occurred_from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "Occurred From"
+        - "name": "occurred_before"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "Occurred Before"
+        - "name": "page_size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Page Size"
+        - "name": "after_occurred_at"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "After Occurred At"
+        - "name": "after_entry_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "After Entry Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AuditEntryPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/evidence/{evidence_id}/read-url":
+    "post":
+      "tags":
+        - "evidencias"
+      "summary": "URL de solo lectura de un clip, vigente 5 minutos (concesión auditada)"
+      "operationId": "read_url_evidence__evidence_id__read_url_post"
+      "parameters":
+        - "name": "evidence_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Evidence Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EvidenceReadUrlResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/labels":
+    "get":
+      "tags":
+        - "etiquetas"
+      "summary": "Etiquetas por periodo, zona, familia y categoría de motivo (consulta auditada)"
+      "operationId": "list_labels_labels_get"
+      "parameters":
+        - "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "To"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "family"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              - "type": "null"
+            "title": "Family"
+        - "name": "reason_category"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              - "type": "null"
+            "title": "Reason Category"
+        - "name": "page_size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Page Size"
+        - "name": "after_labeled_at"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+              - "type": "null"
+            "title": "After Labeled At"
+        - "name": "after_label_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "After Label Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LabelPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/coverage":
+    "get":
+      "tags":
+        - "cobertura"
+      "summary": "Línea de tiempo de cobertura de la zona en [from, to), tope de 31 días"
+      "operationId": "timeline_zones__zone_id__coverage_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "To"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CoverageTimelineOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/coverage/at":
+    "get":
+      "tags":
+        - "cobertura"
+      "summary": "Estado compuesto de cobertura de la zona en un instante"
+      "operationId": "status_at_zones__zone_id__coverage_at_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "instant"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Instant"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CoverageStatusOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/integrity/verify":
+    "post":
+      "tags":
+        - "integridad"
+      "summary": "Pide verificar una cadena a demanda; la verificación corre en el worker"
+      "operationId": "verify_integrity_verify_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/VerifyRequest"
+        "required": true
+      "responses":
+        "202":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/VerificationAccepted"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/integrity/results":
+    "get":
+      "tags":
+        - "integridad"
+      "summary": "Último resultado de la verificación de cada cadena a su alcance"
+      "operationId": "results_integrity_results_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/IntegrityResultsOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/integrity/checkpoints":
+    "get":
+      "tags":
+        - "integridad"
+      "summary": "Último punto de control firmado de cada cadena a su alcance"
+      "operationId": "checkpoints_integrity_checkpoints_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CheckpointsOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/live-view-token":
+    "post":
+      "tags":
+        - "vista en vivo"
+      "summary": "Token de 10 minutos para la vista en vivo difuminada de la zona"
+      "operationId": "live_view_token_zones__zone_id__live_view_token_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/LiveViewTokenOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -309,6 +908,42 @@
       "required":
         - "status"
       "title": "ActivationResponse"
+    "ActorOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Id"
+        "display_name_snapshot":
+          "type": "string"
+          "title": "Display Name Snapshot"
+        "role_in_use":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Role In Use"
+        "concession_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Concession Id"
+        "unit":
+          "type": "string"
+          "title": "Unit"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+        - "display_name_snapshot"
+        - "role_in_use"
+        - "concession_id"
+        - "unit"
+      "title": "ActorOut"
     "ApiErrorBody":
       "additionalProperties": false
       "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."
@@ -383,6 +1018,106 @@
         - "scope_level"
         - "scope_id"
       "title": "AssignmentView"
+    "AuditCursorOut":
+      "properties":
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "entry_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Entry Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "occurred_at"
+        - "entry_id"
+      "title": "AuditCursorOut"
+    "AuditEntryOut":
+      "properties":
+        "entry_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Entry Id"
+        "chain_sequence":
+          "type": "integer"
+          "title": "Chain Sequence"
+        "actor":
+          "$ref": "#/components/schemas/ActorOut"
+        "operation":
+          "type": "string"
+          "title": "Operation"
+        "scope":
+          "$ref": "#/components/schemas/ScopeOut"
+        "resource_kind":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Resource Kind"
+        "resource_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Resource Id"
+        "filters":
+          "$ref": "#/components/schemas/JsonValue"
+        "result_count":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Result Count"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "correlation_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Correlation Id"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "previous_hash":
+          "type": "string"
+          "title": "Previous Hash"
+        "entry_hash":
+          "type": "string"
+          "title": "Entry Hash"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "entry_id"
+        - "chain_sequence"
+        - "actor"
+        - "operation"
+        - "scope"
+        - "resource_kind"
+        - "resource_id"
+        - "filters"
+        - "result_count"
+        - "outcome"
+        - "correlation_id"
+        - "occurred_at"
+        - "previous_hash"
+        - "entry_hash"
+      "title": "AuditEntryOut"
+    "AuditEntryPage":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/AuditEntryOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "$ref": "#/components/schemas/AuditCursorOut"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "AuditEntryPage"
     "BeginActivation":
       "properties":
         "step":
@@ -394,6 +1129,133 @@
       "required":
         - "step"
       "title": "BeginActivation"
+    "ChainOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "enum":
+            - "ledger"
+            - "audit"
+          "title": "Kind"
+        "plant_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Plant Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "plant_id"
+      "title": "ChainOut"
+    "CheckpointKeyOut":
+      "properties":
+        "key_id":
+          "type": "string"
+          "title": "Key Id"
+        "algorithm":
+          "type": "string"
+          "const": "Ed25519"
+          "title": "Algorithm"
+        "public_key":
+          "type": "string"
+          "title": "Public Key"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "valid_from":
+          "type": "string"
+          "title": "Valid From"
+        "valid_until":
+          "type": "string"
+          "title": "Valid Until"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "key_id"
+        - "algorithm"
+        - "public_key"
+        - "status"
+        - "valid_from"
+        - "valid_until"
+      "title": "CheckpointKeyOut"
+    "CheckpointKeysOut":
+      "properties":
+        "purpose":
+          "type": "string"
+          "const": "checkpoint"
+          "title": "Purpose"
+        "keys":
+          "items":
+            "$ref": "#/components/schemas/CheckpointKeyOut"
+          "type": "array"
+          "title": "Keys"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "purpose"
+        - "keys"
+      "title": "CheckpointKeysOut"
+    "CheckpointOut":
+      "properties":
+        "chain":
+          "$ref": "#/components/schemas/ChainOut"
+        "sequence":
+          "type": "integer"
+          "title": "Sequence"
+        "entry_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Entry Id"
+        "entry_hash":
+          "type": "string"
+          "title": "Entry Hash"
+        "covered_sequence":
+          "type": "integer"
+          "title": "Covered Sequence"
+        "covered_hash":
+          "type": "string"
+          "title": "Covered Hash"
+        "taken_at":
+          "type": "string"
+          "title": "Taken At"
+        "key_id":
+          "type": "string"
+          "title": "Key Id"
+        "signature":
+          "type": "string"
+          "title": "Signature"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "chain"
+        - "sequence"
+        - "entry_id"
+        - "entry_hash"
+        - "covered_sequence"
+        - "covered_hash"
+        - "taken_at"
+        - "key_id"
+        - "signature"
+      "title": "CheckpointOut"
+    "CheckpointsOut":
+      "properties":
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "checkpoints":
+          "items":
+            "$ref": "#/components/schemas/CheckpointOut"
+          "type": "array"
+          "title": "Checkpoints"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization_id"
+        - "checkpoints"
+      "title": "CheckpointsOut"
     "CompleteActivation":
       "properties":
         "step":
@@ -424,6 +1286,88 @@
         - "password"
         - "notice_version"
       "title": "CompleteActivation"
+    "CoverageStatusOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "instant":
+          "type": "string"
+          "title": "Instant"
+        "state":
+          "type": "string"
+          "title": "State"
+        "causes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Causes"
+        "layer":
+          "type": "string"
+          "title": "Layer"
+        "clock_basis":
+          "type": "string"
+          "title": "Clock Basis"
+        "source_record_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Source Record Ids"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "instant"
+        - "state"
+        - "causes"
+        - "layer"
+        - "clock_basis"
+        - "source_record_ids"
+      "title": "CoverageStatusOut"
+    "CoverageTimelineOut":
+      "properties":
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "additionalProperties":
+            "type": "string"
+          "type": "object"
+          "title": "Period"
+        "intervals":
+          "items":
+            "$ref": "#/components/schemas/IntervalOut"
+          "type": "array"
+          "title": "Intervals"
+        "node_intervals":
+          "items":
+            "$ref": "#/components/schemas/IntervalOut"
+          "type": "array"
+          "title": "Node Intervals"
+        "summary":
+          "$ref": "#/components/schemas/SummaryOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization_id"
+        - "plant_id"
+        - "zone_id"
+        - "period"
+        - "intervals"
+        - "node_intervals"
+        - "summary"
+      "title": "CoverageTimelineOut"
     "EnrollRequest":
       "properties":
         "code":
@@ -474,6 +1418,392 @@
         - "recovery_codes"
       "title": "EnrollmentView"
       "description": "Lo que se muestra **una sola vez** al inscribirse; nada de esto se guarda en claro."
+    "EvidenceOut":
+      "properties":
+        "evidence_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Evidence Id"
+        "clip_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Clip Id"
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "content_type":
+          "type": "string"
+          "title": "Content Type"
+        "media_kind":
+          "type": "string"
+          "title": "Media Kind"
+        "duration_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Duration Ms"
+        "segment":
+          "type": "string"
+          "title": "Segment"
+        "starts_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Starts At"
+        "ends_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Ends At"
+        "verified_at":
+          "type": "string"
+          "title": "Verified At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "evidence_id"
+        - "clip_id"
+        - "camera_id"
+        - "sha256"
+        - "size_bytes"
+        - "content_type"
+        - "media_kind"
+        - "duration_ms"
+        - "segment"
+        - "starts_at"
+        - "ends_at"
+        - "verified_at"
+      "title": "EvidenceOut"
+      "description": "Metadatos verificados de una evidencia: nunca su clave de almacén, su URL ni sus bytes."
+    "EvidenceReadUrlResponse":
+      "properties":
+        "evidence_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Evidence Id"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "evidence_id"
+        - "url"
+        - "expires_at"
+      "title": "EvidenceReadUrlResponse"
+      "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "IntegrityResultsOut":
+      "properties":
+        "results":
+          "items":
+            "$ref": "#/components/schemas/ResultOut"
+          "type": "array"
+          "title": "Results"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "results"
+      "title": "IntegrityResultsOut"
+    "IntervalOut":
+      "properties":
+        "starts_at":
+          "type": "string"
+          "title": "Starts At"
+        "ends_at":
+          "type": "string"
+          "title": "Ends At"
+        "duration_ms":
+          "type": "integer"
+          "title": "Duration Ms"
+        "layer":
+          "type": "string"
+          "title": "Layer"
+        "state":
+          "type": "string"
+          "title": "State"
+        "causes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Causes"
+        "subject":
+          "anyOf":
+            - "$ref": "#/components/schemas/SubjectOut"
+            - "type": "null"
+        "source_record_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Source Record Ids"
+        "clock_basis":
+          "type": "string"
+          "title": "Clock Basis"
+        "clock_offset_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Clock Offset Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "starts_at"
+        - "ends_at"
+        - "duration_ms"
+        - "layer"
+        - "state"
+        - "causes"
+        - "subject"
+        - "source_record_ids"
+        - "clock_basis"
+      "title": "IntervalOut"
+      "description": "``CoverageInterval`` (domain-entities §3.8)."
+    "JsonValue": {}
+    "KeyRotatedOut":
+      "properties":
+        "purpose":
+          "type": "string"
+          "title": "Purpose"
+        "key_id":
+          "type": "string"
+          "title": "Key Id"
+        "public_key":
+          "type": "string"
+          "title": "Public Key"
+        "valid_from":
+          "type": "string"
+          "title": "Valid From"
+        "valid_until":
+          "type": "string"
+          "title": "Valid Until"
+        "previous_key_id":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Previous Key Id"
+        "key_set_published":
+          "type": "boolean"
+          "title": "Key Set Published"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "purpose"
+        - "key_id"
+        - "public_key"
+        - "valid_from"
+        - "valid_until"
+        - "previous_key_id"
+        - "key_set_published"
+      "title": "KeyRotatedOut"
+    "LabelCursorOut":
+      "properties":
+        "labeled_at":
+          "type": "string"
+          "title": "Labeled At"
+        "label_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Label Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "labeled_at"
+        - "label_id"
+      "title": "LabelCursorOut"
+    "LabelOut":
+      "properties":
+        "label_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Label Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "source_record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Source Record Id"
+        "subject_record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Subject Record Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "evidence_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Evidence Ids"
+        "labeled_at":
+          "type": "string"
+          "title": "Labeled At"
+        "labeled_by_user_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Labeled By User Id"
+        "labeled_by_role":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Labeled By Role"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "label_id"
+        - "plant_id"
+        - "zone_id"
+        - "source_record_id"
+        - "subject_record_id"
+        - "family"
+        - "outcome"
+        - "reason_category"
+        - "evidence_ids"
+        - "labeled_at"
+        - "labeled_by_user_id"
+        - "labeled_by_role"
+      "title": "LabelOut"
+    "LabelPageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/LabelOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "$ref": "#/components/schemas/LabelCursorOut"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "LabelPageOut"
+    "LedgerRecordOut":
+      "properties":
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "plant_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Plant Id"
+        "chain_sequence":
+          "type": "integer"
+          "title": "Chain Sequence"
+        "record_type":
+          "type": "string"
+          "title": "Record Type"
+        "schema_version":
+          "type": "integer"
+          "title": "Schema Version"
+        "actor":
+          "$ref": "#/components/schemas/ActorOut"
+        "scope":
+          "$ref": "#/components/schemas/ScopeOut"
+        "correlation_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Correlation Id"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "occurred_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Occurred At"
+        "source_key":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Source Key"
+        "content":
+          "$ref": "#/components/schemas/JsonValue"
+        "content_hash":
+          "type": "string"
+          "title": "Content Hash"
+        "previous_hash":
+          "type": "string"
+          "title": "Previous Hash"
+        "record_hash":
+          "type": "string"
+          "title": "Record Hash"
+        "evidences":
+          "items":
+            "$ref": "#/components/schemas/EvidenceOut"
+          "type": "array"
+          "title": "Evidences"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "record_id"
+        - "organization_id"
+        - "plant_id"
+        - "chain_sequence"
+        - "record_type"
+        - "schema_version"
+        - "actor"
+        - "scope"
+        - "correlation_id"
+        - "received_at"
+        - "occurred_at"
+        - "source_key"
+        - "content"
+        - "content_hash"
+        - "previous_hash"
+        - "record_hash"
+        - "evidences"
+      "title": "LedgerRecordOut"
+    "LedgerRecordPage":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/LedgerRecordOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "$ref": "#/components/schemas/RecordCursorOut"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "LedgerRecordPage"
     "LiveStatus":
       "properties":
         "status":
@@ -486,6 +1816,26 @@
         - "status"
       "title": "LiveStatus"
       "description": "Respuesta de ``/health/live``."
+    "LiveViewTokenOut":
+      "properties":
+        "token":
+          "type": "string"
+          "title": "Token"
+        "live_view_local_url":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Live View Local Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "token"
+        - "live_view_local_url"
+        - "expires_at"
+      "title": "LiveViewTokenOut"
     "LoginRequest":
       "properties":
         "email":
@@ -650,6 +2000,100 @@
         - "current_password"
         - "new_password"
       "title": "PasswordChangeRequest"
+    "RecordCursorOut":
+      "properties":
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "received_at"
+        - "record_id"
+      "title": "RecordCursorOut"
+    "ReplayOut":
+      "properties":
+        "event_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Event Id"
+        "consumer_name":
+          "type": "string"
+          "title": "Consumer Name"
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "status":
+          "type": "string"
+          "const": "pending"
+          "title": "Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "event_id"
+        - "consumer_name"
+        - "organization_id"
+        - "status"
+      "title": "ReplayOut"
+    "ResultOut":
+      "properties":
+        "chain":
+          "$ref": "#/components/schemas/ChainOut"
+        "mode":
+          "type": "string"
+          "title": "Mode"
+        "result":
+          "type": "string"
+          "title": "Result"
+        "from_sequence":
+          "type": "integer"
+          "title": "From Sequence"
+        "to_sequence":
+          "type": "integer"
+          "title": "To Sequence"
+        "head_sequence":
+          "type": "integer"
+          "title": "Head Sequence"
+        "broken_sequence":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Broken Sequence"
+        "broken_entry_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Broken Entry Id"
+        "reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason"
+        "verified_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Verified At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "chain"
+        - "mode"
+        - "result"
+        - "from_sequence"
+        - "to_sequence"
+        - "head_sequence"
+        - "broken_sequence"
+        - "broken_entry_id"
+        - "reason"
+        - "verified_at"
+      "title": "ResultOut"
     "Role":
       "type": "string"
       "enum":
@@ -668,6 +2112,32 @@
         - "plant"
         - "zone"
       "title": "ScopeLevel"
+    "ScopeOut":
+      "properties":
+        "plant_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Plant Id"
+        "zone_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Zone Id"
+        "node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Node Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "zone_id"
+      "title": "ScopeOut"
     "SecondFactorRequest":
       "properties":
         "code":
@@ -731,6 +2201,68 @@
       "required":
         - "sessions"
       "title": "SessionsResponse"
+    "SigningPurpose":
+      "type": "string"
+      "enum":
+        - "catalog"
+        - "gate"
+        - "live_view_token"
+        - "key_set"
+        - "checkpoint"
+      "title": "SigningPurpose"
+      "description": "``signing_purpose`` (``domain-entities.md`` §1)."
+    "SubjectOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "camera_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Camera Id"
+        "signal_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Signal Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+      "title": "SubjectOut"
+    "SummaryOut":
+      "properties":
+        "observable_ms":
+          "type": "integer"
+          "title": "Observable Ms"
+        "degraded_ms":
+          "type": "integer"
+          "title": "Degraded Ms"
+        "not_observable_ms":
+          "type": "integer"
+          "title": "Not Observable Ms"
+        "no_communication_ms":
+          "type": "integer"
+          "title": "No Communication Ms"
+        "never_reported_ms":
+          "type": "integer"
+          "title": "Never Reported Ms"
+        "zone_not_active_ms":
+          "type": "integer"
+          "title": "Zone Not Active Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "observable_ms"
+        - "degraded_ms"
+        - "not_observable_ms"
+        - "no_communication_ms"
+        - "never_reported_ms"
+        - "zone_not_active_ms"
+      "title": "SummaryOut"
     "UserView":
       "properties":
         "user_id":
@@ -750,3 +2282,68 @@
         - "display_name"
         - "email"
       "title": "UserView"
+    "VerificationAccepted":
+      "properties":
+        "request_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Request Id"
+        "chain":
+          "$ref": "#/components/schemas/ChainOut"
+        "status":
+          "type": "string"
+          "const": "queued"
+          "title": "Status"
+        "requested_at":
+          "type": "string"
+          "title": "Requested At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "request_id"
+        - "chain"
+        - "status"
+        - "requested_at"
+      "title": "VerificationAccepted"
+    "VerifierOut":
+      "properties":
+        "name":
+          "type": "string"
+          "title": "Name"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "format_version":
+          "type": "integer"
+          "title": "Format Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "name"
+        - "sha256"
+        - "size_bytes"
+        - "format_version"
+      "title": "VerifierOut"
+    "VerifyRequest":
+      "properties":
+        "kind":
+          "type": "string"
+          "enum":
+            - "ledger"
+            - "audit"
+          "title": "Kind"
+        "plant_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Plant Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+      "title": "VerifyRequest"
+      "description": "La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o\n``audit`` (sin planta)."

@@ -356,7 +356,6 @@ def test_a_route_cannot_weaken_or_duplicate_the_security_headers() -> None:
     harness = Harness()
     app = harness.world.app(
         units=(*platform_units(), _hostile_unit()),
-        permissions=frozenset({"hierarchy.read"}),
         csp_store_origins=(STORE_ORIGIN,),
         runtime={"authorizer": _AllowAll()},
     )
@@ -416,7 +415,6 @@ def test_errors_of_the_chain_and_of_the_route_carry_the_security_headers() -> No
     cookie = harness.session("errores")
     app = harness.world.app(
         units=(*platform_units(), _hostile_unit()),
-        permissions=frozenset({"hierarchy.read"}),
         csp_store_origins=(STORE_ORIGIN,),
         runtime={
             "sessions": harness.contexts,

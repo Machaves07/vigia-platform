@@ -82,10 +82,11 @@ PERMISSIONS = frozenset(key.value for key in PermissionKey)
 
 
 def chain_units() -> tuple[UnitRegistration, ...]:
-    """Las unidades de la plataforma salvo las rutas reales de ``identity`` (TASK-135): la unidad
-    de prueba de este arnés declara sus propias ``/auth/login``, ``/me`` y aceptación del aviso,
-    con dobles, para probar la cadena sin base."""
-    return tuple(unit for unit in platform_units() if unit.name != "identity")
+    """Las unidades de la plataforma salvo las rutas reales de ``identity`` (TASK-135) y de
+    ``ledger`` (TASK-137): la unidad de prueba de este arnés declara sus propias ``/auth/login``,
+    ``/me`` y aceptación del aviso, con dobles, para probar la cadena sin base. Las rutas de
+    ``ledger`` (y su cuerpo, PR-NUC-38) las prueba ``tests/examples/test_ledger_routes.py``."""
+    return tuple(unit for unit in platform_units() if unit.name not in ("identity", "ledger"))
 
 
 def cookie_header(cookie: SessionCookie) -> dict[str, str]:

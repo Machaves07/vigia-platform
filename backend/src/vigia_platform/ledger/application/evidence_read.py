@@ -22,7 +22,8 @@ El administrador, el mando de línea, el instalador del proveedor y el COPASST n
 **La versión verificada.** La evidencia no guarda el ``version_id`` del objeto, así que antes de
 firmar se consulta el objeto (``HEAD``) y la URL se fija a la versión vigente **solo si** su suma
 SHA-256 de objeto entero y su tamaño son los verificados al registrar (``Evidence.sha256``,
-``size_bytes``). Si el objeto falta o sus bytes no son los verificados no se concede nada
+``size_bytes``). Si el objeto falta, sus bytes no son los verificados o el almacén no devuelve
+``version_id`` (la URL no quedaría fijada a una versión) no se concede nada
 (``EvidenceUnreadable``, auditado con resultado ``error``): la URL nunca sirve otros bytes que
 los del expediente. El ``HEAD`` va fuera de toda transacción (PAT-NUC-RES-08).
 
@@ -276,7 +277,9 @@ class EvidenceService:
         row = rows[0]
         plant_id, zone_id = _plain(row.plant_id), _plain(row.zone_id)
         head = await self._storage.head_object(row.storage_key)
-        if head is None or not _verified_bytes(row, head):
+        # Sin ``version_id`` la URL no quedaría fijada a la versión verificada y serviría
+        # cualquier versión posterior del objeto: se falla cerrado (seguimiento de VIG-65).
+        if head is None or head.version_id is None or not _verified_bytes(row, head):
             await self._audit.append(
                 context,
                 AuditOperation.EVIDENCE_READ_GRANTED,

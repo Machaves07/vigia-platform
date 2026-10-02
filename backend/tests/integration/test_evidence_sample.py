@@ -26,12 +26,13 @@ Solo datos generados: contenedores MP4 sintéticos de ``synthetic_clip`` (U-01),
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -494,6 +495,129 @@ def test_read_url_outside_evidence_read_is_not_found_and_audited_as_denied(
         Role.PLANT_MANAGER,
     )
     assert environment.run(environment.service.url_lectura(plant, clip.evidence_id))
+
+
+# --- Seguimientos de VIG-65 (TASK-137): versión ausente, auditoría caída y carreras ----------------
+
+
+class _WithoutVersion:
+    """``head_object`` como un almacén sin versionado: ``version_id`` nulo."""
+
+    def __init__(self, inner: S3Storage) -> None:
+        self._inner = inner
+        self.presigned = 0
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        head = await self._inner.head_object(key)
+        return None if head is None else replace(head, version_id=None)
+
+    async def presign_get(self, key: str, ttl: timedelta = READ_URL_TTL, **kw: Any) -> Any:
+        self.presigned += 1
+        return await self._inner.presign_get(key, ttl, **kw)
+
+
+def _coordinator(place: Place) -> ScopeContext:
+    return person_context(
+        place.organization_id,
+        [AllowedScope(ScopeLevel.ZONE, place.zone_id, Role.COORDINATOR_SST)],
+        Role.COORDINATOR_SST,
+    )
+
+
+def test_read_url_without_version_id_fails_closed(environment: Environment) -> None:
+    place = Place.new()
+    (clip,) = register_clips(environment, place, [synthetic_clip("sin versión")])
+    storage = _WithoutVersion(environment.storage)
+    service = EvidenceService(database=environment.env.database, audit=environment.env.audit,
+                              storage=storage)
+    with pytest.raises(EvidenceUnreadable):
+        environment.run(service.url_lectura(_coordinator(place), clip.evidence_id))
+    # Ni siquiera se firma: una URL sin versión serviría cualquier versión posterior del objeto.
+    assert storage.presigned == 0
+    entries = audit_entries(environment, place.organization_id, "evidence_read_granted")
+    assert [(e["outcome"], e["result_count"]) for e in entries] == [("error", 0)]
+
+
+class _AuditDownOnSuccess:
+    """El escritor de auditoría real, salvo que la entrada de la concesión no puede escribirse."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    @property
+    def provider_organization_id(self) -> uuid.UUID:
+        return self._inner.provider_organization_id  # type: ignore[no-any-return]
+
+    async def append(self, context: ScopeContext, operation: Any, **kw: Any) -> Any:
+        if kw.get("result_count") == 1:
+            raise StorageUnavailable("audit_entry")  # cualquier fallo al escribir la entrada
+        return await self._inner.append(context, operation, **kw)
+
+
+def test_no_url_leaves_the_service_when_the_grant_cannot_be_audited(
+    environment: Environment,
+) -> None:
+    place = Place.new()
+    (clip,) = register_clips(environment, place, [synthetic_clip("auditoría caída")])
+    service = EvidenceService(
+        database=environment.env.database,
+        audit=_AuditDownOnSuccess(environment.env.audit),  # type: ignore[arg-type]
+        storage=environment.storage,
+    )
+    with pytest.raises(StorageUnavailable):
+        environment.run(service.url_lectura(_coordinator(place), clip.evidence_id))
+    assert audit_entries(environment, place.organization_id, "evidence_read_granted") == []
+
+
+class _ReplacedBeforeSigning:
+    """Carrera 1: otros bytes llegan a la misma clave entre el ``HEAD`` y la firma de la URL."""
+
+    def __init__(self, environment: Environment, substitute: bytes) -> None:
+        self._environment = environment
+        self._substitute = substitute
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        return await self._environment.storage.head_object(key)
+
+    async def presign_get(self, key: str, ttl: timedelta = READ_URL_TTL, **kw: Any) -> Any:
+        upload(self._environment, key, self._substitute)
+        return await self._environment.storage.presign_get(key, ttl, **kw)
+
+
+def test_race_replacement_between_head_and_signing_still_serves_the_verified_bytes(
+    environment: Environment,
+) -> None:
+    place = Place.new()
+    (clip,) = register_clips(environment, place, [synthetic_clip("carrera")])
+    service = EvidenceService(
+        database=environment.env.database,
+        audit=environment.env.audit,
+        storage=_ReplacedBeforeSigning(environment, synthetic_clip("sustituto en carrera")),
+    )
+    grant = environment.run(service.url_lectura(_coordinator(place), clip.evidence_id))
+    assert len(object_versions(environment, clip.storage_key)) == 2
+    query = parse_qs(urlsplit(grant.url).query)
+    assert query["versionId"] == [clip.version_id]
+    assert httpx.get(grant.url, timeout=10).content == clip.content
+
+
+def test_race_two_concurrent_grants_are_two_audited_urls(environment: Environment) -> None:
+    place = Place.new()
+    (clip,) = register_clips(environment, place, [synthetic_clip("concurrentes")])
+    context = _coordinator(place)
+
+    async def both() -> list[Any]:
+        return list(
+            await asyncio.gather(
+                environment.service.url_lectura(context, clip.evidence_id),
+                environment.service.url_lectura(context, clip.evidence_id),
+            )
+        )
+
+    grants = environment.run(both())
+    assert all(httpx.get(g.url, timeout=10).content == clip.content for g in grants)
+    entries = audit_entries(environment, place.organization_id, "evidence_read_granted")
+    assert [(e["outcome"], e["result_count"]) for e in entries] == [("success", 1)] * 2
 
 
 # --- Criterio 2: clip sin marca inyectado en LocalStack ----------------------------------------
