@@ -829,9 +829,21 @@ async def _bootstrap(
     )
     genesis = await runtime.genesis.create_provider_organization(context, request)
     _log.info("organización proveedora creada")
-    secret = await _write_invitation(config, runtime, genesis.organization_id, genesis.invitation)
-    keys = await _initial_keys(runtime, context)
-    published = await node_ca.publish_root(key_id, now=runtime.clock.now())
+    try:
+        secret = await _write_invitation(
+            config, runtime, genesis.organization_id, genesis.invitation
+        )
+        keys = await _initial_keys(runtime, context)
+        published = await node_ca.publish_root(key_id, now=runtime.clock.now())
+    except Exception:
+        # La proveedora ya existe: el operador necesita su identificador para --resume.
+        _fail(
+            streams,
+            "bootstrap_incomplete",
+            "arranque a medias: repite con bootstrap --resume --publish-root y"
+            f" VIGIA_PROVIDER_ORGANIZATION_ID={genesis.organization_id}",
+        )
+        raise
     publication = runtime.signing.current_publication()
     _emit(
         streams,

@@ -306,6 +306,22 @@ def test_bootstrap_resume_completes_only_what_is_missing() -> None:
     assert world.storage.puts == [ROOT_CERTIFICATE_KEY]
 
 
+def test_an_interrupted_bootstrap_names_the_provider_for_resume() -> None:
+    world = FakeWorld()
+
+    async def unavailable(*args: Any, **kwargs: Any) -> Any:
+        raise TemporarilyUnavailable()
+
+    world.signing.rotate = unavailable  # type: ignore[method-assign]
+    code, out, err = world.run(*BOOTSTRAP, "--yes")
+    assert code == ExitCode.UNAVAILABLE and out == ""
+    incomplete, failure = (json.loads(line) for line in err.splitlines())
+    assert incomplete["error"] == "bootstrap_incomplete"
+    assert f"VIGIA_PROVIDER_ORGANIZATION_ID={world.provider_ids[0]}" in incomplete["mensaje"]
+    assert failure["error"] == "temporarily_unavailable"
+    assert TOKEN not in err
+
+
 def test_publish_root_needs_resume() -> None:
     world = FakeWorld()
     code, _, err = world.run(*BOOTSTRAP, "--publish-root", "--yes")
