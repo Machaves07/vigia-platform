@@ -65,6 +65,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp, identity_routers
+from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.application.audit_writer import AuditOutcome
 from vigia_platform.ledger.domain.coverage import (
@@ -485,11 +486,11 @@ def platform_units() -> tuple[UnitRegistration, ...]:
 
 
 def platform_permissions() -> frozenset[str]:
-    """Claves de la matriz de permisos; TASK-125 las aporta desde ``identity.authz.matrix``.
+    """Claves de la matriz de permisos (``identity.authz.matrix``, TASK-125; BR-NUC-15).
 
-    Mientras no existe la matriz, ninguna clave existe: una ruta que exija una no arranca.
+    Una ruta que exige una clave fuera de la matriz no arranca (TASK-136 monta las primeras).
     """
-    return frozenset()
+    return frozenset(key.value for key in PermissionKey)
 
 
 # --- Fábrica -----------------------------------------------------------------------------------

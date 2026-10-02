@@ -17,10 +17,15 @@ from typing import Final
 from fastapi import Request, Response
 
 from vigia_platform.identity.application.common import IdentityRejected
+from vigia_platform.identity.application.concessions import ConcessionService
+from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.application.invitations import InvitationService
 from vigia_platform.identity.application.me import MeService
+from vigia_platform.identity.application.organization import OrganizationSettingsService
 from vigia_platform.identity.application.password_change import PasswordChangeService
 from vigia_platform.identity.application.privacy_notice import PrivacyNoticeService
+from vigia_platform.identity.application.roles import RoleService
+from vigia_platform.identity.application.users import SecondFactorResetService, UserService
 from vigia_platform.identity.auth.login import LoginService
 from vigia_platform.identity.auth.sessions import SessionCookie, SessionService
 from vigia_platform.shared.api.app_state import API_VERSION_STATE_KEY, PRIVACY_NOTICE_STATE_KEY
@@ -35,6 +40,7 @@ __all__ = [
     "client_address",
     "identity_error",
     "identity_http",
+    "installed",
     "no_store",
     "privacy_notice_version",
     "session_cookie",
@@ -47,7 +53,11 @@ _log = get_logger("identity.http")
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IdentityHttp:
-    """Los servicios que usan las rutas de ``identity``."""
+    """Los servicios que usan las rutas de ``identity``.
+
+    Los de administración (TASK-136) son opcionales para que cada grupo de rutas se pueda montar
+    por separado; una ruta cuyo servicio falta responde ``internal_error`` (fallo cerrado).
+    """
 
     login: LoginService
     sessions: SessionService
@@ -56,10 +66,24 @@ class IdentityHttp:
     passwords: PasswordChangeService
     me: MeService
     provider_organization_id: uuid.UUID
+    users: UserService | None = None
+    roles: RoleService | None = None
+    second_factor_reset: SecondFactorResetService | None = None
+    hierarchy: HierarchyService | None = None
+    organization: OrganizationSettingsService | None = None
+    concessions: ConcessionService | None = None
 
     def __post_init__(self) -> None:
         if type(self.provider_organization_id) is not uuid.UUID:
             raise TypeError("provider_organization_id debe ser uuid.UUID")
+
+
+def installed[T](service: T | None) -> T:
+    """El servicio de una ruta de administración; sin él, ``internal_error`` (nunca deja pasar)."""
+    if service is None:
+        _log.error("la ruta de identidad no tiene su servicio instalado")
+        raise ApiError(ApiErrorCode.INTERNAL_ERROR)
+    return service
 
 
 def identity_http(request: Request) -> IdentityHttp:

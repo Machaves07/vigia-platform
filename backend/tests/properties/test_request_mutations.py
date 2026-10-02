@@ -36,7 +36,12 @@ from tests.middleware_support import (
     UnlimitedRateLimiter,
     cookie_header,
 )
-from vigia_platform.shared.api.app import AppConfig, UnitRegistration, platform_units
+from vigia_platform.shared.api.app import (
+    AppConfig,
+    UnitRegistration,
+    platform_permissions,
+    platform_units,
+)
 from vigia_platform.shared.api.declarations import DeclaredRoute, iter_declared_routes, requires
 from vigia_platform.shared.api.errors import ApiErrorBody, ApiErrorCode
 from vigia_platform.shared.api.labels import PlatformLabels
@@ -356,7 +361,7 @@ def test_a_route_cannot_weaken_or_duplicate_the_security_headers() -> None:
     harness = Harness()
     app = harness.world.app(
         units=(*platform_units(), _hostile_unit()),
-        permissions=frozenset({"hierarchy.read"}),
+        permissions=platform_permissions(),
         csp_store_origins=(STORE_ORIGIN,),
         runtime={"authorizer": _AllowAll()},
     )
@@ -416,7 +421,7 @@ def test_errors_of_the_chain_and_of_the_route_carry_the_security_headers() -> No
     cookie = harness.session("errores")
     app = harness.world.app(
         units=(*platform_units(), _hostile_unit()),
-        permissions=frozenset({"hierarchy.read"}),
+        permissions=platform_permissions(),
         csp_store_origins=(STORE_ORIGIN,),
         runtime={
             "sessions": harness.contexts,
