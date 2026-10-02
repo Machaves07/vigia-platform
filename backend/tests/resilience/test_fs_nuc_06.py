@@ -47,8 +47,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
 TIMEOUT_SECONDS: Final = 3.0
 MARGIN_SECONDS: Final = 2.0
-LOCAL_LEAK: Final = "contrasena-filtrada-local-1234"  # noqa: S105 - dato sintético
-REMOTE_LEAK: Final = "contrasena-filtrada-remota-5678"  # noqa: S105 - dato sintético
+LOCAL_LEAK: Final = "contrasena-filtrada-local-1234"
+REMOTE_LEAK: Final = "contrasena-filtrada-remota-5678"
 
 
 class _RangeHandler(http.server.BaseHTTPRequestHandler):
@@ -65,7 +65,7 @@ class _RangeHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - firma de la base
+    def log_message(self, format: str, *args: Any) -> None:
         return
 
 
@@ -151,34 +151,34 @@ def test_fs_nuc_06_breached_password_service_slow_then_down(env: HierarchyEnviro
         metrics, reader = metrics_with_reader()
         pool = CpuPool(SystemClock(), max_workers=1)
         activations: list[Activation] = []
+        breached = {sha1_hex(REMOTE_LEAK), sha1_hex(LOCAL_LEAK)}
         try:
-            with range_service({sha1_hex(REMOTE_LEAK), sha1_hex(LOCAL_LEAK)}) as (host, port):
-                with fault_proxy(host, port) as proxy:
-                    checker = HibpBreachChecker(
-                        local_list([LOCAL_LEAK]),
-                        SystemClock(),
-                        range_url=f"{proxy.url}/range/",
-                        metrics=metrics,
-                    )
-                    service = InvitationService(
-                        env.deps,
-                        contexts=env.authz.contexts,
-                        passwords=PasswordService(checker, pool),
-                        second_factor=env.second_factor,
-                    )
-                    phases = [("latency", ProxyMode.FREEZE), ("refused", ProxyMode.REFUSE)]
-                    # Con el servicio arriba decide el servicio (también una filtrada remota).
-                    activations.append(_activate(env, service, "up", "remote_leak", REMOTE_LEAK))
-                    for phase, mode in phases:
-                        proxy.set_mode(mode)
-                        order = ["fresh", "local_leak"]
-                        run.random.shuffle(order)
-                        for kind in order:
-                            password = (
-                                LOCAL_LEAK if kind == "local_leak" else f"nueva-{secrets.token_hex(8)}"
-                            )
-                            activations.append(_activate(env, service, phase, kind, password))
-                    env.run(checker.aclose())
+            with range_service(breached) as (host, port), fault_proxy(host, port) as proxy:
+                checker = HibpBreachChecker(
+                    local_list([LOCAL_LEAK]),
+                    SystemClock(),
+                    range_url=f"{proxy.url}/range/",
+                    metrics=metrics,
+                )
+                service = InvitationService(
+                    env.deps,
+                    contexts=env.authz.contexts,
+                    passwords=PasswordService(checker, pool),
+                    second_factor=env.second_factor,
+                )
+                phases = [("latency", ProxyMode.FREEZE), ("refused", ProxyMode.REFUSE)]
+                # Con el servicio arriba decide el servicio (también una filtrada remota).
+                activations.append(_activate(env, service, "up", "remote_leak", REMOTE_LEAK))
+                for phase, mode in phases:
+                    proxy.set_mode(mode)
+                    order = ["fresh", "local_leak"]
+                    run.random.shuffle(order)
+                    for kind in order:
+                        password = (
+                            LOCAL_LEAK if kind == "local_leak" else f"nueva-{secrets.token_hex(8)}"
+                        )
+                        activations.append(_activate(env, service, phase, kind, password))
+                env.run(checker.aclose())
         finally:
             pool.shutdown()
         fallback_used = metric_total(reader, MetricName.HIBP_FALLBACK_USED)

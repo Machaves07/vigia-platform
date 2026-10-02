@@ -34,11 +34,11 @@ from typing import Any, Final
 import uvicorn
 
 from tests.authz_support import SYSTEM_ACTOR_ID
-from tests.examples.test_auth_routes import ORIGIN, STATIC
+from tests.examples.test_auth_routes import ORIGIN, STATIC, Passwords
 from tests.hierarchy_support import FakeActivationPasswords, FakeActivationSecondFactor, NoStorage
 from tests.integration.conftest import LOCALSTACK_ACCESS_KEY_ID, LOCALSTACK_SECRET_ACCESS_KEY
 from tests.resilience.processes import EffectHandler, resilience_catalog
-from tests.session_support import ORIGIN_KEY, FakePasswords, FakeSecondFactor
+from tests.session_support import ORIGIN_KEY, FakeSecondFactor
 from tests.signing_support import (
     BOOTSTRAP_ORDER,
     PROVIDER_ORGANIZATION_ID,
@@ -156,7 +156,7 @@ def build(environ: Mapping[str, str]) -> Any:
     registry = RecordTypeRegistry()
     for definition in U02_RECORD_TYPES:
         registry.register(definition)
-    registry.seal()  # los tipos de U-02 ya están en ``ledger.record_type`` (los sincronizó la prueba)
+    registry.seal()  # los tipos de U-02 ya están en ``ledger.record_type`` (los sincronizó el test)
     free_text = FreeTextPolicyRegistry()
     writer = EscritorExpediente(
         database=database,
@@ -177,7 +177,7 @@ def build(environ: Mapping[str, str]) -> Any:
         provider_organization_id=provider,
     )
     store = PostgresSessionStore(database, audit, outbox)
-    passwords = FakePasswords()
+    passwords = Passwords()  # hash ``fake$`` y política determinista (test_auth_routes)
     identity = IdentityHttp(
         login=LoginService(
             store=store,

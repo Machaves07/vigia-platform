@@ -269,7 +269,7 @@ class Balancer:
         self.listener.settimeout(_POLL)
         while not self._stop.is_set():
             try:
-                client, _ = self.listener.accept()
+                client, (client_host, _) = self.listener.accept()
             except (TimeoutError, OSError):
                 continue
             name = self._choose()
@@ -278,16 +278,23 @@ class Balancer:
                     client.close()  # ningún proceso listo: el balanceador no enruta
                 continue
             thread = threading.Thread(
-                target=self._pipe, args=(client, self.backends[name]), daemon=True
+                target=self._pipe, args=(client, client_host, self.backends[name]), daemon=True
             )
             thread.start()
 
-    def _pipe(self, client: socket.socket, port: int) -> None:
+    def _pipe(self, client: socket.socket, client_host: str, port: int) -> None:
+        # Conserva la dirección del cliente (como el balanceador de la nube con la IP de origen):
+        # el retardo de fallos por origen (BR-NUC-24) la ve. Toda 127.0.0.0/8 es local.
+        upstream = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            upstream = socket.create_connection(("127.0.0.1", port), timeout=5)
+            upstream.bind((client_host, 0))
+            upstream.settimeout(5)
+            upstream.connect(("127.0.0.1", port))
+            upstream.settimeout(None)
         except OSError:
-            with contextlib.suppress(OSError):
-                client.close()
+            for sock in (client, upstream):
+                with contextlib.suppress(OSError):
+                    sock.close()
             return
         pair = {client: upstream, upstream: client}
         try:

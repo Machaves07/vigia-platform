@@ -1,8 +1,9 @@
 """FS-NUC-08 · Worker muerto entre el efecto y la confirmación (PR-NUC-30, PR-NUC-42;
 PAT-NUC-RES-05; BR-NUC-76).
 
-Dos ``vigia-worker`` **reales** (``tests/resilience/worker_process.py``: ``shared.worker.main.serve``
-con bucles de despacho, planificador con arrendamiento y PostgreSQL como ``vigia_app``).
+Dos ``vigia-worker`` **reales** (``tests/resilience/worker_process.py``:
+``shared.worker.main.serve`` con bucles de despacho, planificador con arrendamiento y PostgreSQL
+como ``vigia_app``).
 
 **Inyección**:
 
@@ -145,9 +146,7 @@ def test_fs_nuc_08a_worker_killed_between_the_effect_and_the_confirmation(
             def done() -> bool:
                 rows = env.run(_effect_deliveries(env))
                 mine = [r for r in rows if str(r["event_id"]) in set(published)]
-                return len(mine) == len(published) and all(
-                    r["status"] == "delivered" for r in mine
-                )
+                return len(mine) == len(published) and all(r["status"] == "delivered" for r in mine)
 
             wait_until(done, timeout=90, message="las entregas no terminaron")
             codes = {name: spawned.process.poll() for name, spawned in group.spawned.items()}
@@ -203,7 +202,7 @@ def test_fs_nuc_08b_worker_killed_during_a_periodic_task(
                     return str(starts[-1]["owner"])
                 return None
 
-            owner = wait_until(holder, timeout=60, message="ningún worker tomó la tarea")
+            owner = str(wait_until(holder, timeout=60, message="ningún worker tomó la tarea"))
             killed = pids[owner]
             group.spawned[killed].process.send_signal(signal.SIGKILL)
             group.spawned[killed].process.wait(10)
@@ -217,9 +216,7 @@ def test_fs_nuc_08b_worker_killed_during_a_periodic_task(
         entries = read_lines(log)
         effects = [org for org in env.run(env.effects()) if org in set(organizations)]
         survivor = [e for e in entries if e["owner"] != owner]
-        resumed_after = min(
-            (_at(e) - killed_at).total_seconds() for e in survivor
-        )
+        resumed_after = min((_at(e) - killed_at).total_seconds() for e in survivor)
         run.observe(
             organizations=len(organizations),
             killed_after_finished=finished_before,

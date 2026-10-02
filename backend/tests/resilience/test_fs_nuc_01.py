@@ -146,7 +146,7 @@ class _PausingPool:
 
     async def acquire(self) -> ConnectionPort:
         self.acquired += 1
-        return _PausingConnection(await self._pool.acquire(), self)  # type: ignore[return-value]
+        return _PausingConnection(await self._pool.acquire(), self)
 
     async def dispose(self) -> None:
         await self._pool.dispose()
@@ -243,7 +243,7 @@ def test_fs_nuc_01_database_paused_during_a_write_and_a_read(stack: LedgerStack)
         # Lectura: pausa entre el SET LOCAL y la consulta del primer intento.
         reading = stack.database()
         pool = _PausingPool(reading._pools[_person_pool(reading)], stack.container)
-        reading._pools[_person_pool(reading)] = pool  # type: ignore[assignment]
+        reading._pools[_person_pool(reading)] = pool
         context = _context(probe_place)
         statement = text("SELECT count(*) FROM ledger.ledger_record")
         assert stack.run(reading.read(context, statement))  # conexión abierta y sana

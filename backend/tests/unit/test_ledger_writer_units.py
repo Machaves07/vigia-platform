@@ -13,6 +13,9 @@
   ``filters`` enorme se rechaza sin canonicalizarlo; el paso 3 del escritor (esquema, tope de
   ``source_key``, regla de etiqueta) fija ``content_invalid`` antes del texto libre y de cualquier
   consulta a la base; un contenido de más de 16 KB se valida en el pool de CPU.
+- VIG-90: el paso 7 suma ``ledger_writes_total`` y ``chain_lock_wait_ms`` (solo lo que dura la
+  transacción abierta, sin la espera del pool) y, con ``chain_locked_timeout``, también
+  ``chain_locked_timeout_total``, por ``chain_kind``; otro fallo dentro no cuenta como escritura.
 """
 
 from __future__ import annotations
@@ -540,6 +543,9 @@ class _TimedDatabase:
     def transaction(self, context: Any) -> Any:
         return self._transaction(context)
 
+    async def read(self, context: Any, statement: Any, parameters: Any = None) -> Any:
+        raise AssertionError("el paso 7 no lee la base")
+
 
 def _metrics_writer(
     clock: SimulatedClock, outcome: BaseException | None
@@ -561,7 +567,7 @@ def _metrics_writer(
             raise outcome
         return SimpleNamespace(record_id=uuid.uuid4(), received_at=NOW)
 
-    writer._insert = insert  # type: ignore[method-assign]
+    writer._insert = insert  # type: ignore[method-assign,assignment]
     return writer, reader
 
 

@@ -20,6 +20,7 @@ import os
 import sys
 import uuid
 from collections.abc import Mapping
+from typing import cast
 
 from tests.resilience.processes import EffectHandler, resilience_catalog
 from tests.worker_process import LoggedProbe, _config
@@ -30,6 +31,7 @@ from vigia_platform.shared.observability.logging import configure_logging
 from vigia_platform.shared.outbox.dispatcher import Dispatcher
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import Schedule
+from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.worker.main import WorkerConfig, WorkerRuntime, serve
 
 _CLOCK = SystemClock()
@@ -63,7 +65,7 @@ async def build_runtime(config: WorkerConfig, environ: Mapping[str, str]) -> Wor
         database=database,
         storage=StubStorage(),
         signing=StubSigning(),
-        kms=StubKms(),
+        kms=cast(KmsPort, StubKms()),  # el arranque solo pide y descifra la clave de datos
         catalog=catalog,
         dispatcher=Dispatcher(
             database=database,

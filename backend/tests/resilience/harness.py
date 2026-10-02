@@ -30,7 +30,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import random
 import re
 import socket
 import time
@@ -40,6 +39,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC
 from pathlib import Path
+from random import Random
 from typing import Any, Final
 
 import pytest
@@ -396,13 +396,13 @@ class ScenarioRun:
     """Lo que el escenario usa mientras corre: su generador aleatorio y lo observado."""
 
     record: ScenarioRecord
-    random: random.Random
+    random: Random
 
-    def child(self) -> random.Random:
+    def child(self) -> Random:
         """Un generador propio para una pieza del escenario (un nodo, un escritor), derivado del
         del escenario: la misma semilla da la misma secuencia en cada pieza."""
         # S311: decide inyecciones y carga de prueba, nunca secretos.
-        return random.Random(self.random.getrandbits(32))  # noqa: S311
+        return Random(self.random.getrandbits(32))  # noqa: S311
 
     def observe(self, **values: Any) -> None:
         """Anota lo observado (valores JSON: números, textos, listas y objetos)."""
@@ -451,7 +451,7 @@ def scenario(
         profile=root_conftest._active_profile(),
         started_at=WALL.now().astimezone(UTC).isoformat(timespec="milliseconds"),
     )
-    run = ScenarioRun(record, random.Random(f"{seed}:{scenario_id}"))  # noqa: S311 - ídem
+    run = ScenarioRun(record, Random(f"{seed}:{scenario_id}"))  # noqa: S311 - ídem
     started = WALL.monotonic()
     # En la salida del escenario (``-s`` o el informe de un fallo) y en el resumen de la sesión.
     print(f"{scenario_id}: semilla {seed} (reproducir: --hypothesis-seed={seed})")

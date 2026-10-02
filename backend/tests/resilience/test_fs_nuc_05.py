@@ -104,7 +104,9 @@ def _split(url: str) -> tuple[str, int]:
 
 
 @pytest.fixture(scope="module")
-def identity(postgres_endpoint: PostgresEndpoint) -> Iterator[tuple[MigratedDatabase, IdentitySeed]]:
+def identity(
+    postgres_endpoint: PostgresEndpoint,
+) -> Iterator[tuple[MigratedDatabase, IdentitySeed]]:
     with seeded_identity(postgres_endpoint, "fs_nuc_05") as seeded:
         yield seeded
 
@@ -189,7 +191,7 @@ def test_fs_nuc_05a_secrets_and_kms_blocked_before_startup(
         assert probes, "se consultó la salud mientras el proceso arrancaba"
         assert {probe["ready"] for probe in probes} == {503}, "nunca quedó ready"
         assert {probe["live"] for probe in probes} == {200}
-        assert code == STARTUP_FAILURE_EXIT_CODE != 0, output
+        assert code == STARTUP_FAILURE_EXIT_CODE, output  # 3: distinto de cero
         assert "signing_keys" in output and "data_key" in output, output
 
 

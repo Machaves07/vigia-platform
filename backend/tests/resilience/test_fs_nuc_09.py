@@ -22,6 +22,7 @@ Solo datos generados.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import os
 import uuid
 from collections.abc import Iterator
@@ -30,7 +31,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import pytest
-from hypothesis import strategies as st
 from vigia_contracts.conformance.generators import observability_event_pair, zone_catalog
 
 from tests.factories import uuid7
@@ -334,7 +334,7 @@ def test_fs_nuc_09_node_clock_skewed_ten_minutes(site: Site) -> None:
         )
         # Partición exacta de [a, b): contiguos, sin solapes, y el resumen suma b - a.
         assert intervals[0].starts_at == PERIOD.start and intervals[-1].ends_at == PERIOD.end
-        for left, right in zip(intervals, intervals[1:], strict=False):
+        for left, right in itertools.pairwise(intervals):
             assert left.ends_at == right.starts_at
         period_ms = int((PERIOD.end - PERIOD.start) / timedelta(milliseconds=1))
         assert timeline.summary.total_ms == period_ms
