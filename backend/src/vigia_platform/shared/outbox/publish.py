@@ -81,16 +81,20 @@ _log = get_logger("shared.outbox")
 _ORGANIZATION_PARTITION: Final = "organization"
 
 _INSERT_EVENT: Final = text(
-    "INSERT INTO shared.outbox_event (event_id, organization_id, plant_id, event_name,"
-    " ledger_sequence, payload, correlation_id, created_at, trace_id, span_id)"
-    " VALUES (:event_id, :organization_id, :plant_id, :event_name, :ledger_sequence,"
-    " CAST(:payload AS jsonb), :correlation_id,"
-    " GREATEST(CAST(:created_at AS timestamptz), (SELECT max(previous.created_at)"
-    " FROM shared.outbox_event AS previous WHERE previous.organization_id = :organization_id"
-    " AND previous.partition_key = :partition_key)),"
-    " :trace_id, :span_id)"
-    " RETURNING created_at"
+    "WITH stamp AS (SELECT GREATEST(CAST(:created_at AS timestamptz),"
+    " (SELECT max(previous.created_at) FROM shared.outbox_event AS previous"
+    " WHERE previous.organization_id = :organization_id"
+    " AND previous.partition_key = :partition_key)) AS created_at),"
+    " inserted AS (INSERT INTO shared.outbox_event (event_id, organization_id, plant_id,"
+    " event_name, ledger_sequence, payload, correlation_id, created_at, trace_id, span_id)"
+    " SELECT :event_id, :organization_id, :plant_id, :event_name, :ledger_sequence,"
+    " CAST(:payload AS jsonb), :correlation_id, stamp.created_at, :trace_id, :span_id"
+    " FROM stamp)"
+    " SELECT created_at FROM stamp"
 )
+"""Sin ``RETURNING``: la marca sale de ``stamp``. Un contexto de proveedor con concesión de una
+planta no puede leer la fila nueva de la partición de la organización (``nuc_0015``), y un
+``RETURNING`` exigiría leerla: la alerta de denegaciones repetidas no se escribiría."""
 
 _INSERT_DELIVERIES: Final = text(
     "INSERT INTO shared.outbox_delivery (event_id, consumer_name, organization_id, status,"

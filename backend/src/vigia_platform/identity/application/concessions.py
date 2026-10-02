@@ -187,11 +187,18 @@ def concession_duration(
 
 
 def _reason(value: object) -> str:
-    """El motivo en NFC (la forma que guarda el expediente) con 10 a 500 caracteres."""
+    """El motivo en NFC (la forma que guarda el expediente) con 10 a 500 caracteres.
+
+    Con contenido real (seguimiento de VIG-76): al menos una letra o un dígito. Un motivo hecho
+    solo de espacios, espacios duros, puntuación, símbolos o caracteres invisibles no dice nada al
+    cliente que lo lee en su panel (BR-NUC-41).
+    """
     if type(value) is not str:
         raise ConcessionRejected(ConcessionRejectionCode.REASON_INVALID)
     normalized = unicodedata.normalize("NFC", value)
     if not MIN_REASON_CHARS <= len(normalized) <= MAX_REASON_CHARS:
+        raise ConcessionRejected(ConcessionRejectionCode.REASON_INVALID)
+    if not any(unicodedata.category(char)[0] in ("L", "N") for char in normalized):
         raise ConcessionRejected(ConcessionRejectionCode.REASON_INVALID)
     return normalized
 
