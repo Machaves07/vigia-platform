@@ -210,6 +210,29 @@ def _postgres_ready(container: Container) -> bool:
     return False
 
 
+def _promoted_ready(container: Container) -> bool:
+    """Listo **y fuera de recuperación**: en espera en caliente el servidor ya acepta conexiones
+    de solo lectura antes de alcanzar el punto de recuperación y promocionar."""
+    if not _postgres_ready(container):
+        return False
+    with contextlib.suppress(Exception):
+        code, output = container.exec(
+            [
+                "psql",
+                "-h",
+                "127.0.0.1",
+                "-U",
+                POSTGRES_USER,
+                "-d",
+                POSTGRES_DATABASE,
+                "-tAc",
+                "SELECT pg_is_in_recovery()",
+            ]
+        )
+        return code == 0 and output.strip() == "f"
+    return False
+
+
 def _localstack_ready(container: Container) -> bool:
     return _tcp_open(container.host_port) and _localstack_services_running(
         f"http://127.0.0.1:{container.host_port}"
@@ -316,7 +339,7 @@ def restored_postgres(
         internal_port=POSTGRES_PORT,
         environment=POSTGRES_ENVIRONMENT,
         command=command,
-        ready=_postgres_ready,
+        ready=_promoted_ready,
         start=False,
     )
     try:
