@@ -188,6 +188,18 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             ), dict(row)
             assert "vigia.invitation_lookup" in row["qual"], dict(row)
             continue
+        if (row["tablename"], row["policyname"]) == (
+            "live_view_token_issuance",
+            "live_view_rate_lookup",
+        ):
+            # nuc_0012 (TASK-128): igual, solo dentro de identity.live_view_issuances_since.
+            assert (row["cmd"], row["roles"], row["permissive"]) == (
+                "SELECT",
+                ["vigia_migrate"],
+                "PERMISSIVE",
+            ), dict(row)
+            assert "vigia.concession_lookup" in row["qual"], dict(row)
+            continue
         assert row["roles"] == ["public"], dict(row)
         policies.setdefault(row["tablename"], {})[row["policyname"]] = (
             f"{row['permissive']} {row['cmd']}"
