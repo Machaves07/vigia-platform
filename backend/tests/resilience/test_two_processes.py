@@ -52,6 +52,7 @@ from tests.resilience.processes import (
     process_group,
     read_lines,
     wait_http,
+    wait_worker_started,
 )
 from tests.worker_support import EFFECT_EVENT, PROBE_TASK
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, THROTTLE_FREE_FAILURES
@@ -139,6 +140,8 @@ def cluster(postgres_endpoint: PostgresEndpoint, tmp_path_factory: Any) -> Itera
             group.start(name, WORKER_MODULE, {**worker_base, "VIGIA_WORKER_HEALTH_PORT": str(port)})
         for name, port in worker_ports.items():
             wait_http(f"http://127.0.0.1:{port}/health/live", message=f"{name} no arrancó")
+            # Fin del arranque: catálogo sincronizado antes de que la prueba toque las tareas.
+            wait_worker_started(group, name)
         api_ports = {name: free_port() for name in ("api-a", "api-b")}
         for name, port in api_ports.items():
             group.start(name, API_MODULE, _api_environment(env, port))

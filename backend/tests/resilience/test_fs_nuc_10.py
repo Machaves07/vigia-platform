@@ -21,6 +21,9 @@ de todas las organizaciones (``IntegrityService.verify_all`` en modo ``full``, c
 da **todas ``intact``**, el oráculo de PR-NUC-13 también, las cabezas son las del instante
 restaurado y se **registra el punto de control alcanzado** de cada cadena; el **tiempo medido**
 (restauración más verificación) se compara con el **RTO de 4 h** y queda en el informe.
+**Contraprueba** (DR-NUC-02): tras verificar, se altera un registro de planta en la base restaurada
+(saltando la guarda de solo anexar) y la misma verificación da esa cadena ``broken``: el ensayo
+no aprueba una copia dañada.
 
 El ensayo trimestral sobre el entorno desplegado es del runbook (VIG-97), no de esta prueba.
 Solo datos generados.
@@ -56,6 +59,7 @@ from tests.resilience.harness import (
 from tests.resilience.load import all_clips, kit_findings
 from tests.resilience.stack import LedgerStack, ledger_stack
 from tests.signing_support import SigningWorld, bootstrapped_world
+from tests.verify_support import mutate
 from tests.writer_support import (
     NOW,
     ORDER_TYPE,
@@ -255,6 +259,8 @@ class Verified:
     oracle: dict[str, Any]
     checkpoints: list[dict[str, Any]]
     evidence_sha256: dict[str, str]
+    corrupted: list[dict[str, Any]] | None = None
+    """Contraprueba: resultados tras alterar un registro de lo restaurado (solo DR-NUC-02)."""
 
 
 async def _verify_restored(
@@ -345,6 +351,8 @@ def _restore_and_verify(
     files: Sequence[tuple[str, bytes]],
     command: Sequence[str],
     evidence_keys: Sequence[str],
+    *,
+    corrupt: bool = False,
 ) -> Verified:
     migrated = source.stack.migrated
     started = WALL.monotonic()
@@ -364,6 +372,18 @@ def _restore_and_verify(
                 "ledger": {str(plant): length for plant, length in chains.items()},
                 "audit": source.run(verify_audit_chain(restored, organization)),
             }
+        corrupted: list[dict[str, Any]] | None = None
+        if corrupt:
+            # Contraprueba: la misma verificación sobre lo restaurado y luego alterado no da
+            # ``intact`` (el ensayo no aprueba una copia rota).
+            altered = source.run(_corrupt_one_record(restored, source.organizations[0]))
+            again, _, _ = source.run(_verify_restored(source, restored, ()))
+            corrupted = [
+                result
+                for result in again
+                if result["organization_id"] == str(source.organizations[0])
+            ]
+            corrupted.append({"altered_record": altered})
     return Verified(
         round(restore_seconds, 2),
         round(verify_seconds, 2),
@@ -372,7 +392,28 @@ def _restore_and_verify(
         oracle,
         reached,
         evidence,
+        corrupted,
     )
+
+
+async def _corrupt_one_record(restored: MigratedDatabase, organization: uuid.UUID) -> str:
+    """Altera ``content_hash`` de un registro de planta saltando la guarda de solo anexar
+    (``verify_support.mutate``: superusuario, disparadores restaurados en la transacción)."""
+    connection = await restored.connect()
+    try:
+        record_id = await connection.fetchval(
+            "SELECT record_id FROM ledger.ledger_record"
+            " WHERE organization_id = $1 AND plant_id IS NOT NULL"
+            " ORDER BY plant_id, chain_sequence OFFSET 2 LIMIT 1",
+            organization,
+        )
+    finally:
+        await connection.close()
+    assert record_id is not None, "hay un registro de planta que alterar"
+    await mutate(
+        restored, "ledger.ledger_record", "record_id", record_id, {"content_hash": "0" * 64}
+    )
+    return str(record_id)
 
 
 # --- DR-NUC-03: la versión anterior de una evidencia --------------------------------------------
@@ -527,7 +568,9 @@ def test_fs_nuc_10_restore_drill_on_generated_data(
         wal = _archive_into(container, ARCHIVE, "drill_archive")
 
         # DR-NUC-02: desde la instantánea, en un contenedor nuevo.
-        from_snapshot = _restore_and_verify(source, [(PGDATA, base)], ["postgres"], [evidence_key])
+        from_snapshot = _restore_and_verify(
+            source, [(PGDATA, base)], ["postgres"], [evidence_key], corrupt=True
+        )
         # DR-NUC-01: a un instante (el punto con nombre), en otro contenedor nuevo.
         to_point = _restore_and_verify(
             source,
@@ -565,6 +608,7 @@ def test_fs_nuc_10_restore_drill_on_generated_data(
                     "results": drill.results,
                     "checkpoints_reached": drill.checkpoints,
                     "oracle": drill.oracle,
+                    "corrupted_counterproof": drill.corrupted,
                 }
                 for name, drill in drills.items()
             },
@@ -583,6 +627,10 @@ def test_fs_nuc_10_restore_drill_on_generated_data(
             assert drill.restore_seconds + drill.verify_seconds < RTO_SECONDS
             assert drill.evidence_sha256 == {evidence_key: evidence_sha256}
         assert from_snapshot.heads == snapshot_heads, "DR-NUC-02: el estado de la instantánea"
+        # Contraprueba: con un registro alterado en lo restaurado, alguna cadena sale ``broken``.
+        assert from_snapshot.corrupted is not None
+        statuses = {r.get("status") for r in from_snapshot.corrupted if "status" in r}
+        assert "broken" in statuses, from_snapshot.corrupted
         assert to_point.heads == point_heads, "DR-NUC-01: el estado del punto con nombre"
         assert after_point_heads != point_heads, "lo escrito tras el punto no vuelve"
         assert restored_object_sha256 == evidence_sha256, "DR-NUC-03: la versión anterior"

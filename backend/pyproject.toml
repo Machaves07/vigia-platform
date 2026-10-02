@@ -56,6 +56,9 @@ dev = [
   "pytest-benchmark>=4",
   "coverage>=7",
   "testcontainers>=4.8",
+  # Lo usa directamente el arnés de resiliencia (tests/resilience/harness.py) para pausar,
+  # reiniciar y detener sus contenedores; ya llegaba con testcontainers (Apache-2.0).
+  "docker>=7",
   "moto>=5",
   # Solo para leer de vuelta `openapi/app.yaml` en las pruebas de `export_openapi` (TASK-133).
   "pyyaml>=6",

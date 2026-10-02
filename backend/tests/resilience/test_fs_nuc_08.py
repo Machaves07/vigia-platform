@@ -47,6 +47,7 @@ from tests.resilience.processes import (
     read_lines,
     resilience_catalog,
     wait_http,
+    wait_worker_started,
 )
 from tests.worker_support import (
     EFFECT_EVENT,
@@ -96,6 +97,8 @@ def _start_workers(
             f"http://127.0.0.1:{port}/health/live",
             message=f"el worker {name} no atendió /health/live",
         )
+        # Fin del arranque: el catálogo ya está sincronizado y no pisará ``next_run_at``.
+        wait_worker_started(group, name)
     return ports
 
 

@@ -1317,6 +1317,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "coverage" },
+    { name = "docker" },
     { name = "hypothesis" },
     { name = "moto" },
     { name = "mypy" },
@@ -1356,6 +1357,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7" },
+    { name = "docker", specifier = ">=7" },
     { name = "hypothesis", specifier = ">=6" },
     { name = "moto", specifier = ">=5" },
     { name = "mypy", specifier = ">=1.11" },

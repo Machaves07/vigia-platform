@@ -186,6 +186,28 @@ def process_group(directory: Path) -> Iterator[ProcessGroup]:
         group.stop_all()
 
 
+WORKER_STARTED_MARK: Final = "worker en marcha"
+"""Lo que registra ``shared.worker.main`` al terminar el arranque supervisado: catálogo
+sincronizado y sellado, y bucles de despacho y planificador en marcha."""
+
+
+def wait_worker_started(group: ProcessGroup, name: str, *, timeout: float = 90.0) -> None:
+    """Espera el fin del arranque del worker ``name`` (no basta ``/health/live``).
+
+    ``/health/live`` responde en cuanto arranca el servidor interno, antes de que el arranque
+    sincronice el catálogo. Esa sincronización guarda ``next_run_at`` de las tareas nuevas: si la
+    prueba fija antes ``shared.periodic_task``, el worker puede pisarlo.
+    """
+    spawned = group.spawned[name]
+
+    def started() -> bool:
+        if spawned.process.poll() is not None:
+            raise AssertionError(f"el worker {name} terminó al arrancar: {spawned.tail()}")
+        return WORKER_STARTED_MARK in spawned.tail(400)
+
+    wait_until(started, timeout=timeout, message=f"el worker {name} no terminó de arrancar")
+
+
 def wait_http(url: str, *, status: int = 200, timeout: float = 90.0, message: str = "") -> None:
     def probe() -> bool:
         try:
