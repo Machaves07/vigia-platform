@@ -1,7 +1,8 @@
 """Tipos de evento propios de U-02 (domain-entities §4.3, eventos iniciales de U-02).
 
-Catorce eventos, todos publicados por U-02: los trece iniciales y
-``evidence_marker_verification_failed`` (pendiente nº 21, adenda A-14; TASK-121). Cada carga
+Quince eventos, todos publicados por U-02: los trece iniciales,
+``evidence_marker_verification_failed`` (pendiente nº 21, adenda A-14; TASK-121) e
+``integrity_verification_requested`` (la verificación a demanda, TASK-137). Cada carga
 lleva solo identificadores, enumeraciones y marcas (BR-NUC-75): nunca un nombre, un correo, un
 motivo ni otro texto libre. La organización, la planta, la partición, la secuencia del registro
 y ``correlation_id`` van en el propio evento, no en la carga. Es la versión inicial: quien
@@ -147,6 +148,15 @@ class IntegrityCompromised(PayloadModel):
     detected_at: Timestamp
 
 
+class IntegrityVerificationRequested(PayloadModel):
+    """``POST /integrity/verify`` (TASK-137): la verificación a demanda que ejecuta el worker."""
+
+    chain_kind: ChainKind
+    plant_id: UUID | None = None
+    requested_by: UUID
+    requested_at: Timestamp
+
+
 class CheckpointWritten(PayloadModel):
     chain_kind: ChainKind
     covered_sequence: Sequence64
@@ -223,6 +233,11 @@ U02_EVENT_TYPES: Final[tuple[EventType, ...]] = tuple(
             IntegrityCompromised,
             "La verificación encontró una cadena rota (máxima severidad)",
         ),
+        (
+            "integrity_verification_requested",
+            IntegrityVerificationRequested,
+            "Se pidió verificar una cadena a demanda; la verificación corre en el worker",
+        ),
         ("checkpoint_written", CheckpointWritten, "Se escribió un punto de control firmado"),
         ("key_set_published", KeySetPublished, "Se publicó un conjunto de claves firmado"),
         ("key_rotation_due", KeyRotationDue, "Una clave de firma debe rotarse en 45 días"),
@@ -242,6 +257,6 @@ U02_EVENT_TYPES: Final[tuple[EventType, ...]] = tuple(
 
 
 def register_u02_event_types(registry: EventTypeRegistry) -> None:
-    """Registra los catorce eventos de U-02 al arrancar."""
+    """Registra los quince eventos de U-02 al arrancar."""
     for event_type in U02_EVENT_TYPES:
         registry.register(event_type)

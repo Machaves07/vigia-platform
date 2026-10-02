@@ -12,7 +12,9 @@
 - ``/docs`` y ``/openapi.json`` solo existen en ``local`` y ``test``; en cualquier otro entorno
   (``pilot``, ``staging-<n>``) responden ``not_found`` (NFR-NUC-23);
 - la aplicación de página única de ``static_dir`` es servible (``shared.api.static``): su ruta
-  de pantalla va delante de las de la API (solo navegaciones) y sus archivos detrás.
+  de pantalla va delante de las de la API (solo navegaciones) y sus archivos detrás;
+- el verificador de paquetes ``verifier_path`` (``tools/vigia_verify.py``) se puede leer: su
+  SHA-256 es el que publica ``/.well-known/vigia-verifier`` (TASK-137).
 
 **Al arrancar** (en segundo plano, ``StartupSupervisor``), la lista fija de PAT-NUC-RES-02, en
 este orden: base con la seguridad a nivel de fila en vigor y versión mínima del esquema
@@ -67,6 +69,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp, identity_routers
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
+from vigia_platform.ledger.adapters.http import LEDGER_STATE_KEY, LedgerHttp, ledger_routers
 from vigia_platform.ledger.application.audit_writer import AuditOutcome
 from vigia_platform.ledger.domain.coverage import (
     CommunicationState,
@@ -75,6 +78,14 @@ from vigia_platform.ledger.domain.coverage import (
     PlatformCause,
 )
 from vigia_platform.ledger.registry import ChainLevel
+from vigia_platform.shared.adapters.http import (
+    DEFAULT_VERIFIER_PATH,
+    PLATFORM_STATE_KEY,
+    VERIFIER_STATE_KEY,
+    PlatformHttp,
+    VerifierDigest,
+    shared_routers,
+)
 from vigia_platform.shared.api.app_state import API_VERSION_STATE_KEY, PRIVACY_NOTICE_STATE_KEY
 from vigia_platform.shared.api.declarations import (
     AUTHORIZER_STATE_KEY,
@@ -204,6 +215,8 @@ class AppConfig(BaseModel):
     labels_path: Path = DEFAULT_LABELS_PATH
     static_dir: Path = DEFAULT_STATIC_DIR
     """Construcción de la aplicación de página única (``shared.api.static``)."""
+    verifier_path: Path = DEFAULT_VERIFIER_PATH
+    """``tools/vigia_verify.py``: su SHA-256 se publica en ``/.well-known/vigia-verifier``."""
     startup_deadline_seconds: float = Field(default=60.0, gt=0, le=600)
     startup_retry_seconds: float = Field(default=5.0, gt=0, le=60)
     public_origin: str | None = None
@@ -239,7 +252,8 @@ class AppConfig(BaseModel):
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> AppConfig:
         """Lee ``VIGIA_ENVIRONMENT``, ``VIGIA_SECRETS_KEY_ARN`` y, si están,
-        ``VIGIA_HEALTH_SENTINEL_KEY``, ``VIGIA_STATIC_DIR``, ``VIGIA_PUBLIC_ORIGIN`` y
+        ``VIGIA_HEALTH_SENTINEL_KEY``, ``VIGIA_STATIC_DIR``, ``VIGIA_VERIFIER_PATH``,
+        ``VIGIA_PUBLIC_ORIGIN`` y
         ``VIGIA_CSP_STORE_ORIGINS`` (separados por espacios); ``ValueError`` (de Pydantic) si
         falta o no es válida."""
         values: dict[str, Any] = {
@@ -252,6 +266,9 @@ class AppConfig(BaseModel):
         static_dir = environ.get("VIGIA_STATIC_DIR")
         if static_dir is not None:
             values["static_dir"] = Path(static_dir)
+        verifier_path = environ.get("VIGIA_VERIFIER_PATH")
+        if verifier_path is not None:
+            values["verifier_path"] = Path(verifier_path)
         public_origin = environ.get("VIGIA_PUBLIC_ORIGIN")
         if public_origin is not None:
             values["public_origin"] = public_origin
@@ -320,6 +337,11 @@ class AppRuntime:
     """Cubos de fichas del proceso; por defecto, uno nuevo con ``clock``."""
     identity: IdentityHttp | None = None
     """Servicios de las rutas de sesión, invitación y ``GET /me``; sin ellos, ``internal_error``."""
+    ledger: LedgerHttp | None = None
+    """Puertos de las rutas del expediente, evidencias, etiquetas, cobertura, integridad, vista en
+    vivo y auditoría (TASK-137); sin ellos, ``internal_error``."""
+    platform: PlatformHttp | None = None
+    """Firma, cola muerta y auditoría de las claves públicas y de la operación (TASK-137)."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -475,20 +497,21 @@ class UnitRegistration:
 def platform_units() -> tuple[UnitRegistration, ...]:
     """Unidades registradas en ``vigia-api``.
 
-    ``identity`` y ``ledger`` añaden aquí sus enrutadores (TASK-135 a 137) y U-03, U-04 y U-05
-    los suyos con sus ``detail_code``.
+    ``shared`` (salud, claves públicas, hash del verificador y operación), ``identity``
+    (TASK-135, 136) y ``ledger`` (TASK-137); U-03, U-04 y U-05 añaden aquí los suyos con sus
+    ``detail_code``.
     """
     return (
-        UnitRegistration("shared", routers=(health_router(),)),
+        UnitRegistration("shared", routers=(health_router(), *shared_routers())),
         UnitRegistration("identity", routers=identity_routers()),
-        UnitRegistration("ledger"),
+        UnitRegistration("ledger", routers=ledger_routers()),
     )
 
 
 def platform_permissions() -> frozenset[str]:
     """Claves de la matriz de permisos (``identity.authz.matrix``, TASK-125; BR-NUC-15).
 
-    Una ruta que exige una clave fuera de la matriz no arranca (TASK-136 monta las primeras).
+    Una ruta que exige una clave fuera de la matriz no arranca (PR-NUC-37).
     """
     return frozenset(key.value for key in PermissionKey)
 
@@ -513,6 +536,16 @@ def _detail_codes(units: Iterable[UnitRegistration]) -> DetailCodeRegistry:
         registry.register(unit.detail_codes)
     registry.seal()
     return registry
+
+
+def _verifier(config: AppConfig) -> VerifierDigest:
+    """El hash del verificador que se publica: sin el archivo, la aplicación no arranca."""
+    try:
+        return VerifierDigest.of(config.verifier_path)
+    except OSError:
+        raise ApiStartupError(
+            [f"no se puede leer el verificador de paquetes {config.verifier_path.name}"]
+        ) from None
 
 
 def _openapi(app: FastAPI) -> dict[str, Any]:
@@ -578,6 +611,7 @@ def _assemble(
     problems = check_routes(app.routes, permissions, detail_codes, docs_enabled=docs)
     if problems:
         raise ApiStartupError(problems)
+    setattr(app.state, VERIFIER_STATE_KEY, _verifier(config))
     install_error_handlers(app, catalog, clock)
     install_chain(app, _chain_settings(config, clock, catalog, app, runtime))
     problems = verify_chain(app)
@@ -694,6 +728,8 @@ def create_app(
     recorder = _health_recorder(site, runtime.attribute_policy, runtime.metrics)
     setattr(app.state, AUTHORIZER_STATE_KEY, runtime.authorizer)
     setattr(app.state, IDENTITY_STATE_KEY, runtime.identity)
+    setattr(app.state, LEDGER_STATE_KEY, runtime.ledger)
+    setattr(app.state, PLATFORM_STATE_KEY, runtime.platform)
     setattr(app.state, PRIVACY_NOTICE_STATE_KEY, runtime.privacy_notice_version)
     setattr(app.state, API_VERSION_STATE_KEY, site.app_version)
     setattr(app.state, READINESS_STATE_KEY, supervisor)

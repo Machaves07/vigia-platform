@@ -36,8 +36,9 @@ diez eslabones anteriores en su orden y que la ruta que resolvió la cadena sea 
 rutas del contrato de U-03 (BR-CTR-12); sin ella rige el de 1 MB de la cadena.
 
 ``APP_SCREEN`` (``/{screen_path:path}``) solo se admite en una ruta que coincide únicamente con
-navegaciones a pantallas (``navigation_only``, la ruta de ``shared.api.static``): en cualquier
-otra sería un comodín público delante de la API.
+navegaciones a pantallas (``navigation_only``: la ruta de ``shared.api.static``, reconocida por su
+clase exacta y no por un atributo que otra unidad podría copiar): en cualquier otra sería un
+comodín público delante de la API.
 """
 
 from __future__ import annotations
@@ -306,9 +307,17 @@ def iter_declared_routes(routes: Sequence[BaseRoute]) -> Iterator[DeclaredRoute]
             is_api_route=isinstance(original, APIRoute),
             declarations=tuple(found.values()),
             body_limits=tuple(limits.values()),
-            navigation_only=getattr(original, "navigation_only", False) is True,
+            navigation_only=_is_navigation_route(original),
             route=original,
         )
+
+
+def _is_navigation_route(route: BaseRoute) -> bool:
+    """La ruta de pantallas de ``shared.api.static``, reconocida por su clase exacta (VIG-78)."""
+    # Importación diferida: ``shared.api.static`` importa este módulo para declararse.
+    from vigia_platform.shared.api.static import is_navigation_route
+
+    return is_navigation_route(route)
 
 
 def _route_problems(

@@ -6,7 +6,8 @@ no, aperturas sin cierre, inicios empatados), cambios de comunicación de dos no
 que empieza en su último latido, antes o después de otras declaraciones), cambios de compuerta y
 asignaciones de nodo (con huecos y solapes). Las marcas caen en una rejilla gruesa (1 ms, 1 s o
 1 min) para que los empates y los bordes del periodo aparezcan a menudo, y hasta 20 pasos fuera
-del periodo por cada lado.
+del periodo por cada lado. El periodo cruza a menudo la medianoche y el cambio de mes (``T0``) y
+las marcas llegan con desfases distintos de UTC (seguimiento de VIG-64).
 
 ``oracle`` es la lectura literal del §7 del modelo lógico, escrita aparte de
 ``vigia_platform.ledger.domain.coverage``: devuelve el compuesto y las tres lecturas de capa en
@@ -19,7 +20,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from hypothesis import strategies as st
@@ -56,6 +57,9 @@ def at(ms: int) -> datetime:
     return T0 + ms * MS
 
 
+_at = at
+
+
 def ms_of(moment: datetime) -> int:
     return (moment - T0) // MS
 
@@ -86,14 +90,30 @@ def states_and_causes() -> st.SearchStrategy[tuple[CoverageState, tuple[str, ...
     )
 
 
+ZONES = (
+    UTC,
+    timezone(timedelta(hours=-5)),  # America/Bogota
+    timezone(timedelta(hours=5, minutes=30)),
+    timezone(timedelta(hours=14)),
+    timezone(timedelta(hours=-12)),
+)
+"""Desfases con que llegan las marcas: el mismo instante escrito en otra zona horaria."""
+
+
 @st.composite
 def coverage_inputs(draw: st.DrawFn, *, max_events: int = 12) -> Scenario:
-    unit = draw(st.sampled_from([1, 1_000, 60_000]))
+    """Escenario generado. ``T0`` es medianoche UTC del 1 de septiembre: el periodo puede empezar
+    hasta ``span`` pasos antes, así que cruza a menudo la medianoche y el cambio de mes, y cada
+    marca llega con un desfase de ``ZONES`` (seguimiento de VIG-64)."""
+    unit = draw(st.sampled_from([1, 1_000, 60_000, 3_600_000]))
     span = draw(st.integers(min_value=1, max_value=120))
-    a = draw(st.integers(min_value=0, max_value=50)) * unit
+    a = draw(st.integers(min_value=-span, max_value=50)) * unit
     b = a + span * unit
     moment = st.integers(min_value=-20, max_value=span + 20).map(lambda k: a + k * unit)
     ids = iter(draw(st.lists(st.uuids(), min_size=80, max_size=80, unique=True)))
+
+    def at(ms: int) -> datetime:
+        return _at(ms).astimezone(draw(st.sampled_from(ZONES)))
 
     assignments = []
     for _ in range(draw(st.integers(min_value=0, max_value=3))):

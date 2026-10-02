@@ -28,6 +28,8 @@ ORDER = ("foundation", "data", "edge", "compute", "observability", "datasets")
 
 # Tipos de recurso y cuántos de cada uno espera cada pila (sin ``AWS::CDK::Metadata``).
 EXPECTED_RESOURCES: dict[str, Counter[str]] = {key: Counter() for key in ORDER}
+# ``vigia-datasets`` (TASK-150): depósitos del conjunto y de registros, con sus políticas.
+EXPECTED_RESOURCES["datasets"] = Counter({"AWS::S3::Bucket": 2, "AWS::S3::BucketPolicy": 2})
 
 
 def _short(name: str, config: EnvironmentConfig) -> str:

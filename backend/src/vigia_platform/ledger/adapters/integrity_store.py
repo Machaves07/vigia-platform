@@ -72,7 +72,7 @@ from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import ProcessKind
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 
-__all__ = ["SqlIntegrityStore"]
+__all__ = ["SqlIntegrityResults", "SqlIntegrityStore"]
 
 # Paso 1. ``IS NOT TRUE``: una comparación con NULL (una columna alterada a nulo) también rompe.
 _LEDGER_SCAN: Final = text(
@@ -347,6 +347,35 @@ def _pick(chain: CheckpointChain, ledger: TextClause, audit: TextClause) -> Text
     return audit if chain.kind is ChainKind.AUDIT else ledger
 
 
+async def _results(database: LedgerDatabase, context: ScopeContext) -> Sequence[IntegrityResult]:
+    rows = await database.read(context, _RESULTS, {"organization_id": context.organization_id})
+    return tuple(
+        IntegrityResult.from_filters(
+            json.loads(bytes(row.filters)),
+            broken_entry_id=None if row.resource_id is None else _uuid(row.resource_id),
+            verified_at=row.occurred_at,
+        )
+        for row in rows
+    )
+
+
+@repository
+class SqlIntegrityResults:
+    """Los últimos resultados de cada cadena, en cualquier proceso (TASK-137).
+
+    ``GET /integrity/results`` corre en la API, donde ``SqlIntegrityStore`` no se construye (la
+    verificación es del worker): este lector solo lee las entradas ``integrity_verification`` de
+    la auditoría con la misma sentencia y la misma lectura estricta que ``results``.
+    """
+
+    def __init__(self, *, database: LedgerDatabase) -> None:
+        self._database = database
+
+    async def last_results(self, context: ScopeContext) -> tuple[IntegrityResult, ...]:
+        results = await _results(self._database, context)
+        return tuple(sorted(results, key=lambda result: result.chain.sort_key()))
+
+
 @repository
 class SqlIntegrityStore:
     """``IntegrityStore`` sobre ``shared.db`` (solo en el worker), ``AuditWriter`` y la bandeja."""
@@ -459,17 +488,7 @@ class SqlIntegrityStore:
         return IntegrityResult.from_filters(json.loads(bytes(rows[0].filters))).verified_point
 
     async def results(self, context: ScopeContext) -> Sequence[IntegrityResult]:
-        rows = await self._database.read(
-            context, _RESULTS, {"organization_id": context.organization_id}
-        )
-        return tuple(
-            IntegrityResult.from_filters(
-                json.loads(bytes(row.filters)),
-                broken_entry_id=None if row.resource_id is None else _uuid(row.resource_id),
-                verified_at=row.occurred_at,
-            )
-            for row in rows
-        )
+        return await _results(self._database, context)
 
     async def record(
         self,

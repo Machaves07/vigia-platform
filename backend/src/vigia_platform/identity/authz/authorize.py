@@ -21,7 +21,10 @@ Reglas que no caben en la tabla de §2.6:
 ``Authorizer.authorize`` devuelve el contexto con ``actor.role_in_use`` fijado (lo que registran
 el expediente y la auditoría, BR-NUC-16) o, si no concede, audita ``authorization_denied`` y lanza
 ``ResourceNotFound``: hacia el llamador es **exactamente** lo mismo que un recurso inexistente
-(``not_found``, nunca ``forbidden``; BR-NUC-09).
+(``not_found``, nunca ``forbidden``; BR-NUC-09), también si la auditoría de la denegación falla.
+
+``narrowed(context, key)`` es el contexto reducido a las asignaciones que conceden ``key`` (o
+``None``): lo usan las rutas que leen con un puerto que filtra por alcance sin mirar el rol.
 
 Módulo puro con un puerto de auditoría: no importa FastAPI ni SQLAlchemy (NFR-NUC-25).
 """
@@ -34,7 +37,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, Protocol
 
-from vigia_platform.identity.authz.context import with_role_in_use
+from vigia_platform.identity.authz.context import with_role_in_use, with_scopes
 from vigia_platform.identity.authz.matrix import (
     MATRIX,
     PermissionKey,
@@ -49,6 +52,7 @@ from vigia_platform.shared.context import (
     ScopeLevel,
     repository,
 )
+from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
     "AuthorizationAudit",
@@ -57,9 +61,12 @@ __all__ = [
     "Resource",
     "ResourceNotFound",
     "decide",
+    "narrowed",
     "role_in_use",
     "route_role",
 ]
+
+_log = get_logger("identity.authz")
 
 _SPECIFICITY: Final = {ScopeLevel.ZONE: 0, ScopeLevel.PLANT: 1, ScopeLevel.ORGANIZATION: 2}
 _ROLE_ORDER: Final = {role: index for index, role in enumerate(Role)}
@@ -213,6 +220,35 @@ def route_role(
     )
 
 
+def narrowed(
+    context: ScopeContext, key: PermissionKey | str, *, provider_organization_id: uuid.UUID
+) -> ScopeContext | None:
+    """``context`` reducido a las asignaciones que conceden ``key`` en él, o ``None`` si ninguna.
+
+    Las mismas reglas de proveedor y de concesión que ``decide`` y ``route_role``; el rol en uso es
+    el determinista entre las conservadas (BR-NUC-16). Sirve a los puertos que filtran por
+    ``allowed_scopes`` sin mirar el rol (``LectorExpediente``): con el contexto reducido, una
+    asignación de otro rol (p. ej. ``coordinator_sst`` de otra planta) no amplía lo que ve una
+    ruta que exige ``audit.read``.
+    """
+    if not isinstance(context, ScopeContext):
+        raise ContextAbsent("narrowed")
+    key = permission_key(key)
+    if is_platform_key(key) and (
+        context.organization_id != provider_organization_id or context.concession_id is not None
+    ):
+        return None
+    kept = [
+        scope
+        for scope in context.allowed_scopes
+        if key in MATRIX[scope.role] and _counts(scope, context, provider_organization_id)
+    ]
+    role = role_in_use(kept)
+    if role is None:
+        return None
+    return with_scopes(context, kept, role)
+
+
 class AuthorizationAudit(Protocol):
     """Puerto de auditoría de la autorización (adaptador en ``identity.adapters.authz_store``)."""
 
@@ -245,6 +281,11 @@ class Authorizer:
             provider_organization_id=self._provider_organization_id,
         )
         if decision.role_in_use is None:
-            await self._audit.authorization_denied(context, permission, resource)
+            try:
+                await self._audit.authorization_denied(context, permission, resource)
+            except Exception:
+                # Como en la autorización por ruta (seguimiento de VIG-78): la denegación no
+                # depende de la base; con la auditoría caída sigue siendo ``not_found``.
+                _log.exception("no se pudo auditar authorization_denied")
             raise ResourceNotFound()
         return with_role_in_use(context, decision.role_in_use)

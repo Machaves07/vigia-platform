@@ -1,0 +1,484 @@
+{
+  "Description": "Vigia U-01: deposito del conjunto sellado y de registros, presupuestos.",
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/vigia/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>"
+    },
+    "BudgetAlertEmail": {
+      "AllowedPattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "ConstraintDescription": "Debe ser una dirección de correo.",
+      "Description": "Correo del dueño del producto que recibe las alertas de presupuesto.",
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "DatasetsBucket": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "BucketName": {
+          "Fn::Join": [
+            "",
+            [
+              "vigia-datasets-",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              "-us-east-1"
+            ]
+          ]
+        },
+        "LoggingConfiguration": {
+          "DestinationBucketName": {
+            "Ref": "LogsBucket"
+          },
+          "LogFilePrefix": "s3/datasets/"
+        },
+        "ObjectLockConfiguration": {
+          "ObjectLockEnabled": "Enabled",
+          "Rule": {
+            "DefaultRetention": {
+              "Days": 365,
+              "Mode": "GOVERNANCE"
+            }
+          }
+        },
+        "ObjectLockEnabled": true,
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "data",
+            "Value": "anonymized"
+          },
+          {
+            "Key": "managed_by",
+            "Value": "cdk"
+          },
+          {
+            "Key": "project",
+            "Value": "vigia"
+          },
+          {
+            "Key": "unit",
+            "Value": "U-01"
+          }
+        ],
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "DatasetsBucketPolicy": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "DatasetsBucket"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DatasetsBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DatasetsBucket",
+                          "Arn"
+                        ]
+                      },
+                      "/*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      },
+      "Type": "AWS::S3::BucketPolicy"
+    },
+    "LogsBucket": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "BucketName": {
+          "Fn::Join": [
+            "",
+            [
+              "vigia-logs-",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              "-us-east-1"
+            ]
+          ]
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 7
+              },
+              "ExpirationInDays": 365,
+              "Id": "expire-logs-365d",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 365
+              },
+              "Status": "Enabled"
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "data",
+            "Value": "anonymized"
+          },
+          {
+            "Key": "managed_by",
+            "Value": "cdk"
+          },
+          {
+            "Key": "project",
+            "Value": "vigia"
+          },
+          {
+            "Key": "unit",
+            "Value": "U-01"
+          }
+        ],
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "LogsBucketPolicy": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "LogsBucket"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "LogsBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "LogsBucket",
+                          "Arn"
+                        ]
+                      },
+                      "/*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": "s3:PutObject",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::GetAtt": [
+                      "DatasetsBucket",
+                      "Arn"
+                    ]
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "logging.s3.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "LogsBucket",
+                        "Arn"
+                      ]
+                    },
+                    "/s3/datasets/*"
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      },
+      "Type": "AWS::S3::BucketPolicy"
+    },
+    "MonthlyBudget": {
+      "Properties": {
+        "Budget": {
+          "BudgetLimit": {
+            "Amount": 400,
+            "Unit": "USD"
+          },
+          "BudgetName": "vigia-monthly",
+          "BudgetType": "COST",
+          "FilterExpression": {
+            "Tags": {
+              "Key": "project",
+              "MatchOptions": [
+                "EQUALS"
+              ],
+              "Values": [
+                "vigia"
+              ]
+            }
+          },
+          "TimeUnit": "MONTHLY"
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "ACTUAL",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "BudgetAlertEmail"
+                },
+                "SubscriptionType": "EMAIL"
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "ACTUAL",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "BudgetAlertEmail"
+                },
+                "SubscriptionType": "EMAIL"
+              }
+            ]
+          }
+        ],
+        "ResourceTags": [
+          {
+            "Key": "data",
+            "Value": "anonymized"
+          },
+          {
+            "Key": "managed_by",
+            "Value": "cdk"
+          },
+          {
+            "Key": "project",
+            "Value": "vigia"
+          },
+          {
+            "Key": "unit",
+            "Value": "U-01"
+          }
+        ]
+      },
+      "Type": "AWS::Budgets::Budget"
+    },
+    "StagingBudget": {
+      "Properties": {
+        "Budget": {
+          "BudgetLimit": {
+            "Amount": 40,
+            "Unit": "USD"
+          },
+          "BudgetName": "vigia-staging",
+          "BudgetType": "COST",
+          "FilterExpression": {
+            "Tags": {
+              "Key": "environment",
+              "MatchOptions": [
+                "STARTS_WITH"
+              ],
+              "Values": [
+                "staging-"
+              ]
+            }
+          },
+          "TimeUnit": "MONTHLY"
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "ACTUAL",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "BudgetAlertEmail"
+                },
+                "SubscriptionType": "EMAIL"
+              }
+            ]
+          },
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "ACTUAL",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE"
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "BudgetAlertEmail"
+                },
+                "SubscriptionType": "EMAIL"
+              }
+            ]
+          }
+        ],
+        "ResourceTags": [
+          {
+            "Key": "data",
+            "Value": "anonymized"
+          },
+          {
+            "Key": "managed_by",
+            "Value": "cdk"
+          },
+          {
+            "Key": "project",
+            "Value": "vigia"
+          },
+          {
+            "Key": "unit",
+            "Value": "U-01"
+          }
+        ]
+      },
+      "Type": "AWS::Budgets::Budget"
+    }
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5"
+                  ],
+                  {
+                    "Ref": "BootstrapVersion"
+                  }
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+        }
+      ]
+    }
+  }
+}
