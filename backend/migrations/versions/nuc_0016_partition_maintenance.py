@@ -1,6 +1,6 @@
 """Particiones y archivado de auditoría (TASK-131, LC-NUC-33; PAT-NUC-ESC-01, MAN-03).
 
-Revisión nuc_0015. Funciones ``SECURITY DEFINER`` de ``vigia_migrate`` (el dueño de las tablas
+Revisión nuc_0016. Funciones ``SECURITY DEFINER`` de ``vigia_migrate`` (el dueño de las tablas
 particionadas) con ``search_path`` fijo, para que el proceso de trabajo (``vigia_app``) haga lo que
 sus privilegios no le dejan: crear particiones, contar la partición por defecto, leer una partición
 de auditoría entera (todas las organizaciones) y desprenderla. ``vigia_app`` solo puede
@@ -40,8 +40,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0015"
-down_revision: str | None = "nuc_0014"
+revision: str = "nuc_0016"
+down_revision: str | None = "nuc_0015"
 branch_labels: None = None
 depends_on: None = None
 

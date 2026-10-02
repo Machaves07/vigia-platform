@@ -1,6 +1,6 @@
 """``archive_audit_partitions`` contra PostgreSQL 16 y LocalStack reales (TASK-131, PAT-NUC-MAN-03).
 
-Base migrada hasta ``nuc_0015``; escritor, auditoría, bandeja y puntos de control reales como
+Base migrada hasta ``nuc_0016``; escritor, auditoría, bandeja y puntos de control reales como
 ``vigia_app`` (nunca superusuario); ``vigia-archive`` es un depósito de LocalStack con versionado y
 el archivo se sube cifrado con una clave KMS de LocalStack. Las entradas de auditoría se escriben
 **ahora** (el disparador fija ``occurred_at`` con la hora de la base), así que caen en la partición
@@ -19,7 +19,7 @@ del mes en curso; el reloj del archivado va 25 meses por delante para que esa pa
   cortar la pasada; tras una pasada fallida, la siguiente archiva una vez y la tercera no duplica.
 - **Concurrencia**: el desprendimiento espera a un escritor en curso y rechaza su entrada; dos
   archivados a la vez desprenden y registran una sola vez.
-- **Guardas de nuc_0015**: solo el sistema lee y desprende; el desprendimiento exige el recuento
+- **Guardas de nuc_0016**: solo el sistema lee y desprende; el desprendimiento exige el recuento
   verificado y ninguna entrada posterior; solo particiones adjuntas con el nombre del convenio.
 - El manejador solo actúa en la iteración de la organización proveedora.
 
@@ -473,7 +473,7 @@ def test_a_failed_pass_resumes_once_and_never_twice(world: World) -> None:
 def test_detach_waits_for_an_in_flight_writer_and_rejects_its_entry(world: World) -> None:
     """Un escritor con una entrada sin confirmar en la partición mientras otra transacción la
     desprende con el recuento confirmado: el desprendimiento espera al escritor, ve la entrada
-    nueva y se rechaza. Sin el ``LOCK TABLE`` de nuc_0015 contaría sin ella y desprendería una
+    nueva y se rechaza. Sin el ``LOCK TABLE`` de nuc_0016 contaría sin ella y desprendería una
     partición con una entrada sin archivar."""
     count = len(world.partition_rows())
     end = datetime(*add_months(world.month, 1).timetuple()[:3], tzinfo=UTC)
@@ -552,7 +552,7 @@ def test_handler_acts_only_in_the_provider_iteration(world: World) -> None:
     assert world.archived_records() == []
 
 
-# --- Guardas de nuc_0015 -------------------------------------------------------------------------
+# --- Guardas de nuc_0016 -------------------------------------------------------------------------
 
 
 def _call(world: World, context: ScopeContext, statement: str, **parameters: Any) -> str | None:

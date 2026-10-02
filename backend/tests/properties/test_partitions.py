@@ -4,13 +4,13 @@ PR-NUC-43: «para cualquier fecha generada dentro de los tres meses siguientes, 
 tras ``create_partitions``; para una fecha fuera del rango cubierto la fila cae en la partición por
 defecto, no se rechaza y ``default_partition_rows`` es mayor que cero» (PAT-NUC-ESC-01).
 
-Base migrada hasta ``nuc_0015`` y la tarea como ``vigia_app`` (nunca superusuario): las funciones
-de nuc_0015 son de ``vigia_migrate``. El reloj de la tarea es un ``SimulatedClock`` desplazado
+Base migrada hasta ``nuc_0016`` y la tarea como ``vigia_app`` (nunca superusuario): las funciones
+de nuc_0016 son de ``vigia_migrate``. El reloj de la tarea es un ``SimulatedClock`` desplazado
 meses hacia delante, así que cada ejemplo crea particiones nuevas de verdad; las fechas fuera del
 rango son de 2080 en adelante, que ningún ejemplo crea.
 
 - Criterio 3 de la tarea: ejecutar ``create_partitions`` dos veces no falla ni duplica, tampoco
-  con dos a cuatro llamadas a la vez desde conexiones distintas (candado consultivo de nuc_0015).
+  con dos a cuatro llamadas a la vez desde conexiones distintas (candado consultivo de nuc_0016).
 - Cada partición nueva queda protegida como las de la migración (``TRUNCATE`` falla, disparadores
   con ``ENABLE ALWAYS``) y sin privilegios para ``vigia_app``.
 - Un mes con filas en la partición por defecto se devuelve como ``blocked`` sin abortar el resto.

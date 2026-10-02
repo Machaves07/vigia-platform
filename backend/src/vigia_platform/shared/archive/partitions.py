@@ -9,7 +9,7 @@ siempre creados el mes en curso y los ``PARTITION_MONTHS_AHEAD`` siguientes seg�
 inyectado, y publica ``default_partition_rows`` por tabla: una sola fila en una partición por
 defecto dispara la alarma (señal de que la tarea falló).
 
-La creación la hace ``shared.vigia_create_month_partitions`` (nuc_0015), que es **idempotente**:
+La creación la hace ``shared.vigia_create_month_partitions`` (nuc_0016), que es **idempotente**:
 un mes que ya tiene partición no se toca, así que ejecutar la tarea dos veces no falla ni duplica
 nada. Si la partición por defecto ya tiene filas de un mes, ese mes no se puede crear (PostgreSQL
 lo impide y las filas no se pueden mover: la tabla es de solo anexar); la función lo devuelve como
@@ -69,7 +69,7 @@ sin ejecutarse no deja ningún mes sin partición."""
 PARTITION_MONTHS_AHEAD: Final = 3
 """Meses siguientes al actual que siempre tienen partición (PAT-NUC-ESC-01)."""
 MAX_MONTHS_PER_CALL: Final = 120
-"""Tope de meses por llamada de ``shared.vigia_create_month_partitions`` (nuc_0015)."""
+"""Tope de meses por llamada de ``shared.vigia_create_month_partitions`` (nuc_0016)."""
 
 _CREATE: Final = text(
     "SELECT parent, partition, month, created, blocked"

@@ -5,7 +5,7 @@ con arrendamiento, toma cada partición mensual adjunta de ``shared.audit_entry`
 hace al menos ``AUDIT_ONLINE_MONTHS`` meses según el reloj inyectado y, por cada una:
 
 1. **Exporta** la partición entera (todas las organizaciones, por lotes y en orden de organización
-   y secuencia; ``shared.vigia_audit_partition_rows`` de nuc_0015) y recorre cada cadena con
+   y secuencia; ``shared.vigia_audit_partition_rows`` de nuc_0016) y recorre cada cadena con
    ``chain_walk`` antes de subir nada: una partición que ya está rota en la base no se archiva.
 2. **Empaqueta** un ZIP comprimido (``ARCHIVE_CONTENT_TYPE``) con:
 
