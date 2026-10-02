@@ -376,8 +376,6 @@ def routes(postgres_endpoint: PostgresEndpoint) -> Iterator[Routes]:
             checkpoints=checkpoints,
             live_view=env.service(),
             authorizer=authz.authorizer,
-            provider_queries=LedgerProviderQueryLedger(writer),
-            clock=env.clock,
             provider_organization_id=provider,
         )
         platform = PlatformHttp(
@@ -398,7 +396,10 @@ def routes(postgres_endpoint: PostgresEndpoint) -> Iterator[Routes]:
             runtime={
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
-                    audit=authz.audit, provider_organization_id=provider
+                    audit=authz.audit,
+                    provider_organization_id=provider,
+                    provider_queries=LedgerProviderQueryLedger(writer),
+                    clock=env.clock,
                 ),
                 "ledger": ledger,
                 "platform": platform,

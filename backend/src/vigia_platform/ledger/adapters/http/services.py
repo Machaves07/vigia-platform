@@ -7,10 +7,9 @@ fábrica lo deja en ``app.state``. Sin él, ``internal_error`` (fallo cerrado), 
   ``allowed_scopes`` sin mirar el rol (``LectorExpediente``) reciben el contexto reducido a las
   asignaciones que conceden la clave de la ruta (``identity.authz.authorize.narrowed``). Sin
   ninguna, se deniega como ``authorize`` (``authorization_denied`` auditado y ``not_found``).
-- **``provider_query``** (BR-NUC-38): toda petición bajo concesión que leyó o escribió datos del
-  cliente deja su registro en la cadena del alcance concedido **antes** de responder; si no se
-  puede escribir, la petición no se da por buena (``internal_error``) y nada sale: ningún acceso
-  del proveedor es invisible para el cliente (BR-NUC-41). Fuera de concesión no hace nada.
+- **``provider_query``** (BR-NUC-38 y 41): no lo escriben estas rutas, sino ``ContextAuthorizer``
+  (VIG-132) al conceder la clave de la ruta bajo concesión, antes de que corra y con fallo cerrado;
+  así hay uno solo por petición.
 
 Toda respuesta de estas rutas lleva ``Cache-Control: no-store``: son datos del expediente, de la
 auditoría o URL y tokens de corta vida.
@@ -23,12 +22,11 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final, Literal, Protocol
+from typing import Final, Protocol
 
 from fastapi import Request, Response
 
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, narrowed
-from vigia_platform.identity.authz.context import ProviderQueryLedger, record_provider_query
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.coverage import CoveragePort
 from vigia_platform.ledger.application.evidence_read import EvidencePort
@@ -39,7 +37,6 @@ from vigia_platform.ledger.chain.checkpoints import CheckpointChain, StoredCheck
 from vigia_platform.ledger.chain.verify import IntegrityResult
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
-from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.tokens import IssuedLiveViewToken
@@ -58,7 +55,6 @@ __all__ = [
     "narrowed_context",
     "no_store",
     "parse_instant",
-    "provider_access",
     "request_context",
 ]
 
@@ -108,8 +104,6 @@ class LedgerHttp:
     checkpoints: CheckpointReader
     live_view: LiveViewIssuer
     authorizer: Authorizer
-    provider_queries: ProviderQueryLedger
-    clock: Clock
     provider_organization_id: uuid.UUID
 
     def __post_init__(self) -> None:
@@ -147,35 +141,6 @@ async def narrowed_context(
         )
         raise ApiError(ApiErrorCode.NOT_FOUND)  # pragma: no cover - authorize ya lanzó
     return reduced
-
-
-def _route_template(request: Request) -> str:
-    route = request.scope.get("route")
-    path = getattr(route, "path", None)
-    if not isinstance(path, str):
-        raise ApiError(ApiErrorCode.INTERNAL_ERROR)
-    return path
-
-
-async def provider_access(
-    request: Request,
-    services: LedgerHttp,
-    context: ScopeContext,
-    operation: Literal["read", "write"],
-    *,
-    occurred_at: datetime | None = None,
-) -> None:
-    """``provider_query`` de una petición bajo concesión (BR-NUC-38); nada fuera de ella."""
-    if context.concession_id is None:
-        return
-    await record_provider_query(
-        context,
-        services.provider_queries,
-        operation=operation,
-        method=request.method,
-        route_template=_route_template(request),
-        occurred_at=occurred_at or services.clock.now(),
-    )
 
 
 TIMESTAMP_PATTERN: Final = (

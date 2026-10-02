@@ -128,10 +128,8 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         "vigia_platform.identity.application.roles.remove_assignment",
         "vigia_platform.identity.application.users.create_invited_user",
         # ledger.adapters.http (TASK-137): sin consultas propias; ``narrowed_context`` reduce el
-        # contexto (función pura) y, si deniega, llama a ``Authorizer`` (registrado);
-        # ``provider_access`` llama a ``record_provider_query`` (arriba) con su puerto registrado.
+        # contexto (función pura) y, si deniega, llama a ``Authorizer`` (registrado).
         "vigia_platform.ledger.adapters.http.services.narrowed_context",
-        "vigia_platform.ledger.adapters.http.services.provider_access",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

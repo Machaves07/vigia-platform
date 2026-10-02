@@ -30,7 +30,6 @@ from vigia_platform.ledger.adapters.http.services import (
     exact_query,
     ledger_http,
     no_store,
-    provider_access,
     request_context,
 )
 from vigia_platform.ledger.application.evidence_read import (
@@ -78,7 +77,6 @@ def evidence_router() -> APIRouter:
             raise ApiError(ApiErrorCode.CONFLICT) from None
         except EvidenceQueryInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
-        await provider_access(request, services, context, "read")
         return EvidenceReadUrlResponse(
             evidence_id=grant.evidence_id,
             url=grant.url,

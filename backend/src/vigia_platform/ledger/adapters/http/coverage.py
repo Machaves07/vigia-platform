@@ -16,7 +16,7 @@ tramos y los concatena (PR-NUC-51). Las marcas llevan zona horaria (``Z`` o desf
 milisegundos; ``from`` tiene que ser anterior a ``to``. Cada consulta válida queda auditada como
 ``coverage_read`` (``CoveragePort``). La zona fuera del alcance de ``coverage.read`` responde
 ``not_found``, igual que una inexistente. Bajo concesión (el instalador del proveedor tiene
-``coverage.read``) se escribe además ``provider_query`` (BR-NUC-38).
+``coverage.read``), ``ContextAuthorizer`` escribe además ``provider_query`` (BR-NUC-38).
 """
 
 from __future__ import annotations
@@ -35,7 +35,6 @@ from vigia_platform.ledger.adapters.http.services import (
     narrowed_context,
     no_store,
     parse_instant,
-    provider_access,
     request_context,
 )
 from vigia_platform.ledger.application.coverage import (
@@ -187,7 +186,6 @@ def coverage_router() -> APIRouter:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         except CoverageZoneNotFound:
             raise ApiError(ApiErrorCode.NOT_FOUND) from None
-        await provider_access(request, services, context, "read")
         return CoverageTimelineOut(
             organization_id=result.organization_id,
             plant_id=result.plant_id,
@@ -223,7 +221,6 @@ def coverage_router() -> APIRouter:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         except CoverageZoneNotFound:
             raise ApiError(ApiErrorCode.NOT_FOUND) from None
-        await provider_access(request, services, context, "read")
         return _status(zone_id, status)
 
     return router

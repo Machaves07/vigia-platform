@@ -31,7 +31,6 @@ from vigia_platform.ledger.adapters.http.services import (
     exact_query,
     ledger_http,
     no_store,
-    provider_access,
     request_context,
 )
 from vigia_platform.shared.api.declarations import requires
@@ -83,7 +82,6 @@ def live_view_router() -> APIRouter:
             ) from None
         except (SigningKeyUnavailable, SigningNotReady):
             raise ApiError(ApiErrorCode.TEMPORARILY_UNAVAILABLE) from None
-        await provider_access(request, services, context, "write")
         body = issued.to_response()
         return LiveViewTokenOut(
             token=issued.token,

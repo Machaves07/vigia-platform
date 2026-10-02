@@ -46,7 +46,6 @@ from vigia_platform.ledger.adapters.http.services import (
     narrowed_context,
     no_store,
     parse_instant,
-    provider_access,
     request_context,
 )
 from vigia_platform.ledger.application.reader import (
@@ -349,7 +348,6 @@ def records_router() -> APIRouter:
             result = await services.reader.list(reader_context, filters, page)
         except LedgerQueryInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
-        await provider_access(request, services, context, "read")
         cursor = result.next_cursor
         return LedgerRecordPage(
             items=tuple(record_out(item) for item in result.items),
@@ -388,7 +386,6 @@ def records_router() -> APIRouter:
             )
         if record is None:
             raise ApiError(ApiErrorCode.NOT_FOUND)
-        await provider_access(request, services, context, "read")
         return record_out(record)
 
     @router.get(
@@ -435,7 +432,6 @@ def records_router() -> APIRouter:
             result = await services.reader.list_audit(reader_context, filters, page)
         except LedgerQueryInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
-        await provider_access(request, services, context, "read")
         cursor = result.next_cursor
         return AuditEntryPage(
             items=tuple(_audit_out(item) for item in result.items),

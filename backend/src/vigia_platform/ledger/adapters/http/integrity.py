@@ -36,7 +36,6 @@ from vigia_platform.ledger.adapters.http.services import (
     exact_query,
     ledger_http,
     no_store,
-    provider_access,
     request_context,
 )
 from vigia_platform.ledger.application.integrity_requests import ChainNotFound
@@ -191,7 +190,6 @@ def integrity_router() -> APIRouter:
             accepted = await services.integrity_requests.request(authorized, chain)
         except ChainNotFound:
             raise ApiError(ApiErrorCode.NOT_FOUND) from None
-        await provider_access(request, services, context, "write")
         return VerificationAccepted(
             request_id=accepted.request_id,
             chain=_chain_out(chain),
@@ -211,7 +209,6 @@ def integrity_router() -> APIRouter:
         context = request_context(request)
         found = await services.integrity_results.last_results(context)
         visible = tuple(r for r in found if _visible(services, context, r.chain))
-        await provider_access(request, services, context, "read")
         return IntegrityResultsOut(results=tuple(_result_out(r) for r in visible))
 
     @router.get(
@@ -226,7 +223,6 @@ def integrity_router() -> APIRouter:
         context = request_context(request)
         found = await services.checkpoints.latest_checkpoints(context)
         visible = tuple(c for c in found if _visible(services, context, c.chain))
-        await provider_access(request, services, context, "read")
         return CheckpointsOut(
             organization_id=context.organization_id,
             checkpoints=tuple(_checkpoint_out(c) for c in visible),

@@ -27,7 +27,6 @@ from vigia_platform.ledger.adapters.http.services import (
     ledger_http,
     no_store,
     parse_instant,
-    provider_access,
     request_context,
 )
 from vigia_platform.ledger.application.labels import (
@@ -149,7 +148,6 @@ def labels_router() -> APIRouter:
             raise ApiError(ApiErrorCode.NOT_FOUND) from None
         except LabelQueryInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
-        await provider_access(request, services, context, "read")
         cursor = page.next_cursor
         return LabelPageOut(
             items=tuple(_label(view) for view in page.items),
