@@ -30,7 +30,6 @@ import socket
 import subprocess
 import sys
 import threading
-import uuid
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
@@ -39,7 +38,7 @@ from typing import IO, Any, Final
 
 import httpx
 
-from tests.resilience.harness import BACKEND, WALL, free_port, wait_until
+from tests.resilience.harness import BACKEND, free_port, wait_until
 from tests.worker_support import EFFECT_EVENT, ProbeTask, worker_catalog
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.db import Transaction
@@ -326,11 +325,3 @@ def balancer(backends: Mapping[str, int]) -> Iterator[Balancer]:
 def process_environment(**values: object) -> dict[str, str]:
     """Variables ``VIGIA_*`` como texto (las rutas y los identificadores, con ``str``)."""
     return {name: str(value) for name, value in values.items()}
-
-
-def unique_owner() -> str:
-    return f"proceso-{os.getpid()}-{uuid.uuid4().hex[:6]}"
-
-
-def elapsed_since(started: float) -> float:
-    return WALL.monotonic() - started
