@@ -13,6 +13,9 @@ prueba ``test_auth_routes``.
 - **H-56 / BR-NUC-39 y 41**: el proveedor se concede acceso, lo usa con ``X-Vigia-Concession``, el
   cliente lo ve en su panel con el motivo, lo revoca y la petición siguiente del proveedor
   responde ``not_found``; el panel del cliente y la lista del proveedor muestran ``revoked``.
+- **VIG-132 / BR-NUC-38 y 41**: ``GET /hierarchy`` bajo concesión aparece una sola vez en
+  ``GET /concessions/{id}/queries`` del cliente; otra organización y el proveedor reciben
+  ``not_found`` en esa ruta.
 - Bordes de cada grupo: páginas de ``GET /users`` (``limit`` 0, 1, 200 y 201), correo repetido,
   sin asignaciones, último administrador, segundo factor, retiro repetido, código repetido,
   planta de otra organización, alcance de ``GET /hierarchy``, topes de concesión (``default >
@@ -50,6 +53,7 @@ from tests.hierarchy_support import (
 from tests.integration.conftest import PostgresEndpoint
 from tests.second_factor_support import FakeKms
 from tests.session_support import ORIGIN_KEY
+from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
 from vigia_platform.identity.adapters.http.concessions import decode_cursor, encode_cursor
@@ -71,6 +75,7 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
+from vigia_platform.shared.signing.keys import format_timestamp
 
 pytestmark = pytest.mark.integration
 
@@ -187,7 +192,10 @@ def api(postgres_endpoint: PostgresEndpoint) -> Iterator[Api]:
             runtime={
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
-                    audit=authz.audit, provider_organization_id=provider
+                    audit=authz.audit,
+                    provider_organization_id=provider,
+                    provider_queries=LedgerProviderQueryLedger(env.writer),
+                    clock=sessions.clock,
                 ),
                 "identity": identity,
             },
@@ -504,6 +512,51 @@ def test_provider_queries_page_and_cursor(api: Api) -> None:
         assert response.status_code == 400
     unknown = api.request("GET", f"/concessions/{uuid.uuid4()}/queries", cookie=client.admin)
     assert unknown.status_code == 404
+
+
+def test_vig132_a_hierarchy_read_under_concession_shows_in_the_clients_queries(
+    api: Api,
+) -> None:
+    """VIG-132 (BR-NUC-38 y 41): la lectura del proveedor aparece en el panel del cliente."""
+    authz = api.env.authz
+    client = _client(api)
+    other = _client(api, plants=1, zones_per_plant=1)
+    installer = authz.add_provider_user()
+    provider = authz.open_session(authz.provider_organization_id, installer)
+    granted = api.request(
+        "POST",
+        "/provider/concessions",
+        cookie=provider,
+        json={
+            "client_organization_id": str(client.organization_id),
+            "scope_level": "plant",
+            "scope_id": str(client.plant_id),
+            "reason": REASON,
+        },
+    )
+    assert granted.status_code == 201, granted.text
+    concession_id = uuid.UUID(granted.json()["concession_id"])
+    queries = f"/concessions/{concession_id}/queries"
+    assert api.request("GET", queries, cookie=client.admin).json()["queries"] == []
+    moment = format_timestamp(authz.sessions.clock.now())
+
+    used = api.request("GET", "/hierarchy", cookie=provider, concession=concession_id)
+
+    assert used.status_code == 200, used.text
+    page = api.request("GET", queries, cookie=client.admin)
+    assert page.status_code == 200, page.text
+    (item,) = page.json()["queries"]
+    assert (item["operation"], item["method"], item["resource"]) == ("read", "GET", "/hierarchy")
+    assert item["occurred_at"] == moment
+    assert item["plant_id"] == str(client.plant_id)
+    assert item["provider_user_id"] == str(installer) and item["reason"] == REASON
+    # Nadie más ve el panel: otra organización, ni el proveedor con o sin la concesión.
+    assert api.request("GET", queries, cookie=other.admin).status_code == 404
+    for concession in (concession_id, None):
+        refused = api.request("GET", queries, cookie=provider, concession=concession)
+        assert refused.status_code == 404 and _code(refused) == "not_found"
+    # Las peticiones rechazadas antes de la ruta no se cuentan como acceso.
+    assert len(api.request("GET", queries, cookie=client.admin).json()["queries"]) == 1
 
 
 def _naive_cursor() -> str:

@@ -4,8 +4,10 @@ BR-NUC-38 y 41, PR-NUC-11: la aplicación real (``create_app`` con la cadena fij
 ``ScopeContexts`` y ``ContextAuthorizer``) sobre la base migrada como ``vigia_app``, con la
 concesión concedida por ``ConcessionService`` y el ``provider_query`` escrito por
 ``LedgerProviderQueryLedger`` (``EscritorExpediente``). La ruta de datos es una ruta de prueba
-``GET /hierarchy`` con la clave ``hierarchy.read``, como la de TASK-136; el panel del cliente es
-``ConcessionService.list_provider_queries``, lo que responde ``GET /concessions/{id}/queries``.
+genérica ``GET /hierarchy`` con la clave ``hierarchy.read``; el panel del cliente es
+``ConcessionService.list_provider_queries``. El recorrido con las rutas reales de TASK-136
+(``GET /hierarchy`` y ``GET /concessions/{id}/queries``) está en
+``tests/examples/test_admin_routes.py``.
 
 - Una petición bajo concesión deja exactamente un ``provider_query`` en la cadena del alcance
   concedido (planta u organización) con operación, método, plantilla de ruta y momento, y el
