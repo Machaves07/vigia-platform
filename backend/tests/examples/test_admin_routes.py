@@ -37,6 +37,7 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from sqlalchemy import text
 
 from tests.api_support import World
 from tests.authz_support import Site
@@ -957,6 +958,32 @@ def test_each_provider_user_lists_only_their_own_concessions(api: Api) -> None:
         listed = api.request("GET", "/provider/concessions", cookie=session)
         assert listed.status_code == 200, listed.text
         assert [item["concession_id"] for item in listed.json()["concessions"]] == [str(expected)]
+
+
+def test_provider_concessions_of_answers_only_the_providers_own_session(api: Api) -> None:
+    """``identity.provider_concessions_of`` (``nuc_0012``) desde otros contextos: nada."""
+    authz = api.env.authz
+    client = _client(api)
+    installer = authz.add_provider_user()
+    concession_id = authz.add_concession(client.organization_id, installer)
+    statement = text(
+        "SELECT concession_id FROM identity.provider_concessions_of(CAST(:grantee AS uuid))"
+    )
+
+    def listed(context: Any) -> list[uuid.UUID]:
+        rows = api.env.run(
+            authz.sessions.database.read(context, statement, {"grantee": str(installer)})
+        )
+        return [uuid.UUID(str(row.concession_id)) for row in rows]
+
+    provider = api.env.session_context(authz.provider_organization_id, installer)
+    assert listed(provider) == [concession_id]
+    # El cliente de la concesión (u otro) no lee las concesiones del proveedor.
+    assert listed(api.env.session_context(client.organization_id, client.admin_id)) == []
+    # Ni el propio proveedor bajo la concesión (contexto de proveedor, BR-NUC-04).
+    cookie = authz.open_session(authz.provider_organization_id, installer)
+    under = api.env.run(authz.contexts.context_from_session(cookie, concession_id=concession_id))
+    assert listed(under.context) == []
 
 
 def test_an_expired_concession_is_shown_expired_before_the_task_runs(api: Api) -> None:
