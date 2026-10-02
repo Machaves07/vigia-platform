@@ -17,8 +17,12 @@ consulta cada ``poll_seconds`` qué tareas vencieron y ejecuta cada una con arre
    dentro de un ``SAVEPOINT`` y avanza el cursor (la valla de ``SqlLeaseStore.advance``). Si el
    manejador falla, se deshace lo suyo, el fallo **se registra** (cursor con el fallo sumado,
    registro de error con la tarea, la organización y el código, y la métrica con resultado
-   ``failed``) y la tarea **sigue con las demás** (BR-NUC-81). Si la valla no se cumple, la
-   transacción se deshace entera y el proceso abandona la tarea sin liberarla: ya es de otro.
+   ``failed``) y la tarea **sigue con las demás** (BR-NUC-81). El manejador tiene un tope por
+   organización (``handler_timeout_seconds``, 300 s ``[objetivo propio]``): al vencer se cancela,
+   se deshace lo suyo y cuenta como fallo con código ``handler_timeout``. Sin tope, la renovación
+   mantendría para siempre una tarea colgada y ningún otro proceso podría tomarla. Si la valla
+   no se cumple, la transacción se deshace entera y el proceso abandona la tarea sin liberarla:
+   ya es de otro.
 4. ``release`` con ``next_run_at`` del horario y el resultado (``succeeded`` o
    ``partial_failure``). Una parada ordenada o la base caída a mitad liberan **sin** avanzar
    ``next_run_at`` (``interrupted``): otro proceso la toma enseguida y continúa por el cursor.
@@ -63,7 +67,9 @@ from vigia_platform.shared.worker.leases import (
 )
 
 __all__ = [
+    "DEFAULT_HANDLER_TIMEOUT_SECONDS",
     "DEFAULT_POLL_SECONDS",
+    "HandlerTimeout",
     "OrganizationOutcome",
     "OrganizationResult",
     "PeriodicScheduler",
@@ -76,6 +82,9 @@ _log = get_logger("shared.worker")
 DEFAULT_POLL_SECONDS: Final = 5.0
 """Cada cuánto se consultan las tareas vencidas ``[objetivo propio]``: la más frecuente de U-03
 es de 60 s."""
+DEFAULT_HANDLER_TIMEOUT_SECONDS: Final = 300.0
+"""Tope del manejador en una organización ``[objetivo propio]``: muy por encima del
+``statement_timeout`` de 30 s del pool del worker."""
 
 _ACTIVE_ORGANIZATIONS: Final = text(
     "SELECT organization_id FROM shared.vigia_active_organizations()"
@@ -145,6 +154,12 @@ class _Holder:
         return not self.lost and now <= self.lease.until - settings.safety_margin
 
 
+class HandlerTimeout(Exception):
+    """El manejador superó su tope en una organización: cuenta como fallo de esa organización."""
+
+    code = "handler_timeout"
+
+
 class _Interrupted(Exception):
     """La ejecución se corta sin perder el arrendamiento (parada ordenada, base caída)."""
 
@@ -163,10 +178,14 @@ class PeriodicScheduler:
         owner: str,
         metrics: PlatformMetrics | None = None,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
+        handler_timeout_seconds: float = DEFAULT_HANDLER_TIMEOUT_SECONDS,
         on_renewal: Callable[[Lease], None] | None = None,
     ) -> None:
         if poll_seconds <= 0:
             raise ValueError("poll_seconds debe ser positivo")
+        if handler_timeout_seconds <= 0:
+            raise ValueError("handler_timeout_seconds debe ser positivo")
+        self._handler_timeout = handler_timeout_seconds
         self._database = database
         self._registry = registry
         self._leases = leases
@@ -393,12 +412,19 @@ class PeriodicScheduler:
         )
         return OrganizationResult(organization_id, outcome, code)
 
-    @staticmethod
-    async def _invoke(task: PeriodicTask, transaction: Transaction) -> Exception | None:
-        """El manejador dentro de un ``SAVEPOINT``: si falla, se deshace solo lo suyo."""
+    async def _invoke(self, task: PeriodicTask, transaction: Transaction) -> Exception | None:
+        """El manejador dentro de un ``SAVEPOINT`` y con su tope: si falla o vence, se deshace
+        solo lo suyo."""
         try:
             async with transaction.savepoint():
-                await task.handler(transaction)
+                async with asyncio.timeout(self._handler_timeout):
+                    await task.handler(transaction)
+        except TimeoutError:
+            if transaction.failed:
+                # Cancelado en mitad de una sentencia: la transacción no sirve para registrarlo.
+                _log.warning("manejador cancelado por su tope en mitad de una sentencia")
+                raise _Interrupted() from None
+            return HandlerTimeout()
         except Exception as error:
             if transaction.failed:
                 # Conexión rota o paso abandonado: no hay transacción en la que registrarlo.

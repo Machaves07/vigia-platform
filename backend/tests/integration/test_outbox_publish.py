@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
@@ -211,7 +212,7 @@ async def test_under_concession_the_event_belongs_to_the_client_organization(
 
 @pytest.mark.asyncio
 async def test_a_lagging_instance_never_publishes_ahead_in_the_partition(
-    database: Database, outbox: Outbox
+    database: Database, outbox: Outbox, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Revisión de VIG-77: dos instancias con relojes distintos encolan en la misma partición.
 
@@ -225,6 +226,7 @@ async def test_a_lagging_instance_never_publishes_ahead_in_the_partition(
     context = make_context()
     plant_id, other_plant_id = uuid.uuid4(), uuid.uuid4()
     published = []
+    caplog.set_level(logging.WARNING)
     for instance, plant, sequence in (
         (ahead, plant_id, 1),
         (lagging, plant_id, 2),
@@ -264,6 +266,9 @@ async def test_a_lagging_instance_never_publishes_ahead_in_the_partition(
     assert all(rows[p.event.event_id]["created_at"] == p.event.created_at for p in published)
     assert all(d["next_attempt_at"] == rows[d["event_id"]]["created_at"] for d in deliveries)
     assert published[3].event.created_at == datetime(2026, 9, 29, 10, 30, 0, 123000, tzinfo=UTC)
+    # 10 s de desfase (> CLOCK_SKEW_WARNING): queda registrado una vez por evento arrastrado.
+    skewed = [r for r in caplog.records if "reloj desfasado" in r.getMessage()]
+    assert len(skewed) == 2
 
 
 # --- reversión inyectada ------------------------------------------------------------------

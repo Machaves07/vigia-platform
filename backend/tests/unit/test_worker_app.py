@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import socket
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -36,8 +37,10 @@ from vigia_platform.shared.outbox.registries import Consumer, OutboxCatalog
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.worker import main as worker_main
+from vigia_platform.shared.worker.leases import SqlLeaseStore
 from vigia_platform.shared.worker.main import (
     LIVE_PATH,
+    LOOP_FAILURE_EXIT_CODE,
     RUNTIME_VARIABLE,
     WorkerConfig,
     WorkerProcess,
@@ -45,6 +48,7 @@ from vigia_platform.shared.worker.main import (
     create_worker_app,
     resolve_runtime_builder,
 )
+from vigia_platform.shared.worker.scheduler import PeriodicScheduler
 
 # --- Metapropiedad -----------------------------------------------------------------------------
 
@@ -225,8 +229,9 @@ def _free_port() -> int:
         return port
 
 
-def _process(database: FakeDatabase, dispatcher: RecordingDispatcher) -> tuple[WorkerProcess, int]:
-
+def _process(
+    database: FakeDatabase, dispatcher: Any, *, shutdown_grace_seconds: float = 5.0
+) -> tuple[WorkerProcess, int]:
     catalog = _catalog()
     clock = SystemClock()
 
@@ -241,7 +246,7 @@ def _process(database: FakeDatabase, dispatcher: RecordingDispatcher) -> tuple[W
         health_port=port,
         startup_deadline_seconds=0.5,
         startup_retry_seconds=0.1,
-        shutdown_grace_seconds=5.0,
+        shutdown_grace_seconds=shutdown_grace_seconds,
     )
     runtime = WorkerRuntime(
         clock=clock,
@@ -325,3 +330,128 @@ def test_a_stop_during_startup_exits_cleanly(loop: asyncio.AbstractEventLoop) ->
 
     assert loop.run_until_complete(scenario()) == 0
     assert dispatcher.started == []
+
+
+# --- Resiliencia de los bucles -----------------------------------------------------------------
+
+
+class DyingDispatcher(RecordingDispatcher):
+    """El bucle de un consumidor muere con un defecto; los demás esperan la parada."""
+
+    async def run(self, consumer_name: str, stop: asyncio.Event) -> None:
+        if consumer_name == "unit_probe_consumer":
+            self.started.append(consumer_name)
+            raise RuntimeError("defecto del bucle")
+        await super().run(consumer_name, stop)
+
+
+def test_a_dead_loop_is_logged_stops_the_rest_and_exits_with_an_error(
+    loop: asyncio.AbstractEventLoop, caplog: pytest.LogCaptureFixture
+) -> None:
+    database, dispatcher = FakeDatabase(), DyingDispatcher()
+    process, _ = _process(database, dispatcher)
+
+    async def scenario() -> int:
+        return await asyncio.wait_for(process.run(asyncio.Event()), 10)
+
+    with caplog.at_level(logging.ERROR):
+        code = loop.run_until_complete(scenario())
+    assert code == LOOP_FAILURE_EXIT_CODE != 0
+    assert dispatcher.stopped == ["alert_metrics"]  # el resto se paró en orden
+    dead = [r for r in caplog.records if "murió" in r.getMessage()]
+    assert len(dead) == 1 and dead[0].exc_info is not None
+    assert database.disposed
+
+
+class StuckDispatcher:
+    """Un bucle que no atiende la parada: solo la cancelación lo termina."""
+
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+
+    async def run(self, consumer_name: str, stop: asyncio.Event) -> None:
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            self.cancelled.append(consumer_name)
+            raise
+
+
+def test_the_graceful_stop_is_capped_and_cancels_what_remains(
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    dispatcher = StuckDispatcher()
+    process, _ = _process(FakeDatabase(), dispatcher, shutdown_grace_seconds=0.2)
+
+    async def scenario() -> tuple[int | None, float]:
+        stop = asyncio.Event()
+        running = asyncio.create_task(process.run(stop))
+        await asyncio.wait_for(process.started.wait(), 10)
+        stopped_at = loop.time()
+        stop.set()
+        # Sin cancelar ``running``: si la parada no tiene tope, la prueba falla en vez de colgarse.
+        done, _ = await asyncio.wait({running}, timeout=5)
+        return (running.result() if done else None), loop.time() - stopped_at
+
+    code, elapsed = loop.run_until_complete(scenario())
+    assert code == 0, "la parada ordenada no terminó en 5 s"
+    assert sorted(dispatcher.cancelled) == ["alert_metrics", "unit_probe_consumer"]
+    assert elapsed < 5
+
+
+def _bare_scheduler(poll_seconds: float) -> PeriodicScheduler:
+    clock = SystemClock()
+    database = FakeDatabase()
+    contexts = system_contexts(clock, uuid.uuid4())
+    return PeriodicScheduler(
+        database=database,
+        registry=_catalog().periodic_tasks,
+        leases=SqlLeaseStore(database=database, contexts=contexts),
+        contexts=contexts,
+        clock=clock,
+        owner="unit-worker",
+        poll_seconds=poll_seconds,
+    )
+
+
+def test_the_scheduler_survives_an_unexpected_error_and_keeps_polling(
+    loop: asyncio.AbstractEventLoop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scheduler = _bare_scheduler(poll_seconds=0.01)
+    stop = asyncio.Event()
+    rounds: list[int] = []
+
+    async def flaky(_: Any = None) -> list[Any]:
+        rounds.append(1)
+        if len(rounds) == 1:
+            raise RuntimeError("defecto inesperado en una ronda")
+        stop.set()
+        return []
+
+    monkeypatch.setattr(scheduler, "run_pending", flaky)
+    monkeypatch.setattr(scheduler, "_report_last_success", _nothing)
+    loop.run_until_complete(asyncio.wait_for(scheduler.run(stop), 10))
+    assert len(rounds) == 2
+
+
+def test_the_scheduler_waits_between_rounds(
+    loop: asyncio.AbstractEventLoop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scheduler = _bare_scheduler(poll_seconds=0.1)
+    stop = asyncio.Event()
+    rounds: list[int] = []
+
+    async def count(_: Any = None) -> list[Any]:
+        rounds.append(1)
+        if len(rounds) > 50:  # sin espera nunca cede el bucle: se corta aquí
+            stop.set()
+        return []
+
+    async def scenario() -> None:
+        loop.call_later(0.35, stop.set)
+        await asyncio.wait_for(scheduler.run(stop), 10)
+
+    monkeypatch.setattr(scheduler, "run_pending", count)
+    monkeypatch.setattr(scheduler, "_report_last_success", _nothing)
+    loop.run_until_complete(scenario())
+    assert 1 <= len(rounds) <= 6

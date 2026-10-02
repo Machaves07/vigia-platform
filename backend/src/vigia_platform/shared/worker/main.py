@@ -20,6 +20,10 @@ su arrendamiento sin avanzar ``next_run_at`` (otro worker continúa enseguida). 
 que quede se cancela. Una señal no capturable no libera nada: el arrendamiento vence y otro
 worker retoma la tarea (FS-NUC-08).
 
+**Un bucle que muere** (despacho, planificador o métrica: cada uno ya tolera la base caída y los
+fallos de sus manejadores) es un defecto: se registra, se paran los demás en orden y el proceso
+sale con ``LOOP_FAILURE_EXIT_CODE``, para que ECS lo sustituya en lugar de dejarlo vivo a medias.
+
 **Composición.** ``WorkerRuntime`` trae las dependencias construidas (base con el pool del
 worker y ``statement_timeout`` de 30 s, almacén, firma, KMS, catálogo de la bandeja con lo que
 registró cada unidad, despachador y contextos). ``main`` lee ``WorkerConfig`` del entorno y pide
@@ -70,6 +74,7 @@ from vigia_platform.shared.worker.leases import (
     worker_owner_id,
 )
 from vigia_platform.shared.worker.scheduler import (
+    DEFAULT_HANDLER_TIMEOUT_SECONDS,
     DEFAULT_POLL_SECONDS,
     PeriodicScheduler,
     TaskContexts,
@@ -78,6 +83,7 @@ from vigia_platform.shared.worker.scheduler import (
 __all__ = [
     "HEALTH_PORT",
     "LIVE_PATH",
+    "LOOP_FAILURE_EXIT_CODE",
     "RUNTIME_VARIABLE",
     "SHUTDOWN_GRACE_SECONDS",
     "DispatchLoop",
@@ -101,6 +107,8 @@ SHUTDOWN_GRACE_SECONDS: Final = 115.0
 cancelar lo que quede y vaciar los registros antes del ``SIGKILL``."""
 MONITOR_SECONDS: Final = 15.0
 """Cada cuánto se publica la antigüedad del evento pendiente más viejo ``[objetivo propio]``."""
+LOOP_FAILURE_EXIT_CODE: Final = 1
+"""Salida del proceso cuando uno de sus bucles terminó sin que se pidiera la parada."""
 RUNTIME_VARIABLE: Final = "VIGIA_WORKER_RUNTIME"
 _RUNTIME_REFERENCE: Final = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
 """Solo un constructor del propio paquete: la variable no puede nombrar cualquier función."""
@@ -128,6 +136,7 @@ class WorkerConfig(BaseModel):
     renew_seconds: float = Field(default=20.0, gt=0, le=3600)
     lease_margin_seconds: float = Field(default=5.0, ge=0, le=3600)
     scheduler_poll_seconds: float = Field(default=DEFAULT_POLL_SECONDS, gt=0, le=3600)
+    handler_timeout_seconds: float = Field(default=DEFAULT_HANDLER_TIMEOUT_SECONDS, gt=0, le=3600)
     monitor_seconds: float = Field(default=MONITOR_SECONDS, gt=0, le=3600)
 
     @model_validator(mode="after")
@@ -314,6 +323,7 @@ class WorkerProcess:
             owner=runtime.owner,
             metrics=metrics,
             poll_seconds=config.scheduler_poll_seconds,
+            handler_timeout_seconds=config.handler_timeout_seconds,
         )
         self.monitor = OutboxAgeMonitor(
             database=runtime.database,
@@ -346,8 +356,7 @@ class WorkerProcess:
         try:
             if not await self._start(stop):
                 return STARTUP_FAILURE_EXIT_CODE if self._failure is not None else 0
-            await self._work(stop)
-            return 0
+            return await self._work(stop)
         finally:
             await self._supervisor.stop()
             server.should_exit = True
@@ -376,7 +385,8 @@ class WorkerProcess:
             return False
         return True
 
-    async def _work(self, stop: asyncio.Event) -> None:
+    async def _work(self, stop: asyncio.Event) -> int:
+        """Los bucles hasta la parada (0) o hasta que uno muera (``LOOP_FAILURE_EXIT_CODE``)."""
         work_stop = asyncio.Event()
         consumers = [c.consumer_name for c in self._runtime.catalog.consumers.consumers()]
         loops = [
@@ -387,8 +397,16 @@ class WorkerProcess:
         _log.info("worker en marcha: despacho, planificador y métricas")
         self.started.set()
         stopping = asyncio.create_task(stop.wait())
-        await asyncio.wait({stopping, *loops}, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait({stopping, *loops}, return_when=asyncio.FIRST_COMPLETED)
         stopping.cancel()
+        dead = [task for task in loops if task in done]
+        for task in dead:
+            try:
+                task.result()
+            except Exception:
+                _log.exception("un bucle del worker murió; se para el resto y el proceso sale")
+            else:
+                _log.critical("un bucle del worker terminó sin parada; el proceso sale")
         _log.info("parada ordenada: se termina lo que está en curso")
         work_stop.set()
         _, pending = await asyncio.wait(loops, timeout=self._config.shutdown_grace_seconds)
@@ -401,6 +419,7 @@ class WorkerProcess:
             _log.warning("parada ordenada vencida: se cancela lo que quedaba")
         else:
             _log.info("parada ordenada completa")
+        return LOOP_FAILURE_EXIT_CODE if dead else 0
 
 
 # --- Consola ---------------------------------------------------------------------------------

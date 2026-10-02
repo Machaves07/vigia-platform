@@ -64,9 +64,19 @@ from vigia_platform.shared.observability.metrics import MetricName, PlatformMetr
 from vigia_platform.shared.outbox.publish import NewEvent, Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.signing.keys import format_timestamp
-from vigia_platform.shared.worker.leases import LeaseLost, SqlLeaseStore, TaskOutcome
+from vigia_platform.shared.worker.leases import (
+    LeaseLost,
+    LeaseSettings,
+    SqlLeaseStore,
+    TaskOutcome,
+)
 from vigia_platform.shared.worker.main import OutboxAgeMonitor
-from vigia_platform.shared.worker.scheduler import OrganizationOutcome, PeriodicScheduler, _Holder
+from vigia_platform.shared.worker.scheduler import (
+    DEFAULT_HANDLER_TIMEOUT_SECONDS,
+    OrganizationOutcome,
+    PeriodicScheduler,
+    _Holder,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -94,16 +104,24 @@ class Setup:
         env.run(env.put_task(PROBE_TASK, env.clock.now()))
         self.metrics, self.reader = metrics_with_reader()
 
-    def scheduler(self, owner: str, *, database: Any = None) -> PeriodicScheduler:
+    def scheduler(
+        self,
+        owner: str,
+        *,
+        database: Any = None,
+        settings: LeaseSettings | None = None,
+        handler_timeout_seconds: float = DEFAULT_HANDLER_TIMEOUT_SECONDS,
+    ) -> PeriodicScheduler:
         database = database or self.env.database
         return PeriodicScheduler(
             database=database,
             registry=self.catalog.periodic_tasks,
-            leases=SqlLeaseStore(database=database, contexts=self.env.contexts),
+            leases=SqlLeaseStore(database=database, contexts=self.env.contexts, settings=settings),
             contexts=self.env.contexts,
             clock=self.env.clock,
             owner=owner,
             metrics=self.metrics,
+            handler_timeout_seconds=handler_timeout_seconds,
         )
 
     def effects(self) -> list[uuid.UUID]:
@@ -430,6 +448,86 @@ def test_a_graceful_stop_releases_without_advancing_and_another_worker_continues
     other = env.run(setup.scheduler("worker-b").run_due(PROBE_TASK))
     assert other is not None and other.resumed_after == setup.organizations[0]
     assert sorted(setup.effects()) == sorted(setup.organizations)
+
+
+def test_concurrent_acquire_has_a_single_winner(environment: WorkerEnvironment) -> None:
+    """``acquire`` es una sola sentencia condicional: ocho pools a la vez, un ganador.
+
+    Las demás pruebas son secuenciales; esta falla si ``acquire`` comprueba y después escribe
+    (modelo de la revisión independiente de la sesión de control).
+    """
+    env = environment
+    stores = [SqlLeaseStore(database=env.new_database(), contexts=env.contexts) for _ in range(8)]
+    winners: list[int] = []
+    for _ in range(15):
+        env.run(env.put_task(PROBE_TASK, env.clock.now()))
+
+        async def race() -> int:
+            now = env.clock.now()
+            results = await asyncio.gather(
+                *(store.acquire(PROBE_TASK, f"w{i}", now) for i, store in enumerate(stores))
+            )
+            return sum(1 for result in results if result is not None)
+
+        winners.append(env.run(race()))
+        env.clock.advance(100)
+    assert winners == [1] * 15
+
+
+def test_a_run_longer_than_the_lease_is_renewed_and_no_one_else_takes_it(
+    environment: WorkerEnvironment,
+) -> None:
+    """Cuatro organizaciones de 30 s cada una (120 s, el doble de la vigencia): la renovación en
+    segundo plano mantiene la tarea; otro proceso lo intenta en cada organización y no puede."""
+    env = environment
+    setup = Setup(env, 4)
+    rival = SqlLeaseStore(database=env.new_database(), contexts=env.contexts)
+    attempts: list[Any] = []
+
+    async def long_organization(_: Any) -> None:
+        env.clock.advance(30)
+        await asyncio.sleep(0.25)  # la renovación (cada 50 ms reales) corre mientras tanto
+        attempts.append(await rival.acquire(PROBE_TASK, "worker-b", env.clock.now()))
+
+    setup.probe.after = long_organization
+    settings = LeaseSettings(
+        duration=timedelta(seconds=60),
+        renew_every=timedelta(milliseconds=50),
+        safety_margin=timedelta(seconds=5),
+    )
+    report = env.run(setup.scheduler("worker-a", settings=settings).run_due(PROBE_TASK))
+
+    assert attempts == [None] * 4
+    assert report is not None and report.outcome is TaskOutcome.SUCCEEDED
+    assert [i.organization_id for i in setup.probe.invocations] == setup.organizations
+    assert sorted(setup.effects()) == sorted(setup.organizations)
+    row = env.run(env.task_row(PROBE_TASK))
+    assert row.lease_owner is None and row.last_outcome == "succeeded"
+
+
+def test_a_handler_over_its_timeout_fails_that_organization_and_the_others_continue(
+    environment: WorkerEnvironment,
+) -> None:
+    env = environment
+    setup = Setup(env, 3)
+    hanging = setup.organizations[1]
+
+    async def hang(transaction: Any) -> None:
+        if transaction.context.organization_id == hanging:
+            await asyncio.sleep(30)
+
+    setup.probe.after = hang
+    scheduler = setup.scheduler("worker-a", handler_timeout_seconds=0.3)
+    report = env.run(asyncio.wait_for(scheduler.run_due(PROBE_TASK), 20))
+
+    assert report is not None and report.outcome is TaskOutcome.PARTIAL_FAILURE
+    assert [(r.organization_id, r.outcome, r.error_code) for r in report.results] == [
+        (setup.organizations[0], OrganizationOutcome.SUCCEEDED, None),
+        (hanging, OrganizationOutcome.FAILED, "handler_timeout"),
+        (setup.organizations[2], OrganizationOutcome.SUCCEEDED, None),
+    ]
+    # Lo que hizo antes de colgarse se deshizo; las demás confirmaron.
+    assert setup.effects() == [setup.organizations[0], setup.organizations[2]]
 
 
 # --- FS-NUC-08 a nivel de proceso --------------------------------------------------------------
