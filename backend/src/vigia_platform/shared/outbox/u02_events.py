@@ -55,9 +55,11 @@ SecurityAlertKind = Literal[
     "unknown_token_reported",
     "evidence_marker_mismatch",
     "authorization_denied_repeated",
+    "audit_archive_verification_failed",
 ]
-"""Causa de ``security_alert``: BR-NUC-02 y 24, BR-NUC-89, RNF-PRI (muestra de clips) y
-NFR-NUC-28 (``authorization_denied`` repetido)."""
+"""Causa de ``security_alert``: BR-NUC-02 y 24, BR-NUC-89, RNF-PRI (muestra de clips),
+NFR-NUC-28 (``authorization_denied`` repetido) y NFR-NUC-32 (archivo de auditoría que no pasa la
+verificación de vuelta, TASK-131)."""
 
 SecurityAlertResourceKind = Literal[
     "user",
