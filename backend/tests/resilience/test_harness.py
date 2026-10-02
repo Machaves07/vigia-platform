@@ -14,7 +14,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.resilience import harness
 from tests.resilience.harness import REPORT_DIR_VARIABLE, scenario, session_seed
+
+
+@pytest.fixture(autouse=True)
+def _own_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los escenarios de estas pruebas no entran en el resumen de la sesión."""
+    monkeypatch.setattr(harness, "_FINISHED", [])
 
 
 def _report(directory: Path, scenario_id: str) -> dict[str, object]:
