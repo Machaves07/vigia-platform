@@ -16,10 +16,12 @@ roles sin ``live_view.open``, acceso duplicado, acceso con rol fuera de la lista
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -29,18 +31,27 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from vigia_contracts.models._validators import validate_instance
 
-from tests.factories import uuid7
+from tests.factories import make_context, uuid7
 from tests.identity_db import BASE_TIME
 from tests.integration.conftest import PostgresEndpoint
 from tests.live_view_support import (
     LIVE_VIEW_URL,
     LiveViewEnvironment,
+    SimulatedProcess,
     jws_parts,
     live_view_environment,
     node_verifies,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
-from vigia_platform.shared.context import Role, ScopeLevel
+from vigia_platform.shared.context import (
+    Actor,
+    ActorKind,
+    ContextOrigin,
+    Role,
+    ScopeContext,
+    ScopeLevel,
+    _seal_scope_context,
+)
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
 from vigia_platform.shared.signing.service import DetachedSignature, SigningKeyUnavailable
 from vigia_platform.shared.tokens import (
@@ -76,6 +87,12 @@ def env(postgres_endpoint: PostgresEndpoint) -> Iterator[LiveViewEnvironment]:
 @pytest.fixture(scope="module")
 def site(env: LiveViewEnvironment) -> Any:
     return env.add_site(plants=2, zones_per_plant=2)
+
+
+@pytest.fixture(scope="module")
+def processes(env: LiveViewEnvironment) -> list[SimulatedProcess]:
+    """Tres procesos simulados: motor, auditoría y firma propios sobre la misma base."""
+    return [env.process() for _ in range(3)]
 
 
 def _issue(env: LiveViewEnvironment, context: Any, zone_id: uuid.UUID) -> IssuedLiveViewToken:
@@ -390,28 +407,61 @@ def test_system_context_cannot_open_the_view(env: LiveViewEnvironment, site: Any
         _issue(env, env.node_context(site.organization_id), zone_id)
 
 
+@dataclass(frozen=True)
 class _GrantingAuthorizer:
-    """Concede todo y devuelve el contexto tal cual: deja sola a la guarda de persona con sesión."""
+    """Concede todo y fija ``role_in_use = role``: deja sola a la guarda de persona con sesión."""
 
-    async def authorize(self, context: Any, key: Any, resource: Any) -> Any:
-        return context
+    role: Role | None
+
+    async def authorize(self, context: ScopeContext, key: Any, resource: Any) -> ScopeContext:
+        actor = context.actor
+        return _seal_scope_context(
+            organization_id=context.organization_id,
+            actor=Actor(
+                kind=actor.kind,
+                id=actor.id,
+                display_name_snapshot=actor.display_name_snapshot,
+                unit=actor.unit,
+                role_in_use=self.role,
+                concession_id=actor.concession_id,
+            ),
+            origin=context.origin,
+            allowed_scopes=context.allowed_scopes,
+            correlation_id=context.correlation_id,
+            session_id_hash=context.session_id_hash,
+        )
 
 
+@pytest.mark.parametrize(
+    ("kind", "origin", "role"),
+    [
+        # Cada caso lo detiene una sola cláusula de la guarda.
+        (ActorKind.SYSTEM, ContextOrigin.SESSION, Role.ADMINISTRATOR),  # tipo de actor
+        (ActorKind.NODE, ContextOrigin.SESSION, Role.ADMINISTRATOR),  # tipo de actor
+        (ActorKind.USER, ContextOrigin.ADMIN_COMMAND, Role.ADMINISTRATOR),  # origen
+        (ActorKind.USER, ContextOrigin.OUTBOX_EVENT, Role.ADMINISTRATOR),  # origen
+        (ActorKind.USER, ContextOrigin.SESSION, None),  # sin rol en uso
+    ],
+)
 def test_person_guard_holds_even_if_the_authorizer_grants(
-    env: LiveViewEnvironment, site: Any
+    env: LiveViewEnvironment,
+    site: Any,
+    kind: ActorKind,
+    origin: ContextOrigin,
+    role: Role | None,
 ) -> None:
-    """Aunque la matriz conceda, un contexto del sistema no obtiene token: ``sub`` es persona."""
+    """Aunque la matriz conceda, solo una persona con sesión y rol obtiene token (``sub``)."""
     _, zone_id, _, _ = _fresh_zone(env, site)
     sessions = env.authz.sessions
     service = LiveViewTokenService(
         database=sessions.database,
-        authorizer=cast(Any, _GrantingAuthorizer()),
+        authorizer=cast(Any, _GrantingAuthorizer(role)),
         audit=sessions.audit,
         outbox=sessions.outbox,
         signer=env.signing,
         clock=env.clock,
     )
-    context = env.node_context(site.organization_id)
+    context = make_context(kind=kind, organization_id=site.organization_id, origin=origin)
     with pytest.raises(ResourceNotFound):
         env.run(service.issue(context, zone_id))
     assert not env.fetch(
@@ -502,6 +552,41 @@ def test_access_from_the_issued_node_is_incorporated_once(
     # El mismo access_id desde otro nodo no se toma por repetido: es otro acceso, y alerta.
     other_node = env.add_node(site.organization_id, plant_id)
     assert _incorporate(env, site.organization_id, other_node, [record]) == AccessReport(unknown=1)
+
+
+def test_concurrent_heartbeats_incorporate_each_access_once(
+    env: LiveViewEnvironment, site: Any, processes: list[SimulatedProcess]
+) -> None:
+    """Dos latidos (o reintentos) del mismo nodo procesados a la vez en tres procesos (A-02).
+
+    Sin restricción única en la base, solo la exclusión por nodo impide duplicar la entrada de
+    auditoría (solo anexar) y la ``security_alert`` de un ``jti`` desconocido.
+    """
+    _, zone_id, node_id, _ = _fresh_zone(env, site)
+    user = env.user_with_role(site.organization_id, Role.COORDINATOR_SST)
+    issued = _issue(env, env.session_context(site.organization_id, user), zone_id)
+    known = _access(issued)
+    unknown = _access(issued, jti=str(uuid7()))
+    context = env.node_context(site.organization_id)
+
+    async def heartbeats() -> list[AccessReport]:
+        return list(
+            await asyncio.gather(
+                *(
+                    process.service.incorporate(context, node_id, [known, unknown])
+                    for process in processes
+                    for _ in range(2)
+                )
+            )
+        )
+
+    reports: list[AccessReport] = env.run(heartbeats())
+    assert sum(report.incorporated for report in reports) == 1
+    assert sum(report.unknown for report in reports) == 1
+    assert sum(report.duplicates for report in reports) == 2 * len(reports) - 2
+    assert len(_entries(env, known["jti"], "live_view_access_local")) == 1
+    assert len(_entries(env, unknown["jti"], "unknown_token_reported")) == 1
+    assert len(_alerts(env, node_id)) == 1
 
 
 def test_access_with_a_jti_issued_for_another_node_alerts(

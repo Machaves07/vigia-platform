@@ -13,7 +13,10 @@ codificación de U-01 §3.6 con su nota de 2026-09-23.
    (BR-NUC-90, PAT-NUC-ESC-03): dentro de la transacción de emisión se toma una exclusión por
    usuario (``pg_advisory_xact_lock`` sobre su ``user_id``) y se cuentan sus
    ``LiveViewTokenIssuance`` con ``issued_at`` posterior a ``ahora - 10 min``, también las de
-   marca futura (reloj de otro proceso adelantado). Con 30 o más, ``rate_limited`` con
+   marca futura (reloj de otro proceso adelantado). Se cuentan en **todas** sus organizaciones y
+   concesiones con ``identity.live_view_issuances_since`` (``nuc_0012``), que no pasa por la
+   seguridad a nivel de fila del contexto: un usuario del proveedor con varias concesiones no
+   tiene 30 por cada una. Con 30 o más, ``rate_limited`` con
    ``retry_after_seconds`` hasta que salga la más antigua. Contar lo posterior a ``ahora - 10
    min`` acota cualquier ventana que contenga ``ahora``, así que con cualquier número de procesos
    ninguna ventana llega a 31 (PR-NUC-45). La exclusión es un candado consultivo y no la fila de
@@ -273,10 +276,10 @@ _CURRENT_NODE: Final = text(
     " JOIN identity.node_identity AS n ON n.node_id = a.node_id"
     " WHERE a.zone_id = :zone_id AND a.unassigned_at IS NULL AND n.status <> 'revoked'"
 )
+# En todas las organizaciones y concesiones del usuario, no solo las que deja ver la RLS del
+# contexto (nuc_0012): el límite es por usuario.
 _RECENT_ISSUANCES: Final = text(
-    "SELECT count(*) AS issued, min(issued_at) AS oldest"
-    " FROM identity.live_view_token_issuance"
-    " WHERE user_id = :user_id AND issued_at > :window_start"
+    "SELECT issued, oldest FROM identity.live_view_issuances_since(:user_id, :window_start)"
 )
 _INSERT_ISSUANCE: Final = text(
     "INSERT INTO identity.live_view_token_issuance (jti, organization_id, plant_id, zone_id,"

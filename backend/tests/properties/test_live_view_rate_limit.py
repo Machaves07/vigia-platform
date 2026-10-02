@@ -24,6 +24,7 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
+import asyncpg
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -35,7 +36,7 @@ from tests.live_view_support import (
     SkewedClock,
     live_view_environment,
 )
-from vigia_platform.shared.context import Role, ScopeContext
+from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.tokens import (
     RATE_LIMIT_TOKENS,
     RATE_LIMIT_WINDOW,
@@ -211,6 +212,66 @@ def test_pr_nuc_45_never_more_than_30_in_a_window_with_skewed_clocks(
         clock.set(start)
 
 
+@pytest.mark.parametrize("per_process", [11, 15])
+def test_pr_nuc_45_limit_spans_every_concession_of_a_provider_user(
+    env: LiveViewEnvironment, processes: list[SimulatedProcess], per_process: int
+) -> None:
+    """Un instalador con tres concesiones (dos plantas de un cliente y otro cliente): 30 en total.
+
+    La seguridad a nivel de fila de cada contexto solo deja ver las emisiones de su concesión; el
+    límite es del usuario, así que cuenta las de todas (``nuc_0012``). Cada proceso emite a la vez
+    bajo una concesión distinta.
+    """
+    clock = env.clock
+    first = env.add_site(plants=2, zones_per_plant=1)
+    other = env.add_site(plants=1, zones_per_plant=1)
+    installer = env.authz.add_provider_user()
+    # La política de la base mira su ``now()`` real y el constructor del contexto, el reloj
+    # simulado: las concesiones cubren los dos instantes.
+    (database_now,) = env.fetch("SELECT now() AS now")
+    low = min(clock.now(), database_now["now"]) - timedelta(hours=1)
+    high = max(clock.now(), database_now["now"]) + timedelta(hours=1)
+    reaches = [
+        (first, *first.zones()[0], ScopeLevel.PLANT),
+        (first, *first.zones()[1], ScopeLevel.PLANT),
+        (other, *other.zones()[0], ScopeLevel.ORGANIZATION),
+    ]
+    contexts: list[ScopeContext] = []
+    zones: list[uuid.UUID] = []
+    for site, plant_id, zone_id, level in reaches:
+        node_id = env.add_node(site.organization_id, plant_id)
+        env.assign_node(site.organization_id, plant_id, zone_id, node_id)
+        concession = env.authz.add_concession(
+            site.organization_id,
+            installer,
+            level=level,
+            scope_id=plant_id if level is ScopeLevel.PLANT else None,
+            granted_at=low,
+            duration=high - low,
+        )
+        contexts.append(env.concession_context(installer, concession))
+        zones.append(zone_id)
+
+    async def everything() -> list[IssuedLiveViewToken | LiveViewTokenRejected]:
+        return list(
+            await asyncio.gather(
+                *(
+                    _attempt(process, context, zone_id)
+                    for process, context, zone_id in zip(processes, contexts, zones, strict=True)
+                    for _ in range(per_process)
+                )
+            )
+        )
+
+    results: list[IssuedLiveViewToken | LiveViewTokenRejected] = env.run(everything())
+    granted = [r for r in results if isinstance(r, IssuedLiveViewToken)]
+    rejected = [r for r in results if isinstance(r, LiveViewTokenRejected)]
+    assert len(granted) == RATE_LIMIT_TOKENS
+    assert len(rejected) == 3 * per_process - RATE_LIMIT_TOKENS
+    assert all(r.code is LiveViewRejection.RATE_LIMITED for r in rejected)
+    assert len(_issued_times(env, installer)) == RATE_LIMIT_TOKENS
+
+
 # --- Bordes ------------------------------------------------------------------------------------
 
 
@@ -227,6 +288,73 @@ def _rejected(
     with pytest.raises(LiveViewTokenRejected) as raised:
         _issue(env, context, zone_id)
     return raised.value
+
+
+def test_issuance_count_function_is_narrow_and_fails_closed(
+    env: LiveViewEnvironment, target: dict[str, Any]
+) -> None:
+    """``identity.live_view_issuances_since`` (nuc_0012): solo número y mínimo, de cualquier
+    organización, nunca sin organización fijada, y la variable no abre la tabla fuera de ella."""
+    user, context = _new_user(env, target)
+    _issue(env, context, target["zones"][0])
+    since = env.clock.now() - RATE_LIMIT_WINDOW
+    other_organization = str(uuid.uuid4())
+    migrated = env.authz.sessions.migrated
+
+    async def as_app(*statements: tuple[str, tuple[Any, ...]]) -> list[list[Any]]:
+        connection = await migrated.connect("vigia_app")
+        try:
+            results = []
+            async with connection.transaction():
+                for statement, args in statements:
+                    results.append(await connection.fetch(statement, *args))
+            return results
+        finally:
+            await connection.close()
+
+    count = "SELECT issued, oldest FROM identity.live_view_issuances_since($1, $2)"
+    set_organization = (
+        "SELECT set_config('vigia.organization_id', $1, true)",
+        (other_organization,),
+    )
+    # Desde otra organización cuenta igual: el límite es del usuario, no del contexto.
+    (_, rows, flag, table) = env.run(
+        as_app(
+            set_organization,
+            (count, (user, since)),
+            ("SELECT current_setting('vigia.concession_lookup', true) AS flag", ()),
+            ("SELECT count(*) AS n FROM identity.live_view_token_issuance", ()),
+        )
+    )
+    assert [(row["issued"], row["oldest"] is not None) for row in rows] == [(1, True)]
+    assert flag[0]["flag"] == "" and table[0]["n"] == 0
+    # vigia_app no lee la tabla fijando él mismo la variable: la política es solo del dueño.
+    (_, _, opened) = env.run(
+        as_app(
+            set_organization,
+            ("SELECT set_config('vigia.concession_lookup', 'on', true)", ()),
+            ("SELECT count(*) AS n FROM identity.live_view_token_issuance", ()),
+        )
+    )
+    assert opened[0]["n"] == 0
+    # Sin organización fijada, ni usuario ni inicio: error, nunca un cero que deje pasar.
+    for statements in (
+        ((count, (user, since)),),
+        (set_organization, (count, (None, since))),
+        (set_organization, (count, (user, None))),
+    ):
+        with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
+            env.run(as_app(*statements))
+    info = env.fetch(
+        "SELECT prosecdef, proconfig, pg_get_function_result(oid) AS result,"
+        " has_function_privilege('public', oid, 'EXECUTE') AS public_execute,"
+        " has_function_privilege('vigia_app', oid, 'EXECUTE') AS app_execute"
+        " FROM pg_proc"
+        " WHERE oid = 'identity.live_view_issuances_since(uuid, timestamptz)'::regprocedure"
+    )[0]
+    assert info["prosecdef"] and info["proconfig"] == ["search_path=pg_catalog"]
+    assert info["result"] == "TABLE(issued bigint, oldest timestamp with time zone)"
+    assert not info["public_execute"] and info["app_execute"]
 
 
 def test_thirty_pass_the_thirty_first_waits_until_the_oldest_leaves(
