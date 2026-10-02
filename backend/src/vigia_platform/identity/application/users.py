@@ -263,14 +263,22 @@ async def create_invited_user(
     professional_license: str | None,
     assignments: Sequence[PlannedAssignment],
     now: datetime,
+    user_id: uuid.UUID | None = None,
 ) -> IssuedInvitation:
     """La cuenta ``invited`` con sus asignaciones e invitación, en ``transaction`` (ya comprobado
-    todo lo que no depende de la base). La usan ``invite_user`` y la génesis."""
+    todo lo que no depende de la base). La usan ``invite_user`` y la génesis.
+
+    ``user_id`` solo lo fija el arranque de la plataforma, donde el primer operador es a la vez
+    el actor de la orden (``ScopeContexts.bootstrap_operator_context``); si no, uno nuevo.
+    """
     context = transaction.context
     found = (await transaction.execute(_EMAIL_ORGANIZATION, {"email": email})).one()
     if found.organization_id is not None:
         raise IdentityRejected(IdentityRejection.EMAIL_UNAVAILABLE, field="/email")
-    user_id = new_uuid4(deps.random_bytes)
+    if user_id is None:
+        user_id = new_uuid4(deps.random_bytes)
+    elif type(user_id) is not uuid.UUID:
+        raise TypeError("user_id debe ser uuid.UUID")
     await transaction.execute(
         _INSERT_USER,
         {

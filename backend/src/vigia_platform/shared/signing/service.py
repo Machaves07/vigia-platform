@@ -181,6 +181,9 @@ class RotationCommit:
     new_key: SigningKeyRecord
     transitions: tuple[KeyTransition, ...]
     publication: KeySetPublicationRecord | None
+    expected_publication_id: uuid.UUID | None = None
+    """La última publicación que había al calcular la rotación (``None`` si no había ninguna).
+    Con ``publication``, el almacén solo confirma si sigue siendo la última."""
 
 
 class SigningKeyStore(Protocol):
@@ -191,6 +194,9 @@ class SigningKeyStore(Protocol):
     ``KeyTransition`` se aplica solo si la clave sigue en ``expected_status`` (``UPDATE … WHERE
     key_id = :id AND status = :expected`` que afecte exactamente una fila); si no, revierte todo
     y lanza ``KeyStateConflict``: dos procesos nunca confirman desde el mismo estado superado.
+    Una rotación que publica conjunto solo se confirma si la última publicación sigue siendo
+    ``expected_publication_id``: dos rotaciones de propósitos distintos en dos procesos no
+    pueden publicar las dos un conjunto calculado sin la clave de la otra.
     """
 
     async def load(self) -> KeyStoreSnapshot: ...
@@ -428,6 +434,9 @@ class SigningService:
         self, purpose: SigningPurpose, payload: Any
     ) -> ContractEnvelope | PlatformSignedEnvelope:
         """Sobre firmado de ``payload`` con la clave ``active`` vigente de ``purpose``."""
+        # Primero a la lista cerrada: la cadena "key_set" no puede saltarse las comprobaciones
+        # de abajo (``ValueError`` si no es un propósito).
+        purpose = SigningPurpose(purpose)
         if purpose is SigningPurpose.LIVE_VIEW_TOKEN:
             raise ValueError("live_view_token se firma como JWS compacta: usa sign_detached")
         if purpose is SigningPurpose.KEY_SET:
@@ -564,8 +573,14 @@ class SigningService:
             publication = self._publication_record(
                 keys_after.values(), signer_id, signer, issued_at
             )
+        expected = None if self._publication is None else self._publication.publication_id
         await self._store.commit_rotation(
-            RotationCommit(new_key=new_key, transitions=transitions, publication=publication)
+            RotationCommit(
+                new_key=new_key,
+                transitions=transitions,
+                publication=publication,
+                expected_publication_id=expected,
+            )
         )
         self._keys = keys_after
         self._private = private_after

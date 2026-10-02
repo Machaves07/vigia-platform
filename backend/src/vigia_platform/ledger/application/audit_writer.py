@@ -113,6 +113,8 @@ class AuditOperation(enum.StrEnum):
     """Solo auditoría: la respuesta es ``forbidden`` (PAT-NUC-SEG-02, nota del 2026-09-23)."""
     CONTEXT_ABSENT_ATTEMPT = "context_absent_attempt"
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
+    RESTORE_DRILL_RECORDED = "restore_drill_recorded"
+    """``vigia-admin record-restore-drill`` al terminar el runbook 6.1 (TASK-132)."""
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto
     PRIVACY_NOTICE_ACCEPTED = "privacy_notice_accepted"
     """Nota fechada de §2.9 (NFR-NUC-29): aceptación del aviso, con la versión aceptada."""

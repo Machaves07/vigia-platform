@@ -105,6 +105,11 @@ class InMemoryKeyStore:
 
     async def commit_rotation(self, commit: RotationCommit) -> None:
         self._check_available()
+        if commit.publication is not None:
+            # Como ``SqlSigningKeyStore``: solo se publica sobre la última publicación leída.
+            latest = self.publications[-1].record.publication_id if self.publications else None
+            if latest != commit.expected_publication_id:
+                raise KeyStateConflict
         updated = self._apply(commit.transitions)
         if commit.new_key.key_id in updated:
             raise ValueError("key_id duplicado")
