@@ -69,11 +69,13 @@ admitiría un nombre pegado y contaría como texto libre (``schema_rules.is_free
 AuditPartition = Annotated[
     StrictStr,
     Field(
-        min_length=25,
-        max_length=25,
+        min_length=26,
+        max_length=26,
         pattern=r"^shared\.audit_entry_[0-9]{4}_(0[1-9]|1[0-2])$",
     ),
 ]
+"""``shared.audit_entry_AAAA_MM``: 26 caracteres justos (el patrón es de ancho fijo). Hasta
+TASK-131 decía 25 y ningún registro ``audit_partition_archived`` podía escribirse."""
 MonthPeriod = Annotated[
     StrictStr, Field(min_length=7, max_length=7, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
 ]
