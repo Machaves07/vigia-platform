@@ -32,8 +32,11 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 14
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0014``
+MINIMUM_SCHEMA_VERSION: Final = 15
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0015`` (la política de
+proveedor en el expediente, la auditoría y la bandeja: sin ella, un puerto que omitiera el filtro
+de ``allowed_scopes`` expondría al proveedor todas las plantas del cliente), que incluye
+``nuc_0014``
 (``identity.provider_concessions_of``, la lista de ``GET /provider/concessions``), que incluye
 ``nuc_0013`` (el planificador
 de ``vigia-worker``: avance y último éxito en ``shared.periodic_task``,
