@@ -119,6 +119,8 @@ def test_fs_nuc_02_database_failover_with_the_node_queues_active(stack: LedgerSt
                 started = WALL.monotonic()
                 await asyncio.to_thread(stack.container.restart)
                 restart_seconds = WALL.monotonic() - started
+                # Los nodos reintentan solos; la prueba solo espera a la base para leer después.
+                await asyncio.to_thread(stack.container.wait_ready)
                 after_restart_mark = accepted()
                 async with asyncio.timeout(DRAIN_TIMEOUT_SECONDS):
                     await asyncio.gather(*tasks)
