@@ -1,6 +1,6 @@
 """Planificador de ``vigia-worker`` (TASK-130, LC-NUC-24; PAT-NUC-RES-05, ESC-04; BR-NUC-81).
 
-Revisión nuc_0012. Lo que el planificador de tareas periódicas y el proceso de trabajo necesitan:
+Revisión nuc_0013. Lo que el planificador de tareas periódicas y el proceso de trabajo necesitan:
 
 - ``shared.periodic_task``: avance de la ejecución en curso y último éxito.
 
@@ -34,8 +34,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "nuc_0012"
-down_revision: str | None = "nuc_0011"
+revision: str = "nuc_0013"
+down_revision: str | None = "nuc_0012"
 branch_labels: None = None
 depends_on: None = None
 
