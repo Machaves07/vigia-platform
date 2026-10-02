@@ -200,6 +200,12 @@ class Outcome(enum.StrEnum):
     SKIPPED = "skipped"
 
 
+_COUNTED_OUTCOMES: Final = frozenset(
+    {Outcome.DELIVERED, Outcome.RETRIED, Outcome.DEAD_LETTERED, Outcome.DEPENDENCY_DOWN}
+)
+"""Intentos de entrega que cuenta ``outbox_deliveries_total``: los que invocaron al manejador."""
+
+
 @dataclass(frozen=True, slots=True)
 class DueHead:
     """Una cabeza vencida tal como la devuelve ``vigia_outbox_due_heads``."""
@@ -310,6 +316,7 @@ class Dispatcher:
         for key, values in (
             ("consumer", [consumer.consumer_name for consumer in catalog.consumers.consumers()]),
             ("event_type", list(catalog.event_types.event_names())),
+            ("result", [outcome.value for outcome in _COUNTED_OUTCOMES]),
         ):
             for value in values:
                 try:
@@ -468,6 +475,10 @@ class Dispatcher:
             )
         elif outcome is Outcome.RETRIED:
             self._metrics.outbox_retries_total.add(1, {"consumer": consumer.consumer_name})
+        if outcome in _COUNTED_OUTCOMES:
+            self._metrics.outbox_deliveries_total.add(
+                1, {"consumer": consumer.consumer_name, "result": outcome.value}
+            )
         return outcome
 
     async def _process_in(

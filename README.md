@@ -64,6 +64,8 @@ Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son
 
 `run`, `worker` y `admin` quedan operativos cuando llegan sus tareas (TASK-133, TASK-130 y TASK-132). Hasta entonces, `make` avisa de qué falta y termina con error. `migrate` ya funciona (TASK-106).
 
+`vigia-worker` (TASK-130) recibe sus dependencias del constructor que nombra `VIGIA_WORKER_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). Sin esa variable termina con código 3 sin arrancar: la raíz de composición de la imagen aún no existe, igual que la de `vigia-api`.
+
 ### Variables del entorno local
 
 `make run`, `worker`, `migrate` y `admin` apuntan al entorno de compose con los nombres estándar que ya leen las bibliotecas: libpq y asyncpg (`PG*`), boto3 (`AWS_*`) y el SDK de OpenTelemetry (`OTEL_*`). En PowerShell, antes de los comandos de la tabla:

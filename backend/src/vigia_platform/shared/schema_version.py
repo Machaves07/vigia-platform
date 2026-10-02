@@ -32,9 +32,13 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 10
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0010`` (el despacho de
-la bandeja: ``outbox_event.publish_seq``, ``trace_id`` y ``span_id``,
+MINIMUM_SCHEMA_VERSION: Final = 13
+"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0013`` (el planificador
+de ``vigia-worker``: avance y último éxito en ``shared.periodic_task``,
+``shared.vigia_active_organizations`` y ``shared.vigia_outbox_oldest_pending``), que incluye
+``nuc_0012`` (el recuento de emisiones de la vista en vivo), ``nuc_0011`` (el alcance de las
+asignaciones de rol y la búsqueda de invitaciones), ``nuc_0010``
+(el despacho de la bandeja: ``outbox_event.publish_seq``, ``trace_id`` y ``span_id``,
 ``shared.vigia_outbox_due_heads`` y ``shared.vigia_outbox_replay``), que incluye ``nuc_0009``
 (``identity.concession_terms`` e ``identity.provider_concession_of`` de las concesiones del
 proveedor, y la RLS de proveedor en todo ``identity``), ``nuc_0008``
