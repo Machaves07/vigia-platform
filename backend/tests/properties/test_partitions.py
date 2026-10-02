@@ -9,7 +9,8 @@ de nuc_0015 son de ``vigia_migrate``. El reloj de la tarea es un ``SimulatedCloc
 meses hacia delante, así que cada ejemplo crea particiones nuevas de verdad; las fechas fuera del
 rango son de 2080 en adelante, que ningún ejemplo crea.
 
-- Criterio 3 de la tarea: ejecutar ``create_partitions`` dos veces no falla ni duplica.
+- Criterio 3 de la tarea: ejecutar ``create_partitions`` dos veces no falla ni duplica, tampoco
+  con dos a cuatro llamadas a la vez desde conexiones distintas (candado consultivo de nuc_0015).
 - Cada partición nueva queda protegida como las de la migración (``TRUNCATE`` falla, disparadores
   con ``ENABLE ALWAYS``) y sin privilegios para ``vigia_app``.
 - Un mes con filas en la partición por defecto se devuelve como ``blocked`` sin abortar el resto.
@@ -21,10 +22,11 @@ Solo datos generados.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
@@ -267,12 +269,66 @@ def test_create_partitions_twice_neither_fails_nor_duplicates(environment: Envir
         )
 
 
+@pytest.mark.parametrize("callers", [2, 4])
+def test_concurrent_create_partitions_neither_fail_nor_duplicate(
+    environment: Environment, callers: int
+) -> None:
+    """Varias llamadas a la vez (la tarea y ``vigia-admin create-partitions``), desde conexiones
+    distintas y sobre meses nuevos: ninguna falla, cada partición la crea una sola llamada y queda
+    una sola por tabla y mes. Tres rondas, porque el interbloqueo sin candado no sale siempre."""
+    database = app_database(environment.migrated, worker_pool_size=callers)
+
+    async def one(maintenance: PartitionMaintenance) -> PartitionReport:
+        async with database.transaction(environment.system()) as transaction:
+            return await maintenance.create(transaction)
+
+    async def together(now: datetime) -> list[PartitionReport | BaseException]:
+        maintenance = environment.maintenance(now)
+        return await asyncio.gather(
+            *(one(maintenance) for _ in range(callers)), return_exceptions=True
+        )
+
+    try:
+        for round_ in range(3):
+            # 2060-2062 y 2064-2066: meses que ningún otro ejemplo crea (fuera de rango, ≥ 2080).
+            now = datetime(2056 + 2 * callers + round_, 5, 20, 12, 0, tzinfo=UTC)
+            reports = environment.loop.run(together(now))
+            failures = [report for report in reports if isinstance(report, BaseException)]
+            assert failures == [], failures
+            months = [add_months(month_of(now), step) for step in range(PARTITION_MONTHS_AHEAD + 1)]
+            expected = {(table, month) for table in PartitionedTable for month in months}
+            created = [
+                (result.table, result.month)
+                for report in reports
+                if isinstance(report, PartitionReport)
+                for result in report.created
+            ]
+            assert sorted(created) == sorted(expected)
+            for table in PartitionedTable:
+                bounds = partition_bounds(environment, table)
+                for month in months:
+                    assert bounds[partition_name(table, month)] == expected_bound(month)
+    finally:
+        environment.loop.run(database.dispose())
+
+
+def test_the_margin_is_the_current_month_plus_three_in_utc() -> None:
+    """El literal del diseño (mes en curso y tres más, PAT-NUC-ESC-01), no la constante del código;
+    y el mes es el de UTC aunque el reloj traiga otra zona."""
+    assert PARTITION_MONTHS_AHEAD == 3
+    assert PartitionMaintenance(clock=SimulatedClock(BASE)).months_ahead == 3
+    minus_five = timezone(timedelta(hours=-5))
+    assert month_of(datetime(2026, 12, 31, 23, 30, tzinfo=minus_five)) == date(2027, 1, 1)
+    plus_fourteen = timezone(timedelta(hours=14))
+    assert month_of(datetime(2027, 1, 1, 9, 0, tzinfo=plus_fourteen)) == date(2026, 12, 1)
+
+
 def test_new_partitions_are_protected_and_not_granted_to_the_application(
     environment: Environment,
 ) -> None:
     now = datetime(2041, 6, 1, tzinfo=UTC)
     report = environment.create(now)
-    assert len(report.created) == 3 * (PARTITION_MONTHS_AHEAD + 1)
+    assert len(report.created) == 3 * 4  # tres tablas, el mes en curso y tres más
     for result in report.created:
         rows = environment.fetch(
             "SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = $1::regclass"

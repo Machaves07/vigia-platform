@@ -67,6 +67,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol
 
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import text
 
 from vigia_platform.ledger.application.writer import Receipt
@@ -174,6 +175,19 @@ _ROWS: Final = text(
 _DETACH: Final = text(
     "SELECT shared.vigia_detach_audit_partition(:partition, :expected_entries, :not_after)"
 )
+_DETACH_REJECTED: Final = frozenset({"55000", "42P01"})
+"""Rechazos de ``vigia_detach_audit_partition``: ``object_not_in_prerequisite_state`` (la
+partición no es la verificada) y ``undefined_table`` (ya no está adjunta)."""
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    """El ``SQLSTATE`` de un error de la base, a través de SQLAlchemy y del adaptador."""
+    for candidate in (error, getattr(error, "orig", None), error.__cause__):
+        value = getattr(candidate, "sqlstate", None)
+        if isinstance(value, str):
+            return value
+    return None
+
 
 AUDIT_COLUMNS: Final = (
     "entry_id",
@@ -233,6 +247,9 @@ class ArchiveFailure(enum.StrEnum):
     ENTRY_MISMATCH = "entry_mismatch"
     """Una entrada, devuelta a columnas, no es la fila de la base."""
     CHECKPOINT_MISMATCH = "checkpoint_mismatch"
+    PARTITION_CHANGED = "partition_changed"
+    """La base rechazó el desprendimiento: la partición cambió desde la exportación o ya no está
+    adjunta."""
 
 
 class ArchiveVerificationFailed(Exception):
@@ -1050,21 +1067,30 @@ class AuditArchiver:
             "entry_count": snapshot.entry_count,
             "archived_at": format_timestamp(archived_at),
         }
-        async with self._database.transaction(context) as transaction:
-            await transaction.execute(
-                _DETACH,
-                {
-                    "partition": partition.name,
-                    "expected_entries": snapshot.entry_count,
-                    "not_after": partition.range_end,
-                },
-            )
-            result = await self._writer.write(
-                context, ARCHIVED_RECORD_TYPE, content, transaction=transaction
-            )
-            if not isinstance(result, Receipt):
-                # Un rechazo del escritor: se revierte también el desprendimiento.
-                raise RuntimeError(f"audit_partition_archived rechazado: {result!r}")
+        try:
+            async with self._database.transaction(context) as transaction:
+                await transaction.execute(
+                    _DETACH,
+                    {
+                        "partition": partition.name,
+                        "expected_entries": snapshot.entry_count,
+                        "not_after": partition.range_end,
+                    },
+                )
+                result = await self._writer.write(
+                    context, ARCHIVED_RECORD_TYPE, content, transaction=transaction
+                )
+                if not isinstance(result, Receipt):
+                    # Un rechazo del escritor: se revierte también el desprendimiento.
+                    raise RuntimeError(f"audit_partition_archived rechazado: {result!r}")
+        except sa_exc.DBAPIError as error:
+            # La base rechazó el desprendimiento: la partición ya no es la verificada (entradas
+            # nuevas o posteriores) o ya no está adjunta. Sigue como estaba y no hay registro.
+            if _sqlstate(error) not in _DETACH_REJECTED:
+                raise
+            raise ArchiveVerificationFailed(
+                ArchiveFailure.PARTITION_CHANGED, str(_sqlstate(error))
+            ) from None
         _log.info(
             "partición de auditoría archivada y desprendida",
             partition=partition.qualified_name,
@@ -1121,6 +1147,15 @@ class AuditArchiver:
                     code=getattr(error, "code", type(error).__name__),
                 )
                 report.failed.append((partition, getattr(error, "code", "transient")))
+            except Exception:
+                # Un fallo no previsto no abandona las particiones siguientes; la pasada termina
+                # fallida igualmente y la partición sigue adjunta (todo lo que la cambia va en una
+                # transacción).
+                _log.exception(
+                    "archivado fallido por un error no previsto",
+                    partition=partition.qualified_name,
+                )
+                report.failed.append((partition, "unexpected"))
         if report.failed:
             raise AuditArchiveFailed([partition.qualified_name for partition, _ in report.failed])
         return report

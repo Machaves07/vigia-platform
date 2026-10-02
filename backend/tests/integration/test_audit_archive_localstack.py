@@ -15,6 +15,10 @@ del mes en curso; el reloj del archivado va 25 meses por delante para que esa pa
   ``security_alert`` y la entrada ``integrity_verification`` con ``error`` en la proveedora.
 - **Atomicidad**: si el escritor rechaza el registro, el desprendimiento se deshace con él.
 - **Fallo transitorio**: el almacén caído no alerta ni desprende nada.
+- **Desprendimiento rechazado** (entrada nueva tras exportar): fallo de partición con alerta, sin
+  cortar la pasada; tras una pasada fallida, la siguiente archiva una vez y la tercera no duplica.
+- **Concurrencia**: el desprendimiento espera a un escritor en curso y rechaza su entrada; dos
+  archivados a la vez desprenden y registran una sola vez.
 - **Guardas de nuc_0015**: solo el sistema lee y desprende; el desprendimiento exige el recuento
   verificado y ninguna entrada posterior; solo particiones adjuntas con el nombre del convenio.
 - El manejador solo actúa en la iteración de la organización proveedora.
@@ -24,6 +28,7 @@ Solo datos generados.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -391,6 +396,16 @@ def test_a_rejected_record_undoes_the_detach(world: World) -> None:
     assert world.archived_records() == []
 
 
+def test_an_unexpected_failure_ends_the_pass_as_failed_without_escaping(world: World) -> None:
+    """Un error no previsto (aquí, el rechazo del escritor) no sale de la pasada tal cual: la
+    partición queda como fallida, sigue adjunta y la pasada termina con ``AuditArchiveFailed``."""
+    with pytest.raises(AuditArchiveFailed) as raised:
+        run_task(world, world.archiver(writer=RejectingWriter()))
+    assert raised.value.partitions == (world.partition.qualified_name,)
+    assert world.attached()
+    assert world.archived_records() == []
+
+
 class DownStorage:
     def __init__(self, world: World) -> None:
         self._world = world
@@ -408,6 +423,110 @@ def test_storage_down_neither_alerts_nor_detaches(world: World) -> None:
     assert world.attached()
     assert world.archived_records() == []
     assert world.alerts() == []
+
+
+class WritingStorage:
+    """Almacén real que, al leer de vuelta, deja una entrada de auditoría nueva en la partición:
+    algo escribió entre la exportación y el desprendimiento."""
+
+    def __init__(self, world: World) -> None:
+        self._world = world
+
+    async def put_object(self, key: str, body: bytes, content_type: str, **kwargs: Any) -> Any:
+        return await self._world.storage.put_object(key, body, content_type, **kwargs)
+
+    async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+        await self._world.env.audit.append(
+            self._world.system(self._world.client), AuditOperation.LEDGER_READ, result_count=1
+        )
+        return await self._world.storage.get_object(key, version_id=version_id)
+
+
+def test_rejected_detach_is_a_partition_failure_with_alert(world: World) -> None:
+    """La base rechaza el desprendimiento (una entrada nueva tras exportar): la pasada no se
+    corta, la partición sigue adjunta, no hay registro y queda la alerta."""
+    with pytest.raises(AuditArchiveFailed) as raised:
+        run_task(world, world.archiver(storage=WritingStorage(world)))
+    assert raised.value.partitions == (world.partition.qualified_name,)
+    assert world.attached()
+    assert world.archived_records() == []
+    assert [alert["organization_id"] for alert in world.alerts()] == [world.provider]
+    reasons = [json.loads(row["filters_json"])["failure_reason"] for row in world.failure_audits()]
+    assert reasons == [ArchiveFailure.PARTITION_CHANGED.value]
+
+
+def test_a_failed_pass_resumes_once_and_never_twice(world: World) -> None:
+    """Tras una pasada fallida, la siguiente archiva una sola vez y la tercera no duplica."""
+    with pytest.raises(AuditArchiveFailed):
+        run_task(world, world.archiver(storage=CorruptingStorage(world, 0.5, 3)))
+    assert world.attached()
+    run_task(world, world.archiver())
+    assert not world.attached()
+    assert len(world.archived_records()) == 1
+    run_task(world, world.archiver())
+    assert len(world.archived_records()) == 1
+
+
+# --- Concurrencia (la garantía «se desprende exactamente lo verificado, una sola vez») ----------
+
+
+def test_detach_waits_for_an_in_flight_writer_and_rejects_its_entry(world: World) -> None:
+    """Un escritor con una entrada sin confirmar en la partición mientras otra transacción la
+    desprende con el recuento confirmado: el desprendimiento espera al escritor, ve la entrada
+    nueva y se rechaza. Sin el ``LOCK TABLE`` de nuc_0015 contaría sin ella y desprendería una
+    partición con una entrada sin archivar."""
+    count = len(world.partition_rows())
+    end = datetime(*add_months(world.month, 1).timetuple()[:3], tzinfo=UTC)
+    inserted = asyncio.Event()
+
+    async def writer() -> None:
+        context = world.system(world.client)
+        async with world.env.database.transaction(context) as transaction:
+            await world.env.audit.append(
+                context, AuditOperation.LEDGER_READ, result_count=1, transaction=transaction
+            )
+            inserted.set()
+            await asyncio.sleep(1.5)
+
+    async def detach() -> str | None:
+        await inserted.wait()
+        try:
+            async with world.env.database.transaction(world.system()) as transaction:
+                await transaction.execute(
+                    text("SELECT shared.vigia_detach_audit_partition(:p, :n, :t)"),
+                    {"p": world.partition.name, "n": count, "t": end},
+                )
+        except Exception as error:
+            return sqlstate(error) or type(error).__name__
+        return None
+
+    async def both() -> list[Any]:
+        return await asyncio.gather(writer(), detach())
+
+    _, outcome = world.env.loop.run(both())
+    assert outcome == NOT_IN_PREREQUISITE_STATE
+    assert world.attached()
+    assert len(world.partition_rows()) == count + 1
+
+
+def test_two_concurrent_archives_detach_and_record_once(world: World) -> None:
+    """Dos archivados de la misma partición a la vez: uno la desprende y la registra; el otro
+    falla sin desprender nada más ni escribir un segundo ``audit_partition_archived``."""
+
+    async def both() -> list[Any]:
+        return await asyncio.gather(
+            world.archiver().archive(world.system(), world.partition),
+            world.archiver().archive(world.system(), world.partition),
+            return_exceptions=True,
+        )
+
+    outcomes = world.env.loop.run(both())
+    archived = [outcome for outcome in outcomes if not isinstance(outcome, BaseException)]
+    failed = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert len(archived) == 1, outcomes
+    assert len(failed) == 1, outcomes
+    assert not world.attached()
+    assert len(world.archived_records()) == 1
 
 
 @pytest.mark.parametrize("batch_size", [1, 2, 3])

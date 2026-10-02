@@ -17,7 +17,9 @@ ejecutarlas, y cada una exige el actor del contexto (``vigia.actor_kind``, el ``
   ese mes, ``CREATE TABLE ... PARTITION OF`` fallaría (PostgreSQL comprueba la partición por
   defecto) y esas filas no se pueden mover (``DELETE`` está bloqueado): el mes se salta con
   ``blocked``, para que la alarma de ``default_partition_rows`` lo haga visible. A lo sumo 120
-  meses por llamada; ``lock_timeout`` de 5 s para no dejar en cola a los escritores.
+  meses por llamada; ``lock_timeout`` de 5 s para no dejar en cola a los escritores. Las llamadas
+  se **serializan** con un candado consultivo de transacción: dos a la vez (la tarea y la orden
+  administrativa) se bloqueaban entre sí con ``deadlock detected``.
 - ``shared.vigia_default_partition_rows()`` (``system`` u ``operator``): filas de cada partición
   por defecto (métrica ``default_partition_rows``, alarma con una sola fila).
 - ``shared.vigia_audit_partition_summary(partition)`` y
@@ -77,6 +79,11 @@ _FUNCTIONS = (
             RAISE EXCEPTION 'intervalo de meses no válido'
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
+        -- Una llamada a la vez hasta el final de la transacción (la tarea semanal y la orden
+        -- vigia-admin create-partitions comparten esta función): sin el candado, dos llamadas
+        -- simultáneas se bloquean entre sí al crear las mismas particiones (deadlock detected).
+        PERFORM pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended('vigia_create_month_partitions', 0));
         FOR target IN
             SELECT * FROM (VALUES
                 ('ledger', 'ledger_record', 'received_at'),
@@ -114,7 +121,8 @@ _FUNCTIONS = (
                                 format('%I.%I', target.schema_name, partition_name)::regclass);
                             created := true;
                         EXCEPTION WHEN duplicate_table THEN
-                            -- Otra llamada la creó a la vez: ya existe, que es lo que se pedía.
+                            -- Segunda capa tras el candado: si aun así ya existe (creada fuera
+                            -- de esta función), es lo que se pedía.
                             created := false;
                         END;
                     END IF;
@@ -265,7 +273,14 @@ _FUNCTIONS = (
                 USING ERRCODE = 'insufficient_privilege';
         END IF;
         source := shared.vigia_attached_audit_partition(partition_name);
+        -- El candado espera a los escritores en curso y cierra el paso a los nuevos: el recuento
+        -- de abajo es el de lo que se desprende. Tras esperarlo, otra llamada pudo haberla
+        -- desprendido ya: se comprueba de nuevo.
         EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE', source);
+        IF shared.vigia_attached_audit_partition(partition_name) IS DISTINCT FROM source THEN
+            RAISE EXCEPTION 'la partición de auditoría no está adjunta'
+                USING ERRCODE = 'undefined_table';
+        END IF;
         EXECUTE format('SELECT count(*), max(occurred_at) FROM %s', source)
             INTO entries, newest;
         IF entries IS DISTINCT FROM expected_entries
