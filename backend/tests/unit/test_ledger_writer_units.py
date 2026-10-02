@@ -18,9 +18,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal, cast
 
 import pytest
@@ -30,6 +33,7 @@ from pydantic import Field, StrictInt, StrictStr, ValidationError
 from vigia_contracts.models.common import UUID
 from vigia_contracts.models.enumerations import AcceptanceStatus, RejectionCode
 
+from tests.hibp_service import metrics_with_reader
 from tests.writer_support import unit_context
 from vigia_platform.ledger import canonical
 from vigia_platform.ledger.application import audit_writer
@@ -65,7 +69,13 @@ from vigia_platform.ledger.registry import (
 )
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorUnit, ContextAbsent
-from vigia_platform.shared.db import Database, Transaction
+from vigia_platform.shared.db import (
+    ChainLockedTimeout,
+    Database,
+    TemporarilyUnavailable,
+    Transaction,
+)
+from vigia_platform.shared.observability.metrics import MetricName
 
 NOW = datetime(2026, 9, 29, 10, 30, tzinfo=UTC)
 
@@ -508,3 +518,114 @@ def test_small_content_is_validated_in_the_event_loop() -> None:
     with pytest.raises(AssertionError, match="leyó la base"):
         asyncio.run(_step3_writer(pool).write(context, _STEP3_TYPE, _step3_document()))
     assert pool.functions == []
+
+
+# --- VIG-90: métricas de contención del paso 7 (PAT-NUC-RES-08, NFR-NUC-38) ---------------------
+
+_POOL_WAIT_SECONDS = 1.0
+_HELD_SECONDS = 0.25
+
+
+class _TimedDatabase:
+    """Abrir la transacción tarda ``_POOL_WAIT_SECONDS`` (la espera del pool, que no cuenta)."""
+
+    def __init__(self, clock: SimulatedClock) -> None:
+        self._clock = clock
+
+    @contextlib.asynccontextmanager
+    async def _transaction(self, context: Any) -> AsyncIterator[Any]:
+        self._clock.advance(_POOL_WAIT_SECONDS)
+        yield object()
+
+    def transaction(self, context: Any) -> Any:
+        return self._transaction(context)
+
+
+def _metrics_writer(
+    clock: SimulatedClock, outcome: BaseException | None
+) -> tuple[EscritorExpediente, Any]:
+    metrics, reader = metrics_with_reader()
+    writer = EscritorExpediente(
+        database=_TimedDatabase(clock),
+        registry=RecordTypeRegistry(),
+        free_text=FreeTextPolicyRegistry(),
+        evidence=cast(Any, None),
+        outbox=cast(Any, None),
+        clock=clock,
+        metrics=metrics,
+    )
+
+    async def insert(*_: Any) -> Any:
+        clock.advance(_HELD_SECONDS)
+        if outcome is not None:
+            raise outcome
+        return SimpleNamespace(record_id=uuid.uuid4(), received_at=NOW)
+
+    writer._insert = insert  # type: ignore[method-assign]
+    return writer, reader
+
+
+def _points(reader: Any, name: MetricName) -> list[Any]:
+    data = reader.get_metrics_data()
+    if data is None:  # nada medido todavía
+        return []
+    return [
+        point
+        for resource in data.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+        if metric.name == name.value
+        for point in metric.data.data_points
+    ]
+
+
+@pytest.mark.parametrize(
+    ("chain_plant", "chain_kind"), [(uuid.uuid4(), "plant"), (None, "organization")]
+)
+def test_an_accepted_write_counts_one_write_and_its_lock_time(
+    chain_plant: uuid.UUID | None, chain_kind: str
+) -> None:
+    clock = SimulatedClock(NOW)
+    writer, reader = _metrics_writer(clock, None)
+    prepared = cast(Any, SimpleNamespace(chain_plant=chain_plant))
+    context = unit_context(uuid.uuid4(), ActorUnit.U03)
+    result = asyncio.run(writer._commit(context, prepared, None))
+    assert isinstance(result, Receipt)
+    (write,) = _points(reader, MetricName.LEDGER_WRITES_TOTAL)
+    assert (write.value, dict(write.attributes)) == (1, {"chain_kind": chain_kind})
+    assert _points(reader, MetricName.CHAIN_LOCKED_TIMEOUT_TOTAL) == []
+    (wait,) = _points(reader, MetricName.CHAIN_LOCK_WAIT_MS)
+    # Solo lo que duró la transacción abierta, sin la espera del pool.
+    assert (wait.count, wait.sum) == (1, _HELD_SECONDS * 1000)
+    assert dict(wait.attributes) == {"chain_kind": chain_kind}
+
+
+def test_a_chain_locked_timeout_counts_in_the_rate_and_its_wait() -> None:
+    clock = SimulatedClock(NOW)
+    writer, reader = _metrics_writer(clock, ChainLockedTimeout())
+    prepared = cast(Any, SimpleNamespace(chain_plant=uuid.uuid4()))
+    context = unit_context(uuid.uuid4(), ActorUnit.U03)
+    result = asyncio.run(writer._commit(context, prepared, None))
+    assert result == LedgerRejection.of(LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT)
+    (timeouts,) = _points(reader, MetricName.CHAIN_LOCKED_TIMEOUT_TOTAL)
+    (writes,) = _points(reader, MetricName.LEDGER_WRITES_TOTAL)
+    # La condición ``chain_locked_timeout_rate`` es el cociente de las dos (NFR-NUC-38).
+    assert (timeouts.value, writes.value) == (1, 1)
+    assert dict(timeouts.attributes) == {"chain_kind": "plant"}
+    (wait,) = _points(reader, MetricName.CHAIN_LOCK_WAIT_MS)
+    assert (wait.count, wait.sum) == (1, _HELD_SECONDS * 1000)
+
+
+def test_any_other_failure_inside_the_transaction_is_not_a_chain_write() -> None:
+    clock = SimulatedClock(NOW)
+    writer, reader = _metrics_writer(clock, TemporarilyUnavailable())
+    prepared = cast(Any, SimpleNamespace(chain_plant=uuid.uuid4()))
+    context = unit_context(uuid.uuid4(), ActorUnit.U03)
+    with pytest.raises(TemporarilyUnavailable):
+        asyncio.run(writer._commit(context, prepared, None))
+    for name in (
+        MetricName.LEDGER_WRITES_TOTAL,
+        MetricName.CHAIN_LOCKED_TIMEOUT_TOTAL,
+        MetricName.CHAIN_LOCK_WAIT_MS,
+    ):
+        assert _points(reader, name) == []
