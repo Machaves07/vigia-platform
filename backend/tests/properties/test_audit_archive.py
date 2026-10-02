@@ -468,6 +468,26 @@ def test_read_only_restore_verifies_with_the_archive_keys(generated: Generated) 
     assert raised.value.reason is ArchiveFailure.DIGEST_MISMATCH
 
 
+def test_read_only_restore_rejects_a_consistently_rewritten_archive() -> None:
+    """Un archivo reescrito con su SHA-256 recalculado (y registrado) no se restaura: la cadena
+    no cuadra con sus propios hashes."""
+    generated = fixed_partition()
+
+    def change(name: str, content: bytes) -> bytes:
+        if not name.endswith("audit.jsonl"):
+            return content
+        return content.replace(b'"result_count":3', b'"result_count":4', 1)
+
+    tampered = rebuild(archive_of(generated), change)
+    key = generated.snapshot.partition.object_key
+    storage = MemoryStorage({key: tampered})
+    with pytest.raises(ArchiveVerificationFailed) as raised:
+        asyncio.run(
+            restore_audit_partition(storage, key, hashlib.sha256(tampered).hexdigest())  # type: ignore[arg-type]
+        )
+    assert raised.value.reason is ArchiveFailure.CHAIN_BROKEN
+
+
 def test_extracted_packages_pass_the_included_verifier(tmp_path: Path) -> None:
     """El ``vigia_verify.py`` incluido da por íntegro el paquete de cada organización."""
     generated = fixed_partition()

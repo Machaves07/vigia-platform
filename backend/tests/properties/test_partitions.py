@@ -32,6 +32,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from sqlalchemy import text
 
 from tests.dispatch_support import metric_points, metrics_with_reader
 from tests.identity_db import MigratedDatabase, migrated_database
@@ -330,6 +331,19 @@ def test_only_system_or_operator_creates_partitions(
     assert partition_name(PartitionedTable.AUDIT_ENTRY, date(2042, 1, 1)) not in partition_bounds(
         environment, PartitionedTable.AUDIT_ENTRY
     )
+    # Cada función por separado: una guarda no puede apoyarse en la de la otra.
+    for statement in (
+        "SELECT * FROM shared.vigia_create_month_partitions('2042-01-01', '2042-01-01')",
+        "SELECT * FROM shared.vigia_default_partition_rows()",
+    ):
+
+        async def call(sql: str = statement) -> None:
+            async with environment.database.transaction(context) as transaction:
+                await transaction.execute(text(sql))
+
+        with pytest.raises(Exception) as raised:
+            environment.loop.run(call())
+        assert sqlstate(raised.value) == INSUFFICIENT_PRIVILEGE, statement
 
 
 def test_operator_context_creates_until_a_given_month(environment: Environment) -> None:

@@ -97,7 +97,9 @@ class World:
     def partition(self) -> AuditPartition:
         return AuditPartition(self.month)
 
-    def archiver(self, storage: Any = None, writer: Any = None) -> AuditArchiver:
+    def archiver(
+        self, storage: Any = None, writer: Any = None, batch_size: int = 5_000
+    ) -> AuditArchiver:
         now = datetime(self.month.year, self.month.month, 2, 3, 0, tzinfo=UTC)
         later = add_months(self.month, 25)
         clock = SimulatedClock(now.replace(year=later.year, month=later.month))
@@ -111,6 +113,7 @@ class World:
             verifier=VERIFIER,
             clock=clock,
             kms_key_id=self.kms_key_id,
+            batch_size=batch_size,
         )
 
     def fetch(self, query: str, *args: Any) -> list[Any]:
@@ -405,6 +408,23 @@ def test_storage_down_neither_alerts_nor_detaches(world: World) -> None:
     assert world.attached()
     assert world.archived_records() == []
     assert world.alerts() == []
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_export_in_small_batches_reads_every_row_once(world: World, batch_size: int) -> None:
+    """La lectura por lotes (orden de organización y secuencia) cruza organizaciones sin perder
+    ni repetir filas: el archivo verifica y la restauración es la partición entera."""
+    before = world.partition_rows()
+    assert len(before) > 3 * batch_size
+    archived = world.env.loop.run(
+        world.archiver(batch_size=batch_size).archive(world.system(), world.partition)
+    )
+    assert archived.entry_count == len(before)
+    restored = world.env.loop.run(
+        restore_audit_partition(world.storage, archived.object_key, archived.sha256)
+    )
+    assert [column_values(row) for row in restored.rows] == before
+    assert not world.attached()
 
 
 def test_handler_acts_only_in_the_provider_iteration(world: World) -> None:
