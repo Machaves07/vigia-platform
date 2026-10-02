@@ -261,6 +261,511 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/users":
+    "get":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Cuentas de la organización con sus asignaciones vigentes"
+      "operationId": "list_users_users_get"
+      "parameters":
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/UsersPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "post":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Invitar a una persona con al menos una asignación"
+      "operationId": "invite_users_post"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/InviteBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/InvitationView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}/deactivate":
+    "post":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Desactivar una cuenta (nunca se borra)"
+      "operationId": "deactivate_users__user_id__deactivate_post"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/DeactivatedView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}/reactivate":
+    "post":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Reactivar una cuenta con asignaciones nuevas y otra invitación"
+      "operationId": "reactivate_users__user_id__reactivate_post"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReactivateBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/InvitationView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}":
+    "patch":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Editar el nombre y la licencia profesional"
+      "operationId": "update_profile_users__user_id__patch"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ProfileBody"
+      "responses":
+        "204":
+          "description": "Successful Response"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}/second-factor/reset":
+    "post":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Restablecer el segundo factor de una persona"
+      "operationId": "reset_second_factor_users__user_id__second_factor_reset_post"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SecondFactorResetView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}/roles":
+    "post":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Asignar un rol sobre un alcance"
+      "operationId": "assign_role_users__user_id__roles_post"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AssignmentBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AssignedView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/users/{user_id}/roles/{assignment_id}":
+    "delete":
+      "tags":
+        - "usuarios y roles"
+      "summary": "Retirar una asignación (queda con su fecha)"
+      "operationId": "remove_role_users__user_id__roles__assignment_id__delete"
+      "parameters":
+        - "name": "user_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "User Id"
+        - "name": "assignment_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Assignment Id"
+      "responses":
+        "204":
+          "description": "Successful Response"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/hierarchy":
+    "get":
+      "tags":
+        - "jerarquía"
+      "summary": "Organización, plantas, zonas y nodos al alcance de la sesión"
+      "operationId": "hierarchy_hierarchy_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HierarchyView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants":
+    "post":
+      "tags":
+        - "jerarquía"
+      "summary": "Crear una planta con la génesis de su cadena"
+      "operationId": "create_plant_plants_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/PlantBody"
+        "required": true
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PlantView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/zones":
+    "post":
+      "tags":
+        - "jerarquía"
+      "summary": "Crear una zona de la planta"
+      "operationId": "create_zone_plants__plant_id__zones_post"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ZoneBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ZoneView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/organization/settings":
+    "get":
+      "tags":
+        - "organización"
+      "summary": "Datos y topes de concesión de la organización"
+      "operationId": "read_settings_organization_settings_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SettingsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "patch":
+      "tags":
+        - "organización"
+      "summary": "Cambiar el nombre y los topes de concesión"
+      "operationId": "update_settings_organization_settings_patch"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SettingsBody"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SettingsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/concessions":
+    "get":
+      "tags":
+        - "concesiones"
+      "summary": "Concesiones del proveedor sobre la organización (cualquier estado)"
+      "operationId": "list_concessions_concessions_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ConcessionsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/concessions/{concession_id}/queries":
+    "get":
+      "tags":
+        - "concesiones"
+      "summary": "Consultas del proveedor bajo una concesión, en orden de llegada"
+      "operationId": "list_queries_concessions__concession_id__queries_get"
+      "parameters":
+        - "name": "concession_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Concession Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ProviderQueriesPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/concessions/{concession_id}/revoke":
+    "post":
+      "tags":
+        - "concesiones"
+      "summary": "Revocar una concesión de inmediato"
+      "operationId": "revoke_concessions__concession_id__revoke_post"
+      "parameters":
+        - "name": "concession_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Concession Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ConcessionView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/provider/concessions":
+    "get":
+      "tags":
+        - "concesiones"
+      "summary": "Concesiones que la persona del proveedor se concedió"
+      "operationId": "own_concessions_provider_concessions_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ProviderConcessionsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "post":
+      "tags":
+        - "concesiones"
+      "summary": "Concederse acceso temporal a una organización cliente"
+      "operationId": "grant_provider_concessions_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/GrantBody"
+        "required": true
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ProviderConcessionView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -366,6 +871,50 @@
         - "storage_unavailable"
       "title": "ApiErrorCode"
       "type": "string"
+    "AssignedView":
+      "properties":
+        "assignment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignment Id"
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "assignment_id"
+        - "user_id"
+        - "role"
+        - "scope_level"
+        - "scope_id"
+      "title": "AssignedView"
+    "AssignmentBody":
+      "properties":
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "role"
+        - "scope_level"
+        - "scope_id"
+      "title": "AssignmentBody"
     "AssignmentView":
       "properties":
         "role":
@@ -424,6 +973,100 @@
         - "password"
         - "notice_version"
       "title": "CompleteActivation"
+    "ConcessionStatus":
+      "type": "string"
+      "enum":
+        - "active"
+        - "expired"
+        - "revoked"
+      "title": "ConcessionStatus"
+      "description": "``concession_status`` (domain-entities §1)."
+    "ConcessionView":
+      "properties":
+        "concession_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Concession Id"
+        "provider_organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Provider Organization Id"
+        "provider_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Provider User Id"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+        "reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason"
+        "granted_at":
+          "type": "string"
+          "title": "Granted At"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "status":
+          "$ref": "#/components/schemas/ConcessionStatus"
+        "revoked_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Revoked At"
+        "revoked_by_side":
+          "anyOf":
+            - "$ref": "#/components/schemas/RevokedBySide"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "concession_id"
+        - "provider_organization_id"
+        - "provider_user_id"
+        - "scope_level"
+        - "scope_id"
+        - "reason"
+        - "granted_at"
+        - "expires_at"
+        - "status"
+        - "revoked_at"
+        - "revoked_by_side"
+      "title": "ConcessionView"
+      "description": "Una concesión vista por el cliente (con su motivo)."
+    "ConcessionsView":
+      "properties":
+        "concessions":
+          "items":
+            "$ref": "#/components/schemas/ConcessionView"
+          "type": "array"
+          "title": "Concessions"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "concessions"
+      "title": "ConcessionsView"
+    "DeactivatedView":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "status":
+          "type": "string"
+          "const": "deactivated"
+          "title": "Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "status"
+      "title": "DeactivatedView"
     "EnrollRequest":
       "properties":
         "code":
@@ -474,6 +1117,162 @@
         - "recovery_codes"
       "title": "EnrollmentView"
       "description": "Lo que se muestra **una sola vez** al inscribirse; nada de esto se guarda en claro."
+    "GrantBody":
+      "properties":
+        "client_organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Client Organization Id"
+        "scope_level":
+          "type": "string"
+          "enum":
+            - "organization"
+            - "plant"
+          "title": "Scope Level"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+        "reason":
+          "type": "string"
+          "maxLength": 500
+          "minLength": 10
+          "title": "Reason"
+        "duration_hours":
+          "anyOf":
+            - "type": "integer"
+              "maximum": 2160.0
+              "minimum": 1.0
+            - "type": "null"
+          "title": "Duration Hours"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "client_organization_id"
+        - "scope_level"
+        - "scope_id"
+        - "reason"
+      "title": "GrantBody"
+    "HierarchyOrganizationView":
+      "properties":
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "status":
+          "type": "string"
+          "title": "Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization_id"
+        - "code"
+        - "name"
+        - "kind"
+        - "status"
+      "title": "HierarchyOrganizationView"
+    "HierarchyView":
+      "properties":
+        "organization":
+          "$ref": "#/components/schemas/HierarchyOrganizationView"
+        "plants":
+          "items":
+            "$ref": "#/components/schemas/PlantView"
+          "type": "array"
+          "title": "Plants"
+        "nodes":
+          "items":
+            "$ref": "#/components/schemas/NodeView"
+          "type": "array"
+          "title": "Nodes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization"
+        - "plants"
+        - "nodes"
+      "title": "HierarchyView"
+    "InvitationDelivery":
+      "type": "string"
+      "enum":
+        - "email_queued"
+        - "link_disclosed"
+      "title": "InvitationDelivery"
+    "InvitationView":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "invitation_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Invitation Id"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "delivery":
+          "$ref": "#/components/schemas/InvitationDelivery"
+        "link":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Link"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "invitation_id"
+        - "expires_at"
+        - "delivery"
+        - "link"
+      "title": "InvitationView"
+    "InviteBody":
+      "properties":
+        "email":
+          "type": "string"
+          "maxLength": 254
+          "minLength": 3
+          "title": "Email"
+        "display_name":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Display Name"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+              "minLength": 1
+            - "type": "null"
+          "title": "Professional License"
+        "assignments":
+          "items":
+            "$ref": "#/components/schemas/AssignmentBody"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Assignments"
+        "disclose_link":
+          "type": "boolean"
+          "title": "Disclose Link"
+          "default": false
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email"
+        - "display_name"
+        - "assignments"
+      "title": "InviteBody"
     "LiveStatus":
       "properties":
         "status":
@@ -518,6 +1317,49 @@
       "required":
         - "status"
       "title": "LoginResponse"
+    "ManagedUserView":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "email":
+          "type": "string"
+          "title": "Email"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Professional License"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "second_factor_required":
+          "type": "boolean"
+          "title": "Second Factor Required"
+        "second_factor_enrolled":
+          "type": "boolean"
+          "title": "Second Factor Enrolled"
+        "assignments":
+          "items":
+            "$ref": "#/components/schemas/UserAssignmentView"
+          "type": "array"
+          "title": "Assignments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "email"
+        - "display_name"
+        - "professional_license"
+        - "status"
+        - "second_factor_required"
+        - "second_factor_enrolled"
+        - "assignments"
+      "title": "ManagedUserView"
     "MeResponse":
       "properties":
         "user":
@@ -565,6 +1407,36 @@
         - "privacy_notice_version"
         - "api_version"
       "title": "MeResponse"
+    "NodeView":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "live_view_local_url":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Live View Local Url"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "plant_id"
+        - "code"
+        - "status"
+        - "live_view_local_url"
+      "title": "NodeView"
     "NoticeAcceptRequest":
       "properties":
         "notice_version":
@@ -650,6 +1522,256 @@
         - "current_password"
         - "new_password"
       "title": "PasswordChangeRequest"
+    "PlantBody":
+      "properties":
+        "code":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 2
+          "title": "Code"
+        "name":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Name"
+        "country":
+          "type": "string"
+          "maxLength": 2
+          "minLength": 2
+          "title": "Country"
+        "data_region":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 1
+          "title": "Data Region"
+        "timezone":
+          "type": "string"
+          "maxLength": 64
+          "minLength": 3
+          "title": "Timezone"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "name"
+        - "country"
+        - "data_region"
+        - "timezone"
+      "title": "PlantBody"
+    "PlantView":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "country":
+          "type": "string"
+          "title": "Country"
+        "data_region":
+          "type": "string"
+          "title": "Data Region"
+        "timezone":
+          "type": "string"
+          "title": "Timezone"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/ZoneView"
+          "type": "array"
+          "title": "Zones"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "code"
+        - "name"
+        - "country"
+        - "data_region"
+        - "timezone"
+        - "status"
+        - "zones"
+      "title": "PlantView"
+    "ProfileBody":
+      "properties":
+        "display_name":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 120
+              "minLength": 1
+            - "type": "null"
+          "title": "Display Name"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+              "minLength": 1
+            - "type": "null"
+          "title": "Professional License"
+        "clear_professional_license":
+          "type": "boolean"
+          "title": "Clear Professional License"
+          "default": false
+      "additionalProperties": false
+      "type": "object"
+      "title": "ProfileBody"
+    "ProviderConcessionView":
+      "properties":
+        "concession_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Concession Id"
+        "client_organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Client Organization Id"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+        "granted_at":
+          "type": "string"
+          "title": "Granted At"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "status":
+          "$ref": "#/components/schemas/ConcessionStatus"
+        "revoked_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Revoked At"
+        "revoked_by_side":
+          "anyOf":
+            - "$ref": "#/components/schemas/RevokedBySide"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "concession_id"
+        - "client_organization_id"
+        - "scope_level"
+        - "scope_id"
+        - "granted_at"
+        - "expires_at"
+        - "status"
+        - "revoked_at"
+        - "revoked_by_side"
+      "title": "ProviderConcessionView"
+      "description": "Una concesión vista por quien se la concedió (sin el motivo)."
+    "ProviderConcessionsView":
+      "properties":
+        "concessions":
+          "items":
+            "$ref": "#/components/schemas/ProviderConcessionView"
+          "type": "array"
+          "title": "Concessions"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "concessions"
+      "title": "ProviderConcessionsView"
+    "ProviderQueriesPage":
+      "properties":
+        "queries":
+          "items":
+            "$ref": "#/components/schemas/ProviderQueryItem"
+          "type": "array"
+          "title": "Queries"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "queries"
+        - "next_after"
+      "title": "ProviderQueriesPage"
+    "ProviderQueryItem":
+      "properties":
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "plant_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Plant Id"
+        "provider_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Provider User Id"
+        "operation":
+          "type": "string"
+          "title": "Operation"
+        "method":
+          "type": "string"
+          "title": "Method"
+        "resource":
+          "type": "string"
+          "title": "Resource"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "record_id"
+        - "received_at"
+        - "plant_id"
+        - "provider_user_id"
+        - "operation"
+        - "method"
+        - "resource"
+        - "occurred_at"
+        - "reason"
+      "title": "ProviderQueryItem"
+    "ReactivateBody":
+      "properties":
+        "assignments":
+          "items":
+            "$ref": "#/components/schemas/AssignmentBody"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Assignments"
+        "disclose_link":
+          "type": "boolean"
+          "title": "Disclose Link"
+          "default": false
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "assignments"
+      "title": "ReactivateBody"
+    "RevokedBySide":
+      "type": "string"
+      "enum":
+        - "client"
+        - "provider"
+      "title": "RevokedBySide"
     "Role":
       "type": "string"
       "enum":
@@ -680,6 +1802,21 @@
       "required":
         - "code"
       "title": "SecondFactorRequest"
+    "SecondFactorResetView":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "sessions_closed":
+          "type": "integer"
+          "title": "Sessions Closed"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "sessions_closed"
+      "title": "SecondFactorResetView"
     "SessionView":
       "properties":
         "created_at":
@@ -731,6 +1868,89 @@
       "required":
         - "sessions"
       "title": "SessionsResponse"
+    "SettingsBody":
+      "properties":
+        "name":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 120
+              "minLength": 1
+            - "type": "null"
+          "title": "Name"
+        "concession_max_days":
+          "anyOf":
+            - "type": "integer"
+              "maximum": 90.0
+              "minimum": 1.0
+            - "type": "null"
+          "title": "Concession Max Days"
+        "concession_default_days":
+          "anyOf":
+            - "type": "integer"
+              "maximum": 90.0
+              "minimum": 1.0
+            - "type": "null"
+          "title": "Concession Default Days"
+      "additionalProperties": false
+      "type": "object"
+      "title": "SettingsBody"
+    "SettingsView":
+      "properties":
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "concession_max_days":
+          "type": "integer"
+          "title": "Concession Max Days"
+        "concession_default_days":
+          "type": "integer"
+          "title": "Concession Default Days"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "organization_id"
+        - "code"
+        - "name"
+        - "kind"
+        - "status"
+        - "concession_max_days"
+        - "concession_default_days"
+      "title": "SettingsView"
+    "UserAssignmentView":
+      "properties":
+        "assignment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignment Id"
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "scope_level":
+          "$ref": "#/components/schemas/ScopeLevel"
+        "scope_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Scope Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "assignment_id"
+        - "role"
+        - "scope_level"
+        - "scope_id"
+      "title": "UserAssignmentView"
     "UserView":
       "properties":
         "user_id":
@@ -750,3 +1970,71 @@
         - "display_name"
         - "email"
       "title": "UserView"
+    "UsersPage":
+      "properties":
+        "users":
+          "items":
+            "$ref": "#/components/schemas/ManagedUserView"
+          "type": "array"
+          "title": "Users"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "users"
+        - "next_after"
+      "title": "UsersPage"
+    "ZoneBody":
+      "properties":
+        "code":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 2
+          "title": "Code"
+        "name":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Name"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "name"
+      "title": "ZoneBody"
+    "ZoneView":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Node Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "plant_id"
+        - "code"
+        - "name"
+        - "node_id"
+      "title": "ZoneView"

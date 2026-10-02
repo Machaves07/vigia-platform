@@ -23,6 +23,13 @@
 - ``update_profile``: ``display_name`` y ``professional_license`` (BR-NUC-34), con la política de
   texto libre; audita ``user_profile_changed`` con los **nombres** de los campos cambiados, nunca
   sus valores. Ningún registro pasado cambia: cada uno guarda la instantánea del actor.
+- ``list_users`` (``GET /users``, TASK-136): ``users.manage`` sobre la organización; las cuentas
+  de la organización del contexto (la seguridad a nivel de fila no deja ver otras) con sus
+  asignaciones vigentes, en páginas por ``user_id``. Nunca credenciales ni hashes.
+
+``SecondFactorResetService.reset`` (``POST /users/{id}/second-factor/reset``, TASK-136; BR-NUC-29)
+autoriza ``users.manage`` sobre la organización y delega en ``SecondFactorService.reset``, que
+desactiva la credencial, cierra las sesiones del usuario y audita ``second_factor_reset``.
 
 Todas las escrituras de una organización se serializan con el bloqueo de su fila
 (``common.lock_organization``).
@@ -32,9 +39,9 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final
+from typing import Final, Protocol
 
 from pydantic import JsonValue
 from sqlalchemy import exc as sa_exc
@@ -65,6 +72,7 @@ from vigia_platform.identity.application.invitations import (
 from vigia_platform.identity.application.roles import (
     Assignment,
     AssignmentRequest,
+    AssignmentView,
     active_org_administrators,
     find_conflict,
     insert_assignment,
@@ -75,27 +83,35 @@ from vigia_platform.identity.application.roles import (
     role_assignable,
 )
 from vigia_platform.identity.auth.login import normalize_email
+from vigia_platform.identity.auth.second_factor import SecondFactorNotFound
 from vigia_platform.identity.auth.sessions import SessionEndReason
 from vigia_platform.identity.authz.authorize import Resource, ResourceNotFound
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.audit_writer import AuditOperation, ResourceRef
-from vigia_platform.shared.context import Role, ScopeContext, repository
+from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.publish import NewEvent
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
     "DISCARDED_PASSWORD_HASH",
+    "MAX_USERS_PAGE",
     "InviteRequest",
     "PlannedAssignment",
     "ProfileChange",
+    "SecondFactorReset",
+    "SecondFactorResetService",
+    "UserPage",
     "UserService",
+    "UserSummary",
     "create_invited_user",
     "plan_assignments",
 ]
 
 DISPLAY_NAME_MAX: Final = 120
 LICENSE_MAX: Final = 64
+MAX_USERS_PAGE: Final = 200
+"""Tamaño máximo de una página de ``list_users`` (PAT-NUC-ESC-07)."""
 EMAIL_UNIQUE_CONSTRAINT: Final = "user_account_email_unique"
 DISCARDED_PASSWORD_HASH: Final = "!discarded"  # noqa: S105 - marcador que nunca verifica
 """Lo que queda del hash anterior al reactivar: no es Argon2id, así que nunca verifica."""
@@ -128,6 +144,33 @@ class ProfileChange:
 class PlannedAssignment:
     role: Role
     scope: ScopeRef
+
+
+@dataclass(frozen=True, slots=True)
+class UserSummary:
+    """Una cuenta de la organización con sus asignaciones vigentes (``GET /users``)."""
+
+    user_id: uuid.UUID
+    email: str = field(repr=False)
+    display_name: str = field(repr=False)
+    professional_license: str | None = field(repr=False)
+    status: str
+    second_factor_required: bool
+    second_factor_enrolled: bool
+    assignments: tuple[AssignmentView, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class UserPage:
+    items: tuple[UserSummary, ...]
+    next_after: uuid.UUID | None
+    """El ``user_id`` desde el que sigue la página siguiente; ``None`` si no hay más."""
+
+
+class SecondFactorReset(Protocol):
+    """La parte de ``SecondFactorService`` que usa el restablecimiento por el administrador."""
+
+    async def reset(self, admin_context: ScopeContext, user_id: uuid.UUID) -> int: ...
 
 
 def plan_assignments(
@@ -196,6 +239,18 @@ _UPDATE_PROFILE: Final = text(
 _PROFILE: Final = text(
     "SELECT display_name, professional_license FROM identity.user_account"
     " WHERE user_id = :user_id FOR UPDATE"
+)
+_USERS_PAGE: Final = text(
+    "SELECT user_id, email, display_name, professional_license, status,"
+    " second_factor_required, second_factor_enrolled_at IS NOT NULL AS second_factor_enrolled"
+    " FROM identity.user_account"
+    " WHERE CAST(:after AS uuid) IS NULL OR user_id > CAST(:after AS uuid)"
+    " ORDER BY user_id LIMIT :limit"
+)
+_USERS_ASSIGNMENTS: Final = text(
+    "SELECT assignment_id, user_id, role, scope_level, scope_id FROM identity.role_assignment"
+    " WHERE removed_at IS NULL AND user_id = ANY(CAST(:user_ids AS uuid[]))"
+    " ORDER BY assignment_id"
 )
 
 
@@ -508,3 +563,89 @@ class UserService:
                 filters={"fields": list[JsonValue](changed)},
                 transaction=transaction,
             )
+
+    async def list_users(
+        self, context: ScopeContext, *, after: uuid.UUID | None = None, limit: int = MAX_USERS_PAGE
+    ) -> UserPage:
+        """Una página de las cuentas de la organización con sus asignaciones vigentes."""
+        deps = self._deps
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= MAX_USERS_PAGE
+        ):
+            raise ValueError(f"limit debe estar entre 1 y {MAX_USERS_PAGE}")
+        if after is not None and type(after) is not uuid.UUID:
+            raise TypeError("after debe ser uuid.UUID")
+        authorized = await deps.authorizer.authorize(
+            context, PermissionKey.USERS_MANAGE, Resource.organization(context.organization_id)
+        )
+        async with deps.database.transaction(authorized) as transaction:
+            rows = (
+                await transaction.execute(
+                    _USERS_PAGE,
+                    {"after": None if after is None else str(after), "limit": limit + 1},
+                )
+            ).all()
+            more = len(rows) > limit
+            rows = rows[:limit]
+            user_ids = [str(row.user_id) for row in rows]
+            held = (
+                (await transaction.execute(_USERS_ASSIGNMENTS, {"user_ids": user_ids})).all()
+                if user_ids
+                else []
+            )
+        by_user: dict[uuid.UUID, list[AssignmentView]] = {}
+        for row in held:
+            owner = as_uuid(row.user_id)
+            by_user.setdefault(owner, []).append(
+                AssignmentView(
+                    as_uuid(row.assignment_id),
+                    owner,
+                    Role(row.role),
+                    ScopeLevel(row.scope_level),
+                    as_uuid(row.scope_id),
+                )
+            )
+        items = tuple(
+            UserSummary(
+                user_id=as_uuid(row.user_id),
+                email=row.email,
+                display_name=row.display_name,
+                professional_license=row.professional_license,
+                status=row.status,
+                second_factor_required=bool(row.second_factor_required),
+                second_factor_enrolled=bool(row.second_factor_enrolled),
+                assignments=tuple(by_user.get(as_uuid(row.user_id), ())),
+            )
+            for row in rows
+        )
+        return UserPage(items, items[-1].user_id if more and items else None)
+
+
+@repository
+class SecondFactorResetService:
+    """``POST /users/{id}/second-factor/reset``: ``users.manage`` y el restablecimiento."""
+
+    def __init__(self, deps: IdentityDependencies, second_factor: SecondFactorReset) -> None:
+        self._deps = deps
+        self._second_factor = second_factor
+
+    def __repr__(self) -> str:
+        return "SecondFactorResetService()"
+
+    async def reset(self, context: ScopeContext, user_id: uuid.UUID) -> int:
+        """Restablece el segundo factor de ``user_id`` (BR-NUC-29); las sesiones cerradas.
+
+        Un usuario de otra organización o inexistente responde ``ResourceNotFound``: la
+        seguridad a nivel de fila no lo deja ver y el almacén lanza ``SecondFactorNotFound``.
+        """
+        if type(user_id) is not uuid.UUID:
+            raise ResourceNotFound()
+        authorized = await self._deps.authorizer.authorize(
+            context, PermissionKey.USERS_MANAGE, Resource.organization(context.organization_id)
+        )
+        try:
+            return await self._second_factor.reset(authorized, user_id)
+        except SecondFactorNotFound:
+            raise ResourceNotFound() from None
