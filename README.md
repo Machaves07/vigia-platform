@@ -126,11 +126,13 @@ En WSL con Docker Desktop, si testcontainers falla con «Exec format error», ex
 
 ## Dependencia del contrato
 
-`vigia-contracts` se consume por `git+ssh` con `#subdirectory=generated/python` (ADR-004). Durante el desarrollo se fija por **hash de commit** de `main`; TASK-153 (VIG-96) lo cambia a la etiqueta `v1.0.0`:
+`vigia-contracts` se consume por `git+ssh` con `#subdirectory=generated/python` (ADR-004) y **por etiqueta** (TASK-153, VIG-96), con el hash del commit de la etiqueta fijado en `uv.lock` (NFR-NUC-24):
 
 ```toml
-"vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@0365139aa69b7abe788b60a2224a108fa4e97c37#subdirectory=generated/python"
+"vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.0.0#subdirectory=generated/python"
 ```
+
+`tests/unit/test_contract_pin.py` falla si la dependencia deja de ser una etiqueta `vX.Y.Z`, si `uv.lock` no resuelve esa etiqueta al commit esperado o si el paquete instalado es otro commit. Para adoptar una etiqueta nueva se cambian a la vez `pyproject.toml`, `uv lock` y la etiqueta y el commit de esa prueba.
 
 ## Reglas de lint bloqueantes
 
