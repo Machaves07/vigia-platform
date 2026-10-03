@@ -74,8 +74,6 @@ ROLES_BY_SIDE = {False: OPENERS, True: (Role.PROVIDER_INSTALLER,)}
 """Roles que abren la vista: de la organización cliente o, bajo concesión, del proveedor."""
 MAX_OFFSET_SECONDS = 300 * 24 * 3600
 """Dentro de la vigencia de 365 días de la clave ``live_view_token`` dada de alta."""
-PROVIDER_OFFSET_SECONDS = 30 * 24 * 3600
-"""Bajo concesión, la vigencia tiene que cubrir también la hora real de la base (≤ 90 días)."""
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +133,15 @@ def test_pr_nuc_36_token_verified_offline_by_the_u01_verifier(
     clock = env.clock
     start = clock.now()
     try:
-        offset = case["offset"] % PROVIDER_OFFSET_SECONDS if case["provider"] else case["offset"]
+        offset = case["offset"]
+        if case["provider"]:
+            # Un solo reloj (VIG-135): la RLS de la concesión mira el now() de la base, así que el
+            # instalador emite a esa hora; los instantes repartidos en la vigencia de la clave los
+            # cubren los casos sin concesión. Una ventana que cubriera la hora simulada y la real
+            # pasaría de concession_max_days al alejarse la fecha real de la simulada.
+            (database_now,) = env.fetch("SELECT now() AS now")
+            clock.set(database_now["now"])
+            offset = 0
         clock.advance(offset + 0.123)
         plant_id = list(site.plants)[case["plant_index"]]
         zone_id = uuid.uuid4()
@@ -151,18 +157,11 @@ def test_pr_nuc_36_token_verified_offline_by_the_u01_verifier(
             plant_level = case["level"] is ScopeLevel.PLANT
             level = ScopeLevel.PLANT if plant_level else ScopeLevel.ORGANIZATION
             installer = env.authz.add_provider_user()
-            # La política de la base mira su ``now()`` real y el constructor del contexto, el
-            # reloj simulado: la concesión cubre los dos instantes.
-            (database_now,) = env.fetch("SELECT now() AS now")
-            low = min(clock.now(), database_now["now"]) - timedelta(hours=1)
-            high = max(clock.now(), database_now["now"]) + timedelta(hours=1)
             concession = env.authz.add_concession(
                 site.organization_id,
                 installer,
                 level=level,
                 scope_id=plant_id if level is ScopeLevel.PLANT else None,
-                granted_at=low,
-                duration=high - low,
             )
             context = env.concession_context(installer, concession)
             user_id = installer

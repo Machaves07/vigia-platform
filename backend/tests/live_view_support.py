@@ -102,6 +102,24 @@ class LiveViewEnvironment:
     def fetch(self, sql: str, *args: Any) -> list[Any]:
         return self.authz.fetch(sql, *args)
 
+    @contextlib.contextmanager
+    def on_database_time(self) -> Iterator[datetime]:
+        """El reloj simulado toma el ``now()`` de la base mientras dura el bloque, y vuelve después.
+
+        La RLS de las concesiones compara su vigencia con el ``now()`` de la base (``nuc_0004``,
+        ``nuc_0015``) y el constructor del contexto, con el reloj: con un solo reloj, la concesión,
+        la sesión y los registros salen de la misma hora y la prueba no caduca cuando la fecha
+        real pasa la simulada (VIG-135). Límite: las claves de firma del entorno nacen en la hora
+        simulada de arranque y viven ``KEY_LIFETIME`` (365 días).
+        """
+        start = self.clock.now()
+        (row,) = self.fetch("SELECT now() AS now")
+        self.clock.set(row["now"])
+        try:
+            yield row["now"]
+        finally:
+            self.clock.set(start)
+
     def execute(self, sql: str, *args: Any) -> None:
         self.authz.execute(sql, *args)
 

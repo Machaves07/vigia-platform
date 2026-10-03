@@ -1054,6 +1054,12 @@ def test_the_thirty_first_token_in_ten_minutes_is_rate_limited(routes: Routes) -
 
 
 def test_under_concession_coverage_and_live_view_write_provider_query(routes: Routes) -> None:
+    # Un solo reloj (VIG-135): la RLS de la concesión mira el now() de la base.
+    with routes.env.on_database_time():
+        _under_concession_coverage_and_live_view(routes)
+
+
+def _under_concession_coverage_and_live_view(routes: Routes) -> None:
     site, zone_id, _, _ = _zone_with_node(routes)
     authz = routes.env.authz
     installer = authz.add_provider_user()

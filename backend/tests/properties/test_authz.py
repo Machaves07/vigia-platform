@@ -1109,8 +1109,13 @@ def test_session_concession_function_is_narrow(environment: AuthzEnvironment) ->
                     "SELECT set_config('vigia.organization_id', $1, true)",
                     "" if organization is None else str(organization),
                 )
+                # La hora del reloj inyectado, como la pasa el constructor del contexto: con now()
+                # de la base, la prueba caducaba con la concesión simulada (VIG-135).
                 rows = await connection.fetch(
-                    "SELECT * FROM identity.session_concession($1, $2, now())", concession, user
+                    "SELECT * FROM identity.session_concession($1, $2, $3)",
+                    concession,
+                    user,
+                    env.now(),
                 )
                 # Desde otra organización que el cliente, vigia_app no ve la fila aunque fije la
                 # variable de la función: la política concession_lookup es solo del dueño.
