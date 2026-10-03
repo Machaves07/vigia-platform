@@ -1,0 +1,12 @@
+# Contexto de `docker buildx build -f backend/Dockerfile .` (TASK-143): solo lo que copia la
+# imagen. Todo lo demás (historial de git, entornos, cachés, pruebas, infraestructura) queda fuera.
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/alembic.ini
+!backend/src/
+!backend/resources/
+!backend/migrations/
+!backend/tools/vigia_verify.py
+**/__pycache__
+**/*.py[cod]
