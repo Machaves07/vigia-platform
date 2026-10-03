@@ -31,7 +31,9 @@ la organización cliente y escribe ``organization_created`` (secuencia 1 de su c
 planta con ``plant_created`` y su primer administrador ``invited`` con la asignación
 ``administrator`` sobre la organización y su invitación, todo en una transacción; después entrega
 el enlace. La organización proveedora solo nace en el arranque de la plataforma (BR-NUC-06,
-TASK-132).
+TASK-132): ``create_provider_organization`` con el contexto de ``bootstrap``, cuyo actor es el
+primer ``platform_operator``, que nace invitado en la misma transacción. ``check`` y
+``check_provider`` validan sin tocar la base (``vigia-admin … --dry-run``).
 
 Todos los nombres pasan la política de texto libre (``FreeTextPolicyRegistry``).
 """
@@ -65,6 +67,7 @@ from vigia_platform.identity.application.invitations import (
     InvitationOutcome,
     checked_link_base,
     deliver,
+    issue_invitation,
 )
 from vigia_platform.identity.application.users import (
     PlannedAssignment,
@@ -92,6 +95,9 @@ from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "PROVIDER_CONCESSION_DEFAULT_DAYS",
+    "PROVIDER_CONCESSION_MAX_DAYS",
+    "FirstOperator",
     "GenesisRequest",
     "GenesisResult",
     "HierarchyService",
@@ -104,6 +110,9 @@ __all__ = [
     "OrganizationView",
     "PlantSpec",
     "PlantView",
+    "ProviderAlreadyExists",
+    "ProviderGenesisRequest",
+    "ProviderGenesisResult",
     "Recipient",
     "ZoneSpec",
     "ZoneView",
@@ -307,6 +316,18 @@ _INSERT_ORGANIZATION: Final = text(
     " concession_max_days, concession_default_days, created_at, created_by)"
     " VALUES (:organization_id, :code, :name, 'client', 'active', :concession_max_days,"
     " :concession_default_days, :created_at, :created_by)"
+)
+_INSERT_PROVIDER: Final = text(
+    "INSERT INTO identity.organization (organization_id, code, name, kind, status,"
+    " concession_max_days, concession_default_days, created_at, created_by)"
+    " VALUES (:organization_id, :code, :name, 'provider', 'active', :concession_max_days,"
+    " :concession_default_days, :created_at, :created_by)"
+)
+_FIRST_OPERATOR: Final = text(
+    "SELECT u.user_id, u.display_name, u.email, u.status FROM identity.user_account AS u"
+    " WHERE EXISTS (SELECT 1 FROM identity.role_assignment AS r WHERE r.user_id = u.user_id"
+    " AND r.role = 'platform_operator' AND r.removed_at IS NULL)"
+    " ORDER BY u.created_at, u.user_id LIMIT 1"
 )
 _INSERT_PLANT: Final = text(
     "INSERT INTO identity.plant (plant_id, organization_id, code, name, country, data_region,"
@@ -879,6 +900,46 @@ class GenesisResult:
     invitation: InvitationOutcome
 
 
+PROVIDER_CONCESSION_MAX_DAYS: Final = 30
+PROVIDER_CONCESSION_DEFAULT_DAYS: Final = 7
+"""Los topes por omisión de ``identity.organization``: en la proveedora no se usan (las
+concesiones son siempre sobre clientes), pero la génesis los registra como todas."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderGenesisRequest:
+    """``vigia-admin bootstrap``: la organización proveedora y su primer operador."""
+
+    code: str
+    name: str
+    operator_email: str = field(repr=False)
+    operator_display_name: str = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderGenesisResult:
+    organization_id: uuid.UUID
+    operator_user_id: uuid.UUID
+    invitation: InvitationOutcome
+
+
+@dataclass(frozen=True, slots=True)
+class FirstOperator:
+    """El primer ``platform_operator`` (``bootstrap --resume``)."""
+
+    user_id: uuid.UUID
+    display_name: str = field(repr=False)
+    email: str = field(repr=False)
+    status: str
+
+
+class ProviderAlreadyExists(Exception):
+    """Ya hay una organización proveedora: ``bootstrap`` no crea otra (BR-NUC-06)."""
+
+    def __init__(self) -> None:
+        super().__init__("la organización proveedora ya existe")
+
+
 @repository
 class OrganizationGenesis:
     """Alta de una organización cliente (``business-logic-model.md`` §2; BR-NUC-06)."""
@@ -897,22 +958,29 @@ class OrganizationGenesis:
     def __repr__(self) -> str:
         return "OrganizationGenesis()"
 
-    async def create_client_organization(
-        self, operator_context: ScopeContext, request: GenesisRequest
-    ) -> GenesisResult:
-        """Organización cliente, su génesis, su primera planta y su primer administrador."""
+    def check(self, request: GenesisRequest) -> GenesisRequest:
+        """La petición validada y normalizada, sin tocar la base ni autorizar (``--dry-run``)."""
         deps = self._deps
         if not isinstance(request, GenesisRequest):
             raise TypeError("request debe ser GenesisRequest")
-        code = checked_code(request.code)
-        name = checked_free_text(
-            deps, request.name, entity="organization", path="/name", max_length=NAME_MAX
-        )
-        plant = _checked_plant(deps, request.plant)
-        email = checked_email(request.administrator_email)
-        display_name = checked_display_name(deps, request.administrator_display_name)
-        license_ = checked_license(deps, request.administrator_professional_license)
         max_days, default_days = request.concession_max_days, request.concession_default_days
+        checked = GenesisRequest(
+            code=checked_code(request.code),
+            name=checked_free_text(
+                deps, request.name, entity="organization", path="/name", max_length=NAME_MAX
+            ),
+            plant=_checked_plant(deps, request.plant),
+            administrator_email=checked_email(request.administrator_email),
+            administrator_display_name=checked_display_name(
+                deps, request.administrator_display_name
+            ),
+            administrator_professional_license=checked_license(
+                deps, request.administrator_professional_license
+            ),
+            concession_max_days=max_days,
+            concession_default_days=default_days,
+            disclose_link=request.disclose_link is True,
+        )
         if (
             type(max_days) is not int
             or type(default_days) is not int
@@ -920,6 +988,19 @@ class OrganizationGenesis:
             or not 1 <= default_days <= max_days
         ):
             raise IdentityRejected(IdentityRejection.INVALID_VALUE, field="/concession_max_days")
+        return checked
+
+    async def create_client_organization(
+        self, operator_context: ScopeContext, request: GenesisRequest
+    ) -> GenesisResult:
+        """Organización cliente, su génesis, su primera planta y su primer administrador."""
+        deps = self._deps
+        checked = self.check(request)
+        code, name, plant = checked.code, checked.name, checked.plant
+        email = checked.administrator_email
+        display_name = checked.administrator_display_name
+        license_ = checked.administrator_professional_license
+        max_days, default_days = checked.concession_max_days, checked.concession_default_days
         authorized = await deps.authorizer.authorize(
             operator_context,
             PermissionKey.PLATFORM_ORGANIZATIONS_CREATE,
@@ -989,6 +1070,150 @@ class OrganizationGenesis:
             issued,
             email=email,
             link_base=self._link_base,
-            disclose=request.disclose_link is True,
+            disclose=checked.disclose_link,
         )
         return GenesisResult(organization_id, first_plant.plant_id, issued.user_id, invitation)
+
+    # --- Organización proveedora (arranque de la plataforma) -----------------------------------
+
+    def check_provider(self, request: ProviderGenesisRequest) -> ProviderGenesisRequest:
+        """La petición de ``bootstrap`` validada, sin tocar la base (``--dry-run``)."""
+        deps = self._deps
+        if not isinstance(request, ProviderGenesisRequest):
+            raise TypeError("request debe ser ProviderGenesisRequest")
+        return ProviderGenesisRequest(
+            code=checked_code(request.code),
+            name=checked_free_text(
+                deps, request.name, entity="organization", path="/name", max_length=NAME_MAX
+            ),
+            operator_email=checked_email(request.operator_email),
+            operator_display_name=checked_display_name(deps, request.operator_display_name),
+        )
+
+    async def create_provider_organization(
+        self, bootstrap_context: ScopeContext, request: ProviderGenesisRequest
+    ) -> ProviderGenesisResult:
+        """La organización proveedora, su génesis y su primer ``platform_operator`` invitado.
+
+        ``bootstrap_context`` sale de ``ScopeContexts.bootstrap_operator_context``: su actor es el
+        operador que nace aquí (``created_by``, ``invited_by``). Todo en una transacción; después
+        el enlace se divulga **una vez** al llamador (``invitation.link``), que lo deja en el
+        secreto de un solo uso y nunca en la salida. Si ya existe una proveedora (índice
+        ``organization_single_provider``), ``ProviderAlreadyExists`` y no queda nada.
+        """
+        deps = self._deps
+        checked = self.check_provider(request)
+        _require_bootstrap_context(deps, bootstrap_context)
+        organization_id = bootstrap_context.organization_id
+        operator_id = bootstrap_context.actor.id
+        now = deps.clock.now()
+        try:
+            async with deps.database.transaction(bootstrap_context) as transaction:
+                await transaction.execute(
+                    _INSERT_PROVIDER,
+                    {
+                        "organization_id": organization_id,
+                        "code": checked.code,
+                        "name": checked.name,
+                        "concession_max_days": PROVIDER_CONCESSION_MAX_DAYS,
+                        "concession_default_days": PROVIDER_CONCESSION_DEFAULT_DAYS,
+                        "created_at": now,
+                        "created_by": operator_id,
+                    },
+                )
+                await write_record(
+                    deps,
+                    bootstrap_context,
+                    transaction,
+                    "organization_created",
+                    {
+                        "organization_id": str(organization_id),
+                        "code": checked.code,
+                        "name": checked.name,
+                        "kind": "provider",
+                        "concession_max_days": PROVIDER_CONCESSION_MAX_DAYS,
+                        "concession_default_days": PROVIDER_CONCESSION_DEFAULT_DAYS,
+                        "created_by": str(operator_id),
+                    },
+                )
+                issued = await create_invited_user(
+                    deps,
+                    transaction,
+                    email=checked.operator_email,
+                    display_name=checked.operator_display_name,
+                    professional_license=None,
+                    assignments=(
+                        PlannedAssignment(
+                            Role.PLATFORM_OPERATOR,
+                            ScopeRef(ScopeLevel.ORGANIZATION, organization_id),
+                        ),
+                    ),
+                    now=now,
+                    user_id=operator_id,
+                )
+        except sa_exc.IntegrityError as error:
+            if _code_taken(error, "organization_single_provider"):
+                raise ProviderAlreadyExists from None
+            if _code_taken(error, "organization_code_unique"):
+                raise IdentityRejected(IdentityRejection.CODE_TAKEN, field="/code") from None
+            if _code_taken(error, "user_account_email_unique"):
+                raise IdentityRejected(
+                    IdentityRejection.EMAIL_UNAVAILABLE, field="/email"
+                ) from None
+            raise
+        invitation = await deliver(
+            deps,
+            self._senders,
+            bootstrap_context,
+            issued,
+            email=checked.operator_email,
+            link_base=self._link_base,
+            disclose=True,
+        )
+        return ProviderGenesisResult(organization_id, operator_id, invitation)
+
+    async def first_operator(self, provider_context: ScopeContext) -> FirstOperator | None:
+        """El primer ``platform_operator`` de la proveedora (``bootstrap --resume``)."""
+        if provider_context.organization_id != self._deps.provider_organization_id:
+            raise PermissionError("el primer operador se busca en la organización proveedora")
+        rows = await self._deps.database.read(provider_context, _FIRST_OPERATOR)
+        if not rows:
+            return None
+        row = rows[0]
+        return FirstOperator(as_uuid(row.user_id), row.display_name, row.email, row.status)
+
+    async def reissue_operator_invitation(
+        self, bootstrap_context: ScopeContext, operator: FirstOperator
+    ) -> InvitationOutcome | None:
+        """``bootstrap --resume``: invitación nueva del primer operador si sigue ``invited``.
+
+        La anterior queda cancelada (``issue_invitation``); si ya activó su cuenta, ``None``.
+        """
+        deps = self._deps
+        _require_bootstrap_context(deps, bootstrap_context)
+        if operator.user_id != bootstrap_context.actor.id:
+            raise PermissionError("la invitación es del operador del contexto de arranque")
+        if operator.status != "invited":
+            return None
+        async with deps.database.transaction(bootstrap_context) as transaction:
+            issued = await issue_invitation(deps, transaction, operator.user_id, deps.clock.now())
+        return await deliver(
+            deps,
+            self._senders,
+            bootstrap_context,
+            issued,
+            email=operator.email,
+            link_base=self._link_base,
+            disclose=True,
+        )
+
+
+def _require_bootstrap_context(deps: IdentityDependencies, context: ScopeContext) -> None:
+    if (
+        not isinstance(context, ScopeContext)
+        or context.origin is not ContextOrigin.ADMIN_COMMAND
+        or context.actor.kind is not ActorKind.OPERATOR
+        or context.organization_id != deps.provider_organization_id
+        or context.allowed_scopes
+    ):
+        raise PermissionError("la proveedora solo nace con el contexto de bootstrap")

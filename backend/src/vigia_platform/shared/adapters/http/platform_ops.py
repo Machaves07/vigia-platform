@@ -18,7 +18,9 @@ correlación). Es el contexto con el que la base deja reprocesar la cola muerta
   propósito con ``SigningService.rotate`` (clave nueva activa, la anterior ``overlapping``;
   ``key_rotated`` y, si el propósito es del nodo, ``key_set_published`` en la cadena de la
   proveedora) y audita ``key_rotated`` con el propósito y los identificadores de clave
-  (BR-NUC-59). Nunca sale material privado: solo identificadores, la clave pública y su vigencia.
+  (BR-NUC-59), en la **misma** transacción que confirma la clave (``SqlSigningKeyStore`` con
+  ``LedgerRotationRecorder``; revisión de VIG-93). Nunca sale material privado: solo
+  identificadores, la clave pública y su vigencia.
   Si la clave ``key_set`` vigente no está disponible para firmar el conjunto: ``conflict``.
 """
 
@@ -145,7 +147,10 @@ def platform_ops_router() -> APIRouter:
             "key_id": key.key_id,
             "previous_key_id": result.previous_key_id,
         }
-        await services.audit.append(authorized, AuditOperation.KEY_ROTATED, filters=filters)
+        if not result.audited:
+            # Solo con un almacén sin RotationRecorder (dobles de prueba): en producción la
+            # auditoría va en la transacción de la rotación (SqlSigningKeyStore).
+            await services.audit.append(authorized, AuditOperation.KEY_ROTATED, filters=filters)
         return KeyRotatedOut(
             purpose=key.purpose.value,
             key_id=key.key_id,
