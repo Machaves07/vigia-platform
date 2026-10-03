@@ -198,7 +198,18 @@ Códigos de salida: `0` hecho, `1` configuración o error inesperado, `2` uso in
 
 Los flujos están en `.github/workflows/` (TASK-143 y TASK-151). Los trabajos que tocan AWS (federación con `vigia-deploy`, ECR, `cdk deploy`) solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true` (adenda A-47). Sin ella, `release.yml` ensaya hasta donde no hace falta AWS y lo dice en el resumen.
 
-1. **`ci.yml`**, en cada PR listo: escaneo de secretos; backend sin integración (ruff, `lint_rules`, `mypy --strict`, pytest); backend con integración; infra (pruebas y `cdk synth`). La imagen `arm64` se construye y se escanea sin publicarse.
+1. **`ci.yml`**, en cada PR listo (no en borradores), con nueve checks:
+   - escaneo de secretos;
+   - backend (lint, tipos y pruebas sin integración): ruff, `lint_rules`, `mypy --strict` y pytest;
+   - backend (pruebas de integración);
+   - cobertura (≥ 90 % en `identity` y `ledger`, ≥ 80 % global);
+   - dependencias (licencias y `pip-audit`);
+   - imagen `arm64` (construcción, auditoría, arranque y escaneo, sin publicarla);
+   - flujos (`actionlint`);
+   - infra (pruebas y `cdk synth`);
+   - arranque de la imagen N-1 contra el esquema N.
+
+   La definición manda: `.github/workflows/ci.yml`.
 2. **`nightly.yml`**, cada noche sobre `main`: propiedades con el perfil `nightly`, bancos, volumetría, resiliencia FS-NUC-01 a 10 con el ensayo de restauración y conformidad.
 3. **`release.yml`**, a mano (`workflow_dispatch`) sobre un commit con el nocturno verde. Entradas: `version` (`X.Y.Z`), `dry-run` (verdadero por omisión) y `soak`.
    1. Construye y publica la imagen por digest y calcula el `cdk diff`.

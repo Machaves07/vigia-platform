@@ -26,6 +26,12 @@ La alarma `vigia-integrity-compromised` (métrica `integrity_compromised_total`)
    - el punto de control nuevo que **referencia el incidente**.
 
    Lo escrito antes de la restauración se conserva como constancia, nunca se reescribe.
+
+   **Cómo lo restaurado sustituye a `vigia-pilot-db`: se decide en el incidente.** Ni el diseño ni el código fijan el mecanismo. Hay dos caminos posibles:
+   - promover la instancia restaurada como nueva `vigia-pilot-db` (renombrar instancias y volver a apuntar los secretos y la pila `vigia-data`);
+   - restituir solo el tramo afectado en la base vigente.
+
+   Cualquiera de los dos interrumpe el servicio y toca una pila que no se revierte de forma automática. La decisión, con el dueño y la organización afectada, se registra en la adenda al diseño antes de ejecutarla, con el procedimiento elegido y su validación.
 5. **Verificar de nuevo desde la génesis**, una vez restaurada la cadena. Pide una verificación **completa bajo demanda** de cada cadena afectada:
 
    ```text

@@ -10,7 +10,24 @@ Cuando una tarea toca código que compara marcas de tiempo con el reloj de la ba
 
 Usar `faketime` solo sobre pytest no basta: el reloj que importa es el `now()` de PostgreSQL, que corre en otro proceso. Hay que adelantar los dos.
 
+## Requisitos
+
+- Docker en ejecución. En WSL, `DOCKER_CONFIG` apuntando a una configuración sin `credsStore` (ver `AGENTS.md`).
+- **libfaketime del sistema anfitrión**, para pytest: `sudo apt-get install -y libfaketime` en el WSL. La biblioteca de la imagen Debian 13 del paso 1 **no sirve** en el anfitrión: pide `GLIBC_2.38`, y Ubuntu 22.04 trae 2.35. Comprueba la ruta antes de usarla:
+
+  ```text
+  test -f /usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 && echo ok
+  ```
+
 ## Pasos
+
+0. **Fijar la fecha una vez**, como fecha absoluta a **400 días** de hoy. Queda siempre más de un año por delante, y la base y pytest usan la misma:
+
+   ```text
+   export FT="@$(date -u -d '+400 days' '+%Y-%m-%d %H:%M:%S')"
+   echo "$FT"
+   ```
+
 
 1. **Imagen de PostgreSQL con libfaketime.** El mismo digest que `docker-compose.yml` y `backend/tests/integration/conftest.py` (`POSTGRES_IMAGE`), más el paquete. Fuera del repositorio, por ejemplo en `/tmp/<issue>/faketime/Dockerfile`:
 
@@ -27,27 +44,28 @@ Usar `faketime` solo sobre pytest no basta: el reloj que importa es el `now()` d
    ```
 
    En `amd64` la biblioteca queda en `/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1`; en `arm64`, en `/usr/lib/aarch64-linux-gnu/faketime/`.
-2. **Levantar la base adelantada**, con una **fecha absoluta** (`@`, el reloj avanza desde ahí) y en el puerto del entorno local, para que las pruebas la usen con `VIGIA_TEST_USE_COMPOSE=1`:
+2. **Levantar la base adelantada**, con la **fecha absoluta** del paso 0 (`@`, el reloj avanza desde ahí) y en el puerto del entorno local, para que las pruebas la usen con `VIGIA_TEST_USE_COMPOSE=1`:
 
    ```text
    docker run -d --name vigia-faketime -p 127.0.0.1:5432:5432 \
      -e POSTGRES_USER=vigia -e POSTGRES_PASSWORD=vigia_local -e POSTGRES_DB=vigia -e TZ=UTC -e PGTZ=UTC \
      -e LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 \
-     -e "FAKETIME=@2028-03-01 12:00:00" \
+     -e "FAKETIME=$FT" \
      vigia-postgres-faketime:16
    docker exec vigia-faketime psql -U vigia -d vigia -tAc "SELECT now(), clock_timestamp()"
    ```
 
-   La consulta debe devolver 2028. Si devuelve la fecha real, la variable `LD_PRELOAD` no llegó al proceso.
+   La consulta debe devolver la fecha de `$FT`. Si devuelve la fecha real, la variable `LD_PRELOAD` no llegó al proceso.
 3. **LocalStack**, si las pruebas lo necesitan: `docker compose up -d localstack`. No adelantes LocalStack salvo que la prueba compare con su reloj.
-4. **Correr pytest con el mismo reloj**, la misma `LD_PRELOAD` (la ruta de la biblioteca en el sistema anfitrión: `apt-get install libfaketime` en WSL) y la misma `FAKETIME`:
+4. **Correr pytest con el mismo reloj**: la misma `FAKETIME` y la `LD_PRELOAD` de la biblioteca **del anfitrión** (ver «Requisitos»), cuya ruta se comprueba primero:
 
    ```text
    cd backend
    export DOCKER_CONFIG=<directorio con una configuración de Docker sin credsStore>   # WSL: ver AGENTS.md
+   test -f /usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 || echo "falta libfaketime en el anfitrión"
    VIGIA_TEST_USE_COMPOSE=1 FAKETIME_DISABLE_SHM=1 FAKETIME_NO_CACHE=1 \
      LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 \
-     FAKETIME="@2028-03-01 12:00:00" \
+     FAKETIME="$FT" \
      uv run pytest -q -m integration <archivos de la tarea>
    ```
 
