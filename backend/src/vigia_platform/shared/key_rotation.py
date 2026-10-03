@@ -7,6 +7,8 @@ necesita vive aquí:
   ``key_rotated`` y ``key_set_published`` en la cadena de la organización proveedora; el segundo
   publica en la misma transacción el evento ``key_set_published`` de la bandeja, que U-03 entrega
   en el latido (BR-NUC-86). Un rechazo del expediente sube como ``KeyEventRejected``.
+- ``LedgerRotationRecorder``: lo mismo más la auditoría ``key_rotated``, **dentro** de la
+  transacción en que ``SqlSigningKeyStore`` confirma la clave (rotación y auditoría atómicas).
 - La tarea periódica ``key_rotation_reminder`` (diaria, BR-NUC-85): en la organización
   proveedora publica ``key_rotation_due`` para cada clave activa que acaba de entrar en los 45
   días, rota las que vencen en 30 días o menos, retira las ``overlapping`` vencidas y publica
@@ -20,7 +22,12 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any, Final
 
-from vigia_platform.ledger.application.writer import EscritorExpediente, LedgerRejection
+from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter
+from vigia_platform.ledger.application.writer import (
+    EscritorExpediente,
+    LedgerDatabase,
+    LedgerRejection,
+)
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
@@ -32,7 +39,7 @@ from vigia_platform.shared.outbox.registries import (
     PeriodicTaskRegistry,
     Schedule,
 )
-from vigia_platform.shared.signing import SigningService
+from vigia_platform.shared.signing import RotationCommit, SigningService
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
@@ -41,6 +48,7 @@ __all__ = [
     "KEY_ROTATION_REMINDER_SCHEDULE",
     "KeyEventRejected",
     "LedgerKeyEventWriter",
+    "LedgerRotationRecorder",
     "key_rotation_reminder_handler",
     "register_key_rotation_reminder",
 ]
@@ -90,6 +98,78 @@ class LedgerKeyEventWriter:
         events: tuple[NewEvent, ...],
     ) -> None:
         result = await self._writer.write(context, record_type, dict(content), events=events)
+        if isinstance(result, LedgerRejection):
+            _log.error("registro de rotación de claves rechazado por el expediente")
+            raise KeyEventRejected(record_type, result)
+
+
+class LedgerRotationRecorder:
+    """``RotationRecorder``: registros y auditoría de una rotación en **su** transacción.
+
+    ``SqlSigningKeyStore`` lo llama dentro de la transacción que confirma la clave: escribe
+    ``key_rotated`` y, si se publica conjunto, ``key_set_published`` (con su evento de la bandeja)
+    con ``EscritorExpediente``, y la entrada de auditoría ``key_rotated`` con ``AuditWriter``. Un
+    rechazo o un fallo revierte también la clave (revisión de VIG-93). Sin transacción (dobles en
+    memoria) abre una propia antes de que el doble aplique nada.
+    """
+
+    def __init__(
+        self, *, database: LedgerDatabase, writer: EscritorExpediente, audit: AuditWriter
+    ) -> None:
+        self._database = database
+        self._writer = writer
+        self._audit = audit
+
+    def __repr__(self) -> str:
+        return "LedgerRotationRecorder()"
+
+    async def record(self, commit: RotationCommit, transaction: Any | None) -> None:
+        context = commit.context
+        if context is None or commit.rotated is None:
+            raise ValueError("la rotación llega sin su contexto ni su contenido")
+        if transaction is None:
+            async with self._database.transaction(context) as own:
+                await self._record(commit, context, commit.rotated, own)
+            return
+        if not isinstance(transaction, Transaction):
+            raise TypeError("transaction debe ser la de shared.db")
+        await self._record(commit, context, commit.rotated, transaction)
+
+    async def _record(
+        self,
+        commit: RotationCommit,
+        context: ScopeContext,
+        rotated: Mapping[str, Any],
+        transaction: Transaction,
+    ) -> None:
+        await self._write(context, transaction, "key_rotated", rotated, ())
+        if commit.published is not None:
+            content, event = commit.published
+            await self._write(
+                context,
+                transaction,
+                "key_set_published",
+                content,
+                (NewEvent(event_name="key_set_published", payload=dict(event)),),
+            )
+        await self._audit.append(
+            context,
+            AuditOperation.KEY_ROTATED,
+            filters=dict(commit.audit_filters),
+            transaction=transaction,
+        )
+
+    async def _write(
+        self,
+        context: ScopeContext,
+        transaction: Transaction,
+        record_type: str,
+        content: Mapping[str, Any],
+        events: tuple[NewEvent, ...],
+    ) -> None:
+        result = await self._writer.write(
+            context, record_type, dict(content), events=events, transaction=transaction
+        )
         if isinstance(result, LedgerRejection):
             _log.error("registro de rotación de claves rechazado por el expediente")
             raise KeyEventRejected(record_type, result)

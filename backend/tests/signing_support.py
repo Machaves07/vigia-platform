@@ -32,6 +32,7 @@ from vigia_platform.shared.signing import (
     KeyStoreSnapshot,
     KeyTransition,
     RotationCommit,
+    RotationRecorder,
     SigningKeyRecord,
     SigningPurpose,
     SigningService,
@@ -96,6 +97,13 @@ class InMemoryKeyStore:
         self.publications: list[StoredPublication] = []
         self.down = False
         self.fail_next_commit = False
+        self.recorder: RotationRecorder | None = None
+        """Como en ``SqlSigningKeyStore``: registros y auditoría antes de aplicar nada; si
+        fallan, la rotación no queda."""
+
+    @property
+    def records_rotation(self) -> bool:
+        return self.recorder is not None
 
     async def load(self) -> KeyStoreSnapshot:
         if self.down:
@@ -105,11 +113,18 @@ class InMemoryKeyStore:
 
     async def commit_rotation(self, commit: RotationCommit) -> None:
         self._check_available()
+        if commit.publication is not None:
+            # Como ``SqlSigningKeyStore``: solo se publica sobre la última publicación leída.
+            latest = self.publications[-1].record.publication_id if self.publications else None
+            if latest != commit.expected_publication_id:
+                raise KeyStateConflict
         updated = self._apply(commit.transitions)
         if commit.new_key.key_id in updated:
             raise ValueError("key_id duplicado")
         updated[commit.new_key.key_id] = commit.new_key
         _check_constraints(updated.values())
+        if self.recorder is not None:
+            await self.recorder.record(commit, None)
         self.keys = updated
         if commit.publication is not None:
             self.publications.append(StoredPublication(commit.publication, dict(updated)))

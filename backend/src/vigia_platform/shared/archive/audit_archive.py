@@ -123,6 +123,7 @@ __all__ = [
     "read_archive",
     "register_archive_audit_partitions",
     "restore_audit_partition",
+    "restored_from_bytes",
     "verify_archive",
 ]
 
@@ -1171,9 +1172,19 @@ async def restore_audit_partition(
 
     ``expected_sha256`` es el ``archive_sha256`` del registro ``audit_partition_archived``.
     """
+    _require_sha256(expected_sha256)
+    return restored_from_bytes(await storage.get_object(object_key), expected_sha256)
+
+
+def _require_sha256(expected_sha256: object) -> None:
     if not isinstance(expected_sha256, str) or _HEX64.fullmatch(expected_sha256) is None:
         raise ValueError("expected_sha256 debe ser un SHA-256 hexadecimal en minúsculas")
-    data = await storage.get_object(object_key)
+
+
+def restored_from_bytes(data: bytes, expected_sha256: str) -> RestoredPartition:
+    """``restore_audit_partition`` sobre los bytes ya descargados (``vigia-admin`` los verifica
+    y después los extrae con ``extract_archive`` sin descargarlos otra vez)."""
+    _require_sha256(expected_sha256)
     if hashlib.sha256(data).hexdigest() != expected_sha256:
         raise ArchiveVerificationFailed(ArchiveFailure.DIGEST_MISMATCH)
     contents = read_archive(data)

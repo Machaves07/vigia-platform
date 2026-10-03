@@ -47,6 +47,8 @@ dependencies = [
 # infra: WORKER_COMMAND).
 vigia-api = "vigia_platform.shared.api.main:main"
 vigia-worker = "vigia_platform.shared.worker.main:main"
+# Órdenes administrativas del operador del proveedor (LC-NUC-07, TASK-132; infra: ADMIN_COMMAND).
+vigia-admin = "vigia_platform.identity.application.admin_cli:main"
 
 [dependency-groups]
 dev = [
