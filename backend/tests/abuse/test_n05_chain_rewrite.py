@@ -245,6 +245,8 @@ def test_n05_a_rotation_never_stays_without_its_audit_entry(
     response = platform.call("POST", "/platform/keys/checkpoint/rotate", cookie=platform.operator())
     monkeypatch.undo()
     assert response.status_code >= 500 and code_of(response) == "internal_error"
+    # Lo persistido, no la memoria del proceso: otro proceso que relea no debe ver la clave.
+    assert platform.run(platform.signing.refresh())
     rotated = {key.key_id for key in platform.signing.public_keys(_checkpoint_purpose())} - active
     unaudited = len(platform.audit_entries(platform.provider, "key_rotated")) == audited
     # El invariante que se espera: o la rotación no ocurre, o queda auditada.
