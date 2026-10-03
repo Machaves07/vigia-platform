@@ -18,6 +18,10 @@ con la clave pública: un KMS que firmara con otra clave no deja un certificado 
   vigente y la nueva (D-6, ``deployment-architecture.md`` §6.4): un nodo con credencial de la
   raíz anterior sigue validando y pasa a la nueva en su rotación normal. Con dos raíces ya
   publicadas (una sustitución en curso) no se añade una tercera.
+- ``prepare_root`` y ``prepare_rotation`` firman y arman el paquete **sin escribir nada**;
+  ``publish`` es la única escritura. Así ``vigia-admin`` audita la intención (con la huella de la
+  raíz nueva) antes de publicar y el resultado después: el depósito y la base no comparten
+  transacción, y nunca queda una raíz publicada sin su entrada (revisión de VIG-93).
 
 No lee la hora del sistema: ``now`` llega del ``Clock`` del llamador.
 """
@@ -46,6 +50,7 @@ __all__ = [
     "NodeCaError",
     "NodeCaPublisher",
     "NodeCaSigner",
+    "PreparedRoot",
     "PublishedRoot",
     "RootStorage",
     "build_root_certificate",
@@ -344,6 +349,20 @@ def two_root_bundle(current: bytes, new_root: x509.Certificate) -> bytes:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedRoot:
+    """La raíz nueva ya firmada y el paquete que se publicaría (nada escrito todavía): quien
+    publica audita su intención con estos identificadores antes de ``publish``."""
+
+    root: x509.Certificate
+    bundle: tuple[x509.Certificate, ...]
+    object_key: str
+
+    @property
+    def fingerprints(self) -> tuple[str, ...]:
+        return tuple(fingerprint(root) for root in self.bundle)
+
+
+@dataclass(frozen=True, slots=True)
 class PublishedRoot:
     """Lo publicado: la raíz nueva, el paquete completo y la versión del objeto."""
 
@@ -386,18 +405,30 @@ class NodeCaPublisher:
         """Solo lectura (``--dry-run``): la clave existe y es ECC P-256."""
         await kms_public_key(self._kms, key_id)
 
-    async def publish_root(self, key_id: str, *, now: datetime) -> PublishedRoot:
-        """``bootstrap``: la primera raíz, sola en ``ca/root.pem``."""
+    async def prepare_root(self, key_id: str, *, now: datetime) -> PreparedRoot:
+        """``bootstrap``: la primera raíz, sola, firmada y sin publicar todavía."""
         root = await self._build(key_id, now)
-        return await self._put((root,), root)
+        return PreparedRoot(root, (root,), self._object_key)
 
-    async def rotate_root(self, new_key_id: str, *, now: datetime) -> PublishedRoot:
-        """``rotate-node-ca``: la vigente (leída del depósito) y la nueva, en un paquete."""
+    async def prepare_rotation(self, new_key_id: str, *, now: datetime) -> PreparedRoot:
+        """``rotate-node-ca``: la vigente (leída del depósito) y la nueva, sin publicar."""
         current = await self._storage.get_object(self._object_key)
         read_bundle(current)  # antes de firmar nada: un paquete inválido no se amplía
         root = await self._build(new_key_id, now)
         bundle = two_root_bundle(current, root)
-        return await self._put(read_bundle(bundle), root)
+        return PreparedRoot(root, read_bundle(bundle), self._object_key)
+
+    async def publish(self, prepared: PreparedRoot) -> PublishedRoot:
+        """Escribe ``ca/root.pem`` con el paquete preparado (la única escritura)."""
+        if prepared.object_key != self._object_key:
+            raise NodeCaError("el paquete se preparó para otro objeto")
+        return await self._put(prepared.bundle, prepared.root)
+
+    async def publish_root(self, key_id: str, *, now: datetime) -> PublishedRoot:
+        return await self.publish(await self.prepare_root(key_id, now=now))
+
+    async def rotate_root(self, new_key_id: str, *, now: datetime) -> PublishedRoot:
+        return await self.publish(await self.prepare_rotation(new_key_id, now=now))
 
     async def _build(self, key_id: str, now: datetime) -> x509.Certificate:
         return await build_root_certificate(

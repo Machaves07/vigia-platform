@@ -108,6 +108,7 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
+from vigia_platform.shared.key_rotation import LedgerRotationRecorder
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import (
@@ -701,6 +702,11 @@ def platform_world(postgres_endpoint: PostgresEndpoint, prefix: str) -> Iterator
             environment=ENVIRONMENT,
         )
         env.run(signing.start())
+        # Como en producción (SqlSigningKeyStore): cada rotación escribe sus registros y su
+        # auditoría antes de quedar aplicada (VIG-88, revisión de VIG-93).
+        env.store.recorder = LedgerRotationRecorder(
+            database=sessions.database, writer=writer, audit=sessions.audit
+        )
         checkpoints = CheckpointService(
             store=SqlCheckpointStore(
                 database=sessions.database,

@@ -57,6 +57,7 @@ from vigia_platform.identity.application.admin_cli import AdminConfig
 from vigia_platform.identity.application.invitations import InvitationService
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.adapters.integrity_store import SqlIntegrityStore
+from vigia_platform.ledger.application.audit_writer import AuditOperation
 from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain
 from vigia_platform.ledger.chain.verify import IntegrityService, VerificationMode
 from vigia_platform.shared.archive.restore_drill import RestoreDrills
@@ -368,15 +369,22 @@ def test_rotate_node_ca_publishes_two_roots_and_old_nodes_keep_validating(env: E
         "KeyId"
     ]
     environ = env.world.environ(provider_id)
-    code, out, err = env.world.run(
-        "rotate-node-ca", "--new-key-id", new_key, "--dry-run", environ=environ
-    )
+    operator_id = env.activate(provider_id, env.secret(_secret_name(env))["link"])
+    rotate = ("rotate-node-ca", "--new-key-id", new_key, "--operator", str(operator_id))
+    code, out, err = env.world.run(*rotate, "--dry-run", environ=environ)
     assert code == 0, err
     assert len(read_bundle(env.object(ROOT_CERTIFICATE_KEY))) == 1  # --dry-run no publica
-    code, out, err = env.world.run(
-        "rotate-node-ca", "--new-key-id", new_key, "--yes", environ=environ
-    )
+    code, out, err = env.world.run(*rotate, "--yes", environ=environ)
     assert code == 0, err
+    # Intención y resultado auditados con el operador (bootstrap dejó los dos primeros).
+    audited = env.fetch(
+        "SELECT operation, actor_id FROM shared.audit_entry"
+        " WHERE operation LIKE 'node_ca_root_%' ORDER BY chain_sequence"
+    )
+    assert [(r["operation"], r["actor_id"]) for r in audited[2:]] == [
+        ("node_ca_root_requested", operator_id),
+        ("node_ca_root_published", operator_id),
+    ]
     bundle = read_bundle(env.object(ROOT_CERTIFICATE_KEY))
     assert len(bundle) == 2 and bundle[0] == old_root
     new_root = bundle[1]
@@ -575,3 +583,75 @@ def test_operator_commands_against_the_bootstrapped_database(env: Env) -> None:
     assert code == 0
     env.world.clock.offset = timedelta(days=101, minutes=1)
     assert env.with_runtime(provider_id, age) == 101  # el ensayo fallido no la reinicia
+
+
+# --- Rotación y auditoría (revisión de VIG-93) -------------------------------------------------
+
+
+def _audited(env: Env, operation: str) -> int:
+    (row,) = env.fetch(
+        "SELECT count(*) AS n FROM shared.audit_entry WHERE operation = $1", operation
+    )
+    return int(row["n"])
+
+
+def _key_rotated_records(env: Env) -> int:
+    (row,) = env.fetch(
+        "SELECT count(*) AS n FROM ledger.ledger_record WHERE record_type = 'key_rotated'"
+    )
+    return int(row["n"])
+
+
+def test_a_key_rotation_never_stays_without_its_audit_entry(env: Env) -> None:
+    document = _bootstrap(env)
+    provider_id = uuid.UUID(document["provider_organization_id"])
+    environ = env.world.environ(provider_id)
+    # bootstrap: cinco claves, cada una con su key_rotated en el expediente y en la auditoría.
+    assert _audited(env, "key_rotated") == _key_rotated_records(env) == 5
+    operator_id = env.activate(provider_id, env.secret(_secret_name(env))["link"])
+    keys = env.fetch("SELECT key_id FROM identity.signing_key ORDER BY key_id")
+
+    async def failing_audit(built: BuiltRuntime) -> None:
+        audit = built.deps.audit
+        original = audit.append
+
+        async def append(context: Any, operation: Any, *args: Any, **kwargs: Any) -> Any:
+            if operation == AuditOperation.KEY_ROTATED:
+                raise ConnectionError("la base se cae entre la rotación y su auditoría")
+            return await original(context, operation, *args, **kwargs)
+
+        audit.append = append  # type: ignore[method-assign]
+
+    env.world.on_build = failing_audit
+    rotate = ("rotate-key", "catalog", "--operator", str(operator_id))
+    code, out, _ = env.world.run(*rotate, environ=environ)
+    env.world.on_build = None
+    assert code != 0 and out == ""
+    # Fallo inyectado entre la clave y su auditoría: no queda la clave, ni el registro.
+    assert env.fetch("SELECT key_id FROM identity.signing_key ORDER BY key_id") == keys
+    assert _audited(env, "key_rotated") == _key_rotated_records(env) == 5
+    code, out, err = env.world.run(*rotate, environ=environ)
+    assert code == 0, err
+    rotated = output(out)["key_id"]
+    filters = [
+        json.loads(bytes(row["filters"]))
+        for row in env.fetch(
+            "SELECT filters FROM shared.audit_entry WHERE operation = 'key_rotated'"
+        )
+    ]
+    assert [f["key_id"] for f in filters].count(rotated) == 1  # una sola entrada, no dos
+    assert _audited(env, "key_rotated") == _key_rotated_records(env) == 6
+
+
+def test_bootstrap_audits_the_root_before_publishing_it(env: Env) -> None:
+    document = _bootstrap(env)
+    entries = env.fetch(
+        "SELECT operation, outcome, filters FROM shared.audit_entry"
+        " WHERE operation LIKE 'node_ca_root_%' ORDER BY chain_sequence"
+    )
+    assert [(row["operation"], row["outcome"]) for row in entries] == [
+        ("node_ca_root_requested", "success"),
+        ("node_ca_root_published", "success"),
+    ]
+    requested = json.loads(bytes(entries[0]["filters"]))
+    assert requested["root_sha256"] == document["root_sha256"]

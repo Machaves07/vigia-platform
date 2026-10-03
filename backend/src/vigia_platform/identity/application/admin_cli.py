@@ -17,8 +17,15 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
 - ``rotate-key <purpose>``, ``replay-dead-letter <event> <consumer>``,
   ``create-partitions --until AAAA-MM`` y ``record-restore-drill --result ok|failed``: con el
   contexto de ``context_from_operator`` (``--operator``: un ``platform_operator`` activo).
-- ``rotate-node-ca --new-key-id``: solo con ``ca_rotation=true`` en la síntesis (que concede los
-  permisos); publica la raíz vigente y la nueva en un paquete (D-6).
+- ``rotate-node-ca --new-key-id --operator``: solo con ``ca_rotation=true`` en la síntesis (que
+  concede los permisos); publica la raíz vigente y la nueva en un paquete (D-6).
+
+**Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
+almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
+confirma (``SigningService.records_rotation``; si no, la orden se niega sin rotar nada). La raíz
+de la autoridad vive en el depósito, que no comparte transacción con la base: se audita la
+intención (``node_ca_root_requested``, con la huella de la raíz nueva) **antes** de escribir
+``ca/root.pem`` y el resultado (``node_ca_root_published``) después.
 - ``restore-audit-partition``: descarga, verifica y extrae un archivo de auditoría en un
   directorio nuevo; solo lectura (runbook 6.5).
 
@@ -56,7 +63,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Final, NoReturn, Protocol, TextIO
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from vigia_platform.identity.application.common import (
     IdentityRejected,
@@ -75,7 +82,11 @@ from vigia_platform.identity.application.invitations import InvitationOutcome
 from vigia_platform.identity.authz.authorize import Resource, ResourceNotFound
 from vigia_platform.identity.authz.context import ContextUnavailable
 from vigia_platform.identity.authz.matrix import PermissionKey
-from vigia_platform.ledger.application.audit_writer import AuditReceipt
+from vigia_platform.ledger.application.audit_writer import (
+    AuditOperation,
+    AuditOutcome,
+    AuditReceipt,
+)
 from vigia_platform.shared.archive.audit_archive import (
     ArchiveVerificationFailed,
     extract_archive,
@@ -91,7 +102,12 @@ from vigia_platform.shared.archive.restore_drill import DrillResult
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Transaction, TransientDatabaseError
-from vigia_platform.shared.node_ca import ROOT_CERTIFICATE_KEY, NodeCaError, PublishedRoot
+from vigia_platform.shared.node_ca import (
+    ROOT_CERTIFICATE_KEY,
+    NodeCaError,
+    PreparedRoot,
+    PublishedRoot,
+)
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
 from vigia_platform.shared.outbox.registries import REGISTRY_NAME
 from vigia_platform.shared.outbox.replay import ReplayReceipt
@@ -267,6 +283,11 @@ class AdminSigning(Protocol):
     @property
     def ready(self) -> bool: ...
 
+    @property
+    def records_rotation(self) -> bool:
+        """El almacén audita cada rotación en su transacción (``RotationRecorder``)."""
+        ...
+
     async def start(self, *, required: Iterable[SigningPurpose] = ...) -> None: ...
 
     def all_keys(self) -> tuple[SigningKeyRecord, ...]: ...
@@ -309,9 +330,24 @@ class RootPublisher(Protocol):
 
     async def check_key(self, key_id: str) -> None: ...
 
-    async def publish_root(self, key_id: str, *, now: Any) -> PublishedRoot: ...
+    async def prepare_root(self, key_id: str, *, now: Any) -> PreparedRoot: ...
 
-    async def rotate_root(self, new_key_id: str, *, now: Any) -> PublishedRoot: ...
+    async def prepare_rotation(self, new_key_id: str, *, now: Any) -> PreparedRoot: ...
+
+    async def publish(self, prepared: PreparedRoot) -> PublishedRoot: ...
+
+
+class AdminAudit(Protocol):
+    """``AuditWriter.append``: cadena de auditoría de la organización proveedora."""
+
+    async def append(
+        self,
+        context: ScopeContext,
+        operation: AuditOperation,
+        *,
+        outcome: AuditOutcome = ...,
+        filters: Mapping[str, JsonValue] | None = None,
+    ) -> AuditReceipt: ...
 
 
 class ArchiveReader(Protocol):
@@ -334,6 +370,7 @@ class AdminRuntime:
     partitions: AdminPartitions
     drills: AdminDrills
     secrets: OneTimeSecrets
+    audit: AdminAudit
     node_ca: RootPublisher | None = None
     """Con ``VIGIA_NODE_CA_KEY_ARN`` y ``VIGIA_EDGE_BUCKET`` (arranque o sustitución de raíz)."""
     archive: ArchiveReader | None = None
@@ -618,6 +655,7 @@ def build_parser() -> argparse.ArgumentParser:
     root.add_argument(
         "--new-key-id", required=True, metavar="ARN", help="clave KMS ECC_NIST_P256 nueva"
     )
+    _add_operator(root)
     _add_common(root, confirm=True)
 
     replay = commands.add_parser(
@@ -746,6 +784,7 @@ def _invitation_output(invitation: InvitationOutcome, secret: str | None) -> dic
 async def _initial_keys(runtime: AdminRuntime, context: ScopeContext) -> dict[str, str]:
     """Una clave activa por propósito: crea solo las que falten (``key_set`` primero)."""
     signing = runtime.signing
+    _require_audited_rotation(runtime)
     if not signing.ready:
         await signing.start(required=())
     created: dict[str, str] = {}
@@ -757,6 +796,53 @@ async def _initial_keys(runtime: AdminRuntime, context: ScopeContext) -> dict[st
         result = await signing.rotate(purpose, context=context)
         created[purpose.value] = result.new_key.key_id
     return created
+
+
+def _require_audited_rotation(runtime: AdminRuntime) -> None:
+    """Fallo cerrado: sin ``RotationRecorder`` en el almacén, una rotación podría quedar
+    aplicada sin su auditoría (revisión de VIG-93). No se rota nada."""
+    if not runtime.signing.records_rotation:
+        raise AdminError(
+            "rotation_not_audited",
+            "el almacén de claves no audita la rotación en su transacción: no se rota",
+            ExitCode.FAILURE,
+        )
+
+
+async def _publish_root(
+    runtime: AdminRuntime, context: ScopeContext, prepared: PreparedRoot
+) -> PublishedRoot:
+    """Publica ``ca/root.pem`` con intención auditada antes y resultado después.
+
+    El depósito y la base no comparten transacción: la entrada ``node_ca_root_requested`` (con la
+    huella de la raíz nueva) se confirma **antes** de escribir, así que nunca queda una raíz
+    publicada sin entrada; ``node_ca_root_published`` cierra la intención (``error`` si la
+    escritura falló).
+    """
+    node_ca = _require_node_ca(runtime)
+    filters: dict[str, JsonValue] = {
+        "object_key": prepared.object_key,
+        "root_sha256": prepared.fingerprints[-1],
+        "bundle_sha256": list(prepared.fingerprints),
+    }
+    await runtime.audit.append(context, AuditOperation.NODE_CA_ROOT_REQUESTED, filters=filters)
+    try:
+        published = await node_ca.publish(prepared)
+    except Exception:
+        with contextlib.suppress(Exception):
+            await runtime.audit.append(
+                context,
+                AuditOperation.NODE_CA_ROOT_PUBLISHED,
+                outcome=AuditOutcome.ERROR,
+                filters=filters,
+            )
+        raise
+    await runtime.audit.append(
+        context,
+        AuditOperation.NODE_CA_ROOT_PUBLISHED,
+        filters=filters | {"version_id": published.version_id},
+    )
+    return published
 
 
 def _root_output(published: PublishedRoot) -> dict[str, object]:
@@ -794,6 +880,7 @@ async def _bootstrap(
     _require(config.link_base, "link_base_missing", "falta VIGIA_PUBLIC_ORIGIN")
     key_id = _require(config.node_ca_key_id, "node_ca_unavailable", "falta VIGIA_NODE_CA_KEY_ARN")
     node_ca = _require_node_ca(runtime)
+    _require_audited_rotation(runtime)
     request = runtime.genesis.check_provider(
         ProviderGenesisRequest(
             code=args.organization_code,
@@ -834,7 +921,9 @@ async def _bootstrap(
             config, runtime, genesis.organization_id, genesis.invitation
         )
         keys = await _initial_keys(runtime, context)
-        published = await node_ca.publish_root(key_id, now=runtime.clock.now())
+        published = await _publish_root(
+            runtime, context, await node_ca.prepare_root(key_id, now=runtime.clock.now())
+        )
     except Exception:
         # La proveedora ya existe: el operador necesita su identificador para --resume.
         _fail(
@@ -907,9 +996,8 @@ async def _bootstrap_resume(
             output |= _invitation_output(invitation, secret)
     output["signing_keys"] = await _initial_keys(runtime, context)
     if key_id is not None:
-        output |= _root_output(
-            await _require_node_ca(runtime).publish_root(key_id, now=runtime.clock.now())
-        )
+        prepared = await _require_node_ca(runtime).prepare_root(key_id, now=runtime.clock.now())
+        output |= _root_output(await _publish_root(runtime, context, prepared))
     _emit(streams, output)
 
 
@@ -1001,6 +1089,7 @@ async def _rotate_key(
     authorized = await runtime.authorizer.authorize(
         operator, PermissionKey.PLATFORM_KEYS_ROTATE, Resource.organization(provider_id)
     )
+    _require_audited_rotation(runtime)
     if not runtime.signing.ready:
         await runtime.signing.start()
     result = await runtime.signing.rotate(purpose, context=authorized)
@@ -1030,19 +1119,22 @@ async def _rotate_node_ca(
     if new_key_id == config.node_ca_key_id:
         raise AdminError("invalid_value", "la clave nueva debe ser distinta de la vigente")
     await node_ca.check_key(new_key_id)
+    operator = await _operator_context(args, runtime)
     if args.dry_run:
         _emit(
             streams,
             {
                 "command": "rotate-node-ca",
                 "dry_run": True,
+                "operator_user_id": str(operator.actor.id),
                 "root_object_key": config.root_certificate_key,
                 "would_publish": ["current_root", "new_root"],
             },
         )
         return
     _confirm(args, streams, "rotate-node-ca", "publicar una raíz nueva de vigia-node-ca")
-    published = await node_ca.rotate_root(new_key_id, now=runtime.clock.now())
+    prepared = await node_ca.prepare_rotation(new_key_id, now=runtime.clock.now())
+    published = await _publish_root(runtime, operator, prepared)
     _emit(
         streams,
         {"command": "rotate-node-ca", "dry_run": False, **_root_output(published)},

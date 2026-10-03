@@ -65,7 +65,12 @@ from vigia_platform.identity.authz.context import (
     SessionRow,
 )
 from vigia_platform.identity.authz.matrix import PermissionKey
-from vigia_platform.ledger.application.audit_writer import AuditReceipt, AuditWriter
+from vigia_platform.ledger.application.audit_writer import (
+    AuditOperation,
+    AuditOutcome,
+    AuditReceipt,
+    AuditWriter,
+)
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -81,8 +86,13 @@ from vigia_platform.shared.archive.restore_drill import DrillResult, RestoreDril
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.context import AllowedScope, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database, Transaction
-from vigia_platform.shared.key_rotation import LedgerKeyEventWriter
-from vigia_platform.shared.node_ca import NodeCaPublisher, sign_certificate
+from vigia_platform.shared.key_rotation import LedgerKeyEventWriter, LedgerRotationRecorder
+from vigia_platform.shared.node_ca import (
+    NodeCaPublisher,
+    PreparedRoot,
+    PublishedRoot,
+    sign_certificate,
+)
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.replay import DeadLetterReplay, ReplayReceipt
@@ -355,6 +365,8 @@ class FakeSigning:
         self.ready = False
         self.keys: list[SigningKeyRecord] = []
         self.rotated: list[SigningPurpose] = []
+        self.records_rotation = True
+        """Como ``SigningService`` con ``SqlSigningKeyStore`` y ``LedgerRotationRecorder``."""
 
     async def start(self, *, required: Iterable[SigningPurpose] = tuple(SigningPurpose)) -> None:
         self.calls.reads.append("signing.start")
@@ -509,6 +521,7 @@ class FakeWorld:
         self.store = FakeContextStore(self.calls)
         self.database = FakeDatabase(self.calls)
         self.archive = FakeArchive(self.calls, self.archive_data)
+        self.audit = FakeAudit(self.calls)
         self.provider_ids: list[uuid.UUID] = []
         self.environ = {
             "VIGIA_ENVIRONMENT": "test",
@@ -543,6 +556,7 @@ class FakeWorld:
             partitions=FakePartitions(self.calls),
             drills=FakeDrills(self.calls),
             secrets=self.secrets,
+            audit=self.audit,
             node_ca=RecordingNodeCa(
                 NodeCaPublisher(
                     storage=self.storage,
@@ -582,13 +596,40 @@ class RecordingNodeCa:
         self.calls.reads.append("check_key")
         await self.publisher.check_key(key_id)
 
-    async def publish_root(self, key_id: str, *, now: datetime) -> Any:
-        self.calls.writes.append("publish_root")
-        return await self.publisher.publish_root(key_id, now=now)
+    async def prepare_root(self, key_id: str, *, now: datetime) -> PreparedRoot:
+        self.calls.reads.append("prepare_root")
+        return await self.publisher.prepare_root(key_id, now=now)
 
-    async def rotate_root(self, new_key_id: str, *, now: datetime) -> Any:
-        self.calls.writes.append("rotate_root")
-        return await self.publisher.rotate_root(new_key_id, now=now)
+    async def prepare_rotation(self, new_key_id: str, *, now: datetime) -> PreparedRoot:
+        self.calls.reads.append("prepare_rotation")
+        return await self.publisher.prepare_rotation(new_key_id, now=now)
+
+    async def publish(self, prepared: PreparedRoot) -> PublishedRoot:
+        self.calls.writes.append("publish")
+        return await self.publisher.publish(prepared)
+
+
+class FakeAudit:
+    """``AuditWriter.append`` que anota cada entrada; ``fail_on`` hace fallar una operación."""
+
+    def __init__(self, calls: Calls) -> None:
+        self.calls = calls
+        self.entries: list[tuple[str, str, dict[str, Any]]] = []
+        self.fail_on: str | None = None
+
+    async def append(
+        self,
+        context: ScopeContext,
+        operation: AuditOperation,
+        *,
+        outcome: AuditOutcome = AuditOutcome.SUCCESS,
+        filters: Mapping[str, Any] | None = None,
+    ) -> AuditReceipt:
+        if operation.value == self.fail_on:
+            raise ConnectionError("la auditoría se cae (sintético)")
+        self.calls.writes.append(f"audit:{operation.value}")
+        self.entries.append((operation.value, outcome.value, dict(filters or {})))
+        return AuditReceipt(uuid.uuid4(), len(self.entries), START)
 
 
 def output(stdout: str) -> dict[str, Any]:
@@ -754,7 +795,11 @@ class IntegrationWorld:
         kms = KmsAdapter(aws)
         signing = SigningService(
             provider_organization_id=provider_id,
-            store=SqlSigningKeyStore(database=database, context=contexts.provider_audit_context),
+            store=SqlSigningKeyStore(
+                database=database,
+                context=contexts.provider_audit_context,
+                recorder=LedgerRotationRecorder(database=database, writer=writer, audit=audit),
+            ),
             secrets=secrets_adapter,
             events=LedgerKeyEventWriter(writer),
             clock=clock,
@@ -781,6 +826,7 @@ class IntegrationWorld:
             partitions=PartitionMaintenance(clock=clock),
             drills=RestoreDrills(database=database, audit=audit, clock=clock),
             secrets=secrets_adapter,
+            audit=audit,
             node_ca=NodeCaPublisher(
                 storage=S3Storage(self._storage_settings(self.edge_bucket), clock),
                 kms=kms,

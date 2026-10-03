@@ -99,6 +99,7 @@ __all__ = [
     "KeyEventWriter",
     "KeyStoreSnapshot",
     "RotationCommit",
+    "RotationRecorder",
     "RotationResult",
     "SigningKeyStore",
     "SigningKeyUnavailable",
@@ -184,6 +185,31 @@ class RotationCommit:
     expected_publication_id: uuid.UUID | None = None
     """La última publicación que había al calcular la rotación (``None`` si no había ninguna).
     Con ``publication``, el almacén solo confirma si sigue siendo la última."""
+    context: ScopeContext | None = None
+    """El contexto de la rotación (organización proveedora): el actor de sus registros."""
+    rotated: Mapping[str, Any] | None = None
+    """El contenido de ``key_rotated``."""
+    published: tuple[Mapping[str, Any], Mapping[str, Any]] | None = None
+    """El contenido de ``key_set_published`` y la carga de su evento, si se publica conjunto."""
+
+    @property
+    def audit_filters(self) -> dict[str, str | None]:
+        """Los filtros de la entrada de auditoría ``key_rotated``."""
+        previous = None if self.rotated is None else self.rotated.get("previous_key_id")
+        return {
+            "purpose": self.new_key.purpose.value,
+            "key_id": self.new_key.key_id,
+            "previous_key_id": previous,
+        }
+
+
+class RotationRecorder(Protocol):
+    """Escribe ``key_rotated``, ``key_set_published`` y la auditoría ``key_rotated`` de una
+    rotación **dentro** de la transacción que la confirma (``transaction``; ``None`` en los
+    dobles sin base, que abren la suya antes de aplicar nada). ``shared.key_rotation`` tiene el
+    adaptador; aquí la transacción es opaca (este módulo no conoce SQLAlchemy)."""
+
+    async def record(self, commit: RotationCommit, transaction: Any | None) -> None: ...
 
 
 class SigningKeyStore(Protocol):
@@ -197,7 +223,14 @@ class SigningKeyStore(Protocol):
     Una rotación que publica conjunto solo se confirma si la última publicación sigue siendo
     ``expected_publication_id``: dos rotaciones de propósitos distintos en dos procesos no
     pueden publicar las dos un conjunto calculado sin la clave de la otra.
+
+    ``records_rotation``: el almacén escribe en la **misma** transacción los registros y la
+    auditoría de la rotación (``RotationRecorder``): nunca queda una rotación aplicada sin su
+    entrada. Si es falso, el servicio los escribe después, por separado (solo dobles de prueba).
     """
+
+    @property
+    def records_rotation(self) -> bool: ...
 
     async def load(self) -> KeyStoreSnapshot: ...
 
@@ -233,6 +266,8 @@ class RotationResult:
     new_key: SigningKeyRecord
     previous_key_id: str | None
     publication: KeySetPublicationRecord | None
+    audited: bool = False
+    """``True`` si ``key_rotated`` ya quedó auditada en la transacción de la rotación."""
 
 
 def secret_name(environment: str, purpose: SigningPurpose, key_id: str) -> str:
@@ -574,20 +609,32 @@ class SigningService:
                 keys_after.values(), signer_id, signer, issued_at
             )
         expected = None if self._publication is None else self._publication.publication_id
-        await self._store.commit_rotation(
-            RotationCommit(
-                new_key=new_key,
-                transitions=transitions,
-                publication=publication,
-                expected_publication_id=expected,
-            )
+        commit = RotationCommit(
+            new_key=new_key,
+            transitions=transitions,
+            publication=publication,
+            expected_publication_id=expected,
+            context=context,
+            rotated=_rotated_content(new_key, previous_id),
+            published=None if publication is None else _published_content(publication),
         )
+        await self._store.commit_rotation(commit)
         self._keys = keys_after
         self._private = private_after
         if publication is not None:
             self._publication = publication
         _log.info("clave de firma rotada")
-        return RotationResult(new_key=new_key, previous_key_id=previous_id, publication=publication)
+        return RotationResult(
+            new_key=new_key,
+            previous_key_id=previous_id,
+            publication=publication,
+            audited=self._store.records_rotation,
+        )
+
+    @property
+    def records_rotation(self) -> bool:
+        """El almacén audita cada rotación en su propia transacción (``RotationRecorder``)."""
+        return self._store.records_rotation
 
     def _new_key_id(self, purpose: SigningPurpose, now: datetime) -> str:
         suffix = self._random_bytes(4).hex()
@@ -623,35 +670,14 @@ class SigningService:
         )
 
     async def _write_events(self, context: ScopeContext, result: RotationResult) -> None:
-        key = result.new_key
-        rotated: dict[str, Any] = {
-            "key_id": key.key_id,
-            "purpose": key.purpose.value,
-            "public_key": key.public_key,
-            "valid_from": format_timestamp(key.valid_from),
-            "rotated_by": str(key.rotated_by),
-        }
-        if result.previous_key_id is not None:
-            rotated["previous_key_id"] = result.previous_key_id
-        await self._events.key_rotated(context, rotated)
-        publication = result.publication
-        if publication is None:
+        """Solo con un almacén que no las escribe en su transacción (dobles de prueba)."""
+        if result.audited:
             return
-        issued_at = format_timestamp(publication.issued_at)
-        await self._events.key_set_published(
-            context,
-            {
-                "publication_id": str(publication.publication_id),
-                "issued_at": issued_at,
-                "signed_by_key_id": publication.signed_by_key_id,
-                "key_ids": list(publication.key_ids),
-            },
-            {
-                "publication_id": str(publication.publication_id),
-                "signing_key_id": publication.signed_by_key_id,
-                "published_at": issued_at,
-            },
+        await self._events.key_rotated(
+            context, _rotated_content(result.new_key, result.previous_key_id)
         )
+        if result.publication is not None:
+            await self._events.key_set_published(context, *_published_content(result.publication))
 
     async def retire_expired(self) -> tuple[KeyTransition, ...]:
         """``overlapping`` → ``retired`` para las claves vencidas; persiste y devuelve el cambio."""
@@ -705,3 +731,37 @@ def _private_key(raw: object) -> Ed25519PrivateKey | None:
     if not isinstance(raw, bytes) or len(raw) != _PRIVATE_KEY_BYTES:
         return None
     return signing_key_from_bytes(raw)
+
+
+def _rotated_content(key: SigningKeyRecord, previous_key_id: str | None) -> dict[str, Any]:
+    """El contenido de ``key_rotated`` (tipo de U-02)."""
+    rotated: dict[str, Any] = {
+        "key_id": key.key_id,
+        "purpose": key.purpose.value,
+        "public_key": key.public_key,
+        "valid_from": format_timestamp(key.valid_from),
+        "rotated_by": str(key.rotated_by),
+    }
+    if previous_key_id is not None:
+        rotated["previous_key_id"] = previous_key_id
+    return rotated
+
+
+def _published_content(
+    publication: KeySetPublicationRecord,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """El contenido de ``key_set_published`` y la carga de su evento de la bandeja."""
+    issued_at = format_timestamp(publication.issued_at)
+    return (
+        {
+            "publication_id": str(publication.publication_id),
+            "issued_at": issued_at,
+            "signed_by_key_id": publication.signed_by_key_id,
+            "key_ids": list(publication.key_ids),
+        },
+        {
+            "publication_id": str(publication.publication_id),
+            "signing_key_id": publication.signed_by_key_id,
+            "published_at": issued_at,
+        },
+    )

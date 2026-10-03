@@ -20,6 +20,10 @@ Garantías de ``commit_rotation`` y ``commit_transitions`` (``SigningKeyStore``)
 - Una violación de los índices únicos de ``signing_key`` (una ``active`` y una ``overlapping``
   por propósito) también es ``KeyStateConflict``: dos altas iniciales del mismo propósito a la
   vez.
+- **Rotación y auditoría atómicas** (revisión de VIG-93): con ``recorder``, ``key_rotated`` y
+  ``key_set_published`` en el expediente (con su evento) y la entrada de auditoría
+  ``key_rotated`` se escriben en la transacción que confirma la clave, con el contexto de quien
+  rota. Si cualquiera falla, no queda nada: nunca una rotación aplicada sin su entrada.
 
 Sin material privado: la base guarda la clave pública y la referencia al secreto.
 """
@@ -48,7 +52,11 @@ from vigia_platform.shared.signing.keys import (
     SigningKeyRecord,
     SigningPurpose,
 )
-from vigia_platform.shared.signing.service import KeyStoreSnapshot, RotationCommit
+from vigia_platform.shared.signing.service import (
+    KeyStoreSnapshot,
+    RotationCommit,
+    RotationRecorder,
+)
 
 __all__ = ["STORE_LOCK_KEY", "SqlSigningKeyStore"]
 
@@ -149,11 +157,25 @@ def _envelope_json(envelope: SignedPublicKeySet) -> str:
 class SqlSigningKeyStore:
     """``SigningKeyStore`` de ``shared.signing`` sobre ``identity.signing_key``."""
 
-    def __init__(self, *, database: StoreDatabase, context: Callable[[], ScopeContext]) -> None:
+    def __init__(
+        self,
+        *,
+        database: StoreDatabase,
+        context: Callable[[], ScopeContext],
+        recorder: RotationRecorder | None = None,
+    ) -> None:
         """``context`` da el contexto de la organización proveedora para cada transacción
-        (``ScopeContexts.provider_audit_context`` o el de la orden administrativa)."""
+        (``ScopeContexts.provider_audit_context`` o el de la orden administrativa).
+        ``recorder`` (``shared.key_rotation.LedgerRotationRecorder``) escribe los registros y
+        la auditoría de cada rotación en su transacción; sin él (solo pruebas del almacén), los
+        escribe el servicio después."""
         self._database = database
         self._context = context
+        self._recorder = recorder
+
+    @property
+    def records_rotation(self) -> bool:
+        return self._recorder is not None
 
     def __repr__(self) -> str:
         return "SqlSigningKeyStore()"
@@ -168,7 +190,9 @@ class SqlSigningKeyStore:
         )
 
     async def commit_rotation(self, commit: RotationCommit) -> None:
-        context = self._context()
+        context = self._context() if commit.context is None else commit.context
+        if self._recorder is not None and commit.context is None:
+            raise ValueError("una rotación auditada necesita el contexto de quien rota")
         new_key = commit.new_key
         try:
             async with self._database.transaction(context) as transaction:
@@ -207,6 +231,10 @@ class SqlSigningKeyStore:
                             "envelope": _envelope_json(publication.envelope),
                         },
                     )
+                if self._recorder is not None:
+                    # Registros y auditoría de la rotación en esta misma transacción: si fallan,
+                    # la clave tampoco queda (nunca una rotación aplicada sin su entrada).
+                    await self._recorder.record(commit, transaction)
         except sa_exc.IntegrityError as error:
             if violated_constraint(error, _UNIQUE_VIOLATION) in _UNIQUE_CONSTRAINTS:
                 raise KeyStateConflict from None

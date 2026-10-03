@@ -114,6 +114,10 @@ class AuditOperation(enum.StrEnum):
     CONTEXT_ABSENT_ATTEMPT = "context_absent_attempt"
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
     RESTORE_DRILL_RECORDED = "restore_drill_recorded"
+    NODE_CA_ROOT_REQUESTED = "node_ca_root_requested"
+    """``vigia-admin`` va a publicar ``ca/root.pem`` (intención, antes de escribir; TASK-132)."""
+    NODE_CA_ROOT_PUBLISHED = "node_ca_root_published"
+    """``ca/root.pem`` publicado (``outcome = error`` si la escritura falló)."""
     """``vigia-admin record-restore-drill`` al terminar el runbook 6.1 (TASK-132)."""
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto
     PRIVACY_NOTICE_ACCEPTED = "privacy_notice_accepted"

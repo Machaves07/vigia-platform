@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -35,9 +36,10 @@ from tests.identity_db import MigratedDatabase, migrated_database
 from tests.integration.conftest import PostgresEndpoint
 from tests.outbox_support import app_database
 from tests.signing_support import BOOTSTRAP_ORDER, InMemorySecrets, RecordingEvents
+from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import ActorKind, ScopeContext, _seal_scope_context
-from vigia_platform.shared.db import Database
+from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.signing.keys import (
     NODE_PURPOSES,
     KeyStateConflict,
@@ -288,6 +290,64 @@ def test_concurrent_rotations_never_lose_a_key(world: World) -> None:
     publications = _publications(world)
     assert len(publications) == 4 + 12  # alta: key_set y tres más; después, doce rotaciones
     assert conflicts >= 1, "las rotaciones no llegaron a solaparse: la prueba no ejerció nada"
+
+
+class AuditingRecorder:
+    """``RotationRecorder`` que audita ``key_rotated`` en la transacción de la rotación y, con
+    ``fail_after``, falla justo después: el fallo inyectado entre la auditoría y la confirmación."""
+
+    def __init__(self, audit: AuditWriter) -> None:
+        self.audit = audit
+        self.fail_after = False
+
+    async def record(self, commit: RotationCommit, transaction: Any | None) -> None:
+        assert commit.context is not None and isinstance(transaction, Transaction)
+        await self.audit.append(
+            commit.context,
+            AuditOperation.KEY_ROTATED,
+            filters=dict(commit.audit_filters),
+            transaction=transaction,
+        )
+        if self.fail_after:
+            raise ConnectionError("la conexión se corta antes de confirmar (sintético)")
+
+
+def test_a_rotation_and_its_audit_entry_commit_together_or_not_at_all(world: World) -> None:
+    """Revisión de VIG-93: nunca una clave rotada sin su ``key_rotated`` en la auditoría, ni una
+    entrada de auditoría sin su clave."""
+
+    async def scenario() -> tuple[set[str], set[str]]:
+        database = app_database(world.migrated, worker_pool_size=2)
+        audit = AuditWriter(
+            database=database, clock=SystemClock(), provider_organization_id=world.provider_id
+        )
+        recorder = AuditingRecorder(audit)
+        store = SqlSigningKeyStore(database=database, context=world.context, recorder=recorder)
+        service = _service(world, database, InMemorySecrets(), store)
+        operator = world.operator_context()
+        try:
+            await _bootstrap(service, operator)
+            recorder.fail_after = True
+            with pytest.raises(ConnectionError):
+                await service.rotate(SigningPurpose.GATE, context=operator)
+            recorder.fail_after = False
+            done = await service.rotate(SigningPurpose.GATE, context=operator)
+            assert done.audited
+            return {done.new_key.key_id}, {key.key_id for key in service.all_keys()}
+        finally:
+            await database.dispose()
+
+    rotated, keys = asyncio.run(scenario())
+    stored = {row["key_id"] for row in world.fetch("SELECT key_id FROM identity.signing_key")}
+    audited = {
+        json.loads(bytes(row["filters"]))["key_id"]
+        for row in world.fetch(
+            "SELECT filters FROM shared.audit_entry WHERE operation = 'key_rotated'"
+        )
+    }
+    assert stored == keys and rotated <= stored
+    # Seis rotaciones confirmadas (alta y la gate final), seis entradas: ni una más ni una menos.
+    assert audited == stored and len(stored) == 6
 
 
 def test_a_transition_from_a_superseded_state_changes_nothing(world: World) -> None:

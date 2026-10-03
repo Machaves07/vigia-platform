@@ -52,6 +52,7 @@ from vigia_platform.shared.context import ActorKind, ContextOrigin, ScopeContext
 from vigia_platform.shared.db import TemporarilyUnavailable, Transaction
 from vigia_platform.shared.node_ca import ROOT_CERTIFICATE_KEY
 from vigia_platform.shared.signing.keys import SigningPurpose
+from vigia_platform.shared.storage import StorageUnavailable
 
 TEST_SECRET = "vigia/test/bootstrap/invitation"  # noqa: S105 - nombre del secreto, no su valor
 PILOT_SECRET = "vigia/pilot/bootstrap/invitation"  # noqa: S105 - nombre del secreto
@@ -71,6 +72,7 @@ BOOTSTRAP = (
     "--operator-name",
     "Operadora sintética",
 )
+ROTATE_ROOT = ("rotate-node-ca", "--new-key-id", "vigia-node-ca-2", "--operator", str(OPERATOR_ID))
 CREATE = (
     "create-organization",
     "--operator",
@@ -472,20 +474,78 @@ def test_rotate_node_ca_dry_run_and_rotation() -> None:
     code, _, err = world.run(*BOOTSTRAP, "--yes")
     assert code == 0, err
     world.calls.writes.clear()
-    code, out, _ = world.run("rotate-node-ca", "--new-key-id", "vigia-node-ca-2", "--dry-run")
+    code, out, _ = world.run(*ROTATE_ROOT, "--dry-run")
     assert code == 0 and output(out)["dry_run"] is True
     assert world.calls.writes == []
-    code, _, err = world.run("rotate-node-ca", "--new-key-id", "vigia-node-ca")
+    code, _, err = world.run(
+        "rotate-node-ca", "--new-key-id", "vigia-node-ca", "--operator", str(OPERATOR_ID)
+    )
     assert code == ExitCode.REJECTED and json.loads(err)["error"] == "invalid_value"
-    code, out, err = world.run("rotate-node-ca", "--new-key-id", "vigia-node-ca-2", "--yes")
+    code, out, err = world.run(*ROTATE_ROOT, "--yes")
     assert code == 0, err
     document = output(out)
     assert len(document["root_bundle_sha256"]) == 2
-    assert world.calls.writes == ["rotate_root", "edge.put_object"]
+    # Intención auditada antes de escribir y resultado después (revisión de VIG-93).
+    assert world.calls.writes == [
+        "audit:node_ca_root_requested",
+        "publish",
+        "edge.put_object",
+        "audit:node_ca_root_published",
+    ]
     assert "edge.get_object" in world.calls.reads  # la raíz vigente sale del depósito
     bundle = x509.load_pem_x509_certificates(world.storage.objects[ROOT_CERTIFICATE_KEY])
     fingerprints = [certificate.fingerprint(hashes.SHA256()).hex() for certificate in bundle]
     assert fingerprints == document["root_bundle_sha256"]
+    (requested, published) = world.audit.entries[-2:]
+    assert requested[2]["bundle_sha256"] == fingerprints == published[2]["bundle_sha256"]
+
+
+def test_a_root_is_never_published_without_its_audit_entry() -> None:
+    """Fallo inyectado entre los pasos: sin la intención auditada no se escribe ``ca/root.pem``;
+    si la escritura falla, la intención queda cerrada con ``error``."""
+    world = FakeWorld()
+    assert world.run(*BOOTSTRAP, "--yes")[0] == 0
+    before = world.storage.objects[ROOT_CERTIFICATE_KEY]
+    world.audit.fail_on = "node_ca_root_requested"
+    code, out, _ = world.run(*ROTATE_ROOT, "--yes")
+    assert code != 0 and out == ""
+    assert world.storage.objects[ROOT_CERTIFICATE_KEY] == before  # nada publicado
+    world.audit.fail_on = None
+
+    async def storage_down(*args: Any, **kwargs: Any) -> Any:
+        raise StorageUnavailable("put_object")
+
+    world.storage.put_object = storage_down  # type: ignore[method-assign]
+    code, _, _ = world.run(*ROTATE_ROOT, "--yes")
+    assert code == ExitCode.UNAVAILABLE
+    assert [(op, outcome) for op, outcome, _ in world.audit.entries[-2:]] == [
+        ("node_ca_root_requested", "success"),
+        ("node_ca_root_published", "error"),
+    ]
+
+
+def test_bootstrap_audits_the_root_it_publishes() -> None:
+    world = FakeWorld()
+    code, out, _ = world.run(*BOOTSTRAP, "--yes")
+    assert code == 0
+    operations = [operation for operation, _, _ in world.audit.entries]
+    assert operations == ["node_ca_root_requested", "node_ca_root_published"]
+    writes = world.calls.writes
+    assert writes.index("audit:node_ca_root_requested") < writes.index("edge.put_object")
+    assert world.audit.entries[-1][2]["root_sha256"] == output(out)["root_sha256"]
+
+
+def test_keys_are_not_rotated_without_an_audited_store() -> None:
+    world = FakeWorld()
+    world.signing.records_rotation = False
+    for arguments in (
+        ("rotate-key", "gate", "--operator", str(OPERATOR_ID)),
+        (*BOOTSTRAP, "--yes"),
+    ):
+        code, _, err = world.run(*arguments)
+        assert code == ExitCode.FAILURE and json.loads(err)["error"] == "rotation_not_audited"
+    assert world.signing.rotated == []
+    assert "create_provider_organization" not in world.calls.writes
 
 
 # --- restore-audit-partition --------------------------------------------------------------------
