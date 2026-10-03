@@ -81,7 +81,7 @@ from vigia_platform.identity.auth.sessions import (
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.observability import redaction
-from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 
 __all__ = [
     "INVALID_CREDENTIALS_MESSAGE",
@@ -383,7 +383,19 @@ class LoginService:
     async def authenticate(
         self, email: str, password: str, origin: str, user_agent: str | None = None
     ) -> LoginOutcome:
-        """Primer paso: correo y contraseña desde ``origin`` (dirección de red)."""
+        """Primer paso: correo y contraseña desde ``origin`` (dirección de red).
+
+        Mide ``operation_duration_ms`` con ``operation=login`` (NFR-NUC-01) en todo resultado
+        (éxito, segundo factor, rechazo o retención): el tiempo no distingue los casos.
+        """
+        started = self._clock.monotonic()
+        outcome = await self._authenticate(email, password, origin, user_agent)
+        self._metrics.record_operation(Operation.LOGIN, self._clock.monotonic() - started)
+        return outcome
+
+    async def _authenticate(
+        self, email: str, password: str, origin: str, user_agent: str | None
+    ) -> LoginOutcome:
         now = self._clock.now()
         normalized = normalize_email(email)
         hashed_origin = origin_hash(origin, self._origin_key)

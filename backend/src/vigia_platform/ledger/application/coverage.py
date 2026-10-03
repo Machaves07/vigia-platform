@@ -71,8 +71,10 @@ from vigia_platform.ledger.domain.coverage import (
     compose_timeline,
     state_at,
 )
+from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.db import Transaction
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 
 __all__ = [
     "CoverageInputInvalid",
@@ -446,14 +448,36 @@ def _visible(context: ScopeContext, plant_id: uuid.UUID, zone_id: uuid.UUID) -> 
 class CoverageService:
     """``CoveragePort`` sobre PostgreSQL."""
 
-    def __init__(self, *, database: LedgerDatabase, audit: AuditWriter) -> None:
+    def __init__(
+        self,
+        *,
+        database: LedgerDatabase,
+        audit: AuditWriter,
+        clock: Clock | None = None,
+        metrics: PlatformMetrics | None = None,
+    ) -> None:
         self._database = database
         self._audit = audit
+        self._clock = clock if clock is not None else SystemClock()
+        self._metrics = metrics
 
     async def linea_de_tiempo(
         self, context: ScopeContext, zone_id: uuid.UUID, period: CoveragePeriod
     ) -> CoverageTimeline:
-        """La línea de tiempo de la zona en ``period``; escribe una entrada ``coverage_read``."""
+        """La línea de tiempo de la zona en ``period``; escribe una entrada ``coverage_read``.
+
+        Mide ``operation_duration_ms`` con ``operation=ledger_timeline`` (NFR-NUC-01) al
+        devolverla; una entrada inválida, una zona fuera del alcance o un fallo no se miden.
+        """
+        started = self._clock.monotonic()
+        timeline = await self._timeline(context, zone_id, period)
+        metrics = self._metrics if self._metrics is not None else get_metrics()
+        metrics.record_operation(Operation.LEDGER_TIMELINE, self._clock.monotonic() - started)
+        return timeline
+
+    async def _timeline(
+        self, context: ScopeContext, zone_id: uuid.UUID, period: CoveragePeriod
+    ) -> CoverageTimeline:
         context = _require_context(context)
         zone = _zone_id(zone_id)
         check_period(period)  # CoverageInputInvalid o PeriodTooLong antes de tocar la base

@@ -72,7 +72,7 @@ from vigia_platform.shared.context import ActorUnit, ScopeContext
 from vigia_platform.shared.db import Transaction, TransientDatabaseError
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 from vigia_platform.shared.observability.tracing import TRACER_NAME, span_name
 from vigia_platform.shared.outbox.breaker import (
     BreakerAction,
@@ -457,12 +457,17 @@ class Dispatcher:
         self, consumer: Consumer, head: DueHead, probe: BreakerState | None
     ) -> Outcome:
         context = self._contexts.context_from_event(head, unit=consumer.unit)
-        dead_letter: tuple[OutboxEvent, int] | None = None
+        settled: tuple[OutboxEvent, int] | None = None
         async with self._database.transaction(context) as tx:
-            outcome, dead_letter = await self._process_in(tx, consumer, head, probe)
-        # Después de confirmar: la alarma solo cuenta lo que quedó en la cola muerta.
-        if dead_letter is not None:
-            event, attempts = dead_letter
+            outcome, settled = await self._process_in(tx, consumer, head, probe)
+        # Después de confirmar: la alarma solo cuenta lo que quedó en la cola muerta, y la
+        # latencia de la entrega va de la publicación a la confirmación de ``delivered``
+        # (NFR-NUC-01: p95 ≤ 5 s desde la confirmación; las dos marcas son del ``Clock``).
+        if outcome is Outcome.DELIVERED and settled is not None:
+            waited = self._clock.now() - settled[0].created_at
+            self._metrics.record_operation(Operation.OUTBOX_DELIVERY, waited.total_seconds())
+        elif outcome is Outcome.DEAD_LETTERED and settled is not None:
+            event, attempts = settled
             self._metrics.dead_letter_created_total.add(
                 1, {"consumer": consumer.consumer_name, "event_type": event.event_name}
             )
@@ -539,7 +544,7 @@ class Dispatcher:
                     tx, name, probe, ConsumerBreaker.on_success(probe, probe=True)
                 )
                 self._metrics.outbox_circuit_open.set(0, {"consumer": name})
-            return Outcome.DELIVERED, None
+            return Outcome.DELIVERED, (event, locked_head.attempts + 1)
         if isinstance(failure, ExternalDependencyDown) and consumer.has_external_dependency:
             opened = ConsumerBreaker.on_dependency_failure(breaker, at, probe=probe is not None)
             await self._write_breaker(tx, name, breaker, opened)

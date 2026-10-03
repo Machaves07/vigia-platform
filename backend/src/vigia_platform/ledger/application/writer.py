@@ -117,7 +117,7 @@ from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
 from vigia_platform.shared.db import ChainLockedTimeout, Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.storage import StorageUnavailable
 
@@ -610,7 +610,13 @@ class EscritorExpediente:
         (p. ej. la planta y su registro ``plant_created``, TASK-126). Los pasos 1 a 6 no cambian.
         El ``Receipt`` llega antes de confirmar y vale solo si el llamador confirma; un fallo de
         la escritura (cadena ocupada, disparador) sale como excepción y revierte su transacción.
+
+        ``operation_duration_ms`` (NFR-NUC-01) mide, desde la llamada, cada escritura que llega al
+        paso 7 en una transacción propia y termina con resultado: ``ledger_write_with_evidence``
+        si verificó evidencias y ``ledger_write`` si no. Un rechazo de los pasos 1 a 6 o un
+        duplicado no llegan a escribir; con ``transaction`` la confirmación es del llamador.
         """
+        started = self._clock.monotonic()
         if not isinstance(context, ScopeContext):
             report_context_absent("EscritorExpediente.write")
             return LedgerRejection.of(LedgerRejectionCode.CONTEXT_ABSENT)
@@ -641,7 +647,15 @@ class EscritorExpediente:
                 received_at=inserted.received_at,
                 status=AcceptanceStatus.ACCEPTED,
             )
-        return await self._commit(context, prepared, occurred_at, projection)
+        result = await self._commit(context, prepared, occurred_at, projection)
+        operation = (
+            Operation.LEDGER_WRITE_WITH_EVIDENCE if prepared.evidences else Operation.LEDGER_WRITE
+        )
+        self._metrics_port().record_operation(operation, self._clock.monotonic() - started)
+        return result
+
+    def _metrics_port(self) -> PlatformMetrics:
+        return self._metrics if self._metrics is not None else get_metrics()
 
     # --- pasos 1 a 6 ---------------------------------------------------------------------------
 
@@ -904,7 +918,7 @@ class EscritorExpediente:
         projection: Callable[[Transaction], Awaitable[None]] | None = None,
     ) -> Receipt | LedgerRejection:
         record_id = uuid7(self._clock, self._random_bytes)
-        metrics = self._metrics if self._metrics is not None else get_metrics()
+        metrics = self._metrics_port()
         chain = {"chain_kind": "organization" if prepared.chain_plant is None else "plant"}
         started = 0.0
         try:
