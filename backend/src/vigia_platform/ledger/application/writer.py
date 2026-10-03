@@ -37,6 +37,13 @@ un rechazo al ``RejectionResponse`` del contrato cuando escribe U-03.
 
 Fallos transitorios que no son un rechazo: ``StorageUnavailable`` (almacén caído en el paso 6) y
 ``TemporarilyUnavailable`` (base) salen como excepción; ningún mensaje repite el contenido.
+
+Métricas del paso 7 (PAT-NUC-RES-08, NFR-NUC-38), por ``chain_kind`` (``plant`` u
+``organization``): ``ledger_writes_total`` suma cada escritura que llega a la cadena (confirmada o
+con ``chain_locked_timeout``), ``chain_locked_timeout_total`` las que no obtuvieron la exclusión a
+tiempo y ``chain_lock_wait_ms`` la duración de la transacción, que es lo que dura la exclusión.
+Su cociente alimenta la alarma ``chain_locked_timeout_rate``. Una escritura en la transacción del
+llamador no se mide aquí: su exclusión dura lo que dure esa transacción.
 """
 
 from __future__ import annotations
@@ -110,6 +117,7 @@ from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
 from vigia_platform.shared.db import ChainLockedTimeout, Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
+from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.storage import StorageUnavailable
 
@@ -559,6 +567,7 @@ class EscritorExpediente:
         clock: Clock,
         cpu_pool: CpuPool | None = None,
         random_bytes: Callable[[int], bytes] = os.urandom,
+        metrics: PlatformMetrics | None = None,
     ) -> None:
         self._database = database
         self._registry = registry
@@ -568,6 +577,7 @@ class EscritorExpediente:
         self._clock = clock
         self._cpu_pool = cpu_pool
         self._random_bytes = random_bytes
+        self._metrics = metrics
 
     @handles_absent_context
     async def write(
@@ -894,14 +904,22 @@ class EscritorExpediente:
         projection: Callable[[Transaction], Awaitable[None]] | None = None,
     ) -> Receipt | LedgerRejection:
         record_id = uuid7(self._clock, self._random_bytes)
+        metrics = self._metrics if self._metrics is not None else get_metrics()
+        chain = {"chain_kind": "organization" if prepared.chain_plant is None else "plant"}
+        started = 0.0
         try:
             async with self._database.transaction(context) as transaction:
+                # Desde la transacción abierta: la espera de una conexión del pool no cuenta.
+                started = self._clock.monotonic()
                 if projection is not None:
                     await projection(transaction)
                 inserted = await self._insert(
                     transaction, context, prepared, record_id, occurred_at
                 )
         except ChainLockedTimeout:
+            metrics.ledger_writes_total.add(1, chain)
+            metrics.chain_locked_timeout_total.add(1, chain)
+            self._record_lock_wait(metrics, chain, started)
             return LedgerRejection.of(LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT)
         except sa_exc.IntegrityError as error:
             if _is_chain_level_violation(error):
@@ -921,11 +939,20 @@ class EscritorExpediente:
                 return self._resolve_duplicate(existing, prepared.content_hash)
             except _Rejected as rejected:
                 return rejected.rejection
+        metrics.ledger_writes_total.add(1, chain)
+        self._record_lock_wait(metrics, chain, started)
         return Receipt(
             record_id=inserted.record_id,
             received_at=inserted.received_at,
             status=AcceptanceStatus.ACCEPTED,
         )
+
+    def _record_lock_wait(
+        self, metrics: PlatformMetrics, chain: Mapping[str, str], started: float
+    ) -> None:
+        """``chain_lock_wait_ms``: lo que duró la transacción del paso 7, espera incluida."""
+        elapsed_ms = max(0.0, (self._clock.monotonic() - started) * 1000)
+        metrics.chain_lock_wait_ms.record(elapsed_ms, chain)
 
     async def _insert(
         self,

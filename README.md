@@ -14,7 +14,7 @@ vigia-platform/
     migrations/            Alembic, una sola cadena, solo hacia adelante (TASK-106 a 108)
     openapi/               especificación generada de la aplicación (U-05 genera su cliente)
     tools/                 chequeos de lint propios y guiones de verificación
-    tests/                 unit, properties, examples, abuse, isolation, integration, benchmarks
+    tests/                 unit, properties, examples, abuse, isolation, integration, resilience, benchmarks
   infra/                   pilas de AWS CDK en Python (TASK-144)
   docs/runbooks/           restauración, cola muerta, rotación, archivado
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
@@ -106,6 +106,21 @@ cd backend; $env:VIGIA_TEST_USE_COMPOSE = "1"; uv run pytest -q -m integration t
 ```
 
 Sin Docker, estas pruebas fallan con un mensaje; nunca se omiten en silencio.
+
+### Resiliencia (FS-NUC-01 a 10 y dos procesos)
+
+`backend/tests/resilience/` es el arnés de inyección de fallos (LC-NUC-34, PAT-NUC-RES-06):
+
+- **FS-NUC-01 a 10** (`test_fs_nuc_*.py`, marcadas `integration` y `nightly`): cada escenario levanta sus propios contenedores de PostgreSQL 16 y LocalStack (las imágenes de `docker-compose.yml`, con puerto fijo) y los pausa, reinicia o detiene; bloquea puntos concretos con un intermediario TCP, o mata procesos de prueba de `vigia-api` y `vigia-worker`. Los contenedores de la sesión no se tocan. FS-NUC-10 es el ensayo de restauración sobre datos generados: copia física y WAL archivado restaurados en contenedores nuevos, verificación completa de todas las cadenas y tiempo frente al RTO de 4 h.
+- **Dos procesos** (`test_two_processes.py`, solo `integration`, también en `ci`): dos `vigia-api` y dos `vigia-worker` reales tras un balanceador local (NFR-NUC-06).
+- Cada escenario imprime su semilla (la de `--hypothesis-seed`; se repite con ella) y deja un informe JSON en `VIGIA_RESILIENCE_REPORT_DIR` (por defecto `backend/reports/resilience/`, fuera del repositorio), que `nightly.yml` conserva 90 días.
+
+```text
+cd backend && uv run pytest -q --hypothesis-profile=nightly tests/resilience/
+cd backend && uv run pytest -q --hypothesis-profile=ci -m integration tests/resilience/test_two_processes.py
+```
+
+En WSL con Docker Desktop, si testcontainers falla con «Exec format error», exporta antes `DOCKER_CONFIG` hacia una configuración de Docker sin `credsStore`.
 
 ## Dependencia del contrato
 
