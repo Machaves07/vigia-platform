@@ -255,8 +255,17 @@ def _time(
             started = time.perf_counter()  # noqa: TID251 - la volumetría mide tiempo real.
             env.loop.run(operation())
             times.append((time.perf_counter() - started) * 1000)  # noqa: TID251
-    except TemporarilyUnavailable:
-        _log(f"  {name}: agotó el statement_timeout ({len(times)} rondas completas) NO cumple")
+    except TemporarilyUnavailable as error:
+        # ``TemporarilyUnavailable`` cubre el ``statement_timeout`` y la base caída: se distingue
+        # por la causa del controlador para no declarar lento lo que fue una conexión perdida.
+        causes: list[str] = []
+        cause: BaseException | None = error
+        while cause is not None:
+            causes.append(type(cause).__name__)
+            cause = cause.__cause__ or cause.__context__
+        timed_out = "QueryCanceledError" in causes
+        reason = "agotó el statement_timeout de 30 s" if timed_out else "base no disponible"
+        _log(f"  {name}: {reason} ({len(times)} rondas completas) NO cumple")
         return Timing(
             name=name,
             label=label,
@@ -264,8 +273,14 @@ def _time(
             median_ms=None,
             p95_ms=None,
             objective_ms=objective,
-            objective_met=False if objective is not None else None,
-            details={**(details or {}), "timed_out": True, "statement_timeout_ms": 30_000},
+            objective_met=False if objective is not None and timed_out else None,
+            details={
+                **(details or {}),
+                "timed_out": timed_out,
+                "unavailable": not timed_out,
+                "statement_timeout_ms": 30_000,
+                "causes": causes,
+            },
         )
     p95 = _percentile(times, 0.95)
     timing = Timing(
@@ -427,7 +442,10 @@ async def _generate(migrated: MigratedDatabase, scale: Scale, seed: int, workers
 # --- Medición de NFR-NUC-01 ---------------------------------------------------------------------
 
 
-def _measure(env: WriterEnvironment, generated: Generated, scale: Scale) -> list[Timing]:
+def _measure(
+    env: WriterEnvironment, generated: Generated, scale: Scale, timings: list[Timing]
+) -> None:
+    """Mide NFR-NUC-01 y deja cada medida en ``timings`` (lo medido sobrevive a un fallo)."""
     largest = generated.largest
     organization_id = largest.organization_id
     reader = LectorExpediente(database=env.database, audit=env.audit)
@@ -462,57 +480,59 @@ def _measure(env: WriterEnvironment, generated: Generated, scale: Scale) -> list
         return (period.end - period.start).total_seconds() * 1000
 
     rounds = scale.rounds
-    timings = [
-        _time(
-            env,
-            "ledger_list_200_plant_scope",
-            "Lista de 200 con alcance de planta (3 zonas) sobre 1 año, primera página",
-            lambda: reader.list(plant_context, year, PageRequest(size=200)),
-            rounds,
-        ),
-        _time(
-            env,
-            "ledger_list_200_plant_scope_mid_year",
-            "Lista de 200 con alcance de planta, página a mitad del año",
-            lambda: reader.list(plant_context, mid_year, PageRequest(size=200)),
-            rounds,
-        ),
-        _time(
-            env,
-            "ledger_list_200_organization_scope",
-            "Lista de 200 con alcance de organización (60 zonas) sobre 1 año",
-            lambda: reader.list(organization_context, year, PageRequest(size=200)),
-            rounds,
-        ),
-        _time(
-            env,
-            "coverage_timeline_31d_hot_zone",
-            "Línea de tiempo de 31 días, zona con el máximo de eventos y un año de historia",
-            lambda: coverage.linea_de_tiempo(hot_context, hot_plant.zones[0].zone_id, period),
-            scale.timeline_rounds,
-        ),
-        _time(
-            env,
-            "coverage_timeline_31d_zone",
-            "Línea de tiempo de 31 días, zona normal con un año de historia",
-            lambda: coverage.linea_de_tiempo(plant_context, plant.zones[0].zone_id, period),
-            scale.timeline_rounds,
-        ),
-        _time(
-            env,
-            "coverage_state_at_hot_zone",
-            "estado_en de la zona con el volumen máximo de eventos",
-            lambda: coverage.estado_en(hot_context, hot_plant.zones[0].zone_id, instant()),
-            rounds,
-        ),
-        _time(
-            env,
-            "coverage_state_at_zone",
-            "estado_en de una zona normal con un año de historia",
-            lambda: coverage.estado_en(plant_context, plant.zones[0].zone_id, instant()),
-            rounds,
-        ),
-    ]
+    timings.extend(
+        [
+            _time(
+                env,
+                "ledger_list_200_plant_scope",
+                "Lista de 200 con alcance de planta (3 zonas) sobre 1 año, primera página",
+                lambda: reader.list(plant_context, year, PageRequest(size=200)),
+                rounds,
+            ),
+            _time(
+                env,
+                "ledger_list_200_plant_scope_mid_year",
+                "Lista de 200 con alcance de planta, página a mitad del año",
+                lambda: reader.list(plant_context, mid_year, PageRequest(size=200)),
+                rounds,
+            ),
+            _time(
+                env,
+                "ledger_list_200_organization_scope",
+                "Lista de 200 con alcance de organización (60 zonas) sobre 1 año",
+                lambda: reader.list(organization_context, year, PageRequest(size=200)),
+                rounds,
+            ),
+            _time(
+                env,
+                "coverage_timeline_31d_hot_zone",
+                "Línea de tiempo de 31 días, zona con el máximo de eventos y un año de historia",
+                lambda: coverage.linea_de_tiempo(hot_context, hot_plant.zones[0].zone_id, period),
+                scale.timeline_rounds,
+            ),
+            _time(
+                env,
+                "coverage_timeline_31d_zone",
+                "Línea de tiempo de 31 días, zona normal con un año de historia",
+                lambda: coverage.linea_de_tiempo(plant_context, plant.zones[0].zone_id, period),
+                scale.timeline_rounds,
+            ),
+            _time(
+                env,
+                "coverage_state_at_hot_zone",
+                "estado_en de la zona con el volumen máximo de eventos",
+                lambda: coverage.estado_en(hot_context, hot_plant.zones[0].zone_id, instant()),
+                rounds,
+            ),
+            _time(
+                env,
+                "coverage_state_at_zone",
+                "estado_en de una zona normal con un año de historia",
+                lambda: coverage.estado_en(plant_context, plant.zones[0].zone_id, instant()),
+                rounds,
+            ),
+        ]
+    )
     zone = plant.zones[1] if len(plant.zones) > 1 else plant.zones[0]
     place = Place(organization_id, plant.plant_id, zone.zone_id, zone.node_id)
     node = unit_context(organization_id, ActorUnit.U03, kind=ActorKind.SYSTEM)
@@ -525,7 +545,6 @@ def _measure(env: WriterEnvironment, generated: Generated, scale: Scale) -> list
     timings.append(
         _time(env, "ledger_write", "Escritura sin evidencias con un año cargado", write, rounds)
     )
-    return timings
 
 
 def _verify(env: WriterEnvironment, generated: Generated) -> dict[str, Any]:
@@ -598,8 +617,13 @@ def _growth(generated: Generated, scale: Scale) -> dict[str, Any]:
 def run(
     endpoint: PostgresEndpoint, scale: Scale, *, seed: int, workers: int, out: Path
 ) -> dict[str, Any]:
-    """Genera, mide y escribe el informe en ``out``; devuelve el informe."""
+    """Genera, mide y escribe el informe en ``out``; devuelve el informe.
+
+    Si una fase posterior a la generación falla (p. ej. la base desaparece a mitad de la medida),
+    el informe se escribe igual con lo medido hasta entonces y el error, y la excepción sigue.
+    """
     workers = max(1, min(workers, MAX_CONNECTIONS))
+    timings: list[Timing] = []
     with (
         migrated_database(endpoint, f"volumetry_{scale.name}") as migrated,
         writer_environment(migrated, extra_types=COVERAGE_TYPES) as env,
@@ -610,9 +634,34 @@ def run(
         growth = _growth(generated, scale)
         _log(f"NFR-NUC-03: {json.dumps(growth, ensure_ascii=False)}")
         _log("midiendo NFR-NUC-01 sobre la organización mayor")
-        timings = _measure(env, generated, scale)
-        verification = _verify(env, generated)
-    report = {
+        try:
+            _measure(env, generated, scale, timings)
+            verification = _verify(env, generated)
+        except Exception as error:
+            partial = _report(scale, seed, workers, generated, growth, timings, None)
+            partial["error"] = f"{type(error).__name__}: {error}"
+            _write(out, partial)
+            raise
+    report = _report(scale, seed, workers, generated, growth, timings, verification)
+    _write(out, report)
+    return report
+
+
+def _write(out: Path, report: dict[str, Any]) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _report(
+    scale: Scale,
+    seed: int,
+    workers: int,
+    generated: Generated,
+    growth: dict[str, Any],
+    timings: Sequence[Timing],
+    verification: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),  # noqa: TID251
         "scale": {
             "name": scale.name,
@@ -641,9 +690,6 @@ def run(
         "nfr_nuc_01": [asdict(timing) for timing in timings],
         "verification": verification,
     }
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return report
 
 
 def _endpoint() -> Iterator[PostgresEndpoint]:
@@ -681,6 +727,8 @@ def _summary(report: dict[str, Any]) -> None:
             verdict = f" (objetivo p95 {timing['objective_ms']:.0f} ms:{verdict})"
         if timing["details"].get("timed_out"):
             measured = "agotó el statement_timeout de 30 s"
+        elif timing["details"].get("unavailable"):
+            measured = "sin medida: la base dejó de estar disponible"
         else:
             measured = f"mediana {timing['median_ms']} ms, p95 {timing['p95_ms']} ms"
         print(f"NFR-NUC-01 {timing['name']}: {measured}{verdict}")
