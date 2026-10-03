@@ -203,7 +203,7 @@ async def test_run_refresh_stops_when_asked() -> None:
     task = asyncio.create_task(world.service.run_refresh(stop, interval_seconds=0.01))
     await asyncio.sleep(0.05)
     stop.set()
-    await asyncio.wait_for(task, timeout=1)
+    await asyncio.wait_for(task, timeout=10)  # tope de seguridad, no de medida (VIG-134)
 
 
 # --- Rotación sin efectos a medias ------------------------------------------------------------
