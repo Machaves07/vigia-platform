@@ -1,0 +1,27 @@
+# Revisión obligatoria del dueño (TASK-143; deployment-architecture.md §3.1 de U-02; entrada A-26 de
+# la adenda: pendiente nº 13 de U-05). La última regla que coincide con un archivo es la que manda.
+# Mientras `main` no tenga protección (repositorio sin GitHub Pro), GitHub pide la revisión pero no
+# la impone: la regla «nunca fusionar sin el dueño» la sostiene el flujo de los agentes.
+
+# Este archivo: quitar un dueño exige al dueño.
+/.github/CODEOWNERS                              @Machaves07
+
+# Infraestructura, migraciones y canalización.
+/infra/                                          @Machaves07
+/backend/migrations/                             @Machaves07
+/.github/workflows/                              @Machaves07
+
+# Módulos críticos del backend (NFR-NUC-25: aislados de FastAPI y SQLAlchemy).
+/backend/src/vigia_platform/identity/auth/       @Machaves07
+/backend/src/vigia_platform/identity/authz/      @Machaves07
+/backend/src/vigia_platform/ledger/chain/        @Machaves07
+/backend/src/vigia_platform/shared/signing/      @Machaves07
+/backend/src/vigia_platform/shared/crypto/       @Machaves07
+
+# Módulos críticos de la aplicación de página única (U-05, plataforma-aplicacion
+# infrastructure-design.md §4): sesión, puertos, construcción, dependencias y textos.
+/frontend/src/state/session/                     @Machaves07
+/frontend/src/ports/                             @Machaves07
+/frontend/vite.config.ts                         @Machaves07
+/frontend/package.json                           @Machaves07
+/frontend/src/texts/                             @Machaves07

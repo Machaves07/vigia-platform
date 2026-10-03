@@ -1,7 +1,32 @@
-# CI de vigia-platform (U-02). Replica scripts/revisor/ci_local_platform.sh de la sesión de control.
-# Seguridad: solo pull_request del mismo repositorio y push a main (sin pull_request_target), permisos de
-# solo lectura, acciones fijadas por hash completo, gitleaks verificado por suma SHA-256 y la clave de
-# despliegue de vigia-contracts (solo lectura, ADR-004) solo en el trabajo que la necesita.
+# CI de vigia-platform (U-02; LC-NUC-35; TASK-143). Bloquea la integración (NFR-NUC-14, 23, 24,
+# 45 a 47). Replica scripts/revisor/ci_local_platform.sh de la sesión de control.
+#
+# Seguridad: solo pull_request del mismo repositorio y push a main (sin pull_request_target),
+# permisos de solo lectura, acciones fijadas por hash completo (tests/unit/test_workflows_pinned.py),
+# binarios descargados verificados por suma SHA-256 y la clave de despliegue de vigia-contracts
+# (solo lectura, ADR-004) solo en los trabajos que la necesitan: en un archivo que se borra al
+# terminar o, para construir la imagen, solo en ssh-agent (nunca en una capa: tools/image_audit.py).
+#
+# Qué cubre cada trabajo (lista de LC-NUC-35):
+# - backend (lint, tipos y pruebas sin integración): instalación congelada; ruff (deserialización
+#   insegura, hora del sistema, datetime sin zona); lint_rules (SQL por formato, tiempos de espera,
+#   registros); lint de migraciones; mypy estricto; export_openapi --check; build_verifier
+#   --check; pytest perfil ci sin integration (propiedades, tests/isolation, tests/abuse,
+#   tests/examples que no necesitan contenedores) con cobertura.
+# - backend (pruebas de integración): pytest perfil ci con integration (PostgreSQL y LocalStack con
+#   el Docker del runner) con cobertura.
+# - cobertura: combina las dos y exige ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 %
+#   global (tools/check_coverage.py).
+# - dependencias (licencias y pip-audit): lista permitida con LICENSE-EXCEPTIONS.md y avisos de
+#   vulnerabilidad de todo el bloqueo.
+# - imagen arm64 (construcción, auditoría, arranque y escaneo): buildx --platform linux/arm64
+#   --ssh default en un runner arm64; usuario no root, ninguna clave en capas ni historial;
+#   vigia-api arranca con la raíz de solo lectura contra PostgreSQL migrado; Grype. Sin publicar
+#   en ECR (A-47: lo hace release.yml con VIGIA_AWS_ENABLED).
+# - arranque N-1: la imagen de la base del cambio arranca contra el esquema que dejan las
+#   migraciones del cambio (NFR-NUC-14, RESILIENCY-04).
+# - infra (pruebas y cdk synth): pruebas de plantilla de CDK y síntesis sin credenciales.
+# Los cuatro checks obligatorios conservan su nombre: escaneo de secretos, los dos «backend» e infra.
 name: ci
 
 on:
@@ -17,6 +42,10 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Núcleo de medición de coverage.py sobre sys.monitoring (Python 3.12): menos sobrecarga.
+  COVERAGE_CORE: sysmon
 
 jobs:
   secretos:
@@ -70,17 +99,31 @@ jobs:
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
       - name: instalación congelada
         run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
       - name: ruff
         run: uv run --frozen ruff check . && uv run --frozen ruff format --check .
       - name: reglas propias (VIG001 a VIG004)
         run: uv run --frozen python tools/lint_rules.py
+      - name: lint de migraciones (MIG001 a MIG006)
+        run: uv run --frozen python tools/lint_migrations.py
       - name: mypy --strict
         run: uv run --frozen mypy --strict src
-      - name: pruebas perfil ci sin integration
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not integration"
-      - name: borrar la clave
-        if: always()
-        run: rm -f ~/.ssh/vigia_contracts
+      - name: export_openapi --check
+        run: uv run --frozen python -m vigia_platform.shared.api.export_openapi --check
+      - name: build_verifier --check
+        run: uv run --frozen python tools/build_verifier.py --check
+      - name: pruebas perfil ci sin integration (con cobertura)
+        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not integration"
+      - name: datos de cobertura
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: cobertura-sin-integracion
+          path: backend/.coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
 
   backend-integracion:
     name: backend (pruebas de integración)
@@ -108,11 +151,180 @@ jobs:
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
       - name: instalación congelada
         run: uv sync --frozen
-      - name: pruebas perfil ci con integration (Docker del runner)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration
-      - name: borrar la clave
+      - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
+      - name: pruebas perfil ci con integration (Docker del runner, con cobertura)
+        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration
+      - name: datos de cobertura
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: cobertura-integracion
+          path: backend/.coverage.*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+
+  # NFR-NUC-45: ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 % global, sobre la suite
+  # completa (los dos trabajos «backend»). Solo necesita coverage.py y el código fuente.
+  cobertura:
+    name: cobertura (≥ 90 % identity y ledger, ≥ 80 % global)
+    needs: [backend, backend-integracion]
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: cobertura-*
+          path: backend/datos-cobertura
+          merge-multiple: true
+      - name: combinar e informar
+        run: |
+          uvx --python 3.12 --from coverage==7.16.2 coverage combine --keep datos-cobertura
+          uvx --python 3.12 --from coverage==7.16.2 coverage report --skip-covered --sort=cover | tail -40
+          uvx --python 3.12 --from coverage==7.16.2 coverage json -o coverage.json
+      - name: umbrales (tools/check_coverage.py)
+        run: uv run --no-project --python 3.12 python tools/check_coverage.py coverage.json
+
+  # NFR-NUC-24 y NFR-CTR-26: licencias permitidas (con LICENSE-EXCEPTIONS.md) y pip-audit de todo
+  # el bloqueo (ejecución y dev; vigia-contracts, que no está en PyPI, se audita en su repositorio).
+  dependencias:
+    name: dependencias (licencias y pip-audit)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: licencias (tools/check_licenses.py)
+        run: uv run --frozen python tools/check_licenses.py
+      - name: pip-audit 2.9.0
+        run: |
+          uv export --frozen --all-groups --no-emit-project --no-emit-package vigia-contracts --format requirements-txt -o "$RUNNER_TEMP/requisitos.txt"
+          uvx --python 3.12 --from pip-audit==2.9.0 pip-audit --strict --require-hashes --disable-pip --progress-spinner off -r "$RUNNER_TEMP/requisitos.txt"
+
+  # NFR-NUC-23 y 24: la imagen de producción, construida como la construirá release.yml.
+  imagen:
+    name: imagen arm64 (construcción, auditoría, arranque y escaneo)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: construcción arm64 con la clave solo en ssh-agent
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          eval "$(ssh-agent -s)" > /dev/null
+          trap 'ssh-agent -k > /dev/null' EXIT
+          printf '%s\n' "$CLAVE" | ssh-add -q -
+          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile -t vigia-platform:ci --load .
+      - name: historial de la imagen
+        run: docker history --no-trunc --format '{{.CreatedBy}}' vigia-platform:ci
+      - name: usuario no root y ninguna clave privada en capas ni historial
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          docker save vigia-platform:ci -o "$RUNNER_TEMP/imagen.tar"
+          uv run --no-project --python 3.12 python backend/tools/image_audit.py "$RUNNER_TEMP/imagen.tar" --needle-env CLAVE
+          rm -f "$RUNNER_TEMP/imagen.tar"
+      - name: raíz de solo lectura y usuario sin privilegios en ejecución
+        run: |
+          docker run --rm --read-only --tmpfs /tmp --cap-drop ALL vigia-platform:ci sh -c '
+            set -e
+            test "$(id -u)" != 0
+            if touch /app/escritura 2>/dev/null; then echo "la raíz admite escritura" >&2; exit 1; fi
+            touch /tmp/escritura
+            test -z "$(find / -xdev -perm /6000 -type f 2>/dev/null)"
+            command -v vigia-api vigia-worker alembic
+            echo "usuario $(id -u), raíz de solo lectura, sin setuid"'
+      - name: vigia-api arranca contra PostgreSQL migrado por la propia imagen
+        run: uv run --no-project --python 3.12 python backend/tools/run_boot_check.py --migrate-image vigia-platform:ci --boot-image vigia-platform:ci
+      - name: Grype 0.120.0 (suma verificada)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/grype.tar.gz" https://github.com/anchore/grype/releases/download/v0.120.0/grype_0.120.0_linux_arm64.tar.gz
+          echo "bc0e52b1a0de37e2ff021c4924d689dce7dcff2e7d74b39aea16c0453e69be18  $RUNNER_TEMP/grype.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/grype.tar.gz" -C "$RUNNER_TEMP" grype
+      - name: escaneo de la imagen (falla con vulnerabilidades altas o críticas con arreglo)
+        run: '"$RUNNER_TEMP/grype" docker:vigia-platform:ci --only-fixed --fail-on high'
+
+  # NFR-NUC-14: la reversión redespliega la imagen anterior sobre el esquema ya migrado. Aquí se
+  # aplican las migraciones del cambio (imagen N) y se arranca la imagen de la base (N-1) con su
+  # propio tools/image_boot.py. Si la base todavía no tiene Dockerfile (este mismo cambio), se dice
+  # en el resumen y no hay nada que comparar.
+  arranque-n-1:
+    name: arranque N-1 contra el esquema N
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: base del cambio (N-1)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.before }}
+          path: n-1
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: construcción de N y N-1 con la clave solo en ssh-agent
+        id: imagenes
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          if [ ! -f n-1/backend/Dockerfile ] || [ ! -f n-1/backend/tools/image_boot.py ]; then
+            echo "La base no tiene backend/Dockerfile ni tools/image_boot.py: no hay imagen N-1 que arrancar." >> "$GITHUB_STEP_SUMMARY"
+            echo "base=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          eval "$(ssh-agent -s)" > /dev/null
+          trap 'ssh-agent -k > /dev/null' EXIT
+          printf '%s\n' "$CLAVE" | ssh-add -q -
+          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile -t vigia-platform:n --load .
+          docker buildx build --platform linux/arm64 --ssh default -f n-1/backend/Dockerfile -t vigia-platform:n-1 --load n-1
+          echo "base=si" >> "$GITHUB_OUTPUT"
+      - name: la imagen N-1 arranca contra el esquema N
+        if: steps.imagenes.outputs.base == 'si'
+        run: uv run --no-project --python 3.12 python backend/tools/run_boot_check.py --migrate-image vigia-platform:n --boot-image vigia-platform:n-1 --boot-script n-1/backend/tools/image_boot.py
 
   infra:
     name: infra (pruebas y cdk synth)
