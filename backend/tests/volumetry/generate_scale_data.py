@@ -101,6 +101,7 @@ from vigia_platform.shared.context import (  # noqa: E402
     Role,
     ScopeLevel,
 )
+from vigia_platform.shared.db import TemporarilyUnavailable  # noqa: E402
 
 MAX_CONNECTIONS: Final = 3
 CONTAINER_ATTEMPTS: Final = 3
@@ -211,8 +212,9 @@ class Timing:
     name: str
     label: str
     rounds: int
-    median_ms: float
-    p95_ms: float
+    median_ms: float | None
+    p95_ms: float | None
+    """``None`` si la operación agotó el ``statement_timeout`` (``details.timed_out``)."""
     objective_ms: float | None
     objective_met: bool | None
     details: dict[str, Any]
@@ -238,15 +240,33 @@ def _time(
     rounds: int,
     details: dict[str, Any] | None = None,
 ) -> Timing:
-    """``rounds`` ejecuciones (con 2 de calentamiento) medidas con el reloj de alta resolución."""
-    for _ in range(2):
-        env.loop.run(operation())
-    times: list[float] = []
-    for _ in range(rounds):
-        started = time.perf_counter()  # noqa: TID251 - la volumetría mide tiempo real.
-        env.loop.run(operation())
-        times.append((time.perf_counter() - started) * 1000)  # noqa: TID251
+    """``rounds`` ejecuciones (con 2 de calentamiento) medidas con el reloj de alta resolución.
+
+    Si una ejecución agota el ``statement_timeout`` del pool (30 s en el proceso de trabajo), la
+    operación se declara así en el informe (``timed_out``, objetivo no cumplido) y la medición
+    sigue con la siguiente: no se repiten 100 rondas de 30 s.
+    """
     objective = OBJECTIVES_MS.get(name)
+    times: list[float] = []
+    try:
+        for _ in range(2):
+            env.loop.run(operation())
+        for _ in range(rounds):
+            started = time.perf_counter()  # noqa: TID251 - la volumetría mide tiempo real.
+            env.loop.run(operation())
+            times.append((time.perf_counter() - started) * 1000)  # noqa: TID251
+    except TemporarilyUnavailable:
+        _log(f"  {name}: agotó el statement_timeout ({len(times)} rondas completas) NO cumple")
+        return Timing(
+            name=name,
+            label=label,
+            rounds=len(times),
+            median_ms=None,
+            p95_ms=None,
+            objective_ms=objective,
+            objective_met=False if objective is not None else None,
+            details={**(details or {}), "timed_out": True, "statement_timeout_ms": 30_000},
+        )
     p95 = _percentile(times, 0.95)
     timing = Timing(
         name=name,
@@ -657,10 +677,11 @@ def _summary(report: dict[str, Any]) -> None:
         if timing["objective_ms"] is not None:
             verdict = " cumple" if timing["objective_met"] else " NO cumple"
             verdict = f" (objetivo p95 {timing['objective_ms']:.0f} ms:{verdict})"
-        print(
-            f"NFR-NUC-01 {timing['name']}: mediana {timing['median_ms']} ms,"
-            f" p95 {timing['p95_ms']} ms{verdict}"
-        )
+        if timing["details"].get("timed_out"):
+            measured = "agotó el statement_timeout de 30 s"
+        else:
+            measured = f"mediana {timing['median_ms']} ms, p95 {timing['p95_ms']} ms"
+        print(f"NFR-NUC-01 {timing['name']}: {measured}{verdict}")
     verification = report["verification"]
     print(
         f"NFR-NUC-01 verificación incremental: {verification['records']} registros,"
