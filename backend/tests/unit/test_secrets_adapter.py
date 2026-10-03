@@ -9,6 +9,7 @@ entradas. La versión contra Secrets Manager y KMS de LocalStack está en
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -56,13 +57,13 @@ def _client_error(code: str, status: int = 400) -> ClientError:
 class FakeSecretsClient:
     values: dict[str, bytes] = field(default_factory=dict)
     error: Exception | None = None
-    delay: float = 0.0
+    hold: threading.Event | None = None
     calls: int = 0
 
     def get_secret_value(self, SecretId: str) -> dict[str, Any]:
         self.calls += 1
-        if self.delay:
-            time.sleep(self.delay)
+        if self.hold is not None:
+            self.hold.wait(30)  # el servidor no responde hasta que la prueba lo suelta
         if self.error is not None:
             raise self.error
         if SecretId not in self.values:
@@ -150,13 +151,21 @@ async def test_a_missing_secret_is_not_found_and_a_text_secret_is_rejected() -> 
 
 
 async def test_a_call_that_hangs_ends_at_the_timeout() -> None:
+    """El cliente no responde hasta que la prueba lo suelta: si ``get`` sale, salió por su tope
+    (VIG-134: antes, ``< 0,9 s`` de pared frente a un cliente de 1 s fallaba en un runner
+    cargado). La cota de 3 s, con margen de segundos, separa el tope de 0,2 s del de 5 s por
+    defecto."""
     settings = AwsSettings(region="us-east-1", call_timeout_seconds=0.2)
-    client = FakeSecretsClient({ARN: b"x"}, delay=1.0)
+    release = threading.Event()
+    client = FakeSecretsClient({ARN: b"x"}, hold=release)
     adapter = SecretsManagerAdapter(settings, SimulatedClock(START), client=client)
     loop_start = time.perf_counter()  # noqa: TID251 - la prueba mide el tope real
-    with pytest.raises(SecretsUnavailable):
-        await adapter.get(ARN)
-    assert time.perf_counter() - loop_start < 0.9  # noqa: TID251
+    try:
+        with pytest.raises(SecretsUnavailable):
+            await adapter.get(ARN)
+        assert time.perf_counter() - loop_start < 3  # noqa: TID251
+    finally:
+        release.set()
 
 
 @pytest.mark.parametrize(

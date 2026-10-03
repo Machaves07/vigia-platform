@@ -92,10 +92,16 @@ async def test_never_more_than_four_tasks_at_once(pool: CpuPool) -> None:
         with lock:
             running -= 1
 
+    def busy() -> int:
+        with lock:
+            return running
+
     tasks = [asyncio.ensure_future(pool.run(work)) for _ in range(3 * CPU_POOL_MAX_WORKERS)]
-    await asyncio.sleep(0.2)
-    with lock:
-        assert running == CPU_POOL_MAX_WORKERS
+    # Hasta que los hilos arranquen, no un plazo fijo (VIG-134): ``peak`` detecta el exceso.
+    async with asyncio.timeout(10):
+        while busy() < CPU_POOL_MAX_WORKERS:
+            await asyncio.sleep(0.01)
+    assert busy() == CPU_POOL_MAX_WORKERS
     release.set()
     await asyncio.gather(*tasks)
     assert peak == CPU_POOL_MAX_WORKERS

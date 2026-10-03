@@ -35,6 +35,7 @@ from sqlalchemy.sql import Executable
 from tests.api_support import World
 from tests.factories import make_context
 from tests.properties.test_db_retry import FakeConnection, FakePool, Journal, Phase
+from tests.virtual_time import run_virtual
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
@@ -448,11 +449,15 @@ def _health_database(pool: FakePool) -> Database:
     )
 
 
-@pytest.mark.asyncio
-async def test_database_health_sets_a_nonexistent_organization_and_reads_once() -> None:
+HEALTH_CAP_SECONDS = 5.0
+"""Tope externo de cada escenario de ``health``. Corren en tiempo virtual (VIG-134): el tope de
+``health`` no vence por un runner cargado, solo si el pool falso deja de responder."""
+
+
+def test_database_health_sets_a_nonexistent_organization_and_reads_once() -> None:
     journal = Journal()
     database = _health_database(_HealthPool(journal, (0, 4)))
-    health = await database.health(timeout_seconds=1.0)
+    health = run_virtual(database.health(timeout_seconds=1.0), cap_seconds=HEALTH_CAP_SECONDS)
     assert health.visible_organizations == 0 and health.schema_version == 4
     assert journal.scopes == [
         {
@@ -464,17 +469,21 @@ async def test_database_health_sets_a_nonexistent_organization_and_reads_once() 
     assert journal.begins == [True] and journal.released == 1 and journal.attempts == 1
 
 
-@pytest.mark.asyncio
-async def test_database_health_gives_up_at_its_timeout_without_retrying() -> None:
+def test_database_health_gives_up_at_its_timeout_without_retrying() -> None:
     journal = Journal()
     database = _health_database(_HealthPool(journal, (0, 4), hang_at=Phase.EXECUTE))
-    loop = asyncio.get_running_loop()
-    start = loop.time()
-    with pytest.raises(TemporarilyUnavailable):
-        await database.health(timeout_seconds=0.2)
-    assert loop.time() - start < 0.2 + 0.5
+
+    async def scenario() -> float:
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        with pytest.raises(TemporarilyUnavailable):
+            await database.health(timeout_seconds=0.2)
+        elapsed = loop.time() - start
+        await database.dispose()
+        return elapsed
+
+    assert run_virtual(scenario(), cap_seconds=HEALTH_CAP_SECONDS) < 0.2 + 0.5
     assert journal.attempts == 1 and journal.terminated >= 1
-    await database.dispose()
 
 
 @pytest.mark.asyncio
@@ -486,8 +495,7 @@ async def test_database_health_timeout_must_fit_the_attempt(timeout: float) -> N
 
 
 @pytest.mark.parametrize("row", [("0", 1), (0, "1"), (True, 1)])
-@pytest.mark.asyncio
-async def test_database_health_rejects_unexpected_types(row: tuple[object, object]) -> None:
+def test_database_health_rejects_unexpected_types(row: tuple[object, object]) -> None:
     database = _health_database(_HealthPool(Journal(), row))
     with pytest.raises(TypeError):
-        await database.health(timeout_seconds=1.0)
+        run_virtual(database.health(timeout_seconds=1.0), cap_seconds=HEALTH_CAP_SECONDS)
