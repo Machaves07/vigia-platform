@@ -35,6 +35,7 @@ from sqlalchemy.engine import Result
 from sqlalchemy.sql import Executable
 
 from tests.factories import make_context, scope_contexts
+from tests.virtual_time import run_virtual
 from vigia_platform.shared.context import ActorKind, ContextAbsent, ScopeContext
 from vigia_platform.shared.db import (
     MAX_READ_ATTEMPTS,
@@ -301,8 +302,12 @@ Un escenario sano dura menos de 0,5 s; el tope acota también cada paso de reduc
 
 
 def _run[T](scenario: Coroutine[Any, Any, T]) -> T:
-    """``asyncio.run`` con el tope externo ``SAFETY_CAP_SECONDS``."""
-    return asyncio.run(asyncio.wait_for(scenario, SAFETY_CAP_SECONDS))
+    """``asyncio.run`` en tiempo virtual (VIG-134) con el tope externo ``SAFETY_CAP_SECONDS``.
+
+    Los topes del adaptador vencen en el orden de sus plazos y los ``elapsed`` medidos son
+    exactos: con reloj de pared, en un runner cargado vencía un tope antes de llegar a la fase
+    que se quería probar (p. ej. la devolución colgada dentro del intento de lectura)."""
+    return run_virtual(scenario, cap_seconds=SAFETY_CAP_SECONDS)
 
 
 # --- Propiedades --------------------------------------------------------------------------------

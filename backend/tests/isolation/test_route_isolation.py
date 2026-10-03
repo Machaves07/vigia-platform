@@ -708,15 +708,23 @@ class Isolation:
             concession_id,
         )
 
+    def audit_operations(self, organization_id: uuid.UUID, operation: str) -> int:
+        (row,) = self.fetch(
+            "SELECT count(*) AS n FROM shared.audit_entry WHERE organization_id = $1"
+            " AND operation = $2",
+            organization_id,
+            operation,
+        )
+        return int(row["n"])
+
 
 @pytest.fixture(scope="module")
 def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
-    with live_view_environment(postgres_endpoint, "route_isolation") as env:
+    # La RLS de las concesiones compara la vigencia con la hora de la base (nuc_0009): el reloj
+    # simulado arranca en ella antes del alta de las claves de firma, que así no caducan (VIG-135).
+    with live_view_environment(postgres_endpoint, "route_isolation", at_database_time=True) as env:
         authz = env.authz
         sessions = authz.sessions
-        # La RLS de las concesiones compara la vigencia con la hora de la base (nuc_0009).
-        (row,) = env.fetch("SELECT now() AS now")
-        sessions.clock.set(row["now"])
         registry = RecordTypeRegistry()
         for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES):
             registry.register(definition)
@@ -1014,10 +1022,6 @@ def test_the_own_routes_do_show_the_organizations_own_resources(isolation: Isola
 
 # --- PR-NUC-01 bajo concesión (BR-NUC-37, 38) ---------------------------------------------------
 
-AUDIT_GAP: Final = frozenset({("GET", "/hierarchy")})
-"""Ruta de la columna sin operación de auditoría propia en ``audit_operation`` (pendiente para la
-sesión de control; ver ``test_br_nuc_38_a_hierarchy_read_under_concession_is_audited``)."""
-
 
 @dataclass
 class Observed:
@@ -1073,7 +1077,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
             allowed_routes.append(route)
             if not 200 <= own.response.status_code < 300:
                 failures.append(f"{route}: en la columna y responde {own.response.text}")
-            if (method, path) not in AUDIT_GAP and not own.audit:
+            if not own.audit:
                 failures.append(f"{route}: sin auditoría normal de la petición del proveedor")
             if case.kind is Kind.RESOURCE and _code(missing.response) != "not_found":
                 failures.append(f"{route}: inexistente responde {missing.response.text}")
@@ -1127,11 +1131,6 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(
-    strict=True,
-    reason="BR-NUC-38: GET /hierarchy no tiene operación en audit_operation (lista cerrada del "
-    "diseño); pendiente de decisión de la sesión de control",
-)
 def test_br_nuc_38_a_hierarchy_read_under_concession_is_audited(isolation: Isolation) -> None:
     authz, b = isolation.authz, isolation.b
     installer, cookie = isolation.installer()
@@ -1139,7 +1138,13 @@ def test_br_nuc_38_a_hierarchy_read_under_concession_is_audited(isolation: Isola
     seen = _observe(isolation, Call("GET", "/hierarchy"), cookie, concession)
     assert seen.response.status_code == 200, seen.response.text
     assert len(seen.queries) == 1
-    assert seen.audit, "la lectura de la jerarquía del cliente no deja auditoría normal"
+    # Su entrada de auditoría normal (VIG-135), en la cadena del cliente y con su concesión.
+    assert [(e["operation"], e["outcome"]) for e in seen.audit] == [("hierarchy_read", "success")]
+    # La lectura de un miembro del cliente, sin concesión, no se audita (no es de BR-NUC-38).
+    member = isolation.member(b.ids.organization, Role.ADMINISTRATOR)
+    before = isolation.audit_operations(b.ids.organization, "hierarchy_read")
+    assert isolation.send(Call("GET", "/hierarchy"), member).status_code == 200
+    assert isolation.audit_operations(b.ids.organization, "hierarchy_read") == before
 
 
 @pytest.mark.integration

@@ -21,6 +21,7 @@ import logging
 import socket
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -29,7 +30,7 @@ from fastapi.routing import APIRoute
 
 from tests.worker_support import StubKms, StubSigning, StubStorage, system_contexts
 from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE
-from vigia_platform.shared.clock import SystemClock
+from vigia_platform.shared.clock import SimulatedClock, SystemClock
 from vigia_platform.shared.context import ActorUnit, ScopeContext
 from vigia_platform.shared.db import DatabaseHealth, TemporarilyUnavailable, Transaction
 from vigia_platform.shared.observability.alerts_consumer import register_alerts_consumer
@@ -229,11 +230,49 @@ def _free_port() -> int:
         return port
 
 
+async def _live_status(port: int) -> int:
+    """``GET /health/live`` en cuanto el servidor de salud escucha (como mucho 10 s)."""
+    async with asyncio.timeout(10), httpx.AsyncClient(timeout=5) as client:
+        while True:
+            try:
+                return (await client.get(f"http://127.0.0.1:{port}{LIVE_PATH}")).status_code
+            except httpx.ConnectError:
+                await asyncio.sleep(0.01)
+
+
+class HeldStartupRetry:
+    """``sleep`` del arranque supervisado sobre un ``SimulatedClock`` (VIG-134).
+
+    El primer reintento queda retenido hasta ``release()``: mientras tanto el arranque sigue en
+    curso pase lo que pase en pared. Al soltarlo, cada espera adelanta el reloj simulado lo que
+    pide, así que el plazo de arranque vence sin depender de la carga del runner.
+    """
+
+    def __init__(self) -> None:
+        self.clock = SimulatedClock(datetime(2026, 1, 1, tzinfo=UTC))
+        self.retrying = asyncio.Event()
+        self._released = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        self.retrying.set()
+        await self._released.wait()
+        self.clock.advance(seconds)
+        # Cede el bucle como la espera real: un arranque sin plazo no lo acapara.
+        await asyncio.sleep(0)
+
+    def release(self) -> None:
+        self._released.set()
+
+
 def _process(
-    database: FakeDatabase, dispatcher: Any, *, shutdown_grace_seconds: float = 5.0
+    database: FakeDatabase,
+    dispatcher: Any,
+    *,
+    shutdown_grace_seconds: float = 5.0,
+    startup: HeldStartupRetry | None = None,
 ) -> tuple[WorkerProcess, int]:
     catalog = _catalog()
-    clock = SystemClock()
+    clock = SystemClock() if startup is None else startup.clock
 
     async def seal() -> None:
         catalog.check()
@@ -258,6 +297,7 @@ def _process(
         dispatcher=dispatcher,
         contexts=system_contexts(clock, uuid.uuid4()),
         registries=(seal,),
+        sleep=asyncio.sleep if startup is None else startup.sleep,
     )
     return WorkerProcess(config, runtime), port
 
@@ -299,14 +339,15 @@ def test_a_failed_startup_never_starts_loops_and_exits_with_the_startup_code(
         FakeDatabase(schema_version=MINIMUM_SCHEMA_VERSION - 1),
         RecordingDispatcher(),
     )
-    process, port = _process(database, dispatcher)
+    startup = HeldStartupRetry()
+    process, port = _process(database, dispatcher, startup=startup)
 
     async def scenario() -> tuple[int, int]:
         stop = asyncio.Event()
         running = asyncio.create_task(process.run(stop))
-        await asyncio.sleep(0.2)
-        async with httpx.AsyncClient(timeout=5) as client:
-            live = (await client.get(f"http://127.0.0.1:{port}{LIVE_PATH}")).status_code
+        await asyncio.wait_for(startup.retrying.wait(), 10)  # primera comprobación ya fallida
+        live = await _live_status(port)
+        startup.release()
         return live, await asyncio.wait_for(running, 10)
 
     live, code = loop.run_until_complete(scenario())
@@ -319,12 +360,13 @@ def test_a_failed_startup_never_starts_loops_and_exits_with_the_startup_code(
 
 def test_a_stop_during_startup_exits_cleanly(loop: asyncio.AbstractEventLoop) -> None:
     database, dispatcher = FakeDatabase(schema_version=None), RecordingDispatcher()
-    process, _ = _process(database, dispatcher)
+    startup = HeldStartupRetry()  # nunca se suelta: el plazo de arranque no vence
+    process, _ = _process(database, dispatcher, startup=startup)
 
     async def scenario() -> int:
         stop = asyncio.Event()
         running = asyncio.create_task(process.run(stop))
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(startup.retrying.wait(), 10)
         stop.set()
         return await asyncio.wait_for(running, 10)
 

@@ -55,7 +55,10 @@ SKEWS = (timedelta(seconds=-7), timedelta(0), timedelta(seconds=5))
 
 @pytest.fixture(scope="module")
 def env(postgres_endpoint: PostgresEndpoint) -> Iterator[LiveViewEnvironment]:
-    with live_view_environment(postgres_endpoint, "live_view_rate_limit") as environment:
+    # Las claves nacen en la hora de la base: las concesiones firman a esa hora (VIG-135).
+    with live_view_environment(
+        postgres_endpoint, "live_view_rate_limit", at_database_time=True
+    ) as environment:
         yield environment
 
 
@@ -222,15 +225,18 @@ def test_pr_nuc_45_limit_spans_every_concession_of_a_provider_user(
     límite es del usuario, así que cuenta las de todas (``nuc_0012``). Cada proceso emite a la vez
     bajo una concesión distinta.
     """
-    clock = env.clock
+    # Un solo reloj (VIG-135): la política de la base mira su now() y el constructor del contexto,
+    # el reloj simulado; las concesiones nacen de esa misma hora.
+    with env.on_database_time():
+        _limit_spans_every_concession(env, processes, per_process)
+
+
+def _limit_spans_every_concession(
+    env: LiveViewEnvironment, processes: list[SimulatedProcess], per_process: int
+) -> None:
     first = env.add_site(plants=2, zones_per_plant=1)
     other = env.add_site(plants=1, zones_per_plant=1)
     installer = env.authz.add_provider_user()
-    # La política de la base mira su ``now()`` real y el constructor del contexto, el reloj
-    # simulado: las concesiones cubren los dos instantes.
-    (database_now,) = env.fetch("SELECT now() AS now")
-    low = min(clock.now(), database_now["now"]) - timedelta(hours=1)
-    high = max(clock.now(), database_now["now"]) + timedelta(hours=1)
     reaches = [
         (first, *first.zones()[0], ScopeLevel.PLANT),
         (first, *first.zones()[1], ScopeLevel.PLANT),
@@ -246,8 +252,6 @@ def test_pr_nuc_45_limit_spans_every_concession_of_a_provider_user(
             installer,
             level=level,
             scope_id=plant_id if level is ScopeLevel.PLANT else None,
-            granted_at=low,
-            duration=high - low,
         )
         contexts.append(env.concession_context(installer, concession))
         zones.append(zone_id)
