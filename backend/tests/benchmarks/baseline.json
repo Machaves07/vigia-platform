@@ -1,0 +1,111 @@
+{
+  "description": "Línea base de los bancos de NFR-NUC-01 y NFR-NUC-02 (TASK-142). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1; una mediana 1,5 veces peor que esta falla nightly.",
+  "measured_at": "2026-10-02",
+  "environment": {
+    "commit": "0c9c637",
+    "python": "3.12.14",
+    "machine": "x86_64",
+    "system": "Linux",
+    "release": "6.18.40.1-microsoft-standard-WSL2",
+    "cpus": 20,
+    "runner": "local"
+  },
+  "benchmarks": {
+    "auth_login": {
+      "label": "Inicio de sesión con Argon2id (64 MiB, t = 3, p = 2)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 185.256,
+      "p95": 231.129,
+      "objective": 700
+    },
+    "authz_context": {
+      "label": "Contexto de alcance desde la sesión",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 13.488,
+      "p95": 19.759,
+      "objective": null
+    },
+    "coverage_state_at": {
+      "label": "estado_en de la zona caliente en un instante de los últimos 31 días",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 1412.162,
+      "p95": 1490.262,
+      "objective": 50
+    },
+    "coverage_timeline_31d": {
+      "label": "Línea de tiempo de 31 días con el volumen máximo de eventos por zona",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 2871.392,
+      "p95": 2940.453,
+      "objective": 1000
+    },
+    "ledger_list_200_scoped": {
+      "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 3097.747,
+      "p95": 3199.312,
+      "objective": 300
+    },
+    "ledger_verify_batch": {
+      "label": "Verificación de un lote de 10 000 registros (modo full)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 794.076,
+      "p95": 896.079,
+      "objective": 2000.0
+    },
+    "ledger_write": {
+      "label": "Escritura en el expediente sin evidencias",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 17.974,
+      "p95": 21.607,
+      "objective": 150
+    },
+    "ledger_write_2_evidences": {
+      "label": "Escritura con 2 evidencias verificadas por metadatos (S3 en LocalStack)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 32.279,
+      "p95": 36.012,
+      "objective": 400
+    },
+    "ledger_write_throughput": {
+      "label": "Escrituras por segundo agregadas (20 cadenas, 40 escritores)",
+      "kind": "rate",
+      "unit": "escrituras/s",
+      "median": 296.906,
+      "p95": null,
+      "objective": 200.0
+    },
+    "ledger_write_throughput_one_chain": {
+      "label": "Escrituras por segundo sobre una misma cadena (10 escritores)",
+      "kind": "rate",
+      "unit": "escrituras/s",
+      "median": 141.188,
+      "p95": null,
+      "objective": 20.0
+    },
+    "live_view_token": {
+      "label": "Emisión de token de vista en vivo (JWS Ed25519)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 32.435,
+      "p95": 45.367,
+      "objective": 100
+    },
+    "outbox_delivery": {
+      "label": "Entrega de un evento de la bandeja al consumidor desde la confirmación",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 37.147,
+      "p95": 46.286,
+      "objective": 5000
+    }
+  }
+}

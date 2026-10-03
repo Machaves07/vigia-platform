@@ -722,13 +722,18 @@ class _Steps[V]:
         self.points.append((start, value))
 
     def paint(self, start: int, end: int, value: V) -> None:
-        """Pinta ``[start, end)`` y deja lo que había a partir de ``end``."""
+        """Pinta ``[start, end)`` y deja lo que había a partir de ``end``.
+
+        Los puntos están ordenados por inicio: se sustituyen por bisección los que caen en
+        ``[start, end]``, sin recorrer la lista entera (pintar en orden es O(log n) por tramo;
+        la versión que filtraba la lista entera era cuadrática: VIG-91, seguimiento de VIG-64).
+        """
         if end <= start:
             return
         resumed = self.value_at(end)
-        left = [point for point in self.points if point[0] < start]
-        right = [point for point in self.points if point[0] > end]
-        self.points = [*left, (start, value), (end, resumed), *right]
+        low = bisect.bisect_left(self.points, start, key=lambda point: point[0])
+        high = bisect.bisect_right(self.points, end, key=lambda point: point[0])
+        self.points[low:high] = [(start, value), (end, resumed)]
 
     def breakpoints(self) -> list[int]:
         return [start for start, _ in self.points]
