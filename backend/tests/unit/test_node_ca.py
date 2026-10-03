@@ -147,6 +147,29 @@ def test_a_third_root_is_refused_while_a_substitution_is_in_progress() -> None:
     assert len(storage.puts) == 2
 
 
+def test_publishing_the_first_root_again_never_overwrites_what_is_published() -> None:
+    """Un ``bootstrap`` repetido con la misma clave no escribe; con otra clave o con el paquete
+    de una sustitución se niega (dejaría huérfanos a los nodos de la otra raíz)."""
+    kms = FakeKms()
+    for key in ("ca", "ca-2"):
+        kms.add(key)
+    storage = MemoryStorage()
+    publisher = NodeCaPublisher(
+        storage=storage, kms=kms, environment="test", random_bytes=os.urandom
+    )
+    first = asyncio.run(publisher.publish_root("ca", now=NOW))
+    again = asyncio.run(publisher.publish_root("ca", now=NOW + timedelta(days=1)))
+    assert again.root == first.root and storage.puts == [ROOT_CERTIFICATE_KEY]
+    with pytest.raises(NodeCaError, match="no se sobrescribe"):
+        asyncio.run(publisher.publish_root("ca-2", now=NOW))
+    asyncio.run(publisher.rotate_root("ca-2", now=NOW))
+    bundle = storage.objects[ROOT_CERTIFICATE_KEY]
+    for key in ("ca", "ca-2"):
+        with pytest.raises(NodeCaError, match="no se sobrescribe"):
+            asyncio.run(publisher.publish_root(key, now=NOW))
+    assert storage.objects[ROOT_CERTIFICATE_KEY] == bundle and len(storage.puts) == 2
+
+
 def test_the_new_root_must_use_another_key() -> None:
     kms = FakeKms()
     kms.add("ca")

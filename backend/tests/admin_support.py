@@ -163,6 +163,20 @@ class MemoryStorage:
         self.objects: dict[str, bytes] = {}
         self.puts: list[str] = []
 
+    async def head_object(self, key: str) -> ObjectHead | None:
+        body = self.objects.get(key)
+        if body is None:
+            return None
+        return ObjectHead(
+            key=key,
+            size_bytes=len(body),
+            checksum_sha256=None,
+            checksum_type=ChecksumType.FULL_OBJECT,
+            content_type="application/x-pem-file",
+            metadata={},
+            version_id=f"v{len(self.puts)}",
+        )
+
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
         return self.objects[key]
 

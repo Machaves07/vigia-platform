@@ -85,6 +85,8 @@ class NodeCaError(Exception):
 class RootStorage(Protocol):
     """La parte de ``StoragePort`` que usa la publicación (depósito ``vigia-edge``)."""
 
+    async def head_object(self, key: str) -> ObjectHead | None: ...
+
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes: ...
 
     async def put_object(
@@ -327,6 +329,14 @@ def read_bundle(data: bytes) -> tuple[x509.Certificate, ...]:
     return roots
 
 
+def _same_key(certificate: x509.Certificate, public: object) -> bool:
+    spki = serialization.PublicFormat.SubjectPublicKeyInfo
+    if not isinstance(public, ec.EllipticCurvePublicKey):
+        return False
+    mine = certificate.public_key().public_bytes(serialization.Encoding.DER, spki)
+    return mine == public.public_bytes(serialization.Encoding.DER, spki)
+
+
 def two_root_bundle(current: bytes, new_root: x509.Certificate) -> bytes:
     """``root.pem`` con la raíz vigente y la nueva, en ese orden (D-6)."""
     roots = read_bundle(current)
@@ -335,12 +345,7 @@ def two_root_bundle(current: bytes, new_root: x509.Certificate) -> bytes:
             "ya hay dos raíces publicadas: retira la antigua antes de otra sustitución"
         )
     (vigente,) = roots
-    same_key = vigente.public_key().public_bytes(
-        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-    ) == new_root.public_key().public_bytes(
-        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    if same_key:
+    if _same_key(vigente, new_root.public_key()):
         raise NodeCaError("la raíz nueva debe usar una clave KMS distinta de la vigente")
     return certificate_pem(vigente) + certificate_pem(new_root)
 
@@ -356,6 +361,9 @@ class PreparedRoot:
     root: x509.Certificate
     bundle: tuple[x509.Certificate, ...]
     object_key: str
+    already_published: bool = False
+    """``ca/root.pem`` ya es esta raíz (``bootstrap`` repetido): ``publish`` no escribe."""
+    version_id: str | None = None
 
     @property
     def fingerprints(self) -> tuple[str, ...]:
@@ -406,7 +414,24 @@ class NodeCaPublisher:
         await kms_public_key(self._kms, key_id)
 
     async def prepare_root(self, key_id: str, *, now: datetime) -> PreparedRoot:
-        """``bootstrap``: la primera raíz, sola, firmada y sin publicar todavía."""
+        """``bootstrap``: la primera raíz, sola, firmada y sin publicar todavía.
+
+        Nunca sobrescribe lo publicado: si ``ca/root.pem`` ya es una sola raíz de esta misma
+        clave, la devuelve como ya publicada (repetir es inocuo); si tiene la raíz de otra clave
+        o el paquete de una sustitución, ``NodeCaError`` (dejaría huérfanos a sus nodos).
+        """
+        head = await self._storage.head_object(self._object_key)
+        if head is not None:
+            current = read_bundle(await self._storage.get_object(self._object_key))
+            public = await kms_public_key(self._kms, key_id)
+            if len(current) == 1 and _same_key(current[0], public):
+                return PreparedRoot(
+                    current[0], current, self._object_key, already_published=True,
+                    version_id=head.version_id,
+                )  # fmt: skip
+            raise NodeCaError(
+                "ca/root.pem ya tiene otra raíz o un paquete de dos raíces: no se sobrescribe"
+            )
         root = await self._build(key_id, now)
         return PreparedRoot(root, (root,), self._object_key)
 
@@ -422,6 +447,10 @@ class NodeCaPublisher:
         """Escribe ``ca/root.pem`` con el paquete preparado (la única escritura)."""
         if prepared.object_key != self._object_key:
             raise NodeCaError("el paquete se preparó para otro objeto")
+        if prepared.already_published:
+            return PublishedRoot(
+                prepared.root, prepared.bundle, prepared.object_key, prepared.version_id
+            )
         return await self._put(prepared.bundle, prepared.root)
 
     async def publish_root(self, key_id: str, *, now: datetime) -> PublishedRoot:

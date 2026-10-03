@@ -51,6 +51,7 @@ from vigia_platform.shared.archive.restore_drill import DrillResult, RestoreDril
 from vigia_platform.shared.context import ActorKind, ContextOrigin, ScopeContext
 from vigia_platform.shared.db import TemporarilyUnavailable, Transaction
 from vigia_platform.shared.node_ca import ROOT_CERTIFICATE_KEY
+from vigia_platform.shared.secrets import Dependency, SecretsUnavailable
 from vigia_platform.shared.signing.keys import SigningPurpose
 from vigia_platform.shared.storage import StorageUnavailable
 
@@ -522,6 +523,55 @@ def test_a_root_is_never_published_without_its_audit_entry() -> None:
         ("node_ca_root_requested", "success"),
         ("node_ca_root_published", "error"),
     ]
+
+
+def test_resume_never_replaces_a_two_root_bundle() -> None:
+    """Sonda de la revisión: bootstrap, rotate-node-ca y bootstrap --resume --publish-root."""
+    world = FakeWorld()
+    assert world.run(*BOOTSTRAP, "--yes")[0] == 0
+    assert world.run(*ROTATE_ROOT, "--yes")[0] == 0
+    bundle = world.storage.objects[ROOT_CERTIFICATE_KEY]
+    world.genesis.operator = FirstOperator(OPERATOR_ID, "Operadora", "o@example.test", "active")
+    code, out, err = world.run("bootstrap", "--resume", "--publish-root", "--yes")
+    assert code == ExitCode.REJECTED and out == ""
+    assert json.loads(err)["error"] == "node_ca_invalid"
+    assert world.storage.objects[ROOT_CERTIFICATE_KEY] == bundle
+
+
+def test_rotate_node_ca_is_authorized_with_its_permission() -> None:
+    world = FakeWorld()
+    assert world.run(*BOOTSTRAP, "--yes")[0] == 0
+    assert world.run(*ROTATE_ROOT, "--yes")[0] == 0
+    assert "authorize:platform.keys.rotate" in world.calls.reads
+    other = FakeWorld()
+    assert other.run(*BOOTSTRAP, "--yes")[0] == 0
+    code, _, err = other.run(
+        "rotate-node-ca", "--new-key-id", "vigia-node-ca-2", "--operator", str(uuid.uuid4()),
+        "--yes",
+    )  # fmt: skip
+    assert code == ExitCode.REJECTED and json.loads(err)["error"] == "operator_invalid"
+
+
+@pytest.mark.parametrize("command", ["bootstrap", "create-organization"])
+def test_a_failed_secret_write_never_shows_the_link(
+    command: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    world = FakeWorld()
+
+    async def unavailable(name: str, value: str) -> str:
+        raise SecretsUnavailable(Dependency.SECRETS_MANAGER, "put_secret")
+
+    world.secrets.put_one_time = unavailable  # type: ignore[method-assign]
+    arguments = (*BOOTSTRAP, "--yes") if command == "bootstrap" else (*CREATE, "--yes")
+    code, out, err = world.run(*arguments)
+    assert code == ExitCode.UNAVAILABLE and out == ""
+    for text_ in (out, err, _log_text(caplog)):
+        assert TOKEN not in text_ and "://" not in text_ and "invitacion#" not in text_
+    first = json.loads(err.splitlines()[0])
+    assert first["error"] in {"bootstrap_incomplete", "invitation_not_stored"}
+    if command == "create-organization":
+        assert "creada" in first["mensaje"] and "72 h" in first["mensaje"]
 
 
 def test_bootstrap_audits_the_root_it_publishes() -> None:

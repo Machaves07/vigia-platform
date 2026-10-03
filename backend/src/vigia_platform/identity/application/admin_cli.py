@@ -18,16 +18,19 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
   ``create-partitions --until AAAA-MM`` y ``record-restore-drill --result ok|failed``: con el
   contexto de ``context_from_operator`` (``--operator``: un ``platform_operator`` activo).
 - ``rotate-node-ca --new-key-id --operator``: solo con ``ca_rotation=true`` en la síntesis (que
-  concede los permisos); publica la raíz vigente y la nueva en un paquete (D-6).
+  concede los permisos y ``platform.keys.rotate``); publica la raíz vigente y la nueva en un
+  paquete (D-6).
+- ``restore-audit-partition``: descarga, verifica y extrae un archivo de auditoría en un
+  directorio nuevo; solo lectura (runbook 6.5).
 
 **Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
 almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
 confirma (``SigningService.records_rotation``; si no, la orden se niega sin rotar nada). La raíz
 de la autoridad vive en el depósito, que no comparte transacción con la base: se audita la
 intención (``node_ca_root_requested``, con la huella de la raíz nueva) **antes** de escribir
-``ca/root.pem`` y el resultado (``node_ca_root_published``) después.
-- ``restore-audit-partition``: descarga, verifica y extrae un archivo de auditoría en un
-  directorio nuevo; solo lectura (runbook 6.5).
+``ca/root.pem`` y el resultado (``node_ca_root_published``) después. ``bootstrap`` nunca
+sobrescribe una raíz publicada: con la misma clave no hace nada; con otra, o con el paquete de
+una sustitución, se niega.
 
 **Secretos** (NFR-NUC-17, 54): el enlace de una invitación **nunca** sale por la salida ni por los
 registros: se escribe en el secreto de un solo uso ``vigia/<entorno>/bootstrap/invitation``, que
@@ -820,6 +823,9 @@ async def _publish_root(
     escritura falló).
     """
     node_ca = _require_node_ca(runtime)
+    if prepared.already_published:
+        # ``bootstrap`` repetido con la misma clave: ya está publicada y auditada; no se escribe.
+        return await node_ca.publish(prepared)
     filters: dict[str, JsonValue] = {
         "object_key": prepared.object_key,
         "root_sha256": prepared.fingerprints[-1],
@@ -1053,7 +1059,18 @@ async def _create_organization(
     await _synchronize(runtime)
     result = await runtime.genesis.create_client_organization(operator, request)
     _log.info("organización cliente creada")
-    secret = await _write_invitation(config, runtime, result.organization_id, result.invitation)
+    try:
+        secret = await _write_invitation(config, runtime, result.organization_id, result.invitation)
+    except Exception:
+        # La organización ya existe y el enlace (solo en memoria) se pierde: nunca se muestra.
+        _fail(
+            streams,
+            "invitation_not_stored",
+            f"organización {result.organization_id} creada, pero el enlace del administrador"
+            f" {result.administrator_user_id} no se guardó: la invitación"
+            f" {result.invitation.invitation_id} vence sola en 72 h y hay que emitir otra",
+        )
+        raise
     _emit(
         streams,
         {
@@ -1133,8 +1150,13 @@ async def _rotate_node_ca(
         )
         return
     _confirm(args, streams, "rotate-node-ca", "publicar una raíz nueva de vigia-node-ca")
+    authorized = await runtime.authorizer.authorize(
+        operator,
+        PermissionKey.PLATFORM_KEYS_ROTATE,
+        Resource.organization(_require_provider(config)),
+    )
     prepared = await node_ca.prepare_rotation(new_key_id, now=runtime.clock.now())
-    published = await _publish_root(runtime, operator, prepared)
+    published = await _publish_root(runtime, authorized, prepared)
     _emit(
         streams,
         {"command": "rotate-node-ca", "dry_run": False, **_root_output(published)},
