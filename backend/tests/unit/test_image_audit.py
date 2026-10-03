@@ -103,7 +103,9 @@ def test_needles_skip_the_pem_armor_and_short_lines() -> None:
     assert needles_from_key("-----BEGIN X-----\nabc\n-----END X-----\n") == []
 
 
-@pytest.mark.parametrize("user", [None, "", "root", "0", "0:0", "root:vigia"])
+@pytest.mark.parametrize(
+    "user", [None, "", "root", "0", "0:0", "root:vigia", "00", "000:10001", " 0"]
+)
 def test_a_root_image_fails(tmp_path: Path, user: str | None) -> None:
     findings = audit_image(_image(tmp_path, [_CLEAN], user=user))
     assert [f.where for f in findings] == ["config.User"]

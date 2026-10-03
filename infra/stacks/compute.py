@@ -206,6 +206,23 @@ DEPLOY_ECR_ACTIONS = (
     # NFR-NUC-23: los hallazgos críticos del escaneo bloquean el release.
     "ecr:DescribeImageScanFindings",
 )
+# Lectura de la canalización sin permisos a nivel de recurso (TASK-151): comprobaciones nº 2
+# (``HealthyHostCount``) y 7 (alarmas), y barrido y residuos de ``staging-<n>``.
+PIPELINE_READ_ACTIONS = (
+    "cloudformation:ListStacks",
+    "cloudwatch:DescribeAlarms",
+    "cloudwatch:GetMetricStatistics",
+    "elasticloadbalancing:DescribeTargetGroups",
+    "tag:GetResources",
+)
+# ``vigia-node-trust``: paquete de raíces (§6.4) y respaldo manual de la lista de revocación
+# (``trust-store.yml``, pendiente nº 19; U-03 deployment-architecture §4 y runbook 6.2).
+TRUST_STORE_ACTIONS = (
+    "elasticloadbalancing:ModifyTrustStore",
+    "elasticloadbalancing:AddTrustStoreRevocations",
+    "elasticloadbalancing:RemoveTrustStoreRevocations",
+    "elasticloadbalancing:DescribeTrustStoreRevocations",
+)
 
 # --- Restauración (§8 y deployment-architecture §6.1) --------------------------------------
 
@@ -317,6 +334,7 @@ class ComputeStack(VigiaStack):
             ]
 
         self.deploy_role = self._deploy_role() if deploy_role_owned(config) else None
+        self.staging_deploy_policy = self._staging_deploy_policy() if config.ephemeral else None
         publish(
             self, config, Output.WORKER_TASK_ROLE_ARN, self.roles[TaskRole.WORKER_TASK].role_arn
         )
@@ -845,43 +863,60 @@ class ComputeStack(VigiaStack):
             description="vigia-deploy: GitHub Actions de vigia-platform, entornos pilot y staging",
         )
 
-    def _deploy_statements(self) -> list[iam.PolicyStatement]:
-        cluster_arn = self.cluster.cluster_arn
-        on_cluster = {"ArnEquals": {"ecs:cluster": cluster_arn}}
-        bootstrap_roles = [
-            self.format_arn(
-                service="iam",
-                region="",
-                resource="role",
-                resource_name=f"cdk-vigia-{name}-role-{self.account}-{self.region}",
-            )
-            for name in CDK_BOOTSTRAP_ROLES
-        ]
-        passable = [
-            self.roles[role].role_arn
-            for role in (
-                TaskRole.TASK_EXECUTION,
-                TaskRole.API_TASK,
-                TaskRole.WORKER_TASK,
-                TaskRole.MIGRATE_TASK,
-            )
-        ]
+    def _staging_deploy_policy(self) -> iam.ManagedPolicy:
+        """``vigia-deploy-staging-<n>`` (seguimiento de VIG-48 en VIG-95): ``staging-<n>`` nace
+        vacío y con autoridad propia, así que el flujo de release lanza en él ``vigia-migrate`` y
+        ``vigia-admin bootstrap`` (orden corregido del primer despliegue, nota U02-H-01) y lee la
+        invitación sintética del arranque para la comprobación nº 5. Los recursos son los de este
+        ``staging``; la política se adjunta al ``vigia-deploy`` de la cuenta, importado por nombre,
+        y se destruye con la pila."""
+        deploy_role = iam.Role.from_role_name(
+            self, "ImportedDeployRole", deploy_role_name(self.config)
+        )
+        invitation = self._invitation_secret()
         statements = [
+            *self._release_statements(with_admin=True),
             iam.PolicyStatement(
-                sid="AssumeCdkBootstrapRoles", actions=["sts:AssumeRole"], resources=bootstrap_roles
+                sid="ReadBootstrapInvitation",
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[invitation],
             ),
             iam.PolicyStatement(
-                sid="RegistryToken", actions=["ecr:GetAuthorizationToken"], resources=["*"]
+                sid="BootstrapInvitationKey",
+                actions=["kms:Decrypt"],
+                resources=[self._key_arn(KeyName.SECRETS)],
+                conditions={
+                    "StringEquals": {
+                        "kms:ViaService": f"secretsmanager.{self.region}.amazonaws.com"
+                    }
+                },
             ),
-            iam.PolicyStatement(
-                sid="PushImage",
-                actions=list(DEPLOY_ECR_ACTIONS),
-                resources=[self.registry.repository_arn],
-            ),
+        ]
+        policy = self._policy(
+            "deploy",
+            f"vigia-deploy en {self.config.deployment}: migrate, bootstrap y comprobaciones",
+            statements,
+        )
+        policy.attach_to_role(deploy_role)
+        return policy
+
+    def _release_statements(self, *, with_admin: bool) -> list[iam.PolicyStatement]:
+        """Tareas puntuales y servicios del despliegue. ``vigia-admin`` solo en ``staging-<n>``:
+        en ``pilot`` las órdenes administrativas las lanza el dueño con su identidad (§5)."""
+        on_cluster = {"ArnEquals": {"ecs:cluster": self.cluster.cluster_arn}}
+        one_off = [ServiceName.MIGRATE, *([ServiceName.ADMIN] if with_admin else [])]
+        passable = [
+            TaskRole.TASK_EXECUTION,
+            TaskRole.API_TASK,
+            TaskRole.WORKER_TASK,
+            TaskRole.MIGRATE_TASK,
+            *([TaskRole.ADMIN_TASK] if with_admin else []),
+        ]
+        return [
             iam.PolicyStatement(
                 sid="RunMigration",
                 actions=["ecs:RunTask"],
-                resources=[self.task_definitions[ServiceName.MIGRATE].task_definition_arn],
+                resources=[self.task_definitions[name].task_definition_arn for name in one_off],
                 conditions=on_cluster,
             ),
             iam.PolicyStatement(
@@ -904,13 +939,65 @@ class ComputeStack(VigiaStack):
             iam.PolicyStatement(
                 sid="PassTaskRoles",
                 actions=["iam:PassRole"],
-                resources=passable,
+                resources=[self.roles[role].role_arn for role in passable],
                 conditions={"StringEquals": {"iam:PassedToService": "ecs-tasks.amazonaws.com"}},
             ),
-            # Nota U02-H-01: ``ModifyTrustStore`` lee el paquete con las credenciales del llamador.
+        ]
+
+    def _deploy_statements(self) -> list[iam.PolicyStatement]:
+        bootstrap_roles = [
+            self.format_arn(
+                service="iam",
+                region="",
+                resource="role",
+                resource_name=f"cdk-vigia-{name}-role-{self.account}-{self.region}",
+            )
+            for name in CDK_BOOTSTRAP_ROLES
+        ]
+        statements = [
+            iam.PolicyStatement(
+                sid="AssumeCdkBootstrapRoles", actions=["sts:AssumeRole"], resources=bootstrap_roles
+            ),
+            iam.PolicyStatement(
+                sid="RegistryToken", actions=["ecr:GetAuthorizationToken"], resources=["*"]
+            ),
+            iam.PolicyStatement(
+                sid="PushImage",
+                actions=list(DEPLOY_ECR_ACTIONS),
+                resources=[self.registry.repository_arn],
+            ),
+            *self._release_statements(with_admin=False),
+            # Flujos de vigia-platform (TASK-151): salidas de las pilas para lanzar las tareas
+            # puntuales, y el barrido y la comprobación de residuos de ``staging-<n>``, que
+            # corren cuando la política de ese ``staging`` ya se destruyó con él.
+            iam.PolicyStatement(
+                sid="ReadStacks",
+                actions=["cloudformation:DescribeStacks"],
+                resources=[
+                    self.format_arn(
+                        service="cloudformation", resource="stack", resource_name="vigia-*"
+                    )
+                ],
+            ),
+            # Comprobaciones nº 2 y 7 (§3.2) y residuos de ``staging-<n>``: solo lectura, sin
+            # permisos a nivel de recurso en estos servicios.
+            iam.PolicyStatement(
+                sid="ReadDeploymentState",
+                actions=list(PIPELINE_READ_ACTIONS),
+                resources=["*"],
+            ),
+            # Residuos: las claves de un ``staging`` destruido quedan con borrado programado.
+            iam.PolicyStatement(
+                sid="InspectStagingKeys",
+                actions=["kms:DescribeKey"],
+                resources=[self.format_arn(service="kms", resource="key", resource_name="*")],
+                conditions={"StringLike": {"aws:ResourceTag/environment": "staging-*"}},
+            ),
+            # Nota U02-H-01: ``ModifyTrustStore`` lee el paquete con las credenciales del llamador;
+            # ``AddTrustStoreRevocations`` (``trust-store.yml``, nº 19) lee una versión concreta.
             iam.PolicyStatement(
                 sid="ReadEdgeCa",
-                actions=["s3:GetObject"],
+                actions=["s3:GetObject", "s3:GetObjectVersion"],
                 resources=[self._objects(BucketUsage.EDGE, "ca/*")],
             ),
             iam.PolicyStatement(
@@ -930,7 +1017,7 @@ class ComputeStack(VigiaStack):
             statements.append(
                 iam.PolicyStatement(
                     sid="UpdateTrustStore",
-                    actions=["elasticloadbalancing:ModifyTrustStore"],
+                    actions=list(TRUST_STORE_ACTIONS),
                     resources=[trust_store.trust_store_arn],
                 )
             )
@@ -1393,6 +1480,9 @@ class ComputeStack(VigiaStack):
                 self.foundation.vpc.select_subnets(subnet_group_name=APP_SUBNETS).subnet_ids,
             ),
         }
+        if self.edge.trust_store is not None:
+            # ``trust-store.yml`` (respaldo manual de la lista de revocación, nº 19).
+            values["NodeTrustStoreArn"] = self.edge.trust_store.trust_store_arn
         for name, value in values.items():
             CfnOutput(self, name, value=value)
 
@@ -1402,6 +1492,8 @@ __all__ = [
     "EVIDENCE_UPLOAD_PREFIXES",
     "GITHUB_REPOSITORY",
     "IMAGE_DIGEST_CONTEXT",
+    "PIPELINE_READ_ACTIONS",
+    "TRUST_STORE_ACTIONS",
     "ComputeStack",
     "ServiceName",
     "cluster_name",

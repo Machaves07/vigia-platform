@@ -1,0 +1,64 @@
+# Respaldo manual de la lista de revocación de nodos (U-02; TASK-151; pendiente nº 19 y A-28;
+# U-03 deployment-architecture §4 y runbook 6.2, paso 3).
+#
+# La vía ordinaria es la tarea regenerate_revocation_list de vigia-worker, que publica ca/crl.pem y la
+# asocia a vigia-node-trust en su barrido de 60 s. Si la API del servicio de balanceo falla, el dueño
+# lanza este flujo con la versión del objeto ca/crl.pem: añade esa lista al almacén de confianza,
+# comprueba que quedó asociada y solo entonces retira las anteriores (nunca deja el almacén sin lista).
+#
+# Entorno pilot: revisor obligatorio (el dueño). Credenciales de una hora de vigia-deploy por
+# federación, sin claves. A-47: solo con VIGIA_AWS_ENABLED.
+name: trust-store
+
+on:
+  workflow_dispatch:
+    inputs:
+      crl-version:
+        description: "VersionId de S3 del objeto ca/crl.pem en vigia-edge"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trust-store
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    name: asociar ca/crl.pem a vigia-node-trust
+    if: vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: pilot
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CRL_VERSION: ${{ inputs.crl-version }}
+      BUCKET: vigia-edge-${{ vars.VIGIA_AWS_ACCOUNT_ID }}-us-east-1
+    steps:
+      - name: forma de la versión
+        run: |
+          [[ "$CRL_VERSION" =~ ^[A-Za-z0-9._-]{1,1024}$ ]] || { echo "VersionId fuera de forma." >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy"
+      - name: añadir la lista, verificar y retirar las anteriores
+        run: |
+          STORE=$(python3 .github/scripts/staging.py output --environment pilot --key NodeTrustStoreArn)
+          ANTERIORES=$(aws elbv2 describe-trust-store-revocations --trust-store-arn "$STORE" \
+            --query 'TrustStoreRevocations[].RevocationId' --output text)
+          NUEVA=$(aws elbv2 add-trust-store-revocations --trust-store-arn "$STORE" \
+            --revocation-contents "S3Bucket=$BUCKET,S3Key=ca/crl.pem,S3ObjectVersion=$CRL_VERSION,RevocationType=CRL" \
+            --query 'TrustStoreRevocations[0].RevocationId' --output text)
+          aws elbv2 describe-trust-store-revocations --trust-store-arn "$STORE" --revocation-ids "$NUEVA" \
+            --query 'TrustStoreRevocations[0].[RevocationId,NumberOfRevokedEntries]' --output text | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -n "$ANTERIORES" ] && [ "$ANTERIORES" != "None" ]; then
+            # shellcheck disable=SC2086 # una lista de identificadores separados por espacios
+            aws elbv2 remove-trust-store-revocations --trust-store-arn "$STORE" --revocation-ids $ANTERIORES
+          fi
+          echo "Lista $NUEVA asociada a vigia-node-trust (versión $CRL_VERSION); retiradas: ${ANTERIORES:-ninguna}." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,78 @@
+# Barrido de entornos staging-<n> huérfanos (U-02; TASK-151; infrastructure-design §2.1 y D-8).
+#
+# Cada noche lista las pilas vigia-*-staging-* vivas; las de un entorno con alguna pila de más de 6 h
+# (un release que murió sin su cdk destroy) se destruyen con cdk destroy, y después se comprueba que no
+# queda nada vivo (las claves KMS, con borrado programado). La alarma del presupuesto vigia-staging
+# avisa antes, por costo.
+#
+# Entorno staging (sin revisores). Credenciales de una hora de vigia-deploy por federación, sin claves.
+# A-47: solo con VIGIA_AWS_ENABLED.
+name: staging-sweeper
+
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-sweeper
+  cancel-in-progress: false
+
+env:
+  CDK: npx --yes aws-cdk@2.1144.0
+
+jobs:
+  barrer:
+    name: destruir staging-<n> de más de 6 horas
+    if: vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ROLE: arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada de infra
+        working-directory: infra
+        run: uv sync --frozen
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: huérfanos de más de 6 horas
+        id: huerfanos
+        run: |
+          LISTA=$(python3 .github/scripts/staging.py orphans --now "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" --hours 6)
+          echo "entornos=$LISTA" >> "$GITHUB_OUTPUT"
+          echo "Huérfanos de más de 6 h: ${LISTA:-ninguno}" >> "$GITHUB_STEP_SUMMARY"
+      - name: cdk destroy y residuos de cada huérfano
+        if: steps.huerfanos.outputs.entornos != ''
+        working-directory: infra
+        env:
+          ENTORNOS: ${{ steps.huerfanos.outputs.entornos }}
+        run: |
+          FALLOS=0
+          for ENTORNO in $ENTORNOS; do
+            python3 ../.github/scripts/aws_federation.py --role-arn "$ROLE"
+            # Las credenciales renovadas llegan a $GITHUB_ENV; este mismo paso las necesita ya.
+            set -a
+            # shellcheck source=/dev/null
+            . "$GITHUB_ENV"
+            set +a
+            if $CDK destroy --all --force -c environment="$ENTORNO" && python3 ../.github/scripts/staging.py residue --environment "$ENTORNO"; then
+              echo "- $ENTORNO destruido sin residuos" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- $ENTORNO: destrucción o residuos con fallo" >> "$GITHUB_STEP_SUMMARY"
+              FALLOS=1
+            fi
+          done
+          exit "$FALLOS"

@@ -373,6 +373,13 @@ NO_RESOURCE_LEVEL_ACTIONS: frozenset[str] = frozenset(
         "xray:PutTraceSegments",
         "xray:PutTelemetryRecords",
         "cloudwatch:PutMetricData",
+        # Lectura de la canalización (``vigia-deploy``, TASK-151): comprobaciones nº 2 y 7 de
+        # §3.2 y residuos de ``staging-<n>``.
+        "cloudformation:ListStacks",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:GetMetricStatistics",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "tag:GetResources",
     }
 )
 # ``cloudwatch:PutMetricData`` solo con la condición de espacio de nombres (§8).
@@ -447,6 +454,18 @@ RESOURCE_WILDCARDS: tuple[DeclaredWildcard, ...] = (
             r"(\*|[a-z0-9/_-]+:\*|[a-z0-9/_-]+:log-stream:\*)$"
         ),
         "§8: CreateLogStream y PutLogEvents sobre /vigia/<entorno>/*",
+    ),
+    DeclaredWildcard(
+        "pipeline-stacks",
+        re.compile(r"^arn:[^:]+:cloudformation:[^:]+:[^:]+:stack/vigia-\*$"),
+        "TASK-151: DescribeStacks de vigia-deploy sobre las pilas vigia-* (salidas para las "
+        "tareas puntuales; staging-<n> lleva el número de ejecución en el nombre)",
+    ),
+    DeclaredWildcard(
+        "staging-keys",
+        re.compile(r"^arn:[^:]+:kms:[^:]+:[^:]+:key/\*$"),
+        "TASK-151: DescribeKey de vigia-deploy, con la condición de etiqueta "
+        "environment=staging-*, para comprobar el borrado programado de las claves de un staging",
     ),
 )
 

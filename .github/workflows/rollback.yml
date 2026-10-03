@@ -1,0 +1,78 @@
+# Reversión de la aplicación de pilot por digest (U-02; TASK-151; deployment-architecture §4).
+#
+# Entrada: el digest anterior de vigia-platform en ECR. Actualiza vigia-api y vigia-worker a ese
+# digest con cdk deploy de vigia-compute (la plantilla sigue siendo la fuente de verdad: sin deriva),
+# el esquema ya migrado se queda (solo hacia adelante; la imagen N-1 arranca contra el esquema N, lo
+# prueba ci.yml) y corre la verificación posterior de §3.2. Del orden de 5 minutos más los 15 de
+# alarmas.
+#
+# Entorno pilot: revisor obligatorio (el dueño). Credenciales de una hora de vigia-deploy por
+# federación, sin claves. A-47: solo con VIGIA_AWS_ENABLED.
+name: rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Digest anterior (sha256:<64 hex>) de vigia-platform en ECR"
+        required: true
+        type: string
+      verifier-sha256:
+        description: "SHA-256 del vigia_verify.py de esa imagen (artefacto de su release)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pilot
+  cancel-in-progress: false
+
+env:
+  CDK: npx --yes aws-cdk@2.1144.0
+
+jobs:
+  revertir:
+    name: revertir pilot al digest anterior
+    if: vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: pilot
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DIGEST: ${{ inputs.digest }}
+      VERIFIER: ${{ inputs.verifier-sha256 }}
+      DOMAIN: ${{ vars.VIGIA_DOMAIN }}
+      ROLE: arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy
+    steps:
+      - name: forma de las entradas
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Digest fuera de la forma sha256:<64 hex>." >&2; exit 1; }
+          [[ "$VERIFIER" =~ ^[0-9a-f]{64}$ ]] || { echo "SHA-256 del verificador fuera de forma." >&2; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada de infra
+        working-directory: infra
+        run: uv sync --frozen
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: el digest existe en el registro
+        run: aws ecr describe-images --repository-name vigia-platform --image-ids imageDigest="$DIGEST" > /dev/null
+      - name: vigia-compute con el digest anterior
+        working-directory: infra
+        run: |
+          $CDK deploy --require-approval never --exclusively -c environment=pilot -c image_digest="$DIGEST" vigia-compute
+          aws ecs wait services-stable --cluster vigia-pilot --services vigia-api vigia-worker
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: verificación posterior (§3.2)
+        run: |
+          uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment pilot --domain "$DOMAIN" \
+            --verifier-sha256 "$VERIFIER" --summary "$GITHUB_STEP_SUMMARY"
