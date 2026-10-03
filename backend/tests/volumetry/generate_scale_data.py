@@ -607,6 +607,8 @@ def run(
         generated = env.loop.run(_generate(migrated, scale, seed, workers))
         total = sum(generated.written_total.values())
         _log(f"generados {total} registros y entradas en {generated.seconds:.0f} s")
+        growth = _growth(generated, scale)
+        _log(f"NFR-NUC-03: {json.dumps(growth, ensure_ascii=False)}")
         _log("midiendo NFR-NUC-01 sobre la organización mayor")
         timings = _measure(env, generated, scale)
         verification = _verify(env, generated)
@@ -635,7 +637,7 @@ def run(
             "cpus": os.cpu_count(),
             "write_connections": workers,
         },
-        "nfr_nuc_03": _growth(generated, scale),
+        "nfr_nuc_03": growth,
         "nfr_nuc_01": [asdict(timing) for timing in timings],
         "verification": verification,
     }
