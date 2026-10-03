@@ -95,6 +95,8 @@ class AuditOperation(enum.StrEnum):
     ZONE_CREATED = "zone_created"
     NODE_ZONE_ASSIGNED = "node_zone_assigned"
     NODE_ZONE_UNASSIGNED = "node_zone_unassigned"
+    HIERARCHY_READ = "hierarchy_read"
+    """``GET /hierarchy`` bajo concesión (BR-NUC-38): la lectura del proveedor, auditada."""
     LEDGER_READ = "ledger_read"
     LEDGER_DETAIL_READ = "ledger_detail_read"
     EVIDENCE_READ_GRANTED = "evidence_read_granted"

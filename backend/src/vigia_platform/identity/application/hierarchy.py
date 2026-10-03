@@ -414,6 +414,64 @@ def _node_view(row: Any) -> NodeView:
     )
 
 
+def _hierarchy_view(
+    context: ScopeContext,
+    organization: Any,
+    plants: Iterable[Any],
+    zones: Iterable[Any],
+    nodes: Iterable[Any],
+) -> HierarchyView:
+    """Las filas leídas, recortadas al alcance del contexto."""
+    whole = _whole_organization(context)
+    zone_views = [
+        ZoneView(
+            as_uuid(row.zone_id),
+            as_uuid(row.plant_id),
+            row.code,
+            row.name,
+            None if row.node_id is None else as_uuid(row.node_id),
+        )
+        for row in zones
+    ]
+    visible_zones = [
+        zone for zone in zone_views if whole or context.covers(zone.plant_id, zone.zone_id)
+    ]
+    plant_views: list[PlantView] = []
+    for row in plants:
+        plant_id = as_uuid(row.plant_id)
+        own = tuple(zone for zone in visible_zones if zone.plant_id == plant_id)
+        if not (whole or context.covers(plant_id) or own):
+            continue
+        plant_views.append(
+            PlantView(
+                plant_id,
+                row.code,
+                row.name,
+                row.country,
+                row.data_region,
+                row.timezone,
+                row.status,
+                own,
+            )
+        )
+    node_views = tuple(
+        view
+        for view in (_node_view(row) for row in nodes)
+        if whole or context.covers(view.plant_id)
+    )
+    return HierarchyView(
+        OrganizationView(
+            as_uuid(organization.organization_id),
+            organization.code,
+            organization.name,
+            organization.kind,
+            organization.status,
+        ),
+        tuple(plant_views),
+        node_views,
+    )
+
+
 async def _require_absent(
     transaction: Transaction, statement: object, **parameters: object
 ) -> None:
@@ -568,60 +626,25 @@ class HierarchyService:
     # --- IdentityQueryPort ---------------------------------------------------------------------
 
     async def hierarchy(self, context: ScopeContext) -> HierarchyView:
-        """La organización con las plantas, zonas y nodos al alcance del contexto."""
+        """La organización con las plantas, zonas y nodos al alcance del contexto.
+
+        Bajo concesión, la lectura deja además su entrada ``hierarchy_read`` en la auditoría del
+        cliente, en la misma transacción (BR-NUC-38), con el número de plantas devueltas.
+        """
         async with self._deps.database.transaction(context) as transaction:
             organization = (await transaction.execute(_ORGANIZATION)).one()
             plants = (await transaction.execute(_PLANTS)).all()
             zones = (await transaction.execute(_ZONES)).all()
             nodes = (await transaction.execute(_NODES)).all()
-        whole = _whole_organization(context)
-        zone_views = [
-            ZoneView(
-                as_uuid(row.zone_id),
-                as_uuid(row.plant_id),
-                row.code,
-                row.name,
-                None if row.node_id is None else as_uuid(row.node_id),
-            )
-            for row in zones
-        ]
-        visible_zones = [
-            zone for zone in zone_views if whole or context.covers(zone.plant_id, zone.zone_id)
-        ]
-        plant_views: list[PlantView] = []
-        for row in plants:
-            plant_id = as_uuid(row.plant_id)
-            own = tuple(zone for zone in visible_zones if zone.plant_id == plant_id)
-            if not (whole or context.covers(plant_id) or own):
-                continue
-            plant_views.append(
-                PlantView(
-                    plant_id,
-                    row.code,
-                    row.name,
-                    row.country,
-                    row.data_region,
-                    row.timezone,
-                    row.status,
-                    own,
+            view = _hierarchy_view(context, organization, plants, zones, nodes)
+            if context.concession_id is not None:
+                await self._deps.audit.append(
+                    context,
+                    AuditOperation.HIERARCHY_READ,
+                    result_count=len(view.plants),
+                    transaction=transaction,
                 )
-            )
-        node_views = tuple(
-            view
-            for view in (_node_view(row) for row in nodes)
-            if whole or context.covers(view.plant_id)
-        )
-        return HierarchyView(
-            OrganizationView(
-                as_uuid(organization.organization_id),
-                organization.code,
-                organization.name,
-                organization.kind,
-                organization.status,
-            ),
-            tuple(plant_views),
-            node_views,
-        )
+        return view
 
     async def users_by_role_and_scope(
         self,
