@@ -616,10 +616,10 @@ class EscritorExpediente:
         si verificó evidencias y ``ledger_write`` si no. Un rechazo de los pasos 1 a 6 o un
         duplicado no llegan a escribir; con ``transaction`` la confirmación es del llamador.
         """
-        started = self._clock.monotonic()
         if not isinstance(context, ScopeContext):
             report_context_absent("EscritorExpediente.write")
             return LedgerRejection.of(LedgerRejectionCode.CONTEXT_ABSENT)
+        started = self._clock.monotonic()
         if occurred_at is not None and (
             not isinstance(occurred_at, datetime) or occurred_at.utcoffset() is None
         ):
