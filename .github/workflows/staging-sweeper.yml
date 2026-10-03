@@ -63,8 +63,11 @@ jobs:
           FALLOS=0
           for ENTORNO in $ENTORNOS; do
             python3 ../.github/scripts/aws_federation.py --role-arn "$ROLE"
-            # shellcheck disable=SC1090 # credenciales renovadas por la federación
-            set -a; . "$GITHUB_ENV"; set +a
+            # Las credenciales renovadas llegan a $GITHUB_ENV; este mismo paso las necesita ya.
+            set -a
+            # shellcheck source=/dev/null
+            . "$GITHUB_ENV"
+            set +a
             if $CDK destroy --all --force -c environment="$ENTORNO" && python3 ../.github/scripts/staging.py residue --environment "$ENTORNO"; then
               echo "- $ENTORNO destruido sin residuos" >> "$GITHUB_STEP_SUMMARY"
             else
