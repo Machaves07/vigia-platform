@@ -29,6 +29,8 @@ dist/
 node_modules/
 # Ensamblado de nube que genera `cdk synth` en infra/
 cdk.out/
+# Informes del arnés de resiliencia (tests/resilience): artefacto de la canalización, no del árbol.
+backend/reports/
 
 # Respaldo local de filtradas: se genera en la construcción (tools/build_pwned_top100k.py).
 backend/resources/pwned-top100k.txt
