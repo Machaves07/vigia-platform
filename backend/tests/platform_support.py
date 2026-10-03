@@ -596,7 +596,9 @@ class Platform:
 
 @contextlib.contextmanager
 def platform_world(postgres_endpoint: PostgresEndpoint, prefix: str) -> Iterator[Platform]:
-    with live_view_environment(postgres_endpoint, prefix) as env:
+    # resync() lleva el reloj al now() de la base: las claves de firma nacen a esa hora para que
+    # sigan vigentes sea cual sea la fecha real (VIG-135).
+    with live_view_environment(postgres_endpoint, prefix, at_database_time=True) as env:
         authz = env.authz
         sessions = authz.sessions
         registry = RecordTypeRegistry()

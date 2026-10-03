@@ -310,7 +310,10 @@ def _stamp(moment: datetime) -> str:
 
 @pytest.fixture(scope="module")
 def routes(postgres_endpoint: PostgresEndpoint) -> Iterator[Routes]:
-    with live_view_environment(postgres_endpoint, "ledger_routes") as env:
+    # El reloj simulado arranca en la hora de la base antes del alta de las claves de firma: la
+    # prueba bajo concesión (RLS con now()) firma con claves vigentes sea cual sea la fecha real
+    # (VIG-135). Las demás usan marcas fijas (T0) o relativas al reloj.
+    with live_view_environment(postgres_endpoint, "ledger_routes", at_database_time=True) as env:
         authz = env.authz
         sessions = authz.sessions
         registry = RecordTypeRegistry()
@@ -1054,6 +1057,13 @@ def test_the_thirty_first_token_in_ten_minutes_is_rate_limited(routes: Routes) -
 
 
 def test_under_concession_coverage_and_live_view_write_provider_query(routes: Routes) -> None:
+    # Un solo reloj (VIG-135): la RLS de la concesión mira el now() de la base, y las claves de
+    # firma del entorno nacieron a esa hora.
+    with routes.env.on_database_time():
+        _under_concession_coverage_and_live_view(routes)
+
+
+def _under_concession_coverage_and_live_view(routes: Routes) -> None:
     site, zone_id, _, _ = _zone_with_node(routes)
     authz = routes.env.authz
     installer = authz.add_provider_user()
