@@ -55,7 +55,10 @@ SKEWS = (timedelta(seconds=-7), timedelta(0), timedelta(seconds=5))
 
 @pytest.fixture(scope="module")
 def env(postgres_endpoint: PostgresEndpoint) -> Iterator[LiveViewEnvironment]:
-    with live_view_environment(postgres_endpoint, "live_view_rate_limit") as environment:
+    # Las claves nacen en la hora de la base: las concesiones firman a esa hora (VIG-135).
+    with live_view_environment(
+        postgres_endpoint, "live_view_rate_limit", at_database_time=True
+    ) as environment:
         yield environment
 
 

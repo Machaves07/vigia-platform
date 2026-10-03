@@ -109,8 +109,8 @@ class LiveViewEnvironment:
         La RLS de las concesiones compara su vigencia con el ``now()`` de la base (``nuc_0004``,
         ``nuc_0015``) y el constructor del contexto, con el reloj: con un solo reloj, la concesión,
         la sesión y los registros salen de la misma hora y la prueba no caduca cuando la fecha
-        real pasa la simulada (VIG-135). Límite: las claves de firma del entorno nacen en la hora
-        simulada de arranque y viven ``KEY_LIFETIME`` (365 días).
+        real pasa la simulada (VIG-135). Las claves de firma tienen que ser vigentes a esa hora:
+        úsalo en un entorno creado con ``at_database_time``.
         """
         start = self.clock.now()
         (row,) = self.fetch("SELECT now() AS now")
@@ -303,10 +303,21 @@ def node_verifies(
 
 
 @contextlib.contextmanager
-def live_view_environment(endpoint: PostgresEndpoint, prefix: str) -> Iterator[LiveViewEnvironment]:
-    """``authz_environment`` con un servicio de firma real y las cinco claves dadas de alta."""
+def live_view_environment(
+    endpoint: PostgresEndpoint, prefix: str, *, at_database_time: bool = False
+) -> Iterator[LiveViewEnvironment]:
+    """``authz_environment`` con un servicio de firma real y las cinco claves dadas de alta.
+
+    Con ``at_database_time`` el reloj simulado arranca en el ``now()`` de la base **antes** del
+    alta de las claves (VIG-135): las pruebas que comparan con la hora de la base (la RLS de las
+    concesiones) firman con claves vigentes sea cual sea la fecha real. Sin él, las claves nacen en
+    la hora simulada fija de ``session_support`` y viven ``KEY_LIFETIME``.
+    """
     with authz_environment(endpoint, prefix) as authz:
         clock = authz.sessions.clock
+        if at_database_time:
+            (row,) = authz.fetch("SELECT now() AS now")
+            clock.set(row["now"])
         secrets_port, store, events = InMemorySecrets(), InMemoryKeyStore(), RecordingEvents()
         bootstrap = build_service(clock, secrets_port, store, events)
         authz.run(bootstrap.start(required=()))

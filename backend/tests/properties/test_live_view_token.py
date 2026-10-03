@@ -78,7 +78,10 @@ MAX_OFFSET_SECONDS = 300 * 24 * 3600
 
 @pytest.fixture(scope="module")
 def env(postgres_endpoint: PostgresEndpoint) -> Iterator[LiveViewEnvironment]:
-    with live_view_environment(postgres_endpoint, "live_view_token") as environment:
+    # Las claves nacen en la hora de la base: el caso del proveedor firma a esa hora (VIG-135).
+    with live_view_environment(
+        postgres_endpoint, "live_view_token", at_database_time=True
+    ) as environment:
         yield environment
 
 

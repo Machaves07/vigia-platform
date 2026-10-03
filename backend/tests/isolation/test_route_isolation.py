@@ -720,12 +720,11 @@ class Isolation:
 
 @pytest.fixture(scope="module")
 def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
-    with live_view_environment(postgres_endpoint, "route_isolation") as env:
+    # La RLS de las concesiones compara la vigencia con la hora de la base (nuc_0009): el reloj
+    # simulado arranca en ella antes del alta de las claves de firma, que así no caducan (VIG-135).
+    with live_view_environment(postgres_endpoint, "route_isolation", at_database_time=True) as env:
         authz = env.authz
         sessions = authz.sessions
-        # La RLS de las concesiones compara la vigencia con la hora de la base (nuc_0009).
-        (row,) = env.fetch("SELECT now() AS now")
-        sessions.clock.set(row["now"])
         registry = RecordTypeRegistry()
         for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES):
             registry.register(definition)
