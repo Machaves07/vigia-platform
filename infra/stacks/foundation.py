@@ -730,6 +730,24 @@ class FoundationStack(VigiaStack):
                 conditions={"StringEquals": {"aws:SourceAccount": self.account}},
             )
         )
+        # Regla ``backup-job-failed`` de ``vigia-observability`` (§9.4), solo esa.
+        topic.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="BackupJobFailedRulePublish",
+                principals=[iam.ServicePrincipal("events.amazonaws.com")],
+                actions=["sns:Publish"],
+                resources=[topic.topic_arn],
+                conditions={
+                    "ArnEquals": {
+                        "aws:SourceArn": self.format_arn(
+                            service="events",
+                            resource="rule",
+                            resource_name=self.config.resource_name("backup-job-failed"),
+                        )
+                    }
+                },
+            )
+        )
         return topic
 
     def _budgets(self) -> list[budgets.CfnBudget]:

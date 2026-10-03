@@ -23,8 +23,10 @@ from tests.test_compute import expected_compute_resources
 from tests.test_data import expected_data_resources
 from tests.test_edge import expected_edge_resources
 from tests.test_foundation import expected_foundation_resources
+from tests.test_observability import expected_observability_resources
 
-ORDER = ("foundation", "data", "edge", "compute", "observability", "datasets")
+# ``observability`` antes que ``compute``: crea los grupos de registro de sus tareas (TASK-149).
+ORDER = ("foundation", "data", "edge", "observability", "compute", "datasets")
 
 # Tipos de recurso y cuántos de cada uno espera cada pila (sin ``AWS::CDK::Metadata``).
 EXPECTED_RESOURCES: dict[str, Counter[str]] = {key: Counter() for key in ORDER}
@@ -53,8 +55,8 @@ def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
         "foundation": (),
         "data": ("foundation",),
         "edge": ("foundation", "data"),
-        "compute": ("foundation", "data", "edge"),
-        "observability": ("compute",),
+        "observability": ("foundation", "data", "edge"),
+        "compute": ("foundation", "data", "edge", "observability"),
         "datasets": (),
     }
 
@@ -71,6 +73,8 @@ def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
         return expected_edge_resources(config)
     if key == "compute":
         return expected_compute_resources(config)
+    if key == "observability":
+        return expected_observability_resources(config)
     return EXPECTED_RESOURCES[key]
 
 

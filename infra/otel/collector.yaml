@@ -80,6 +80,9 @@ exporters:
     dimension_rollup_option: NoDimensionRollup
     resource_to_telemetry_conversion:
       enabled: false
+    # Una métrica sale con cada conjunto de dimensiones cuyas claves trae; las alarmas y el
+    # tablero de vigia-observability (stacks/observability.py) separan por estos atributos de
+    # observability.metrics, todos de lista cerrada y baja cardinalidad (NFR-NUC-41).
     metric_declarations:
       - dimensions:
           - [service, environment]
@@ -87,6 +90,39 @@ exporters:
           - [service, environment, component]
         metric_name_selectors:
           - ".*"
+      - dimensions:
+          - [service, environment, status_class]
+          - [service, environment, route, status_class]
+        metric_name_selectors:
+          - "^http_server_(requests|errors)_total$"
+      - dimensions:
+          - [service, environment, rate_limit]
+        metric_name_selectors:
+          - "^rate_limited_total$"
+      - dimensions:
+          - [service, environment, operation]
+        metric_name_selectors:
+          - "^operation_duration_ms$"
+      - dimensions:
+          - [service, environment, task]
+        metric_name_selectors:
+          - "^periodic_task_last_success_age_seconds$"
+      - dimensions:
+          - [service, environment, result, task]
+        metric_name_selectors:
+          - "^periodic_task_duration_ms$"
+      - dimensions:
+          - [service, environment, pool_class]
+        metric_name_selectors:
+          - "^(db_pool|bulkhead)_(in_use|size)$"
+      - dimensions:
+          - [service, environment, alert_type]
+        metric_name_selectors:
+          - "^security_alert_total$"
+      - dimensions:
+          - [service, environment, app_version]
+        metric_name_selectors:
+          - "^health_ready$"
 
   awsxray:
     region: ${env:AWS_REGION}
