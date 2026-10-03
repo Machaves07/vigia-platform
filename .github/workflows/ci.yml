@@ -25,6 +25,7 @@
 #   en ECR (A-47: lo hace release.yml con VIGIA_AWS_ENABLED).
 # - arranque N-1: la imagen de la base del cambio arranca contra el esquema que dejan las
 #   migraciones del cambio (NFR-NUC-14, RESILIENCY-04).
+# - flujos (actionlint): lint de .github/workflows con shellcheck (TASK-151).
 # - infra (pruebas y cdk synth): pruebas de plantilla de CDK y síntesis sin credenciales.
 # Los cuatro checks obligatorios conservan su nombre: escaneo de secretos, los dos «backend» e infra.
 name: ci
@@ -188,11 +189,15 @@ jobs:
           pattern: cobertura-*
           path: backend/datos-cobertura
           merge-multiple: true
+      - name: coverage fijado por suma (tools/requirements/coverage.txt)
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/herramientas"
+          uv pip install --python "$RUNNER_TEMP/herramientas" --require-hashes -r tools/requirements/coverage.txt
       - name: combinar e informar
         run: |
-          uvx --python 3.12 --from coverage==7.16.2 coverage combine --keep datos-cobertura
-          uvx --python 3.12 --from coverage==7.16.2 coverage report --skip-covered --sort=cover | tail -40
-          uvx --python 3.12 --from coverage==7.16.2 coverage json -o coverage.json
+          "$RUNNER_TEMP/herramientas/bin/coverage" combine --keep datos-cobertura
+          "$RUNNER_TEMP/herramientas/bin/coverage" report --skip-covered --sort=cover | tail -40
+          "$RUNNER_TEMP/herramientas/bin/coverage" json -o coverage.json
       - name: umbrales (tools/check_coverage.py)
         run: uv run --no-project --python 3.12 python tools/check_coverage.py coverage.json
 
@@ -229,10 +234,12 @@ jobs:
         run: rm -f ~/.ssh/vigia_contracts
       - name: licencias (tools/check_licenses.py)
         run: uv run --frozen python tools/check_licenses.py
-      - name: pip-audit 2.9.0
+      - name: pip-audit 2.9.0 (fijado por suma, tools/requirements/pip-audit.txt)
         run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/herramientas"
+          uv pip install --python "$RUNNER_TEMP/herramientas" --require-hashes -r tools/requirements/pip-audit.txt
           uv export --frozen --all-groups --no-emit-project --no-emit-package vigia-contracts --format requirements-txt -o "$RUNNER_TEMP/requisitos.txt"
-          uvx --python 3.12 --from pip-audit==2.9.0 pip-audit --strict --require-hashes --disable-pip --progress-spinner off -r "$RUNNER_TEMP/requisitos.txt"
+          "$RUNNER_TEMP/herramientas/bin/pip-audit" --strict --require-hashes --disable-pip --progress-spinner off -r "$RUNNER_TEMP/requisitos.txt"
 
   # NFR-NUC-23 y 24: la imagen de producción, construida como la construirá release.yml.
   imagen:
@@ -286,8 +293,8 @@ jobs:
 
   # NFR-NUC-14: la reversión redespliega la imagen anterior sobre el esquema ya migrado. Aquí se
   # aplican las migraciones del cambio (imagen N) y se arranca la imagen de la base (N-1) con su
-  # propio tools/image_boot.py. Si la base todavía no tiene Dockerfile (este mismo cambio), se dice
-  # en el resumen y no hay nada que comparar.
+  # propio tools/image_boot.py. main ya tiene los dos archivos desde VIG-94: si la base no los tiene,
+  # el trabajo falla en vez de dar verde sin probar nada (seguimiento de VIG-94).
   arranque-n-1:
     name: arranque N-1 contra el esquema N
     if: github.event_name == 'push' || github.event.pull_request.draft == false
@@ -307,24 +314,38 @@ jobs:
         with:
           enable-cache: false
       - name: construcción de N y N-1 con la clave solo en ssh-agent
-        id: imagenes
         env:
           CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
         run: |
           if [ ! -f n-1/backend/Dockerfile ] || [ ! -f n-1/backend/tools/image_boot.py ]; then
-            echo "La base no tiene backend/Dockerfile ni tools/image_boot.py: no hay imagen N-1 que arrancar." >> "$GITHUB_STEP_SUMMARY"
-            echo "base=no" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "La base no tiene backend/Dockerfile o tools/image_boot.py: no hay imagen N-1 que arrancar." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            exit 1
           fi
           eval "$(ssh-agent -s)" > /dev/null
           trap 'ssh-agent -k > /dev/null' EXIT
           printf '%s\n' "$CLAVE" | ssh-add -q -
           docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile -t vigia-platform:n --load .
           docker buildx build --platform linux/arm64 --ssh default -f n-1/backend/Dockerfile -t vigia-platform:n-1 --load n-1
-          echo "base=si" >> "$GITHUB_OUTPUT"
       - name: la imagen N-1 arranca contra el esquema N
-        if: steps.imagenes.outputs.base == 'si'
         run: uv run --no-project --python 3.12 python backend/tools/run_boot_check.py --migrate-image vigia-platform:n --boot-image vigia-platform:n-1 --boot-script n-1/backend/tools/image_boot.py
+
+  # TASK-151 y A-47: lint de los flujos (expresiones, contextos, shellcheck de los run:).
+  flujos:
+    name: flujos (actionlint)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint 1.7.12 (suma verificada)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+      - name: actionlint con shellcheck
+        run: '"$RUNNER_TEMP/actionlint" -color'
 
   infra:
     name: infra (pruebas y cdk synth)

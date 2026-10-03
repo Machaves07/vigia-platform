@@ -1,0 +1,279 @@
+# Nocturno de vigia-platform (U-02; LC-NUC-35; TASK-151). Bloquea la etiqueta: release.yml exige
+# un nightly verde sobre el mismo commit.
+#
+# Qué corre (fila nightly de LC-NUC-35):
+# - propiedades perfil nightly (2 000 ejemplos por propiedad), sin y con integración;
+# - bancos de NFR-NUC-01 y 02 con regresión bloqueante del 50 % frente a tests/benchmarks/baseline.json
+#   (con update_baseline=true en un lanzamiento manual, reescribe la base con lo medido en este runner y
+#   la publica como artefacto para llevarla a un PR; seguimiento de VIG-91, punto 1);
+# - volumetría a escala objetivo (NFR-NUC-05) con su informe;
+# - FS-NUC-01 a 10 en el arnés de resiliencia; FS-NUC-10 es el ensayo de restauración;
+# - conformidad de U-01 contra la plataforma: preparada y omitida con motivo mientras la plataforma no
+#   exponga las rutas del contrato (llegan con U-03);
+# - informe archivado 90 días.
+#
+# Seguridad: igual que ci.yml (permisos de solo lectura, acciones fijadas por hash y la clave de
+# despliegue de vigia-contracts solo para instalar, borrada después). Ningún trabajo toca AWS.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: "Reescribir la línea base de los bancos con lo medido en este runner (artefacto)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  propiedades:
+    name: propiedades nightly (sin integración)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: pruebas perfil nightly sin integration
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks
+
+  propiedades-integracion:
+    name: propiedades nightly (integración)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: pruebas perfil nightly con integration (sin bancos, volumetría ni resiliencia)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry
+
+  bancos:
+    name: bancos (regresión del 50 %)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: bancos de NFR-NUC-01 y 02
+        env:
+          VIGIA_BENCHMARK_REPORT: ${{ runner.temp }}/informes/vigia-benchmarks.json
+          VIGIA_BENCHMARK_UPDATE_BASELINE: ${{ inputs.update_baseline && '1' || '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/informes"
+          uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly tests/benchmarks
+      - name: línea base medida en este runner
+        if: inputs.update_baseline
+        run: cp tests/benchmarks/baseline.json "$RUNNER_TEMP/informes/baseline.json"
+      - name: informe de los bancos
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-bancos
+          path: ${{ runner.temp }}/informes/
+          if-no-files-found: warn
+          retention-days: 90
+
+  volumetria:
+    name: volumetría a escala objetivo
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: generación y medición (NFR-NUC-05 y NFR-NUC-01 sobre un año)
+        run: |
+          mkdir -p "$RUNNER_TEMP/informes"
+          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --out "$RUNNER_TEMP/informes/volumetry-target.json"
+      - name: informe de volumetría
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-volumetria
+          path: ${{ runner.temp }}/informes/
+          if-no-files-found: warn
+          retention-days: 90
+
+  resiliencia:
+    name: resiliencia FS-NUC-01 a 10 (con el ensayo de restauración)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: FS-NUC-01 a 10 (perfil nightly)
+        env:
+          VIGIA_RESILIENCE_REPORT_DIR: ${{ runner.temp }}/informes
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly tests/resilience
+      - name: informes de resiliencia
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-resiliencia
+          path: ${{ runner.temp }}/informes/
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Suite de conformidad de U-01 contra la plataforma (LC-NUC-35). Preparada y desactivada: se omite
+  # con motivo mientras openapi/app.yaml no tenga rutas del contrato. Cuando U-03 las añada, este
+  # trabajo falla hasta que alguien escriba aquí la ejecución: nunca pasa en vacío.
+  conformance:
+    name: conformidad de U-01 contra la plataforma
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: rutas del contrato en la plataforma
+        run: |
+          if grep -Eq '^  "/(api/)?nodes/' backend/openapi/app.yaml; then
+            echo "La plataforma ya expone rutas del contrato: escribe la ejecución de vigia-conformance en este trabajo." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Conformidad omitida: la plataforma todavía no expone las rutas del contrato (llegan con U-03)." | tee -a "$GITHUB_STEP_SUMMARY"
+
+  informe:
+    name: informe nocturno
+    needs: [propiedades, propiedades-integracion, bancos, volumetria, resiliencia, conformance]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: informe-*
+          path: informe
+      - name: resumen
+        env:
+          RESULTADOS: ${{ toJSON(needs) }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "### Nocturno sobre \`$COMMIT\`"
+            echo
+            echo "| Trabajo | Resultado |"
+            echo "|---|---|"
+            echo "$RESULTADOS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } | tee -a "$GITHUB_STEP_SUMMARY" > resumen.md
+          mkdir -p informe
+          cp resumen.md informe/
+          echo "$RESULTADOS" | jq -e 'all(.[]; .result == "success")' > /dev/null
+      - name: informe archivado 90 días
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-nocturno
+          path: informe/
+          retention-days: 90

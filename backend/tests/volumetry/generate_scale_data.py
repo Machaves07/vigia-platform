@@ -360,7 +360,9 @@ async def _generate(migrated: MigratedDatabase, scale: Scale, seed: int, workers
     try:
         now: datetime = await connection.fetchval("SELECT date_trunc('milliseconds', now())")
         first_day = days_back(now, scale.days)
-        await create_partitions(connection, first_day, now)
+        # También el mes siguiente: una corrida larga que cruce el fin de mes escribe (marcas en
+        # vivo de las mediciones) en esa partición, no en la de por defecto (seguimiento de VIG-91).
+        await create_partitions(connection, first_day, now + timedelta(days=31))
         since = first_day - timedelta(days=1)
         largest = await seed_organization(
             connection,

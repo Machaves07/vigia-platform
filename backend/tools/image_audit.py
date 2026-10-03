@@ -157,9 +157,17 @@ def _read_json(archive: tarfile.TarFile, name: str) -> Any:
             raise AuditError(f"{name} no es JSON") from None
 
 
+def _is_root(name: str) -> bool:
+    """``root``, vacío o un UID numérico 0 en cualquier forma (``0``, ``00``, ``+0``)."""
+    name = name.strip()
+    if name in _ROOT_USERS:
+        return True
+    return name.lstrip("+").isdigit() and int(name) == 0
+
+
 def _user_findings(config: dict[str, Any]) -> Iterable[Finding]:
     user = str((config.get("config") or {}).get("User") or "")
-    if user.split(":", 1)[0] in _ROOT_USERS:
+    if _is_root(user.split(":", 1)[0]):
         shown = user or "sin declarar (root)"
         yield Finding("config.User", f"la imagen corre como root ({shown})")
 

@@ -6,10 +6,19 @@
 # Este archivo: quitar un dueño exige al dueño.
 /.github/CODEOWNERS                              @Machaves07
 
-# Infraestructura, migraciones y canalización.
+# Infraestructura, migraciones y canalización (con los scripts de los flujos, la configuración de
+# Dependabot, las herramientas de CI y el lint que vigila los flujos; seguimiento de VIG-94).
 /infra/                                          @Machaves07
 /backend/migrations/                             @Machaves07
 /.github/workflows/                              @Machaves07
+/.github/scripts/                                @Machaves07
+/.github/dependabot.yml                          @Machaves07
+/backend/tools/                                  @Machaves07
+/backend/tests/unit/test_workflows_pinned.py     @Machaves07
+
+# Reglas de los agentes y excepciones del escaneo de secretos.
+/AGENTS.md                                       @Machaves07
+/.gitleaksignore                                 @Machaves07
 
 # Módulos críticos del backend (NFR-NUC-25: aislados de FastAPI y SQLAlchemy).
 /backend/src/vigia_platform/identity/auth/       @Machaves07

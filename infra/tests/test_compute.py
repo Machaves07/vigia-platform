@@ -69,6 +69,8 @@ def expected_compute_resources(config: EnvironmentConfig) -> Counter[str]:
     if deploy_role_owned(config):
         roles += 1
         policies += 1
+    if config.ephemeral:
+        policies += 1  # vigia-deploy-staging-<n> sobre el vigia-deploy importado
     if config.first_deploy:
         policies += 1  # vigia-migrate-task-bootstrap
     if config.elevated_bootstrap:
