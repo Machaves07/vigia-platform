@@ -292,7 +292,7 @@ def test_deployments_whose_bucket_names_overflow_stop_the_synthesis(
 def test_staging_7_synthesizes_suffixed_stacks_without_datasets(staging: Synthesized) -> None:
     assert staging.stack_names == tuple(
         f"vigia-{key}-staging-7"
-        for key in ("foundation", "data", "edge", "compute", "observability")
+        for key in ("foundation", "data", "edge", "observability", "compute")
     )
     assert not any("datasets" in name for name in staging.stack_names)
 

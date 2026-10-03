@@ -165,6 +165,8 @@ EVIDENCE_INFREQUENT_ACCESS_AFTER = Duration.days(90)  # [hipótesis pendiente de
 ARCHIVE_DEEP_ARCHIVE_AFTER = Duration.days(180)  # [objetivo propio]
 ABORT_INCOMPLETE_UPLOADS_AFTER = Duration.days(7)  # nº 22, [objetivo propio]
 ACCESS_LOGS_EXPIRATION = Duration.days(365)  # ciclo de vida de vigia-logs (U-01)
+# Filtro de las métricas de peticiones de ``vigia-evidence`` (dimensión ``FilterId`` en AWS/S3).
+EVIDENCE_REQUEST_METRICS = "EntireBucket"
 ACCESS_LOGS_POLICY_WARNING = "@aws-cdk/aws-s3:accessLogsPolicyNotAdded"
 # Prefijos de los registros de acceso de los balanceadores de ``vigia-edge`` (§4.2 y §4.3).
 LOAD_BALANCER_LOG_PREFIXES = ("alb/app", "alb/nodes")
@@ -348,6 +350,13 @@ class DataStack(VigiaStack):
             server_access_logs_prefix=f"s3/{usage.value}/",
             lifecycle_rules=self._lifecycle(usage),
             cors=self._cors() if usage is BucketUsage.EVIDENCE else None,
+            # Métricas de peticiones de todo el depósito para la alarma ``quota-evidence-reads``
+            # de ``vigia-observability`` (U-03 §8.4, nº 18).
+            metrics=(
+                [s3.BucketMetrics(id=EVIDENCE_REQUEST_METRICS)]
+                if usage is BucketUsage.EVIDENCE
+                else None
+            ),
             # El depósito de ensayo se vacía en el paso 6 del runbook y se destruye con la pila.
             removal_policy=RemovalPolicy.DESTROY if drill else self.removal,
             auto_delete_objects=config.buckets_auto_delete_objects,

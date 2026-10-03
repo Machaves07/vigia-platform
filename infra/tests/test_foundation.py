@@ -939,7 +939,10 @@ def test_rds_events_may_publish_to_the_alerts_topic(deployment: Synthesized) -> 
     template = _foundation(deployment)
     statements = _topic_statements(template)
     budgets = {"BudgetsPublish"} if budgets_enabled(deployment.config) else set()
-    assert set(statements) == {"RdsEventsPublish", "CloudWatchAlarmsPublish"} | budgets
+    assert (
+        set(statements)
+        == {"RdsEventsPublish", "CloudWatchAlarmsPublish", "BackupJobFailedRulePublish"} | budgets
+    )
     statement = statements["RdsEventsPublish"]
     assert statement["Principal"] == {"Service": "events.rds.amazonaws.com"}
     assert statement["Action"] == "sns:Publish"
@@ -948,6 +951,23 @@ def test_rds_events_may_publish_to_the_alerts_topic(deployment: Synthesized) -> 
     assert statement["Condition"] == {
         "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
     }
+
+
+def test_only_the_backup_rule_of_the_deployment_may_publish_from_events(
+    deployment: Synthesized,
+) -> None:
+    """Regla ``backup-job-failed`` de ``vigia-observability`` (§9.4): EventBridge publica solo
+    desde esa regla del despliegue, no desde cualquier regla de la cuenta."""
+    template = _foundation(deployment)
+    statement = _topic_statements(template)["BackupJobFailedRulePublish"]
+    assert statement["Principal"] == {"Service": "events.amazonaws.com"}
+    assert statement["Action"] == "sns:Publish"
+    ((topic_id, _),) = _of_type(template, "AWS::SNS::Topic")
+    assert reference_target(statement["Resource"]) == topic_id
+    (source,) = statement["Condition"]["ArnEquals"].values()
+    rule = deployment.config.resource_name("backup-job-failed")
+    assert render(source, template) == f"arn:aws:events:us-east-1:<AccountId>:rule/{rule}"
+    assert set(statement["Condition"]) == {"ArnEquals"}
 
 
 def test_cloudwatch_alarms_may_publish_to_the_alerts_topic(deployment: Synthesized) -> None:
