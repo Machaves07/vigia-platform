@@ -9,6 +9,15 @@
 # falla si alguna entrada de la raíz falta aquí.
 extend = "../pyproject.toml"
 
+# `print()` tampoco (T20, seguimiento de VIG-22): solo las dos órdenes de consola, cuya salida es la
+# respuesta a quien las ejecuta.
+[lint]
+extend-select = ["T20"]
+
+[lint.extend-per-file-ignores]
+"vigia_platform/ledger/chain/package_verifier.py" = ["T201"]
+"vigia_platform/shared/api/export_openapi.py" = ["T201"]
+
 [lint.flake8-tidy-imports.banned-api]
 "pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
 "_pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
@@ -43,3 +52,11 @@ extend = "../pyproject.toml"
 "logging.critical".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
 "logging.fatal".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
 "logging.log".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+# Evasiones del registro estructurado (seguimiento de VIG-22, TASK-143): escriben texto libre fuera
+# del JSON igual que logging.getLogger.
+"logging.Logger".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.getLoggerClass".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.LoggerAdapter".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.Manager".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.makeLogRecord".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
+"logging.lastResort".msg = "Prohibido en src/: usa vigia_platform.shared.observability.logging.get_logger (NFR-NUC-17, PR-NUC-54)."
