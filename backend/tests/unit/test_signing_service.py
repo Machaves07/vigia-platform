@@ -446,6 +446,17 @@ async def test_key_set_is_not_signed_through_the_port() -> None:
         world.service.sign(SigningPurpose.KEY_SET, {"keys": [], "issued_at": "x"})
 
 
+@pytest.mark.parametrize(
+    ("purpose", "match"),
+    [("key_set", "key_set"), ("live_view_token", "sign_detached"), ("otro", "otro")],
+)
+async def test_purposes_given_as_text_get_the_same_answer(purpose: Any, match: str) -> None:
+    """Seguimiento de VIG-60: con la cadena, ``ValueError`` y nunca ``AttributeError``."""
+    world = await bootstrapped_world()
+    with pytest.raises(ValueError, match=match):
+        world.service.sign(purpose, {"keys": [], "issued_at": "x"})
+
+
 async def test_refresh_counts_a_secrets_outage_even_without_new_keys() -> None:
     metrics, reader = metrics_with_reader()
     world = await bootstrapped_world(metrics=metrics)

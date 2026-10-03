@@ -566,6 +566,32 @@ class ScopeContexts:
             correlation_id=correlation,
         )
 
+    def bootstrap_operator_context(self, operator_id: uuid.UUID, display_name: str) -> ScopeContext:
+        """``vigia-admin bootstrap``: el primer operador, que nace en esta orden (BR-NUC-06).
+
+        Actor ``operator`` en la organización proveedora con origen de orden administrativa,
+        **sin asignaciones**: ``authorize`` no le concede nada. Solo sirve para lo que la orden
+        escribe directamente (la proveedora, el operador invitado y sus claves de firma), que la
+        base exige atribuir a una cuenta (``created_by``, ``invited_by``, ``rotated_by``). Las
+        órdenes siguientes usan ``context_from_operator``, que exige el operador ya activo.
+        """
+        if type(operator_id) is not uuid.UUID:
+            raise ContextUnavailable(ContextUnavailableReason.OPERATOR_INVALID)
+        if not isinstance(display_name, str):
+            raise TypeError("display_name debe ser str")
+        return _seal_scope_context(
+            organization_id=self._provider_organization_id,
+            actor=Actor(
+                kind=ActorKind.OPERATOR,
+                id=operator_id,
+                display_name_snapshot=_display_name(display_name),
+                unit=ActorUnit.U02,
+            ),
+            origin=ContextOrigin.ADMIN_COMMAND,
+            allowed_scopes=(),
+            correlation_id=self._correlation(None),
+        )
+
     # --- Inicio de sesión (LoginContexts, SessionContexts) -------------------------------------
 
     def anonymous(self, organization_id: uuid.UUID) -> ScopeContext:

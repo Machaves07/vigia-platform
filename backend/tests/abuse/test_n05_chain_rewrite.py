@@ -14,8 +14,8 @@ cuadrar.
   jamás de la publicación (tampoco tras rotar);
 - BR-NUC-56: la verificación en la plataforma comprueba cada enlace **y** cada punto de control.
 
-Incluye el seguimiento 4 de la revisión de VIG-86 (rotación y su auditoría en transacciones
-separadas).
+Incluye el seguimiento 4 de la revisión de VIG-86: la rotación y su auditoría van en la misma
+transacción (VIG-88, ``LedgerRotationRecorder``); si la auditoría falla, la clave no queda.
 """
 
 from __future__ import annotations
@@ -228,12 +228,6 @@ def test_n05_checkpoint_keys_are_never_withdrawn_after_rotation(platform: Platfo
     assert all(len(base64.b64decode(value)) == 32 for value in after.values())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Seguimiento 4 de VIG-86: POST /platform/keys/{purpose}/rotate rota y confirma la clave "
-    "y después audita key_rotated en otra transacción; si la auditoría falla, la rotación queda "
-    "sin su entrada. Pendiente de decisión de la sesión de control.",
-)
 def test_n05_a_rotation_never_stays_without_its_audit_entry(
     platform: Platform, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -251,10 +245,16 @@ def test_n05_a_rotation_never_stays_without_its_audit_entry(
     response = platform.call("POST", "/platform/keys/checkpoint/rotate", cookie=platform.operator())
     monkeypatch.undo()
     assert response.status_code >= 500 and code_of(response) == "internal_error"
+    # Lo persistido, no la memoria del proceso: otro proceso que relea no debe ver la clave.
+    assert platform.run(platform.signing.refresh())
     rotated = {key.key_id for key in platform.signing.public_keys(_checkpoint_purpose())} - active
     unaudited = len(platform.audit_entries(platform.provider, "key_rotated")) == audited
     # El invariante que se espera: o la rotación no ocurre, o queda auditada.
     assert not (rotated and unaudited), f"rotación sin auditar: {sorted(rotated)}"
+    # Y una rotación que sí ocurre deja exactamente una entrada (la de su transacción).
+    response = platform.call("POST", "/platform/keys/checkpoint/rotate", cookie=platform.operator())
+    assert response.status_code == 200, response.text
+    assert len(platform.audit_entries(platform.provider, "key_rotated")) == audited + 1
 
 
 def _checkpoint_purpose() -> Any:

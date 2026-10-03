@@ -397,6 +397,39 @@ class SecretsManagerAdapter:
         self._cache[name] = _Cached(value, now)
         return arn
 
+    async def put_one_time(self, name: str, value: str) -> str:
+        """Deja ``value`` (texto) en el secreto de un solo uso ``name`` y devuelve su ARN.
+
+        Para ``vigia/<entorno>/bootstrap/invitation`` (``infrastructure-design.md`` §5.4): lo
+        crea o, si ya existe, le añade una versión nueva (``PutSecretValue``); el dueño lo lee y
+        lo borra tras usarlo. Es texto para leerlo con ``aws secretsmanager get-secret-value``;
+        la plataforma nunca lo lee, y el valor **no** se guarda en la caché.
+        """
+        _require(_SECRET_NAME, name, "el nombre del secreto")
+        if not isinstance(value, str) or not 0 < len(value.encode("utf-8")) <= _MAX_SECRET_BYTES:
+            raise ValueError(
+                f"el valor del secreto debe ser texto de 1 a {_MAX_SECRET_BYTES} bytes"
+            )
+        params: dict[str, Any] = {"Name": name, "SecretString": value}
+        if self._kms_key_id is not None:
+            params["KmsKeyId"] = self._kms_key_id
+
+        def put() -> str:
+            try:
+                response = self._client.create_secret(**params)
+            except botocore_exceptions.ClientError as error:
+                if _error_code(error) != "ResourceExistsException":
+                    raise
+                response = self._client.put_secret_value(SecretId=name, SecretString=value)
+            arn = response.get("ARN")
+            if not isinstance(arn, str) or _SECRET_ID.fullmatch(arn) is None:
+                raise SecretsUnavailable(Dependency.SECRETS_MANAGER, "put_secret")
+            return arn
+
+        return await _call(
+            self._settings, self._executor, Dependency.SECRETS_MANAGER, "put_secret", put
+        )
+
     def _refresh_failed(self) -> None:
         metrics = self._metrics if self._metrics is not None else get_metrics()
         metrics.secrets_refresh_failed.add(1, {"dependency": Dependency.SECRETS_MANAGER.value})
