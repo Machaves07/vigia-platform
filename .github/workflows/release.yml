@@ -1,0 +1,477 @@
+# Release de vigia-platform (U-02; TASK-151; deployment-architecture §3 y §5; LC-NUC-35 con su nota
+# de 2026-09-23: manual, con la versión, y la etiqueta al final).
+#
+# Orden:
+#  1. preparar: versión X.Y.Z, etiqueta libre y nightly verde sobre el mismo commit.
+#  2. imagen: arm64 construida en un runner ARM con la clave de despliegue de vigia-contracts solo en
+#     ssh-agent (--ssh), auditada y escaneada; SBOM de la imagen (Grype, CycloneDX) y del código (uv
+#     export, CycloneDX); vigia_verify.py y su SHA-256.
+#  3. síntesis: cdk synth de staging-<n> (first_deploy=true y false) y de pilot.
+#  4. [AWS] publicar: imagen por digest en ECR, escaneo del registro y cdk diff de pilot adjunto.
+#  5. [AWS] staging-<n> (D-8), que nace vacío y con autoridad propia, en el orden corregido del primer
+#     despliegue (nota U02-H-01): pilas con first_deploy=true, vigia-migrate, vigia-admin bootstrap,
+#     pilas otra vez con first_deploy=false (vigia-edge crea el almacén de confianza con la raíz recién
+#     publicada; vigia-compute escala los servicios) y comprobaciones nº 1 a 13 (tools/deploy_checks.py;
+#     las que dependen de U-03 o U-05 se omiten con motivo mientras falten). Con soak=true, el perfil
+#     soak de 8 h contra ese staging (nº 19) y nada de pilot.
+#  6. [AWS] destruir staging-<n>: cdk destroy con if: always() y comprobación de residuos (ningún
+#     recurso vivo; las claves KMS con borrado programado).
+#  7. [AWS, sin dry-run] pilot: entorno de GitHub pilot (revisor obligatorio: el dueño), cdk deploy,
+#     vigia-migrate, servicios por digest y comprobaciones con 15 minutos de alarmas.
+#  8. etiqueta vX.Y.Z y release creados por la aplicación vigia-release, con el digest, los SBOM y el
+#     verificador.
+#
+# A-47 (U-02 sin AWS): todo trabajo que toca AWS lleva if: vars.VIGIA_AWS_ENABLED == 'true'. Sin esa
+# variable el release ensaya 1 a 3 y lo dice en el resumen. Ningún trabajo usa claves de AWS de larga
+# duración: los de AWS piden un token OIDC (id-token: write) en el entorno staging o pilot y lo cambian
+# por credenciales de una hora del rol vigia-deploy (.github/scripts/aws_federation.py).
+#
+# Variables del repositorio: VIGIA_AWS_ENABLED, VIGIA_AWS_ACCOUNT_ID, VIGIA_DOMAIN (P1, P5).
+# Secretos: VIGIA_CONTRACTS_DEPLOY_KEY, VIGIA_RELEASE_APP_ID, VIGIA_RELEASE_PRIVATE_KEY (A-40).
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión X.Y.Z (la etiqueta será vX.Y.Z)"
+        required: true
+        type: string
+      dry-run:
+        description: "Ensayo: staging-<n> sí; pilot y etiqueta no"
+        type: boolean
+        default: true
+      soak:
+        description: "Trabajo soak de 8 h contra staging-<n> (nº 19); no despliega pilot"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CDK: npx --yes aws-cdk@2.1144.0
+  STAGING: staging-${{ github.run_number }}
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  preparar:
+    name: preparar (versión y nightly verde sobre el commit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: versión, rama y etiqueta libre
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          SOAK: ${{ inputs.soak }}
+        run: |
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Versión fuera de la forma X.Y.Z: $VERSION" >&2; exit 1
+          fi
+          if [ "$DRY_RUN" != "true" ] && [ "$SOAK" != "true" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Un release que despliega pilot solo sale de main (rama: $GITHUB_REF)." >&2; exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$VERSION" > /dev/null 2>&1; then
+            echo "La etiqueta v$VERSION ya existe." >&2; exit 1
+          fi
+      - name: nightly verde sobre el mismo commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow nightly.yml --commit "$GITHUB_SHA" \
+            --status success --limit 1 --json databaseId,url --jq '.[0].url // empty')
+          if [ -z "$RUN" ]; then
+            echo "No hay un nightly verde sobre $GITHUB_SHA: lánzalo y espera a que termine." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            exit 1
+          fi
+          echo "Nightly verde sobre \`$GITHUB_SHA\`: $RUN" >> "$GITHUB_STEP_SUMMARY"
+
+  imagen:
+    name: imagen arm64 (construcción, auditoría, escaneo y SBOM)
+    needs: preparar
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    outputs:
+      image-id: ${{ steps.construccion.outputs.image-id }}
+      verifier-sha256: ${{ steps.verificador.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: construcción arm64 con la clave solo en ssh-agent
+        id: construccion
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          eval "$(ssh-agent -s)" > /dev/null
+          trap 'ssh-agent -k > /dev/null' EXIT
+          printf '%s\n' "$CLAVE" | ssh-add -q -
+          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile -t vigia-platform:release --load .
+          echo "image-id=$(docker image inspect --format '{{.Id}}' vigia-platform:release)" >> "$GITHUB_OUTPUT"
+      - name: usuario no root y ninguna clave privada en capas ni historial
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          docker save vigia-platform:release -o "$RUNNER_TEMP/imagen.tar"
+          uv run --no-project --python 3.12 python backend/tools/image_audit.py "$RUNNER_TEMP/imagen.tar" --needle-env CLAVE
+          gzip -c "$RUNNER_TEMP/imagen.tar" > "$RUNNER_TEMP/imagen.tar.gz"
+          rm -f "$RUNNER_TEMP/imagen.tar"
+      - name: Grype 0.120.0 (suma verificada)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/grype.tar.gz" https://github.com/anchore/grype/releases/download/v0.120.0/grype_0.120.0_linux_arm64.tar.gz
+          echo "bc0e52b1a0de37e2ff021c4924d689dce7dcff2e7d74b39aea16c0453e69be18  $RUNNER_TEMP/grype.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/grype.tar.gz" -C "$RUNNER_TEMP" grype
+      - name: escaneo y SBOM de la imagen (CycloneDX; falla con altas o críticas con arreglo)
+        run: '"$RUNNER_TEMP/grype" docker:vigia-platform:release --only-fixed --fail-on high -o table -o "cyclonedx-json=$RUNNER_TEMP/release/sbom-imagen.cdx.json"'
+      - name: SBOM del código (CycloneDX del bloqueo, sin dependencias de desarrollo)
+        working-directory: backend
+        run: uv export --frozen --no-dev --format cyclonedx1.5 -o "$RUNNER_TEMP/release/sbom-codigo.cdx.json"
+      - name: vigia_verify.py y su SHA-256
+        id: verificador
+        working-directory: backend
+        run: |
+          uv run --no-project --python 3.12 python tools/build_verifier.py --check
+          cp tools/vigia_verify.py "$RUNNER_TEMP/release/"
+          SUMA=$(sha256sum tools/vigia_verify.py | cut -d' ' -f1)
+          echo "$SUMA  vigia_verify.py" > "$RUNNER_TEMP/release/vigia_verify.py.sha256"
+          echo "sha256=$SUMA" >> "$GITHUB_OUTPUT"
+      - name: artefactos del release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: 90
+      - name: imagen para publicar
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: imagen
+          path: ${{ runner.temp }}/imagen.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+  sintesis:
+    name: cdk synth de staging y pilot
+    needs: imagen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: cdk synth sin credenciales (la imagen local hace de digest)
+        env:
+          DIGEST: ${{ needs.imagen.outputs.image-id }}
+        run: |
+          $CDK synth --quiet -c environment="$STAGING" -c first_deploy=true -c image_digest="$DIGEST" -o "$RUNNER_TEMP/cdk-staging-primero"
+          $CDK synth --quiet -c environment="$STAGING" -c image_digest="$DIGEST" -o "$RUNNER_TEMP/cdk-staging"
+          $CDK synth --quiet -c environment=pilot -c image_digest="$DIGEST" -o "$RUNNER_TEMP/cdk-pilot"
+          echo "cdk synth de \`$STAGING\` (first_deploy=true y false) y de \`pilot\` con la imagen \`$DIGEST\`." >> "$GITHUB_STEP_SUMMARY"
+
+  publicar:
+    name: publicar la imagen por digest y cdk diff de pilot
+    needs: [imagen, sintesis]
+    if: vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: imagen
+          path: ${{ runner.temp }}
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy"
+      - name: publicación en ECR por digest
+        id: push
+        env:
+          REGISTRY: ${{ vars.VIGIA_AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+        run: |
+          gunzip -c "$RUNNER_TEMP/imagen.tar.gz" | docker load
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          TAG="v$VERSION-${{ github.run_number }}"
+          docker tag vigia-platform:release "$REGISTRY/vigia-platform:$TAG"
+          docker push "$REGISTRY/vigia-platform:$TAG"
+          DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/vigia-platform:$TAG" | cut -d@ -f2)
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Imagen publicada: \`vigia-platform@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: escaneo del registro (NFR-NUC-23; los críticos bloquean)
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          aws ecr wait image-scan-complete --repository-name vigia-platform --image-id imageDigest="$DIGEST"
+          CRITICOS=$(aws ecr describe-image-scan-findings --repository-name vigia-platform --image-id imageDigest="$DIGEST" \
+            --query 'imageScanFindings.findingSeverityCounts.CRITICAL' --output text)
+          if [ "$CRITICOS" != "None" ] && [ "$CRITICOS" != "0" ]; then
+            echo "El escaneo del registro encontró $CRITICOS hallazgos críticos." >&2; exit 1
+          fi
+      - name: cdk diff de pilot (adjunto a la ejecución)
+        working-directory: infra
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          uv sync --frozen
+          $CDK diff -c environment=pilot -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-pilot.txt" 2>&1 || true
+          tail -n 200 "$RUNNER_TEMP/cdk-diff-pilot.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: cdk-diff-pilot
+          path: ${{ runner.temp }}/cdk-diff-pilot.txt
+          retention-days: 90
+
+  staging:
+    name: staging-<n> (primer despliegue, comprobaciones y soak)
+    needs: [imagen, publicar]
+    if: vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    # Tope de un runner de GitHub (6 h). El soak de 8 h necesitará un runner propio cuando exista.
+    timeout-minutes: 360
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DIGEST: ${{ needs.publicar.outputs.digest }}
+      DOMAIN: ${{ vars.VIGIA_DOMAIN }}
+      ROLE: arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada de infra
+        working-directory: infra
+        run: uv sync --frozen
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: pilas con first_deploy=true (servicios con 0 tareas, sin almacén de confianza)
+        working-directory: infra
+        run: $CDK deploy --all --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=true -c image_digest="$DIGEST"
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: vigia-migrate
+        run: python3 .github/scripts/staging.py run-task --environment "$STAGING" --task migrate --started-by "release-${{ github.run_id }}"
+      - name: vigia-admin bootstrap (raíz propia del entorno)
+        run: |
+          python3 .github/scripts/staging.py run-task --environment "$STAGING" --task admin --started-by "release-${{ github.run_id }}" -- \
+            vigia-admin bootstrap --organization-code VIGIA-PROV --organization-name "Proveedor sintético $STAGING" \
+            --operator-email "operadora@$STAGING.$DOMAIN" --operator-name "Operadora sintética" --yes
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: pilas con first_deploy=false (almacén de confianza con la raíz y servicios escalados)
+        working-directory: infra
+        run: |
+          $CDK deploy --all --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=false -c image_digest="$DIGEST"
+          aws ecs wait services-stable --cluster "vigia-$STAGING" --services vigia-api vigia-worker
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: comprobaciones de despliegue nº 1 a 13
+        env:
+          VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
+        run: |
+          uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment "$STAGING" --domain "$DOMAIN" \
+            --verifier-sha256 "$VERIFIER" --operator-email "operadora@$STAGING.$DOMAIN" \
+            --report "$RUNNER_TEMP/comprobaciones-staging.json" --summary "$GITHUB_STEP_SUMMARY"
+      - name: soak de 8 h (nº 19)
+        if: inputs.soak
+        run: |
+          if [ ! -f backend/tests/load/soak.py ]; then
+            echo "Soak pedido y no disponible: el perfil soak con el cliente sintético de consola llega con U-03." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            exit 1
+          fi
+          echo "El perfil soak existe y este paso todavía no lo ejecuta: escríbelo aquí antes de usar soak=true." >&2
+          exit 1
+      - name: informe de las comprobaciones
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: comprobaciones-staging
+          path: ${{ runner.temp }}/comprobaciones-staging.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  destruir-staging:
+    name: destruir staging-<n> (siempre) y comprobar residuos
+    needs: [publicar, staging]
+    if: always() && vars.VIGIA_AWS_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ROLE: arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada de infra
+        working-directory: infra
+        run: uv sync --frozen
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: cdk destroy de staging-<n>
+        working-directory: infra
+        run: $CDK destroy --all --force -c environment="$STAGING"
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: sin residuos (ningún recurso vivo; claves con borrado programado)
+        run: python3 .github/scripts/staging.py residue --environment "$STAGING" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  pilot:
+    name: pilot (aprobación del dueño, despliegue y verificación de 15 minutos)
+    needs: [imagen, publicar, staging, destruir-staging]
+    if: vars.VIGIA_AWS_ENABLED == 'true' && !inputs.dry-run && !inputs.soak && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: pilot
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DIGEST: ${{ needs.publicar.outputs.digest }}
+      DOMAIN: ${{ vars.VIGIA_DOMAIN }}
+      ROLE: arn:aws:iam::${{ vars.VIGIA_AWS_ACCOUNT_ID }}:role/vigia-deploy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: instalación congelada de infra
+        working-directory: infra
+        run: uv sync --frozen
+      - name: federación con vigia-deploy (sin claves)
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: cdk deploy de pilot (foundation, data, edge, observability, compute)
+        working-directory: infra
+        run: |
+          $CDK deploy --require-approval never --concurrency 1 -c environment=pilot -c image_digest="$DIGEST" \
+            vigia-foundation vigia-data vigia-edge vigia-observability vigia-compute
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: vigia-migrate y servicios en el digest nuevo
+        run: |
+          python3 .github/scripts/staging.py run-task --environment pilot --task migrate --started-by "release-${{ github.run_id }}"
+          aws ecs wait services-stable --cluster vigia-pilot --services vigia-api vigia-worker
+      - name: federación renovada
+        run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
+      - name: comprobaciones de despliegue con 15 minutos de alarmas
+        env:
+          VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
+        run: |
+          uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment pilot --domain "$DOMAIN" \
+            --verifier-sha256 "$VERIFIER" --report "$RUNNER_TEMP/comprobaciones-pilot.json" --summary "$GITHUB_STEP_SUMMARY"
+      - name: informe de las comprobaciones
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: comprobaciones-pilot
+          path: ${{ runner.temp }}/comprobaciones-pilot.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  etiqueta:
+    name: etiqueta vX.Y.Z y release (vigia-release)
+    needs: [imagen, publicar, pilot]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+      - name: token de instalación de vigia-release
+        id: app
+        env:
+          VIGIA_RELEASE_APP_ID: ${{ secrets.VIGIA_RELEASE_APP_ID }}
+          VIGIA_RELEASE_PRIVATE_KEY: ${{ secrets.VIGIA_RELEASE_PRIVATE_KEY }}
+        run: python3 .github/scripts/github_app_token.py
+      - name: etiqueta y release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          DIGEST: ${{ needs.publicar.outputs.digest }}
+          VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
+        run: |
+          echo "$DIGEST" > "$RUNNER_TEMP/release/image-digest.txt"
+          {
+            echo "Imagen: \`vigia-platform@$DIGEST\`"
+            echo
+            echo "Verificador \`vigia_verify.py\`: SHA-256 \`$VERIFIER\`"
+            echo
+            echo "SBOM CycloneDX de la imagen y del código adjuntos."
+          } > "$RUNNER_TEMP/notas.md"
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notas.md" "$RUNNER_TEMP"/release/*
+
+  resumen:
+    name: resumen del release
+    needs: [preparar, imagen, sintesis, publicar, staging, destruir-staging, pilot, etiqueta]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: qué se ensayó y qué se omitió
+        env:
+          RESULTADOS: ${{ toJSON(needs) }}
+          AWS_ENABLED: ${{ vars.VIGIA_AWS_ENABLED == 'true' }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          SOAK: ${{ inputs.soak }}
+        run: |
+          {
+            echo "### Release v$VERSION sobre \`$GITHUB_SHA\` (dry-run=$DRY_RUN, soak=$SOAK)"
+            echo
+            if [ "$AWS_ENABLED" != "true" ]; then
+              echo "**Sin AWS (A-47):** \`VIGIA_AWS_ENABLED\` no vale \`true\`. Se ensayó lo que no necesita AWS: nightly verde sobre el commit, imagen arm64 construida, auditada y escaneada **sin publicar**, SBOM, verificador y \`cdk synth\` de \`$STAGING\` y \`pilot\`. Se omitieron la publicación en ECR, el diff de CDK de pilot, \`$STAGING\` y su destrucción, \`pilot\` y la etiqueta."
+              echo
+            fi
+            echo "| Trabajo | Resultado |"
+            echo "|---|---|"
+            echo "$RESULTADOS" | jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$RESULTADOS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")' > /dev/null
