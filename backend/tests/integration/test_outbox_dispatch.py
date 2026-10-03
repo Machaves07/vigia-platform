@@ -187,6 +187,55 @@ def test_a_crash_between_effect_and_ack_redelivers_with_one_effect(
     assert env.run(env.echoes())[(PLAIN, event.event_id)] == 1  # el de la base, también
 
 
+# --- outbox_delivery (NFR-NUC-01, alarma latency-outbox-delivery; VIG-136) ---------------------
+
+
+def _delivery_latency(env: DispatchEnvironment) -> tuple[int, float]:
+    """Cuenta y suma (ms) acumuladas de ``operation_duration_ms{operation=outbox_delivery}``."""
+    data = env.reader.get_metrics_data()
+    for resource in [] if data is None else data.resource_metrics:
+        for scope in resource.scope_metrics:
+            for metric in scope.metrics:
+                if metric.name != MetricName.OPERATION_DURATION_MS.value:
+                    continue
+                for point in metric.data.data_points:
+                    if dict(point.attributes or {}) == {"operation": "outbox_delivery"}:
+                        return point.count, point.sum
+    return 0, 0.0
+
+
+def test_a_delivery_records_its_latency_from_publication_to_commit(
+    env: DispatchEnvironment,
+) -> None:
+    count, total = _delivery_latency(env)
+    env.run(env.publish(uuid.uuid4(), [None]))
+    env.clock.advance(2.5)
+    assert env.run(env.dispatcher().dispatch_once(PLAIN)).count(Outcome.DELIVERED) == 1
+    after_count, after_total = _delivery_latency(env)
+    assert after_count == count + 1
+    # ``created_at`` se guarda al milisegundo: la diferencia, a 1 ms de los 2,5 s.
+    assert after_total - total == pytest.approx(2_500.0, abs=1.0)
+
+
+def test_only_a_confirmed_delivery_records_latency_and_retries_add_to_it(
+    env: DispatchEnvironment,
+) -> None:
+    count, total = _delivery_latency(env)
+    (event,) = env.run(env.publish(uuid.uuid4(), [None]))
+    env.handlers[PLAIN].plan(event.event_id, [Behavior.DEFECT, Behavior.CRASH_AFTER_EFFECT])
+    assert env.run(env.dispatcher().dispatch_once(PLAIN)).count(Outcome.RETRIED) == 1
+    env.clock.advance(1)  # vence el primer reintento
+    with pytest.raises(SimulatedCrash):  # efecto sin confirmar: no hay entrega
+        env.run(env.dispatcher().dispatch_once(PLAIN))
+    assert _delivery_latency(env) == (count, total)
+    env.clock.advance(1)
+    assert env.run(env.dispatcher().dispatch_once(PLAIN)).count(Outcome.DELIVERED) == 1
+    after_count, after_total = _delivery_latency(env)
+    assert after_count == count + 1
+    # Desde la publicación, con la espera del reintento incluida.
+    assert after_total - total == pytest.approx(2_000.0, abs=1.0)
+
+
 # --- FS-NUC-07 a nivel de módulo ---------------------------------------------------------------
 
 

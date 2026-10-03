@@ -95,7 +95,7 @@ from vigia_platform.shared.context import (
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningKeyRecord, SigningPurpose
 from vigia_platform.shared.signing.keys import format_timestamp as _format_timestamp
@@ -367,7 +367,19 @@ class LiveViewTokenService:
     # --- emitir_token_vista --------------------------------------------------------------------
 
     async def issue(self, context: ScopeContext, zone_id: uuid.UUID) -> IssuedLiveViewToken:
-        """``emitir_token_vista``: token de 10 minutos para la vista difuminada de ``zone_id``."""
+        """``emitir_token_vista``: token de 10 minutos para la vista difuminada de ``zone_id``.
+
+        Mide ``operation_duration_ms`` con ``operation=live_view_token`` (NFR-NUC-01) al emitir;
+        un rechazo (``not_found``, límite, zona sin nodo) sale como excepción y no se mide.
+        """
+        started = self._clock.monotonic()
+        issued = await self._issue(context, zone_id)
+        self._metrics_port().record_operation(
+            Operation.LIVE_VIEW_TOKEN, self._clock.monotonic() - started
+        )
+        return issued
+
+    async def _issue(self, context: ScopeContext, zone_id: uuid.UUID) -> IssuedLiveViewToken:
         if type(zone_id) is not uuid.UUID:
             raise ResourceNotFound()
         rows = await self._database.read(context, _ZONE, {"zone_id": zone_id})

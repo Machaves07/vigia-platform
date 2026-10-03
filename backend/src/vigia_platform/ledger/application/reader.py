@@ -68,8 +68,10 @@ from vigia_platform.ledger.application.audit_writer import (
 )
 from vigia_platform.ledger.application.writer import MAX_SOURCE_KEY_CHARS, LedgerDatabase
 from vigia_platform.ledger.canonical import CanonicalFormError, canonical_bytes_sync
+from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.db import Transaction
+from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 
 __all__ = [
     "DEFAULT_PAGE_SIZE",
@@ -707,9 +709,18 @@ def _audit_query(filters: object, page: object) -> _RecordQuery:
 class LectorExpediente:
     """El puerto ``LectorExpediente`` (business-logic-model §10.1) sobre PostgreSQL."""
 
-    def __init__(self, *, database: LedgerDatabase, audit: AuditWriter) -> None:
+    def __init__(
+        self,
+        *,
+        database: LedgerDatabase,
+        audit: AuditWriter,
+        clock: Clock | None = None,
+        metrics: PlatformMetrics | None = None,
+    ) -> None:
         self._database = database
         self._audit = audit
+        self._clock = clock if clock is not None else SystemClock()
+        self._metrics = metrics
 
     async def list(
         self,
@@ -717,7 +728,23 @@ class LectorExpediente:
         filters: LedgerFilters | None = None,
         page: PageRequest | None = None,
     ) -> Page[LedgerRecordView, RecordCursor]:
-        """Una página de registros con alcance; escribe una entrada ``ledger_read``."""
+        """Una página de registros con alcance; escribe una entrada ``ledger_read``.
+
+        Mide ``operation_duration_ms`` con ``operation=ledger_list`` (NFR-NUC-01) al devolver la
+        página; una entrada inválida o un fallo de la base no se miden.
+        """
+        started = self._clock.monotonic()
+        result = await self._list(context, filters, page)
+        metrics = self._metrics if self._metrics is not None else get_metrics()
+        metrics.record_operation(Operation.LEDGER_LIST, self._clock.monotonic() - started)
+        return result
+
+    async def _list(
+        self,
+        context: ScopeContext,
+        filters: LedgerFilters | None,
+        page: PageRequest | None,
+    ) -> Page[LedgerRecordView, RecordCursor]:
         context = _require_context(context)
         query = _record_query(filters or LedgerFilters(), page or PageRequest())
         parameters = {

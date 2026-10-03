@@ -595,11 +595,14 @@ class IntegrityService:
         if not isinstance(chain, CheckpointChain):
             raise TypeError("chain debe ser CheckpointChain")
         mode = VerificationMode(mode)
+        started = self._clock.monotonic()
         result = await self._walk(context, chain, mode)
+        walked = self._clock.monotonic() - started
         detected_at = self._clock.now()
         event = None if result.intact else event_payload(result, detected_at)
         recorded_at = await self._store.record(context, result, event)
         result = replace(result, verified_at=recorded_at)
+        self._record_rate(result, walked)
         if result.intact:
             _log.info(
                 "cadena verificada íntegra",
@@ -637,6 +640,30 @@ class IntegrityService:
         return tuple(sorted(results, key=lambda result: result.chain.sort_key()))
 
     # --- interno -------------------------------------------------------------------------------
+
+    def _record_rate(self, result: IntegrityResult, walked_seconds: float) -> None:
+        """``chain_verification_records_per_second`` de una verificación incremental auditada.
+
+        Alimenta la alarma ``latency-verify-chains-incremental`` (mitad del objetivo de
+        NFR-NUC-01, ≥ 5 000 registros por segundo): registros verificados íntegros entre el
+        recorrido de la cadena y su duración (la auditoría del resultado no cuenta). Solo la
+        incremental, la que el objetivo mide; sin registros nuevos o sin tiempo medido no hay
+        tasa que publicar.
+        """
+        if result.mode is not VerificationMode.INCREMENTAL or walked_seconds <= 0:
+            return
+        records = result.to_sequence - result.from_sequence + 1
+        if records <= 0:
+            return
+        chain = result.chain
+        # ``chain_kind`` de las métricas: ``plant``, ``organization`` o ``audit`` (NFR-NUC-41).
+        if chain.kind is ChainKind.AUDIT:
+            kind = "audit"
+        else:
+            kind = "organization" if chain.plant_id is None else "plant"
+        (self._metrics or get_metrics()).chain_verification_records_per_second.set(
+            records / walked_seconds, {"chain_kind": kind}
+        )
 
     def _public_keys(self) -> dict[str, bytes]:
         keys: dict[str, bytes] = {}
