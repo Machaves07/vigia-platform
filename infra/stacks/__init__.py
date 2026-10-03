@@ -1,9 +1,15 @@
 """Pilas de U-02 en su orden de registro y despliegue (infrastructure-design §2.3).
 
-``register_stacks`` las instancia en el orden ``foundation``, ``data``, ``edge``, ``compute``,
-``observability`` y ``datasets``, con las dependencias de la tabla de §2.3, para que
+``register_stacks`` las instancia en el orden ``foundation``, ``data``, ``edge``,
+``observability``, ``compute`` y ``datasets``, con las dependencias de la tabla de §2.3, para que
 ``cdk deploy --all`` siga el orden del primer despliegue (deployment-architecture §5).
 ``vigia-datasets`` solo existe en ``pilot`` de la instancia compartida (D-8).
+
+Única diferencia con §2.3 (TASK-149, nota de VIG-48): ``vigia-observability`` va antes que
+``vigia-compute`` y no al revés. Crea los grupos ``/vigia/<despliegue>/*`` que las tareas de
+``vigia-compute`` importan por nombre, y ``awslogs`` no arranca una tarea sin su grupo:
+``vigia-migrate`` (paso 6 del primer despliegue) fallaría si la pila llegara en el paso 9.
+``cdk deploy vigia-compute`` despliega antes su dependencia.
 """
 
 from __future__ import annotations
@@ -27,18 +33,23 @@ STACK_ORDER: tuple[type[VigiaStack], ...] = (
     FoundationStack,
     DataStack,
     EdgeStack,
-    ComputeStack,
     ObservabilityStack,
+    ComputeStack,
     DatasetsStack,
 )
 
-# Columna "Depende de" de la tabla de §2.3.
+# Columna "Depende de" de la tabla de §2.3, con ``vigia-observability`` antes de ``vigia-compute``.
 DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     FoundationStack.key: (),
     DataStack.key: (FoundationStack.key,),
     EdgeStack.key: (FoundationStack.key, DataStack.key),
-    ComputeStack.key: (FoundationStack.key, DataStack.key, EdgeStack.key),
-    ObservabilityStack.key: (ComputeStack.key,),
+    ObservabilityStack.key: (FoundationStack.key, DataStack.key, EdgeStack.key),
+    ComputeStack.key: (
+        FoundationStack.key,
+        DataStack.key,
+        EdgeStack.key,
+        ObservabilityStack.key,
+    ),
     DatasetsStack.key: (),
 }
 

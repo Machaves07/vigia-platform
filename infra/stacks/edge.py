@@ -152,6 +152,8 @@ MANAGED_RULE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("AWSManagedRulesKnownBadInputsRuleSet", ()),
 )
 WAF_LOG_RETENTION = logs.RetentionDays.THREE_MONTHS  # 90 días
+# Cabeceras que el registro del cortafuegos oculta (NFR-NUC-17; seguimiento de VIG-41).
+WAF_REDACTED_HEADERS = ("authorization", "cookie")
 # Aviso de bloqueos de la regla de tasa general (nº 11): cualquier bloqueo en 5 minutos.
 RATE_ALARM_PERIOD = Duration.minutes(5)
 RATE_ALARM_THRESHOLD = 1
@@ -628,6 +630,11 @@ class EdgeStack(VigiaStack):
                     resource_name=waf_log_group_name(config),
                     arn_format=ArnFormat.COLON_RESOURCE_NAME,
                 )
+            ],
+            # Nada identificable en los registros (NFR-NUC-17): sin credenciales ni sesión.
+            redacted_fields=[
+                wafv2.CfnLoggingConfiguration.FieldToMatchProperty(single_header={"Name": header})
+                for header in WAF_REDACTED_HEADERS
             ],
         )
         logging.node.add_dependency(log_group)
