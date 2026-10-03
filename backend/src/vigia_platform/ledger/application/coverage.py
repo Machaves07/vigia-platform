@@ -17,11 +17,12 @@ Operaciones del puerto (business-logic-model §7 y §10.1; PAT-NUC-REN-04):
 La composición es la función pura de ``ledger.domain.coverage``; aquí solo se cargan sus entradas
 de ``ledger.ledger_record`` (``observability_event_received``, ``gate_state_changed`` y
 ``node_communication_state_changed``, con los campos del contrato y de U-03), de
-``identity.zone_node_assignment`` y de ``ledger.communication_state``. De la historia se lee solo
+``identity.zone_node_assignment`` y de ``ledger.communication_state``. De la historia se carga solo
 lo que puede influir en el periodo: por sujeto, el último inicio de tramo anterior a ``from`` y
 los del periodo con sus cierres; por capa de plataforma, la última declaración anterior y las del
-periodo. Sin caché: un cierre huérfano tardío puede cambiar un periodo ya consultado y la verdad
-es siempre el expediente.
+periodo. Para elegir los eventos se recorre la historia de la zona una vez, con coste lineal (ver
+las sentencias). Sin caché: un cierre huérfano tardío puede cambiar un periodo ya consultado y la
+verdad es siempre el expediente.
 
 **Alcance.** La seguridad a nivel de fila limita a la organización del contexto; además la zona
 tiene que estar en ``allowed_scopes`` (la organización entera, su planta o ella misma). Una zona
@@ -224,46 +225,48 @@ _COMMUNICATION_AT: Final = text(
 
 # Eventos de la zona con los campos del contrato; ``starter`` marca las aperturas y los cierres
 # huérfanos (sin apertura de la zona con ese ``event_id``), que son los que inician un tramo.
+#
+# Coste lineal en la historia de la zona (VIG-91, seguimiento de VIG-64): ``ev`` proyecta de cada
+# evento solo lo que decide la elección (identificadores, fase, sujeto y ``started_at``); los
+# huérfanos salen de una antirreunión con las aperturas (por tabla hash, que se reparte en lotes si
+# no cabe en ``work_mem``: un ``NOT EXISTS`` sobre la CTE pasaba a recorrerla por fila, cuadrático,
+# en cuanto la historia dejaba de caber); y solo de los eventos elegidos se leen todos los campos,
+# por clave primaria. La historia se sigue leyendo entera: un índice sobre ``content_json`` no
+# sirve como condición de índice bajo la seguridad a nivel de fila (``->>`` no es ``LEAKPROOF``).
+#
+# Las dos sentencias comparten ``ev``, ``opened``, ``marked`` y ``events`` (escritas dos veces:
+# ``text()`` solo admite literales, VIG001). ``events`` devuelve los elegidos con todos sus campos
+# junto al primer reporte de la zona (el ``started_at`` más antiguo de su historia), en la misma
+# pasada: siempre sale al menos una fila, con ``record_id`` nulo si no se eligió ningún evento.
 _OBSERVABILITY_IN_PERIOD: Final = text(
-    "WITH ev AS ("
-    " SELECT r.record_id,"
-    " CAST(r.content_json ->> 'event_id' AS uuid) AS event_id,"
-    " r.content_json -> 'subject' ->> 'kind' AS subject_kind,"
-    " CAST(r.content_json -> 'subject' ->> 'camera_id' AS uuid) AS camera_id,"
-    " CAST(r.content_json -> 'subject' ->> 'signal_id' AS uuid) AS signal_id,"
-    " r.content_json ->> 'phase' AS phase, r.content_json ->> 'state' AS state,"
-    " ARRAY(SELECT jsonb_array_elements_text(r.content_json -> 'causes')) AS causes,"
-    " CAST(r.content_json ->> 'started_at' AS timestamptz) AS started_at,"
-    " CAST(r.content_json ->> 'ended_at' AS timestamptz) AS ended_at,"
-    " CAST(r.content_json ->> 'opened_event_id' AS uuid) AS opened_event_id,"
-    " CAST(r.content_json -> 'node_time' -> 'clock' ->> 'offset_ms' AS bigint)"
-    " AS clock_offset_ms"
+    "WITH ev AS MATERIALIZED ("
+    " SELECT r.record_id, r.received_at,"
+    " r.content_json ->> 'event_id' AS event_key,"
+    " r.content_json ->> 'opened_event_id' AS opened_key,"
+    " r.content_json ->> 'phase' AS phase,"
+    " r.content_json -> 'subject' AS subject,"
+    " CAST(r.content_json ->> 'started_at' AS timestamptz) AS started_at"
     " FROM ledger.ledger_record AS r"
     " WHERE r.organization_id = :organization_id AND r.scope_zone_id = :zone_id"
     " AND r.record_type = 'observability_event_received'),"
-    " marked AS (SELECT ev.*, (ev.phase = 'opened' OR NOT EXISTS ("
-    " SELECT 1 FROM ev AS o WHERE o.phase = 'opened' AND o.event_id = ev.opened_event_id))"
-    " AS starter FROM ev),"
+    " opened AS (SELECT DISTINCT event_key FROM ev WHERE phase = 'opened'),"
+    " marked AS (SELECT ev.*, (ev.phase = 'opened' OR o.event_key IS NULL) AS starter"
+    " FROM ev LEFT JOIN opened AS o ON o.event_key = ev.opened_key),"
     " chosen AS ("
-    " (SELECT * FROM marked WHERE starter"
+    " (SELECT record_id, received_at, event_key, phase FROM marked WHERE starter"
     " AND started_at >= CAST(:period_start AS timestamptz)"
     " AND started_at < CAST(:period_end AS timestamptz))"
     " UNION ALL"
-    " (SELECT DISTINCT ON (subject_kind, camera_id, signal_id) * FROM marked"
+    " (SELECT DISTINCT ON (subject) record_id, received_at, event_key, phase FROM marked"
     " WHERE starter AND started_at < CAST(:period_start AS timestamptz)"
-    " ORDER BY subject_kind, camera_id, signal_id, started_at DESC, event_id DESC))"
-    " SELECT record_id, event_id, subject_kind, camera_id, signal_id, phase, state, causes,"
-    " started_at, ended_at, opened_event_id, clock_offset_ms FROM chosen"
+    " ORDER BY subject, started_at DESC, CAST(event_key AS uuid) DESC)),"
+    " picked AS ("
+    " SELECT record_id, received_at FROM chosen"
     " UNION ALL"
-    " SELECT record_id, event_id, subject_kind, camera_id, signal_id, phase, state, causes,"
-    " started_at, ended_at, opened_event_id, clock_offset_ms FROM marked"
-    " WHERE NOT starter AND opened_event_id IN ("
-    " SELECT event_id FROM chosen WHERE phase = 'opened')"
-)
-
-_ZONE_STARTER_AT: Final = text(
-    "WITH ev AS ("
-    " SELECT r.record_id,"
+    " SELECT m.record_id, m.received_at FROM marked AS m"
+    " JOIN chosen AS c ON c.phase = 'opened' AND m.opened_key = c.event_key"
+    " WHERE NOT m.starter),"
+    " events AS (SELECT r.record_id,"
     " CAST(r.content_json ->> 'event_id' AS uuid) AS event_id,"
     " r.content_json -> 'subject' ->> 'kind' AS subject_kind,"
     " CAST(r.content_json -> 'subject' ->> 'camera_id' AS uuid) AS camera_id,"
@@ -275,25 +278,57 @@ _ZONE_STARTER_AT: Final = text(
     " CAST(r.content_json ->> 'opened_event_id' AS uuid) AS opened_event_id,"
     " CAST(r.content_json -> 'node_time' -> 'clock' ->> 'offset_ms' AS bigint)"
     " AS clock_offset_ms"
+    " FROM picked AS p JOIN ledger.ledger_record AS r"
+    " ON r.record_id = p.record_id AND r.received_at = p.received_at"
+    " WHERE r.organization_id = :organization_id AND r.scope_zone_id = :zone_id"
+    " AND r.record_type = 'observability_event_received')"
+    " SELECT f.first_report_at, e.* FROM (SELECT min(started_at) AS first_report_at FROM ev)"
+    " AS f LEFT JOIN events AS e ON true"
+)
+
+_ZONE_STARTER_AT: Final = text(
+    "WITH ev AS MATERIALIZED ("
+    " SELECT r.record_id, r.received_at,"
+    " r.content_json ->> 'event_id' AS event_key,"
+    " r.content_json ->> 'opened_event_id' AS opened_key,"
+    " r.content_json ->> 'phase' AS phase,"
+    " r.content_json -> 'subject' AS subject,"
+    " CAST(r.content_json ->> 'started_at' AS timestamptz) AS started_at"
     " FROM ledger.ledger_record AS r"
     " WHERE r.organization_id = :organization_id AND r.scope_zone_id = :zone_id"
     " AND r.record_type = 'observability_event_received'),"
-    " chosen AS (SELECT * FROM ev WHERE subject_kind = 'zone'"
+    " opened AS (SELECT DISTINCT event_key FROM ev WHERE phase = 'opened'),"
+    " marked AS (SELECT ev.*, (ev.phase = 'opened' OR o.event_key IS NULL) AS starter"
+    " FROM ev LEFT JOIN opened AS o ON o.event_key = ev.opened_key),"
+    " chosen AS (SELECT record_id, received_at, event_key, phase FROM marked"
+    " WHERE starter AND subject ->> 'kind' = 'zone'"
     " AND date_trunc('milliseconds', started_at) <= CAST(:instant AS timestamptz)"
-    " AND (phase = 'opened' OR NOT EXISTS (SELECT 1 FROM ev AS o"
-    " WHERE o.phase = 'opened' AND o.event_id = ev.opened_event_id))"
-    " ORDER BY date_trunc('milliseconds', started_at) DESC, event_id DESC LIMIT 1)"
-    " SELECT * FROM chosen"
+    " ORDER BY date_trunc('milliseconds', started_at) DESC, CAST(event_key AS uuid) DESC"
+    " LIMIT 1),"
+    " picked AS ("
+    " SELECT record_id, received_at FROM chosen"
     " UNION ALL"
-    " SELECT * FROM ev WHERE phase = 'closed' AND opened_event_id IN ("
-    " SELECT event_id FROM chosen WHERE phase = 'opened')"
-)
-
-_FIRST_REPORT: Final = text(
-    "SELECT min(CAST(r.content_json ->> 'started_at' AS timestamptz)) AS first_report_at"
-    " FROM ledger.ledger_record AS r"
+    " SELECT e.record_id, e.received_at FROM ev AS e"
+    " JOIN chosen AS c ON c.phase = 'opened' AND e.opened_key = c.event_key"
+    " WHERE e.phase = 'closed'),"
+    " events AS (SELECT r.record_id,"
+    " CAST(r.content_json ->> 'event_id' AS uuid) AS event_id,"
+    " r.content_json -> 'subject' ->> 'kind' AS subject_kind,"
+    " CAST(r.content_json -> 'subject' ->> 'camera_id' AS uuid) AS camera_id,"
+    " CAST(r.content_json -> 'subject' ->> 'signal_id' AS uuid) AS signal_id,"
+    " r.content_json ->> 'phase' AS phase, r.content_json ->> 'state' AS state,"
+    " ARRAY(SELECT jsonb_array_elements_text(r.content_json -> 'causes')) AS causes,"
+    " CAST(r.content_json ->> 'started_at' AS timestamptz) AS started_at,"
+    " CAST(r.content_json ->> 'ended_at' AS timestamptz) AS ended_at,"
+    " CAST(r.content_json ->> 'opened_event_id' AS uuid) AS opened_event_id,"
+    " CAST(r.content_json -> 'node_time' -> 'clock' ->> 'offset_ms' AS bigint)"
+    " AS clock_offset_ms"
+    " FROM picked AS p JOIN ledger.ledger_record AS r"
+    " ON r.record_id = p.record_id AND r.received_at = p.received_at"
     " WHERE r.organization_id = :organization_id AND r.scope_zone_id = :zone_id"
-    " AND r.record_type = 'observability_event_received'"
+    " AND r.record_type = 'observability_event_received')"
+    " SELECT f.first_report_at, e.* FROM (SELECT min(started_at) AS first_report_at FROM ev)"
+    " AS f LEFT JOIN events AS e ON true"
 )
 
 
@@ -326,6 +361,14 @@ def _observability(row: Row[Any]) -> ObservabilityInput:
         opened_event_id=_optional_id(row.opened_event_id),
         clock_offset_ms=None if row.clock_offset_ms is None else int(row.clock_offset_ms),
     )
+
+
+def _events(
+    rows: Sequence[Row[Any]],
+) -> tuple[tuple[ObservabilityInput, ...], datetime | None]:
+    """Los eventos elegidos y el primer reporte de la zona (siempre llega al menos una fila)."""
+    events = tuple(_observability(row) for row in rows if row.record_id is not None)
+    return events, rows[0].first_report_at if rows else None
 
 
 def _communication(row: Row[Any]) -> CommunicationInput:
@@ -515,17 +558,15 @@ class CoverageService:
         gates = tuple(
             _gate(row) for row in await self._rows(transaction, _GATES_IN_PERIOD, parameters)
         )
-        observability = tuple(
-            _observability(row)
-            for row in await self._rows(transaction, _OBSERVABILITY_IN_PERIOD, parameters)
+        observability, first_report_at = _events(
+            await self._rows(transaction, _OBSERVABILITY_IN_PERIOD, parameters)
         )
-        first = (await self._rows(transaction, _FIRST_REPORT, parameters))[0]
         return CoverageInputs(
             observability=observability,
             communication=communication,
             gates=gates,
             assignments=assignments,
-            first_report_at=first.first_report_at,
+            first_report_at=first_report_at,
         )
 
     async def _instant_inputs(
@@ -549,17 +590,15 @@ class CoverageService:
                     for row in await self._rows(transaction, _COMMUNICATION_AT, node)
                 )
         gates = tuple(_gate(row) for row in await self._rows(transaction, _GATE_AT, parameters))
-        observability = tuple(
-            _observability(row)
-            for row in await self._rows(transaction, _ZONE_STARTER_AT, parameters)
+        observability, first_report_at = _events(
+            await self._rows(transaction, _ZONE_STARTER_AT, parameters)
         )
-        first = (await self._rows(transaction, _FIRST_REPORT, parameters))[0]
         return CoverageInputs(
             observability=observability,
             communication=communication,
             gates=gates,
             assignments=assignments,
-            first_report_at=first.first_report_at,
+            first_report_at=first_report_at,
         )
 
     async def _audited(
