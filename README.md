@@ -1,6 +1,8 @@
 # vigia-platform
 
-Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. Este repositorio nace con TASK-101 (VIG-18): el backend en Python 3.12, sus herramientas de calidad y el árbol de módulos vacío. TASK-103 (VIG-21) añade el entorno local con Docker; la base de datos, la infraestructura y el frontend llegan en tareas posteriores.
+Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. U-02 (plataforma núcleo) está construida: expediente, identidad, auditoría, bandeja de salida, worker, orden administrativa, seis pilas de CDK y canalización. U-03 a U-05 añaden flota, lazo de cierre y la aplicación de página única. Lo que entra en cada versión está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
+
+**Sin AWS por ahora (adenda A-47)**: U-02 se cierra sin cuenta de AWS. El primer despliegue (TASK-154, VIG-98) está diferido, y los trabajos de la canalización que tocan AWS solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true`.
 
 ## Estructura
 
@@ -15,9 +17,11 @@ vigia-platform/
     openapi/               especificación generada de la aplicación (U-05 genera su cliente)
     tools/                 chequeos de lint propios y guiones de verificación
     tests/                 unit, properties, examples, abuse, isolation, integration, resilience, benchmarks
-  infra/                   pilas de AWS CDK en Python (TASK-144)
-  docs/runbooks/           restauración, cola muerta, rotación, archivado
+  infra/                   pilas de AWS CDK en Python (TASK-144 a 150)
+  docs/                    formatos del paquete y del archivo de auditoría
+  docs/runbooks/           procedimientos de operación 6.1 a 6.6 y contingencias (TASK-152)
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
+  .github/scripts/         pasos de AWS de los flujos (tareas puntuales, salidas, barrido)
   local/                   configuración de los servicios locales (colector de OpenTelemetry)
   docker-compose.yml       entorno local: PostgreSQL 16, LocalStack y colector (TASK-103)
   Makefile                 up, down, ps, test, run, worker, migrate, admin (TASK-103)
@@ -62,9 +66,7 @@ Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son
 | `make migrate` | `cd backend; uv run alembic upgrade head` |
 | `make admin ARGS="--help"` | `cd backend; uv run vigia-admin --help` |
 
-`run`, `worker` y `admin` quedan operativos cuando llegan sus tareas (TASK-133, TASK-130 y TASK-132). Hasta entonces, `make` avisa de qué falta y termina con error. `migrate` ya funciona (TASK-106).
-
-`vigia-worker` (TASK-130) recibe sus dependencias del constructor que nombra `VIGIA_WORKER_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). Sin esa variable termina con código 3 sin arrancar: la raíz de composición de la imagen aún no existe, igual que la de `vigia-api`.
+`migrate` funciona contra el entorno local. Los módulos de `run`, `worker` y `admin` ya existen (TASK-133, TASK-130 y TASK-132), pero los tres procesos piden sus dependencias a un constructor, la **raíz de composición**, que nombran `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). Ningún módulo de `src/` implementa todavía ese constructor: solo existen los de las pruebas (`backend/tests/api_support.py`, `backend/tests/worker_process.py`, `backend/tests/admin_support.py`). Sin la variable, el proceso termina sin arrancar con un mensaje que lo dice. `make admin ARGS="--help"` sí funciona: la ayuda no necesita dependencias.
 
 ### Variables del entorno local
 
@@ -150,12 +152,86 @@ En WSL con Docker Desktop, si testcontainers falla con «Exec format error», ex
 
 `tools/lint_rules.py` corre también dentro de la suite (`tests/unit/test_lint_rules.py`), así que `pytest` falla si el árbol tiene una violación.
 
-## Variables de configuración y orden administrativa
+## Variables de configuración
 
-Las del entorno local están en «Variables del entorno local». El modelo de configuración de la aplicación llega con TASK-133 y la orden `vigia-admin` con TASK-132. Ningún secreto, clave ni `.env` entra al repositorio.
+Cada proceso lee su configuración del entorno **una vez**, al arrancar, con un modelo estricto de Pydantic (`extra="forbid"`). Si falta una variable obligatoria o no es válida, el proceso no arranca. Ningún secreto, clave ni `.env` entra al repositorio. En AWS, las tareas solo reciben **nombres o ARN** de secretos y claves (`infra/stacks/compute.py`), nunca sus valores. Las del entorno local están en «Variables del entorno local».
+
+| Variable | Procesos | Obligatoria | Contenido |
+|---|---|---|---|
+| `VIGIA_ENVIRONMENT` | api, worker, admin, migrate | Sí | `local`, `test`, `staging-<n>` o `pilot` |
+| `VIGIA_SECRETS_KEY_ARN` | api, worker | Sí | Clave KMS `vigia-secrets` del cifrado de sobre |
+| `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME`, `VIGIA_ADMIN_RUNTIME` | api, worker, admin | Sí | Constructor de dependencias `vigia_platform.<módulo>:<función>` (raíz de composición) |
+| `VIGIA_HEALTH_SENTINEL_KEY` | api, worker | No (`health/ready-sentinel`) | Objeto centinela del depósito de evidencias que consulta `/health/ready` |
+| `VIGIA_PUBLIC_ORIGIN` | api, admin | No | `https://app.<dominio>`: origen exigido por la barrera anti-falsificación y base del enlace de invitación. Sin él, toda petición que cambia estado con `Origin` se rechaza |
+| `VIGIA_CSP_STORE_ORIGINS` | api | No | Orígenes del almacén para `media-src` y `connect-src`, separados por espacios |
+| `VIGIA_STATIC_DIR`, `VIGIA_VERIFIER_PATH` | api | No | Construcción de la aplicación de página única y `tools/vigia_verify.py`, cuyo SHA-256 publica `/.well-known/vigia-verifier` |
+| `VIGIA_API_PORT`, `VIGIA_FORWARDED_ALLOW_IPS` | api | No (8000; ninguna) | Puerto y redes del balanceador de las que se aceptan cabeceras `X-Forwarded-*` |
+| `VIGIA_WORKER_HEALTH_PORT` | worker | No (8001) | Puerto de la sonda de salud del worker |
+| `VIGIA_PROVIDER_ORGANIZATION_ID` | admin | Todas las órdenes salvo `bootstrap` | La organización proveedora que imprimió `bootstrap` |
+| `VIGIA_BOOTSTRAP_INVITATION_SECRET` | admin | No (`vigia/<entorno>/bootstrap/invitation`) | Secreto de un solo uso donde queda el enlace de invitación |
+| `VIGIA_NODE_CA_KEY_ARN`, `VIGIA_EDGE_BUCKET`, `VIGIA_ROOT_CERTIFICATE_KEY` | admin | Con `first_deploy=true` o `ca_rotation=true` | Clave de `vigia-node-ca`, depósito de borde y `ca/root.pem` |
+| `VIGIA_ARCHIVE_BUCKET` | admin | Para `restore-audit-partition` | Depósito `vigia-archive` |
+| `VIGIA_DB_MIGRATE_SECRET`; `VIGIA_DB_MASTER_SECRET_ARN` y `VIGIA_DB_APP_SECRET` | migrate | En AWS; los dos últimos solo en el primer despliegue | Secretos de los roles de la base. En local, `PG*` y las contraseñas `VIGIA_DB_APP_PASSWORD` y `VIGIA_DB_MIGRATE_PASSWORD` |
+| `VIGIA_LOG_LEVEL` | todos | No | Nivel del registro JSON |
+| `PGSSLMODE`, `PGSSLROOTCERT` | migrate y conexiones a la base | En AWS | Modo TLS de la conexión con RDS |
+
+La definición de tareas de `infra/stacks/compute.py` fija además variables que todavía no lee ningún módulo de `src/`: `VIGIA_DB_APP_SECRET` de api y worker, `VIGIA_EVIDENCE_BUCKET`, `VIGIA_SIGNING_SECRET_PREFIX`, `VIGIA_METRICS_NAMESPACE`, `VIGIA_SERVICE` y los ajustes de la API (`VIGIA_UVICORN_WORKERS`, `VIGIA_BULKHEAD_*`, `VIGIA_DB_POOL_*`…). Las leerá la raíz de composición.
+
+## Orden administrativa `vigia-admin`
+
+`vigia-admin` (LC-NUC-07, TASK-132) hace las operaciones sin interfaz del operador del proveedor. Llama a los mismos servicios de aplicación que la API. La salida es **una línea JSON** con identificadores, nunca enlaces ni contraseñas. `--dry-run` valida y muestra lo que haría sin escribir nada. `uv run vigia-admin <orden> --help` da la ayuda de cada orden.
+
+| Orden | Para qué | Runbook |
+|---|---|---|
+| `bootstrap [--resume] [--publish-root]` | Organización proveedora, primer `platform_operator` por invitación, claves Ed25519 por propósito y raíz de `vigia-node-ca` | Primer despliegue (TASK-154) |
+| `create-organization --operator …` | Organización cliente, su primera planta y su primer administrador | Primer despliegue |
+| `rotate-key <propósito> --operator …` | Rotación de la clave de firma de `catalog`, `gate`, `live_view_token`, `key_set` o `checkpoint` | [6.4](docs/runbooks/6.4-key-rotation.md) |
+| `rotate-node-ca --new-key-id … --operator …` | Paquete de dos raíces de `vigia-node-ca`, solo con `ca_rotation=true` | [6.4](docs/runbooks/6.4-key-rotation.md) |
+| `replay-dead-letter <evento> <consumidor> --operator …` | Reentrega de una entrega de la cola muerta | [6.3](docs/runbooks/6.3-dead-letter-replay.md) |
+| `create-partitions --until AAAA-MM --operator …` | Particiones mensuales por adelantado | [Contingencia de subparticionado](docs/runbooks/subpartitioning-contingency.md) |
+| `restore-audit-partition <objeto> --sha256 … --output …` | Descarga, verifica y extrae un archivo de auditoría (solo lectura) | [6.5](docs/runbooks/6.5-audit-archive-and-restore.md) |
+| `record-restore-drill --result ok\|failed --operator …` | Registra el ensayo de restauración y reinicia su alarma | [6.1](docs/runbooks/6.1-quarterly-restore-drill.md) |
+
+Códigos de salida: `0` hecho, `1` configuración o error inesperado, `2` uso incorrecto, `3` sin confirmación, `4` rechazo de la operación, `5` dependencia no disponible (reintentable). En local: `make admin ARGS="…"`. En un despliegue, como tarea puntual de ECS: `python .github/scripts/staging.py run-task --environment pilot --task admin -- vigia-admin …` (detalle en [runbooks](docs/runbooks/README.md#cómo-lanzar-vigia-admin-y-vigia-migrate-en-un-despliegue)).
+
+## Flujo de release
+
+Los flujos están en `.github/workflows/` (TASK-143 y TASK-151). Los trabajos que tocan AWS (federación con `vigia-deploy`, ECR, `cdk deploy`) solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true` (adenda A-47). Sin ella, `release.yml` ensaya hasta donde no hace falta AWS y lo dice en el resumen.
+
+1. **`ci.yml`**, en cada PR listo: escaneo de secretos; backend sin integración (ruff, `lint_rules`, `mypy --strict`, pytest); backend con integración; infra (pruebas y `cdk synth`). La imagen `arm64` se construye y se escanea sin publicarse.
+2. **`nightly.yml`**, cada noche sobre `main`: propiedades con el perfil `nightly`, bancos, volumetría, resiliencia FS-NUC-01 a 10 con el ensayo de restauración y conformidad.
+3. **`release.yml`**, a mano (`workflow_dispatch`) sobre un commit con el nocturno verde. Entradas: `version` (`X.Y.Z`), `dry-run` (verdadero por omisión) y `soak`.
+   1. Construye y publica la imagen por digest y calcula el `cdk diff`.
+   2. Levanta `staging-<n>` efímero: despliega, migra, ejecuta `vigia-admin bootstrap` y las comprobaciones de despliegue (`backend/tools/deploy_checks.py`).
+   3. Destruye `staging-<n>` siempre.
+   4. Pide la **aprobación del dueño** en el entorno de GitHub `pilot`, despliega, migra, verifica salud, humo y 15 minutos de alarmas, y crea la etiqueta `vX.Y.Z`.
+   5. Cada etiqueta lleva su sección en [CHANGELOG.md](CHANGELOG.md).
+4. **`rollback.yml`**, a mano: devuelve `vigia-api` y `vigia-worker` al digest anterior (entradas `digest` y `verifier-sha256`) y repite la verificación posterior. El esquema ya migrado se queda: las migraciones son solo hacia adelante.
+5. **`trust-store.yml`**, a mano: respaldo para añadir una versión de `ca/crl.pem` al almacén de confianza `vigia-node-trust` (entrada `crl-version`).
+6. **`staging-sweeper.yml`**, cada noche: destruye los `staging-<n>` huérfanos de más de 6 horas.
+
+## Operación
+
+Los procedimientos de conmutación y recuperación (RESILIENCY-13, NFR-NUC-12) están en [docs/runbooks/](docs/runbooks/README.md):
+
+- [6.1 restauración de prueba trimestral](docs/runbooks/6.1-quarterly-restore-drill.md);
+- [6.2 conmutación y vuelta](docs/runbooks/6.2-failover-and-failback.md);
+- [6.3 cola muerta](docs/runbooks/6.3-dead-letter-replay.md);
+- [6.4 rotación de claves](docs/runbooks/6.4-key-rotation.md);
+- [6.5 archivado y restauración de auditoría](docs/runbooks/6.5-audit-archive-and-restore.md);
+- [6.6 contraseña de la base](docs/runbooks/6.6-database-password-rotation.md);
+- y las contingencias.
+
+Los enlaces relativos de este archivo y de `docs/` se comprueban con:
+
+```text
+uv run --project backend python backend/tools/check_links.py README.md docs/
+```
 
 ## Documentación de referencia
 
 - Diseño aprobado (fuente del *qué*): `aidlc-docs/construction/plataforma-nucleo/` del espacio de trabajo de Vigía, fuera de este repositorio.
 - Decisiones posteriores del dueño: `docs/decisions/adenda-al-diseno.md` del plan; mandan sobre el diseño donde difieran.
+- Formatos de este repositorio: [paquete `vigia-package`](docs/package-format.md) y [archivo de auditoría](docs/audit-archive-format.md).
+- Registro de cambios: [CHANGELOG.md](CHANGELOG.md).
 - Reglas para agentes: [AGENTS.md](AGENTS.md).

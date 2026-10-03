@@ -62,7 +62,7 @@ resultado `error`, en la proveedora).
 La orden la añade `vigia-admin` (TASK-132) sobre `restore_audit_partition` y `extract_archive`:
 
 ```text
-vigia-admin restore-audit-partition --object-key audit/2026-10/audit_entry_2026_10.zip \
+vigia-admin restore-audit-partition audit/2026-10/audit_entry_2026_10.zip \
     --sha256 <archive_sha256 del registro audit_partition_archived> --output <directorio nuevo>
 ```
 
