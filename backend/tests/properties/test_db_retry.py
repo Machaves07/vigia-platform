@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import enum
+import selectors
 from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -305,6 +306,46 @@ def _run[T](scenario: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(asyncio.wait_for(scenario, SAFETY_CAP_SECONDS))
 
 
+@dataclass
+class _VirtualClock:
+    now: float = 0.0
+
+
+class _VirtualClockSelector(selectors.DefaultSelector):
+    """Selector que no duerme: cuando el bucle queda ocioso hasta su próximo temporizador,
+    adelanta el reloj virtual hasta él y vuelve enseguida."""
+
+    def __init__(self, clock: _VirtualClock) -> None:
+        super().__init__()
+        self._clock = clock
+
+    def select(self, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
+        if timeout is not None and timeout > 0:
+            self._clock.now += timeout
+            timeout = 0
+        return super().select(timeout)
+
+
+class _VirtualTimeLoop(asyncio.SelectorEventLoop):
+    """Bucle con reloj virtual (VIG-134): los topes (``wait_for``, ``sleep``) vencen en el orden
+    de sus plazos y el tiempo solo avanza cuando no queda nada listo para ejecutarse. Un runner
+    cargado tarda más en pared, pero no cambia qué tope vence antes ni el ``elapsed`` medido."""
+
+    def __init__(self) -> None:
+        self._clock = _VirtualClock()
+        super().__init__(_VirtualClockSelector(self._clock))
+
+    def time(self) -> float:
+        return self._clock.now
+
+
+def _run_virtual[T](scenario: Coroutine[Any, Any, T]) -> T:
+    """``_run`` sobre ``_VirtualTimeLoop``: mismo tope externo, en tiempo virtual."""
+    return asyncio.run(
+        asyncio.wait_for(scenario, SAFETY_CAP_SECONDS), loop_factory=_VirtualTimeLoop
+    )
+
+
 # --- Propiedades --------------------------------------------------------------------------------
 
 
@@ -581,7 +622,11 @@ def test_a_hung_server_never_blocks_the_caller(
 ) -> None:
     """Revisión de VIG-26: con el servidor colgado en la sentencia, el COMMIT o la devolución,
     la operación termina dentro de su tope, la escritura tiene exactamente 1 intento y ninguna
-    conexión se queda fuera del pool (cada una se devuelve o se retira una sola vez)."""
+    conexión se queda fuera del pool (cada una se devuelve o se retira una sola vez).
+
+    Corre en tiempo virtual (VIG-134): con reloj de pared, la lectura colgada en la devolución
+    solo tenía ``ATTEMPT_TIMEOUT - COMMAND_TIMEOUT`` de margen para llegar a ella y en un runner
+    cargado vencía antes el tope del intento."""
     journal = Journal()
     pool = HangingPool(journal, hang_at)
     database = _database(
@@ -608,7 +653,7 @@ def test_a_hung_server_never_blocks_the_caller(
         assert not database._abandoned
         return outcome, elapsed
 
-    outcome, elapsed = _run(scenario())
+    outcome, elapsed = _run_virtual(scenario())
 
     if operation == "write":
         assert journal.attempts == 1
