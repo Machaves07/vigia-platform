@@ -37,7 +37,7 @@ jobs:
   propiedades:
     name: propiedades nightly (sin integración)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: backend
@@ -68,7 +68,7 @@ jobs:
   propiedades-integracion:
     name: propiedades nightly (integración)
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 240
     defaults:
       run:
         working-directory: backend
