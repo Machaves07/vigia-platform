@@ -42,7 +42,10 @@ dependencies = [
 ]
 
 [project.scripts]
-# Segundo punto de entrada de la imagen (LC-NUC-24, PAT-NUC-ESC-04; infra: WORKER_COMMAND).
+# Los dos puntos de entrada de la imagen (backend/Dockerfile, TASK-143): `vigia-api` es la orden
+# por defecto (LC-NUC-19); `vigia-worker` la elige su servicio (LC-NUC-24, PAT-NUC-ESC-04;
+# infra: WORKER_COMMAND).
+vigia-api = "vigia_platform.shared.api.main:main"
 vigia-worker = "vigia_platform.shared.worker.main:main"
 # Órdenes administrativas del operador del proveedor (LC-NUC-07, TASK-132; infra: ADMIN_COMMAND).
 vigia-admin = "vigia_platform.identity.application.admin_cli:main"
