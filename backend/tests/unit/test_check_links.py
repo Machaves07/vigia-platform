@@ -138,6 +138,26 @@ def test_indented_list_continuations_are_checked(repo: Path) -> None:
     assert _reasons(repo, "# T\n\n1. Paso\n\n    Ver [roto](no-existe.md).\n") == ["no existe"]
 
 
+def test_links_wrapped_over_lines_are_checked(repo: Path) -> None:
+    # Sonda de la revisión del PR #61: GitHub renderiza el enlace aunque su texto ocupe dos líneas.
+    text = (
+        "# T\n\nPárrafo que sigue\n"
+        "en [texto\nsegunda línea](./inexistente.md) y\n"
+        "[otro](runbooks/).\n"
+    )
+    source = _write(repo, "docs/a.md", text)
+    _, broken = check_files([source], repo)
+    # Se informa en la línea donde empieza el ``[``, la segunda del párrafo.
+    assert [(item.link.line, item.link.target, item.reason) for item in broken] == [
+        (4, "./inexistente.md", "no existe")
+    ]
+
+
+def test_paragraphs_do_not_join_across_headings_blank_lines_or_fences(repo: Path) -> None:
+    text = "# T [a\ntexto](no-1.md)\n\n[b\n\ntexto](no-2.md)\n[c\n```\n```\ntexto](no-3.md)\n"
+    assert _reasons(repo, text) == []
+
+
 def test_angle_brackets_titles_images_and_references(repo: Path) -> None:
     _write(repo, "docs/con espacio.md", "# X\n")
     text = (

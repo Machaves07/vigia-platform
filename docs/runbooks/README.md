@@ -41,7 +41,7 @@ python .github/scripts/staging.py run-task --environment pilot --task migrate   
 - La salida de `vigia-admin` es **una línea JSON** con identificadores, en el grupo de registros `/vigia/pilot/admin`. Nunca lleva enlaces ni contraseñas; el enlace de una invitación va al secreto de un solo uso `vigia/pilot/bootstrap/invitation`.
 - Códigos de salida: `0` hecho, `1` configuración o error inesperado, `2` uso incorrecto, `3` sin confirmación, `4` rechazo de la operación, `5` dependencia no disponible (reintentable).
 - Las órdenes con confirmación (`bootstrap`, `create-organization`, `rotate-node-ca`) necesitan `--yes` en una tarea sin consola. Antes de la ejecución real, lanza la misma orden con `--dry-run`: valida y muestra lo que haría sin escribir nada.
-- Todas las órdenes salvo `bootstrap` y `restore-audit-partition` piden `--operator <UUID>`, el `platform_operator` activo que ejecuta la orden, y la variable `VIGIA_PROVIDER_ORGANIZATION_ID` en la definición de la tarea.
+- Todas las órdenes salvo `bootstrap` y `restore-audit-partition` piden `--operator <UUID>`, el `platform_operator` activo que ejecuta la orden. Todas salvo un `bootstrap` nuevo (sin `--resume`), incluida `restore-audit-partition`, piden la variable `VIGIA_PROVIDER_ORGANIZATION_ID`.
 
 ### Estado en el código (común)
 

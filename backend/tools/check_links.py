@@ -12,7 +12,8 @@ y comprueba que cada enlace relativo resuelve:
   admiten anclas de línea (``#L10``, ``#L10-L20``).
 
 Se revisan los enlaces en línea (``[texto](destino)``, también imágenes) y las definiciones de
-referencia (``[id]: destino``). No se revisan: los enlaces con esquema (``https:``, ``mailto:``…),
+referencia (``[id]: destino``); los en línea, por párrafo, así que también los que parten su
+texto en varias líneas. No se revisan: los enlaces con esquema (``https:``, ``mailto:``…),
 que no son relativos, ni lo que está dentro de bloques cercados (```` ``` ````, ``~~~``) o tramos
 de código en línea. Los bloques sangrados sí se revisan (en una lista son párrafo). Un enlace
 absoluto (``/ruta``) es un error: solo resuelve en la web de GitHub, no en un clon.
@@ -106,16 +107,44 @@ def _without_code_spans(line: str) -> str:
 
 
 def extract_links(path: Path, text: str) -> list[Link]:
-    """Enlaces en línea y definiciones de referencia de ``text``, fuera del código."""
+    """Enlaces en línea y definiciones de referencia de ``text``, fuera del código.
+
+    Los enlaces en línea se buscan por **párrafo** (líneas seguidas no vacías), no por línea:
+    GitHub reconoce un enlace cuyo texto ocupa varias líneas (``[texto\\nmás](destino)``). Un
+    encabezado, una definición de referencia, una línea vacía o un bloque cercado cierran el
+    párrafo. El enlace se informa en la línea donde empieza su ``[``.
+    """
     links: list[Link] = []
+    paragraph: list[tuple[int, str]] = []
+
+    def flush() -> None:
+        if not paragraph:
+            return
+        joined = "\n".join(line for _, line in paragraph)
+        for match in _INLINE_LINK.finditer(joined):
+            number = paragraph[0][0] + joined.count("\n", 0, match.start())
+            links.append(Link(path, number, _strip_angle(match.group(1))))
+        paragraph.clear()
+
+    previous: int | None = None
     for number, raw in _prose_lines(text):
         line = _without_code_spans(raw)
         reference = _REFERENCE.match(line)
+        heading = _HEADING.match(line)
+        if previous is not None and number != previous + 1:
+            flush()  # entre medias había un bloque cercado
+        previous = number
         if reference:
+            flush()
             links.append(Link(path, number, _strip_angle(reference.group(1))))
-            continue
-        for match in _INLINE_LINK.finditer(line):
-            links.append(Link(path, number, _strip_angle(match.group(1))))
+        elif heading or not line.strip():
+            flush()
+            if heading:
+                paragraph.append((number, line))
+                flush()
+        else:
+            paragraph.append((number, line))
+    flush()
     return links
 
 

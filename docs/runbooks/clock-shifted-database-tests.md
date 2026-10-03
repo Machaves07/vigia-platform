@@ -40,16 +40,18 @@ Usar `faketime` solo sobre pytest no basta: el reloj que importa es el `now()` d
 
    La consulta debe devolver 2028. Si devuelve la fecha real, la variable `LD_PRELOAD` no llegó al proceso.
 3. **LocalStack**, si las pruebas lo necesitan: `docker compose up -d localstack`. No adelantes LocalStack salvo que la prueba compare con su reloj.
-4. **Correr pytest con el mismo reloj**, la misma `LD_PRELOAD` (la ruta de la biblioteca en el sistema anfitrión: `apt-get install libfaketime` en WSL) y la misma `FAKETIME`, con `-n 3` como máximo:
+4. **Correr pytest con el mismo reloj**, la misma `LD_PRELOAD` (la ruta de la biblioteca en el sistema anfitrión: `apt-get install libfaketime` en WSL) y la misma `FAKETIME`:
 
    ```text
    cd backend
-   export DOCKER_CONFIG=/home/manu/vigia/docker-sin-credenciales      # WSL: ver AGENTS.md
+   export DOCKER_CONFIG=<directorio con una configuración de Docker sin credsStore>   # WSL: ver AGENTS.md
    VIGIA_TEST_USE_COMPOSE=1 FAKETIME_DISABLE_SHM=1 FAKETIME_NO_CACHE=1 \
      LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 \
      FAKETIME="@2028-03-01 12:00:00" \
-     uv run pytest -q -n 3 -m integration <archivos de la tarea>
+     uv run pytest -q -m integration <archivos de la tarea>
    ```
+
+   Sin `-n`: este repositorio no usa `pytest-xdist`. Limita la corrida a los archivos de la tarea.
 
 5. **Pegar en `Evidence`** del PR la salida de la consulta del paso 2 (la fecha de la base) y la de pytest.
 6. **Limpiar**: `docker rm -f vigia-faketime` y `docker compose down -v` si se levantó LocalStack. No dejes contenedores vivos.
@@ -74,4 +76,7 @@ Sin comunicación externa: es un procedimiento de pruebas. El resultado va en el
 ## Estado en el código
 
 - El repositorio no tiene imagen de PostgreSQL con libfaketime ni ninguna prueba que la use. Las pruebas usan el reloj inyectado (`backend/tests/virtual_time.py`) y este runbook es la comprobación adicional que pide la regla.
-- **Verificado en TASK-152**: el `Dockerfile` del paso 1 construye con el digest fijado (Debian 13) y deja `libfaketime.so.1` y `libfaketimeMT.so.1` en `/usr/lib/x86_64-linux-gnu/faketime/`. **No verificado**: los pasos 2 a 4 (base adelantada, pytest con `LD_PRELOAD`) ni los dos artefactos conocidos.
+- **Verificado**:
+  - en TASK-152: el `Dockerfile` del paso 1 construye con el digest fijado (Debian 13) y deja `libfaketime.so.1` y `libfaketimeMT.so.1` en `/usr/lib/x86_64-linux-gnu/faketime/`;
+  - en la revisión del PR #61: con el paso 2 (`LD_PRELOAD` y `FAKETIME='@2028-03-01 12:00:00'`), `now()` de la base devuelve 2028-03-01.
+- **No verificado**: el paso 4 (pytest con `LD_PRELOAD`) ni los dos artefactos conocidos.
