@@ -6,7 +6,8 @@ y para KMS se bloquean, cada uno con su ``FaultProxy`` (el almacén no se toca):
 del arranque de un proceso ``vigia-api`` real (``tests/resilience/api_process.py``, uvicorn,
 ``SigningService`` con el material en el gestor y ``KmsAdapter``); **(b)** tras 5 minutos de
 operación (reloj simulado: la caché de 5 minutos del gestor y la de la clave de datos vencen).
-El modo del bloqueo (rechazo o servicio congelado) sale de la semilla.
+El modo del bloqueo (rechazo o servicio congelado) sale de la semilla. LocalStack es uno propio
+del escenario (``harness.dedicated_localstack``), no el de la sesión.
 
 **Resultado esperado**:
 
@@ -49,7 +50,7 @@ from tests.integration.conftest import (
     PostgresEndpoint,
 )
 from tests.ledger_database import DatabaseLoop
-from tests.resilience.harness import WALL, free_port, scenario, wait_until
+from tests.resilience.harness import WALL, dedicated_localstack, free_port, scenario, wait_until
 from tests.resilience.processes import process_environment, process_group
 from tests.signing_support import (
     BOOTSTRAP_ORDER,
@@ -101,6 +102,13 @@ def _aws(url: str) -> AwsSettings:
 def _split(url: str) -> tuple[str, int]:
     host, port = url.split("//", 1)[1].rsplit(":", 1)
     return host, int(port)
+
+
+@pytest.fixture(scope="module")
+def localstack_endpoint() -> Iterator[LocalStackEndpoint]:
+    """Un LocalStack propio del escenario (sin depender del de la sesión de testcontainers)."""
+    with dedicated_localstack() as (endpoint, _):
+        yield endpoint
 
 
 @pytest.fixture(scope="module")
