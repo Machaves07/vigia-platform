@@ -19,6 +19,9 @@
   los valores al exportar, retira los ejemplares (llevan los atributos filtrados) y fusiona las
   series que queden iguales. Así también quedan cubiertas las métricas de la instrumentación
   automática.
+- **Histogramas exponenciales** (``metric_aggregation``): ``awsemf`` solo publica los
+  exponenciales con ``Values`` y ``Counts``, de los que CloudWatch calcula el p95 de las alarmas
+  ``latency-*``; uno de cubos explícitos llega como conjunto estadístico sin percentiles.
 - **Caída del colector**: una línea de registro al empezar a fallar la exportación de cada
   señal y otra al recuperarse, en lugar de una por lote (el exportador OTLP queda en silencio).
 - ``enable_auto_instrumentation`` activa FastAPI, SQLAlchemy, httpx y botocore desde la fábrica
@@ -39,8 +42,10 @@ from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace as otel_trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, MeterProvider
+from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, Histogram, MeterProvider
 from opentelemetry.sdk.metrics.export import (
+    Buckets,
+    ExponentialHistogramDataPoint,
     HistogramDataPoint,
     MetricExporter,
     MetricExportResult,
@@ -50,7 +55,7 @@ from opentelemetry.sdk.metrics.export import (
     PeriodicExportingMetricReader,
     Sum,
 )
-from opentelemetry.sdk.metrics.view import View
+from opentelemetry.sdk.metrics.view import Aggregation, ExponentialBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
@@ -62,6 +67,7 @@ from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import METER_NAME, PlatformMetrics
 
 __all__ = [
+    "HISTOGRAM_MAX_BUCKETS",
     "AutoInstrumentation",
     "BoundedSpanProcessor",
     "CountingMetricExporter",
@@ -72,6 +78,7 @@ __all__ = [
     "configure_telemetry",
     "enable_auto_instrumentation",
     "event_name",
+    "metric_aggregation",
     "metric_views",
     "sanitize_metrics",
     "sanitize_span",
@@ -79,6 +86,10 @@ __all__ = [
 ]
 
 TRACER_NAME: Final = "vigia_platform"
+HISTOGRAM_MAX_BUCKETS: Final = 100
+"""Cubos por signo de un histograma exponencial ``[objetivo propio]``: ``awsemf`` publica cada
+cubo como un valor de ``Values`` y un punto de CloudWatch admite hasta 100. Con 1 ms a 30 s el
+cubo mide un 19 % del valor (escala 2): sobra para una alarma al doble del objetivo."""
 _EXCEPTION_EVENT: Final = "exception"
 _INTERRUPTED_EXPORT_GRACE_SECONDS: Final = 2.0
 
@@ -410,10 +421,65 @@ class CountingMetricExporter(MetricExporter):
         self._inner.shutdown(timeout_millis=timeout_millis, **kwargs)
 
 
+def _bucket_counts(points: Sequence[tuple[int, Buckets]], scale: int) -> dict[int, int]:
+    """Cuentas por índice de cubo a la escala ``scale`` (≤ la de cada punto)."""
+    counts: dict[int, int] = {}
+    for point_scale, buckets in points:
+        shift = point_scale - scale
+        for position, count in enumerate(buckets.bucket_counts):
+            if count:
+                index = (buckets.offset + position) >> shift
+                counts[index] = counts.get(index, 0) + count
+    return counts
+
+
+def _span(counts: Mapping[int, int]) -> int:
+    return max(counts) - min(counts) + 1 if counts else 0
+
+
+def _as_buckets(counts: Mapping[int, int]) -> Buckets:
+    if not counts:
+        return Buckets(offset=0, bucket_counts=[])
+    low = min(counts)
+    return Buckets(offset=low, bucket_counts=[counts.get(low + i, 0) for i in range(_span(counts))])
+
+
+def _merge_exponential(
+    first: ExponentialHistogramDataPoint, second: ExponentialHistogramDataPoint
+) -> ExponentialHistogramDataPoint:
+    """Une dos histogramas exponenciales a la escala común más fina que quepa en el tope."""
+    scale = min(first.scale, second.scale)
+    sides = (
+        [(first.scale, first.positive), (second.scale, second.positive)],
+        [(first.scale, first.negative), (second.scale, second.negative)],
+    )
+    positive, negative = (_bucket_counts(side, scale) for side in sides)
+    while max(_span(positive), _span(negative)) > HISTOGRAM_MAX_BUCKETS:
+        scale -= 1
+        positive, negative = (_bucket_counts(side, scale) for side in sides)
+    return dataclasses.replace(
+        first,
+        start_time_unix_nano=min(first.start_time_unix_nano, second.start_time_unix_nano),
+        time_unix_nano=max(first.time_unix_nano, second.time_unix_nano),
+        count=first.count + second.count,
+        sum=first.sum + second.sum,
+        scale=scale,
+        zero_count=first.zero_count + second.zero_count,
+        positive=_as_buckets(positive),
+        negative=_as_buckets(negative),
+        min=min(first.min, second.min),
+        max=max(first.max, second.max),
+    )
+
+
 def _merge_points(first: Any, second: Any, data: Any) -> Any:
     """Une dos puntos que quedaron con los mismos atributos tras limpiarlos."""
     start = min(first.start_time_unix_nano, second.start_time_unix_nano)
     end = max(first.time_unix_nano, second.time_unix_nano)
+    if isinstance(first, ExponentialHistogramDataPoint) and isinstance(
+        second, ExponentialHistogramDataPoint
+    ):
+        return _merge_exponential(first, second)
     if (
         isinstance(first, HistogramDataPoint)
         and isinstance(second, HistogramDataPoint)
@@ -471,14 +537,23 @@ def sanitize_metrics(data: MetricsData, policy: redaction.AttributePolicy) -> Me
 
 
 class SanitizingMetricExporter(MetricExporter):
-    """Exportador que limpia atributos y retira ejemplares antes del exportador real."""
+    """Exportador que limpia atributos y retira ejemplares antes del exportador real.
+
+    ``preferred_aggregation`` sustituye, por clase de instrumento, la del exportador real.
+    """
 
     def __init__(
-        self, inner: MetricExporter, policy: redaction.AttributePolicy | None = None
+        self,
+        inner: MetricExporter,
+        policy: redaction.AttributePolicy | None = None,
+        *,
+        preferred_aggregation: Mapping[type, Aggregation] | None = None,
     ) -> None:
+        aggregation = dict(getattr(inner, "_preferred_aggregation", None) or {})
+        aggregation.update(preferred_aggregation or {})
         super().__init__(
             preferred_temporality=getattr(inner, "_preferred_temporality", None),
-            preferred_aggregation=getattr(inner, "_preferred_aggregation", None),
+            preferred_aggregation=aggregation,
         )
         self._inner = inner
         self._policy = policy
@@ -496,6 +571,19 @@ class SanitizingMetricExporter(MetricExporter):
 
     def shutdown(self, timeout_millis: float = 30_000, **kwargs: Any) -> None:
         self._inner.shutdown(timeout_millis=timeout_millis, **kwargs)
+
+
+def metric_aggregation() -> dict[type, Aggregation]:
+    """Agregación de exportación: todo histograma, exponencial (NFR-NUC-38).
+
+    Las alarmas ``latency-*`` leen el p95 de ``operation_duration_ms`` y de
+    ``http_server_duration_ms``. ``awsemf`` publica un histograma de cubos explícitos como
+    conjunto estadístico (``Min``, ``Max``, ``Count``, ``Sum``), del que CloudWatch no saca
+    percentiles; uno exponencial sale con ``Values`` y ``Counts`` (comprobado con la imagen ADOT
+    fijada en ``infra/config/pilot.py``, VIG-136). Se aplica a todos los histogramas: los demás
+    conservan ``Min``, ``Max``, ``Count`` y ``Sum``.
+    """
+    return {Histogram: ExponentialBucketHistogramAggregation(max_size=HISTOGRAM_MAX_BUCKETS)}
 
 
 def metric_views(policy: redaction.AttributePolicy | None = None) -> list[View]:
@@ -559,6 +647,7 @@ def configure_telemetry(
                 on_result=_ExportHealth("metrics"),
             ),
             policy,
+            preferred_aggregation=metric_aggregation(),
         ),
         export_interval_millis=config.metric_export_interval_seconds * 1000,
         export_timeout_millis=config.export_timeout_seconds * 1000,

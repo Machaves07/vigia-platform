@@ -40,6 +40,7 @@ __all__ = [
     "MetricKind",
     "MetricName",
     "MetricSpec",
+    "Operation",
     "PlatformMetrics",
     "get_metrics",
 ]
@@ -267,14 +268,27 @@ ALARM_CONDITIONS: Final[tuple[AlarmCondition, ...]] = (
 )
 """Condiciones de aplicación de NFR-NUC-38, en el orden del requisito."""
 
+
+class Operation(enum.StrEnum):
+    """Valores del atributo ``operation`` de ``operation_duration_ms`` (NFR-NUC-01)."""
+
+    LEDGER_WRITE = "ledger_write"
+    LEDGER_WRITE_WITH_EVIDENCE = "ledger_write_with_evidence"
+    LEDGER_LIST = "ledger_list"
+    LEDGER_TIMELINE = "ledger_timeline"
+    LOGIN = "login"
+    LIVE_VIEW_TOKEN = "live_view_token"  # noqa: S105 - nombre de operación, no un secreto
+    OUTBOX_DELIVERY = "outbox_delivery"
+
+
 OPERATION_P95_TARGET_MS: Final[Mapping[str, int]] = {
-    "ledger_write": 150,
-    "ledger_write_with_evidence": 400,
-    "ledger_list": 300,
-    "ledger_timeline": 1_000,
-    "login": 700,
-    "live_view_token": 100,
-    "outbox_delivery": 5_000,
+    Operation.LEDGER_WRITE.value: 150,
+    Operation.LEDGER_WRITE_WITH_EVIDENCE.value: 400,
+    Operation.LEDGER_LIST.value: 300,
+    Operation.LEDGER_TIMELINE.value: 1_000,
+    Operation.LOGIN.value: 700,
+    Operation.LIVE_VIEW_TOKEN.value: 100,
+    Operation.OUTBOX_DELIVERY.value: 5_000,
 }
 """Objetivos p95 de NFR-NUC-01 por operación; la alarma salta por encima del doble."""
 
@@ -383,6 +397,16 @@ class PlatformMetrics:
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)
         self.otel_dropped_total = counter(_N.OTEL_DROPPED_TOTAL)
         self.health_ready = gauge(_N.HEALTH_READY)
+
+    def record_operation(self, operation: Operation, elapsed_seconds: float) -> None:
+        """``operation_duration_ms`` de ``operation``: ``elapsed_seconds`` medidos con ``Clock``.
+
+        Lo llama cada operación de NFR-NUC-01 al terminar con resultado; alimenta las alarmas
+        ``latency-<operación>`` (p95, NFR-NUC-38). Una excepción no se mide: la cuentan los
+        errores. Un intervalo negativo (relojes de dos instancias) cuenta como 0.
+        """
+        elapsed_ms = max(0.0, elapsed_seconds * 1000)
+        self.operation_duration_ms.record(elapsed_ms, {"operation": Operation(operation).value})
 
     def instrument(self, name: MetricName) -> Counter | Histogram | Gauge:
         """Instrumento de ``name`` (el atributo con el nombre publicado)."""

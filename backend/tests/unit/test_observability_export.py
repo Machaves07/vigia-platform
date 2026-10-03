@@ -210,7 +210,8 @@ def test_export_merges_series_that_become_equal(
     assert dict(counter.attributes) == {"http.route": redaction.OTHER} and counter.value == 5
     (merged,) = found["duracion"]
     assert merged.count == 2 and merged.sum == 10 and merged.min == 4 and merged.max == 6
-    assert sum(merged.bucket_counts) == 2 and list(merged.exemplars) == []
+    # Exponencial (``tracing.metric_aggregation``): las dos cuentas siguen en sus cubos.
+    assert sum(merged.positive.bucket_counts) == 2 and list(merged.exemplars) == []
 
 
 def test_platform_metric_drops_attributes_outside_its_spec(
