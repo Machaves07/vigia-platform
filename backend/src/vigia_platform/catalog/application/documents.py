@@ -64,7 +64,7 @@ from vigia_platform.ledger.application.audit_writer import (
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ContextAbsent, ScopeContext
+from vigia_platform.shared.context import ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.storage import ObjectHead, PresignedRequest
@@ -160,6 +160,7 @@ def _object_matches(grant: DocumentUploadGrant, head: ObjectHead | None) -> bool
     )
 
 
+@repository
 class DocumentService:
     """``catalog.documents`` sobre PostgreSQL y ``vigia-evidence``."""
 
