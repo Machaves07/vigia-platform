@@ -1049,9 +1049,7 @@ def test_each_zone_reads_only_its_own_versions_and_regression(routes: CatalogRou
         )
 
     history = routes.request("GET", f"/zones/{zone_b}/catalog/versions", admin).json()
-    assert [(v["zone_id"], v["catalog_version"]) for v in history["versions"]] == [
-        (str(zone_b), 1)
-    ]
+    assert [(v["zone_id"], v["catalog_version"]) for v in history["versions"]] == [(str(zone_b), 1)]
     assert _code(routes.request("GET", f"/zones/{zone_b}/catalog/versions/3", admin))[0] == 404
     current = routes.request("GET", f"/zones/{zone_b}/catalog", admin).json()
     assert (current["zone_id"], current["catalog_version"]) == (str(zone_b), 1)
