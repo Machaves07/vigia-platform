@@ -1032,6 +1032,40 @@ def test_out_of_scope_zones_answer_exactly_like_missing_ones(routes: CatalogRout
     assert routes.request("GET", f"/zones/{zone_a2}/regression", zone_reader).status_code == 200
 
 
+def test_each_zone_reads_only_its_own_versions_and_regression(routes: CatalogRoutes) -> None:
+    # Misma organización y una persona con alcance de organización: la RLS no separa las zonas;
+    # solo el filtro de zona de cada sentencia lo hace.
+    site = routes.site(zones=2)
+    (_, zone_a), (_, zone_b) = site.zones()
+    admin = routes.member(site)
+    routes.configure(admin, zone_a)
+    routes.configure(admin, zone_b)
+    for review in (0.1, 0.2):
+        routes.request(
+            "PUT",
+            f"/zones/{zone_a}/thresholds",
+            admin,
+            {"review": review, "publication": 0.9, "reason_es": REASON},
+        )
+
+    history = routes.request("GET", f"/zones/{zone_b}/catalog/versions", admin).json()
+    assert [(v["zone_id"], v["catalog_version"]) for v in history["versions"]] == [
+        (str(zone_b), 1)
+    ]
+    assert _code(routes.request("GET", f"/zones/{zone_b}/catalog/versions/3", admin))[0] == 404
+    current = routes.request("GET", f"/zones/{zone_b}/catalog", admin).json()
+    assert (current["zone_id"], current["catalog_version"]) == (str(zone_b), 1)
+    assert _regression(routes, admin, zone_b)["state"] == "current"
+    assert _regression(routes, admin, zone_a)["state"] == "pending"
+    # Una marca de modelo en B no toca la fila de A.
+    routes.run(
+        routes.regression.mark_model_version_change(
+            routes.system_context(site), (zone_b,), "detector-v4"
+        )
+    )
+    assert _regression(routes, admin, zone_a)["cause"] == "catalog_change"
+
+
 # --- Concurrencia --------------------------------------------------------------------------------
 
 

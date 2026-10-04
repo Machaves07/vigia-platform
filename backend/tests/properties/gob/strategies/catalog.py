@@ -55,6 +55,7 @@ __all__ = [
     "Intent",
     "OutageCase",
     "camera_outage_subsets",
+    "catalog_changes",
     "catalog_versions",
     "predicates",
     "resolve",
@@ -203,6 +204,11 @@ def _intents() -> st.SearchStrategy[Intent]:
             lambda t: Intent("occupancy", t)
         ),
     )
+
+
+def catalog_changes() -> st.SearchStrategy[Intent]:
+    """Una intención de cambio suelta (las reglas de una máquina de estados, PR-GOB-14)."""
+    return _intents()
 
 
 @dataclass(frozen=True)
