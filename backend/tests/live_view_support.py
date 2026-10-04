@@ -192,7 +192,7 @@ class LiveViewEnvironment:
             node_id,
             organization_id,
             plant_id,
-            f"ND-{secrets.token_hex(3).upper()}",
+            f"ND-{secrets.token_hex(8).upper()}",
             status,
             url,
             BASE_TIME,

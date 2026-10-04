@@ -2102,6 +2102,179 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/signatory-policy":
+    "put":
+      "tags":
+        - "acuerdos"
+      "summary": "Fija la política de firmantes del acuerdo de uso de la planta"
+      "operationId": "put_signatory_policy_plants__plant_id__signatory_policy_put"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SignatoryPolicyBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SignatoryPolicyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "get":
+      "tags":
+        - "acuerdos"
+      "summary": "Política de firmantes de la planta (configured = false si no hay)"
+      "operationId": "signatory_policy_plants__plant_id__signatory_policy_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SignatoryPolicyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/use-agreements":
+    "post":
+      "tags":
+        - "acuerdos"
+      "summary": "Registra el acuerdo de uso de la zona con sus firmantes esperados"
+      "operationId": "create_agreement_zones__zone_id__use_agreements_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UseAgreementBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AgreementOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/use-agreements/{agreement_id}/confirmations":
+    "post":
+      "tags":
+        - "acuerdos"
+      "summary": "Confirma la firma del usuario de la sesión en el acuerdo de uso"
+      "operationId": "confirm_agreement_use_agreements__agreement_id__confirmations_post"
+      "parameters":
+        - "name": "agreement_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Agreement Id"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ConfirmationOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/use-agreements/{agreement_id}/approval":
+    "post":
+      "tags":
+        - "acuerdos"
+      "summary": "Aprueba el acuerdo de uso: la compuerta de uso queda aprobada"
+      "operationId": "approve_agreement_use_agreements__agreement_id__approval_post"
+      "parameters":
+        - "name": "agreement_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Agreement Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApprovalOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/transparency":
+    "get":
+      "tags":
+        - "transparencia"
+      "summary": "Vista de transparencia: alcance declarado, estándares, acuerdo y compuertas"
+      "operationId": "transparency_zones__zone_id__transparency_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/TransparencyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/zones/{zone_id}/commissioning-clips":
     "get":
       "tags":
@@ -2464,6 +2637,76 @@
         - "admissions"
         - "next_after"
       "title": "AdmissionsPage"
+    "AgreementOut":
+      "properties":
+        "agreement_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Agreement Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "status":
+          "$ref": "#/components/schemas/AgreementStatus"
+        "signatories":
+          "items":
+            "$ref": "#/components/schemas/SignatoryOut"
+          "type": "array"
+          "title": "Signatories"
+        "document_sha256":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Document Sha256"
+        "replaces_agreement_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Replaces Agreement Id"
+        "created_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Created By"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "approved_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Approved At"
+        "approved_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Approved By"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "agreement_id"
+        - "zone_id"
+        - "status"
+        - "signatories"
+        - "document_sha256"
+        - "replaces_agreement_id"
+        - "created_by"
+        - "created_at"
+        - "approved_at"
+        - "approved_by"
+      "title": "AgreementOut"
+      "description": "``UseAgreement`` (DE §2.8; la forma de ``current_agreement`` de interfaces §1.2)."
+    "AgreementStatus":
+      "type": "string"
+      "enum":
+        - "pending_signatures"
+        - "approved"
+        - "superseded"
+        - "revoked"
+      "title": "AgreementStatus"
+      "description": "Ciclo del acuerdo de uso: nunca vuelve atrás."
     "AnswersBody":
       "properties":
         "standard":
@@ -2540,6 +2783,18 @@
         - "storage_unavailable"
       "title": "ApiErrorCode"
       "type": "string"
+    "ApprovalOut":
+      "properties":
+        "agreement":
+          "$ref": "#/components/schemas/AgreementOut"
+        "gates":
+          "$ref": "#/components/schemas/GateStateOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "agreement"
+        - "gates"
+      "title": "ApprovalOut"
     "AssignedView":
       "properties":
         "assignment_id":
@@ -3342,6 +3597,39 @@
       "required":
         - "concessions"
       "title": "ConcessionsView"
+    "ConfirmationOrigin":
+      "type": "string"
+      "enum":
+        - "management"
+        - "transparency"
+      "title": "ConfirmationOrigin"
+      "description": "Pantalla desde la que un firmante confirma su firma (respuesta 5)."
+    "ConfirmationOut":
+      "properties":
+        "agreement_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Agreement Id"
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "role_in_use":
+          "$ref": "#/components/schemas/Role"
+        "confirmed_at":
+          "type": "string"
+          "title": "Confirmed At"
+        "origin":
+          "$ref": "#/components/schemas/ConfirmationOrigin"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "agreement_id"
+        - "user_id"
+        - "role_in_use"
+        - "confirmed_at"
+        - "origin"
+      "title": "ConfirmationOut"
     "ContentType":
       "type": "string"
       "enum":
@@ -3465,6 +3753,32 @@
         - "user_id"
         - "status"
       "title": "DeactivatedView"
+    "DeclaredScopeOut":
+      "properties":
+        "scope_text_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Scope Text Es"
+        "cameras":
+          "items":
+            "additionalProperties": true
+            "type": "object"
+          "type": "array"
+          "title": "Cameras"
+        "minimum_coverage":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Minimum Coverage"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "scope_text_es"
+        - "cameras"
+        - "minimum_coverage"
+      "title": "DeclaredScopeOut"
     "DocumentContentType":
       "type": "string"
       "enum":
@@ -3792,6 +4106,21 @@
         - "revoked"
       "title": "GateStatus"
       "description": "Estado de una compuerta (montaje o uso)."
+    "GatesOut":
+      "properties":
+        "mounting":
+          "$ref": "#/components/schemas/MountingGateOut"
+        "usage":
+          "$ref": "#/components/schemas/UsageGateOut"
+        "resulting_mode":
+          "$ref": "#/components/schemas/ZoneMode"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "mounting"
+        - "usage"
+        - "resulting_mode"
+      "title": "GatesOut"
     "GrantBody":
       "properties":
         "client_organization_id":
@@ -5439,6 +5768,105 @@
         - "signals"
         - "reason_es"
       "title": "SignalsBody"
+    "SignatoryBody":
+      "properties":
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "role"
+        - "user_id"
+      "title": "SignatoryBody"
+    "SignatoryOut":
+      "properties":
+        "role":
+          "$ref": "#/components/schemas/Role"
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Display Name"
+        "confirmed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Confirmed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "role"
+        - "user_id"
+        - "display_name"
+        - "confirmed_at"
+      "title": "SignatoryOut"
+    "SignatoryPolicyBody":
+      "properties":
+        "required_roles":
+          "items":
+            "$ref": "#/components/schemas/Role"
+          "type": "array"
+          "maxItems": 7
+          "title": "Required Roles"
+        "minimum":
+          "type": "integer"
+          "title": "Minimum"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "required_roles"
+        - "minimum"
+      "title": "SignatoryPolicyBody"
+    "SignatoryPolicyOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "configured":
+          "type": "boolean"
+          "title": "Configured"
+        "required_roles":
+          "anyOf":
+            - "items":
+                "$ref": "#/components/schemas/Role"
+              "type": "array"
+            - "type": "null"
+          "title": "Required Roles"
+        "minimum":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Minimum"
+        "workers_role":
+          "$ref": "#/components/schemas/Role"
+          "default": "copasst"
+        "updated_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Updated By"
+        "updated_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Updated At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "configured"
+      "title": "SignatoryPolicyOut"
+      "description": "``PlantSignatoryPolicy`` (DE §2.7); ``configured = false`` en una planta sin ella."
     "SigningPurpose":
       "type": "string"
       "enum":
@@ -5520,6 +5948,29 @@
       "additionalProperties": false
       "type": "object"
       "title": "StandardChanges"
+    "StandardOut":
+      "properties":
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "version":
+          "type": "integer"
+          "title": "Version"
+        "title_es":
+          "type": "string"
+          "title": "Title Es"
+        "declared_text":
+          "type": "string"
+          "title": "Declared Text"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+        - "title_es"
+        - "declared_text"
+      "title": "StandardOut"
     "StandardVersionBody":
       "properties":
         "changes":
@@ -5636,6 +6087,41 @@
       "minLength": 24
       "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
       "title": "Timestamp"
+    "TransparencyOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "declared_scope":
+          "$ref": "#/components/schemas/DeclaredScopeOut"
+        "standards":
+          "items":
+            "$ref": "#/components/schemas/StandardOut"
+          "type": "array"
+          "title": "Standards"
+        "current_agreement":
+          "anyOf":
+            - "$ref": "#/components/schemas/AgreementOut"
+            - "type": "null"
+        "gates":
+          "$ref": "#/components/schemas/GatesOut"
+        "pending_confirmation_for_me":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Pending Confirmation For Me"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "declared_scope"
+        - "standards"
+        - "current_agreement"
+        - "gates"
+        - "pending_confirmation_for_me"
+      "title": "TransparencyOut"
     "UUID":
       "type": "string"
       "maxLength": 36
@@ -5677,6 +6163,31 @@
         - "agreement_id"
         - "decided_by"
       "title": "UsageGateOut"
+    "UseAgreementBody":
+      "properties":
+        "signatories":
+          "items":
+            "$ref": "#/components/schemas/SignatoryBody"
+          "type": "array"
+          "maxItems": 32
+          "title": "Signatories"
+        "document_ref":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Document Ref"
+        "replaces_agreement_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Replaces Agreement Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signatories"
+      "title": "UseAgreementBody"
     "UserAssignmentView":
       "properties":
         "assignment_id":

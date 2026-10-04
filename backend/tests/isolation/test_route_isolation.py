@@ -86,6 +86,9 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
 from vigia_platform.catalog.adapters.postgres.catalog_repository import (
     PostgresCatalogRepository,
 )
@@ -101,6 +104,7 @@ from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
 )
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.application.agreements import AgreementService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.gates import GateService
 from vigia_platform.catalog.application.plant_policy import (
@@ -118,6 +122,8 @@ from vigia_platform.catalog.application.scope_record import (
     MOUNTING_GATE_RECORD,
     ScopeRecordService,
 )
+from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
+from vigia_platform.catalog.application.transparency import TransparencyService
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
@@ -274,10 +280,12 @@ class Ids:
     evidence: uuid.UUID
     event: uuid.UUID
     label: uuid.UUID
+    agreement: uuid.UUID
+    """Acuerdo de uso ``pending_signatures`` de la zona (VIG-149)."""
 
     @classmethod
     def missing(cls) -> Ids:
-        return cls(*(uuid7() for _ in range(10)))
+        return cls(*(uuid7() for _ in range(11)))
 
     def values(self) -> tuple[uuid.UUID, ...]:
         return tuple(getattr(self, name) for name in self.__dataclass_fields__)
@@ -669,6 +677,42 @@ CASES: Final[dict[tuple[str, str], Case]] = {
             json={"camera_id": str(i.label), "captured_at": _stamp(T0), "reason_es": REASON},
         ),
     ),
+    # VIG-149: política de firmantes, acuerdo de uso (la zona de cada organización tiene uno
+    # pendiente, ``Isolation.agreement``) y transparencia.
+    ("PUT", "/plants/{plant_id}/signatory-policy"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/plants/{i.plant}/signatory-policy",
+            json={"required_roles": ["coordinator_sst", "copasst"], "minimum": 3},
+        ),
+    ),
+    ("GET", "/plants/{plant_id}/signatory-policy"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/signatory-policy")
+    ),
+    ("POST", "/zones/{zone_id}/use-agreements"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/zones/{i.zone}/use-agreements",
+            json={
+                "signatories": [
+                    {"role": "coordinator_sst", "user_id": str(i.user)},
+                    {"role": "copasst", "user_id": str(i.label)},
+                    {"role": "plant_manager", "user_id": str(i.event)},
+                ]
+            },
+        ),
+    ),
+    ("POST", "/use-agreements/{agreement_id}/confirmations"): Case(
+        Kind.RESOURCE, lambda i: Call("POST", f"/use-agreements/{i.agreement}/confirmations")
+    ),
+    ("POST", "/use-agreements/{agreement_id}/approval"): Case(
+        Kind.RESOURCE, lambda i: Call("POST", f"/use-agreements/{i.agreement}/approval")
+    ),
+    ("GET", "/zones/{zone_id}/transparency"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/transparency")
+    ),
     # --- fleet (VIG-152) ---
     ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
@@ -713,6 +757,13 @@ PROVIDER_SIDE_ONLY: Final = frozenset(
 """Clave de la columna, pero solo desde la proveedora sin concesión (A-46): bajo concesión,
 ``not_found`` tras su ``provider_query``."""
 
+DENIED_UNDER_CONCESSION: Final = frozenset(
+    {("POST", "/use-agreements/{agreement_id}/confirmations")}
+)
+"""La ruta se declara con ``transparency.read`` (en la columna), pero el servicio nunca deja
+confirmar bajo concesión (BR-GOB-27, G-9; VIG-149): ``not_found`` tras su ``provider_query``,
+con ``authorization_denied`` en la auditoría del cliente."""
+
 STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     # La zona de B no tiene catálogo: los encuadres no son sus cámaras.
     ("POST", "/zones/{zone_id}/gates/mounting/scope-record"): "invalid_request",
@@ -722,6 +773,10 @@ STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     ("POST", "/plants/{plant_id}/policy"): "invalid_request",
     # La cámara del caso no es de la versión 1 sembrada en la zona de B (VIG-148).
     ("POST", "/zones/{zone_id}/framing-recaptures"): "invalid_request",
+    # La planta de B no tiene política de firmantes: signatory_role_not_in_policy (VIG-149).
+    ("POST", "/zones/{zone_id}/use-agreements"): "invalid_request",
+    # El montaje de B está pending: mounting_gate_pending, la primera guarda (VIG-149).
+    ("POST", "/use-agreements/{agreement_id}/approval"): "conflict",
 }
 """Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
 no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
@@ -995,6 +1050,29 @@ class Isolation:
             uuid7(),
         )
 
+    def agreement(
+        self, site: Site, plant_id: uuid.UUID, zone_id: uuid.UUID, user_id: uuid.UUID
+    ) -> uuid.UUID:
+        """Un acuerdo de uso ``pending_signatures`` de la zona (fila sintética; el alta real está
+        en ``tests/integration/test_catalog_agreements.py``)."""
+        agreement_id = uuid7()
+        signatories = [
+            {"role": role, "user_id": str(uuid7())}
+            for role in ("coordinator_sst", "plant_manager", "copasst")
+        ]
+        self.env.execute(
+            "INSERT INTO catalog.use_agreement (agreement_id, organization_id, plant_id, zone_id,"
+            " signatories, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            agreement_id,
+            site.organization_id,
+            plant_id,
+            zone_id,
+            json.dumps(signatories),
+            user_id,
+            T0,
+        )
+        return agreement_id
+
     def resources(self, site: Site, plant_index: int) -> Ids:
         """Un recurso de cada tipo en la planta ``plant_index`` de ``site`` (filas reales)."""
         authz = self.authz
@@ -1031,6 +1109,7 @@ class Isolation:
             evidence=evidence_id,
             event=self.dead_letter(organization_id, plant_id),
             label=label_id,
+            agreement=self.agreement(site, plant_id, zone_id, user_id),
         )
 
     def organization(self) -> Organization:
@@ -1258,9 +1337,11 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         )
         catalog_repository = PostgresCatalogRepository(sessions.database)
         policy_repository = PostgresPlantPolicyRepository(sessions.database)
+        agreement_repository = PostgresAgreementRepository()
         gates = GateService(
             repository=PostgresGateRepository(sessions.database),
             catalog=catalog_repository,
+            agreements=agreement_repository,
             database=sessions.database,
             writer=writer,
             authorizer=authz.authorizer,
@@ -1340,6 +1421,32 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             audit=sessions.audit,
                             free_text=free_text,
                             clock=sessions.clock,
+                        ),
+                        signatory_policies=SignatoryPolicyService(
+                            repository=agreement_repository,
+                            plants=policy_repository,
+                            database=sessions.database,
+                            authorizer=authz.authorizer,
+                            audit=sessions.audit,
+                            clock=sessions.clock,
+                        ),
+                        agreements=AgreementService(
+                            repository=agreement_repository,
+                            gates=gates,
+                            policies=policy_repository,
+                            documents=documents,
+                            identity=HierarchyService(deps),
+                            database=sessions.database,
+                            writer=writer,
+                            authorizer=authz.authorizer,
+                            clock=sessions.clock,
+                        ),
+                        transparency=TransparencyService(
+                            repository=agreement_repository,
+                            gates=gates,
+                            catalog=catalog_repository,
+                            database=sessions.database,
+                            audit=sessions.audit,
                         ),
                     ),
                     FLEET_STATE_KEY: FleetHttp(
@@ -1552,7 +1659,8 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
             documents = [(q["method"], q["resource"]) for q in seen.queries]
             if documents != [(method, path)] * expected_queries:
                 failures.append(f"{route} ({name}): provider_query {documents}")
-        if in_column and (method, path) not in PROVIDER_SIDE_ONLY:
+        denied_by_service = (method, path) in DENIED_UNDER_CONCESSION
+        if in_column and (method, path) not in PROVIDER_SIDE_ONLY and not denied_by_service:
             allowed_routes.append(route)
             stateful = STATEFUL_WRITES.get((method, path))
             if stateful is not None:
@@ -1581,8 +1689,9 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
                 )
             if _code(own.response) != "not_found":
                 failures.append(f"{route}: fuera de la columna responde {own.response.text}")
-            if not in_column and "authorization_denied" not in {e["operation"] for e in own.audit}:
-                # La denegación por ruta del proveedor queda en la auditoría del cliente.
+            denied = not in_column or denied_by_service
+            if denied and "authorization_denied" not in {e["operation"] for e in own.audit}:
+                # La denegación (por ruta o del servicio) queda en la auditoría del cliente.
                 failures.append(f"{route}: denegación sin auditar {own.audit}")
     assert not failures, "\n".join(failures)
     # Las rutas de la columna que existen hoy: si una desaparece, la prueba ya no las prueba.
@@ -1603,6 +1712,11 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /zones/{zone_id}/catalog/versions/{catalog_version}",
         "GET /zones/{zone_id}/regression",
         "POST /zones/{zone_id}/framing-recaptures",
+        "PUT /plants/{plant_id}/signatory-policy",
+        "GET /plants/{plant_id}/signatory-policy",
+        "POST /zones/{zone_id}/use-agreements",
+        "POST /use-agreements/{agreement_id}/approval",
+        "GET /zones/{zone_id}/transparency",
         "GET /zones/{zone_id}/commissioning-clips",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
