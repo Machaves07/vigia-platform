@@ -112,6 +112,9 @@ CATALOG_TYPES: Final = (
 WAIT_SECONDS: Final = 30.0
 """Tope generoso de las esperas por evento (la decisión la da el estado, no el tope)."""
 POLL_SECONDS: Final = 0.05
+TEST_LOCK_TIMEOUT_MS: Final = 60_000
+TEST_SIGN_TIMEOUT_SECONDS: Final = 120.0
+"""Topes generosos (retro 15) para las pruebas que no tratan de los topes."""
 GATE_SECONDS: Final = 60.0
 PLATFORM_ONLY: Final = ("single_occupancy", "aggregation_window_minutes")
 
@@ -213,6 +216,9 @@ class Stack:
             "signer": self.signer,
             "clock": sessions.clock,
             "regression_marker": self.marker,
+            # Retro 15: el tope de firma no es lo que prueban estas pruebas (solo
+            # ``test_a_signature_that_exceeds_its_timeout_writes_nothing`` lo acorta).
+            "sign_timeout_seconds": TEST_SIGN_TIMEOUT_SECONDS,
         }
         fields.update(changes)
         return CatalogPublicationService(**fields)
@@ -442,7 +448,11 @@ def catalogs(postgres_endpoint: PostgresEndpoint) -> Iterator[Catalogs]:
         free_text = FreeTextPolicyRegistry()
         register_u03_free_text_validator(free_text)
         free_text.seal()
-        database = app_database(sessions.migrated, worker_pool_size=8)
+        # Retro 15: la espera del candado de la zona no depende del ``lock_timeout`` de 2 s,
+        # que no es lo que se prueba; la prueba concurrente decide por eventos.
+        database = app_database(
+            sessions.migrated, worker_pool_size=8, lock_timeout_ms=TEST_LOCK_TIMEOUT_MS
+        )
         writer = EscritorExpediente(
             database=database,
             registry=registry,
