@@ -1442,6 +1442,31 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/documents":
+    "post":
+      "tags":
+        - "documentos"
+      "summary": "Concesión de subida de un documento firmado de planta (un solo PUT, 15 minutos)"
+      "operationId": "grant_document_documents_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/DocumentGrantBody"
+        "required": true
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/DocumentGrantOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -2211,6 +2236,119 @@
         - "user_id"
         - "status"
       "title": "DeactivatedView"
+    "DocumentContentType":
+      "type": "string"
+      "enum":
+        - "application/pdf"
+        - "image/jpeg"
+        - "image/png"
+      "title": "DocumentContentType"
+      "description": "Tipos admitidos (nota del 2026-09-23 de §3.14: ``image/png`` además de PDF y JPEG)."
+    "DocumentGrantBody":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "kind":
+          "$ref": "#/components/schemas/DocumentKind"
+        "content_type":
+          "$ref": "#/components/schemas/DocumentContentType"
+        "size_bytes":
+          "type": "integer"
+          "maximum": 20971520.0
+          "minimum": 1.0
+          "title": "Size Bytes"
+        "sha256":
+          "type": "string"
+          "pattern": "^[0-9a-f]{64}$"
+          "title": "Sha256"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "kind"
+        - "content_type"
+        - "size_bytes"
+        - "sha256"
+      "title": "DocumentGrantBody"
+    "DocumentGrantOut":
+      "properties":
+        "document_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Document Id"
+        "upload":
+          "$ref": "#/components/schemas/DocumentUploadOut"
+        "document_ref":
+          "$ref": "#/components/schemas/DocumentRefOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "document_id"
+        - "upload"
+        - "document_ref"
+      "title": "DocumentGrantOut"
+    "DocumentKind":
+      "type": "string"
+      "enum":
+        - "scope_record"
+        - "use_agreement"
+        - "plant_policy"
+        - "blur_check_capture"
+      "title": "DocumentKind"
+      "description": "Documento firmado de planta; ``blur_check_capture`` por la nota de §3.14."
+    "DocumentRefOut":
+      "properties":
+        "document_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Document Id"
+        "storage_key":
+          "type": "string"
+          "title": "Storage Key"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "content_type":
+          "$ref": "#/components/schemas/DocumentContentType"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "document_id"
+        - "storage_key"
+        - "sha256"
+        - "content_type"
+        - "size_bytes"
+      "title": "DocumentRefOut"
+    "DocumentUploadOut":
+      "properties":
+        "method":
+          "type": "string"
+          "const": "PUT"
+          "title": "Method"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "required_headers":
+          "additionalProperties":
+            "type": "string"
+          "type": "object"
+          "title": "Required Headers"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "method"
+        - "url"
+        - "required_headers"
+        - "expires_at"
+      "title": "DocumentUploadOut"
     "EnrollRequest":
       "properties":
         "code":

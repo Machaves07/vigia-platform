@@ -48,7 +48,7 @@ import enum
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -83,7 +83,9 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
@@ -131,6 +133,7 @@ from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.signing.service import SigningService
+from vigia_platform.shared.storage import ObjectHead, PresignedRequest
 
 STATIC: Final = Path(__file__).resolve().parents[1] / "fixtures" / "static"
 ORIGIN: Final = "https://app.vigia.test"
@@ -147,6 +150,30 @@ ADMISSION_TYPES: Final = tuple(
     d for d in CATALOG_RECORD_TYPES if d.record_type == ADMISSION_RECORD_TYPE
 )
 """El tipo que escriben las rutas de admisión (los que registra la unidad ``catalog``)."""
+DOCUMENT: Final = b"%PDF-1.7 acta de alcance sintetica"
+
+
+class StubDocumentStorage:
+    """``vigia-evidence`` para ``POST /documents``: la clave nueva no tiene objeto y la URL es
+    sintética (el almacén real, en ``test_catalog_documents_localstack``)."""
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        return None
+
+    async def presign_put(
+        self,
+        key: str,
+        content_type: str,
+        checksum_sha256: str,
+        required_headers: Mapping[str, str],
+        ttl: timedelta = timedelta(minutes=15),
+    ) -> PresignedRequest:
+        return PresignedRequest(
+            "PUT",
+            f"https://almacen.vigia.test/{key}?X-Amz-Expires=900",
+            {"content-type": content_type, "x-amz-checksum-sha256": checksum_sha256},
+            T0 + ttl,
+        )
 
 
 def _stamp(moment: datetime) -> str:
@@ -404,6 +431,20 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ),
     ("GET", "/plants/{plant_id}/admissions"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/admissions")
+    ),
+    ("POST", "/documents"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            "/documents",
+            json={
+                "plant_id": str(i.plant),
+                "kind": "scope_record",
+                "content_type": "application/pdf",
+                "size_bytes": len(DOCUMENT),
+                "sha256": hashlib.sha256(DOCUMENT).hexdigest(),
+            },
+        ),
     ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
@@ -907,7 +948,14 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             audit=sessions.audit,
                             free_text=free_text,
                             clock=sessions.clock,
-                        )
+                        ),
+                        documents=DocumentService(
+                            database=sessions.database,
+                            audit=sessions.audit,
+                            authorizer=authz.authorizer,
+                            store=DocumentObjectStore(StubDocumentStorage()),
+                            clock=env.clock,
+                        ),
                     )
                 },
             },
@@ -1141,6 +1189,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
     assert not failures, "\n".join(failures)
     # Las rutas de la columna que existen hoy: si una desaparece, la prueba ya no las prueba.
     assert set(allowed_routes) == {
+        "POST /documents",
         "GET /hierarchy",
         "GET /zones/{zone_id}/coverage",
         "GET /zones/{zone_id}/coverage/at",

@@ -49,7 +49,9 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp,
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
 )
@@ -57,6 +59,7 @@ from vigia_platform.catalog.detail_codes import (
     CATALOG_DETAIL_CODE_LABEL_BINDINGS,
     CatalogDetailCode,
 )
+from vigia_platform.catalog.domain.documents import DocumentSettings
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
@@ -132,7 +135,7 @@ from vigia_platform.shared.outbox.registries import (
     PeriodicTaskRegistry,
 )
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
-from vigia_platform.shared.runtime.config import RuntimeConfigInvalid
+from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
 from vigia_platform.shared.signing.service import SigningService
@@ -195,6 +198,9 @@ class UnitServices:
     archive: S3Storage | None = None
     """Depósito de archivo (``VIGIA_ARCHIVE_BUCKET``); solo en ``vigia-worker``."""
     verifier_path: Path = DEFAULT_VERIFIER_PATH
+    config: RuntimeConfig | None = None
+    """La configuración leída del entorno (tamaños y prefijos de cada unidad); ``None`` en las
+    pruebas que no la necesitan: cada unidad usa entonces los valores del diseño."""
 
     def require_evidence(self) -> S3Storage:
         if self.evidence is None:
@@ -396,6 +402,13 @@ def _catalog_record_types(registry: RecordTypeRegistry) -> None:
             registry.register(definition)
 
 
+def _document_settings(config: RuntimeConfig | None) -> DocumentSettings:
+    """``VIGIA_DOCUMENTS_PREFIX`` y ``VIGIA_DOCUMENTS_MAX_BYTES``; sin configuración, el diseño."""
+    if config is None:
+        return DocumentSettings()
+    return DocumentSettings(prefix=config.documents_prefix, max_bytes=config.documents_max_bytes)
+
+
 def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     return {
         CATALOG_STATE_KEY: CatalogHttp(
@@ -407,7 +420,16 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 free_text=services.free_text,
                 clock=services.clock,
-            )
+            ),
+            # LC-GOB-05 (VIG-143): POST /documents sobre vigia-evidence.
+            documents=DocumentService(
+                database=services.database,
+                audit=services.audit,
+                authorizer=services.authorizer,
+                store=DocumentObjectStore(services.require_evidence()),
+                clock=services.clock,
+                settings=_document_settings(services.config),
+            ),
         )
     }
 
@@ -452,7 +474,7 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
     # U-03 (VIG-139): las etiquetas de sus 21 enumeraciones y de sus detail_code (NFR-GOB-67).
     # VIG-142: rutas de la admisión, detail_code del catálogo, el tipo que escriben
     # (``standard_admission_test``) y el validador mínimo de texto libre de U-03 (A-45, D-7). El
-    # resto de tipos y los eventos los conecta VIG-163 (TASK-227).
+    # resto de tipos y los eventos los conecta VIG-163 (TASK-227). VIG-143: POST /documents.
     PlatformUnit(
         name="catalog",
         routers=catalog_routers,
