@@ -303,7 +303,7 @@ def test_a_newer_minor_is_unsupported_with_rejected_newer_never_as_a_code(nodes:
     assert rejection.code.value == "contract_version_unsupported"
     assert rejection.compatibility_result.value == "rejected_newer"
     assert rejection.retryable is False
-    assert "rejected_newer" != response.json()["code"]
+    assert response.json()["code"] != "rejected_newer"
 
 
 # --- Certificado y alcance ---------------------------------------------------------------------

@@ -271,13 +271,16 @@ def node_gate(
     clock: Clock,
     probe: Probe,
     limiter: RateLimiter | None = None,
+    limits: NodeRateLimits | None = None,
     policy: VersionPolicy | None = None,
     responses: NodeResponses | None = None,
     operations: Mapping[NodeRoute, NodeOperation] | None = None,
 ) -> NodeApiGate:
+    if limits is None:
+        limits = NodeRateLimits(limiter if limiter is not None else UnlimitedNodeLimiter(clock))
     return NodeApiGate(
         identity=NodeIdentity(contexts=contexts, store=store),
-        limits=NodeRateLimits(limiter if limiter is not None else UnlimitedNodeLimiter(clock)),
+        limits=limits,
         clock=clock,
         responses=responses if responses is not None else NodeResponses(clock),
         policy=policy,

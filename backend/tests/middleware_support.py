@@ -37,8 +37,8 @@ from vigia_platform.identity.authz.context import (
     SessionRow,
 )
 from vigia_platform.identity.authz.matrix import PermissionKey
-from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.node_api.rejections import NodeRejection
+from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.shared.api.declarations import (
     NODE_GATE_STATE_KEY,
     NodeRoute,
