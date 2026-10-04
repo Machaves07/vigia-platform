@@ -42,7 +42,10 @@ ni la base, ni secretos, ni objetos (solo lecturas, como la del operador o la cl
 **Composición**: como ``vigia-worker``, la orden pide sus dependencias (``AdminRuntime``) al
 constructor que nombra ``VIGIA_ADMIN_RUNTIME`` (``vigia_platform.<módulo>:<función>``,
 asíncrono, recibe la configuración y el identificador de la organización proveedora). La
-configuración se lee una vez del entorno con un modelo estricto (``AdminConfig``).
+configuración se lee una vez del entorno con un modelo estricto (``AdminConfig``). El de
+producción es ``vigia_platform.shared.runtime.admin:build_admin_runtime`` (A-52): construye la
+base de forma perezosa, así que una orden que no la usa no la toca. Una variable ausente o un
+secreto de la base inexistente salen con código 1 y ``config_invalid``, que nombra la variable.
 
 Códigos de salida: 0 hecho; 2 uso incorrecto; 3 sin confirmación; 4 rechazo de la operación;
 5 dependencia no disponible (reintentable); 1 configuración o error inesperado.
@@ -114,6 +117,7 @@ from vigia_platform.shared.node_ca import (
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
 from vigia_platform.shared.outbox.registries import REGISTRY_NAME
 from vigia_platform.shared.outbox.replay import ReplayReceipt
+from vigia_platform.shared.runtime.config import RuntimeConfigInvalid
 from vigia_platform.shared.secrets import SecretsUnavailable
 from vigia_platform.shared.signing.keys import (
     KeySetPublicationRecord,
@@ -1383,6 +1387,11 @@ async def execute(
     except ArchiveVerificationFailed as error:
         _fail(streams, "archive_invalid", "el archivo no verifica: " + error.reason.value)
         return ExitCode.REJECTED
+    except RuntimeConfigInvalid as error:
+        # Variable ausente o secreto de la base que no existe: nombra la variable, sin valores.
+        _log.error("configuración de vigia-admin no válida: revisa las variables VIGIA_*")
+        _fail(streams, "config_invalid", str(error))
+        return ExitCode.FAILURE
     except (TransientDatabaseError, SecretsUnavailable, StorageUnavailable):
         _fail(streams, "temporarily_unavailable", "dependencia no disponible: reintenta")
         return ExitCode.UNAVAILABLE
