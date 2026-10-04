@@ -31,8 +31,9 @@ y el origen como HMAC con la clave estable (``SourceIpHasher``); el rechazo escr
 ``enrollment_attempt_rejected`` en la cadena de la planta. Un ``node_id`` que no es de ningún nodo
 declarado no tiene organización: no deja fila ni registro de cliente, solo la métrica
 ``enrollment_attempts_total`` (``reason = node_unknown``) y un registro estructurado con el
-``source_ip_hash`` (lectura del redactor de TASK-218). ``attempts`` lista los intentos de un nodo
-(``fleet.read``), el más reciente primero.
+``source_ip_tag`` (los 16 primeros hexadecimales de ``source_ip_hash``: un valor de 64 no sale
+nunca en un registro, PR-GOB-31; lectura del redactor de TASK-218). ``attempts`` lista los
+intentos de un nodo (``fleet.read``), el más reciente primero.
 
 El código en claro solo existe en la memoria de la emisión y en la respuesta 201: nunca en la
 base, el expediente, la auditoría, los eventos, los registros estructurados ni las métricas
@@ -366,7 +367,7 @@ class EnrollmentCodeService:
             _log.warning(
                 "intento de alta de un nodo no declarado",
                 result=result.value,
-                source_ip_hash=source_ip_hash,
+                source_ip_tag=source_ip_hash[:16],
                 correlation_id=str(request.correlation_id),
             )
             return None

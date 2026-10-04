@@ -140,6 +140,8 @@ def test_u02_free_text_is_only_the_declared_names_and_the_concession_reason() ->
         ("plant_created", "/timezone"),
         ("zone_created", "/name"),
         ("provider_concession_granted", "/reason"),
+        # TASK-218: el motivo de la retirada de una zona (``node_zone_unassigned`` v2).
+        ("node_zone_unassigned", "/reason_es"),
     }
 
 

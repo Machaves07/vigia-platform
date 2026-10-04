@@ -797,7 +797,9 @@ def test_every_attempt_is_registered_and_rejections_go_to_the_ledger(
     # El de un nodo desconocido: sin fila, con métrica y registro estructurado con el hash.
     logs = _json_logs(caplog) + capsys.readouterr().out
     assert "intento de alta de un nodo no declarado" in logs
-    assert SourceIpHasher(fleet.hash_key).hash("198.51.100.23") in logs
+    full_hash = SourceIpHasher(fleet.hash_key).hash("198.51.100.23")
+    assert f'"source_ip_tag": "{full_hash[:16]}"' in logs.replace('":"', '": "')
+    assert full_hash not in logs  # nunca un valor de 64 hexadecimales en un registro
     assert "198.51.100.23" not in logs
     admin = fleet.member(site)
     listed = fleet.send(admin, "GET", f"/nodes/{node}/enrollment-attempts")

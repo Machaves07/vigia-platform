@@ -231,11 +231,13 @@ INTEGER_KEYS: Final[Mapping[str, tuple[int, int]]] = {
 
 BOOLEAN_KEYS: Final = frozenset({"exception.escaped"})
 
-HASH_KEYS: Final = frozenset({"source_ip_hash"})
-"""Hashes SHA-256 en hexadecimal (64 en minúsculas) que nunca son un dato en claro: el origen de
-un intento de alta, HMAC con la clave estable de la plataforma (TASK-218, BR-GOB-61). Solo para
-registros estructurados: ninguna métrica los declara (cardinalidad)."""
-_SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
+HASH_KEYS: Final = frozenset({"source_ip_tag"})
+"""Etiqueta del origen de un intento de alta (TASK-218, BR-GOB-61): los **16** primeros
+hexadecimales de su ``source_ip_hash`` (HMAC con la clave estable), para cruzar el registro con
+las filas de ``enrollment_attempt``. Exactamente 16: un valor de 64 (una huella de hardware, una
+firma de URL) se parece a un hash y nunca pasa por aquí (PR-GOB-31). Solo para registros
+estructurados: ninguna métrica la declara (cardinalidad)."""
+_SOURCE_TAG: Final = re.compile(r"^[0-9a-f]{16}$")
 
 
 class AttributePolicy:
@@ -355,7 +357,7 @@ class AttributePolicy:
         if key in BOOLEAN_KEYS:
             return value if isinstance(value, bool) else None
         if key in HASH_KEYS:
-            return value if isinstance(value, str) and _SHA256.fullmatch(value) else replacement
+            return value if isinstance(value, str) and _SOURCE_TAG.fullmatch(value) else replacement
         return None
 
     def clean(
