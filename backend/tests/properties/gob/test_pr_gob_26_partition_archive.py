@@ -592,23 +592,31 @@ def destructive_statements(draw: st.DrawFn) -> str:
     return statement.lower() if draw(st.booleans()) else statement
 
 
+def _next_revision() -> tuple[str, str]:
+    """La revisión siguiente a la cabeza de la cadena y la propia cabeza (``gob_NNNN``)."""
+    heads = sorted(
+        (int(path.name[4:8]), path.name[:8])
+        for path in VERSIONS.glob("*.py")
+        if re.fullmatch(r"[a-z]{3}_[0-9]{4}_.+\.py", path.name)
+    )
+    number, head = heads[-1]
+    return f"gob_{number + 1:04d}", head
+
+
 @given(destructive_statements())
 def test_any_generated_migration_with_a_destructive_statement_is_rejected(statement: str) -> None:
     registry = load_registry()
-    # El eslabón siguiente a la cabeza de la cadena: el lint exige que el número sea la posición.
-    chain = sorted(VERSIONS.glob("*_[0-9][0-9][0-9][0-9]_*.py"), key=lambda p: p.name[4:8])
-    head = chain[-1].name[:8]
-    following = f"gob_{int(head[4:]) + 1:04d}"
+    revision, head = _next_revision()
     with tempfile.TemporaryDirectory() as directory:
         versions = Path(directory)
         for path in sorted(VERSIONS.glob("*.py")):
             (versions / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        (versions / f"{following}_generated.py").write_text(
+        (versions / f"{revision}_generated.py").write_text(
             "\n".join(
                 [
                     '"""Migración generada."""',
                     "from alembic import op",
-                    f"revision = '{following}'",
+                    f"revision = '{revision}'",
                     f"down_revision = '{head}'",
                     "branch_labels = None",
                     "depends_on = None",

@@ -1,6 +1,6 @@
 """``record_id`` en la historia de compuertas (TASK-211, LC-GOB-03; interfaces §1.2).
 
-Revisión gob_0019, aditiva. ``GateQueryPort.state_at`` y ``gate_history`` devuelven, por
+Revisión gob_0020, aditiva. ``GateQueryPort.state_at`` y ``gate_history`` devuelven, por
 intervalo, el ``record_id`` que respalda la decisión: el del acta de alcance para el montaje y el
 ``agreement_id`` del acuerdo de uso para el uso (``interfaces-para-u04-u05.md`` §1.2). La tabla de
 ``gob_0017`` solo guardaba ``ledger_record_id`` (el registro ``gate_state_changed``), y leerlo del
@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "gob_0019"
-down_revision: str | None = "gob_0018"
+revision: str = "gob_0020"
+down_revision: str | None = "gob_0019"
 branch_labels: None = None
 depends_on: None = None
 

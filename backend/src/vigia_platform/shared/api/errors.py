@@ -42,7 +42,7 @@ import os
 import re
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, MutableMapping
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
@@ -54,10 +54,11 @@ from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.labels import PlatformLabels
+from vigia_platform.shared.api.request_state import request_state
 from vigia_platform.shared.bulkheads import BulkheadSaturated
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ContextAbsent
-from vigia_platform.shared.db import TransientDatabaseError
+from vigia_platform.shared.db import RouteClass, TransientDatabaseError
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.secrets import SecretsUnavailable
@@ -79,6 +80,7 @@ __all__ = [
     "ErrorBoundary",
     "ErrorCatalog",
     "ExternalDependencyDown",
+    "NodeErrorRenderer",
     "correlation_id_of",
     "from_ledger_rejection",
     "install_error_handlers",
@@ -505,14 +507,44 @@ class ErrorBoundary:
             await response(scope, receive, send)
 
 
-def install_error_handlers(app: Any, catalog: ErrorCatalog, clock: Clock) -> None:
+class NodeErrorRenderer(Protocol):
+    """La respuesta de la clase ``node`` a cualquier fallo (``node_api.rejections``, TASK-206).
+
+    Una petición de nodo nunca recibe un ``ApiError``: la cadena compartida (cuerpo, mamparo,
+    tasa, error interno) y los manejadores de FastAPI le entregan aquí la excepción y la
+    respuesta es un ``RejectionResponse`` del contrato (o ``404`` sin cuerpo si no hay ruta).
+    """
+
+    @property
+    def contract_version(self) -> str:
+        """Valor de ``X-Vigia-Contract-Version`` en toda respuesta a un nodo."""
+        ...
+
+    def render(self, error: BaseException, scope: MutableMapping[str, Any]) -> Response: ...
+
+
+def _is_node_request(scope: MutableMapping[str, Any]) -> bool:
+    """La clase de ruta que fijó la cadena (``RouteClassStep``) antes de llegar a FastAPI."""
+    return request_state(scope).route_class is RouteClass.NODE
+
+
+def install_error_handlers(
+    app: Any,
+    catalog: ErrorCatalog,
+    clock: Clock,
+    *,
+    node_errors: NodeErrorRenderer | None = None,
+) -> None:
     """Respuestas ``ApiError`` para lo que FastAPI y Starlette responderían por su cuenta.
 
     ``HTTPException`` (404, 405…), la validación de FastAPI y ``ApiError`` se responden aquí;
-    todo lo demás llega a ``ErrorBoundary``.
+    todo lo demás llega a ``ErrorBoundary``. Bajo ``/api/nodes``, con ``node_errors``, la
+    respuesta es la del contrato.
     """
 
     async def handle(request: Request, error: Exception) -> Response:
+        if node_errors is not None and _is_node_request(request.scope):
+            return node_errors.render(error, request.scope)
         api_error = translate(error)
         return catalog.response(api_error, correlation_id_of(request.scope, clock))
 

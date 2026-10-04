@@ -27,8 +27,12 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from hypothesis import given
 from hypothesis import strategies as st
+from vigia_contracts.models.enumerations import RejectionCode
+from vigia_contracts.models.rejection_response import RejectionResponse
 
 from tests.middleware_support import (
+    NODE_HEARTBEAT_PATH,
+    NODE_READ_PATH,
     ORIGIN,
     SAME_ORIGIN,
     STORE_ORIGIN,
@@ -42,7 +46,13 @@ from vigia_platform.shared.api.app import (
     platform_permissions,
     platform_units,
 )
-from vigia_platform.shared.api.declarations import DeclaredRoute, iter_declared_routes, requires
+from vigia_platform.shared.api.declarations import (
+    NODE_PREFIX,
+    DeclaredRoute,
+    NodeRoute,
+    iter_declared_routes,
+    requires,
+)
 from vigia_platform.shared.api.errors import ApiErrorBody, ApiErrorCode
 from vigia_platform.shared.api.labels import PlatformLabels
 from vigia_platform.shared.api.middleware import (
@@ -69,13 +79,17 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/users"): {"email": "a@b.co", "role": "copasst", "plant_id": str(uuid.uuid4())},
     ("PATCH", "/users/{user_id}"): {"display_name": "Nombre sintético", "active": True},
     ("POST", "/auth/login"): {"email": "a@b.co", "password": "contraseña-sintética"},
-    ("POST", "/api/nodes/heartbeat"): {"sequence": 3},
 }
-"""Un cuerpo válido por ruta con cuerpo del catálogo de la unidad de prueba."""
+"""Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
+del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
+prueban ``tests/properties/gob/test_pr_gob_02_prechecks_order.py`` y
+``tests/unit/test_node_rejection_translation.py`` (TASK-206)."""
 
 
 def _url(path: str, user_id: str | None = None) -> str:
-    return path.replace("{user_id}", user_id or str(uuid.uuid4()))
+    return path.replace("{user_id}", user_id or str(uuid.uuid4())).replace(
+        "{zone_id}", str(uuid.uuid4())
+    )
 
 
 @pytest.fixture(scope="module")
@@ -98,6 +112,7 @@ def test_the_catalog_of_body_routes_is_complete(world: tuple[Harness, Any, Any])
         (method, route.path)
         for route in _routes(client)
         if getattr(route.route, "body_field", None) is not None
+        and not route.path.startswith(NODE_PREFIX + "/")
         for method in route.methods
     }
     assert with_body == set(VALID_BODIES)
@@ -159,8 +174,7 @@ def _mutated(
             # Sin identificador en la ruta: el campo de texto, vacío (fuera de su longitud mínima).
             body[next(iter(body))] = "" if isinstance(next(iter(body.values())), str) else "x"
     elif mutation == "oversized":
-        limit = 4096 if path.startswith("/api/nodes/") else DEFAULT_BODY_LIMIT_BYTES
-        body["relleno"] = "x" * (limit + 1)
+        body["relleno"] = "x" * (DEFAULT_BODY_LIMIT_BYTES + 1)
     return url, json.dumps(body).encode(), {"Content-Type": "application/json"}
 
 
@@ -216,7 +230,12 @@ def test_every_route_of_the_catalog_rejects_a_body_over_its_limit(
     assert len(catalog) >= 9
     for method, url in catalog:
         response = client.request(method, url, headers=headers, content=oversized)
-        assert _generic_error(response).code is ApiErrorCode.PAYLOAD_TOO_LARGE, (method, url)
+        if url.startswith(NODE_PREFIX + "/"):
+            # Ruta del contrato: el rechazo del contrato, nunca un ApiError (TASK-206).
+            rejection = RejectionResponse.model_validate_json(response.content)
+            assert rejection.code is RejectionCode.PAYLOAD_TOO_LARGE, (method, url)
+        else:
+            assert _generic_error(response).code is ApiErrorCode.PAYLOAD_TOO_LARGE, (method, url)
         assert response.status_code == 413
         _assert_security_headers(response)
 
@@ -252,14 +271,14 @@ def test_a_body_exactly_at_the_limit_passes_the_chain(
 def test_a_route_with_its_own_limit_uses_it(world: tuple[Harness, Any, dict[str, str]]) -> None:
     _, client, _ = world
     raw = json.dumps({"sequence": 1}).encode()
-    at_limit = raw + b" " * (4096 - len(raw))
+    limit = NodeRoute.HEARTBEAT.max_body_bytes
+    at_limit = raw + b" " * (limit - len(raw))
     over = at_limit + b" "
     json_type = {"Content-Type": "application/json"}
-    assert (
-        client.post("/api/nodes/heartbeat", content=at_limit, headers=json_type).status_code == 200
-    )
-    response = client.post("/api/nodes/heartbeat", content=over, headers=json_type)
-    assert _generic_error(response).code is ApiErrorCode.PAYLOAD_TOO_LARGE
+    assert client.post(NODE_HEARTBEAT_PATH, content=at_limit, headers=json_type).status_code == 200
+    response = client.post(NODE_HEARTBEAT_PATH, content=over, headers=json_type)
+    rejection = RejectionResponse.model_validate_json(response.content)
+    assert rejection.code is RejectionCode.PAYLOAD_TOO_LARGE and response.status_code == 413
     # Un límite propio más pequeño no se aplica a las demás rutas.
     padded = json.dumps(VALID_BODIES[("POST", "/auth/login")]).encode() + b" " * 8000
     login = client.post("/auth/login", content=padded, headers={**json_type, **SAME_ORIGIN})
@@ -436,7 +455,8 @@ def test_a_route_cannot_weaken_or_duplicate_the_security_headers() -> None:
 
 PATHS = st.sampled_from(
     ["/", "/me", "/users", "/health/live", "/health/ready", "/no-existe", "/assets/x.js",
-     "/version.json", "/robots.txt", "/api/nodes/x", "/auth/login", "/docs", "/openapi.json"]
+     "/version.json", "/robots.txt", "/api/nodes/x", NODE_READ_PATH, NODE_HEARTBEAT_PATH,
+     "/api/nodes/Findings", "/auth/login", "/docs", "/openapi.json"]
 )  # fmt: skip
 METHODS = st.sampled_from(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 

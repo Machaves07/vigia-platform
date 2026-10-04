@@ -209,6 +209,15 @@ async def test_every_tenant_table_forces_row_security_with_its_policies(superuse
             ), dict(row)
             assert "vigia.periodic_iteration" in row["qual"], dict(row)
             continue
+        if (row["tablename"], row["policyname"]) == ("node_identity", "node_enrollment_lookup"):
+            # gob_0019 (TASK-206): igual, solo dentro de fleet.vigia_node_enrollment_scope.
+            assert (row["cmd"], row["roles"], row["permissive"]) == (
+                "SELECT",
+                ["vigia_migrate"],
+                "PERMISSIVE",
+            ), dict(row)
+            assert "vigia.node_enrollment_lookup" in row["qual"], dict(row)
+            continue
         assert row["roles"] == ["public"], dict(row)
         policies.setdefault(row["tablename"], {})[row["policyname"]] = (
             f"{row['permissive']} {row['cmd']}"

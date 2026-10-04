@@ -6,10 +6,10 @@ las tres variables de sesión que leen las políticas: ``vigia.organization_id``
 ``vigia.actor_kind`` (el ``actor.kind``) y ``vigia.concession_id`` (vacía salvo bajo concesión).
 
 **Sin constructores públicos** (BR-NUC-03): ``ScopeContext(...)`` sin el sello del módulo lanza
-``TypeError``. Los cuatro constructores (sesión válida, evento de la bandeja, iteración periódica
-y orden administrativa) viven en ``identity.authz.context`` (TASK-125) y son los únicos que usan
-``_seal_scope_context``; ``tests/unit/test_scope_context.py`` falla si otro módulo de ``src/`` lo
-nombra.
+``TypeError``. Los cinco constructores (sesión válida, evento de la bandeja, iteración periódica,
+orden administrativa y, desde A-51, petición de un nodo) viven en ``identity.authz.context``
+(TASK-125, TASK-206) y son los únicos que usan ``_seal_scope_context``;
+``tests/unit/test_scope_context.py`` falla si otro módulo de ``src/`` lo nombra.
 
 ``ContextAbsent`` es la excepción de todo repositorio o adaptador invocado sin contexto: se lanza
 antes de tocar la red (BR-NUC-02).
@@ -82,12 +82,14 @@ class ActorKind(enum.StrEnum):
 
 
 class ContextOrigin(enum.StrEnum):
-    """``context_origin``: de cuál de los cuatro constructores salió el contexto."""
+    """``context_origin``: de cuál de los cinco constructores salió el contexto (A-51)."""
 
     SESSION = "session"
     OUTBOX_EVENT = "outbox_event"
     PERIODIC_ITERATION = "periodic_iteration"
     ADMIN_COMMAND = "admin_command"
+    NODE_REQUEST = "node_request"
+    """Petición de un nodo por una ruta del contrato (``context_from_node``, solo ``node_api``)."""
 
 
 class ScopeLevel(enum.StrEnum):
@@ -208,7 +210,7 @@ class AllowedScope:
 
 
 _SEAL: Final = object()
-"""Sello privado: solo ``_seal_scope_context`` (y con él los cuatro constructores) lo pasa."""
+"""Sello privado: solo ``_seal_scope_context`` (y con él los cinco constructores) lo pasa."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,7 +287,7 @@ def _seal_scope_context(
     correlation_id: uuid.UUID,
     session_id_hash: str | None = None,
 ) -> ScopeContext:
-    """Crea un ``ScopeContext`` validado. **Privado**: solo lo llaman los cuatro constructores.
+    """Crea un ``ScopeContext`` validado. **Privado**: solo lo llaman los cinco constructores.
 
     ``concession_id`` sale del actor, así que nunca puede diferir de él.
     """

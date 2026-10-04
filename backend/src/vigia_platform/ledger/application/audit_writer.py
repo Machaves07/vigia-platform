@@ -124,6 +124,10 @@ class AuditOperation(enum.StrEnum):
     NODE_CA_ROOT_PUBLISHED = "node_ca_root_published"
     """``ca/root.pem`` publicado (``outcome = error`` si la escritura falló)."""
     """``vigia-admin record-restore-drill`` al terminar el runbook 6.1 (TASK-132)."""
+    NODE_RATE_BRAKE_SET = "node_rate_brake_set"
+    """``vigia-admin set-node-rate-brake``: freno global de emergencia de las rutas del contrato
+    (TASK-206, NFR-GOB-33). La entrada **es** el ajuste: ``filters.per_minute`` con el límite
+    o ``off``; ``vigia-api`` lee la última de la proveedora."""
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto
     PRIVACY_NOTICE_ACCEPTED = "privacy_notice_accepted"
     """Nota fechada de §2.9 (NFR-NUC-29): aceptación del aviso, con la versión aceptada."""

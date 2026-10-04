@@ -1,6 +1,6 @@
 """Declaración obligatoria de cada ruta (BR-NUC-91, BR-NUC-15; PR-NUC-37; PAT-NUC-SEG-06).
 
-Denegación por defecto: toda ruta declara **exactamente una** de estas tres cosas, como
+Denegación por defecto: toda ruta declara **exactamente una** de estas cuatro cosas, como
 dependencia de FastAPI:
 
 - ``requires(clave)``: la clave de permiso que exige (``users.manage``…), que debe existir en la
@@ -15,7 +15,14 @@ dependencia de FastAPI:
   pendiente, cierre de sesión, aceptación de invitación, salud superficial, claves públicas de
   ``checkpoint`` y hash del verificador, la salud profunda, que es interna, y los estáticos de la
   aplicación de página única: pantallas, ``/assets/*``, ``/version.json`` y ``/robots.txt``);
-  método y plantilla de la ruta deben coincidir con los de la lista.
+  método y plantilla de la ruta deben coincidir con los de la lista;
+- ``node_route(NodeRoute.X)`` (A-51): la ruta es una de las **diez rutas obligatorias del
+  contrato** de U-01 bajo ``/api/nodes`` (``NodeRoute``, lista cerrada; el descubrimiento de
+  versión ``GET conformance-profile`` no se implementa en v1). Sin sesión ni clave de la matriz:
+  la identifica el certificado del nodo. Toda ruta bajo ``/api/nodes`` debe declarar
+  ``node_route`` y ninguna otra puede hacerlo; método y plantilla deben coincidir con su entrada.
+  Su límite de cuerpo es el de su entrada (``NodeRoute.max_body_bytes``), así que no declara
+  ``body_limit``.
 
 ``check_routes`` recorre las rutas de la aplicación al construirla y devuelve un problema en
 español por cada ruta sin declaración, con dos declaraciones, con una clave inexistente, que no
@@ -25,15 +32,19 @@ Starlette sin declarar). La fábrica no arranca si hay alguno. Cada declaración
 
 En la petición, ``requires`` delega en el ``Authorizer`` de la aplicación (cadena de middleware,
 TASK-134, y ``identity.authz.authorize``, TASK-125). Sin autorizador instalado **deniega** con
-``unauthenticated``: nunca deja pasar.
+``unauthenticated``: nunca deja pasar. ``node_route`` delega igual en la ``NodeGate`` de la
+aplicación (``node_api``, TASK-206: freno, tasa, versión, certificado y alcance, tamaño y
+esquema); sin ella deniega con ``internal_error``, que la clase ``node`` responde como
+``temporarily_unavailable``.
 
 La declaración es el último eslabón de la cadena fija (``request_state.ChainStep.AUTHORIZATION``):
 antes de autorizar, toda ruta (también las públicas) exige que la petición haya pasado por los
 diez eslabones anteriores en su orden y que la ruta que resolvió la cadena sea esta. Si no,
 ``internal_error``: una cadena desordenada, incompleta o que resolvió otra ruta nunca deja pasar.
 
-``body_limit(n)`` (opcional, una por ruta) declara un límite de cuerpo propio en bytes para las
-rutas del contrato de U-03 (BR-CTR-12); sin ella rige el de 1 MB de la cadena.
+``body_limit(n)`` (opcional, una por ruta de personas) declara un límite de cuerpo propio en
+bytes; sin ella rige el de 1 MB de la cadena. Las rutas del contrato no la usan: su límite es el de
+su ``NodeRoute`` (BR-CTR-12, BR-GOB-86).
 
 ``APP_SCREEN`` (``/{screen_path:path}``) solo se admite en una ruta que coincide únicamente con
 navegaciones a pantallas (``navigation_only``: la ruta de ``shared.api.static``, reconocida por su
@@ -60,18 +71,24 @@ from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
     "MAX_ROUTE_BODY_LIMIT_BYTES",
+    "NODE_GATE_STATE_KEY",
+    "NODE_PREFIX",
     "PERMISSION_KEY",
     "Authorizer",
     "DeclaredRoute",
     "DenyAll",
     "Exposure",
+    "NodeGate",
+    "NodeRoute",
     "RouteDeclaration",
     "SessionRoute",
     "UnauthenticatedRoute",
     "authenticated",
     "body_limit",
     "check_routes",
+    "is_node_path",
     "iter_declared_routes",
+    "node_route",
     "requires",
     "unauthenticated",
 ]
@@ -80,6 +97,9 @@ PERMISSION_KEY: Final = re.compile(r"[a-z][a-z_]{0,31}(?:\.[a-z][a-z_]{0,31}){1,
 """Forma de una clave de permiso (``ledger.read``, ``platform.keys.rotate``)."""
 MAX_ROUTE_BODY_LIMIT_BYTES: Final = 16 * 1024 * 1024
 """Tope de un límite de cuerpo propio (``body_limit``) ``[objetivo propio]``."""
+NODE_PREFIX: Final = "/api/nodes"
+"""Prefijo de las rutas del contrato (``ingest_base_url``, ``domain-entities.md`` §4 de U-01)."""
+NODE_GATE_STATE_KEY: Final = "vigia_node_gate"
 
 _log = get_logger("shared.api.declarations")
 
@@ -154,6 +174,75 @@ class SessionRoute(enum.Enum):
         return str(self.value[1])
 
 
+class NodeRoute(enum.Enum):
+    """Las diez rutas obligatorias del contrato (A-51; ``domain-entities.md`` §4 de U-01).
+
+    Cada entrada: ``operation_id`` de ``ingest.yaml``, método, plantilla relativa a
+    ``/api/nodes`` y límite del cuerpo **descomprimido** en bytes (BR-CTR-12 y la nota de
+    NFR-GOB-33: 16 KB la rotación y sin cuerpo la confirmación y el catálogo). Añadir una entrada
+    es un cambio revisado del código; ``tests/unit/test_node_route_declarations.py`` la compara con
+    ``OPERATIONS`` del esqueleto de U-01.
+    """
+
+    ENROLLMENT = ("post_enrollment", "POST", "/enrollment", 16_384)
+    CREDENTIAL_ROTATION = ("post_credential_rotation", "POST", "/credential-rotations", 16_384)
+    HEARTBEAT = ("post_heartbeat", "POST", "/heartbeats", 65_536)
+    FINDING = ("post_finding", "POST", "/findings", 262_144)
+    DETECTION_REVIEW = ("post_detection_review", "POST", "/detection-reviews", 262_144)
+    OBSERVABILITY_EVENT = ("post_observability_event", "POST", "/observability-events", 65_536)
+    CLIP_UPLOAD = ("post_clip_upload", "POST", "/clip-uploads", 16_384)
+    CLIP_CONFIRMATION = (
+        "post_clip_upload_confirmation",
+        "POST",
+        "/clip-uploads/{clip_id}/confirmation",
+        0,
+    )
+    ZONE_CATALOG = ("get_zone_catalog", "GET", "/zones/{zone_id}/catalog", 0)
+    UPDATE_RESULT = ("post_update_result", "POST", "/update-results", 65_536)
+
+    @property
+    def operation_id(self) -> str:
+        return str(self.value[0])
+
+    @property
+    def method(self) -> str:
+        return str(self.value[1])
+
+    @property
+    def relative_path(self) -> str:
+        """La plantilla de ``ingest.yaml``, relativa a ``ingest_base_url``."""
+        return str(self.value[2])
+
+    @property
+    def path(self) -> str:
+        """La plantilla completa en la aplicación (``/api/nodes/...``)."""
+        return NODE_PREFIX + self.relative_path
+
+    @property
+    def max_body_bytes(self) -> int:
+        """Límite del cuerpo descomprimido; ``0``: la ruta no admite cuerpo."""
+        return int(self.value[3])
+
+    @property
+    def mutual_tls(self) -> bool:
+        """Toda ruta del contrato exige certificado salvo el alta (BR-GOB-62)."""
+        return self is not NodeRoute.ENROLLMENT
+
+
+def is_node_path(path: str) -> bool:
+    """``True`` para ``/api/nodes`` y todo lo que cuelga de ``/api/nodes/`` (clase ``node``)."""
+    return path == NODE_PREFIX or path.startswith(NODE_PREFIX + "/")
+
+
+class NodeGate(Protocol):
+    """Verificación previa común de una ruta del contrato (``node_api``, TASK-206).
+
+    Lanza la excepción del rechazo; la cadena la responde como ``RejectionResponse``.
+    """
+
+    async def admit(self, request: Request, route: NodeRoute) -> None: ...
+
+
 class Authorizer(Protocol):
     """Autorización de una petición para una clave (TASK-134 y TASK-125 la implementan).
 
@@ -181,6 +270,8 @@ class RouteDeclaration:
     unauthenticated: UnauthenticatedRoute | None
     detail_codes: tuple[str, ...]
     session: SessionRoute | None = None
+    node: NodeRoute | None = None
+    """La entrada de ``NodeRoute`` de una ruta del contrato (A-51)."""
 
     @property
     def requires_session(self) -> bool:
@@ -212,6 +303,14 @@ class _Declared:
             if request_state(request.scope).session is None:
                 raise ApiError(ApiErrorCode.UNAUTHENTICATED)
             return
+        node = self.declaration.node
+        if node is not None:
+            gate = getattr(request.app.state, NODE_GATE_STATE_KEY, None)
+            if gate is None:
+                _log.error("ruta del contrato sin verificación de nodo instalada: se deniega")
+                raise ApiError(ApiErrorCode.INTERNAL_ERROR)
+            await gate.admit(request, node)
+            return
         permission = self.declaration.permission
         if permission is None:
             return
@@ -238,6 +337,13 @@ def authenticated(route: SessionRoute, *, detail_codes: Iterable[str] = ()) -> A
     if not isinstance(route, SessionRoute):
         raise TypeError("route debe ser SessionRoute")
     return Depends(_Declared(RouteDeclaration(None, None, tuple(detail_codes), session=route)))
+
+
+def node_route(route: NodeRoute) -> Any:
+    """Dependencia que declara la ruta como la entrada ``route`` del contrato (A-51)."""
+    if not isinstance(route, NodeRoute):
+        raise TypeError("route debe ser NodeRoute")
+    return Depends(_Declared(RouteDeclaration(None, None, (), node=route)))
 
 
 class _BodyLimit:
@@ -328,6 +434,11 @@ def _route_problems(
     methods = sorted(route.methods)
     where = f"{'/'.join(methods) or '?'} {route.path}"
     declarations = route.declarations
+    if not declarations and is_node_path(route.path):
+        return [
+            f"la ruta {where} está bajo {NODE_PREFIX} y no declara node_route: las rutas del "
+            "contrato se declaran con NodeRoute (A-51)"
+        ]
     if not declarations:
         return [
             f"la ruta {where} no declara su clave de permiso ni está en la lista pública "
@@ -339,6 +450,15 @@ def _route_problems(
     problems: list[str] = []
     if len(route.body_limits) > 1:
         problems.append(f"la ruta {where} declara {len(route.body_limits)} límites de cuerpo")
+    if is_node_path(route.path) and declaration.node is None:
+        problems.append(
+            f"la ruta {where} está bajo {NODE_PREFIX} y no declara node_route: las rutas del "
+            "contrato se declaran con NodeRoute (A-51)"
+        )
+    if declaration.node is not None and route.body_limits:
+        problems.append(
+            f"la ruta {where} es del contrato: su límite de cuerpo es el de su NodeRoute"
+        )
     if (declaration.unauthenticated is UnauthenticatedRoute.APP_SCREEN) != route.navigation_only:
         problems.append(
             f"la ruta {where}: «APP_SCREEN» solo se admite en la ruta de pantallas, que coincide "
@@ -367,6 +487,13 @@ def _route_problems(
             f"la ruta {where} dice ser «{session.name}» de las rutas de sesión, que es "
             f"{session.method} {session.path}"
         )
+    elif (node := declaration.node) is not None and (
+        route.path != node.path or set(methods) - {"HEAD"} != {node.method}
+    ):
+        problems.append(
+            f"la ruta {where} dice ser «{node.name}» de las rutas del contrato, que es "
+            f"{node.method} {node.path}"
+        )
     problems.extend(
         f"la ruta {where} responde el detail_code «{code}», que ninguna unidad registró"
         for code in declaration.detail_codes
@@ -384,7 +511,7 @@ def check_routes(
 ) -> list[str]:
     """Problemas de declaración de ``routes`` (vacío si todas cumplen BR-NUC-91)."""
     problems: list[str] = []
-    seen: set[UnauthenticatedRoute | SessionRoute] = set()
+    seen: set[UnauthenticatedRoute | SessionRoute | NodeRoute] = set()
     for route in iter_declared_routes(routes):
         if not route.is_api_route:
             if docs_enabled and route.path in _DOCS_PATHS and not route.declarations:
@@ -396,7 +523,7 @@ def check_routes(
             continue
         problems.extend(_route_problems(route, known_permissions, detail_codes))
         for declaration in route.declarations[:1]:
-            entry = declaration.unauthenticated or declaration.session
+            entry = declaration.unauthenticated or declaration.session or declaration.node
             if entry is not None and entry in seen:
                 problems.append(f"la entrada «{entry.name}» de una lista cerrada está repetida")
             if entry is not None:
