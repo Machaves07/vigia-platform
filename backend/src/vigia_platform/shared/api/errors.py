@@ -20,11 +20,12 @@ pendiente nº 33): ``{code, detail_code?, message_es, correlation_id, retry_afte
 ``translate`` convierte cualquier excepción en un ``ApiError``: ``ApiError`` tal cual;
 ``ContextAbsent`` y todo lo desconocido en ``internal_error`` (una excepción en autorización,
 contexto o validación **deniega**, BR-NUC-93); ``ExternalDependencyDown``, los fallos
-transitorios de la base, del gestor de secretos y los tiempos de espera en
-``temporarily_unavailable``; el almacén caído en ``storage_unavailable``; la validación de
-FastAPI en ``invalid_request``; ``ResourceNotFound`` de ``authorize`` (sin la clave o fuera de
-alcance) en ``not_found``, nunca ``forbidden`` (BR-NUC-09); ``ContextUnavailable`` en
-``unauthenticated`` (sin sesión utilizable) o ``not_found`` (concesión no vigente).
+transitorios de la base, del gestor de secretos, el mamparo saturado (``BulkheadSaturated``, con
+su ``retry_after_seconds``) y los tiempos de espera en ``temporarily_unavailable``; el almacén
+caído en ``storage_unavailable``; la validación de FastAPI en ``invalid_request``;
+``ResourceNotFound`` de ``authorize`` (sin la clave o fuera de alcance) en ``not_found``, nunca
+``forbidden`` (BR-NUC-09); ``ContextUnavailable`` en ``unauthenticated`` (sin sesión utilizable)
+o ``not_found`` (concesión no vigente).
 ``from_ledger_rejection`` traduce un ``LedgerRejection``.
 
 ``ErrorBoundary`` es el manejador global (paso 2 de la cadena de PAT-NUC-SEG-06, que ordena
@@ -53,6 +54,7 @@ from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.labels import PlatformLabels
+from vigia_platform.shared.bulkheads import BulkheadSaturated
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ContextAbsent
 from vigia_platform.shared.db import TransientDatabaseError
@@ -343,7 +345,10 @@ def translate(error: BaseException) -> ApiError:
         return ApiError(_HTTP_EXCEPTION_CODES.get(error.status_code, ApiErrorCode.INTERNAL_ERROR))
     if isinstance(error, StorageUnavailable):
         return ApiError(ApiErrorCode.STORAGE_UNAVAILABLE)
-    if isinstance(error, ExternalDependencyDown | SecretsUnavailable | TransientDatabaseError):
+    if isinstance(
+        error,
+        ExternalDependencyDown | SecretsUnavailable | TransientDatabaseError | BulkheadSaturated,
+    ):
         retry = getattr(error, "retry_after_seconds", DEFAULT_RETRY_AFTER_SECONDS)
         valid = type(retry) is int and 1 <= retry <= MAX_RETRY_AFTER_SECONDS
         return ApiError(

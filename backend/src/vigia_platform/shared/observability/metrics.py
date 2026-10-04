@@ -101,6 +101,11 @@ class MetricName(enum.StrEnum):
     DB_POOL_SIZE = "db_pool_size"
     DB_POOL_RECONNECTS_TOTAL = "db_pool_reconnects_total"
     CPU_POOL_WAIT_MS = "cpu_pool_wait_ms"
+    # Mamparos por clase de ruta (U-03, NFR-GOB-19)
+    BULKHEAD_IN_USE = "bulkhead_in_use"
+    BULKHEAD_SIZE = "bulkhead_size"
+    BULKHEAD_WAIT_MS = "bulkhead_wait_ms"
+    BULKHEAD_REJECTED_TOTAL = "bulkhead_rejected_total"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -214,6 +219,16 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "pool_class"),
     _spec(_N.CPU_POOL_WAIT_MS, _H, "ms", "Espera en cola del pool de hilos de CPU.",
           "PAT-NUC-REN-05"),
+    # Mamparos por clase de ruta (LC-GOB-20): por pool_class, nunca por nodo; alimentan la alarma
+    # bulkhead-person-saturated (§8.1 de U-03).
+    _spec(_N.BULKHEAD_IN_USE, _G, "{request}", "Peticiones en curso dentro del mamparo.",
+          "NFR-GOB-19", "pool_class"),
+    _spec(_N.BULKHEAD_SIZE, _G, "{request}", "Puestos del mamparo por trabajador.", "NFR-GOB-19",
+          "pool_class"),
+    _spec(_N.BULKHEAD_WAIT_MS, _H, "ms", "Espera hasta obtener puesto o ser rechazada.",
+          "NFR-GOB-19", "pool_class"),
+    _spec(_N.BULKHEAD_REJECTED_TOTAL, _C, "{request}",
+          "Rechazos temporarily_unavailable del mamparo.", "NFR-GOB-19", "pool_class"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -397,6 +412,10 @@ class PlatformMetrics:
         self.db_pool_size = gauge(_N.DB_POOL_SIZE)
         self.db_pool_reconnects_total = counter(_N.DB_POOL_RECONNECTS_TOTAL)
         self.cpu_pool_wait_ms = histogram(_N.CPU_POOL_WAIT_MS)
+        self.bulkhead_in_use = gauge(_N.BULKHEAD_IN_USE)
+        self.bulkhead_size = gauge(_N.BULKHEAD_SIZE)
+        self.bulkhead_wait_ms = histogram(_N.BULKHEAD_WAIT_MS)
+        self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)
