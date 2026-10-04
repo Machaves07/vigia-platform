@@ -15,6 +15,9 @@ from fastapi import Request
 
 from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.documents import DocumentService
+from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.plant_policy import PlantPolicyService
+from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -32,6 +35,12 @@ class CatalogHttp:
     admissions: AdmissionService | None = None
     documents: DocumentService | None = None
     """``POST /documents`` (LC-GOB-05, VIG-143)."""
+    gates: GateService | None = None
+    """``GET /zones/{zone_id}/gates`` y la revocación (LC-GOB-03, VIG-146)."""
+    scope_records: ScopeRecordService | None = None
+    """Acta de alcance de la compuerta de montaje (LC-GOB-03, VIG-146)."""
+    plant_policies: PlantPolicyService | None = None
+    """``POST`` y ``GET /plants/{plant_id}/policy`` (LC-GOB-03, VIG-146)."""
 
 
 def installed[T](service: T | None) -> T:
