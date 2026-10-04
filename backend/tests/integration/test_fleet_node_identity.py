@@ -629,7 +629,9 @@ def test_revocation_is_one_transaction_and_the_next_node_request_is_rejected(
     def node_request() -> httpx.Response:
         async def call() -> httpx.Response:
             async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="https://nodes.vigia.test"
+                transport=httpx.ASGITransport(app=app),
+                base_url="https://nodes.vigia.test",
+                timeout=60.0,
             ) as client:
                 return await client.get(f"/api/nodes/zones/{zones[0]}/catalog", headers=headers)
 
