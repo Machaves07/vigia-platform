@@ -185,6 +185,8 @@ GATE_STATE_HISTORY: Final = Table(
     _uuid("decided_by"),
     _text("reason_es", nullable=True),
     _uuid("ledger_record_id"),
+    # gob_0019: el acta (montaje) o el acuerdo (uso) del intervalo.
+    _uuid("record_id", nullable=True),
 )
 """§2.5 ``GateStateHistory`` ⛓; cierre ``effective_until``; exclusión ``gate_state_no_overlap``."""
 
