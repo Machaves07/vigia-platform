@@ -157,7 +157,7 @@ class AuthzEnvironment:
                 " 'Planta sintética', 'CO', 'us-east-1', 'America/Bogota', $4, $5)",
                 plant_id,
                 organization_id,
-                f"PL-{secrets.token_hex(3).upper()}",
+                f"PL-{secrets.token_hex(8).upper()}",
                 BASE_TIME,
                 self.operator_id,
             )
@@ -174,7 +174,7 @@ class AuthzEnvironment:
             zone_id,
             organization_id,
             plant_id,
-            f"ZN-{secrets.token_hex(3).upper()}",
+            f"ZN-{secrets.token_hex(8).upper()}",
             BASE_TIME,
             self.operator_id,
         )

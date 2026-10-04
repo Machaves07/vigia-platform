@@ -222,7 +222,7 @@ def _seed_site(env: AuthzEnvironment, site: Site) -> None:
             node_id,
             organization_id,
             plant_id,
-            f"ND-{secrets.token_hex(3).upper()}",
+            f"ND-{secrets.token_hex(8).upper()}",
             BASE_TIME,
         )
         env.execute(
