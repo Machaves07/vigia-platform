@@ -96,7 +96,7 @@ from vigia_platform.ledger.application.writer import (
 from vigia_platform.ledger.free_text import FreeTextField, FreeTextPolicyRegistry, FreeTextRejected
 from vigia_platform.shared.api.errors import ApiErrorCode, ExternalDependencyDown
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, Role, ScopeContext
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent
@@ -186,6 +186,7 @@ class RegressionMarker(Protocol):
     ) -> None: ...
 
 
+@repository
 class NullRegressionMarker:
     """No marca nada (TASK-209 trae la marca real)."""
 
@@ -235,6 +236,7 @@ class _RaceLost(Exception):
 # --- Servicio --------------------------------------------------------------------------------
 
 
+@repository
 class CatalogPublicationService:
     """``catalog.versions``: publicar una versión y leer el sobre almacenado."""
 
