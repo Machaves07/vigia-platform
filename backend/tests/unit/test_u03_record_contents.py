@@ -47,6 +47,49 @@ def _invalid(record_type: str, document: dict[str, Any], message: str) -> None:
         _valid(record_type, document)
 
 
+# --- la tabla de §5: clave de idempotencia y eventos de cada tipo -----------------------------
+
+TABLE: dict[str, tuple[str | None, tuple[str, ...]]] = {
+    "finding_received": ("/finding_id", ("finding_received",)),
+    "detection_for_review_received": ("/detection_id", ("detection_for_review_received",)),
+    "observability_event_received": ("/event_id", ("observability_event_received",)),
+    "node_communication_state_changed": (None, ()),
+    "node_enrolled": ("/source_key", ("node_enrolled",)),
+    "node_credential_rotated": ("/credential_id", ()),
+    "node_revoked": (None, ("node_revoked",)),
+    "update_result_received": ("/update_result_id", ("update_result_received",)),
+    "node_target_version_published": ("/publication_id", ("target_version_published",)),
+    "catalog_version_published": ("/source_key", ("catalog_updated", "regression_marked")),
+    "standard_admission_test": ("/admission_id", ()),
+    "gate_state_changed": (None, ("gate_state_changed", "zone_activated")),
+    "mounting_gate_record": ("/record_id", ("gate_state_changed",)),
+    "use_agreement_signed": ("/agreement_id", ("gate_state_changed", "zone_activated")),
+    "commissioning_step": ("/step_id", ()),
+    "walk_test_result": ("/commissioning_record_id", ("regression_cleared",)),
+    "plant_policy_signed": ("/policy_id", ()),
+    "occlusion_test_result": ("/test_id", ()),
+    "walk_test_regression_marked": (None, ("regression_marked",)),
+    "walk_test_regression_cleared": (None, ("regression_cleared",)),
+    "catalog_standard_retired": ("/source_key", ("catalog_updated",)),
+    "single_occupancy_declared": ("/source_key", ("catalog_updated",)),
+    "node_decommissioned": ("/node_id", ("node_decommissioned",)),
+    "enrollment_code_issued": ("/code_id", ()),
+    "enrollment_attempt_rejected": ("/attempt_id", ()),
+    "ingest_rejected": (None, ()),
+}
+"""``source_key`` y «Eventos que publica» de ``domain-entities.md`` §5; las claves compuestas
+(``zone_id`` + ``catalog_version``, ``standard_id`` + ``version``, ``node_id`` +
+``credential_id``) van en el campo ``source_key``, que el modelo comprueba contra sus partes."""
+
+
+@pytest.mark.parametrize("record_type", sorted(TABLE))
+def test_source_key_and_events_are_those_of_the_table(record_type: str) -> None:
+    source_key_path, events = TABLE[record_type]
+    definition = REGISTRY.get(record_type).definition
+    assert definition.source_key_path == source_key_path
+    assert definition.outbox_events == events
+
+
 # --- claves compuestas ------------------------------------------------------------------------
 
 
