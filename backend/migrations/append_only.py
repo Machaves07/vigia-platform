@@ -3,7 +3,8 @@
 Ninguna migración puede ejecutar ``DROP TABLE``, ``TRUNCATE`` ni ``DELETE`` sobre ellas, ni
 ``DROP SCHEMA`` sobre un esquema que las contenga (``tools/lint_migrations.py``, regla MIG002).
 Una tabla cuenta también por sus particiones: ``shared.audit_entry`` protege
-``shared.audit_entry_2026_10``.
+``shared.audit_entry_2026_10`` y ``fleet.heartbeat_history`` protege
+``fleet.heartbeat_history_2026_10``.
 
 - ``APPEND_ONLY_SCHEMAS``: esquemas enteros de solo anexar. ``ledger`` lo es entero (fallo
   cerrado: el expediente no se borra, P4; también ``ledger.record_type``, porque retirar un tipo
@@ -48,5 +49,12 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "catalog.walk_test_pass",
         "catalog.occlusion_test",
         "catalog.commissioning_record",
+        # fleet (TASK-203, gob_0018); las tres primeras, particionadas por mes
+        "fleet.enrollment_attempt",
+        "fleet.heartbeat_history",
+        "fleet.fleet_alarm",
+        "fleet.target_version_publication",
+        "fleet.update_result",
+        "fleet.verification_clip",
     }
 )
