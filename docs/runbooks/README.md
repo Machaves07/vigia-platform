@@ -45,5 +45,11 @@ python .github/scripts/staging.py run-task --environment pilot --task migrate   
 
 ### Estado en el código (común)
 
-- **Raíz de composición pendiente.** `vigia-api`, `vigia-worker` y `vigia-admin` reciben sus dependencias del constructor que nombran `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME`. Ningún módulo de `backend/src/` implementa todavía ese constructor y `infra/stacks/compute.py` no fija esas variables; hoy solo existen los de las pruebas (`backend/tests/admin_support.py`, `backend/tests/worker_process.py`). Hasta que llegue la raíz de composición, las tareas desplegadas terminan con código 3 o 1 sin arrancar. Es una precondición del primer despliegue (VIG-98), no de estos runbooks.
+- **Raíz de composición (VIG-137, A-52).** `vigia-api`, `vigia-worker` y `vigia-admin` reciben sus dependencias de `backend/src/vigia_platform/shared/runtime/`. `infra/stacks/compute.py` fija `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME`, y además `VIGIA_PUBLIC_ORIGIN` en la API y en `vigia-admin`.
+  - La raíz lee la credencial de `vigia_app` del secreto de `VIGIA_DB_APP_SECRET`, sin contraseñas en variables.
+  - Si falta una variable o el secreto no existe, la API y el worker salen con código 3, y `vigia-admin` con 1 y `config_invalid`. La salida de errores nombra la variable, nunca su valor.
+- **`VIGIA_PROVIDER_ORGANIZATION_ID` llega con un contexto de CDK.** La API y el worker la exigen, igual que `vigia-admin`. La organización proveedora no existe hasta `vigia-admin bootstrap`, así que la variable entra en las tres definiciones de tarea solo con `--context provider_organization_id=<UUID que imprime bootstrap>`. Sin ese contexto, la API y el worker no arrancan. El orden de pasos lo fija el primer despliegue (VIG-98).
+- **Precondiciones del primer despliegue que deja la raíz** (VIG-98):
+  - la imagen no trae `resources/pwned-top100k.txt`: la API no arranca sin ese respaldo (`VIGIA_BREACH_LIST_PATH`);
+  - la imagen no trae el certificado raíz de RDS. Con `PGSSLMODE=verify-full`, que es el valor por defecto, hace falta `PGSSLROOTCERT`.
 - `staging.py run-task` acepta `--environment pilot` o `staging-<n>`. Una instancia dedicada (`instance=<cliente>`) todavía no tiene entrada en el guion.

@@ -60,31 +60,23 @@ import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final, Protocol
 
 from fastapi import APIRouter, FastAPI
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp, identity_routers
+from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
-from vigia_platform.ledger.adapters.http import LEDGER_STATE_KEY, LedgerHttp, ledger_routers
-from vigia_platform.ledger.application.audit_writer import AuditOutcome
-from vigia_platform.ledger.domain.coverage import (
-    CommunicationState,
-    CoverageLayer,
-    CoverageState,
-    PlatformCause,
-)
-from vigia_platform.ledger.registry import ChainLevel
+from vigia_platform.ledger.adapters.http import LEDGER_STATE_KEY, LedgerHttp
 from vigia_platform.shared.adapters.http import (
     DEFAULT_VERIFIER_PATH,
     PLATFORM_STATE_KEY,
     VERIFIER_STATE_KEY,
     PlatformHttp,
     VerifierDigest,
-    shared_routers,
 )
 from vigia_platform.shared.api.app_state import API_VERSION_STATE_KEY, PRIVACY_NOTICE_STATE_KEY
 from vigia_platform.shared.api.declarations import (
@@ -96,7 +88,6 @@ from vigia_platform.shared.api.declarations import (
 )
 from vigia_platform.shared.api.errors import (
     ApiErrorBody,
-    ApiErrorCode,
     ApiStartupError,
     DetailCodeRegistry,
     ErrorCatalog,
@@ -109,7 +100,6 @@ from vigia_platform.shared.api.health import (
     ReadinessCheck,
     ReadinessProbe,
     SentinelPort,
-    health_router,
 )
 from vigia_platform.shared.api.labels import DEFAULT_LABELS_PATH, LabelsInvalid, PlatformLabels
 from vigia_platform.shared.api.middleware import (
@@ -130,7 +120,6 @@ from vigia_platform.shared.api.static import (
     static_routers,
 )
 from vigia_platform.shared.clock import Clock, SystemClock
-from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeLevel
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.observability.redaction import (
@@ -139,9 +128,10 @@ from vigia_platform.shared.observability.redaction import (
     redact_text,
 )
 from vigia_platform.shared.ratelimit import RateLimiter
+from vigia_platform.shared.runtime.units import label_bindings, registered_units
 from vigia_platform.shared.schema_version import MINIMUM_SCHEMA_VERSION
 from vigia_platform.shared.secrets import KmsPort
-from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
+from vigia_platform.shared.signing.keys import SigningPurpose
 
 __all__ = [
     "API_TITLE",
@@ -180,22 +170,11 @@ _ROUTE_TEMPLATE: Final = re.compile(r"^[A-Za-z0-9_./{}:-]{1,128}$")
 
 _log = get_logger("shared.api.app")
 
-LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
-    "api_error_code": ApiErrorCode,
-    "role": Role,
-    "scope_level": ScopeLevel,
-    "actor_kind": ActorKind,
-    "context_origin": ContextOrigin,
-    "signing_purpose": SigningPurpose,
-    "key_status": KeyStatus,
-    "chain_level": ChainLevel,
-    "audit_outcome": AuditOutcome,
-    "coverage_state": CoverageState,
-    "coverage_layer": CoverageLayer,
-    "platform_cause": PlatformCause,
-    "communication_state": CommunicationState,
-}
-"""Enumeraciones del código cuyos miembros deben tener etiqueta (fallo cerrado, NFR-NUC-51)."""
+LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = MappingProxyType(
+    label_bindings(registered_units())
+)
+"""Enumeraciones del código cuyos miembros deben tener etiqueta (fallo cerrado, NFR-NUC-51): las
+que declara cada unidad en el registro por unidad (``shared.runtime.units``, A-52)."""
 
 
 # --- Configuración -----------------------------------------------------------------------------
@@ -342,6 +321,9 @@ class AppRuntime:
     vivo y auditoría (TASK-137); sin ellos, ``internal_error``."""
     platform: PlatformHttp | None = None
     """Firma, cola muerta y auditoría de las claves públicas y de la operación (TASK-137)."""
+    state: Mapping[str, object] = field(default_factory=dict)
+    """Servicios que cada unidad deja en ``app.state`` para sus rutas (``units.api_state``); una
+    clave que ya fijó la fábrica no se puede pisar."""
 
 
 # --- Arranque ----------------------------------------------------------------------------------
@@ -487,24 +469,30 @@ class StartupSupervisor:
 
 @dataclass(frozen=True, slots=True)
 class UnitRegistration:
-    """Lo que una unidad aporta a la aplicación: enrutadores y ``detail_code``."""
+    """Lo que una unidad aporta a la aplicación: enrutadores, ``detail_code`` y enumeraciones
+    con etiqueta."""
 
     name: str
     routers: tuple[APIRouter, ...] = ()
     detail_codes: tuple[str, ...] = ()
+    labels: Mapping[str, type[enum.Enum]] = field(default_factory=dict)
 
 
 def platform_units() -> tuple[UnitRegistration, ...]:
-    """Unidades registradas en ``vigia-api``.
+    """Unidades registradas en ``vigia-api``, leídas del registro por unidad (A-52).
 
-    ``shared`` (salud, claves públicas, hash del verificador y operación), ``identity``
-    (TASK-135, 136) y ``ledger`` (TASK-137); U-03, U-04 y U-05 añaden aquí los suyos con sus
-    ``detail_code``.
+    U-02 aporta ``shared`` (salud, claves públicas, hash del verificador y operación),
+    ``identity`` (TASK-135, 136) y ``ledger`` (TASK-137); U-03, U-04 y U-05 añaden su entrada a
+    ``shared.runtime.units.REGISTERED_UNITS`` con sus ``detail_code``.
     """
-    return (
-        UnitRegistration("shared", routers=(health_router(), *shared_routers())),
-        UnitRegistration("identity", routers=identity_routers()),
-        UnitRegistration("ledger", routers=ledger_routers()),
+    return tuple(
+        UnitRegistration(
+            unit.name,
+            routers=unit.routers(),
+            detail_codes=unit.detail_codes,
+            labels=unit.labels,
+        )
+        for unit in registered_units()
     )
 
 
@@ -519,12 +507,24 @@ def platform_permissions() -> frozenset[str]:
 # --- Fábrica -----------------------------------------------------------------------------------
 
 
-def _labels(config: AppConfig) -> PlatformLabels:
+def _bindings(units: Iterable[UnitRegistration]) -> dict[str, type[enum.Enum]]:
+    """``LABEL_BINDINGS`` más las enumeraciones de ``units``; un nombre con dos enumeraciones
+    distintas no arranca."""
+    bindings = dict(LABEL_BINDINGS)
+    for unit in units:
+        for name, enumeration in unit.labels.items():
+            if bindings.get(name, enumeration) is not enumeration:
+                raise ApiStartupError([f"la enumeración con etiqueta «{name}» está repetida"])
+            bindings[name] = enumeration
+    return bindings
+
+
+def _labels(config: AppConfig, units: Iterable[UnitRegistration] = ()) -> PlatformLabels:
     try:
         labels = PlatformLabels.load(config.labels_path)
     except LabelsInvalid as error:
         raise ApiStartupError([str(error)]) from None
-    problems = labels.require_complete(LABEL_BINDINGS)
+    problems = labels.require_complete(_bindings(units))
     if problems:
         raise ApiStartupError(problems)
     return labels
@@ -588,7 +588,7 @@ def _assemble(
     site: StaticSite,
     runtime: AppRuntime | None = None,
 ) -> FastAPI:
-    labels = _labels(config)
+    labels = _labels(config, units)
     detail_codes = _detail_codes(units)
     catalog = ErrorCatalog(labels, detail_codes)
     docs = config.docs_enabled
@@ -734,6 +734,10 @@ def create_app(
     setattr(app.state, API_VERSION_STATE_KEY, site.app_version)
     setattr(app.state, READINESS_STATE_KEY, supervisor)
     setattr(app.state, HEALTH_RECORDER_STATE_KEY, recorder)
+    for key, value in runtime.state.items():
+        if getattr(app.state, key, None) is not None:
+            raise ApiStartupError([f"la clave de app.state «{key}» ya está en uso"])
+        setattr(app.state, key, value)
     return app
 
 

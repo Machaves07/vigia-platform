@@ -17,6 +17,9 @@ valores por defecto; ``--context clave=valor`` los sustituye):
   (contingencia de R2: balanceador de red con paso directo y terminación en la aplicación,
   infrastructure-design §4.3).
 
+Y uno opcional, fuera de ``cdk.json``: ``provider_organization_id``, la organización proveedora
+que imprime ``vigia-admin bootstrap`` (se pasa con ``--context`` a partir del paso que la crea).
+
 Un valor fuera de su forma cerrada detiene la síntesis con un mensaje en español: nunca
 se sintetiza un despliegue con un contexto adivinado.
 """
@@ -40,6 +43,10 @@ CONTEXT_FIRST_DEPLOY = "first_deploy"
 CONTEXT_CA_ROTATION = "ca_rotation"
 CONTEXT_NAT_PER_AZ = "nat_per_az"
 CONTEXT_NODES_TLS_MODE = "nodes_tls_mode"
+CONTEXT_PROVIDER_ORGANIZATION = "provider_organization_id"
+"""Opcional (no está en ``cdk.json``): la organización proveedora que creó ``vigia-admin
+bootstrap``. Con él, ``vigia-api``, ``vigia-worker`` y ``vigia-admin`` reciben
+``VIGIA_PROVIDER_ORGANIZATION_ID``; sin él, no (raíz de composición, VIG-137)."""
 CONTEXT_KEYS = (
     CONTEXT_ENVIRONMENT,
     CONTEXT_INSTANCE,
@@ -55,6 +62,7 @@ _STAGING = re.compile(r"^staging-([1-9][0-9]{0,8})$")
 # depósitos (63 caracteres) y de pilas, así que se acota a 20 caracteres.
 _INSTANCE = re.compile(r"^[a-z][a-z0-9-]{0,18}[a-z0-9]$")
 _RESERVED_INSTANCES = frozenset({PILOT, SHARED_INSTANCE})
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 # Límites de S3 e IAM y los nombres más largos que llevan el sufijo del despliegue
 # (``vigia-evidence-...`` en §6.2; ``vigia-task-execution-...`` en §8).
 _BUCKET_NAME_MAX = 63
@@ -151,6 +159,9 @@ class EnvironmentConfig:
     nodes_tls_mode: NodesTlsMode = NodesTlsMode.MTLS
 
     region: str = REGION
+
+    # Raíz de composición (VIG-137): la proveedora de ``vigia-admin bootstrap``, si ya existe.
+    provider_organization_id: str | None = None
 
     def __post_init__(self) -> None:
         """Los nombres más largos del despliegue caben en los límites de sus servicios."""
@@ -274,6 +285,19 @@ def parse_nodes_tls_mode(value: object) -> NodesTlsMode:
         f"El contexto '{CONTEXT_NODES_TLS_MODE}' debe ser 'mtls' o 'passthrough'; "
         f"se recibió {value!r}."
     )
+
+
+def parse_provider_organization(value: object) -> str | None:
+    """Lee ``provider_organization_id`` (opcional): el UUID canónico que imprime
+    ``vigia-admin bootstrap``; ausente o vacío, ``None``."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or not _UUID.match(value):
+        raise ContextError(
+            f"El contexto '{CONTEXT_PROVIDER_ORGANIZATION}' debe ser el UUID en minúsculas que "
+            "imprime vigia-admin bootstrap (provider_organization_id); el valor no es válido."
+        )
+    return value
 
 
 def require(context: Mapping[str, object], key: str) -> object:
