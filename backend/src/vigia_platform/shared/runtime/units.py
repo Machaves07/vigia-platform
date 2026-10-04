@@ -45,6 +45,10 @@ from fastapi import APIRouter
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
 
+from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
+from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import identity_routers
 from vigia_platform.identity.adapters.session_store import register_session_tasks
@@ -400,6 +404,16 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
         record_types=register_u02_record_types,
         consumers=_ledger_consumers,
         periodic_tasks=_ledger_tasks,
+    ),
+    # U-03 (VIG-139): por ahora solo las etiquetas de sus 21 enumeraciones y de sus detail_code
+    # (NFR-GOB-67). Tipos, eventos, detail_code y validador los conecta VIG-163 (TASK-227).
+    PlatformUnit(
+        name="catalog",
+        labels={**CATALOG_LABEL_BINDINGS, **CATALOG_DETAIL_CODE_LABEL_BINDINGS},
+    ),
+    PlatformUnit(
+        name="fleet",
+        labels={**FLEET_LABEL_BINDINGS, **FLEET_DETAIL_CODE_LABEL_BINDINGS},
     ),
 )
 """Las unidades registradas, en orden de registro. U-03 y U-04 añaden aquí su entrada."""

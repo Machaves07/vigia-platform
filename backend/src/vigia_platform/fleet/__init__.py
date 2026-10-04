@@ -1,1 +1,1 @@
-"""Módulo de flota (esquema ``fleet``): identidad, credenciales, inventario, latidos y alarmas."""
+"""Módulo de la flota (esquema ``fleet``): identidad del nodo, alta, inventario y versiones."""
