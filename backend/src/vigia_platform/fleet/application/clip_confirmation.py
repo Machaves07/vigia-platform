@@ -202,9 +202,10 @@ class CommissioningClips:
         authorizer: ClipAuthorizer,
         audit: AuditWriter,
         clock: Clock,
+        grants: PostgresClipGrants | None = None,
     ) -> None:
         self._database = database
-        self._grants = PostgresClipGrants(database)
+        self._grants = grants if grants is not None else PostgresClipGrants(database)
         self._authorizer = authorizer
         self._audit = audit
         self._clock = clock
