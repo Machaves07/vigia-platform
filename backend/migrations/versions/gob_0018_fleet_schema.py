@@ -13,10 +13,13 @@ TASK-226) solo escriben repositorios encima.
 - **Particiones mensuales** (UTC) de ``heartbeat_history`` (``received_at``),
   ``enrollment_attempt`` (``attempted_at``) y ``fleet_alarm`` (``raised_at``), con partición por
   defecto; esta migración crea el mes en curso y los tres siguientes y protege cada partición con
-  ``shared.vigia_protect_append_only_partition`` (nuc_0002).
-  ``shared.vigia_create_month_partitions`` y ``shared.vigia_default_partition_rows`` (nuc_0016) se
-  **amplían** a las tres tablas: la tarea
-  heredada ``create_partitions`` las mantiene y publica ``default_partition_rows`` sin cambiar.
+  ``shared.vigia_protect_append_only_partition`` (nuc_0002). La tarea heredada
+  ``create_partitions`` las mantiene y publica su ``default_partition_rows`` con dos funciones
+  **nuevas**, ``shared.vigia_create_fleet_month_partitions`` y
+  ``shared.vigia_fleet_default_partition_rows`` (mismo cuerpo, guarda y candado que las de
+  nuc_0016). Las de nuc_0016 **no se tocan**: la imagen N-1 convierte cada fila que devuelven a su
+  lista de tres tablas, y una fila de ``fleet`` haría fallar su ``create_partitions`` tras una
+  reversión por redespliegue (NFR-GOB-22, NFR-NUC-14).
 - **Retención por archivado** (PAT-GOB-ESC-02, sin octava tarea): ``archive_audit_partitions``
   recorre también estas tablas (``shared.archive.table_archive``) con tres funciones
   ``SECURITY DEFINER`` de solo ``system`` análogas a las de la auditoría:
@@ -637,6 +640,8 @@ _TABLES = (
         used_at timestamptz,
         orphaned_at timestamptz,
         CONSTRAINT clip_upload_grant_storage_key_unique UNIQUE (storage_key),
+        CONSTRAINT clip_upload_grant_scope_key
+            UNIQUE (organization_id, plant_id, zone_id, node_id, clip_id),
         CONSTRAINT clip_upload_grant_node_fkey FOREIGN KEY (organization_id, plant_id, node_id)
             REFERENCES identity.node_identity (organization_id, plant_id, node_id),
         CONSTRAINT clip_upload_grant_zone_fkey FOREIGN KEY (organization_id, plant_id, zone_id)
@@ -662,7 +667,7 @@ _TABLES = (
     # resultado es un cierre de nulo a valor.
     f"""
     CREATE TABLE fleet.verification_clip (
-        clip_id uuid PRIMARY KEY REFERENCES fleet.clip_upload_grant (clip_id),
+        clip_id uuid PRIMARY KEY,
         organization_id uuid NOT NULL,
         plant_id uuid NOT NULL,
         zone_id uuid NOT NULL,
@@ -673,6 +678,12 @@ _TABLES = (
         blur_check_result jsonb
             CONSTRAINT verification_clip_blur_check_result_object
                 CHECK (jsonb_typeof(blur_check_result) = 'object'),
+        -- El clip es el de su concesión: misma organización, planta, zona y nodo. Que la concesión
+        -- sea de purpose = 'verification' lo comprueba la confirmación (TASK-226).
+        CONSTRAINT verification_clip_grant_fkey
+            FOREIGN KEY (organization_id, plant_id, zone_id, node_id, clip_id)
+            REFERENCES fleet.clip_upload_grant
+                (organization_id, plant_id, zone_id, node_id, clip_id),
         CONSTRAINT verification_clip_node_fkey FOREIGN KEY (organization_id, plant_id, node_id)
             REFERENCES identity.node_identity (organization_id, plant_id, node_id),
         CONSTRAINT verification_clip_zone_fkey FOREIGN KEY (organization_id, plant_id, zone_id)
@@ -997,11 +1008,13 @@ $$
 _ARCHIVABLE = "'fleet.heartbeat_history', 'fleet.enrollment_attempt', 'fleet.fleet_alarm'"
 
 _PARTITION_FUNCTIONS = (
-    # Igual que en nuc_0016, con las tres tablas de fleet en la lista.
+    # Las funciones de nuc_0016 no se tocan: la imagen N-1 convierte cada fila que devuelven a su
+    # PartitionedTable de tres valores, y una fila de fleet haría fallar (y revertir) su
+    # create_partitions (NFR-GOB-22, NFR-NUC-14). Las tablas de fleet tienen sus funciones propias,
+    # con el mismo cuerpo, la misma guarda de actor y el mismo candado consultivo, que la imagen N
+    # llama en la misma transacción.
     """
-    CREATE OR REPLACE FUNCTION shared.vigia_create_month_partitions(
-        first_month date, last_month date
-    )
+    CREATE FUNCTION shared.vigia_create_fleet_month_partitions(first_month date, last_month date)
         RETURNS TABLE (parent text, partition text, month date, created boolean, blocked boolean)
         LANGUAGE plpgsql
         SECURITY DEFINER
@@ -1032,15 +1045,11 @@ _PARTITION_FUNCTIONS = (
             RAISE EXCEPTION 'intervalo de meses no válido'
                 USING ERRCODE = 'invalid_parameter_value';
         END IF;
-        -- Una llamada a la vez hasta el final de la transacción (la tarea semanal y la orden
-        -- vigia-admin create-partitions comparten esta función).
+        -- El mismo candado que vigia_create_month_partitions: las dos se serializan entre sí.
         PERFORM pg_catalog.pg_advisory_xact_lock(
             pg_catalog.hashtextextended('vigia_create_month_partitions', 0));
         FOR target IN
             SELECT * FROM (VALUES
-                ('ledger', 'ledger_record', 'received_at'),
-                ('ledger', 'evidence', 'verified_at'),
-                ('shared', 'audit_entry', 'occurred_at'),
                 ('fleet', 'heartbeat_history', 'received_at'),
                 ('fleet', 'enrollment_attempt', 'attempted_at'),
                 ('fleet', 'fleet_alarm', 'raised_at')
@@ -1088,13 +1097,12 @@ _PARTITION_FUNCTIONS = (
     $$
     """,
     """
-    COMMENT ON FUNCTION shared.vigia_create_month_partitions(date, date) IS
-        'Particiones mensuales que falten de ledger_record, evidence, audit_entry y de las tres '
-        'tablas de fleet, protegidas; salta el mes con filas en la partición por defecto '
-        '(TASK-131, TASK-203)'
+    COMMENT ON FUNCTION shared.vigia_create_fleet_month_partitions(date, date) IS
+        'Particiones mensuales que falten de las tres tablas de volumen de fleet, protegidas; '
+        'salta el mes con filas en la partición por defecto (TASK-203)'
     """,
     """
-    CREATE OR REPLACE FUNCTION shared.vigia_default_partition_rows()
+    CREATE FUNCTION shared.vigia_fleet_default_partition_rows()
         RETURNS TABLE (parent text, row_count bigint)
         LANGUAGE plpgsql
         SECURITY DEFINER
@@ -1108,12 +1116,6 @@ _PARTITION_FUNCTIONS = (
                 USING ERRCODE = 'insufficient_privilege';
         END IF;
         RETURN QUERY
-            SELECT 'ledger.ledger_record', count(*) FROM ledger.ledger_record_default
-            UNION ALL
-            SELECT 'ledger.evidence', count(*) FROM ledger.evidence_default
-            UNION ALL
-            SELECT 'shared.audit_entry', count(*) FROM shared.audit_entry_default
-            UNION ALL
             SELECT 'fleet.heartbeat_history', count(*) FROM fleet.heartbeat_history_default
             UNION ALL
             SELECT 'fleet.enrollment_attempt', count(*) FROM fleet.enrollment_attempt_default
@@ -1123,8 +1125,8 @@ _PARTITION_FUNCTIONS = (
     $$
     """,
     """
-    COMMENT ON FUNCTION shared.vigia_default_partition_rows() IS
-        'Filas de cada partición por defecto (default_partition_rows, PAT-NUC-ESC-01)'
+    COMMENT ON FUNCTION shared.vigia_fleet_default_partition_rows() IS
+        'Filas de cada partición por defecto de fleet (default_partition_rows, PAT-GOB-ESC-02)'
     """,
     # Una partición adjunta de una tabla archivable, con el nombre del convenio, o un error.
     f"""
@@ -1309,6 +1311,8 @@ _PARTITION_FUNCTIONS = (
 _PARTITION_GRANTS = tuple(
     statement
     for signature in (
+        "shared.vigia_create_fleet_month_partitions(date, date)",
+        "shared.vigia_fleet_default_partition_rows()",
         "shared.vigia_table_partition_summary(text, text)",
         "shared.vigia_table_partition_rows(text, text, uuid, timestamptz, integer)",
         "shared.vigia_detach_table_partition(text, text, bigint, timestamptz)",

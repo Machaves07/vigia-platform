@@ -11,8 +11,9 @@ con arrendamiento, mantiene siempre creados el mes en curso y los ``PARTITION_MO
 siguientes según el reloj inyectado, y publica ``default_partition_rows`` por tabla: una sola fila
 en una partición por defecto dispara la alarma (señal de que la tarea falló).
 
-La creación la hace ``shared.vigia_create_month_partitions`` (nuc_0016, con las tablas de
-``fleet`` desde gob_0018), que es **idempotente**:
+La creación la hacen ``shared.vigia_create_month_partitions`` (nuc_0016) y, para ``fleet``,
+``shared.vigia_create_fleet_month_partitions`` (gob_0018; las de nuc_0016 no cambian, para que la
+imagen N-1 siga funcionando contra el esquema N), con el mismo candado; son **idempotentes**:
 un mes que ya tiene partición no se toca, así que ejecutar la tarea dos veces no falla ni duplica
 nada. Si la partición por defecto ya tiene filas de un mes, ese mes no se puede crear (PostgreSQL
 lo impide y las filas no se pueden mover: la tabla es de solo anexar); la función lo devuelve como
@@ -77,8 +78,15 @@ MAX_MONTHS_PER_CALL: Final = 120
 _CREATE: Final = text(
     "SELECT parent, partition, month, created, blocked"
     " FROM shared.vigia_create_month_partitions(:first_month, :last_month)"
+    " UNION ALL SELECT parent, partition, month, created, blocked"
+    " FROM shared.vigia_create_fleet_month_partitions(:first_month, :last_month)"
 )
-_DEFAULT_ROWS: Final = text("SELECT parent, row_count FROM shared.vigia_default_partition_rows()")
+_DEFAULT_ROWS: Final = text(
+    "SELECT parent, row_count FROM shared.vigia_default_partition_rows()"
+    " UNION ALL SELECT parent, row_count FROM shared.vigia_fleet_default_partition_rows()"
+)
+"""Las funciones de nuc_0016 (tablas de U-02) y las de ``fleet`` de gob_0018, en una sentencia.
+Las de nuc_0016 siguen devolviendo solo sus tres tablas: la imagen N-1 las lee sin cambios."""
 
 
 class PartitionedTable(enum.StrEnum):

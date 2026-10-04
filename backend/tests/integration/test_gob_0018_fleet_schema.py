@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import enum
 import importlib.util
 import json
 import secrets
@@ -57,6 +58,7 @@ from tests.fleet_db import (
     seed_fleet,
     storage_key,
     update_result,
+    verification_clip,
 )
 from tests.identity_db import BASE_TIME, MigratedDatabase, seeded_identity, set_scope
 from tests.integration.conftest import PostgresEndpoint
@@ -538,6 +540,80 @@ def test_a_row_in_the_default_partition_shows_in_default_partition_rows(fleet: F
     }
 
 
+# --- Compatibilidad con la imagen N-1 (NFR-GOB-22, NFR-NUC-14) -----
+
+
+class PartitionedTableN1(enum.StrEnum):
+    """El ``PartitionedTable`` de la imagen anterior (U-02, nuc_0016): solo sus tres tablas."""
+
+    LEDGER_RECORD = "ledger.ledger_record"
+    EVIDENCE = "ledger.evidence"
+    AUDIT_ENTRY = "shared.audit_entry"
+
+
+N1_CREATE = (
+    "SELECT parent, partition, month, created, blocked"
+    " FROM shared.vigia_create_month_partitions($1, $2)"
+)
+N1_DEFAULT_ROWS = "SELECT parent, row_count FROM shared.vigia_default_partition_rows()"
+"""Las sentencias de ``create_partitions`` de la imagen N-1, literales."""
+
+
+@pytest.mark.asyncio
+async def test_the_previous_image_create_partitions_still_works_on_schema_n(
+    app: Any, superuser: Any, fleet: Fleet
+) -> None:
+    """La imagen N-1 contra el esquema N: sus dos funciones devuelven solo sus tres tablas (cada
+    fila se convierte a su ``PartitionedTable``) y su ``create_partitions`` confirma las
+    particiones. Si gob_0018 ampliara esas funciones a ``fleet``, la conversión lanzaría
+    ``ValueError`` y la transacción entera se revertiría."""
+    first = dt.date(2071, 3, 1)
+    last = add_months(first, PARTITION_MONTHS_AHEAD)
+    async with app.transaction():
+        await set_scope(app, uuid.uuid4(), actor_kind="system")
+        created = [
+            (PartitionedTableN1(row["parent"]), row["month"], row["created"])
+            for row in await app.fetch(N1_CREATE, first, last)
+        ]
+        defaults = {
+            PartitionedTableN1(row["parent"]): row["row_count"]
+            for row in await app.fetch(N1_DEFAULT_ROWS)
+        }
+    assert {table for table, _, _ in created} == set(PartitionedTableN1)
+    assert all(was_created for _, _, was_created in created)
+    assert set(defaults) == set(PartitionedTableN1)
+    for table in PartitionedTableN1:
+        assert await superuser.fetchval(
+            "SELECT to_regclass($1) IS NOT NULL", f"{table.value}_{first.year:04d}_03"
+        ), table
+    # Las de fleet de esos meses no las crea N-1: las crea la imagen N con su función propia.
+    assert await superuser.fetchval("SELECT to_regclass('fleet.heartbeat_history_2071_03') IS NULL")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM shared.vigia_create_fleet_month_partitions('2072-01-01', '2072-01-01')",
+        "SELECT * FROM shared.vigia_fleet_default_partition_rows()",
+    ],
+)
+async def test_the_fleet_partition_functions_need_the_system_or_an_operator(
+    statement: str, app: Any, superuser: Any
+) -> None:
+    for kind in ("user", "provider_user", "node"):
+        try:
+            async with app.transaction():
+                await set_scope(app, uuid.uuid4(), actor_kind=kind)
+                await app.fetch(statement)
+                raise _Rollback
+        except asyncpg.PostgresError as error:
+            assert str(error.sqlstate) == INSUFFICIENT_PRIVILEGE, kind
+        except _Rollback:
+            pytest.fail(f"{kind} pudo ejecutar {statement}")
+    assert await superuser.fetchval("SELECT to_regclass('fleet.heartbeat_history_2072_01') IS NULL")
+
+
 # --- Solo anexar -----
 
 
@@ -999,6 +1075,26 @@ async def test_rows_must_match_their_node_plant_and_organization(app: Any, fleet
     )
     for builder in (heartbeat, update_result, node_credential):
         assert await _steps(app, scope.organization_id, builder(mixed)) == FOREIGN_KEY_VIOLATION
+
+
+@pytest.mark.asyncio
+async def test_a_verification_clip_has_the_scope_of_its_grant(app: Any, fleet: Fleet) -> None:
+    """``verification_clip_grant_fkey``: la concesión ``clip_id`` del ``FleetScope`` (planta 0)
+    solo admite su clip con su misma organización, planta, zona y nodo; con los de la planta 1
+    (coherentes con ``identity``) la base lo rechaza."""
+    scope = fleet.a
+    other = fleet.seed.plant(fleet.seed.identity.a.organization_id, 1)
+    elsewhere = FleetScope(
+        scope.organization_id,
+        other.plant_id,
+        other.zone_id,
+        other.node_id,
+        scope.user_id,
+        scope.clip_id,
+    )
+    org = scope.organization_id
+    assert await _steps(app, org, verification_clip(scope)) == "ok"
+    assert await _steps(app, org, verification_clip(elsewhere)) == FOREIGN_KEY_VIOLATION
 
 
 @pytest.mark.asyncio

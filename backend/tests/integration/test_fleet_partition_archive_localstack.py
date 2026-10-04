@@ -9,7 +9,7 @@ pasados que necesita y las llena con filas de dos organizaciones:
 
 - ``heartbeat_history``: ``M-4`` (su mes terminó hace más de 90 días: vence), ``M-3`` (aún no) y
   ``M-1`` (el mes anterior).
-- ``enrollment_attempt``: ``M-25`` (vence a los 24 meses) y ``M-23`` (sigue en línea).
+- ``enrollment_attempt``: ``M-25`` (vence a los 24 meses), ``M-24`` (el borde: sigue) y ``M-23``.
 - ``fleet_alarm``: ``M-25`` con alarmas cerradas (vence) y ``M-26`` con una abierta (vence, pero
   no se archiva mientras siga abierta).
 
@@ -197,7 +197,7 @@ async def _prepare(env: WriterEnvironment, places: tuple[FleetScope, ...], month
             )
         partitions = {
             "heartbeat_history": (4, 3, 1),
-            "enrollment_attempt": (25, 23),
+            "enrollment_attempt": (25, 24, 23),
             "fleet_alarm": (26, 25),
         }
         async with connection.transaction():
@@ -340,6 +340,7 @@ def test_the_task_archives_what_is_due_and_nothing_else(world: World) -> None:
     kept = (
         world.partition(HEARTBEAT_HISTORY, 3),
         world.partition(HEARTBEAT_HISTORY, 1),  # el mes anterior
+        world.partition(ENROLLMENT_ATTEMPT, 24),  # el borde: aún dentro de los 24 meses
         world.partition(ENROLLMENT_ATTEMPT, 23),  # hace 23 meses
         world.partition(FLEET_ALARM, 26),  # vencida, con una alarma abierta
         *(world.partition(table, -step) for table in ARCHIVED_TABLES for step in range(4)),
