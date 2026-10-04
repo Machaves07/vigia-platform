@@ -12,8 +12,14 @@ distintas para cada operación (``asyncio.gather`` sobre el pool de la base):
   7 perdedoras chocan en él (``ConcurrentIssue``, ``conflict``) sin dejar código ni registro;
   queda exactamente un ``active``.
 
-Las dos pruebas fallan si se quita la condición o el índice (mutaciones en el PR). Topes: la
-barrera espera 30 s y la base 60 s (retro 15); nada decide por tiempo de pared.
+- **Marca global de la lista** (revisión de la ronda 1): 8 revocaciones de nodos de organizaciones
+  distintas llegan juntas a la marca (barrera) y ``dirty_generation`` sube exactamente 8; una
+  revocación y una re-alta de la misma planta terminan las dos (el mismo orden de candados, cadena
+  de la planta → fila global, en los dos caminos).
+
+Las pruebas fallan si se quita la condición, el índice, la atomicidad del incremento o el orden
+de los candados (mutaciones en el PR). Topes: la barrera espera 30 s y la base 60 s (retro 15);
+nada decide por tiempo de pared.
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -21,16 +27,26 @@ Solo datos generados (NFR-CTR-43).
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import dataclasses
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 import pytest
 
-from tests.fleet_http_support import FleetStack, fleet_stack
+from tests.fleet_http_support import REASON, FleetStack, fleet_stack
 from tests.integration.conftest import PostgresEndpoint
 from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnrollmentStore
-from vigia_platform.fleet.application.enrollment_codes import ConcurrentIssue, IssuedCode
+from vigia_platform.fleet.adapters.postgres.revocation_mark_store import (
+    PostgresRevocationMarkStore,
+)
+from vigia_platform.fleet.application.enrollment_codes import (
+    ConcurrentIssue,
+    IssuedCode,
+)
+from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.domain.enums import EnrollmentAttemptResult
 from vigia_platform.node_api.identity import PostgresNodeContextStore
 from vigia_platform.shared.context import ScopeContext
@@ -40,6 +56,10 @@ pytestmark = pytest.mark.integration
 
 PARTIES: Final = 8
 BARRIER_TIMEOUT_SECONDS: Final = 30.0
+GATE_SECONDS: Final = 15.0
+"""Cuánto espera la revocación a que la re-alta marque antes que ella. Con el orden de candados
+bueno la re-alta no puede marcar (espera la cadena que tiene la revocación) y la espera se agota
+sin decidir nada: no es un tope de «llegó a tiempo» (retro 14)."""
 
 
 @pytest.fixture(scope="module")
@@ -66,6 +86,47 @@ class BarrierEnrollmentStore(PostgresEnrollmentStore):
             async with asyncio.timeout(BARRIER_TIMEOUT_SECONDS):
                 await self.barrier.wait()
         return changed
+
+
+class BarrierMarks(PostgresRevocationMarkStore):
+    """Retiene cada marca hasta que las ``parties`` revocaciones han llegado a ella: todas leen
+    la generación antes de que ninguna confirme."""
+
+    def __init__(self, parties: int) -> None:
+        self.barrier = asyncio.Barrier(parties)
+
+    async def mark_dirty(self, transaction: Transaction, marked_at: datetime) -> int:
+        async with asyncio.timeout(BARRIER_TIMEOUT_SECONDS):
+            await self.barrier.wait()
+        return await super().mark_dirty(transaction, marked_at)
+
+
+class GatedMarks(PostgresRevocationMarkStore):
+    """La revocación: avisa de que ya escribió su registro (tiene la cadena de la planta) y espera
+    a que la re-alta haya marcado, o ``GATE_SECONDS`` si la re-alta no llega a marcar antes."""
+
+    def __init__(self, arrived: asyncio.Event, other_marked: asyncio.Event) -> None:
+        self.arrived = arrived
+        self.other_marked = other_marked
+
+    async def mark_dirty(self, transaction: Transaction, marked_at: datetime) -> int:
+        self.arrived.set()
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(GATE_SECONDS):
+                await self.other_marked.wait()
+        return await super().mark_dirty(transaction, marked_at)
+
+
+class SignalingMarks(PostgresRevocationMarkStore):
+    """La re-alta: avisa en cuanto su marca tiene la fila global."""
+
+    def __init__(self, marked: asyncio.Event) -> None:
+        self.marked = marked
+
+    async def mark_dirty(self, transaction: Transaction, marked_at: datetime) -> int:
+        generation = await super().mark_dirty(transaction, marked_at)
+        self.marked.set()
+        return generation
 
 
 def _declared_node(fleet: FleetStack) -> tuple[Any, str]:
@@ -152,3 +213,73 @@ def test_eight_simultaneous_issues_leave_exactly_one_active_code(fleet: FleetSta
     ]
     assert len(fleet.records("enrollment_code_issued", _organization(fleet, node))) == 1
     assert store.passes == PARTIES
+
+
+# --- Marca global de la lista de revocación (revisión de VIG-147, ronda 1) ----------------------
+
+
+def test_simultaneous_revocations_raise_the_dirty_generation_by_exactly_n(
+    fleet: FleetStack,
+) -> None:
+    # Una organización por nodo: las cadenas de planta no se comparten, así que las PARTIES
+    # revocaciones llegan juntas a la marca (barrera) y solo el incremento atómico de la fila
+    # global impide perder alguna.
+    targets = []
+    for _ in range(PARTIES):
+        installer, node = _declared_node(fleet)
+        targets.append((fleet.context(installer), uuid.UUID(node)))
+    service = NodeRevocationService(dataclasses.replace(fleet.deps, marks=BarrierMarks(PARTIES)))
+    before = fleet.revocation_state()["dirty_generation"]
+
+    async def race() -> list[Any]:
+        return list(
+            await asyncio.gather(
+                *(service.revoke(context, node, REASON) for context, node in targets),
+                return_exceptions=True,
+            )
+        )
+
+    outcomes = fleet.run(race())
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert not failures, failures
+    generations = sorted(outcome.dirty_generation for outcome in outcomes)
+    assert generations == list(range(before + 1, before + PARTIES + 1)), generations
+    assert fleet.revocation_state()["dirty_generation"] == before + PARTIES
+
+
+def test_a_revocation_and_a_re_enrollment_in_one_plant_both_finish(fleet: FleetStack) -> None:
+    # La revocación de A escribe node_revoked (cadena de la planta) y espera en la marca; la
+    # re-alta de B (credencial vencida) revoca su credencial y emite. Con el orden de candados
+    # común (cadena → fila global) la re-alta espera la cadena y las dos terminan; con la marca
+    # de la re-alta antes de su registro, cada una espera a la otra (bloqueo mutuo).
+    site = fleet.site(plants=1, zones=2)
+    plant = next(iter(site.plants))
+    zones = site.plants[plant]
+    installer = fleet.installer(site)
+    revoked = fleet.declare(installer, plant, [zones[0]]).json()["node_id"]
+    expired = fleet.declare(installer, plant, [zones[1]]).json()["node_id"]
+    fleet.enroll(expired, plant, zones[1], expires_at=fleet.authz.now() - timedelta(seconds=1))
+    context = fleet.context(installer)
+    arrived, marked = asyncio.Event(), asyncio.Event()
+    revocations = NodeRevocationService(
+        dataclasses.replace(fleet.deps, marks=GatedMarks(arrived, marked))
+    )
+    issues = fleet.codes_service(marks=SignalingMarks(marked))
+    before = fleet.revocation_state()["dirty_generation"]
+
+    async def race() -> list[Any]:
+        revocation = asyncio.ensure_future(revocations.revoke(context, uuid.UUID(revoked), REASON))
+        async with asyncio.timeout(BARRIER_TIMEOUT_SECONDS):
+            await arrived.wait()  # la revocación ya tiene la cadena de la planta
+        reissue = asyncio.ensure_future(issues.issue(context, uuid.UUID(expired)))
+        return list(await asyncio.gather(revocation, reissue, return_exceptions=True))
+
+    outcomes = fleet.run(race())
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert not failures, failures
+    assert isinstance(outcomes[1], IssuedCode) and outcomes[1].re_enrollment
+    assert fleet.node_row(revoked)["status"] == "revoked"
+    assert fleet.node_row(expired)["status"] == "re_enrollment_pending"
+    assert fleet.revocation_state()["dirty_generation"] == before + 2

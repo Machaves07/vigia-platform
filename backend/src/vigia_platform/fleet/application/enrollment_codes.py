@@ -60,7 +60,6 @@ from vigia_platform.fleet.application.common import (
     authorized_node,
     write,
 )
-from vigia_platform.fleet.application.node_revocation import revoke_credentials_in
 from vigia_platform.fleet.detail_codes import FleetDetailCode
 from vigia_platform.fleet.domain.enrollment_attempt import EnrollmentAttempt, SourceIpHasher
 from vigia_platform.fleet.domain.enrollment_code import (
@@ -95,6 +94,7 @@ from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
     "ATTEMPT_RECORD_TYPE",
+    "ENROLLABLE_STATUSES",
     "ISSUED_RECORD_TYPE",
     "MAX_ATTEMPTS_PAGE",
     "AttemptPage",
@@ -112,6 +112,8 @@ ATTEMPT_RECORD_TYPE: Final = "enrollment_attempt_rejected"
 MAX_ATTEMPTS_PAGE: Final = 200
 """Página máxima de ``GET /nodes/{node_id}/enrollment-attempts``."""
 _UNIQUE_VIOLATION: Final = "23505"
+ENROLLABLE_STATUSES: Final = frozenset({"declared", "re_enrollment_pending"})
+"""Estados de ``NodeIdentity`` desde los que un código se acepta en el alta (BLM §3.4)."""
 
 _DECLARED: Final = "node_declared"
 _UNKNOWN: Final = "node_unknown"
@@ -252,6 +254,7 @@ class EnrollmentCodeService:
                 eligibility = code_eligibility(node.status, node.record, credentials, now)
             if eligibility is CodeEligibility.REJECTED:
                 raise FleetRejected(FleetDetailCode.NODE_NOT_DECLARED)
+            revoked_credentials: tuple[uuid.UUID, ...] = ()
             if eligibility is CodeEligibility.RE_ENROLLMENT:
                 await deps.identity.update_node(
                     authorized,
@@ -260,7 +263,7 @@ class EnrollmentCodeService:
                     node.live_view_local_url,
                     transaction=transaction,
                 )
-                await revoke_credentials_in(deps, transaction, node_id, now)
+                revoked_credentials = await deps.nodes.revoke_credentials(transaction, node_id, now)
                 if node.record.revoked:
                     await deps.nodes.clear_revocation(transaction, node_id)
             await deps.enrollment.supersede_active(transaction, node_id)
@@ -301,6 +304,10 @@ class EnrollmentCodeService:
                     ledger_record_id=receipt.record_id,
                 ),
             )
+            if revoked_credentials:
+                # La marca de la lista, **después** del registro: el mismo orden de candados que la
+                # revocación (cadena de la planta → fila global); al revés se bloquean mutuamente.
+                await deps.marks.mark_dirty(transaction, now)
             await deps.audit.append(
                 writer,
                 AuditOperation.ENROLLMENT_CODE_ISSUED,
@@ -322,13 +329,21 @@ class EnrollmentCodeService:
     # --- Verificación y consumo (alta, VIG-151) --------------------------------------------------
 
     async def verify(self, enrollment: EnrollmentScope, presented: object) -> CodeCheck:
-        """El código presentado frente a los del nodo del alta, en tiempo constante."""
+        """El código presentado frente a los del nodo del alta, en tiempo constante.
+
+        Solo un nodo ``declared`` o ``re_enrollment_pending`` se da de alta (BLM §3.4): con el nodo
+        en cualquier otro estado (revocado, ya dado de alta) ningún código vale, aunque siga
+        ``active`` (``enrollment_code_invalid``, sin revelar si coincidía).
+        """
         if not isinstance(enrollment, EnrollmentScope):
             raise TypeError("enrollment debe ser el EnrollmentScope del alta")
         deps = self._deps
         async with deps.database.transaction(enrollment.context) as transaction:
             codes = await deps.enrollment.codes(transaction, enrollment.node_id)
-        return check_presented(codes, presented, deps.clock.now())
+        check = check_presented(codes, presented, deps.clock.now())
+        if enrollment.node_status not in ENROLLABLE_STATUSES:
+            return CodeCheck(EnrollmentAttemptResult.ENROLLMENT_CODE_INVALID)
+        return check
 
     async def consume(self, transaction: Transaction, code_id: uuid.UUID, now: datetime) -> bool:
         """``active → used`` si sigue ``active`` y vigente; ``True`` solo con una fila afectada."""

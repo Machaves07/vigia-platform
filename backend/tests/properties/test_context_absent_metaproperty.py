@@ -135,7 +135,6 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # ``AuditWriter``, ``Authorizer`` e ``IdentityCommandPort`` sobre la ``Transaction`` dada.
         "vigia_platform.fleet.application.common.authorized_node",
         "vigia_platform.fleet.application.common.write",
-        "vigia_platform.fleet.application.node_revocation.revoke_credentials_in",
         "vigia_platform.fleet.application.node_revocation.revoke_in",
         "vigia_platform.fleet.application.node_revocation.decommission_in",
     }

@@ -5,7 +5,10 @@ transacción corta (PAT-GOB-RES-02):
 
 1. ``IdentityCommandPort.update_node(status = revoked)``: la primera capa, que ``node_api``
    comprueba en **cada** petición del nodo (``node_revoked``) sin esperar a nada más;
-2. toda ``NodeCredential`` ``active``/``overlapping`` del nodo pasa a ``revoked`` (``revoked_at``);
+2. toda ``NodeCredential`` ``active``/``overlapping`` del nodo pasa a ``revoked`` (``revoked_at``)
+   y su código de alta ``active``, si lo tiene, pasa a ``superseded``: un nodo revocado no se da de
+   alta con un código emitido antes (BLM §3.4: ``→ active`` solo con el nodo ``declared`` o en
+   re-alta, que emite un código nuevo);
 3. ``NodeFleetRecord.revoked_at`` y ``revocation_reason_es``;
 4. el registro ``node_revoked`` ``{node_id, reason_es, revoked_at, revoked_by}`` en la cadena de la
    planta con el evento ``node_revoked`` ``{node_id, plant_id, zone_ids[], replaces_node_id?}``;
@@ -13,6 +16,11 @@ transacción corta (PAT-GOB-RES-02):
    ``regenerate_revocation_list`` (TASK-220) publica la lista después; la respuesta no espera al
    almacén de confianza. La marca por organización existe solo como métrica
    (``node_revocations_total``).
+
+**Orden de los candados** (el mismo en la revocación, el reemplazo y la re-alta de
+``enrollment_codes``): ficha del nodo → identidad y credenciales → exclusión de la cadena de la
+planta (el registro) → fila global de la marca. Tomar la marca antes de escribir el registro
+bloquearía mutuamente una revocación y una re-alta de la misma planta.
 
 Revocar un nodo ya revocado no escribe nada otra vez (el registro no se reescribe, P4): responde
 la revocación que ya consta.
@@ -61,7 +69,6 @@ __all__ = [
     "RevocationOutcome",
     "decommission_in",
     "lifecycle_payload",
-    "revoke_credentials_in",
     "revoke_in",
 ]
 
@@ -98,15 +105,6 @@ def lifecycle_payload(node: FleetNode, zone_ids: Sequence[uuid.UUID]) -> dict[st
     return payload
 
 
-async def revoke_credentials_in(
-    deps: FleetDependencies, transaction: Transaction, node_id: uuid.UUID, now: datetime
-) -> tuple[tuple[uuid.UUID, ...], int | None]:
-    """Revoca las credenciales vivas del nodo y, si alguna cambió, deja la marca de la lista."""
-    revoked = await deps.nodes.revoke_credentials(transaction, node_id, now)
-    generation = await deps.marks.mark_dirty(transaction, now) if revoked else None
-    return revoked, generation
-
-
 async def revoke_in(
     deps: FleetDependencies,
     authorized: ScopeContext,
@@ -129,6 +127,7 @@ async def revoke_in(
         authorized, node.node_id, "revoked", node.live_view_local_url, transaction=transaction
     )
     credentials = await deps.nodes.revoke_credentials(transaction, node.node_id, now)
+    await deps.enrollment.supersede_active(transaction, node.node_id)
     if not await deps.nodes.mark_revoked(transaction, node.node_id, now, reason_es):
         raise ResourceNotFound()  # la ficha bloqueada no cambió: nunca se da por revocado
     zones = (
@@ -179,6 +178,8 @@ async def decommission_in(
     writer = with_unit(authorized, ActorUnit.U03)
     if not await deps.nodes.mark_decommissioned(transaction, node.node_id, now):
         raise FleetRejected(FleetDetailCode.NODE_NOT_REVOKED)
+    # Un nodo revocado antes de que la revocación invalidara su código: tampoco queda uno vivo.
+    await deps.enrollment.supersede_active(transaction, node.node_id)
     zones = await deps.nodes.current_zones(transaction, node.node_id)
     await write(
         deps,

@@ -30,6 +30,8 @@ from tests.authz_support import AuthzEnvironment, Site, authz_environment
 from tests.examples.test_ledger_routes import StubEvidenceStorage
 from tests.fleet_support import RootObjects, root_bundle
 from tests.integration.conftest import PostgresEndpoint
+from tests.node_api_db import DbNode, issue
+from tests.node_api_support import DAY, TestAuthority
 from tests.outbox_support import app_database
 from tests.writer_support import save_record_types, unit_context
 from vigia_platform.catalog.application.free_text_validator import (
@@ -53,7 +55,7 @@ from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
 from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.shared.api.middleware import ContextAuthorizer
-from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
+from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
@@ -95,6 +97,42 @@ class FleetStack:
 
     def tick(self, seconds: float = 1.0) -> None:
         self.authz.sessions.clock.advance(seconds)
+
+    def context(self, who: tuple[SessionCookie, uuid.UUID | None]) -> ScopeContext:
+        """El contexto de la sesión de ``who`` (y su concesión), como lo construye la cadena."""
+        cookie, concession = who
+        scope = self.run(self.authz.contexts.context_from_session(cookie, concession_id=concession))
+        context: ScopeContext = scope.context
+        return context
+
+    def enroll(
+        self, node: uuid.UUID | str, plant: uuid.UUID, zone: uuid.UUID, **issue_args: Any
+    ) -> tuple[Any, uuid.UUID]:
+        """Simula el alta aceptada (VIG-151): nodo ``enrolled`` con una credencial ``active``
+        de 365 días (``issue_args`` la cambia, p. ej. ``expires_at`` ya pasado)."""
+        node_id = uuid.UUID(str(node))
+        (row,) = self.fetch(
+            "SELECT organization_id, declared_by FROM fleet.node_fleet_record WHERE node_id = $1",
+            node_id,
+        )
+        now = self.authz.now()
+        self.execute(
+            "UPDATE identity.node_identity SET status = 'enrolled' WHERE node_id = $1", node_id
+        )
+        self.execute(
+            "UPDATE fleet.node_fleet_record SET enrolled_at = $2 WHERE node_id = $1", node_id, now
+        )
+        db_node = DbNode(
+            node_id,
+            uuid.UUID(str(row["organization_id"])),
+            plant,
+            zone,
+            uuid.UUID(str(row["declared_by"])),
+        )
+        certificate, credential = self.run(
+            issue(self.authz.sessions.admin, TestAuthority(), db_node, now - DAY, **issue_args)
+        )
+        return certificate, credential
 
     def codes_service(self, **changes: Any) -> EnrollmentCodeService:
         """Otro ``EnrollmentCodeService`` sobre las mismas dependencias (otra instancia)."""

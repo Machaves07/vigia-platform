@@ -48,11 +48,11 @@ import pytest
 from vigia_contracts.models.api import parse_rejection_response
 
 from tests.api_support import World
+from tests.dispatch_support import metric_points, metrics_with_reader
 from tests.fleet_http_support import REASON, FleetStack, fleet_stack, new_code
 from tests.fleet_support import root_bundle
 from tests.integration.conftest import PostgresEndpoint
-from tests.node_api_db import DbNode, issue
-from tests.node_api_support import VERSION, Probe, TestAuthority, alb_headers, node_app, node_gate
+from tests.node_api_support import VERSION, Probe, alb_headers, node_app, node_gate
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.application.enrollment_codes import AttemptRequest
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
@@ -64,6 +64,7 @@ from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.node_ca import fingerprint, read_bundle
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import JsonFormatter
+from vigia_platform.shared.observability.metrics import MetricName
 
 pytestmark = pytest.mark.integration
 
@@ -112,30 +113,7 @@ def _enroll(
     fleet: FleetStack, node: str, plant: uuid.UUID, zone: uuid.UUID, **issue_args: Any
 ) -> Any:
     """Simula el alta aceptada (VIG-151): nodo ``enrolled`` con una credencial ``active``."""
-    (row,) = fleet.fetch(
-        "SELECT organization_id, declared_by FROM fleet.node_fleet_record WHERE node_id = $1",
-        uuid.UUID(node),
-    )
-    now = fleet.authz.now()
-    fleet.execute(
-        "UPDATE identity.node_identity SET status = 'enrolled' WHERE node_id = $1", uuid.UUID(node)
-    )
-    fleet.execute(
-        "UPDATE fleet.node_fleet_record SET enrolled_at = $2 WHERE node_id = $1",
-        uuid.UUID(node),
-        now,
-    )
-    db_node = DbNode(
-        uuid.UUID(node),
-        uuid.UUID(str(row["organization_id"])),
-        plant,
-        zone,
-        uuid.UUID(str(row["declared_by"])),
-    )
-    certificate, credential = fleet.run(
-        issue(fleet.authz.sessions.admin, TestAuthority(), db_node, now - DAY, **issue_args)
-    )
-    return certificate, credential
+    return fleet.enroll(node, plant, zone, **issue_args)
 
 
 # --- Declaración (BR-GOB-57, 73) -----------------------------------------------------------------
@@ -504,6 +482,43 @@ def test_the_plain_code_only_exists_in_the_201(
     ]
 
 
+def test_the_plain_code_never_reaches_the_exported_metrics(fleet: FleetStack) -> None:
+    # Revisión de VIG-147 (ronda 1, menor 1): lo que la ejecución exporta, no solo la política.
+    metrics, reader = metrics_with_reader()
+    service = fleet.codes_service(metrics=metrics)
+    site = fleet.site()
+    plant, _ = _zones(site)
+    installer = fleet.installer(site)
+    node = fleet.declare(installer, plant, []).json()["node_id"]
+    issued = fleet.run(service.issue(fleet.context(installer), uuid.UUID(node)))
+    scope = fleet.run(
+        fleet.authz.contexts.context_from_node_enrollment(
+            PostgresNodeContextStore(fleet.database), uuid.UUID(node)
+        )
+    )
+    for result in (
+        EnrollmentAttemptResult.ENROLLMENT_CODE_INVALID,
+        EnrollmentAttemptResult.ACCEPTED,
+    ):
+        fleet.tick()
+        fleet.run(service.register_attempt(scope, _request(issued.code), result))
+    fleet.run(
+        service.register_attempt(
+            None, _request(issued.code), EnrollmentAttemptResult.ENROLLMENT_CODE_INVALID
+        )
+    )
+
+    exported = reader.get_metrics_data()
+    assert exported is not None
+    points = metric_points(reader, MetricName.ENROLLMENT_ATTEMPTS_TOTAL)
+    assert {(p[0]["result"], p[0]["reason"]) for p in points} == {
+        ("enrollment_code_invalid", "node_declared"),
+        ("accepted", "node_declared"),
+        ("enrollment_code_invalid", "node_unknown"),
+    }
+    assert issued.code not in exported.to_json()
+
+
 def test_the_root_fingerprints_follow_the_published_bundle(fleet: FleetStack) -> None:
     site = fleet.site()
     plant, _ = _zones(site)
@@ -729,6 +744,66 @@ def test_decommission_requires_revocation_and_keeps_everything(fleet: FleetStack
     # Nada se borra: la ficha, las asignaciones y los códigos siguen ahí.
     assert fleet.node_row(node)["decommissioned_at"] is not None
     assert _assignments(fleet, node) and fleet.codes(node)
+
+
+def _verify(fleet: FleetStack, node: str, code: str) -> str:
+    """Lo que respondería el alta (VIG-151) a ``code`` para ``node``."""
+    service = fleet.services.enrollment_codes
+    assert service is not None
+    scope = fleet.run(
+        fleet.authz.contexts.context_from_node_enrollment(
+            PostgresNodeContextStore(fleet.database), uuid.UUID(node)
+        )
+    )
+    return str(fleet.run(service.verify(scope, code)).result.value)
+
+
+@pytest.mark.parametrize("ending", ["revocation", "decommission"])
+def test_revocation_and_decommission_leave_no_usable_enrollment_code(
+    fleet: FleetStack, ending: str
+) -> None:
+    # Revisión de VIG-147 (ronda 1): un código emitido con el nodo declared no puede sobrevivir a
+    # la revocación ni a la baja (BR-GOB-66, 67; BLM §3.4).
+    site = fleet.site()
+    plant, _ = _zones(site)
+    installer = fleet.installer(site)
+    node = fleet.declare(installer, plant, []).json()["node_id"]
+    code = fleet.issue(installer, node).json()["code"]
+    assert _verify(fleet, node, code) == "accepted"
+
+    assert fleet.revoke(installer, node).status_code == 200
+    if ending == "decommission":
+        assert fleet.decommission(installer, node).status_code == 200
+
+    assert [row["status"] for row in fleet.codes(node)] == ["superseded"]
+    assert _verify(fleet, node, code) == "enrollment_code_invalid"
+
+
+def test_a_replaced_node_keeps_no_usable_enrollment_code(fleet: FleetStack) -> None:
+    site = fleet.site()
+    plant, zones = _zones(site)
+    installer = fleet.installer(site)
+    old = fleet.declare(installer, plant, [zones[0]]).json()["node_id"]
+    code = fleet.issue(installer, old).json()["code"]
+
+    assert fleet.declare(installer, plant, [], replaces_node_id=old).status_code == 201
+
+    assert [row["status"] for row in fleet.codes(old)] == ["superseded"]
+    assert _verify(fleet, old, code) == "enrollment_code_invalid"
+
+
+def test_verify_refuses_a_live_code_of_a_node_that_cannot_enroll(fleet: FleetStack) -> None:
+    # La guarda de ``verify`` por sí sola: el código sigue active, pero el nodo ya está enrolled.
+    site = fleet.site()
+    plant, zones = _zones(site)
+    installer = fleet.installer(site)
+    node = fleet.declare(installer, plant, [zones[0]]).json()["node_id"]
+    code = fleet.issue(installer, node).json()["code"]
+
+    fleet.enroll(node, plant, zones[0])
+
+    assert [row["status"] for row in fleet.codes(node)] == ["active"]
+    assert _verify(fleet, node, code) == "enrollment_code_invalid"
 
 
 # --- Intentos (BR-GOB-61) -------------------------------------------------------------------------
