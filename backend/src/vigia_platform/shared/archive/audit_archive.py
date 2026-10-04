@@ -46,6 +46,12 @@ registrado, verifica las cadenas con las claves del propio archivo y devuelve la
 columnas de ``shared.audit_entry``; ``extract_archive`` escribe los paquetes y el verificador en un
 directorio nuevo. Nunca escribe en la base: volver a cargar las filas es un paso del runbook.
 
+**Lista ampliada** (TASK-203, PAT-GOB-ESC-02): en la misma pasada, después de la auditoría, la
+tarea archiva las particiones vencidas de ``fleet.heartbeat_history`` (90 días),
+``fleet.enrollment_attempt`` y ``fleet.fleet_alarm`` (24 meses) con ``table_archive.TableArchiver``:
+mismo almacén, misma verificación de vuelta antes de desprender, mismo registro
+``audit_partition_archived`` (versión 2) y misma alerta si algo falla. No hay octava tarea.
+
 El planificador invoca el manejador una vez por organización; el archivado es global y solo actúa
 en la iteración de la organización proveedora. No lee la hora del sistema.
 """
@@ -54,7 +60,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import enum
 import hashlib
 import io
 import json
@@ -81,7 +86,16 @@ from vigia_platform.ledger.chain.checkpoints import CheckpointPublicKey
 from vigia_platform.ledger.chain.package_verifier import parse_json
 from vigia_platform.ledger.chain.pure_rfc8785 import CanonicalizationError, canonicalize
 from vigia_platform.ledger.chain.verify import audit_entry
+from vigia_platform.shared.archive.errors import ArchiveFailure, ArchiveVerificationFailed, sqlstate
 from vigia_platform.shared.archive.partitions import add_months, month_of
+from vigia_platform.shared.archive.table_archive import (
+    ARCHIVED_TABLES,
+    ArchivedTable,
+    ArchivedTablePartition,
+    PartitionStillOpen,
+    TableArchiver,
+    TablePartition,
+)
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction, TransientDatabaseError
@@ -181,13 +195,7 @@ _DETACH_REJECTED: Final = frozenset({"55000", "42P01"})
 partición no es la verificada) y ``undefined_table`` (ya no está adjunta)."""
 
 
-def _sqlstate(error: BaseException) -> str | None:
-    """El ``SQLSTATE`` de un error de la base, a través de SQLAlchemy y del adaptador."""
-    for candidate in (error, getattr(error, "orig", None), error.__cause__):
-        value = getattr(candidate, "sqlstate", None)
-        if isinstance(value, str):
-            return value
-    return None
+_sqlstate = sqlstate
 
 
 AUDIT_COLUMNS: Final = (
@@ -230,38 +238,8 @@ _UUID_COLUMNS: Final = frozenset(
 
 
 # --- Errores ------------------------------------------------------------------------------------
-
-
-class ArchiveFailure(enum.StrEnum):
-    """Motivo por el que un archivo no se da por bueno (``failure_reason`` de la alerta)."""
-
-    SOURCE_BROKEN = "source_broken"
-    """La partición ya está rota en la base: no se archiva."""
-    UNREADABLE = "unreadable"
-    """El archivo no es un ZIP legible, le falta o le sobra un miembro, o no es JSON válido."""
-    FORMAT_MISMATCH = "format_mismatch"
-    DIGEST_MISMATCH = "digest_mismatch"
-    """Lo leído del almacén no tiene el SHA-256 de lo subido."""
-    VERIFIER_MISMATCH = "verifier_mismatch"
-    COUNT_MISMATCH = "count_mismatch"
-    CHAIN_BROKEN = "chain_broken"
-    ENTRY_MISMATCH = "entry_mismatch"
-    """Una entrada, devuelta a columnas, no es la fila de la base."""
-    CHECKPOINT_MISMATCH = "checkpoint_mismatch"
-    PARTITION_CHANGED = "partition_changed"
-    """La base rechazó el desprendimiento: la partición cambió desde la exportación o ya no está
-    adjunta."""
-
-
-class ArchiveVerificationFailed(Exception):
-    """El archivo de una partición no pasó la verificación: la partición no se desprende."""
-
-    code: Final = "audit_archive_verification_failed"
-
-    def __init__(self, reason: ArchiveFailure, detail: str = "") -> None:
-        super().__init__(f"archivo de auditoría no verificado: {reason.value}")
-        self.reason = reason
-        self.detail = detail
+# ``ArchiveFailure`` y ``ArchiveVerificationFailed`` viven en ``errors``: los comparte el archivado
+# de las tablas de ``fleet`` (``table_archive``).
 
 
 class AuditArchiveFailed(Exception):
@@ -398,10 +376,12 @@ class RestoredPartition:
 
 @dataclass(slots=True)
 class ArchiveRunReport:
-    """Lo que hizo una pasada de la tarea."""
+    """Lo que hizo una pasada de la tarea: la auditoría y las tablas de la lista ampliada."""
 
-    archived: list[ArchivedPartition] = field(default_factory=list)
-    failed: list[tuple[AuditPartition, str]] = field(default_factory=list)
+    archived: list[ArchivedPartition | ArchivedTablePartition] = field(default_factory=list)
+    failed: list[tuple[AuditPartition | TablePartition, str]] = field(default_factory=list)
+    deferred: list[TablePartition] = field(default_factory=list)
+    """Particiones vencidas con filas abiertas (alarmas sin cerrar): siguen adjuntas, sin alerta."""
 
 
 # --- Puertos ------------------------------------------------------------------------------------
@@ -968,6 +948,7 @@ class AuditArchiver:
         kms_key_id: str | None = None,
         online_months: int = AUDIT_ONLINE_MONTHS,
         batch_size: int = READ_BATCH,
+        tables: Sequence[ArchivedTable] = ARCHIVED_TABLES,
     ) -> None:
         if not isinstance(verifier, bytes) or not verifier:
             raise ValueError("verifier debe ser el contenido de vigia_verify.py")
@@ -988,6 +969,21 @@ class AuditArchiver:
         self._kms_key_id = kms_key_id
         self._online_months = online_months
         self._batch_size = batch_size
+        # La lista ampliada (PAT-GOB-ESC-02): las tablas de volumen de fleet, cada una con su
+        # plazo, en la misma pasada y con las mismas dependencias.
+        self._tables = TableArchiver(
+            database=database,
+            storage=storage,
+            writer=writer,
+            clock=clock,
+            kms_key_id=kms_key_id,
+            tables=tables,
+            batch_size=batch_size,
+        )
+
+    @property
+    def tables(self) -> TableArchiver:
+        return self._tables
 
     def cutoff(self) -> date:
         """Primer mes que sigue en línea: se archiva todo mes anterior a él."""
@@ -1100,7 +1096,10 @@ class AuditArchiver:
         return ArchivedPartition(partition, key, uploaded_sha256, snapshot.entry_count, archived_at)
 
     async def alert(
-        self, context: ScopeContext, partition: AuditPartition, failure: ArchiveVerificationFailed
+        self,
+        context: ScopeContext,
+        partition: AuditPartition | TablePartition,
+        failure: ArchiveVerificationFailed,
     ) -> None:
         """``security_alert`` y la entrada ``integrity_verification`` con ``error``, confirmadas."""
         occurred_at = format_timestamp(self._clock.now())
@@ -1127,39 +1126,63 @@ class AuditArchiver:
             )
 
     async def run(self, context: ScopeContext) -> ArchiveRunReport:
-        """Una pasada: cada partición vencida por separado; ``AuditArchiveFailed`` si alguna
-        quedó sin archivar, después de intentar las demás."""
+        """Una pasada: cada partición vencida por separado, primero la auditoría y después la
+        lista ampliada de ``fleet``; ``AuditArchiveFailed`` si alguna quedó sin archivar, después
+        de intentar las demás."""
         report = ArchiveRunReport()
         for partition in await self.due_partitions(context):
-            try:
-                report.archived.append(await self.archive(context, partition))
-            except ArchiveVerificationFailed as failure:
-                _log.error(
-                    "archivo de auditoría no verificado: la partición sigue adjunta",
-                    partition=partition.qualified_name,
-                    failure_reason=failure.reason.value,
-                )
-                await self.alert(context, partition, failure)
-                report.failed.append((partition, failure.reason.value))
-            except (StorageUnavailable, TransientDatabaseError) as error:
-                _log.warning(
-                    "archivado aplazado por un fallo transitorio",
-                    partition=partition.qualified_name,
-                    code=getattr(error, "code", type(error).__name__),
-                )
-                report.failed.append((partition, getattr(error, "code", "transient")))
-            except Exception:
-                # Un fallo no previsto no abandona las particiones siguientes; la pasada termina
-                # fallida igualmente y la partición sigue adjunta (todo lo que la cambia va en una
-                # transacción).
-                _log.exception(
-                    "archivado fallido por un error no previsto",
-                    partition=partition.qualified_name,
-                )
-                report.failed.append((partition, "unexpected"))
+            await self._archive_one(context, partition, report)
+        for table_partition in await self._tables.due_partitions(context):
+            await self._archive_one(context, table_partition, report)
         if report.failed:
             raise AuditArchiveFailed([partition.qualified_name for partition, _ in report.failed])
         return report
+
+    async def _archive_one(
+        self,
+        context: ScopeContext,
+        partition: AuditPartition | TablePartition,
+        report: ArchiveRunReport,
+    ) -> None:
+        """Archiva una partición y anota el resultado; nunca deja escapar su fallo."""
+        try:
+            if isinstance(partition, TablePartition):
+                report.archived.append(await self._tables.archive(context, partition))
+            else:
+                report.archived.append(await self.archive(context, partition))
+        except PartitionStillOpen as still_open:
+            # Una alarma sigue abierta: su cierre tiene que poder escribirse. Sin alerta; la
+            # pasada siguiente vuelve a mirarla.
+            _log.warning(
+                "partición vencida con filas abiertas: sigue adjunta",
+                partition=still_open.partition.qualified_name,
+                open_rows=still_open.open_rows,
+            )
+            report.deferred.append(still_open.partition)
+        except ArchiveVerificationFailed as failure:
+            _log.error(
+                "archivo de auditoría no verificado: la partición sigue adjunta",
+                partition=partition.qualified_name,
+                failure_reason=failure.reason.value,
+            )
+            await self.alert(context, partition, failure)
+            report.failed.append((partition, failure.reason.value))
+        except (StorageUnavailable, TransientDatabaseError) as error:
+            _log.warning(
+                "archivado aplazado por un fallo transitorio",
+                partition=partition.qualified_name,
+                code=getattr(error, "code", type(error).__name__),
+            )
+            report.failed.append((partition, getattr(error, "code", "transient")))
+        except Exception:
+            # Un fallo no previsto no abandona las particiones siguientes; la pasada termina
+            # fallida igualmente y la partición sigue adjunta (todo lo que la cambia va en una
+            # transacción).
+            _log.exception(
+                "archivado fallido por un error no previsto",
+                partition=partition.qualified_name,
+            )
+            report.failed.append((partition, "unexpected"))
 
 
 # --- Restauración de solo lectura ---------------------------------------------------------------

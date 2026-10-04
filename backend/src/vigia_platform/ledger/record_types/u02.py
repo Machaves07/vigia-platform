@@ -76,6 +76,16 @@ AuditPartition = Annotated[
 ]
 """``shared.audit_entry_AAAA_MM``: 26 caracteres justos (el patrón es de ancho fijo). Hasta
 TASK-131 decía 25 y ningún registro ``audit_partition_archived`` podía escribirse."""
+FleetPartition = Annotated[
+    StrictStr,
+    Field(
+        min_length=25,
+        max_length=32,
+        pattern=r"^fleet\.(heartbeat_history|enrollment_attempt|fleet_alarm)_[0-9]{4}_(0[1-9]|1[0-2])$",
+    ),
+]
+"""``fleet.<tabla>_AAAA_MM`` de las tres tablas de volumen de ``fleet`` (gob_0018, TASK-203):
+de 25 (``fleet_alarm``) a 32 (``enrollment_attempt``) caracteres."""
 MonthPeriod = Annotated[
     StrictStr, Field(min_length=7, max_length=7, pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
 ]
@@ -228,6 +238,19 @@ class AuditPartitionArchived(ContentModel):
     archived_at: Timestamp
 
 
+class AuditPartitionArchivedV2(ContentModel):
+    """Versión 2 (TASK-203): ``archive_audit_partitions`` archiva también las particiones de
+    ``fleet`` (PAT-GOB-ESC-02), así que ``partition_name`` admite además sus nombres. Solo amplía
+    la versión 1 (BR-NUC-52): ``entry_count`` es el número de filas archivadas."""
+
+    partition_name: AuditPartition | FleetPartition
+    period: MonthPeriod
+    archive_object_key: ObjectKey
+    archive_sha256: Sha256Hex
+    entry_count: Count64
+    archived_at: Timestamp
+
+
 def _u02(
     record_type: str,
     chain_level: ChainLevel,
@@ -236,12 +259,13 @@ def _u02(
     free_text_paths: tuple[str, ...] = (),
     outbox_events: tuple[str, ...] = (),
     chain_follows_scope: bool = False,
+    schema_version: int = 1,
 ) -> RecordType:
     return RecordType(
         record_type=record_type,
         writer_unit=ActorUnit.U02,
         chain_level=chain_level,
-        schema_version=1,
+        schema_version=schema_version,
         content_model=model,
         free_text_paths=free_text_paths,
         outbox_events=outbox_events,
@@ -292,5 +316,7 @@ U02_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _u02("key_rotated", _ORG, KeyRotated),
     _u02("key_set_published", _ORG, KeySetPublished, outbox_events=("key_set_published",)),
     _u02("audit_partition_archived", _ORG, AuditPartitionArchived),
+    _u02("audit_partition_archived", _ORG, AuditPartitionArchivedV2, schema_version=2),
 )
-"""Los catorce tipos de U-02, en versión 1."""
+"""Los catorce tipos de U-02, cada uno con todas sus versiones en orden: todos en la 1 y
+``audit_partition_archived`` también en la 2 (TASK-203)."""
