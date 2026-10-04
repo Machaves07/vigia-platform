@@ -124,6 +124,9 @@ class AuditOperation(enum.StrEnum):
     UNKNOWN_TOKEN_REPORTED = "unknown_token_reported"  # noqa: S105 - operación, no un secreto
     PRIVACY_NOTICE_ACCEPTED = "privacy_notice_accepted"
     """Nota fechada de §2.9 (NFR-NUC-29): aceptación del aviso, con la versión aceptada."""
+    DOCUMENT_UPLOAD_GRANTED = "document_upload_granted"
+    """U-03 (LC-GOB-05, VIG-143): concesión de subida de un documento firmado de planta, como
+    ``evidence_read_granted``; la emite un instalador bajo concesión (BR-NUC-38)."""
 
 
 class AuditOutcome(enum.StrEnum):
