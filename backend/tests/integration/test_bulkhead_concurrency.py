@@ -110,7 +110,9 @@ async def _scenario(node: int = 35, person: int = 15) -> AsyncIterator[Scenario]
     app = harness.app(bulkheads=bulkheads)
     cookie = cookie_header(harness.session("mamparo"))
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="https://app.vigia.test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://app.vigia.test", timeout=30.0
+    ) as client:
         try:
             yield Scenario(harness, holds, bulkheads, timer, reader, app, client, cookie)
         finally:
