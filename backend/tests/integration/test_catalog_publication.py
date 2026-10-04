@@ -1058,16 +1058,20 @@ def test_another_organization_or_an_out_of_scope_plant_or_zone_answer_not_found(
 
 
 def test_the_statements_filter_the_zone_and_the_organization(catalogs: Catalogs) -> None:
-    # Dos zonas de la misma planta con catálogo: la de la zona B se publica antes. Sin el filtro
-    # de zona en las sentencias, leer la zona A devolvería la primera fila (la de B).
+    # Dos zonas de la misma planta con catálogo: la versión 1 de B (vigente) se escribe antes que
+    # las de A, así que es la primera fila de la organización. Sin el filtro de zona en las
+    # sentencias, leer la zona A devolvería la de B.
     site = catalogs.site(plants=1, zones=2)
     other = catalogs.site()
     (_, zone_a), (_, zone_b) = site.zones()
     admin = catalogs.member(site)
     catalogs.publish(admin, zone_b, _first())
     catalogs.publish(admin, zone_a, _first())
-    catalogs.publish(admin, zone_b, NewStandard(draft=_draft()))
+    catalogs.publish(admin, zone_a, NewStandard(draft=_draft()))
     repository = catalogs.repository
+    service_read = catalogs.run(catalogs.service.stored_envelope(admin, zone_a))
+    assert service_read["payload"]["zone_id"] == str(zone_a)
+    assert service_read["payload"]["version"] == 2
     own = unit_context(site.organization_id, ActorUnit.U03)
     foreign = unit_context(other.organization_id, ActorUnit.U03)
 
@@ -1080,12 +1084,53 @@ def test_the_statements_filter_the_zone_and_the_organization(catalogs: Catalogs)
     for version in (None, 1):
         envelope, current = catalogs.run(read(own, zone_a, version))
         assert envelope["payload"]["zone_id"] == str(zone_a)
-        assert current.zone_id == zone_a and current.catalog_version == 1
-    assert catalogs.run(read(own, zone_b, None))[1].catalog_version == 2
+        assert envelope["payload"]["version"] == (2 if version is None else 1)
+        assert current.zone_id == zone_a and current.catalog_version == 2
+    assert catalogs.run(read(own, zone_b, None))[1].catalog_version == 1
     assert catalogs.run(read(foreign, zone_a, None)) == (None, None)
     assert catalogs.run(repository.version(own, zone_a)).zone_id == zone_a
     history = catalogs.run(repository.standard_history(own, zone_a))
     assert {v.zone_id for v in history} == {zone_a}
+
+
+def test_under_concession_the_installer_reads_audited_and_never_publishes(
+    catalogs: Catalogs,
+) -> None:
+    authz = catalogs.authz
+    site = catalogs.site(plants=2, zones=1)
+    (plant_a, zone_a), (_, zone_b) = site.zones()
+    admin = catalogs.member(site)
+    first = catalogs.publish(admin, zone_a, _first())
+    catalogs.publish(admin, zone_b, _first())
+    installer = authz.add_provider_user()
+    concession = authz.add_concession(
+        site.organization_id,
+        installer,
+        level=ScopeLevel.PLANT,
+        scope_id=plant_a,
+        granted_at=authz.now() - timedelta(hours=1),
+    )
+    cookie = authz.open_session(authz.provider_organization_id, installer)
+    scope = catalogs.run(authz.contexts.context_from_session(cookie, concession_id=concession))
+    context: ScopeContext = scope.context
+
+    envelope = catalogs.run(catalogs.service.stored_envelope(context, zone_a))
+
+    assert envelope == dict(first.envelope)
+    with pytest.raises(ResourceNotFound):  # la otra planta no está concedida
+        catalogs.run(catalogs.service.stored_envelope(context, zone_b))
+    with pytest.raises(ResourceNotFound):  # catalog.manage no está en la columna del proveedor
+        catalogs.publish(context, zone_a, NewStandard(draft=_draft()))
+    audited = catalogs.fetch(
+        "SELECT scope_plant_id, scope_zone_id, result_count FROM shared.audit_entry"
+        " WHERE organization_id = $1 AND actor_concession_id = $2 AND operation = 'catalog_read'",
+        site.organization_id,
+        concession,
+    )
+    assert [(r["scope_plant_id"], r["scope_zone_id"], r["result_count"]) for r in audited] == [
+        (plant_a, zone_a, 1)
+    ]
+    assert [r["catalog_version"] for r in catalogs.versions(zone_a)] == [1]
 
 
 def test_the_organization_filter_holds_even_without_rls(catalogs: Catalogs) -> None:

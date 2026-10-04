@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 from vigia_contracts.models.enumerations import PredicateFamily
 
+from vigia_platform.catalog.domain import predicates
 from vigia_platform.catalog.domain.catalog_version import (
     ALL_CHANGED_FIELDS,
     CatalogRuleViolated,
@@ -495,6 +496,28 @@ def test_everything_outside_the_closed_grammar_is_predicate_invalid(
 ) -> None:
     with pytest.raises(PredicateInvalid):
         validate_predicate(family, predicate)
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        {"all_of": [{"presence": False}, ENERGY_ON], "min_duration_ms": 0},
+        {"all_of": [PRESENCE, {"not": ENERGY_ON}], "min_duration_ms": 0},
+        {"any_of": [PRESENCE, ENERGY_ON], "min_duration_ms": 0},
+        {"all_of": [PRESENCE, {"signal_role": "auxiliary", "value": "asserted"}]},
+    ],
+)
+def test_the_explicit_guard_does_not_depend_on_the_contract_schema(
+    monkeypatch: pytest.MonkeyPatch, predicate: dict[str, Any]
+) -> None:
+    # Si una versión futura del esquema dejara pasar ausencia, negación, disyunción o el rol
+    # auxiliar, la guarda explícita (business-rules §11) los sigue rechazando.
+    monkeypatch.setattr(
+        predicates.DeclaredStandard, "model_validate_json", classmethod(lambda cls, data: None)
+    )
+    assert validate_predicate("coexistence", COEXISTENCE) == COEXISTENCE
+    with pytest.raises(PredicateInvalid):
+        validate_predicate("coexistence", predicate)
 
 
 def test_canonical_conditions_ignore_order() -> None:
