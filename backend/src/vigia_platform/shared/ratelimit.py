@@ -42,6 +42,7 @@ import hmac
 import os
 import re
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -50,9 +51,11 @@ from vigia_platform.shared.clock import Clock
 __all__ = [
     "AUTHENTICATED_ORIGIN_BUDGET",
     "BRAKE_KEY",
+    "BRAKE_OFF",
     "CONTRACT_MAX_RETRY_AFTER_SECONDS",
     "DEFAULT_MAX_KEYS",
     "KEY_PATTERN",
+    "MAX_BRAKE_PER_MINUTE",
     "MAX_RETRY_AFTER_SECONDS",
     "PUBLIC_ORIGIN_BUDGET",
     "SESSION_BUDGET",
@@ -61,10 +64,12 @@ __all__ = [
     "EnrollmentWindow",
     "Limited",
     "RateLimiter",
+    "brake_filters",
     "contract_retry_after",
     "enrollment_origin_key",
     "node_key",
     "origin_key",
+    "parse_brake",
     "public_key",
     "session_key",
 ]
@@ -298,6 +303,35 @@ def enrollment_origin_key(
 def contract_retry_after(seconds: int) -> int:
     """``retry_after_seconds`` de un ``rate_limited`` del contrato: el del cubo acotado a 1..60."""
     return min(max(int(seconds), 1), CONTRACT_MAX_RETRY_AFTER_SECONDS)
+
+
+# --- Freno global de las rutas del contrato (TASK-206) -------------------------------------------
+
+BRAKE_OFF: Final = "off"
+MAX_BRAKE_PER_MINUTE: Final = 1_000_000
+
+
+def brake_filters(per_minute: int | None) -> dict[str, str]:
+    """Los ``filters`` de la entrada ``node_rate_brake_set``: ``{"per_minute": "<n>"|"off"}``.
+
+    La escribe ``vigia-admin set-node-rate-brake`` y la lee ``node_api.limits`` (la auditoría es
+    el ajuste del freno global de emergencia, NFR-GOB-33).
+    """
+    if per_minute is None:
+        return {"per_minute": BRAKE_OFF}
+    if type(per_minute) is not int or not 1 <= per_minute <= MAX_BRAKE_PER_MINUTE:
+        raise ValueError(f"el freno debe ser de 1 a {MAX_BRAKE_PER_MINUTE} por minuto")
+    return {"per_minute": str(per_minute)}
+
+
+def parse_brake(filters: object) -> int | None:
+    """El límite por minuto de una entrada ``node_rate_brake_set`` (``None``: sin freno)."""
+    value = filters.get("per_minute") if isinstance(filters, Mapping) else None
+    if value == BRAKE_OFF or not isinstance(value, str) or not value.isascii():
+        return None
+    if not value.isdigit() or not 1 <= int(value) <= MAX_BRAKE_PER_MINUTE:
+        return None
+    return int(value)
 
 
 def node_key(node_id: object, operation: str) -> str:

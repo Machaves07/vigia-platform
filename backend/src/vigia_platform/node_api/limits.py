@@ -55,15 +55,14 @@ from vigia_platform.shared.ratelimit import (
     contract_retry_after,
     enrollment_origin_key,
     node_key,
+    parse_brake,
 )
 
 __all__ = [
     "BRAKE_CACHE_SECONDS",
-    "BRAKE_OFF",
     "BRAKE_STATEMENT",
     "ENROLLMENT_NODE_BUDGET",
     "ENROLLMENT_ORIGIN_BUDGETS",
-    "MAX_BRAKE_PER_MINUTE",
     "MINIMUM_PER_MINUTE",
     "NODE_BUDGETS",
     "AuditBrakeSource",
@@ -72,15 +71,11 @@ __all__ = [
     "NodeRateLimits",
     "RateCause",
     "RouteBudget",
-    "brake_filters",
     "check_minimum",
-    "parse_brake",
 ]
 
 BRAKE_CACHE_SECONDS: Final = 10.0
 """Caché corta del freno ``[objetivo propio]``: lo que tarda un cambio en llegar a cada proceso."""
-BRAKE_OFF: Final = "off"
-MAX_BRAKE_PER_MINUTE: Final = 1_000_000
 
 _log = get_logger("node_api.limits")
 
@@ -149,25 +144,6 @@ if check_minimum():  # pragma: no cover - un cambio de presupuesto lo detiene al
 
 
 # --- Freno global --------------------------------------------------------------------------------
-
-
-def brake_filters(per_minute: int | None) -> dict[str, str]:
-    """Los ``filters`` de ``node_rate_brake_set``: ``{"per_minute": "<n>"|"off"}``."""
-    if per_minute is None:
-        return {"per_minute": BRAKE_OFF}
-    if type(per_minute) is not int or not 1 <= per_minute <= MAX_BRAKE_PER_MINUTE:
-        raise ValueError(f"el freno debe ser de 1 a {MAX_BRAKE_PER_MINUTE} por minuto")
-    return {"per_minute": str(per_minute)}
-
-
-def parse_brake(filters: object) -> int | None:
-    """El límite por minuto de una entrada ``node_rate_brake_set`` (``None``: sin freno)."""
-    value = filters.get("per_minute") if isinstance(filters, Mapping) else None
-    if value == BRAKE_OFF or not isinstance(value, str) or not value.isascii():
-        return None
-    if not value.isdigit() or not 1 <= int(value) <= MAX_BRAKE_PER_MINUTE:
-        return None
-    return int(value)
 
 
 class BrakeSource(Protocol):

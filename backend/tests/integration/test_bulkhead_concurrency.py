@@ -36,13 +36,15 @@ from tests.bulkhead_support import ManualTimer, bulkheads_with_reader, gauge, un
 from tests.middleware_support import Harness, cookie_header
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.shared.api.app import UnitRegistration
-from vigia_platform.shared.api.declarations import requires
+from vigia_platform.shared.api.declarations import NodeRoute, node_route, requires
 from vigia_platform.shared.api.errors import ApiErrorCode
 from vigia_platform.shared.bulkheads import PERSON_WAIT_SECONDS, RETRY_AFTER_SECONDS, Bulkheads
 from vigia_platform.shared.db import RouteClass
 from vigia_platform.shared.observability.metrics import MetricName
 
 NODE, PERSON = RouteClass.NODE, RouteClass.PERSON
+NODE_HOLD = "/api/nodes/zones/hold/catalog"
+"""La ruta de nodo que retiene la petición hasta que la prueba la suelta."""
 
 
 @dataclass
@@ -67,21 +69,19 @@ class Holds:
 def _unit(holds: Holds) -> UnitRegistration:
     router = APIRouter()
 
-    @router.get("/api/nodes/hold", dependencies=[requires(PermissionKey.FLEET_READ.value)])
-    async def node_hold() -> dict[str, str]:
+    # Una ruta del contrato (A-51) con tres comportamientos según el segmento de la ruta:
+    # /api/nodes/zones/{hold|boom|listen}/catalog.
+    @router.get(NodeRoute.ZONE_CATALOG.path, dependencies=[node_route(NodeRoute.ZONE_CATALOG)])
+    async def node_route_handler(zone_id: str, request: Request) -> dict[str, str]:
+        if zone_id == "boom":
+            raise RuntimeError("fallo del manejador")
+        if zone_id == "listen":
+            holds.entered["listen"] += 1
+            while not await request.is_disconnected():
+                await asyncio.sleep(0)
+            return {"ok": "gone"}
         await holds.hold("node")
         return {"ok": "node"}
-
-    @router.get("/api/nodes/boom", dependencies=[requires(PermissionKey.FLEET_READ.value)])
-    async def node_boom() -> dict[str, str]:
-        raise RuntimeError("fallo del manejador")
-
-    @router.get("/api/nodes/listen", dependencies=[requires(PermissionKey.FLEET_READ.value)])
-    async def node_listen(request: Request) -> dict[str, str]:
-        holds.entered["listen"] += 1
-        while not await request.is_disconnected():
-            await asyncio.sleep(0)
-        return {"ok": "gone"}
 
     @router.get("/hold", dependencies=[requires(PermissionKey.HIERARCHY_READ.value)])
     async def person_hold() -> dict[str, str]:
@@ -147,7 +147,7 @@ def _is_temporarily_unavailable(response: httpx.Response) -> bool:
 
 def test_36_simultaneous_nodes_admit_35_reject_one_at_once_and_a_person_is_served() -> None:
     async def test(s: Scenario) -> None:
-        nodes = [asyncio.create_task(s.client.get("/api/nodes/hold")) for _ in range(36)]
+        nodes = [asyncio.create_task(s.client.get(NODE_HOLD)) for _ in range(36)]
         # Las 36 llegan a la vez: 35 quedan dentro del manejador y una sale ya rechazada.
         await until(lambda: s.holds.entered["node"] == 35 and sum(t.done() for t in nodes) == 1)
         (rejected,) = [task.result() for task in nodes if task.done()]
@@ -171,12 +171,12 @@ def test_36_simultaneous_nodes_admit_35_reject_one_at_once_and_a_person_is_serve
 
 def test_a_node_rejected_by_the_bulkhead_is_served_once_a_slot_frees() -> None:
     async def test(s: Scenario) -> None:
-        nodes = [asyncio.create_task(s.client.get("/api/nodes/hold")) for _ in range(35)]
+        nodes = [asyncio.create_task(s.client.get(NODE_HOLD)) for _ in range(35)]
         await until(lambda: s.holds.entered["node"] == 35)
-        assert _is_temporarily_unavailable(await s.client.get("/api/nodes/hold"))
+        assert _is_temporarily_unavailable(await s.client.get(NODE_HOLD))
         s.holds.let_go("node")
         await until(lambda: s.bulkheads.in_use(NODE) == 34)
-        retry = asyncio.create_task(s.client.get("/api/nodes/hold"))
+        retry = asyncio.create_task(s.client.get(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 36)
         s.holds.let_go("node", 35)
         assert (await retry).status_code == 200
@@ -222,7 +222,7 @@ def test_the_16th_person_gets_temporarily_unavailable_at_2_seconds() -> None:
         assert _is_temporarily_unavailable(await sixteenth)
         assert s.timer.clock.monotonic() == PERSON_WAIT_SECONDS
         # Los nodos no se ven afectados por el mamparo de personas lleno.
-        node = asyncio.create_task(s.client.get("/api/nodes/hold"))
+        node = asyncio.create_task(s.client.get(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 1)
         s.holds.let_go("node")
         assert (await node).status_code == 200
@@ -257,9 +257,10 @@ def test_health_probes_do_not_wait_for_the_person_bulkhead() -> None:
 
 def test_a_raising_handler_returns_the_slot() -> None:
     async def test(s: Scenario) -> None:
-        response = await s.client.get("/api/nodes/boom")
-        assert response.status_code == 500
-        assert response.json()["code"] == ApiErrorCode.INTERNAL_ERROR.value
+        response = await s.client.get("/api/nodes/zones/boom/catalog")
+        # Clase node: un error interno es el transitorio del contrato, nunca un ApiError.
+        assert response.status_code == 503
+        assert response.json()["code"] == "temporarily_unavailable"
         assert s.bulkheads.in_use(NODE) == 0
         assert gauge(s.reader, MetricName.BULKHEAD_IN_USE, NODE) == 0
 
@@ -268,7 +269,7 @@ def test_a_raising_handler_returns_the_slot() -> None:
 
 def test_a_cancelled_request_returns_the_slot() -> None:
     async def test(s: Scenario) -> None:
-        request = asyncio.create_task(s.client.get("/api/nodes/hold"))
+        request = asyncio.create_task(s.client.get(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 1)
         assert gauge(s.reader, MetricName.BULKHEAD_IN_USE, NODE) == 1
         request.cancel()
@@ -303,8 +304,8 @@ def test_a_client_disconnect_returns_the_slot() -> None:
             "http_version": "1.1",
             "method": "GET",
             "scheme": "https",
-            "path": "/api/nodes/listen",
-            "raw_path": b"/api/nodes/listen",
+            "path": "/api/nodes/zones/listen/catalog",
+            "raw_path": b"/api/nodes/zones/listen/catalog",
             "root_path": "",
             "query_string": b"",
             "headers": [(b"host", b"app.vigia.test")],

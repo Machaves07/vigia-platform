@@ -27,6 +27,8 @@ from starlette.websockets import WebSocketDisconnect
 import vigia_platform.shared.api.app as app_module
 from tests.middleware_support import (
     CLIENT_ORG,
+    NODE_HEARTBEAT_PATH,
+    NODE_READ_PATH,
     NOTICE,
     PROVIDER_ORG,
     SAME_ORIGIN,
@@ -215,9 +217,9 @@ def test_node_routes_use_the_node_pool_and_person_routes_the_person_pool() -> No
     harness = Harness()
     cookie = harness.session("pool")
     with TestClient(harness.app()) as client:
-        node = client.get("/api/nodes/x")
+        node = client.get(NODE_READ_PATH)
         person = client.get("/me", headers=cookie_header(cookie))
-        heartbeat = client.post("/api/nodes/heartbeat", json={"sequence": 1})
+        heartbeat = client.post(NODE_HEARTBEAT_PATH, json={"sequence": 1})
     assert node.status_code == person.status_code == heartbeat.status_code == 200
     assert harness.observed.route_classes == [RouteClass.NODE, RouteClass.PERSON, RouteClass.NODE]
 
@@ -244,7 +246,7 @@ def test_node_routes_skip_session_csrf_and_privacy_notice_by_construction() -> N
     harness = Harness(privacy_notice_version=None)
     with TestClient(harness.app()) as client:
         # Sin cookie, sin Sec-Fetch-Site y sin aviso vigente: el nodo no pasa por esos eslabones.
-        response = client.post("/api/nodes/heartbeat", json={"sequence": 7})
+        response = client.post(NODE_HEARTBEAT_PATH, json={"sequence": 7})
     assert response.status_code == 200 and response.json() == {"sequence": 7}
     assert harness.csrf_audit.total == 0 and harness.store.lookups == []
 

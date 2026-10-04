@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from vigia_contracts.clock import SimulatedClock
+from vigia_contracts.models.enumerations import RejectionCode
 
 from tests.api_support import World
 from tests.signing_support import START
@@ -37,9 +38,12 @@ from vigia_platform.identity.authz.context import (
 )
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.shared.api.app import UnitRegistration, platform_units
+from vigia_platform.node_api.rejections import NodeRejection
 from vigia_platform.shared.api.declarations import (
+    NODE_GATE_STATE_KEY,
+    NodeRoute,
     UnauthenticatedRoute,
-    body_limit,
+    node_route,
     requires,
     unauthenticated,
 )
@@ -56,6 +60,8 @@ from vigia_platform.shared.ratelimit import Allowed, Budget, Limited, RateLimite
 
 __all__ = [
     "CLIENT_ORG",
+    "NODE_HEARTBEAT_PATH",
+    "NODE_READ_PATH",
     "NOTICE",
     "ORIGIN",
     "PERMISSIONS",
@@ -202,6 +208,21 @@ class NodeAwareAuthorizer:
         await self._inner.authorize(request, permission)
 
 
+NODE_READ_TEMPLATE = NodeRoute.ZONE_CATALOG.path
+NODE_READ_PATH = "/api/nodes/zones/0192f0c4-0000-7000-8000-0000000000aa/catalog"
+"""Una ruta de lectura de nodo (sin cuerpo) del arnés."""
+NODE_HEARTBEAT_PATH = NodeRoute.HEARTBEAT.path
+
+
+class HarnessNodeGate:
+    """``NodeGate`` del arnés: sin identidad ni versión (las prueba ``node_api``); solo emite el
+    ``payload_too_large`` que la cadena marcó (paso 3), como la verificación real."""
+
+    async def admit(self, request: Request, route: NodeRoute) -> None:
+        if request_state(request.scope).body_exceeded:
+            raise NodeRejection(RejectionCode.PAYLOAD_TOO_LARGE)
+
+
 # Cuerpos como los de las rutas reales: sin campos extra y sin coerción de tipos primitivos;
 # los UUID y las enumeraciones llegan como texto JSON (FastAPI valida el JSON ya decodificado).
 
@@ -281,15 +302,14 @@ def _unit(observed: Observed) -> UnitRegistration:
         seen("login", request)
         return {"ok": "true"}
 
-    @router.get("/api/nodes/x", dependencies=[requires(PermissionKey.FLEET_READ.value)])
-    async def node_read(request: Request) -> dict[str, str]:
+    # Rutas del contrato (A-51): se declaran con node_route y su plantilla de NodeRoute; la
+    # verificación previa la hace la NodeGate del arnés (HarnessNodeGate).
+    @router.get(NODE_READ_TEMPLATE, dependencies=[node_route(NodeRoute.ZONE_CATALOG)])
+    async def node_read(zone_id: str, request: Request) -> dict[str, str]:
         seen("node_read", request)
         return {"ok": "node"}
 
-    @router.post(
-        "/api/nodes/heartbeat",
-        dependencies=[requires(PermissionKey.FLEET_READ.value), body_limit(4096)],
-    )
+    @router.post(NodeRoute.HEARTBEAT.path, dependencies=[node_route(NodeRoute.HEARTBEAT)])
     async def node_heartbeat(body: NodeHeartbeat, request: Request) -> dict[str, int]:
         seen("node_heartbeat", request)
         return {"sequence": body.sequence}
@@ -358,6 +378,7 @@ class Harness:
             "origin_secret": b"k" * 32,
             "privacy_notice_version": self.privacy_notice_version,
             "authorizer": authorizer,
+            "state": {NODE_GATE_STATE_KEY: HarnessNodeGate()},
         }
         values.update(runtime)
         return self.world.app(

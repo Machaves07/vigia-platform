@@ -288,7 +288,12 @@ def translate(error: BaseException) -> NodeRejection | None:
     if isinstance(error, NodeContextRejected):
         return NodeRejection(RejectionCode(error.reason.value))
     if isinstance(error, ContractValidationError):
-        return NodeRejection(RejectionCode.SCHEMA_INVALID, field=_contract_field(error.field))
+        # Sin ``field`` el fallo es del cuerpo entero (JSON inválido, raíz de otro tipo): 400.
+        return NodeRejection(
+            RejectionCode.SCHEMA_INVALID,
+            field=_contract_field(error.field),
+            body_level=error.field is None,
+        )
     if isinstance(error, LedgerRejected):
         return _from_ledger(error.rejection)
     if isinstance(error, ApiError):

@@ -26,6 +26,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from vigia_contracts.clock import SimulatedClock
 
 from tests.middleware_support import (
+    NODE_READ_PATH,
     ORIGIN,
     STORE_ORIGIN,
     Harness,
@@ -359,7 +360,7 @@ def test_an_origin_allows_1200_per_minute_on_authenticated_routes() -> None:
 def test_node_routes_are_outside_the_origin_limiter() -> None:
     harness = Harness()
     with TestClient(harness.app()) as client:
-        statuses = [client.get("/api/nodes/x").status_code for _ in range(1_300)]
+        statuses = [client.get(NODE_READ_PATH).status_code for _ in range(1_300)]
     # Más que cualquier presupuesto por origen (1 200): el nodo no pasa por ese limitador.
     assert 429 not in statuses
 
