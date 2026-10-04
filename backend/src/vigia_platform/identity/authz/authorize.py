@@ -35,7 +35,7 @@ import re
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final, NoReturn, Protocol
 
 from vigia_platform.identity.authz.context import with_role_in_use, with_scopes
 from vigia_platform.identity.authz.matrix import (
@@ -281,11 +281,23 @@ class Authorizer:
             provider_organization_id=self._provider_organization_id,
         )
         if decision.role_in_use is None:
-            try:
-                await self._audit.authorization_denied(context, permission, resource)
-            except Exception:
-                # Como en la autorización por ruta (seguimiento de VIG-78): la denegación no
-                # depende de la base; con la auditoría caída sigue siendo ``not_found``.
-                _log.exception("no se pudo auditar authorization_denied")
-            raise ResourceNotFound()
+            await self.deny(context, permission, resource)
         return with_role_in_use(context, decision.role_in_use)
+
+    async def deny(
+        self, context: ScopeContext, key: PermissionKey | str, resource: Resource
+    ) -> NoReturn:
+        """Audita ``authorization_denied`` y lanza ``ResourceNotFound``.
+
+        Es la denegación de ``authorize`` y la de las reglas de un servicio que la matriz no
+        expresa (p. ej. BR-GOB-27: ``agreements.sign`` nunca por la concesión, aunque esté en la
+        columna ``provider_installer``): hacia el llamador, igual que un recurso inexistente.
+        """
+        permission = permission_key(key)
+        try:
+            await self._audit.authorization_denied(context, permission, resource)
+        except Exception:
+            # Como en la autorización por ruta (seguimiento de VIG-78): la denegación no
+            # depende de la base; con la auditoría caída sigue siendo ``not_found``.
+            _log.exception("no se pudo auditar authorization_denied")
+        raise ResourceNotFound()

@@ -145,6 +145,10 @@ class AuditOperation(enum.StrEnum):
     FLEET_READ = "fleet_read"
     """Lectura de la flota de una planta bajo concesión (BR-NUC-38; como ``catalog_read``):
     ``GET /nodes/{node_id}/enrollment-attempts`` (TASK-218)."""
+    SIGNATORY_POLICY_CHANGED = "signatory_policy_changed"
+    """U-03 (LC-GOB-04, VIG-149): ``PUT /plants/{plant_id}/signatory-policy``. La política de
+    firmantes es una proyección sin tipo de registro (DE §2.7): esta entrada es su rastro, con
+    ``filters`` ``{minimum, required_roles}``; la emite un instalador bajo concesión."""
 
 
 class AuditOutcome(enum.StrEnum):

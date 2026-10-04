@@ -39,6 +39,9 @@ from tests.integration.conftest import PostgresEndpoint
 from tests.outbox_support import app_database
 from tests.signing_support import SigningWorld, bootstrapped_world
 from tests.writer_support import save_record_types, unit_context
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
@@ -82,7 +85,12 @@ from vigia_platform.shared.storage import (
     StorageUnavailable,
 )
 
-GATE_TYPES: Final = ("gate_state_changed", "mounting_gate_record", "plant_policy_signed")
+GATE_TYPES: Final = (
+    "gate_state_changed",
+    "mounting_gate_record",
+    "plant_policy_signed",
+    "use_agreement_signed",
+)
 HOUR: Final = timedelta(hours=1)
 SCOPE_TEXT: Final = "Se observa la celda de soldadura 3 durante el turno; nunca a las personas."
 FRAMING: Final = "Encuadre cenital de la celda con la valla perimetral visible"
@@ -196,6 +204,7 @@ class GatesWorld:
         fields: dict[str, Any] = {
             "repository": PostgresGateRepository(self.database),
             "catalog": PostgresCatalogRepository(self.database),
+            "agreements": PostgresAgreementRepository(),
             "database": self.database,
             "writer": self.writer,
             "authorizer": self.authz.authorizer,
@@ -292,9 +301,18 @@ class GatesWorld:
         return context
 
     def equip(
-        self, site: Site, plant: uuid.UUID, zone: uuid.UUID, cameras: int = 2, *, node: bool = True
+        self,
+        site: Site,
+        plant: uuid.UUID,
+        zone: uuid.UUID,
+        cameras: int = 2,
+        *,
+        node: bool = True,
+        payload: Mapping[str, Any] | None = None,
     ) -> tuple[uuid.UUID, ...]:
-        """Catálogo vigente con ``cameras`` cámaras en la zona y, si ``node``, un nodo asignado."""
+        """Catálogo vigente con ``cameras`` cámaras en la zona y, si ``node``, un nodo asignado.
+
+        ``payload`` añade campos al catálogo sintético (estándares, cobertura mínima…)."""
         camera_ids = tuple(uuid.uuid4() for _ in range(cameras))
         self.execute(
             "INSERT INTO catalog.zone_catalog_version (organization_id, plant_id, zone_id,"
@@ -307,7 +325,9 @@ class GatesWorld:
             zone,
             BASE_TIME,
             self.authz.operator_id,
-            json.dumps({"cameras": [{"camera_id": str(c)} for c in camera_ids]}),
+            json.dumps(
+                {"cameras": [{"camera_id": str(c)} for c in camera_ids], **dict(payload or {})}
+            ),
             uuid.uuid4(),
         )
         if node:

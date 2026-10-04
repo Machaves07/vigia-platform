@@ -15,8 +15,14 @@ zona, en dos tiempos para que la firma no retenga la cadena del expediente:
 
 **Revocación** (``revoke``, ``POST /zones/{zone_id}/gates/{gate}/revocation``): motivo de 10 a 500
 por la política de texto libre; solo una compuerta ``approved`` (si no, ``GateConflict``, que es
-``conflict`` sin ``detail_code``); cierra el intervalo aprobado y abre ``revoked``. No toca ningún
-hallazgo ni registro anterior (BR-GOB-34).
+``conflict`` sin ``detail_code``); cierra el intervalo aprobado y abre ``revoked``. Revocar el uso
+deja además el acuerdo vigente de la zona en ``revoked`` en la misma transacción (TASK-212,
+BL §3.2). No toca ningún hallazgo ni registro anterior (BR-GOB-34).
+
+**Candados** (orden único, también para ``catalog.agreements``): primero la exclusión de la
+proyección de la zona (``lock_projection``), después la de la cadena de la planta que toma
+``EscritorExpediente`` al escribir. La aprobación del acuerdo (``locked_state``) y la revocación
+toman la misma exclusión de la zona antes de leer nada.
 
 **Fallo cerrado** (FS-GOB-02, PAT-GOB-RES-03): si la firma no responde (clave no disponible,
 servicio sin arrancar o tope agotado) la transacción entera se revierte: sin historia, registro ni
@@ -43,6 +49,9 @@ from typing import Any, Final, Protocol
 from sqlalchemy import exc as sa_exc
 from vigia_contracts.models.enumerations import AcceptanceStatus, GateStatus
 
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.gate_repository import (
     GateWriteConflict,
@@ -206,6 +215,7 @@ class GateService:
         *,
         repository: PostgresGateRepository,
         catalog: PostgresCatalogRepository,
+        agreements: PostgresAgreementRepository,
         database: LedgerDatabase,
         writer: EscritorExpediente,
         authorizer: Authorizer,
@@ -219,6 +229,7 @@ class GateService:
             raise ValueError("sign_timeout_seconds debe ser positivo")
         self._repository = repository
         self._catalog = catalog
+        self._agreements = agreements
         self._database = database
         self._writer = writer
         self._authorizer = authorizer
@@ -408,18 +419,41 @@ class GateService:
             raise ResourceNotFound()
         writer_context = with_unit(authorized, ActorUnit.U03)
 
+        kind = GateKind(gate)
+
         async def revoke(transaction: Transaction) -> GateTransition:
-            return await self.transition_gate(
+            transition = await self.transition_gate(
                 transaction,
                 writer_context,
                 zone.zone_id,
-                GateKind(gate),
+                kind,
                 GateStatus.REVOKED,
                 None,
                 reason,
             )
+            if kind is GateKind.USAGE:
+                # El acuerdo vigente se revoca con su compuerta (BL §3.2); no caduca nunca solo.
+                at = transition.interval.effective_from
+                await self._agreements.revoke_current(transaction, zone.zone_id, at)
+            return transition
 
         return await self.run(writer_context, revoke)
+
+    # --- Proyección dentro de una transacción (catalog.agreements) ----------------------------
+
+    async def locked_state(self, transaction: Transaction, zone: ZoneRef) -> ZoneGateState:
+        """La exclusión de la proyección de la zona y su estado (``pending`` si nunca cambió).
+
+        La toma la aprobación del acuerdo **antes** de leer el acuerdo y sus guardas: dos
+        aprobaciones simultáneas se ordenan y la segunda ve lo que dejó la primera.
+        """
+        await self._repository.lock_projection(transaction, zone.zone_id)
+        return await self.state_in(transaction, zone)
+
+    async def state_in(self, transaction: Transaction, zone: ZoneRef) -> ZoneGateState:
+        """El estado de la zona dentro de ``transaction`` (``pending`` si nunca cambió)."""
+        state = await self._repository.state(transaction, zone.zone_id)
+        return state or ZoneGateState.initial(zone.organization_id, zone.plant_id, zone.zone_id)
 
     async def run[T](self, context: ScopeContext, body: Callable[[Transaction], Awaitable[T]]) -> T:
         """``body(transaction)`` en una transacción; traduce carreras y reglas a sus errores."""
