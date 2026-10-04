@@ -222,7 +222,10 @@ class RegressionService:
 
         Cada zona tiene que existir y estar dentro del alcance del contexto (las zonas asignadas
         al nodo); si no, ``ResourceNotFound`` y nada escrito. Con ``transaction`` (abierta con un
-        contexto de U-03) corre dentro de ella, en la transacción corta del latido.
+        contexto de U-03) corre dentro de ella, en la transacción corta del latido: quien la abre
+        **no debe escribir registros del expediente antes** de llamar a la marca, porque el
+        registro retendría la cabeza de la cadena antes de los candados de regresión (orden
+        regresión → cadena; si no, interbloqueo con una publicación de la misma planta).
         """
         version = _model_version(model_version)
         zones = tuple(sorted(set(zone_ids)))
@@ -248,9 +251,14 @@ class RegressionService:
             if zone is None or not context.covers(zone.plant_id, zone.zone_id):
                 raise ResourceNotFound()
             refs.append(zone)
-        results: list[WalkTestRegression] = []
-        for zone in refs:  # en orden de zona: dos latidos nunca se interbloquean
+        # Todos los candados de regresión, en orden de zona, **antes** de escribir ningún registro:
+        # el registro toma la cabeza de la cadena de la planta hasta confirmar, así que tomar el de
+        # la zona B después del registro de A interbloquearía con una publicación en B (zona →
+        # regresión → cadena). Orden siempre: regresión de cada zona → cadena.
+        for zone in refs:
             await self._repository.lock(transaction, zone.zone_id)
+        results: list[WalkTestRegression] = []
+        for zone in refs:
             current = await self._repository.get(transaction, zone.zone_id)
             results.append(
                 await self._apply(

@@ -1176,6 +1176,100 @@ def test_a_parameter_change_and_a_model_change_at_once_keep_both_marks(
     assert attempt in (1, 2, 3)
 
 
+class HeldSecondLockRepository(PostgresRegressionRepository):
+    """Retiene la marca de modelo justo antes de su **segundo** candado de regresión.
+
+    Con el orden correcto (todos los candados antes de escribir) la marca solo retiene ahí el
+    candado de la primera zona, y una publicación en la segunda termina. Si escribiera el registro
+    de la primera zona antes del segundo candado, retendría la cabeza de la cadena de la planta:
+    la publicación quedaría esperando la cadena y, al soltar, las dos se interbloquearían.
+    """
+
+    def __init__(self, database: Database) -> None:
+        super().__init__(database)
+        self.locks = 0
+        self.at_second: asyncio.Event | None = None
+        self.release: asyncio.Event | None = None
+
+    def arm(self) -> None:
+        self.locks = 0
+        self.at_second = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def lock(self, transaction: Transaction, zone_id: uuid.UUID) -> None:
+        self.locks += 1
+        if self.locks == 2 and self.at_second is not None and self.release is not None:
+            self.at_second.set()
+            async with asyncio.timeout(HOLD_SECONDS):
+                await self.release.wait()
+        await super().lock(transaction, zone_id)
+
+
+async def _blocked_sessions(admin: Any) -> int:
+    value: int = await admin.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+    return value
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 3])
+def test_a_model_change_on_two_zones_and_a_publication_in_the_second_never_deadlock(
+    routes: CatalogRoutes, attempt: int
+) -> None:
+    site = routes.site(zones=2)
+    (plant, zone_1), (_, zone_2) = site.zones()
+    first, second = sorted((zone_1, zone_2))
+    admin_cookie = routes.member(site)
+    for zone in (first, second):
+        routes.productive(site, plant, zone)
+        routes.configure(admin_cookie, zone)
+    repository = HeldSecondLockRepository(routes.database)
+    _, regression = routes.services(repository)
+    admin = routes.context(admin_cookie)
+    database_admin = routes.authz.sessions.admin
+    routes.tick()
+
+    async def race() -> list[Any]:
+        repository.arm()
+        assert repository.at_second is not None and repository.release is not None
+        model = asyncio.create_task(
+            regression.mark_model_version_change(
+                routes.system_context(site), (first, second), "detector-v7"
+            )
+        )
+        async with asyncio.timeout(WAIT_SECONDS):
+            await repository.at_second.wait()
+        publication = asyncio.create_task(
+            routes.publication.publish_catalog_version(
+                admin,
+                second,
+                SetThresholds(thresholds={"review": 0.3, "publication": 0.7}),
+                REASON,
+            )
+        )
+        # Se suelta al ver la publicación terminada o esperando un candado (sin topes de pared).
+        async with asyncio.timeout(WAIT_SECONDS):
+            while not (publication.done() or await _blocked_sessions(database_admin) >= 1):
+                await asyncio.sleep(POLL_SECONDS)
+        repository.release.set()
+        return list(await asyncio.gather(model, publication, return_exceptions=True))
+
+    results = routes.run(race())
+
+    assert not [r for r in results if isinstance(r, BaseException)], results
+    assert isinstance(results[1], ZoneCatalogVersion) and results[1].catalog_version == 2
+    for zone in (first, second):
+        row = routes.regression_row(zone)
+        assert row is not None and row["state"] == "pending"
+        assert json.loads(row["affected_row_ids"]) == "all"
+        assert row["model_version"] == "detector-v7"
+    assert routes.regression_row(second)["catalog_version"] == 2
+    assert sorted(m["cause"] for m in _marks(routes, second)) == [
+        "catalog_change",
+        "model_version_change",
+    ]
+    assert [m["cause"] for m in _marks(routes, first)] == ["model_version_change"]
+    assert attempt in (1, 2, 3)
+
+
 def _dwell_change() -> NewStandard:
     return NewStandard(
         draft=StandardDraft(
