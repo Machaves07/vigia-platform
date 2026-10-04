@@ -42,7 +42,8 @@ U03_FREE_TEXT_VALIDATOR: Final = "u03_intent_attribution"
 INTENT_ATTRIBUTION: Final = "intent_attribution"
 """Motivo cerrado del rechazo (``FreeTextRejected.reason``)."""
 
-_MESSAGE: Final = "el texto afirma intención (sabotaje o manipulación deliberada)"
+_MESSAGE: Final = "el texto afirma intención (RNF-OBS-03)"
+"""Mensaje genérico: no repite el texto ni las expresiones que encontró."""
 
 _CONFUSABLES: Final = str.maketrans(
     {

@@ -98,8 +98,8 @@ VersionedKey = Annotated[
 DocumentStorageKey = Annotated[
     StrictStr,
     Field(
-        min_length=104,
-        max_length=104,
+        min_length=134,
+        max_length=134,
         pattern=(
             f"^org/{_UUID_PATTERN}/plant/{_UUID_PATTERN}/documents/{_UUID_PATTERN}"
             r"\.(pdf|jpg|png)$"
@@ -107,7 +107,7 @@ DocumentStorageKey = Annotated[
     ),
 ]
 """``org/{organization_id}/plant/{plant_id}/documents/{document_id}.{ext}`` (infrastructure-design
-§4.1): 104 caracteres justos con cualquiera de las tres extensiones."""
+§4.1): 134 caracteres justos con cualquiera de las tres extensiones."""
 
 DocumentContentType = Literal["application/pdf", "image/jpeg", "image/png"]
 
