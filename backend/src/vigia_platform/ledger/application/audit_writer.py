@@ -97,6 +97,9 @@ class AuditOperation(enum.StrEnum):
     NODE_ZONE_UNASSIGNED = "node_zone_unassigned"
     HIERARCHY_READ = "hierarchy_read"
     """``GET /hierarchy`` bajo concesión (BR-NUC-38): la lectura del proveedor, auditada."""
+    CATALOG_READ = "catalog_read"
+    """Lectura del catálogo de una planta bajo concesión (BR-NUC-38; como ``hierarchy_read``,
+    A-50): ``GET /plants/{plant_id}/admissions`` (VIG-142)."""
     LEDGER_READ = "ledger_read"
     LEDGER_DETAIL_READ = "ledger_detail_read"
     EVIDENCE_READ_GRANTED = "evidence_read_granted"

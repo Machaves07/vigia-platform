@@ -20,13 +20,13 @@ La respuesta lleva ``Cache-Control: no-store``: la URL es un secreto de corta vi
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Final, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
+from vigia_platform.catalog.adapters.http.services import CatalogHttp, catalog_http, installed
 from vigia_platform.catalog.adapters.s3.documents import DocumentKeyTaken
-from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.domain.documents import (
     DOCUMENTS_MAX_BYTES,
     DocumentContentType,
@@ -38,34 +38,12 @@ from vigia_platform.ledger.adapters.http.services import exact_query, no_store
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
-from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.storage import StorageUnavailable
 
-__all__ = [
-    "CATALOG_DOCUMENTS_STATE_KEY",
-    "DocumentGrantBody",
-    "DocumentGrantOut",
-    "documents_http",
-    "documents_router",
-]
+__all__ = ["DocumentGrantBody", "DocumentGrantOut", "documents_router"]
 
-CATALOG_DOCUMENTS_STATE_KEY: Final = "vigia_catalog_documents"
-"""Clave de ``app.state`` con el ``DocumentService`` (``units.api_state``)."""
-
-_log = get_logger("catalog.http")
-
-
-def documents_http(request: Request) -> DocumentService:
-    """El servicio de la aplicación; sin él, ``internal_error`` (nunca deja pasar)."""
-    service = getattr(request.app.state, CATALOG_DOCUMENTS_STATE_KEY, None)
-    if not isinstance(service, DocumentService):
-        _log.error("la ruta de documentos no tiene servicio instalado")
-        raise ApiError(ApiErrorCode.INTERNAL_ERROR)
-    return service
-
-
-Service = Annotated[DocumentService, Depends(documents_http)]
+Services = Annotated[CatalogHttp, Depends(catalog_http)]
 
 
 class _Strict(BaseModel):
@@ -111,11 +89,11 @@ def documents_router() -> APIRouter:
         summary="Concesión de subida de un documento firmado de planta (un solo PUT, 15 minutos)",
     )
     async def grant_document(
-        body: DocumentGrantBody, request: Request, response: Response, service: Service
+        body: DocumentGrantBody, request: Request, response: Response, services: Services
     ) -> DocumentGrantOut:
         no_store(response)
         try:
-            issued = await service.issue(
+            issued = await installed(services.documents).issue(
                 request_context(request),
                 plant_id=body.plant_id,
                 kind=body.kind.value,

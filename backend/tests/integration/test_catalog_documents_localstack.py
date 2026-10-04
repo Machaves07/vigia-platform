@@ -43,7 +43,7 @@ from tests.api_support import World
 from tests.authz_support import AuthzEnvironment, Site, authz_environment
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, versioned_bucket
 from tests.writer_support import save_record_types, unit_context
-from vigia_platform.catalog.adapters.http import CATALOG_DOCUMENTS_STATE_KEY
+from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.documents import DocumentService, VerifiedDocuments
 from vigia_platform.catalog.domain.documents import (
@@ -364,7 +364,7 @@ def documents(
                     provider_queries=LedgerProviderQueryLedger(writer),
                     clock=clock,
                 ),
-                "state": {CATALOG_DOCUMENTS_STATE_KEY: service},
+                "state": {CATALOG_STATE_KEY: CatalogHttp(documents=service)},
             },
             public_origin=ORIGIN,
         )
@@ -689,6 +689,33 @@ def test_bodies_out_of_the_limits_are_invalid_request_without_grant(
     response = documents.post(cookie, concession, _body(plant, **INVALID_BODIES[case]))
     assert response.status_code == 400, response.text
     assert _code(response) == "invalid_request"
+    assert len(documents.grants(site.organization_id)) == before
+    assert documents.storage.calls["presign_put"] == presigned
+
+
+@pytest.mark.parametrize(
+    "fetch_site", [None, "cross-site", "same-site", "none"], ids=["sin", "cross", "same", "none"]
+)
+def test_a_forged_request_is_forbidden_and_grants_nothing(
+    documents: Documents, fetch_site: str | None
+) -> None:
+    # La barrera CSRF de la cadena (PR-NUC-53) también protege POST /documents.
+    site = documents.a
+    plant = documents.plants(site)[0]
+    cookie, concession, _ = documents.installer(site)
+    before = len(documents.grants(site.organization_id))
+    presigned = documents.storage.calls["presign_put"]
+    headers = {
+        "Cookie": f"{SESSION_COOKIE_NAME}={cookie.value}",
+        CONCESSION_HEADER: str(concession),
+    }
+    if fetch_site is not None:
+        headers["Sec-Fetch-Site"] = fetch_site
+    response: httpx.Response = documents.run(
+        documents.client.post("/documents", json=_body(plant), headers=headers)
+    )
+    assert response.status_code == 403, response.text
+    assert _code(response) == "forbidden"
     assert len(documents.grants(site.organization_id)) == before
     assert documents.storage.calls["presign_put"] == presigned
 

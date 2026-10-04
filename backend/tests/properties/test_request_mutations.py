@@ -73,11 +73,6 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
 }
 """Un cuerpo válido por ruta con cuerpo del catálogo de la unidad de prueba."""
 
-TESTED_ELSEWHERE: frozenset[tuple[str, str]] = frozenset({("POST", "/documents")})
-"""Rutas reales con cuerpo cuyo servicio no está en el arnés: ``POST /documents`` (VIG-143) exige
-``commissioning.run`` bajo concesión, y sus cuerpos mutados (fuera de lista, tipos, campos de más o
-de menos) los prueba ``tests/integration/test_catalog_documents_localstack.py``."""
-
 
 def _url(path: str, user_id: str | None = None) -> str:
     return path.replace("{user_id}", user_id or str(uuid.uuid4()))
@@ -105,7 +100,7 @@ def test_the_catalog_of_body_routes_is_complete(world: tuple[Harness, Any, Any])
         if getattr(route.route, "body_field", None) is not None
         for method in route.methods
     }
-    assert with_body == set(VALID_BODIES) | TESTED_ELSEWHERE
+    assert with_body == set(VALID_BODIES)
 
 
 def test_the_valid_bodies_are_accepted(world: tuple[Harness, Any, dict[str, str]]) -> None:

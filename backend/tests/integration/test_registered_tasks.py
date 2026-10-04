@@ -111,6 +111,7 @@ def u02_catalog(environment: WorkerEnvironment) -> OutboxCatalog:
         audit=unused,
         outbox=unused,
         writer=unused,
+        free_text=unused,
         signing=unused,
         checkpoints=unused,
         kms=unused,

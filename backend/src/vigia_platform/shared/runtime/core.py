@@ -266,6 +266,7 @@ def build_core(
         audit=audit,
         outbox=outbox,
         writer=writer,
+        free_text=free_text,
         signing=signing,
         checkpoints=checkpoints,
         kms=kms,
