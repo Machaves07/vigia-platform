@@ -346,6 +346,11 @@ def _fix_regression(document: JsonObject, draw: st.DrawFn) -> None:
         document["model_version"] = "detector-v2"
     if cause == "framing_recaptured":
         document["affected_row_ids"] = "all"
+    else:
+        # La cámara, la captura y el motivo solo valen con framing_recaptured (VIG-148): el
+        # esquema aún no expresa esa regla (VIG-176), así que el generador no los produce aquí.
+        for key in ("camera_id", "captured_at", "reason_es"):
+            document.pop(key, None)
 
 
 def _fix_window(document: JsonObject, draw: st.DrawFn) -> None:
