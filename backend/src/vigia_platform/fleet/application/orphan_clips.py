@@ -51,7 +51,7 @@ from vigia_platform.fleet.domain.clip_upload_grant import (
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit
+from vigia_platform.shared.context import ActorUnit, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRegistry, Schedule
@@ -102,6 +102,7 @@ class SweepRepository(Protocol):
     ) -> tuple[NodeClipCounts, ...]: ...
 
 
+@repository
 class OrphanClipSweeper:
     """El manejador de ``mark_orphan_clips`` para la transacción de una organización."""
 

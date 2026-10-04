@@ -54,7 +54,7 @@ from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 
@@ -192,6 +192,7 @@ class CommissioningClipPage:
     next_after: uuid.UUID | None
 
 
+@repository
 class CommissioningClips:
     """``GET /zones/{zone_id}/commissioning-clips`` (selector de U-05 para el pase)."""
 
