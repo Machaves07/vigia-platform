@@ -14,7 +14,8 @@ no, deniega con ``internal_error``.
 ``node`` (rutas del contrato de U-03, autenticación mutua, sin cookie); lo demás, ``person``. La
 clase elige el pool de la base (``shared.db.route_class_scope``) y deja fuera de las rutas de
 nodos, por construcción, la sesión, su límite de tasa, la barrera anti-falsificación y el aviso de
-tratamiento.
+tratamiento. Una ruta de nodo que no llega en forma canónica (``is_canonical_node_path``:
+mayúsculas, ``%2F`` u otro carácter codificado, barra final) responde ``not_found`` (TASK-206).
 """
 
 from __future__ import annotations
@@ -28,16 +29,27 @@ from starlette.datastructures import Headers
 from starlette.routing import BaseRoute, compile_path
 
 from vigia_platform.shared.api.declarations import (
+    NODE_PREFIX,
     DeclaredRoute,
     UnauthenticatedRoute,
+    is_node_path,
     iter_declared_routes,
 )
 from vigia_platform.shared.api.static import is_navigation, is_screen_path
 from vigia_platform.shared.db import RouteClass
 
-__all__ = ["NODE_PREFIX", "RATE_EXEMPT_ROUTES", "ResolvedRoute", "RouteTable", "route_class_of"]
+__all__ = [
+    "NODE_PREFIX",
+    "RATE_EXEMPT_ROUTES",
+    "ResolvedRoute",
+    "RouteTable",
+    "is_canonical_node_path",
+    "route_class_of",
+]
 
-NODE_PREFIX: Final = "/api/nodes"
+_CANONICAL_NODE_PATH: Final = re.compile(r"/api/nodes(?:/[a-z0-9][a-z0-9-]{0,63}){1,4}")
+"""Forma de una ruta del contrato tal como llega: segmentos en minúsculas, cifras y guiones (las
+plantillas de ``NodeRoute`` y los UUID canónicos), sin barra final ni segmentos vacíos."""
 
 RATE_EXEMPT_ROUTES: Final = frozenset(
     {
@@ -55,9 +67,27 @@ balanceador)."""
 
 def route_class_of(path: str) -> RouteClass:
     """``node`` para ``/api/nodes`` y ``/api/nodes/...``; ``person`` para todo lo demás."""
-    if path == NODE_PREFIX or path.startswith(NODE_PREFIX + "/"):
+    if is_node_path(path):
         return RouteClass.NODE
     return RouteClass.PERSON
+
+
+def is_canonical_node_path(scope: Mapping[str, Any]) -> bool:
+    """¿La ruta de nodo llegó en su forma canónica? (TASK-206).
+
+    La ruta cruda (``raw_path``) debe ser idéntica a la decodificada: ningún carácter codificado
+    con ``%`` (``%2F`` haría de ``a%2Fb`` un solo segmento para el cliente y dos para quien
+    decodifique), y solo minúsculas, cifras y guiones por segmento (``/api/nodes/Findings`` no es
+    ``/api/nodes/findings``). Lo que no cumple responde ``not_found`` sin llegar al enrutador.
+    """
+    path = str(scope.get("path", ""))
+    raw = scope.get("raw_path")
+    # Algunos servidores de prueba incluyen la consulta en ``raw_path``; uvicorn no.
+    if isinstance(raw, bytes | bytearray) and bytes(raw).split(b"?", 1)[0] != path.encode(
+        "latin-1", errors="replace"
+    ):
+        return False
+    return _CANONICAL_NODE_PATH.fullmatch(path) is not None
 
 
 @dataclass(frozen=True, slots=True)

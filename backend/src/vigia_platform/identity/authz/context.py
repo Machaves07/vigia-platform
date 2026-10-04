@@ -1,4 +1,4 @@
-"""Los cuatro constructores de ``ScopeContext`` (LC-NUC-04; BR-NUC-02 a 04, 18, 37, 38, 40).
+"""Los cinco constructores de ``ScopeContext`` (LC-NUC-04; BR-NUC-02 a 04, 18, 37, 38, 40; A-51).
 
 Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los constructores:
 
@@ -24,6 +24,21 @@ Solo este módulo sella contextos (``_seal_scope_context``; BR-NUC-03). Los cons
   ``operator_in_organization(operator_context, organization_id, …)`` es la misma orden actuando
   sobre la organización cliente que el operador da de alta (génesis, TASK-126): mismo actor y
   correlación, sin asignaciones en ese cliente.
+- ``context_from_node(store, presented)`` (quinto constructor, A-51; **solo** ``node_api``, que
+  lo llama con el certificado que verificó el balanceador): **una** sentencia sin caché
+  (``NodeContextStore.node_row``, bajo la organización del certificado) trae la identidad del
+  nodo, la credencial del número de serie, la marca de flota y las asignaciones de zona del nodo.
+  Exige identidad ``enrolled`` con ``enrolled_at``, sin revocación ni baja; credencial ``active``
+  dentro de su vigencia u ``overlapping`` dentro de las 24 h desde el ``issued_at`` de su sucesora
+  (``OVERLAP``, NFR-GOB-34); organización y planta del certificado iguales a las de la fila. Si
+  no, ``NodeContextRejected`` con ``not_enrolled``, ``revoked`` o ``zone_mismatch``. El contexto
+  lleva el actor ``node`` (su ``node_id``), el origen ``node_request`` y la organización del
+  certificado; su **alcance** son solo las zonas asignadas al nodo **ahora**
+  (``NodeScope.zone_ids``; el filtro por instante vive aquí). ``allowed_scopes`` queda vacío: un
+  nodo no tiene rol en la matriz y ``authorize`` nunca le concede una clave.
+- ``context_from_node_enrollment(store, node_id)``: el alta, sin certificado. La organización del
+  nodo declarado se busca por ``node_id`` (nombre común de la CSR, nota U03-H-13) con la función
+  de ``gob_0019``; mismo actor y origen, sin zonas. ``None`` si no hay nodo declarado.
 
 ``with_unit(context, unit)`` es el mismo contexto escrito por otra unidad: los puertos de U-02
 que U-03 y U-04 llaman en proceso (``IdentityCommandPort``) escriben sus propios tipos de
@@ -67,7 +82,7 @@ import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final, Literal, Protocol
 
 from vigia_platform.identity.auth.sessions import SessionCookie
@@ -92,14 +107,24 @@ from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "OVERLAP",
     "ConcessionRow",
     "ContextAbsentAuditor",
     "ContextStore",
     "ContextUnavailable",
     "ContextUnavailableReason",
+    "EnrollmentRow",
+    "EnrollmentScope",
+    "NodeAssignment",
+    "NodeContextReason",
+    "NodeContextRejected",
+    "NodeContextStore",
+    "NodeRow",
+    "NodeScope",
     "OperatorRow",
     "OrganizationEvent",
     "OrganizationTask",
+    "PresentedNode",
     "ProviderQueryLedger",
     "ScopeContexts",
     "SecurityAudit",
@@ -118,6 +143,11 @@ SYSTEM_DISPLAY_NAME: Final = "Sistema Vigía"
 """Instantánea del nombre del actor del sistema (eventos, iteraciones, inicio de sesión)."""
 _OPERATION: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}")
 _UNKNOWN_OPERATION: Final = "unknown"
+OVERLAP: Final = timedelta(hours=24)
+"""Una credencial ``overlapping`` autentica 24 h desde el ``issued_at`` de su sucesora (BLM §3.5,
+NFR-GOB-34, nota de TASK-219): después deja de autenticar aunque su estado no haya cambiado."""
+_NODE_DISPLAY_PREFIX: Final = "Nodo "
+_SERIAL: Final = re.compile(r"[0-9a-f]{1,64}")
 
 
 class ContextUnavailableReason(enum.StrEnum):
@@ -227,6 +257,200 @@ class SessionScope:
     session_organization_id: uuid.UUID
     """La organización de la sesión (bajo concesión, la proveedora)."""
     privacy_notice_version_accepted: str | None
+
+
+# --- Nodo (A-51) ---------------------------------------------------------------------------------
+
+
+class NodeContextReason(enum.StrEnum):
+    """Por qué una petición de nodo no tiene contexto (cada uno es un ``rejection_code``)."""
+
+    NOT_ENROLLED = "node_not_enrolled"
+    """Sin identidad ni credencial de ese número de serie en la organización del certificado,
+    identidad aún sin alta (``declared``, ``re_enrollment_pending``) o credencial vencida o fuera
+    de su vigencia: el nodo necesita un alta (NFR-GOB-34)."""
+    REVOKED = "node_revoked"
+    """Identidad revocada o dada de baja, o credencial revocada, sustituida o fuera de su
+    solapamiento de 24 h (BR-GOB-66, BLM §3.5)."""
+    ZONE_MISMATCH = "node_zone_mismatch"
+    """Planta del certificado distinta de la del nodo, o zona fuera de las asignadas al nodo
+    (BR-GOB-88)."""
+
+
+class NodeContextRejected(Exception):
+    """La petición del nodo no tiene contexto; ``reason`` es su ``rejection_code``."""
+
+    def __init__(self, reason: NodeContextReason) -> None:
+        super().__init__(f"sin contexto de nodo: {reason.value}")
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class PresentedNode:
+    """Lo que el certificado de cliente que verificó el balanceador dice del nodo.
+
+    Lo construye ``node_api.identity`` con el perfil del sujeto de ``certificate_profile``
+    (nombre común = ``node_id``, organización y planta) y el número de serie en hexadecimal.
+    """
+
+    node_id: uuid.UUID
+    organization_id: uuid.UUID
+    plant_id: uuid.UUID
+    certificate_serial: str
+
+    def __post_init__(self) -> None:
+        for name in ("node_id", "organization_id", "plant_id"):
+            if type(getattr(self, name)) is not uuid.UUID:
+                raise TypeError(f"{name} debe ser uuid.UUID")
+        if (
+            not isinstance(self.certificate_serial, str)
+            or _SERIAL.fullmatch(self.certificate_serial) is None
+        ):
+            raise ValueError("certificate_serial debe ser hexadecimal en minúsculas")
+
+
+@dataclass(frozen=True, slots=True)
+class NodeAssignment:
+    """Una asignación (vigente o pasada) de una zona al nodo (``identity.zone_node_assignment``)."""
+
+    zone_id: uuid.UUID
+    assigned_at: datetime
+    unassigned_at: datetime | None
+
+    def in_force(self, now: datetime) -> bool:
+        """¿Está asignada la zona en ``now``? ``[assigned_at, unassigned_at)``."""
+        return self.assigned_at <= now and (self.unassigned_at is None or now < self.unassigned_at)
+
+
+@dataclass(frozen=True, slots=True)
+class NodeRow:
+    """El resultado de la sentencia única de ``context_from_node`` (una fila o ninguna)."""
+
+    node_id: uuid.UUID
+    organization_id: uuid.UUID
+    plant_id: uuid.UUID
+    code: str
+    node_status: str
+    """``identity.node_identity.status``: ``declared``, ``enrolled``, ``revoked`` o
+    ``re_enrollment_pending``."""
+    enrolled_at: datetime | None
+    revoked_at: datetime | None
+    decommissioned_at: datetime | None
+    credential_organization_id: uuid.UUID
+    credential_plant_id: uuid.UUID
+    credential_status: str
+    """``active``, ``overlapping``, ``revoked`` o ``superseded``."""
+    issued_at: datetime
+    expires_at: datetime
+    successor_issued_at: datetime | None
+    """``issued_at`` de la credencial que rotó desde esta (su sucesora), si existe."""
+    assignments: tuple[NodeAssignment, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EnrollmentRow:
+    """El nodo declarado de un ``node_id``, buscado sin conocer su organización (gob_0019)."""
+
+    node_id: uuid.UUID
+    organization_id: uuid.UUID
+    plant_id: uuid.UUID
+    code: str
+    node_status: str
+
+
+class NodeContextStore(Protocol):
+    """Lecturas de ``context_from_node`` (``node_api.identity``): **una** sentencia cada una."""
+
+    async def node_row(
+        self, lookup: ScopeContext, node_id: uuid.UUID, certificate_serial: str
+    ) -> NodeRow | None:
+        """El nodo y la credencial ``(node_id, certificate_serial)`` vistos desde ``lookup``."""
+        ...
+
+    async def enrollment_row(
+        self, lookup: ScopeContext, node_id: uuid.UUID
+    ) -> EnrollmentRow | None:
+        """El nodo declarado ``node_id`` en cualquier organización (solo actor ``system``)."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class NodeScope:
+    """El contexto de una petición de nodo y su alcance: solo las zonas asignadas ahora."""
+
+    context: ScopeContext
+    node_id: uuid.UUID
+    plant_id: uuid.UUID
+    zone_ids: frozenset[uuid.UUID]
+    certificate_serial: str
+    credential_status: str
+
+    @property
+    def organization_id(self) -> uuid.UUID:
+        return self.context.organization_id
+
+    def covers_zone(self, zone_id: uuid.UUID) -> bool:
+        """¿Está ``zone_id`` entre las zonas asignadas al nodo en el instante de la petición?"""
+        return zone_id in self.zone_ids
+
+
+@dataclass(frozen=True, slots=True)
+class EnrollmentScope:
+    """El contexto del alta: la organización del nodo declarado, sin zonas (A-51)."""
+
+    context: ScopeContext
+    node_id: uuid.UUID
+    plant_id: uuid.UUID
+    node_status: str
+
+
+def _node_display_name(code: str) -> str:
+    return (_NODE_DISPLAY_PREFIX + code)[:120] if code else SYSTEM_DISPLAY_NAME
+
+
+def _credential_reason(row: NodeRow, now: datetime) -> NodeContextReason | None:
+    """Por qué la credencial no autentica en ``now`` (``None``: autentica)."""
+    if row.credential_status == "active":
+        if row.issued_at <= now < row.expires_at:
+            return None
+        return NodeContextReason.NOT_ENROLLED
+    if row.credential_status == "overlapping":
+        successor = row.successor_issued_at
+        if (
+            successor is not None
+            and row.issued_at <= now < row.expires_at
+            and now < successor + OVERLAP
+        ):
+            return None
+        if not now < row.expires_at:
+            return NodeContextReason.NOT_ENROLLED
+        return NodeContextReason.REVOKED
+    return NodeContextReason.REVOKED
+
+
+def _node_reason(
+    row: NodeRow | None, presented: PresentedNode, now: datetime
+) -> NodeContextReason | None:
+    """La regla de ``context_from_node`` sobre la fila (``None``: hay contexto)."""
+    if (
+        row is None
+        or row.node_id != presented.node_id
+        or row.organization_id != presented.organization_id
+        or row.credential_organization_id != presented.organization_id
+    ):
+        return NodeContextReason.NOT_ENROLLED
+    if (
+        row.node_status == "revoked"
+        or row.revoked_at is not None
+        or row.decommissioned_at is not None
+        or row.credential_status == "revoked"
+    ):
+        return NodeContextReason.REVOKED
+    if row.node_status != "enrolled" or row.enrolled_at is None:
+        return NodeContextReason.NOT_ENROLLED
+    if row.plant_id != presented.plant_id or row.credential_plant_id != presented.plant_id:
+        return NodeContextReason.ZONE_MISMATCH
+    return _credential_reason(row, now)
 
 
 def with_role_in_use(context: ScopeContext, role: Role) -> ScopeContext:
@@ -564,6 +788,92 @@ class ScopeContexts:
             origin=ContextOrigin.ADMIN_COMMAND,
             allowed_scopes=scopes,
             correlation_id=correlation,
+        )
+
+    # --- Petición de un nodo (quinto constructor, A-51; solo node_api) ------------------------
+
+    async def context_from_node(
+        self,
+        store: NodeContextStore,
+        presented: PresentedNode,
+        *,
+        correlation_id: uuid.UUID | None = None,
+    ) -> NodeScope:
+        """El contexto de la petición del nodo ``presented``; ``NodeContextRejected`` si no hay.
+
+        Una sentencia por petición y nada guardado entre peticiones: una revocación, una
+        rotación, una baja o una reasignación surten efecto en la siguiente (PR-GOB-28).
+        """
+        if not isinstance(presented, PresentedNode):
+            raise TypeError("presented debe ser PresentedNode")
+        correlation = self._correlation(correlation_id)
+        now = self._clock.now()
+        lookup = self._system(
+            presented.organization_id, ContextOrigin.OUTBOX_EVENT, ActorUnit.U03, correlation
+        )
+        row = await store.node_row(lookup, presented.node_id, presented.certificate_serial)
+        reason = _node_reason(row, presented, now)
+        if reason is not None or row is None:
+            raise NodeContextRejected(reason or NodeContextReason.NOT_ENROLLED)
+        zones = frozenset(
+            assignment.zone_id for assignment in row.assignments if assignment.in_force(now)
+        )
+        context = _seal_scope_context(
+            organization_id=row.organization_id,
+            actor=Actor(
+                kind=ActorKind.NODE,
+                id=row.node_id,
+                display_name_snapshot=_node_display_name(row.code),
+                unit=ActorUnit.U03,
+            ),
+            origin=ContextOrigin.NODE_REQUEST,
+            allowed_scopes=(),
+            correlation_id=correlation,
+        )
+        return NodeScope(
+            context=context,
+            node_id=row.node_id,
+            plant_id=row.plant_id,
+            zone_ids=zones,
+            certificate_serial=presented.certificate_serial,
+            credential_status=row.credential_status,
+        )
+
+    async def context_from_node_enrollment(
+        self,
+        store: NodeContextStore,
+        node_id: uuid.UUID,
+        *,
+        correlation_id: uuid.UUID | None = None,
+    ) -> EnrollmentScope | None:
+        """El contexto del alta del nodo declarado ``node_id`` (nombre común de la CSR).
+
+        La búsqueda cruza organizaciones (el alta no lleva certificado): la hace la función de
+        ``gob_0019`` con el actor del sistema en la proveedora. ``None`` si no existe el nodo.
+        """
+        if type(node_id) is not uuid.UUID:
+            raise TypeError("node_id debe ser uuid.UUID")
+        correlation = self._correlation(correlation_id)
+        lookup = self._system(
+            self._provider_organization_id, ContextOrigin.OUTBOX_EVENT, ActorUnit.U03, correlation
+        )
+        row = await store.enrollment_row(lookup, node_id)
+        if row is None or row.node_id != node_id:
+            return None
+        context = _seal_scope_context(
+            organization_id=row.organization_id,
+            actor=Actor(
+                kind=ActorKind.NODE,
+                id=row.node_id,
+                display_name_snapshot=_node_display_name(row.code),
+                unit=ActorUnit.U03,
+            ),
+            origin=ContextOrigin.NODE_REQUEST,
+            allowed_scopes=(),
+            correlation_id=correlation,
+        )
+        return EnrollmentScope(
+            context=context, node_id=row.node_id, plant_id=row.plant_id, node_status=row.node_status
         )
 
     def bootstrap_operator_context(self, operator_id: uuid.UUID, display_name: str) -> ScopeContext:

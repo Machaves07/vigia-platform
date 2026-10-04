@@ -106,6 +106,9 @@ class MetricName(enum.StrEnum):
     BULKHEAD_SIZE = "bulkhead_size"
     BULKHEAD_WAIT_MS = "bulkhead_wait_ms"
     BULKHEAD_REJECTED_TOTAL = "bulkhead_rejected_total"
+    # Rutas del contrato (U-03, NFR-GOB-54)
+    NODE_REQUESTS_TOTAL = "node_requests_total"
+    NODE_REQUEST_BODY_BYTES = "node_request_body_bytes"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -229,6 +232,13 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "NFR-GOB-19", "pool_class"),
     _spec(_N.BULKHEAD_REJECTED_TOTAL, _C, "{request}",
           "Rechazos temporarily_unavailable del mamparo.", "NFR-GOB-19", "pool_class"),
+    # Rutas del contrato (NFR-GOB-54): aceptados, duplicados y rechazos por rejection_code; la
+    # latencia por ruta es http_server_duration_ms y la tasa, rate_limited_total con su causa.
+    _spec(_N.NODE_REQUESTS_TOTAL, _C, "{request}",
+          "Peticiones de nodo por ruta, resultado y rejection_code.", "NFR-GOB-54",
+          "route", "result", "rejection_code"),
+    _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
+          "NFR-GOB-54", "route"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -416,6 +426,8 @@ class PlatformMetrics:
         self.bulkhead_size = gauge(_N.BULKHEAD_SIZE)
         self.bulkhead_wait_ms = histogram(_N.BULKHEAD_WAIT_MS)
         self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
+        self.node_requests_total = counter(_N.NODE_REQUESTS_TOTAL)
+        self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)

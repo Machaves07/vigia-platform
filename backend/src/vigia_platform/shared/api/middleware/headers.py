@@ -12,7 +12,9 @@ Valores fijos, iguales para la API y para los estáticos de la aplicación (aden
   y ``form-action`` en ``'self'``; y ``require-trusted-types-for 'script'`` (PAT-APP-SEG-04).
   Ninguna directiva ``unsafe-*``, ningún comodín.
 - **Sin CORS**: la aplicación se sirve desde el mismo origen; cualquier ``Access-Control-*`` que
-  una ruta intente añadir se quita.
+  una ruta intente añadir se quita. Vale también para las rutas del contrato (TASK-206).
+- Clase ``node``: ``X-Vigia-Contract-Version`` con la versión de la plataforma en toda respuesta,
+  también en las de error y en ``not_found`` (BR-CTR-18).
 
 Una cabecera de seguridad que una ruta haya puesto se **sustituye** por la de la plataforma:
 nunca sale duplicada ni rebajada.
@@ -31,6 +33,7 @@ from typing import Any, Final
 
 __all__ = [
     "CONTENT_SECURITY_POLICY",
+    "CONTRACT_VERSION_HEADER",
     "MAX_STORE_ORIGINS",
     "SECURITY_HEADER_NAMES",
     "SecurityHeaders",
@@ -40,6 +43,8 @@ __all__ = [
 ]
 
 MAX_STORE_ORIGINS: Final = 8
+CONTRACT_VERSION_HEADER: Final = b"x-vigia-contract-version"
+"""Cabecera de versión que lleva toda respuesta a un nodo (BR-CTR-18)."""
 CONTENT_SECURITY_POLICY: Final = "content-security-policy"
 
 _HOST: Final = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+"
@@ -111,8 +116,14 @@ class SecurityHeaders:
         )
         self.policy = policy
 
-    def apply(self, message: MutableMapping[str, Any]) -> None:
-        """Sustituye las cabeceras de seguridad y quita las de CORS del mensaje de inicio."""
+    def apply(
+        self, message: MutableMapping[str, Any], *, contract_version: str | None = None
+    ) -> None:
+        """Sustituye las cabeceras de seguridad y quita las de CORS del mensaje de inicio.
+
+        Con ``contract_version`` (respuestas de la clase ``node``), fija además
+        ``X-Vigia-Contract-Version`` con la versión del contrato de la plataforma (BR-CTR-18).
+        """
         if message.get("type") != "http.response.start":
             return
         kept = [
@@ -120,5 +131,9 @@ class SecurityHeaders:
             for name, value in message.get("headers", ())
             if (lowered := bytes(name).lower()).decode("latin-1") not in SECURITY_HEADER_NAMES
             and not lowered.startswith(b"access-control-")
+            and (contract_version is None or lowered != CONTRACT_VERSION_HEADER)
         ]
-        message["headers"] = [*kept, *self._headers]
+        extra: list[tuple[bytes, bytes]] = []
+        if contract_version is not None:
+            extra.append((CONTRACT_VERSION_HEADER, contract_version.encode("latin-1")))
+        message["headers"] = [*kept, *self._headers, *extra]

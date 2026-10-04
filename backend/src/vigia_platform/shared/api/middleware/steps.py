@@ -9,12 +9,20 @@ convierte en la respuesta genérica, con las cabeceras de seguridad y el ``corre
    nunca lee uno del cliente (cabecera, cookie, consulta o cuerpo). Lo pone en el contexto de los
    registros y, al terminar, publica la latencia y el resultado por ruta y la línea de registro de
    la petición (salvo ``/assets/*``, que solo queda en el registro del balanceador).
-2. ``ErrorStep``: manejador global; toda excepción sin responder es un ``ApiError`` genérico.
-3. ``SecurityHeadersStep``: cabeceras de seguridad en toda respuesta (también en las de error).
-   (nº 37) ``RouteClassStep``: resuelve la ruta y la clase ``node``/``person`` y fija el pool.
+2. ``ErrorStep``: manejador global; toda excepción sin responder es un ``ApiError`` genérico. En
+   la clase ``node`` la respuesta es la del contrato (``ChainSettings.node_errors``,
+   ``node_api.rejections``): un ``RejectionResponse`` con ``retryable``, ``message_es`` genérico
+   y ``X-Vigia-Contract-Version``, nunca un ``ApiError`` (TASK-206).
+3. ``SecurityHeadersStep``: cabeceras de seguridad en toda respuesta (también en las de error) y,
+   en la clase ``node``, ``X-Vigia-Contract-Version``.
+   (nº 37) ``RouteClassStep``: resuelve la ruta y la clase ``node``/``person`` y fija el pool. Una
+   ruta de nodo que no llega en forma canónica responde ``not_found`` (``routing``).
 4. ``BodyLimitStep``: 1 MB (o el ``body_limit`` de la ruta); lee el cuerpo entero antes de
    seguir, así que un cuerpo excedido es siempre ``payload_too_large``, con o sin
-   ``Content-Length``.
+   ``Content-Length``. En la clase ``node`` el límite es el de la ``NodeRoute`` y el exceso se
+   **marca** (``RequestState.body_exceeded``) sin leer más allá del límite más un fragmento: la
+   verificación previa de ``node_api`` emite ``payload_too_large`` en su paso (3), después de la
+   versión y del certificado (BR-GOB-84).
    (LC-GOB-20) ``BulkheadStep``: un puesto del semáforo de la clase de ruta mientras dura la
    respuesta (``shared.bulkheads``); sin puesto, ``temporarily_unavailable`` con
    ``retry_after_seconds`` (al instante los nodos, tras 2 s las personas). Fuera, las sondas de
@@ -49,12 +57,14 @@ from vigia_platform.shared.api.errors import (
     ApiError,
     ApiErrorCode,
     ErrorCatalog,
+    NodeErrorRenderer,
     translate,
 )
 from vigia_platform.shared.api.middleware.headers import SecurityHeaders
 from vigia_platform.shared.api.middleware.routing import (
     RATE_EXEMPT_ROUTES,
     RouteTable,
+    is_canonical_node_path,
     route_class_of,
 )
 from vigia_platform.shared.api.request_state import (
@@ -203,10 +213,20 @@ class ChainSettings:
     """Versión vigente del aviso; sin ella ninguna sesión la tiene aceptada (fallo cerrado)."""
     metrics: PlatformMetrics | None = None
     body_limit_bytes: int = DEFAULT_BODY_LIMIT_BYTES
+    node_errors: NodeErrorRenderer | None = None
+    """Respuesta del contrato a los fallos de la clase ``node`` (``node_api.rejections``)."""
 
     @property
     def instruments(self) -> PlatformMetrics:
         return self.metrics if self.metrics is not None else get_metrics()
+
+    def contract_version_for(self, scope: MutableMapping[str, Any]) -> str | None:
+        """``X-Vigia-Contract-Version`` de la respuesta: solo en la clase ``node``."""
+        if self.node_errors is None:
+            return None
+        if route_class_of(str(scope.get("path", ""))) is not RouteClass.NODE:
+            return None
+        return self.node_errors.contract_version
 
 
 # --- Utilidades ----------------------------------------------------------------------------------
@@ -292,6 +312,7 @@ class CorrelationStep(_Step):
         state.correlation_id = correlation_id
         scope["state"]["correlation_id"] = correlation_id
         started = clock.monotonic()
+        state.started_monotonic = started
         status = 500
 
         async def tracked(message: _Message) -> None:
@@ -361,17 +382,25 @@ class ErrorStep(_Step):
         try:
             await self._app(scope, receive, tracked)
         except Exception as error:
-            api_error = translate(error)
-            if api_error.code is ApiErrorCode.INTERNAL_ERROR:
-                _log.exception("excepción no controlada en una petición")
-            if started:
-                raise
-            correlation_id = state.correlation_id or uuid7(self._chain.clock)
-            response = self._chain.catalog.response(api_error, correlation_id)
-            headers = self._chain.headers
+            chain = self._chain
+            contract_version = chain.contract_version_for(scope)
+            if chain.node_errors is not None and contract_version is not None:
+                # Clase node: la respuesta del contrato (TASK-206); el renderizador registra.
+                if started:
+                    raise
+                response = chain.node_errors.render(error, scope)
+            else:
+                api_error = translate(error)
+                if api_error.code is ApiErrorCode.INTERNAL_ERROR:
+                    _log.exception("excepción no controlada en una petición")
+                if started:
+                    raise
+                correlation_id = state.correlation_id or uuid7(chain.clock)
+                response = chain.catalog.response(api_error, correlation_id)
+            headers = chain.headers
 
             async def secured(message: _Message) -> None:
-                headers.apply(message)
+                headers.apply(message, contract_version=contract_version)
                 await send(message)
 
             await response(scope, receive, secured)
@@ -387,9 +416,10 @@ class SecurityHeadersStep(_Step):
         self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
     ) -> None:
         headers = self._chain.headers
+        contract_version = self._chain.contract_version_for(scope)
 
         async def secured(message: _Message) -> None:
-            headers.apply(message)
+            headers.apply(message, contract_version=contract_version)
             await send(message)
 
         await self._app(scope, receive, secured)
@@ -404,8 +434,12 @@ class RouteClassStep(_Step):
     async def handle(
         self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
     ) -> None:
-        state.route = self._chain.routes.resolve(scope)
         state.route_class = route_class_of(str(scope.get("path", "")))
+        if state.route_class is RouteClass.NODE and not is_canonical_node_path(scope):
+            # Mayúsculas, %2F u otro carácter codificado: ninguna ruta del contrato (TASK-206).
+            state.resolved = True
+            raise ApiError(ApiErrorCode.NOT_FOUND)
+        state.route = self._chain.routes.resolve(scope)
         state.resolved = True
         with route_class_scope(state.route_class):
             await self._app(scope, receive, send)
@@ -426,6 +460,9 @@ class BodyLimitStep(_Step):
     async def handle(
         self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
     ) -> None:
+        if state.route_class is RouteClass.NODE:
+            await self._mark(scope, receive, send, state)
+            return
         limit = self._limit_for(state)
         declared = _header_values(scope, b"content-length")
         if declared:
@@ -454,6 +491,62 @@ class BodyLimitStep(_Step):
         async def replay() -> _Message:
             if pending:
                 return pending.pop(0)
+            return await receive()
+
+        await self._app(scope, replay, send)
+
+    async def _mark(
+        self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
+    ) -> None:
+        """Clase ``node``: lee hasta el límite de su ``NodeRoute`` y **marca** el exceso.
+
+        No responde: ``payload_too_large`` lo emite la verificación previa de ``node_api`` en su
+        paso (3), así que un cuerpo grande con versión inválida responde la versión
+        (BR-GOB-84). Con ``Content-Length`` por encima del límite no lee nada; sin él, deja de
+        leer en el primer fragmento que lo supera (nunca más allá del límite más ese fragmento) y
+        entrega a la ruta un cuerpo vacío.
+        """
+        route = state.route
+        declaration = route.declarations[0] if route is not None and route.declarations else None
+        node = declaration.node if declaration is not None else None
+        limit = node.max_body_bytes if node is not None else 0
+        declared = _header_values(scope, b"content-length")
+        chunks: list[bytes] = []
+        pending: list[_Message] = []
+        if declared:
+            text = {value.strip().decode("latin-1") for value in declared}
+            if len(text) != 1 or _CONTENT_LENGTH.fullmatch(next(iter(text))) is None:
+                state.body_length_invalid = True
+            elif int(next(iter(text))) > limit:
+                state.body_exceeded = True
+        if not state.body_exceeded and not state.body_length_invalid:
+            size = 0
+            while True:
+                message = await receive()
+                if message["type"] != "http.request":
+                    pending = [message]
+                    break
+                body = bytes(message.get("body", b""))
+                size += len(body)
+                state.body_bytes_received = size
+                if size > limit:
+                    state.body_exceeded = True
+                    chunks = []
+                    break
+                chunks.append(body)
+                if not message.get("more_body", False):
+                    break
+        if not pending:
+            pending = [{"type": "http.request", "body": b"".join(chunks), "more_body": False}]
+
+        exceeded = state.body_exceeded or state.body_length_invalid
+
+        async def replay() -> _Message:
+            if pending:
+                return pending.pop(0)
+            if exceeded:
+                # Lo que quede del cuerpo excedido nunca se lee (PAT-SEG-07).
+                return {"type": "http.disconnect"}
             return await receive()
 
         await self._app(scope, replay, send)

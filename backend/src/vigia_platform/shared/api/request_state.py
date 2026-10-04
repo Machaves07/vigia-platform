@@ -80,6 +80,8 @@ class RequestState:
     """Lo que la cadena sabe de la petición en curso."""
 
     correlation_id: uuid.UUID | None = None
+    started_monotonic: float | None = None
+    """Inicio de la petición (``Clock.monotonic`` del primer eslabón): mide su duración."""
     trace: list[ChainStep] = field(default_factory=list)
     resolved: bool = False
     """``True`` cuando el eslabón de clase de ruta ya resolvió la ruta."""
@@ -88,6 +90,16 @@ class RequestState:
     route_class: RouteClass = RouteClass.PERSON
     session: SessionScope | None = None
     """El contexto de la sesión, si la ruta la exige y la cookie es válida."""
+    body_exceeded: bool = False
+    """Clase ``node``: el cuerpo recibido supera el límite de la ruta. El límite de cuerpo lo
+    **marca** sin responder y ``node_api`` emite ``payload_too_large`` en el paso 3 de BR-GOB-84,
+    después de la versión y del certificado."""
+    body_length_invalid: bool = False
+    """Clase ``node``: ``Content-Length`` repetido o mal formado (``schema_invalid``, paso 3)."""
+    body_bytes_received: int = 0
+    """Bytes del cuerpo que la cadena llegó a leer (como mucho el límite más un fragmento)."""
+    node: object | None = None
+    """Lo que la verificación previa de ``node_api`` dejó para la operación de la ruta."""
 
 
 def request_state(scope: MutableMapping[str, Any]) -> RequestState:

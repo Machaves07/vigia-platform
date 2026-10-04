@@ -71,6 +71,7 @@ from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHt
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.ledger.adapters.http import LEDGER_STATE_KEY, LedgerHttp
+from vigia_platform.node_api.observability import NodeResponses
 from vigia_platform.shared.adapters.http import (
     DEFAULT_VERIFIER_PATH,
     PLATFORM_STATE_KEY,
@@ -91,6 +92,7 @@ from vigia_platform.shared.api.errors import (
     ApiStartupError,
     DetailCodeRegistry,
     ErrorCatalog,
+    NodeErrorRenderer,
     install_error_handlers,
 )
 from vigia_platform.shared.api.health import (
@@ -616,8 +618,10 @@ def _assemble(
     if problems:
         raise ApiStartupError(problems)
     setattr(app.state, VERIFIER_STATE_KEY, _verifier(config))
-    install_error_handlers(app, catalog, clock)
-    install_chain(app, _chain_settings(config, clock, catalog, app, runtime))
+    # Clase node: toda respuesta de error es la del contrato (node_api, TASK-206).
+    node_errors = NodeResponses(clock, metrics=runtime.metrics if runtime is not None else None)
+    install_error_handlers(app, catalog, clock, node_errors=node_errors)
+    install_chain(app, _chain_settings(config, clock, catalog, app, runtime, node_errors))
     problems = verify_chain(app)
     if problems:
         raise ApiStartupError(problems)
@@ -631,6 +635,7 @@ def _chain_settings(
     catalog: ErrorCatalog,
     app: FastAPI,
     runtime: AppRuntime | None,
+    node_errors: NodeErrorRenderer | None = None,
 ) -> ChainSettings:
     """Los ajustes de la cadena de middleware para ``app`` (PAT-NUC-SEG-06)."""
     if config.public_origin is None and not config.allows_local_origins:
@@ -653,6 +658,7 @@ def _chain_settings(
         origin_secret=runtime.origin_secret if runtime is not None else None,
         privacy_notice_version=runtime.privacy_notice_version if runtime is not None else None,
         metrics=metrics,
+        node_errors=node_errors,
     )
 
 
