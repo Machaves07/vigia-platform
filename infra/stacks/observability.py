@@ -157,8 +157,6 @@ INGEST_ROUTES: Final = ("/api/nodes/findings", "/api/nodes/observability-events"
 PENDING_UNIT_METRICS: Final = {
     "revocation_list_seconds_to_expiry": "U-03, NFR-GOB-48 (nombre de su §8.1)",
     "revocation_list_entries": "U-03, NFR-GOB-14 (entradas de la lista vigente, §8.4)",
-    "bulkhead_in_use": "U-03, NFR-GOB-19 (ocupación del semáforo por pool_class)",
-    "bulkhead_size": "U-03, NFR-GOB-19 (límite del semáforo por pool_class)",
 }
 """Métricas de ``Vigia/Platform`` que una alarma vigila y que su unidad aún no publica en un
 catálogo: la unidad las emite con este nombre y la prueba cruzada exige que no estén en el

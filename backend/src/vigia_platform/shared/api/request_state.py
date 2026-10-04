@@ -1,8 +1,9 @@
 """Estado de una petición dentro de la cadena fija de middleware (PAT-NUC-SEG-06; TASK-134).
 
-``ChainStep`` y ``CHAIN`` fijan el orden de los once eslabones: los diez de PAT-NUC-SEG-06 más el
+``ChainStep`` y ``CHAIN`` fijan el orden de los doce eslabones: los diez de PAT-NUC-SEG-06, el
 eslabón de clase de ruta del pendiente nº 37, que va tras las cabeceras y antes del límite de
-cuerpo (el límite y todo lo demás ya saben si la petición es de un nodo o de una persona).
+cuerpo (el límite y todo lo demás ya saben si la petición es de un nodo o de una persona), y el
+mamparo de LC-GOB-20, tras el límite de cuerpo y antes del límite de tasa por origen.
 
 Cada eslabón deja su nombre en ``RequestState.trace`` al pasar. La autorización por ruta (el
 último eslabón, una dependencia obligatoria de cada ruta) exige que la traza sea exactamente
@@ -38,7 +39,7 @@ __all__ = [
 
 
 class ChainStep(enum.StrEnum):
-    """Eslabones de la cadena, en su orden (PAT-NUC-SEG-06 y pendiente nº 37)."""
+    """Eslabones de la cadena, en su orden (PAT-NUC-SEG-06, pendiente nº 37 y LC-GOB-20)."""
 
     CORRELATION = "correlation"
     """(1) ``correlation_id`` generado por la plataforma; nunca se acepta del cliente."""
@@ -50,6 +51,8 @@ class ChainStep(enum.StrEnum):
     """(nº 37) Clase de ruta ``node`` o ``person``: fija el pool de la base."""
     BODY_LIMIT = "body_limit"
     """(4) Límite de cuerpo: 1 MB salvo la ruta que declara el suyo."""
+    BULKHEAD = "bulkhead"
+    """(LC-GOB-20) Mamparo: un puesto del semáforo de la clase de ruta."""
     ORIGIN_RATE_LIMIT = "origin_rate_limit"
     """(5) Límite de tasa por origen."""
     SESSION = "session"
