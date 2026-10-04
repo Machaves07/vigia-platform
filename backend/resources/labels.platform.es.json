@@ -140,5 +140,175 @@
   "verification_result": {
     "intact": "íntegra",
     "broken": "rota"
+  },
+  "admission_result": {
+    "admitted": "admitida",
+    "rejected": "rechazada"
+  },
+  "admission_criterion": {
+    "standard": "estándar escrito",
+    "remedy": "remedio de ingeniería o de proceso",
+    "subject": "sujeto del dato"
+  },
+  "gate_kind": {
+    "mounting": "compuerta de montaje",
+    "usage": "compuerta de uso"
+  },
+  "agreement_status": {
+    "pending_signatures": "pendiente de firmas",
+    "approved": "aprobado",
+    "superseded": "sustituido",
+    "revoked": "revocado"
+  },
+  "confirmation_origin": {
+    "management": "consola de gestión",
+    "transparency": "vista de transparencia"
+  },
+  "walk_test_kind": {
+    "initial": "inicial",
+    "regression_rerun": "reejecución por regresión"
+  },
+  "walk_test_status": {
+    "in_progress": "en curso",
+    "closed": "cerrada",
+    "incomplete": "incompleta",
+    "reopened": "reabierta"
+  },
+  "step_kind": {
+    "physical_setup": "configuración física",
+    "signal_mapping": "mapeo de señales",
+    "framing": "encuadre",
+    "walk_test_passes": "pases de walk-test",
+    "occlusion_test": "prueba de oclusión",
+    "latency_measurement": "medición de latencia",
+    "review_and_signatures": "revisión y firmas",
+    "other": "otro"
+  },
+  "posture": {
+    "standing": "de pie",
+    "crouched": "agachado",
+    "partially_occluded": "parcialmente ocluido",
+    "slow_movement": "desplazamiento lento"
+  },
+  "pass_result": {
+    "detected": "detectado",
+    "missed": "falso negativo",
+    "false_alarm": "falsa alarma"
+  },
+  "occlusion_verification": {
+    "verified": "verificada",
+    "declared": "declarada",
+    "failed": "fallida",
+    "pending": "verificando"
+  },
+  "regression_state": {
+    "current": "acta vigente",
+    "pending": "regresión pendiente"
+  },
+  "regression_cause": {
+    "catalog_change": "cambio de catálogo",
+    "model_version_change": "cambio de versión del modelo",
+    "framing_recaptured": "línea base recapturada"
+  },
+  "enrollment_code_status": {
+    "active": "activo",
+    "used": "usado",
+    "expired": "vencido",
+    "superseded": "sustituido"
+  },
+  "enrollment_attempt_result": {
+    "accepted": "aceptado",
+    "enrollment_code_used": "código ya usado",
+    "enrollment_code_expired": "código vencido",
+    "enrollment_code_invalid": "código inválido",
+    "rate_limited": "límite de tasa"
+  },
+  "credential_status": {
+    "active": "activo",
+    "overlapping": "en solapamiento",
+    "revoked": "revocado",
+    "superseded": "sustituida"
+  },
+  "fleet_alarm_kind": {
+    "node_mute": "nodo mudo",
+    "queue_over_threshold": "cola sobre umbral",
+    "clock_drift": "desviación de reloj",
+    "version_retiring": "versión próxima a retirarse",
+    "simulated_adapter_in_productive": "adaptador simulado en modo productivo",
+    "certificate_expiring": "certificado por vencer",
+    "camera_below_min_fps": "cámara por debajo de su tasa mínima",
+    "orphan_clips_growing": "clips huérfanos en aumento"
+  },
+  "update_result": {
+    "applied": "aplicada",
+    "reverted": "revertida",
+    "failed": "fallida"
+  },
+  "upload_grant_status": {
+    "issued": "emitida",
+    "used": "usada",
+    "expired": "vencida",
+    "orphan": "huérfana"
+  },
+  "document_kind": {
+    "scope_record": "acta de alcance",
+    "use_agreement": "acuerdo de uso",
+    "plant_policy": "política de planta",
+    "blur_check_capture": "captura del difuminado"
+  },
+  "catalog_changed_field": {
+    "standards": "estándares",
+    "cameras": "cámaras",
+    "minimum_coverage": "cobertura mínima",
+    "signals": "señales",
+    "thresholds": "umbrales",
+    "clip_window": "ventana de clip",
+    "episode": "episodio",
+    "single_occupancy": "marca unipersonal"
+  },
+  "catalog_detail_code": {
+    "catalog_admission_rejected": "Familia rechazada: no cumple el criterio de estándar, remedio o sujeto.",
+    "catalog_family_already_admitted": "La familia ya está admitida en esta planta.",
+    "catalog_family_not_admitted": "La familia no ha pasado la prueba de admisión en esta planta.",
+    "catalog_predicate_invalid": "El predicado no es expresable en la gramática del contrato.",
+    "catalog_unsatisfiable_coverage": "La cobertura mínima no se puede cumplir con las cámaras de la zona.",
+    "catalog_zone_without_cameras": "La zona no tiene cámaras declaradas.",
+    "catalog_last_standard_in_zone": "Una zona no puede quedar sin estándar declarado.",
+    "catalog_free_text_rejected": "El texto no cumple la política de texto libre: revísalo e inténtalo de nuevo.",
+    "catalog_plant_policy_missing": "La planta no tiene política de hallazgos incerrables cargada.",
+    "catalog_mounting_gate_pending": "Compuerta de montaje pendiente: sin acta de alcance no se enciende.",
+    "catalog_use_gate_not_loaded": "Compuerta de uso pendiente: sin acuerdo no hay registro.",
+    "catalog_blur_not_verified": "El difuminado no está verificado (falta la declaración con captura o la comprobación automática).",
+    "catalog_fewer_than_three": "El acuerdo exige al menos tres firmantes.",
+    "catalog_workers_representation_missing": "Falta la representación de los trabajadores.",
+    "catalog_signatory_role_not_in_policy": "El rol del firmante no está en la política de firmantes de la planta.",
+    "catalog_signatory_user_role_mismatch": "El usuario no tiene el rol declarado para esta zona.",
+    "catalog_signatory_not_expected": "Usted no es firmante esperado de este acuerdo.",
+    "catalog_signatures_incomplete": "Faltan confirmaciones de firmantes.",
+    "catalog_agreement_reused_from_other_zone": "El acuerdo de otra zona no habilita esta.",
+    "catalog_commissioning_record_missing": "La zona no tiene acta de comisionamiento cerrada.",
+    "catalog_node_not_assigned": "La zona no tiene nodo asignado.",
+    "catalog_walk_test_in_progress": "Ya hay una sesión de walk-test en curso.",
+    "catalog_passes_below_minimum": "El número de pases por celda es menor que el mínimo (3).",
+    "catalog_matrix_incomplete": "La matriz del walk-test tiene filas sin los pases exigidos.",
+    "catalog_pass_not_found": "El pase indicado no existe en esta sesión de walk-test.",
+    "catalog_false_negative_present": "La matriz tiene un falso negativo: la zona no se aprueba.",
+    "catalog_false_alarm_rate_above_threshold": "Tasa de falsas alarmas por encima del umbral declarado: exige aceptación registrada.",
+    "catalog_redundancy_not_verified": "La prueba de oclusión no verificó la cobertura mínima.",
+    "catalog_no_observability_events_in_window": "El nodo no reportó eventos de observabilidad en la ventana de la prueba.",
+    "catalog_steps_still_open": "Hay pasos sin cerrar.",
+    "catalog_latency_not_measured": "La latencia no se midió con al menos 100 repeticiones.",
+    "catalog_walk_test_incomplete": "Sesión incompleta por inactividad: reábrala con motivo."
+  },
+  "fleet_detail_code": {
+    "fleet_node_not_declared": "El nodo no está declarado.",
+    "fleet_node_unregistered": "El nodo no ha completado su alta.",
+    "fleet_node_not_revoked": "El nodo debe estar revocado antes de darlo de baja.",
+    "fleet_zone_already_served": "La zona ya tiene nodo.",
+    "fleet_zone_in_other_plant": "La zona es de otra planta.",
+    "fleet_code_in_use": "El código ya existe.",
+    "fleet_replaced_node_not_found": "El nodo reemplazado no existe.",
+    "fleet_version_outside_contract_window": "La versión no está en la ventana de compatibilidad.",
+    "fleet_free_text_rejected": "El texto no cumple la política de texto libre: revísalo e inténtalo de nuevo."
   }
 }

@@ -36,6 +36,10 @@ from tests.api_support import World
 from tests.factories import make_context
 from tests.properties.test_db_retry import FakeConnection, FakePool, Journal, Phase
 from tests.virtual_time import run_virtual
+from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
+from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
@@ -347,9 +351,17 @@ DESIGN_ENUMERATIONS = {
 }
 """Las enumeraciones con etiqueta en español de ``domain-entities.md`` §1."""
 
+U03_ENUMERATIONS = {
+    *CATALOG_LABEL_BINDINGS,
+    *FLEET_LABEL_BINDINGS,
+    *CATALOG_DETAIL_CODE_LABEL_BINDINGS,
+    *FLEET_DETAIL_CODE_LABEL_BINDINGS,
+}
+"""Las 21 de U-03 (domain-entities §4 de U-03) y sus ``detail_code`` (pendiente nº 33)."""
+
 
 def test_the_labels_file_covers_every_labelled_enumeration() -> None:
-    assert LABELS.enumerations() == DESIGN_ENUMERATIONS
+    assert LABELS.enumerations() == DESIGN_ENUMERATIONS | U03_ENUMERATIONS
     assert LABELS.require_complete(LABEL_BINDINGS) == []
     assert LABELS.label("role", Role.COPASST) == "COPASST"
 
