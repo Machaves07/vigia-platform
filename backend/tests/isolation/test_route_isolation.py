@@ -693,6 +693,9 @@ class Isolation:
     def send(
         self, call: Call, cookie: SessionCookie, concession: uuid.UUID | None = None
     ) -> httpx.Response:
+        # Un milisegundo por petición: dos peticiones reales nunca comparten el instante (la
+        # retirada de una zona exige ``unassigned_at > assigned_at``, VIG-147).
+        self.env.clock.advance(0.001)
         headers = dict(SAME_ORIGIN)
         headers["Cookie"] = f"{SESSION_COOKIE_NAME}={cookie.value}"
         if concession is not None:
@@ -928,9 +931,18 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         authz = env.authz
         sessions = authz.sessions
         registry = RecordTypeRegistry()
-        for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES, *ADMISSION_TYPES):
+        # Los tipos que escriben las rutas de la flota (VIG-147) mandan sobre las versiones de
+        # prueba de la cobertura (``node_communication_state_changed``).
+        fleet_types = RecordTypeRegistry()
+        _fleet_record_types(fleet_types)
+        fleet_names = {compiled.record_type for compiled in fleet_types.latest()}
+        for definition in (
+            *U02_RECORD_TYPES,
+            *(d for d in COVERAGE_TYPES if d.record_type not in fleet_names),
+            *ADMISSION_TYPES,
+            *(compiled.definition for compiled in fleet_types.latest()),
+        ):
             registry.register(definition)
-        _fleet_record_types(registry)
         # Los eventos de la revocación y la baja de un nodo (VIG-147), además de los de U-02.
         events = OutboxCatalog()
         register_u02_event_types(events.event_types)
