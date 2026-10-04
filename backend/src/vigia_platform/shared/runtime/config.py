@@ -24,6 +24,9 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   ``VIGIA_BULKHEAD_NODE`` (35), ``VIGIA_BULKHEAD_PERSON`` (15) y ``VIGIA_UVICORN_WORKERS`` (2);
   ``VIGIA_BULKHEAD_PERSON`` por debajo del 30 % de la suma de los dos mamparos impide arrancar
   (NFR-GOB-19, ``shared.bulkheads``);
+- documentos firmados (LC-GOB-05, §6 de U-03): ``VIGIA_DOCUMENTS_PREFIX`` (``documents/``, el
+  único que admite la restricción ``document_upload_grant_storage_key_format`` de ``gob_0017``:
+  otro prefijo exige una migración) y ``VIGIA_DOCUMENTS_MAX_BYTES`` (de 1 a 20 971 520);
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -76,6 +79,7 @@ _ENDPOINT: Final = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
 _PATH: Final = re.compile(r"/[A-Za-z0-9/_.-]{1,1023}")
 _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _DIGITS: Final = re.compile(r"[0-9]{1,9}")
+_DOCUMENTS_PREFIX: Final = re.compile(r"documents/")
 
 
 class RuntimeConfigInvalid(ValueError):
@@ -178,6 +182,8 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable("bulkhead_node", "VIGIA_BULKHEAD_NODE", _integer(1, 1_000)),
     _Variable("bulkhead_person", "VIGIA_BULKHEAD_PERSON", _integer(1, 1_000)),
     _Variable("uvicorn_workers", "VIGIA_UVICORN_WORKERS", _integer(1, 16)),
+    _Variable("documents_prefix", "VIGIA_DOCUMENTS_PREFIX", _text(_DOCUMENTS_PREFIX)),
+    _Variable("documents_max_bytes", "VIGIA_DOCUMENTS_MAX_BYTES", _integer(1, 20_971_520)),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -220,6 +226,8 @@ class RuntimeConfig(BaseModel):
     bulkhead_node: int = 35
     bulkhead_person: int = 15
     uvicorn_workers: int = 2
+    documents_prefix: str = "documents/"
+    documents_max_bytes: int = 20_971_520
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:

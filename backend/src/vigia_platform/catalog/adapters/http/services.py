@@ -14,6 +14,7 @@ from typing import Final
 from fastapi import Request
 
 from vigia_platform.catalog.application.admission import AdmissionService
+from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -29,6 +30,8 @@ class CatalogHttp:
     """Los servicios que usan las rutas de ``catalog``."""
 
     admissions: AdmissionService | None = None
+    documents: DocumentService | None = None
+    """``POST /documents`` (LC-GOB-05, VIG-143)."""
 
 
 def installed[T](service: T | None) -> T:
