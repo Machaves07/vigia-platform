@@ -15,10 +15,10 @@ en la suya (``IntegrityStore.record``). Una cadena rota no detiene a las demás;
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, Protocol
 
-from vigia_platform.ledger.chain.verify import IntegrityService, VerificationMode
-from vigia_platform.shared.context import ActorUnit
+from vigia_platform.ledger.chain.verify import IntegrityResult, VerificationMode
+from vigia_platform.shared.context import ActorUnit, ScopeContext
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.registries import (
     PeriodicHandler,
@@ -42,7 +42,15 @@ VERIFY_CHAINS_FULL: Final = "verify_chains_full"
 VERIFY_CHAINS_FULL_SCHEDULE: Final = Schedule.monthly(day=1, hour=2)
 
 
-def verify_chains_handler(service: IntegrityService, mode: VerificationMode) -> PeriodicHandler:
+class ChainVerifier(Protocol):
+    """``IntegrityService.verify_all`` (o la raíz de composición, que lo construye al usarlo)."""
+
+    async def verify_all(
+        self, context: ScopeContext, mode: VerificationMode
+    ) -> tuple[IntegrityResult, ...]: ...
+
+
+def verify_chains_handler(service: ChainVerifier, mode: VerificationMode) -> PeriodicHandler:
     """Manejador que verifica todas las cadenas de la organización en ``mode``."""
 
     async def handler(transaction: Transaction) -> None:
@@ -52,7 +60,7 @@ def verify_chains_handler(service: IntegrityService, mode: VerificationMode) -> 
 
 
 def register_verify_chains(
-    registry: PeriodicTaskRegistry, service: IntegrityService
+    registry: PeriodicTaskRegistry, service: ChainVerifier
 ) -> tuple[PeriodicTask, PeriodicTask]:
     """Registra las dos tareas de verificación de U-02 (``domain-entities.md`` §4.3)."""
     incremental = registry.register(

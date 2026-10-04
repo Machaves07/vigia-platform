@@ -30,6 +30,11 @@ Servicios (§5.2, §5.3 con su nota U02-H-10, nº 17 y A-21):
   ``/vigia/<despliegue>/*`` que crea ``vigia-observability`` (TASK-149), y colector ADOT lateral
   (``otel/collector.yaml``). Ningún secreto en variables: la aplicación lee Secrets Manager con su
   rol y las variables solo llevan nombres y ARN (§5.3).
+- Raíz de composición (VIG-137, A-52): ``VIGIA_API_RUNTIME``, ``VIGIA_WORKER_RUNTIME`` y
+  ``VIGIA_ADMIN_RUNTIME`` nombran los constructores de ``vigia_platform.shared.runtime``;
+  ``VIGIA_PUBLIC_ORIGIN`` (``https://app.<dominio>``) llega a la API y a ``vigia-admin``, y
+  ``VIGIA_PROVIDER_ORGANIZATION_ID`` a los tres solo con el contexto ``provider_organization_id``
+  (la proveedora que imprime ``vigia-admin bootstrap``; antes de ella no existe).
 
 Tareas puntuales (§5.4 y nota U02-H-01): ``vigia-migrate`` (``alembic upgrade head``) y
 ``vigia-admin`` (``vigia-admin <orden>``), con red ``sg-tasks`` al lanzarlas.
@@ -159,6 +164,17 @@ API_TUNING: Mapping[str, str] = {
     "VIGIA_DOCUMENTS_MAX_BYTES": str(20 * 1024 * 1024),
 }
 WORKER_STATEMENT_TIMEOUT_MS = "30000"  # NFR-NUC-36, solo en el worker
+# Raíz de composición de producción (VIG-137, A-52): el constructor de dependencias de cada
+# proceso, ``vigia_platform.<módulo>:<función>`` (``_RUNTIME_REFERENCE`` de la aplicación).
+API_RUNTIME = "vigia_platform.shared.runtime.api:build_api_runtime"
+WORKER_RUNTIME = "vigia_platform.shared.runtime.worker:build_worker_runtime"
+ADMIN_RUNTIME = "vigia_platform.shared.runtime.admin:build_admin_runtime"
+RUNTIME_VARIABLES: Mapping[str, tuple[str, str]] = {
+    "api": ("VIGIA_API_RUNTIME", API_RUNTIME),
+    "worker": ("VIGIA_WORKER_RUNTIME", WORKER_RUNTIME),
+    "admin": ("VIGIA_ADMIN_RUNTIME", ADMIN_RUNTIME),
+}
+"""Variable y referencia del constructor por definición de tarea."""
 CRL_KEY = "ca/crl.pem"
 
 # --- Escalado (§5.2) -----------------------------------------------------------------------
@@ -1143,6 +1159,16 @@ class ComputeStack(VigiaStack):
 
     # --- Variables (§5.3; ninguna es un secreto) ------------------------------------------
 
+    def _provider_environment(self) -> dict[str, str]:
+        """``VIGIA_PROVIDER_ORGANIZATION_ID`` con el contexto ``provider_organization_id`` (la
+        proveedora que imprimió ``vigia-admin bootstrap``); antes de crearla, nada."""
+        provider = self.config.provider_organization_id
+        return {} if provider is None else {"VIGIA_PROVIDER_ORGANIZATION_ID": provider}
+
+    def _public_origin(self) -> str:
+        """``https://app.<dominio>``: origen de la aplicación y base de los enlaces."""
+        return Fn.join("", ["https://", app_host(self.config), ".", self.edge.domain])
+
     def _common_environment(self, service: str) -> dict[str, str]:
         config = self.config
         return {
@@ -1156,6 +1182,7 @@ class ComputeStack(VigiaStack):
             "VIGIA_SIGNING_SECRET_PREFIX": f"vigia/{config.deployment}/signing/",
             "VIGIA_SECRETS_KEY_ARN": self._key_arn(KeyName.SECRETS),
             "VIGIA_NODE_CA_KEY_ARN": self._key_arn(KeyName.NODE_CA),
+            **self._provider_environment(),
         }
 
     def _api_environment(self) -> dict[str, str]:
@@ -1164,6 +1191,8 @@ class ComputeStack(VigiaStack):
         environment = {
             **self._common_environment(API_SERVICE),
             **API_TUNING,
+            "VIGIA_API_RUNTIME": API_RUNTIME,
+            "VIGIA_PUBLIC_ORIGIN": self._public_origin(),
             # Nº 10: un solo origen, el depósito de evidencias del entorno.
             "VIGIA_CSP_STORE_ORIGINS": evidence_store_origin(
                 self._bucket(BucketUsage.EVIDENCE), self.region
@@ -1183,6 +1212,7 @@ class ComputeStack(VigiaStack):
     def _worker_environment(self) -> dict[str, str]:
         environment = {
             **self._common_environment(WORKER_SERVICE),
+            "VIGIA_WORKER_RUNTIME": WORKER_RUNTIME,
             "VIGIA_DB_STATEMENT_TIMEOUT_MS": WORKER_STATEMENT_TIMEOUT_MS,
             "VIGIA_ARCHIVE_BUCKET": self._bucket(BucketUsage.ARCHIVE),
             "VIGIA_EDGE_BUCKET": self._bucket(BucketUsage.EDGE),
@@ -1217,6 +1247,9 @@ class ComputeStack(VigiaStack):
             "VIGIA_BOOTSTRAP_INVITATION_SECRET": f"vigia/{config.deployment}/bootstrap/invitation",
             "VIGIA_SIGNING_SECRET_PREFIX": f"vigia/{config.deployment}/signing/",
             "VIGIA_SECRETS_KEY_ARN": self._key_arn(KeyName.SECRETS),
+            "VIGIA_ADMIN_RUNTIME": ADMIN_RUNTIME,
+            "VIGIA_PUBLIC_ORIGIN": self._public_origin(),
+            **self._provider_environment(),
         }
         if config.elevated_bootstrap:
             environment |= {
@@ -1488,12 +1521,16 @@ class ComputeStack(VigiaStack):
 
 
 __all__ = [
+    "ADMIN_RUNTIME",
+    "API_RUNTIME",
     "API_TUNING",
     "EVIDENCE_UPLOAD_PREFIXES",
     "GITHUB_REPOSITORY",
     "IMAGE_DIGEST_CONTEXT",
     "PIPELINE_READ_ACTIONS",
+    "RUNTIME_VARIABLES",
     "TRUST_STORE_ACTIONS",
+    "WORKER_RUNTIME",
     "ComputeStack",
     "ServiceName",
     "cluster_name",
