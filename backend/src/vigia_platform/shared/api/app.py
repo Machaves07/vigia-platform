@@ -66,6 +66,10 @@ from fastapi import APIRouter, FastAPI
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
+from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.identity.adapters.http import IDENTITY_STATE_KEY, IdentityHttp, identity_routers
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
@@ -194,6 +198,11 @@ LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "coverage_layer": CoverageLayer,
     "platform_cause": PlatformCause,
     "communication_state": CommunicationState,
+    # U-03: las veintiuna enumeraciones del catálogo y la flota y sus detail_code (NFR-GOB-67).
+    **CATALOG_LABEL_BINDINGS,
+    **FLEET_LABEL_BINDINGS,
+    **CATALOG_DETAIL_CODE_LABEL_BINDINGS,
+    **FLEET_DETAIL_CODE_LABEL_BINDINGS,
 }
 """Enumeraciones del código cuyos miembros deben tener etiqueta (fallo cerrado, NFR-NUC-51)."""
 
