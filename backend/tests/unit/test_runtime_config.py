@@ -7,7 +7,8 @@
 - Un valor no válido también, y el mensaje **nunca contiene el valor** (propiedad con Hypothesis
   sobre valores hostiles: marcas de secreto, espacios, caracteres invisibles, homoglifos,
   dígitos no ASCII y cadenas enormes).
-- Bordes: tamaños en su mínimo, máximo y justo fuera; ``VIGIA_DB_MAX_OVERFLOW`` solo admite 0;
+- Bordes: tamaños en su mínimo, máximo y justo fuera (los de los mamparos, con su reserva del
+  30 %, en ``test_bulkheads.py``); ``VIGIA_DB_MAX_OVERFLOW`` solo admite 0;
   ``VIGIA_AWS_ENDPOINT_URL`` solo en ``local`` y ``test``; el prefijo de firma da el entorno de
   los secretos.
 - ``parse_database_secret``: el formato de RDS; un secreto incompleto nombra el campo y nunca un
@@ -171,7 +172,6 @@ def test_an_invalid_value_is_named_without_its_value(variable: str, value: str) 
         ("VIGIA_DB_POOL_TIMEOUT_SECONDS", "1", "60"),
         ("VIGIA_DB_STATEMENT_TIMEOUT_MS", "100", "600000"),
         ("VIGIA_THREADPOOL_SIZE", "1", "64"),
-        ("VIGIA_BULKHEAD_NODE", "1", "1000"),
         ("VIGIA_UVICORN_WORKERS", "1", "16"),
     ],
 )

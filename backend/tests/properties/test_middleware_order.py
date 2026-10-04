@@ -1,7 +1,8 @@
 """Orden fijo de la cadena de middleware, clase de ruta, sesión, aviso y correlación (TASK-134).
 
-- PAT-NUC-SEG-06 y pendiente nº 37: el orden es exactamente el del diseño; intercambiar dos
-  eslabones **cualesquiera** (los 55 pares, incluido el de clase de ruta y la autorización) impide
+- PAT-NUC-SEG-06, pendiente nº 37 y mamparo de LC-GOB-20: el orden es exactamente el del diseño;
+  intercambiar dos eslabones **cualesquiera** (los 66 pares, incluidos el de clase de ruta, el
+  mamparo y la autorización) impide
   arrancar y, aunque alguien se salte la comprobación de arranque, ninguna petición pasa.
 - Clase de ruta: ``/api/nodes/*`` usa el pool ``node``; ``/me``, el pool ``person``.
 - Sesión y contexto (paso 6), aviso de tratamiento (paso 9, NFR-NUC-29) y autorización por ruta
@@ -51,6 +52,7 @@ DESIGN_ORDER = (
     "security_headers",
     "route_class",
     "body_limit",
+    "bulkhead",
     "origin_rate_limit",
     "session",
     "session_rate_limit",
@@ -58,7 +60,8 @@ DESIGN_ORDER = (
     "privacy_notice",
     "authorization",
 )
-"""El orden de PAT-NUC-SEG-06 con el eslabón del nº 37, escrito aquí a mano (no desde el código)."""
+"""El orden de PAT-NUC-SEG-06 con los eslabones del nº 37 y de LC-GOB-20, escrito aquí a mano (no
+desde el código)."""
 
 PAIRS = list(itertools.combinations(range(len(CHAIN)), 2))
 
@@ -94,7 +97,7 @@ def _code(response: Any) -> str:
 def test_the_chain_is_exactly_the_design_order() -> None:
     assert tuple(step.value for step in CHAIN) == DESIGN_ORDER
     assert CHAIN[:-1] == MIDDLEWARE_CHAIN and CHAIN[-1] is ChainStep.AUTHORIZATION
-    assert len(PAIRS) == 55
+    assert len(PAIRS) == 66
 
 
 def test_the_factory_installs_the_fixed_order() -> None:
@@ -136,6 +139,32 @@ def test_verify_chain_names_the_expected_and_the_installed_order() -> None:
     (problem,) = verify_chain(app)
     assert "correlation, errors" in problem and "«errors, security_headers" in problem
     assert verify_chain(FastAPI()) != []
+
+
+def test_the_bulkhead_sits_between_the_body_limit_and_the_origin_rate_limit() -> None:
+    """LC-GOB-20: después del límite de cuerpo y antes del límite de tasa por origen, sin
+    alterar el orden relativo de los eslabones de LC-NUC-20."""
+    position = MIDDLEWARE_CHAIN.index(ChainStep.BULKHEAD)
+    assert MIDDLEWARE_CHAIN[position - 1] is ChainStep.BODY_LIMIT
+    assert MIDDLEWARE_CHAIN[position + 1] is ChainStep.ORIGIN_RATE_LIMIT
+    others = tuple(step for step in DESIGN_ORDER if step != "bulkhead")
+    assert tuple(s.value for s in CHAIN if s is not ChainStep.BULKHEAD) == others
+
+
+@pytest.mark.parametrize("position", range(len(MIDDLEWARE_CHAIN)))
+def test_verify_chain_rejects_the_bulkhead_in_any_other_position(position: int) -> None:
+    rest = [step for step in MIDDLEWARE_CHAIN if step is not ChainStep.BULKHEAD]
+    order = (*rest[:position], ChainStep.BULKHEAD, *rest[position:])
+    app = FastAPI()
+    install_chain(app, settings=None, order=order)  # type: ignore[arg-type]
+    if order == MIDDLEWARE_CHAIN:
+        assert verify_chain(app) == []
+    else:
+        (problem,) = verify_chain(app)
+        assert "bulkhead" in problem
+    missing = FastAPI()
+    install_chain(missing, settings=None, order=tuple(rest))  # type: ignore[arg-type]
+    assert verify_chain(missing) != []
 
 
 def test_every_request_leaves_the_complete_trace() -> None:

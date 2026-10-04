@@ -1,4 +1,4 @@
-"""Los diez eslabones ASGI de la cadena fija (PAT-NUC-SEG-06, LC-NUC-20; pendiente nº 37).
+"""Los once eslabones ASGI de la cadena fija (PAT-NUC-SEG-06, LC-NUC-20; nº 37; LC-GOB-20).
 
 Cada clase es un middleware ASGI puro (sin ``BaseHTTPMiddleware``: no copia el cuerpo ni rompe
 las variables de contexto) con su ``step``. Al pasar, deja su nombre en la traza de la petición
@@ -15,6 +15,10 @@ convierte en la respuesta genérica, con las cabeceras de seguridad y el ``corre
 4. ``BodyLimitStep``: 1 MB (o el ``body_limit`` de la ruta); lee el cuerpo entero antes de
    seguir, así que un cuerpo excedido es siempre ``payload_too_large``, con o sin
    ``Content-Length``.
+   (LC-GOB-20) ``BulkheadStep``: un puesto del semáforo de la clase de ruta mientras dura la
+   respuesta (``shared.bulkheads``); sin puesto, ``temporarily_unavailable`` con
+   ``retry_after_seconds`` (al instante los nodos, tras 2 s las personas). Fuera, las sondas de
+   salud del balanceador (``BULKHEAD_EXEMPT_ROUTES``).
 5. ``OriginRateLimitStep``: 1 200 por minuto por origen en rutas con sesión (con permiso o de
    ``SessionRoute``); 60 en las públicas y en lo que no es ninguna ruta; fuera, los estáticos y
    las rutas de nodos.
@@ -40,6 +44,7 @@ from typing import Any, ClassVar, Final, Protocol
 
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCookie, origin_hash
 from vigia_platform.identity.authz.context import SessionScope
+from vigia_platform.shared.api.declarations import UnauthenticatedRoute
 from vigia_platform.shared.api.errors import (
     ApiError,
     ApiErrorCode,
@@ -59,6 +64,7 @@ from vigia_platform.shared.api.request_state import (
     request_state,
 )
 from vigia_platform.shared.api.static import is_request_logged
+from vigia_platform.shared.bulkheads import Bulkheads
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import RouteClass, route_class_scope
@@ -78,12 +84,14 @@ from vigia_platform.shared.ratelimit import (
 )
 
 __all__ = [
+    "BULKHEAD_EXEMPT_ROUTES",
     "DEFAULT_BODY_LIMIT_BYTES",
     "PRIVACY_NOTICE_ACCEPT",
     "SAFE_METHODS",
     "STEP_CLASSES",
     "UNMATCHED_ROUTE",
     "BodyLimitStep",
+    "BulkheadStep",
     "ChainSettings",
     "CorrelationStep",
     "CsrfAuditPort",
@@ -112,6 +120,12 @@ _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 _CONTENT_LENGTH: Final = re.compile(r"[0-9]{1,19}")
 UNMATCHED_ROUTE: Final = "unmatched"
 """Valor del atributo ``route`` de una petición que no coincide con ninguna ruta."""
+BULKHEAD_EXEMPT_ROUTES: Final = frozenset(
+    {UnauthenticatedRoute.HEALTH_LIVE, UnauthenticatedRoute.HEALTH_READY}
+)
+"""Fuera del mamparo: las sondas de salud del balanceador. Un mamparo de personas saturado las
+haría esperar y fallar, y el balanceador sacaría la tarea justo cuando más carga tiene (el mismo
+motivo por el que ``/health/ready`` está fuera del limitador)."""
 
 _log = get_logger("shared.api.middleware")
 
@@ -177,6 +191,8 @@ class ChainSettings:
     headers: SecurityHeaders
     routes: RouteTable
     limiter: RateLimiter
+    bulkheads: Bulkheads
+    """Los semáforos por clase de ruta de este trabajador (LC-GOB-20)."""
     public_origin: str | None = None
     """Origen de la aplicación (``https://app.<dominio>``); sin él, un ``Origin`` se rechaza."""
     sessions: SessionContextPort | None = None
@@ -443,6 +459,32 @@ class BodyLimitStep(_Step):
         await self._app(scope, replay, send)
 
 
+# --- (LC-GOB-20) mamparo -------------------------------------------------------------------------
+
+
+class BulkheadStep(_Step):
+    """Un puesto del semáforo de la clase de ruta mientras dura la respuesta.
+
+    ``Bulkheads.slot`` lo libera al salir: respuesta enviada, excepción, cancelación o desconexión
+    del cliente. Sin puesto, ``BulkheadSaturated`` (``temporarily_unavailable``).
+    """
+
+    step = ChainStep.BULKHEAD
+
+    async def handle(
+        self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send, state: RequestState
+    ) -> None:
+        route = state.route
+        if route is not None and any(
+            declaration.unauthenticated in BULKHEAD_EXEMPT_ROUTES
+            for declaration in route.declarations
+        ):
+            await self._app(scope, receive, send)
+            return
+        async with self._chain.bulkheads.slot(state.route_class):
+            await self._app(scope, receive, send)
+
+
 # --- (5) y (7) límites de tasa ------------------------------------------------------------------
 
 
@@ -635,6 +677,7 @@ STEP_CLASSES: Final[dict[ChainStep, type[_Step]]] = {
     ChainStep.SECURITY_HEADERS: SecurityHeadersStep,
     ChainStep.ROUTE_CLASS: RouteClassStep,
     ChainStep.BODY_LIMIT: BodyLimitStep,
+    ChainStep.BULKHEAD: BulkheadStep,
     ChainStep.ORIGIN_RATE_LIMIT: OriginRateLimitStep,
     ChainStep.SESSION: SessionStep,
     ChainStep.SESSION_RATE_LIMIT: SessionRateLimitStep,

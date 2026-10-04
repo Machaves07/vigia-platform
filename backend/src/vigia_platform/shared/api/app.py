@@ -119,6 +119,7 @@ from vigia_platform.shared.api.static import (
     StaticSiteInvalid,
     static_routers,
 )
+from vigia_platform.shared.bulkheads import Bulkheads
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
@@ -314,6 +315,9 @@ class AppRuntime:
     explícito, fallo cerrado (ninguna sesión la tiene aceptada)."""
     rate_limiter: RateLimiter | None = None
     """Cubos de fichas del proceso; por defecto, uno nuevo con ``clock``."""
+    bulkheads: Bulkheads | None = None
+    """Semáforos por clase de ruta del trabajador (LC-GOB-20); por defecto, los tamaños del diseño
+    (35 ``node`` y 15 ``person``) con ``clock``."""
     identity: IdentityHttp | None = None
     """Servicios de las rutas de sesión, invitación y ``GET /me``; sin ellos, ``internal_error``."""
     ledger: LedgerHttp | None = None
@@ -634,18 +638,21 @@ def _chain_settings(
             "sin VIGIA_PUBLIC_ORIGIN: toda petición que cambia estado con Origin se rechazará"
         )
     limiter = runtime.rate_limiter if runtime is not None else None
+    bulkheads = runtime.bulkheads if runtime is not None else None
+    metrics = runtime.metrics if runtime is not None else None
     return ChainSettings(
         clock=clock,
         catalog=catalog,
         headers=SecurityHeaders(config.csp_store_origins, allow_local=config.allows_local_origins),
         routes=RouteTable(app.routes),
         limiter=limiter if limiter is not None else RateLimiter(clock),
+        bulkheads=bulkheads if bulkheads is not None else Bulkheads(clock=clock, metrics=metrics),
         public_origin=config.public_origin,
         sessions=runtime.sessions if runtime is not None else None,
         csrf_audit=runtime.csrf_audit if runtime is not None else None,
         origin_secret=runtime.origin_secret if runtime is not None else None,
         privacy_notice_version=runtime.privacy_notice_version if runtime is not None else None,
-        metrics=runtime.metrics if runtime is not None else None,
+        metrics=metrics,
     )
 
 

@@ -22,6 +22,8 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   ``VIGIA_DB_POOL_TIMEOUT_SECONDS`` (5), ``VIGIA_DB_STATEMENT_TIMEOUT_MS`` (por defecto el del
   proceso: 10 000 en la API y 30 000 en el worker), ``VIGIA_THREADPOOL_SIZE`` (4),
   ``VIGIA_BULKHEAD_NODE`` (35), ``VIGIA_BULKHEAD_PERSON`` (15) y ``VIGIA_UVICORN_WORKERS`` (2);
+  ``VIGIA_BULKHEAD_PERSON`` por debajo del 30 % de la suma de los dos mamparos impide arrancar
+  (NFR-GOB-19, ``shared.bulkheads``);
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -38,10 +40,16 @@ import sys
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Final, TextIO
+from typing import Any, Final, Self, TextIO
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from vigia_platform.shared.bulkheads import (
+    PERSON_RESERVE_PERCENT,
+    PERSON_VARIABLE,
+    BulkheadSettings,
+    reserve_problem,
+)
 from vigia_platform.shared.db import SslMode
 
 __all__ = [
@@ -213,6 +221,18 @@ class RuntimeConfig(BaseModel):
     bulkhead_person: int = 15
     uvicorn_workers: int = 2
 
+    @model_validator(mode="after")
+    def _person_reserve(self) -> Self:
+        problem = reserve_problem(self.bulkhead_node, self.bulkhead_person)
+        if problem is not None:
+            raise ValueError(problem)
+        return self
+
+    @property
+    def bulkheads(self) -> BulkheadSettings:
+        """Los tamaños de los semáforos por clase de ruta (LC-GOB-20)."""
+        return BulkheadSettings(node=self.bulkhead_node, person=self.bulkhead_person)
+
     @property
     def signing_environment(self) -> str:
         """El ``<entorno>`` de ``vigia/<entorno>/signing/`` (nombre de los secretos de firma)."""
@@ -247,6 +267,15 @@ class RuntimeConfig(BaseModel):
         if "aws_endpoint_url" in values and environment not in ENDPOINT_ENVIRONMENTS:
             raise RuntimeConfigInvalid(
                 "VIGIA_AWS_ENDPOINT_URL", "solo se admite en los entornos local y test"
+            )
+        fields = cls.model_fields
+        node = values.get("bulkhead_node", fields["bulkhead_node"].default)
+        person = values.get("bulkhead_person", fields["bulkhead_person"].default)
+        if isinstance(node, int) and isinstance(person, int) and reserve_problem(node, person):
+            raise RuntimeConfigInvalid(
+                PERSON_VARIABLE,
+                f"deja a las personas menos del {PERSON_RESERVE_PERCENT} % de los puestos del "
+                "mamparo (NFR-GOB-19)",
             )
         try:
             return cls.model_validate(values)
