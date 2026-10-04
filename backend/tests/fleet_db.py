@@ -49,6 +49,22 @@ FLEET_TABLES = (
 
 GLOBAL_TABLE = "revocation_list_publication"
 
+REVOCATION_STATE_TABLE = "revocation_list_state"
+"""``gob_0020`` (TASK-218): marca única de la lista de revocación, una fila global **sin** RLS ni
+datos de cliente (excepción documentada: la sube la revocación de un instalador bajo concesión de
+planta, que la política ``operator_only`` no dejaría escribir)."""
+REVOCATION_STATE_COLUMNS = frozenset(
+    {
+        "dirty_generation",
+        "dirty_since",
+        "published_generation",
+        "published_at",
+        "object_version_id",
+        "next_update",
+        "entries",
+    }
+)
+
 APPEND_ONLY_TABLES = (
     "enrollment_attempt",
     "heartbeat_history",

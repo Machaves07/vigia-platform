@@ -231,6 +231,12 @@ INTEGER_KEYS: Final[Mapping[str, tuple[int, int]]] = {
 
 BOOLEAN_KEYS: Final = frozenset({"exception.escaped"})
 
+HASH_KEYS: Final = frozenset({"source_ip_hash"})
+"""Hashes SHA-256 en hexadecimal (64 en minúsculas) que nunca son un dato en claro: el origen de
+un intento de alta, HMAC con la clave estable de la plataforma (TASK-218, BR-GOB-61). Solo para
+registros estructurados: ninguna métrica los declara (cardinalidad)."""
+_SHA256: Final = re.compile(r"^[0-9a-f]{64}$")
+
 
 class AttributePolicy:
     """Lista blanca de atributos con sus validadores (identificadores y enumeraciones)."""
@@ -246,7 +252,11 @@ class AttributePolicy:
     def keys(self) -> frozenset[str]:
         """Todos los nombres de atributo permitidos."""
         return frozenset(
-            IDENTIFIER_KEYS | self._enumerations.keys() | INTEGER_KEYS.keys() | BOOLEAN_KEYS
+            IDENTIFIER_KEYS
+            | self._enumerations.keys()
+            | INTEGER_KEYS.keys()
+            | BOOLEAN_KEYS
+            | HASH_KEYS
         )
 
     def register(self, key: str, values: Iterable[str]) -> None:
@@ -344,6 +354,8 @@ class AttributePolicy:
             return None
         if key in BOOLEAN_KEYS:
             return value if isinstance(value, bool) else None
+        if key in HASH_KEYS:
+            return value if isinstance(value, str) and _SHA256.fullmatch(value) else replacement
         return None
 
     def clean(

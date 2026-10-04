@@ -109,6 +109,9 @@ class MetricName(enum.StrEnum):
     # Rutas del contrato (U-03, NFR-GOB-54)
     NODE_REQUESTS_TOTAL = "node_requests_total"
     NODE_REQUEST_BODY_BYTES = "node_request_body_bytes"
+    # Flota (U-03, TASK-218): intentos de alta y revocaciones
+    ENROLLMENT_ATTEMPTS_TOTAL = "enrollment_attempts_total"
+    NODE_REVOCATIONS_TOTAL = "node_revocations_total"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -239,6 +242,15 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "route", "result", "rejection_code"),
     _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
           "NFR-GOB-54", "route"),
+    # Flota (TASK-218): todo intento de alta, también el de un nodo desconocido, que no deja fila
+    # (reason = node_unknown); y la marca por organización de la lista de revocación (D-7: solo
+    # métrica).
+    _spec(_N.ENROLLMENT_ATTEMPTS_TOTAL, _C, "{attempt}",
+          "Intentos de alta por resultado y si el nodo estaba declarado.", "BR-GOB-61",
+          "result", "reason"),
+    _spec(_N.NODE_REVOCATIONS_TOTAL, _C, "{revocation}",
+          "Revocaciones de nodo (marca de la lista de revocación) por organización.", "D-7",
+          "organization_id"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -428,6 +440,8 @@ class PlatformMetrics:
         self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
         self.node_requests_total = counter(_N.NODE_REQUESTS_TOTAL)
         self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
+        self.enrollment_attempts_total = counter(_N.ENROLLMENT_ATTEMPTS_TOTAL)
+        self.node_revocations_total = counter(_N.NODE_REVOCATIONS_TOTAL)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)

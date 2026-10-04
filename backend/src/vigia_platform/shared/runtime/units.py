@@ -62,15 +62,39 @@ from vigia_platform.catalog.detail_codes import (
 from vigia_platform.catalog.domain.documents import DocumentSettings
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
-from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp, fleet_routers
+from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
+from vigia_platform.fleet.application.common import FleetDependencies
+from vigia_platform.fleet.application.enrollment_codes import (
+    ATTEMPT_RECORD_TYPE,
+    ISSUED_RECORD_TYPE,
+    BundleRoots,
+    EnrollmentCodeService,
+    NodeCaRoots,
+    RootsUnavailable,
+)
+from vigia_platform.fleet.application.node_declaration import (
+    COMMUNICATION_RECORD_TYPE,
+    NodeDeclarationService,
+)
+from vigia_platform.fleet.application.node_revocation import (
+    DECOMMISSIONED_RECORD_TYPE,
+    REVOKED_RECORD_TYPE,
+    NodeRevocationService,
+)
+from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
+from vigia_platform.fleet.events import FLEET_EVENT_TYPES
+from vigia_platform.fleet.record_types import FLEET_RECORD_TYPES
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import identity_routers
 from vigia_platform.identity.adapters.session_store import register_session_tasks
+from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.concessions import (
     ConcessionService,
     register_expire_concessions,
 )
+from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.identity.authz.context import ScopeContexts
 from vigia_platform.ledger.adapters.http import ledger_routers
@@ -440,6 +464,84 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     }
 
 
+_FLEET_WRITTEN_TYPES: Final = frozenset(
+    {
+        COMMUNICATION_RECORD_TYPE,
+        REVOKED_RECORD_TYPE,
+        DECOMMISSIONED_RECORD_TYPE,
+        ISSUED_RECORD_TYPE,
+        ATTEMPT_RECORD_TYPE,
+    }
+)
+"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218)."""
+_FLEET_PUBLISHED_EVENTS: Final = frozenset({"node_revoked", "node_decommissioned"})
+"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218)."""
+
+
+def _fleet_record_types(registry: RecordTypeRegistry) -> None:
+    for definition in FLEET_RECORD_TYPES:
+        if definition.record_type in _FLEET_WRITTEN_TYPES:
+            registry.register(definition)
+
+
+def _fleet_event_types(registry: EventTypeRegistry) -> None:
+    for event_type in FLEET_EVENT_TYPES:
+        if event_type.event_name in _FLEET_PUBLISHED_EVENTS:
+            registry.register(event_type)
+
+
+class _UnpublishedRoots:
+    """Sin ``VIGIA_EDGE_BUCKET``: no hay raíz publicada que mostrar, así que no se emite código."""
+
+    async def fingerprints(self) -> tuple[str, ...]:
+        raise RootsUnavailable("este proceso no tiene el depósito vigia-edge")
+
+
+def _node_ca_roots(services: UnitServices) -> NodeCaRoots:
+    """``ca/root.pem`` de ``vigia-edge`` (``VIGIA_EDGE_BUCKET``), leído en cada emisión."""
+    config = services.config
+    if config is None or config.edge_bucket is None:
+        return _UnpublishedRoots()
+    # ``runtime.core`` importa este módulo: se resuelve al construir, nunca al importar.
+    from vigia_platform.shared.runtime.core import s3_storage
+
+    return BundleRoots(s3_storage(config, config.edge_bucket, services.clock))
+
+
+def _fleet_state(services: UnitServices) -> Mapping[str, object]:
+    identity = HierarchyService(
+        IdentityDependencies(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+            authorizer=services.authorizer,
+            free_text=services.free_text,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        )
+    )
+    deps = FleetDependencies(
+        database=services.database,
+        writer=services.writer,
+        audit=services.audit,
+        authorizer=services.authorizer,
+        free_text=services.free_text,
+        clock=services.clock,
+        identity=identity,
+        nodes=PostgresNodeFleetStore(services.database),
+        metrics=services.metrics,
+    )
+    return {
+        FLEET_STATE_KEY: FleetHttp(
+            declarations=NodeDeclarationService(deps),
+            # La clave estable del hash de origen la cablea la ruta del alta (VIG-151).
+            enrollment_codes=EnrollmentCodeService(deps, roots=_node_ca_roots(services)),
+            revocations=NodeRevocationService(deps),
+        )
+    }
+
+
 PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = ()
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. Mientras esté vacía,
@@ -526,9 +628,16 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
         free_text=register_u03_free_text_validator,
         api_state=_catalog_state,
     ),
+    # VIG-147 (TASK-218): rutas de identidad del nodo de SCR-07, sus detail_code, los tipos que
+    # escriben y los eventos node_revoked y node_decommissioned.
     PlatformUnit(
         name="fleet",
+        routers=fleet_routers,
+        detail_codes=tuple(code.value for code in FleetDetailCode),
         labels={**FLEET_LABEL_BINDINGS, **FLEET_DETAIL_CODE_LABEL_BINDINGS},
+        record_types=_fleet_record_types,
+        event_types=_fleet_event_types,
+        api_state=_fleet_state,
     ),
     # VIG-144 (TASK-206): el adaptador único de las rutas del contrato (LC-GOB-19, A-51).
     PlatformUnit(name="node_api", routers=_node_routers, api_state=_node_api_state),

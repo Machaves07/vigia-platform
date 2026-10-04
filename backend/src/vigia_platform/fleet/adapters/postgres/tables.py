@@ -46,6 +46,7 @@ __all__ = [
     "PLANT_FLEET_THRESHOLDS",
     "REVOCATION_LIST_DIRTY",
     "REVOCATION_LIST_PUBLICATION",
+    "REVOCATION_LIST_STATE",
     "SCHEMA",
     "TARGET_VERSION_PUBLICATION",
     "UPDATE_RESULT",
@@ -108,6 +109,20 @@ REVOCATION_LIST_PUBLICATION: Final = Table(
     _text("crl_sha256", nullable=True),
 )
 """Nota de §3.1 (D-7): marca única de la lista de revocación global; solo el operador."""
+
+REVOCATION_LIST_STATE: Final = Table(
+    "revocation_list_state",
+    METADATA,
+    Column("singleton", Boolean, primary_key=True),
+    Column("dirty_generation", BigInteger, nullable=False),
+    _instant("dirty_since", nullable=True),
+    Column("published_generation", BigInteger, nullable=False),
+    _instant("published_at", nullable=True),
+    _text("object_version_id", nullable=True),
+    _instant("next_update", nullable=True),
+    _integer("entries"),
+)
+"""``gob_0020`` (TASK-218): marca única y estado de publicación de la lista global, sin RLS."""
 
 REVOCATION_LIST_DIRTY: Final = Table(
     "revocation_list_dirty",

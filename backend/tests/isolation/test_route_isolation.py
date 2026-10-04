@@ -67,6 +67,7 @@ from tests.authz_support import Site
 from tests.examples.test_admin_routes import UnusedPasswords
 from tests.examples.test_ledger_routes import CLIP, StubEvidenceStorage
 from tests.factories import uuid7
+from tests.fleet_support import RootObjects, root_bundle
 from tests.hierarchy_support import (
     LINK_BASE,
     FakeActivationPasswords,
@@ -90,6 +91,12 @@ from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
+from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
+from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
+from vigia_platform.fleet.application.common import FleetDependencies
+from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
+from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
@@ -141,7 +148,12 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
+from vigia_platform.shared.outbox.publish import Outbox
+from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
+from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
+from vigia_platform.shared.outbox.u02_events import register_u02_event_types
+from vigia_platform.shared.runtime.units import _fleet_event_types, _fleet_record_types
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import ObjectHead, PresignedRequest
 
@@ -186,6 +198,17 @@ class StubDocumentStorage:
         )
 
 
+def fleet_http(deps: FleetDependencies) -> FleetHttp:
+    """Los servicios de las rutas de identidad del nodo (VIG-147) con una raíz de prueba."""
+    return FleetHttp(
+        declarations=NodeDeclarationService(deps),
+        enrollment_codes=EnrollmentCodeService(
+            deps, roots=BundleRoots(RootObjects(root_bundle(1)))
+        ),
+        revocations=NodeRevocationService(deps),
+    )
+
+
 def _stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).replace(tzinfo=None).isoformat(timespec="milliseconds") + "Z"
 
@@ -219,10 +242,16 @@ class Ids:
     evidence: uuid.UUID
     event: uuid.UUID
     label: uuid.UUID
+    node: uuid.UUID
+    """Nodo ``declared`` con ficha de flota (rutas de SCR-07, VIG-147)."""
+    spare_zone: uuid.UUID
+    """Zona de la planta sin nodo: se asigna y se retira en la misma pasada."""
+    retired_node: uuid.UUID
+    """Nodo revocado con ficha de flota: el de la baja."""
 
     @classmethod
     def missing(cls) -> Ids:
-        return cls(*(uuid7() for _ in range(10)))
+        return cls(*(uuid7() for _ in cls.__dataclass_fields__))
 
     def values(self) -> tuple[uuid.UUID, ...]:
         return tuple(getattr(self, name) for name in self.__dataclass_fields__)
@@ -459,6 +488,41 @@ CASES: Final[dict[tuple[str, str], Case]] = {
                 "sha256": hashlib.sha256(DOCUMENT).hexdigest(),
             },
         ),
+    ),
+    # --- fleet (U-03, VIG-147; el aislamiento exhaustivo de U-03 es de VIG-165). En este orden,
+    # cada pasada bajo concesión deja el nodo listo para la siguiente: la zona se asigna y se
+    # retira, el código se reemite (o re-alta desde revoked) y la revocación lo deja revocado.
+    ("POST", "/plants/{plant_id}/nodes"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST", f"/plants/{i.plant}/nodes", json={"code": new_code("ND"), "zone_ids": []}
+        ),
+    ),
+    ("POST", "/nodes/{node_id}/zones"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/nodes/{i.node}/zones", json={"zone_id": str(i.spare_zone)}),
+    ),
+    ("POST", "/nodes/{node_id}/zones/{zone_id}/unassignment"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/nodes/{i.node}/zones/{i.spare_zone}/unassignment",
+            json={"reason_es": REASON},
+        ),
+    ),
+    ("POST", "/nodes/{node_id}/enrollment-codes"): Case(
+        Kind.RESOURCE, lambda i: Call("POST", f"/nodes/{i.node}/enrollment-codes")
+    ),
+    ("GET", "/nodes/{node_id}/enrollment-attempts"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/nodes/{i.node}/enrollment-attempts")
+    ),
+    ("POST", "/nodes/{node_id}/revocation"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/nodes/{i.node}/revocation", json={"reason_es": REASON}),
+    ),
+    ("POST", "/nodes/{node_id}/decommission"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/nodes/{i.retired_node}/decommission", json={"reason_es": REASON}),
     ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
@@ -738,6 +802,10 @@ class Isolation:
             "SELECT record_id FROM ledger.evidence WHERE evidence_id = $1", evidence_id
         )
         label_id = self.label(site, plant_id, zone_id)
+        spare_zone = uuid7()
+        authz.add_zone(organization_id, plant_id, spare_zone)
+        fleet_node = self.fleet_node(organization_id, plant_id, user_id, revoked=False)
+        retired_node = self.fleet_node(organization_id, plant_id, user_id, revoked=True)
         return Ids(
             organization=organization_id,
             plant=plant_id,
@@ -749,7 +817,32 @@ class Isolation:
             evidence=evidence_id,
             event=self.dead_letter(organization_id, plant_id),
             label=label_id,
+            node=fleet_node,
+            spare_zone=spare_zone,
+            retired_node=retired_node,
         )
+
+    def fleet_node(
+        self, organization_id: uuid.UUID, plant_id: uuid.UUID, user_id: uuid.UUID, *, revoked: bool
+    ) -> uuid.UUID:
+        """Un nodo con ficha de flota: ``declared``, o ``revoked`` con su motivo."""
+        node_id = self.env.add_node(
+            organization_id, plant_id, status="revoked" if revoked else "declared"
+        )
+        self.env.execute(
+            "INSERT INTO fleet.node_fleet_record (node_id, organization_id, plant_id, declared_at,"
+            " declared_by, revoked_at, revocation_reason_es) VALUES ($1, $2, $3, $4, $5,"
+            " CASE WHEN $6::boolean THEN $4::timestamptz END,"
+            " CASE WHEN $6::boolean THEN $7 END)",
+            node_id,
+            organization_id,
+            plant_id,
+            T0,
+            user_id,
+            revoked,
+            REASON,
+        )
+        return node_id
 
     def organization(self) -> Organization:
         site = self.authz.add_site(plants=2, zones_per_plant=1)
@@ -782,7 +875,7 @@ class Isolation:
             " FROM pg_catalog.pg_attribute AS a"
             " JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid"
             " JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace"
-            " WHERE n.nspname IN ('identity', 'ledger', 'shared', 'catalog')"
+            " WHERE n.nspname IN ('identity', 'ledger', 'shared', 'catalog', 'fleet')"
             " AND a.attname = 'organization_id' AND NOT a.attisdropped"
             " AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
         )
@@ -837,11 +930,17 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         registry = RecordTypeRegistry()
         for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES, *ADMISSION_TYPES):
             registry.register(definition)
+        _fleet_record_types(registry)
+        # Los eventos de la revocación y la baja de un nodo (VIG-147), además de los de U-02.
+        events = OutboxCatalog()
+        register_u02_event_types(events.event_types)
+        _fleet_event_types(events.event_types)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
             async with sessions.database.transaction(system) as transaction:
                 await save_record_types(transaction, registry)
+                await events.synchronize(SqlOutboxCatalogStore(transaction), sessions.clock)
             registry.seal()
 
         env.run(synchronize())
@@ -852,7 +951,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             registry=registry,
             free_text=free_text,
             evidence=EvidenceVerifier(storage, env.clock),
-            outbox=sessions.outbox,
+            outbox=Outbox(events, env.clock),
             clock=env.clock,
         )
         provider = authz.provider_organization_id
@@ -999,7 +1098,19 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             store=DocumentObjectStore(StubDocumentStorage()),
                             clock=env.clock,
                         ),
-                    )
+                    ),
+                    FLEET_STATE_KEY: fleet_http(
+                        FleetDependencies(
+                            database=sessions.database,
+                            writer=writer,
+                            audit=sessions.audit,
+                            authorizer=authz.authorizer,
+                            free_text=free_text,
+                            clock=sessions.clock,
+                            identity=HierarchyService(deps),
+                            nodes=PostgresNodeFleetStore(sessions.database),
+                        )
+                    ),
                 },
             },
             static_dir=STATIC,
@@ -1238,6 +1349,13 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /zones/{zone_id}/coverage/at",
         "POST /zones/{zone_id}/live-view-token",
         "GET /plants/{plant_id}/admissions",
+        "POST /plants/{plant_id}/nodes",
+        "POST /nodes/{node_id}/zones",
+        "POST /nodes/{node_id}/zones/{zone_id}/unassignment",
+        "POST /nodes/{node_id}/enrollment-codes",
+        "GET /nodes/{node_id}/enrollment-attempts",
+        "POST /nodes/{node_id}/revocation",
+        "POST /nodes/{node_id}/decommission",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.

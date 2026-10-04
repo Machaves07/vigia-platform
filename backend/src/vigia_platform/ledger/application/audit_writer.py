@@ -134,6 +134,17 @@ class AuditOperation(enum.StrEnum):
     DOCUMENT_UPLOAD_GRANTED = "document_upload_granted"
     """U-03 (LC-GOB-05, VIG-143): concesión de subida de un documento firmado de planta, como
     ``evidence_read_granted``; la emite un instalador bajo concesión (BR-NUC-38)."""
+    NODE_DECLARED = "node_declared"
+    """U-03 (TASK-218): declaración de un nodo, con o sin reemplazo (``commissioning.run``)."""
+    ENROLLMENT_CODE_ISSUED = "enrollment_code_issued"
+    """U-03 (TASK-218): emisión de un código de alta; nunca lleva el código."""
+    NODE_REVOKED = "node_revoked"
+    """U-03 (TASK-218): revocación capa 1 de un nodo (``fleet.manage``)."""
+    NODE_DECOMMISSIONED = "node_decommissioned"
+    """U-03 (TASK-218): baja de un nodo ya revocado (``fleet.manage``)."""
+    FLEET_READ = "fleet_read"
+    """Lectura de la flota de una planta bajo concesión (BR-NUC-38; como ``catalog_read``):
+    ``GET /nodes/{node_id}/enrollment-attempts`` (TASK-218)."""
 
 
 class AuditOutcome(enum.StrEnum):

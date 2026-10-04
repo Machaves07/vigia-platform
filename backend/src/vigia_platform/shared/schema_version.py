@@ -32,8 +32,11 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 16
-"""Versión mínima del esquema que exige el código de esta imagen: ``nuc_0016`` (las funciones de
+MINIMUM_SCHEMA_VERSION: Final = 20
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0020`` (la marca global
+``fleet.revocation_list_state`` que la revocación de un nodo sube en su transacción, TASK-218),
+que incluye ``gob_0019`` (la búsqueda del nodo declarado del alta), ``gob_0018`` (el esquema
+``fleet``) y ``gob_0017`` (el esquema ``catalog``), que incluyen ``nuc_0016`` (las funciones de
 ``create_partitions`` y ``archive_audit_partitions``: crear particiones, contar la partición por
 defecto, leer y desprender una partición de auditoría), que incluye ``nuc_0015`` (la política de
 proveedor en el expediente, la auditoría y la bandeja: sin ella, un puerto que omitiera el filtro
