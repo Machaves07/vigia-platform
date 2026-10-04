@@ -93,6 +93,9 @@ from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGat
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
     PostgresPlantPolicyRepository,
 )
+from vigia_platform.catalog.adapters.postgres.regression_repository import (
+    PostgresRegressionRepository,
+)
 from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
     PostgresScopeRecordRepository,
 )
@@ -104,6 +107,13 @@ from vigia_platform.catalog.application.plant_policy import (
     PLANT_POLICY_SIGNED,
     PlantPolicyService,
 )
+from vigia_platform.catalog.application.publication import (
+    PUBLISHED_RECORD_TYPE,
+    RETIRED_RECORD_TYPE,
+    SINGLE_OCCUPANCY_RECORD_TYPE,
+    CatalogPublicationService,
+)
+from vigia_platform.catalog.application.regression import MARKED_RECORD_TYPE, RegressionService
 from vigia_platform.catalog.application.scope_record import (
     MOUNTING_GATE_RECORD,
     ScopeRecordService,
@@ -178,7 +188,16 @@ INSTALLER_KEYS: Final = frozenset(key.value for key in permissions_of(Role.PROVI
 ADMISSION_TYPES: Final = tuple(
     d
     for d in CATALOG_RECORD_TYPES
-    if d.record_type in (ADMISSION_RECORD_TYPE, MOUNTING_GATE_RECORD, PLANT_POLICY_SIGNED)
+    if d.record_type
+    in (
+        ADMISSION_RECORD_TYPE,
+        MOUNTING_GATE_RECORD,
+        PLANT_POLICY_SIGNED,
+        PUBLISHED_RECORD_TYPE,
+        RETIRED_RECORD_TYPE,
+        SINGLE_OCCUPANCY_RECORD_TYPE,
+        MARKED_RECORD_TYPE,
+    )
 )
 """Los tipos que escriben las rutas del catálogo; ``gate_state_changed`` ya lo trae
 ``COVERAGE_TYPES`` (la versión de prueba con la que se siembran las compuertas de U-02)."""
@@ -286,6 +305,29 @@ class Case:
 
 def _assignment(ids: Ids) -> list[dict[str, str]]:
     return [{"role": "coordinator_sst", "scope_level": "plant", "scope_id": str(ids.plant)}]
+
+
+def _standard_body() -> dict[str, Any]:
+    return {
+        "family": "coexistence",
+        "title_es": "Coexistencia en la celda",
+        "declared_text": "Nadie permanece en la celda mientras la máquina está energizada.",
+        "predicate": {
+            "all_of": [{"presence": True}, {"signal_role": "energy", "value": "asserted"}],
+            "min_duration_ms": 0,
+        },
+        "reason_es": REASON,
+    }
+
+
+def _camera_body(camera_id: uuid.UUID) -> dict[str, Any]:
+    return {
+        "camera_id": str(camera_id),
+        "code": "CM-1",
+        "role_in_zone": "primary",
+        "declared_min_fps": 5.0,
+        "stream_reference": "cam-1",
+    }
 
 
 def _coverage_period() -> dict[str, str]:
@@ -539,6 +581,92 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("GET", "/plants/{plant_id}/policy"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/policy")
     ),
+    # VIG-148: catálogo de la zona, estándares, parámetros y regresión (la zona de cada
+    # organización tiene su versión 1, ``Isolation.catalog``).
+    ("GET", "/zones/{zone_id}/catalog"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/catalog")
+    ),
+    ("GET", "/zones/{zone_id}/catalog/versions"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/catalog/versions")
+    ),
+    ("GET", "/zones/{zone_id}/catalog/versions/{catalog_version}"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/catalog/versions/1")
+    ),
+    ("PUT", "/zones/{zone_id}/catalog/single-occupancy"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/zones/{i.zone}/catalog/single-occupancy",
+            json={"single_occupancy": True, "reason_es": REASON},
+        ),
+    ),
+    ("POST", "/zones/{zone_id}/standards"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/zones/{i.zone}/standards", json=_standard_body()),
+    ),
+    ("POST", "/zones/{zone_id}/standards/{standard_id}/versions"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/zones/{i.zone}/standards/{i.label}/versions",
+            json={"changes": {"title_es": "Coexistencia revisada"}, "reason_es": REASON},
+        ),
+    ),
+    ("POST", "/zones/{zone_id}/standards/{standard_id}/retirement"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/zones/{i.zone}/standards/{i.label}/retirement",
+            json={"reason_es": REASON, "effective_from": _stamp(T0)},
+        ),
+    ),
+    ("PUT", "/zones/{zone_id}/cameras"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/zones/{i.zone}/cameras",
+            json={"cameras": [_camera_body(i.label)], "reason_es": REASON},
+        ),
+    ),
+    ("PUT", "/zones/{zone_id}/minimum-coverage"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/zones/{i.zone}/minimum-coverage",
+            json={"required_count": 1, "required_camera_ids": [], "reason_es": REASON},
+        ),
+    ),
+    ("PUT", "/zones/{zone_id}/signals"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT", f"/zones/{i.zone}/signals", json={"signals": [], "reason_es": REASON}
+        ),
+    ),
+    ("PUT", "/zones/{zone_id}/thresholds"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/zones/{i.zone}/thresholds",
+            json={"review": 0.4, "publication": 0.8, "reason_es": REASON},
+        ),
+    ),
+    ("PUT", "/zones/{zone_id}/windows"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT", f"/zones/{i.zone}/windows", json={"episode": {}, "reason_es": REASON}
+        ),
+    ),
+    ("GET", "/zones/{zone_id}/regression"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/regression")
+    ),
+    ("POST", "/zones/{zone_id}/framing-recaptures"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/zones/{i.zone}/framing-recaptures",
+            json={"camera_id": str(i.label), "captured_at": _stamp(T0), "reason_es": REASON},
+        ),
+    ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
         Kind.PROVIDER_ONLY,
@@ -563,6 +691,8 @@ STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     ("POST", "/zones/{zone_id}/gates/{gate}/revocation"): "conflict",
     # El document_ref no corresponde a ninguna concesión de B.
     ("POST", "/plants/{plant_id}/policy"): "invalid_request",
+    # La cámara del caso no es de la versión 1 sembrada en la zona de B (VIG-148).
+    ("POST", "/zones/{zone_id}/framing-recaptures"): "invalid_request",
 }
 """Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
 no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
@@ -808,6 +938,34 @@ class Isolation:
         )
         return event_id
 
+    def catalog(
+        self, site: Site, plant_id: uuid.UUID, zone_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        """La versión 1 del catálogo de la zona (fila sintética: las rutas de lectura la leen tal
+        cual; la publicación real está en ``tests/integration/test_catalog_routes.py``)."""
+        payload = {
+            "zone_id": str(zone_id),
+            "version": 1,
+            "cameras": [{"camera_id": str(uuid7()), "code": "CM-1"}],
+            "standards": [],
+        }
+        self.env.execute(
+            "INSERT INTO catalog.zone_catalog_version (organization_id, plant_id, zone_id,"
+            " catalog_version, issued_at, issued_by, role_in_use, reason_es, changed_fields,"
+            " payload, envelope, single_occupancy, aggregation_window_minutes, ledger_record_id)"
+            " VALUES ($1, $2, $3, 1, $4, $5, 'administrator', $6, '{standards}', $7, $8, false,"
+            " 60, $9)",
+            site.organization_id,
+            plant_id,
+            zone_id,
+            T0,
+            user_id,
+            REASON,
+            json.dumps(payload),
+            json.dumps({"payload": payload, "signature": "sintética"}),
+            uuid7(),
+        )
+
     def resources(self, site: Site, plant_index: int) -> Ids:
         """Un recurso de cada tipo en la planta ``plant_index`` de ``site`` (filas reales)."""
         authz = self.authz
@@ -832,6 +990,7 @@ class Isolation:
             "SELECT record_id FROM ledger.evidence WHERE evidence_id = $1", evidence_id
         )
         label_id = self.label(site, plant_id, zone_id)
+        self.catalog(site, plant_id, zone_id, user_id)
         return Ids(
             organization=organization_id,
             plant=plant_id,
@@ -1081,6 +1240,37 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             signer=signing,
             clock=env.clock,
         )
+        admissions = AdmissionService(
+            repository=PostgresAdmissionRepository(sessions.database),
+            database=sessions.database,
+            writer=writer,
+            authorizer=authz.authorizer,
+            audit=sessions.audit,
+            free_text=free_text,
+            clock=sessions.clock,
+        )
+        regression = RegressionService(
+            repository=PostgresRegressionRepository(sessions.database),
+            catalog=catalog_repository,
+            database=sessions.database,
+            writer=writer,
+            authorizer=authz.authorizer,
+            audit=sessions.audit,
+            free_text=free_text,
+            clock=sessions.clock,
+        )
+        publication = CatalogPublicationService(
+            repository=catalog_repository,
+            database=sessions.database,
+            writer=writer,
+            authorizer=authz.authorizer,
+            audit=sessions.audit,
+            free_text=free_text,
+            admissions=admissions,
+            signer=signing,
+            clock=sessions.clock,
+            regression_marker=regression,
+        )
         app = World(clock=sessions.clock).app(
             units=None,
             permissions=None,
@@ -1097,15 +1287,9 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                 "platform": platform,
                 "state": {
                     CATALOG_STATE_KEY: CatalogHttp(
-                        admissions=AdmissionService(
-                            repository=PostgresAdmissionRepository(sessions.database),
-                            database=sessions.database,
-                            writer=writer,
-                            authorizer=authz.authorizer,
-                            audit=sessions.audit,
-                            free_text=free_text,
-                            clock=sessions.clock,
-                        ),
+                        admissions=admissions,
+                        catalog=publication,
+                        regression=regression,
                         documents=documents,
                         gates=gates,
                         scope_records=ScopeRecordService(
@@ -1377,6 +1561,11 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "POST /zones/{zone_id}/gates/{gate}/revocation",
         "POST /plants/{plant_id}/policy",
         "GET /plants/{plant_id}/policy",
+        "GET /zones/{zone_id}/catalog",
+        "GET /zones/{zone_id}/catalog/versions",
+        "GET /zones/{zone_id}/catalog/versions/{catalog_version}",
+        "GET /zones/{zone_id}/regression",
+        "POST /zones/{zone_id}/framing-recaptures",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.

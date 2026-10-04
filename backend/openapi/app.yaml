@@ -1624,6 +1624,484 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/catalog":
+    "get":
+      "tags":
+        - "catálogo"
+      "summary": "Catálogo vigente de la zona con su motivo, autor y fecha"
+      "operationId": "current_catalog_zones__zone_id__catalog_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/catalog/versions":
+    "get":
+      "tags":
+        - "catálogo"
+      "summary": "Historial de versiones del catálogo de la zona, la más reciente primero"
+      "operationId": "catalog_history_zones__zone_id__catalog_versions_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 10
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogHistoryOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/catalog/versions/{catalog_version}":
+    "get":
+      "tags":
+        - "catálogo"
+      "summary": "Versión del catálogo con su sobre firmado tal como se emitió"
+      "operationId": "catalog_version_zones__zone_id__catalog_versions__catalog_version__get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "catalog_version"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "maximum": 2147483647
+            "minimum": 1
+            "title": "Catalog Version"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionDetail"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/catalog/single-occupancy":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Marca unipersonal y ventana de agregación de la zona (no marca regresión)"
+      "operationId": "single_occupancy_zones__zone_id__catalog_single_occupancy_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SingleOccupancyBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/standards":
+    "post":
+      "tags":
+        - "catálogo"
+      "summary": "Declara un estándar en la zona: versión nueva del catálogo firmado"
+      "operationId": "new_standard_zones__zone_id__standards_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/StandardBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/standards/{standard_id}/versions":
+    "post":
+      "tags":
+        - "catálogo"
+      "summary": "Versión nueva de un estándar: la anterior permanece consultable"
+      "operationId": "new_standard_version_zones__zone_id__standards__standard_id__versions_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "standard_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Standard Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/StandardVersionBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/standards/{standard_id}/retirement":
+    "post":
+      "tags":
+        - "catálogo"
+      "summary": "Retira un estándar: versión nueva del catálogo sin él, nunca un borrado"
+      "operationId": "retirement_zones__zone_id__standards__standard_id__retirement_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "standard_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Standard Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RetirementBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/cameras":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Cámaras de la zona: versión nueva del catálogo y regresión pendiente"
+      "operationId": "cameras_zones__zone_id__cameras_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CamerasBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/minimum-coverage":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Cobertura mínima de la zona: versión nueva del catálogo y regresión pendiente"
+      "operationId": "minimum_coverage_zones__zone_id__minimum_coverage_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/MinimumCoverageBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/signals":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Señales declaradas de la zona: versión nueva del catálogo y regresión pendiente"
+      "operationId": "signals_zones__zone_id__signals_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SignalsBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/thresholds":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Umbrales de revisión y publicación: versión nueva y regresión pendiente"
+      "operationId": "thresholds_zones__zone_id__thresholds_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ThresholdsBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/windows":
+    "put":
+      "tags":
+        - "catálogo"
+      "summary": "Ventana de clip y parámetros de episodio: versión nueva y regresión pendiente"
+      "operationId": "windows_zones__zone_id__windows_put"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/WindowsBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CatalogVersionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/regression":
+    "get":
+      "tags":
+        - "catálogo"
+      "summary": "Estado de la regresión del walk-test de la zona (no bloquea la operación)"
+      "operationId": "regression_state_zones__zone_id__regression_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RegressionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/framing-recaptures":
+    "post":
+      "tags":
+        - "catálogo"
+      "summary": "Recaptura del encuadre de una cámara: regresión con la matriz completa"
+      "operationId": "framing_recapture_zones__zone_id__framing_recaptures_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/FramingRecaptureBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RegressionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -2077,6 +2555,32 @@
       "type": "object"
       "title": "BlurVerificationBody"
       "description": "Parte declarada del difuminado (D-2). Los dos campos son opcionales en la forma para que\nsu ausencia responda ``catalog_blur_not_verified``, no ``invalid_request``."
+    "CameraBody":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "role_in_zone":
+          "$ref": "#/components/schemas/CameraRoleInZone"
+        "declared_min_fps":
+          "type": "number"
+          "title": "Declared Min Fps"
+        "stream_reference":
+          "type": "string"
+          "title": "Stream Reference"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "code"
+        - "role_in_zone"
+        - "declared_min_fps"
+        - "stream_reference"
+      "title": "CameraBody"
     "CameraFramingBody":
       "properties":
         "camera_id":
@@ -2096,6 +2600,224 @@
         - "framing_description_es"
         - "reference_marker"
       "title": "CameraFramingBody"
+    "CameraRoleInZone":
+      "type": "string"
+      "enum":
+        - "primary"
+        - "redundant"
+      "title": "CameraRoleInZone"
+      "description": "Rol de una cámara dentro de su zona."
+    "CamerasBody":
+      "properties":
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/CameraBody"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Cameras"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "cameras"
+        - "reason_es"
+      "title": "CamerasBody"
+    "CatalogChangedField":
+      "type": "string"
+      "enum":
+        - "standards"
+        - "cameras"
+        - "minimum_coverage"
+        - "signals"
+        - "thresholds"
+        - "clip_window"
+        - "episode"
+        - "single_occupancy"
+      "title": "CatalogChangedField"
+      "description": "Qué cambió de una versión del catálogo a la siguiente."
+    "CatalogHistoryOut":
+      "properties":
+        "versions":
+          "items":
+            "$ref": "#/components/schemas/CatalogVersionSummary"
+          "type": "array"
+          "title": "Versions"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "versions"
+        - "next_after"
+      "title": "CatalogHistoryOut"
+    "CatalogVersionDetail":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "issued_at":
+          "type": "string"
+          "title": "Issued At"
+        "issued_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Issued By"
+        "role_in_use":
+          "$ref": "#/components/schemas/Role"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "changed_fields":
+          "items":
+            "$ref": "#/components/schemas/CatalogChangedField"
+          "type": "array"
+          "title": "Changed Fields"
+        "superseded_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Superseded At"
+        "single_occupancy":
+          "type": "boolean"
+          "title": "Single Occupancy"
+        "aggregation_window_minutes":
+          "type": "integer"
+          "title": "Aggregation Window Minutes"
+        "catalog":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Catalog"
+        "envelope":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Envelope"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "catalog_version"
+        - "issued_at"
+        - "issued_by"
+        - "role_in_use"
+        - "reason_es"
+        - "changed_fields"
+        - "superseded_at"
+        - "single_occupancy"
+        - "aggregation_window_minutes"
+        - "catalog"
+        - "envelope"
+      "title": "CatalogVersionDetail"
+    "CatalogVersionOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "issued_at":
+          "type": "string"
+          "title": "Issued At"
+        "issued_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Issued By"
+        "role_in_use":
+          "$ref": "#/components/schemas/Role"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "changed_fields":
+          "items":
+            "$ref": "#/components/schemas/CatalogChangedField"
+          "type": "array"
+          "title": "Changed Fields"
+        "superseded_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Superseded At"
+        "single_occupancy":
+          "type": "boolean"
+          "title": "Single Occupancy"
+        "aggregation_window_minutes":
+          "type": "integer"
+          "title": "Aggregation Window Minutes"
+        "catalog":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Catalog"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "catalog_version"
+        - "issued_at"
+        - "issued_by"
+        - "role_in_use"
+        - "reason_es"
+        - "changed_fields"
+        - "superseded_at"
+        - "single_occupancy"
+        - "aggregation_window_minutes"
+        - "catalog"
+      "title": "CatalogVersionOut"
+      "description": "La versión con su ``ZoneCatalog`` y los atributos de plataforma que no viajan al nodo."
+    "CatalogVersionSummary":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "issued_at":
+          "type": "string"
+          "title": "Issued At"
+        "issued_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Issued By"
+        "role_in_use":
+          "$ref": "#/components/schemas/Role"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "changed_fields":
+          "items":
+            "$ref": "#/components/schemas/CatalogChangedField"
+          "type": "array"
+          "title": "Changed Fields"
+        "superseded_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Superseded At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "catalog_version"
+        - "issued_at"
+        - "issued_by"
+        - "role_in_use"
+        - "reason_es"
+        - "changed_fields"
+        - "superseded_at"
+      "title": "CatalogVersionSummary"
+      "description": "Una entrada del historial: qué cambió, por qué, quién y cuándo (H-44)."
     "ChainOut":
       "properties":
         "kind":
@@ -2223,6 +2945,19 @@
         - "organization_id"
         - "checkpoints"
       "title": "CheckpointsOut"
+    "ClipWindowBody":
+      "properties":
+        "pre_seconds":
+          "type": "integer"
+          "title": "Pre Seconds"
+          "default": 10
+        "post_seconds":
+          "type": "integer"
+          "title": "Post Seconds"
+          "default": 10
+      "additionalProperties": false
+      "type": "object"
+      "title": "ClipWindowBody"
     "CompleteActivation":
       "properties":
         "step":
@@ -2413,6 +3148,24 @@
         - "node_intervals"
         - "summary"
       "title": "CoverageTimelineOut"
+    "CoverageValues":
+      "properties":
+        "required_count":
+          "type": "integer"
+          "title": "Required Count"
+        "required_camera_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 8
+          "title": "Required Camera Ids"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "required_count"
+        - "required_camera_ids"
+      "title": "CoverageValues"
     "DeactivatedView":
       "properties":
         "user_id":
@@ -2592,6 +3345,19 @@
         - "recovery_codes"
       "title": "EnrollmentView"
       "description": "Lo que se muestra **una sola vez** al inscribirse; nada de esto se guarda en claro."
+    "EpisodeBody":
+      "properties":
+        "grouping_window_ms":
+          "type": "integer"
+          "title": "Grouping Window Ms"
+          "default": 3000
+        "max_segment_ms":
+          "type": "integer"
+          "title": "Max Segment Ms"
+          "default": 900000
+      "additionalProperties": false
+      "type": "object"
+      "title": "EpisodeBody"
     "EvidenceOut":
       "properties":
         "evidence_id":
@@ -2676,6 +3442,26 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "FramingRecaptureBody":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "captured_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Captured At"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "captured_at"
+        - "reason_es"
+      "title": "FramingRecaptureBody"
     "GateKind":
       "type": "string"
       "enum":
@@ -3335,6 +4121,28 @@
         - "privacy_notice_version"
         - "api_version"
       "title": "MeResponse"
+    "MinimumCoverageBody":
+      "properties":
+        "required_count":
+          "type": "integer"
+          "title": "Required Count"
+        "required_camera_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 8
+          "title": "Required Camera Ids"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "required_count"
+        - "required_camera_ids"
+        - "reason_es"
+      "title": "MinimumCoverageBody"
     "MountingGateOut":
       "properties":
         "status":
@@ -3826,6 +4634,69 @@
         - "received_at"
         - "record_id"
       "title": "RecordCursorOut"
+    "RegressionCause":
+      "type": "string"
+      "enum":
+        - "catalog_change"
+        - "model_version_change"
+        - "framing_recaptured"
+      "title": "RegressionCause"
+      "description": "Causa de la regresión del walk-test; ``framing_recaptured`` por la nota de §2.16."
+    "RegressionOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "state":
+          "$ref": "#/components/schemas/RegressionState"
+        "marked_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Marked At"
+        "cause":
+          "anyOf":
+            - "$ref": "#/components/schemas/RegressionCause"
+            - "type": "null"
+        "catalog_version":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Catalog Version"
+        "model_version":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Model Version"
+        "affected_row_ids":
+          "anyOf":
+            - "items":
+                "type": "string"
+                "format": "uuid"
+              "type": "array"
+            - "type": "string"
+              "const": "all"
+            - "type": "null"
+          "title": "Affected Row Ids"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "state"
+        - "marked_at"
+        - "cause"
+        - "catalog_version"
+        - "model_version"
+        - "affected_row_ids"
+      "title": "RegressionOut"
+      "description": "``regression_state`` de la zona (``CatalogQueryPort.regression_state``)."
+    "RegressionState":
+      "type": "string"
+      "enum":
+        - "current"
+        - "pending"
+      "title": "RegressionState"
     "ReplayOut":
       "properties":
         "event_id":
@@ -3905,6 +4776,21 @@
         - "reason"
         - "verified_at"
       "title": "ResultOut"
+    "RetirementBody":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "effective_from":
+          "type": "string"
+          "format": "date-time"
+          "title": "Effective From"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+        - "effective_from"
+      "title": "RetirementBody"
     "RevocationBody":
       "properties":
         "reason_es":
@@ -4150,6 +5036,24 @@
         - "concession_max_days"
         - "concession_default_days"
       "title": "SettingsView"
+    "SignalsBody":
+      "properties":
+        "signals":
+          "items":
+            "additionalProperties": true
+            "type": "object"
+          "type": "array"
+          "maxItems": 32
+          "title": "Signals"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signals"
+        - "reason_es"
+      "title": "SignalsBody"
     "SigningPurpose":
       "type": "string"
       "enum":
@@ -4160,6 +5064,90 @@
         - "checkpoint"
       "title": "SigningPurpose"
       "description": "``signing_purpose`` (``domain-entities.md`` §1)."
+    "SingleOccupancyBody":
+      "properties":
+        "single_occupancy":
+          "type": "boolean"
+          "title": "Single Occupancy"
+        "aggregation_window_minutes":
+          "type": "integer"
+          "maximum": 480.0
+          "minimum": 15.0
+          "title": "Aggregation Window Minutes"
+          "default": 60
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "single_occupancy"
+        - "reason_es"
+      "title": "SingleOccupancyBody"
+    "StandardBody":
+      "properties":
+        "family":
+          "$ref": "#/components/schemas/PredicateFamily"
+        "title_es":
+          "type": "string"
+          "title": "Title Es"
+        "declared_text":
+          "type": "string"
+          "title": "Declared Text"
+        "predicate":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Predicate"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "zone_parameters":
+          "anyOf":
+            - "$ref": "#/components/schemas/ZoneParametersBody"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "family"
+        - "title_es"
+        - "declared_text"
+        - "predicate"
+        - "reason_es"
+      "title": "StandardBody"
+    "StandardChanges":
+      "properties":
+        "title_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Title Es"
+        "declared_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Declared Text"
+        "predicate":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Predicate"
+      "additionalProperties": false
+      "type": "object"
+      "title": "StandardChanges"
+    "StandardVersionBody":
+      "properties":
+        "changes":
+          "$ref": "#/components/schemas/StandardChanges"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "changes"
+        - "reason_es"
+      "title": "StandardVersionBody"
     "SubjectOut":
       "properties":
         "kind":
@@ -4212,6 +5200,46 @@
         - "never_reported_ms"
         - "zone_not_active_ms"
       "title": "SummaryOut"
+    "ThresholdValues":
+      "properties":
+        "review":
+          "type": "number"
+          "exclusiveMaximum": 1.0
+          "exclusiveMinimum": 0.0
+          "title": "Review"
+        "publication":
+          "type": "number"
+          "maximum": 1.0
+          "exclusiveMinimum": 0.0
+          "title": "Publication"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "review"
+        - "publication"
+      "title": "ThresholdValues"
+    "ThresholdsBody":
+      "properties":
+        "review":
+          "type": "number"
+          "exclusiveMaximum": 1.0
+          "exclusiveMinimum": 0.0
+          "title": "Review"
+        "publication":
+          "type": "number"
+          "maximum": 1.0
+          "exclusiveMinimum": 0.0
+          "title": "Publication"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "review"
+        - "publication"
+        - "reason_es"
+      "title": "ThresholdsBody"
     "UsageGateOut":
       "properties":
         "status":
@@ -4366,6 +5394,24 @@
         - "kind"
       "title": "VerifyRequest"
       "description": "La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o\n``audit`` (sin planta). Sin campos de más; ``plant_id`` es un UUID en texto."
+    "WindowsBody":
+      "properties":
+        "clip_window":
+          "anyOf":
+            - "$ref": "#/components/schemas/ClipWindowBody"
+            - "type": "null"
+        "episode":
+          "anyOf":
+            - "$ref": "#/components/schemas/EpisodeBody"
+            - "type": "null"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "WindowsBody"
     "ZoneBody":
       "properties":
         "code":
@@ -4392,6 +5438,51 @@
         - "productive"
       "title": "ZoneMode"
       "description": "Modo de operación de una zona, derivado de sus compuertas."
+    "ZoneParametersBody":
+      "properties":
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/CameraBody"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Cameras"
+        "minimum_coverage":
+          "$ref": "#/components/schemas/CoverageValues"
+        "signals":
+          "items":
+            "additionalProperties": true
+            "type": "object"
+          "type": "array"
+          "maxItems": 32
+          "title": "Signals"
+        "thresholds":
+          "$ref": "#/components/schemas/ThresholdValues"
+        "clip_window":
+          "$ref": "#/components/schemas/ClipWindowBody"
+        "episode":
+          "$ref": "#/components/schemas/EpisodeBody"
+        "single_occupancy":
+          "type": "boolean"
+          "title": "Single Occupancy"
+          "default": false
+        "aggregation_window_minutes":
+          "type": "integer"
+          "maximum": 480.0
+          "minimum": 15.0
+          "title": "Aggregation Window Minutes"
+          "default": 60
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "cameras"
+        - "minimum_coverage"
+        - "signals"
+        - "thresholds"
+        - "clip_window"
+        - "episode"
+      "title": "ZoneParametersBody"
+      "description": "Los parámetros de la versión 1 de la zona (solo con la zona aún sin catálogo)."
     "ZoneView":
       "properties":
         "zone_id":

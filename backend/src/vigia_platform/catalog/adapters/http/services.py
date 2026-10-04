@@ -17,6 +17,8 @@ from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.gates import GateService
 from vigia_platform.catalog.application.plant_policy import PlantPolicyService
+from vigia_platform.catalog.application.publication import CatalogPublicationService
+from vigia_platform.catalog.application.regression import RegressionService
 from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
@@ -41,6 +43,10 @@ class CatalogHttp:
     """Acta de alcance de la compuerta de montaje (LC-GOB-03, VIG-146)."""
     plant_policies: PlantPolicyService | None = None
     """``POST`` y ``GET /plants/{plant_id}/policy`` (LC-GOB-03, VIG-146)."""
+    catalog: CatalogPublicationService | None = None
+    """Catálogo de la zona, estándares y parámetros (LC-GOB-01, VIG-148)."""
+    regression: RegressionService | None = None
+    """``GET /zones/{zone_id}/regression`` y la recaptura del encuadre (LC-GOB-09, VIG-148)."""
 
 
 def installed[T](service: T | None) -> T:
