@@ -21,6 +21,7 @@ import secrets
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from tests.identity_db import BASE_TIME, IdentitySeed, Tenant, set_scope
@@ -105,6 +106,17 @@ Builder = Callable[[FleetScope], tuple[str, list[Any]]]
 
 def _json(value: Any) -> str:
     return json.dumps(value)
+
+
+def exact(text: str | bytes) -> Any:
+    """Un documento JSON leído sin pérdida (enteros exactos, decimales como ``Decimal``), con
+    ``json`` de la biblioteca estándar: independiente de ``table_archive.parse_row``."""
+    return json.loads(text, parse_float=Decimal)
+
+
+def json_order(document: Any) -> str:
+    """Clave de orden estable de un documento leído con ``exact``."""
+    return json.dumps(document, sort_keys=True, default=str)
 
 
 def _hex() -> str:

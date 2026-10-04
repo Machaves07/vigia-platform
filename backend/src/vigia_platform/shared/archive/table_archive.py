@@ -50,6 +50,7 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Final, Protocol
 
 from sqlalchemy import exc as sa_exc
@@ -81,6 +82,7 @@ __all__ = [
     "TablePartition",
     "TableSnapshot",
     "build_table_archive",
+    "parse_row",
     "read_table_archive",
     "restore_table_partition",
     "restore_table_rows",
@@ -331,6 +333,37 @@ def _member(archive: zipfile.ZipFile, name: str) -> bytes:
     return archive.read(info)
 
 
+def _reject_constant(name: str) -> object:
+    raise ValueError(f"constante JSON no admitida: {name}")
+
+
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    document = dict(pairs)
+    if len(document) != len(pairs):
+        raise ValueError("claves repetidas")
+    return document
+
+
+def parse_row(row: bytes) -> dict[str, Any]:
+    """Una fila del archivo como documento, **sin pérdida**: los enteros quedan exactos y los
+    números con decimales como ``Decimal`` (``numeric`` de ``jsonb`` no cabe siempre en un doble).
+    ``ValueError`` si no es un objeto JSON en UTF-8 sin claves repetidas ni ``NaN``."""
+    try:
+        document = json.loads(
+            row.decode("utf-8"),
+            parse_float=Decimal,
+            parse_constant=_reject_constant,
+            object_pairs_hook=_unique_keys,
+        )
+    except RecursionError:
+        raise ValueError("anidamiento demasiado profundo") from None
+    except UnicodeDecodeError:
+        raise ValueError("no es UTF-8 válido") from None
+    if not isinstance(document, dict):
+        raise ValueError("fila que no es un objeto JSON")
+    return document
+
+
 def _split_rows(data: bytes) -> tuple[bytes, ...]:
     if not data:
         return ()
@@ -338,8 +371,7 @@ def _split_rows(data: bytes) -> tuple[bytes, ...]:
         raise _unreadable("las filas no terminan en salto de línea")
     rows = tuple(data.split(b"\n")[:-1])
     for row in rows:
-        if not isinstance(parse_json(row), dict):
-            raise _unreadable("fila que no es un objeto JSON")
+        parse_row(row)
     return rows
 
 
@@ -415,13 +447,10 @@ def verify_table_download(
 
 def restore_table_rows(contents: TableArchiveContents) -> tuple[dict[str, Any], ...]:
     """Las filas del archivo como documentos (``restaurar`` de PR-GOB-26), en orden de clave."""
-    restored: list[dict[str, Any]] = []
-    for row in contents.rows:
-        document = parse_json(row)
-        if not isinstance(document, dict):  # pragma: no cover - read_table_archive ya lo exige
-            raise _unreadable("fila que no es un objeto JSON")
-        restored.append(document)
-    return tuple(restored)
+    try:
+        return tuple(parse_row(row) for row in contents.rows)
+    except ValueError as error:  # pragma: no cover - read_table_archive ya lo exige
+        raise _unreadable(str(error)) from None
 
 
 def restored_table_from_bytes(data: bytes, expected_sha256: str) -> RestoredTablePartition:

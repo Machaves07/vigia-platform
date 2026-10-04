@@ -37,7 +37,8 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from tests.fleet_db import FleetScope, enrollment_attempt, fleet_alarm, heartbeat
+from tests.fleet_db import FleetScope, enrollment_attempt, exact, fleet_alarm, heartbeat
+from tests.fleet_db import json_order as _order
 from tests.identity_db import migrated_database, set_scope
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, versioned_bucket
 from tests.writer_support import (
@@ -140,7 +141,7 @@ class World:
             "SELECT to_jsonb(t)::text AS row FROM "  # noqa: S608 - nombre fijo de la prueba
             f"{partition.qualified_name} AS t"
         )
-        return sorted((json.loads(row["row"]) for row in found), key=json.dumps)
+        return sorted((exact(row["row"]) for row in found), key=_order)
 
     def archived_records(self) -> list[dict[str, Any]]:
         rows = self.fetch(
@@ -376,7 +377,7 @@ def test_the_task_archives_what_is_due_and_nothing_else(world: World) -> None:
         restored = world.env.loop.run(
             restore_table_partition(world.storage, key, record["archive_sha256"])
         )
-        assert sorted(restored.rows, key=json.dumps) == before[partition]
+        assert sorted(restored.rows, key=_order) == before[partition]
     world.env.loop.run(verify_ledger_chains(world.env.migrated, world.provider))
     assert world.alerts() == []
 
