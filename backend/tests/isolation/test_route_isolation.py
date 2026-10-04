@@ -83,8 +83,6 @@ from tests.session_support import ORIGIN_KEY
 from tests.signing_support import ENVIRONMENT
 from tests.writer_support import save_record_types, unit_context
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
-from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
-from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
@@ -121,6 +119,8 @@ from vigia_platform.catalog.application.scope_record import (
     ScopeRecordService,
 )
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
+from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
+from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp

@@ -198,8 +198,8 @@ def test_localstack_enforces_the_conditional_write_when_the_url_signs_it(
         Params={"Bucket": clips.bucket, "Key": key, "IfNoneMatch": "*"},
         ExpiresIn=60,
     )
-    assert httpx.put(url, content=data, headers={"If-None-Match": "*"}).status_code == 200
-    second = httpx.put(url, content=data, headers={"If-None-Match": "*"})
+    assert clips.put(url, {"If-None-Match": "*"}, data).status_code == 200
+    second = clips.put(url, {"If-None-Match": "*"}, data)
     assert second.status_code == 412, second.text
 
 
