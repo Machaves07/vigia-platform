@@ -29,7 +29,9 @@ worker y ``statement_timeout`` de 30 s, almacén, firma, KMS, catálogo de la ba
 registró cada unidad, despachador y contextos). ``main`` lee ``WorkerConfig`` del entorno y pide
 el ``WorkerRuntime`` al constructor que nombra ``VIGIA_WORKER_RUNTIME``
 (``vigia_platform.<módulo>:<función>``,
-asíncrono, recibe la configuración); sin él, el proceso no arranca.
+asíncrono, recibe la configuración); sin él, o si la construcción falla, el proceso sale con
+``STARTUP_FAILURE_EXIT_CODE``. El de producción es
+``vigia_platform.shared.runtime.worker:build_worker_runtime`` (A-52).
 """
 
 from __future__ import annotations
@@ -66,6 +68,7 @@ from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.registries import OutboxCatalog
+from vigia_platform.shared.runtime.config import report_invalid
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.worker.leases import (
     LeaseSettings,
@@ -446,7 +449,13 @@ async def serve(config: WorkerConfig, builder: RuntimeBuilder) -> int:
     for number in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(number, stop.set)
     try:
-        runtime = await builder(config)
+        try:
+            runtime = await builder(config)
+        except Exception as error:
+            # Como ``vigia-api``: una composición que falla (variable, secreto…) no arranca.
+            _log.exception("la composición de vigia-worker falló: el proceso no arranca")
+            report_invalid(error)  # la variable que falta, sin su valor
+            return STARTUP_FAILURE_EXIT_CODE
         return await WorkerProcess(config, runtime).run(stop)
     finally:
         for number in (signal.SIGTERM, signal.SIGINT):

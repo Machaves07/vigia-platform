@@ -4,10 +4,11 @@
 U-02 y su cadencia; ``shared.worker.main`` exige que un worker no arranque sin todos sus
 consumidores registrados. Contra PostgreSQL 16 real, como ``vigia_app``:
 
-- **Cadencias**: el catálogo de U-02, compuesto con las funciones ``register_*`` que cada módulo
-  publica, contiene las diez tareas del diseño con su cadencia (cada 5 min, cada 15 min, diaria
-  a las 00:00 UTC, diaria, semanal o mensual) y la unidad U-02; la única otra tarea de U-02 es
-  ``restore_drill_age`` (TASK-132), de modo que una tarea nueva o retirada se nota aquí.
+- **Cadencias**: el catálogo que compone la raíz de producción (``shared.runtime.units``, A-52;
+  VIG-137) con las unidades registradas contiene las diez tareas de U-02 del diseño con su
+  cadencia (cada 5 min, cada 15 min, diaria a las 00:00 UTC, diaria, semanal o mensual); la única
+  otra tarea de U-02 es ``restore_drill_age`` (TASK-132), de modo que una tarea nueva o retirada
+  se nota aquí.
 - **Arranque**: un ``WorkerProcess`` con ese catálogo supera el arranque supervisado, deja en
   ``shared.periodic_task`` una fila por tarea con su horario persistido y una próxima ejecución
   sobre la rejilla del horario, en ``shared.consumer`` sus dos consumidores, abre un bucle de
@@ -42,36 +43,20 @@ from tests.worker_support import (
     synchronize,
     worker_environment,
 )
-from vigia_platform.identity.adapters.session_store import register_session_tasks
-from vigia_platform.identity.application.concessions import (
-    ConcessionService,
-    register_expire_concessions,
-)
-from vigia_platform.ledger.application.audit_writer import AuditWriter
-from vigia_platform.ledger.application.checkpoint_task import register_write_checkpoints
-from vigia_platform.ledger.application.evidence_sample import register_evidence_sample
 from vigia_platform.ledger.application.integrity_requests import (
     INTEGRITY_ON_DEMAND_CONSUMER,
-    IntegrityVerifier,
-    register_integrity_on_demand,
 )
-from vigia_platform.ledger.application.verify_tasks import register_verify_chains
-from vigia_platform.ledger.chain.verify import IntegrityService
 from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE
-from vigia_platform.shared.archive.audit_archive import register_archive_audit_partitions
-from vigia_platform.shared.archive.partitions import register_create_partitions
-from vigia_platform.shared.archive.restore_drill import register_restore_drill_age
 from vigia_platform.shared.context import ActorUnit
-from vigia_platform.shared.db import Transaction
-from vigia_platform.shared.key_rotation import register_key_rotation_reminder
 from vigia_platform.shared.observability.alerts_consumer import (
     ALERTS_CONSUMER,
-    register_alerts_consumer,
 )
+from vigia_platform.shared.observability.metrics import get_metrics
 from vigia_platform.shared.outbox.dispatcher import Dispatcher
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog, Schedule, ScheduleKind
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
+from vigia_platform.shared.runtime.units import UnitServices, outbox_catalog, registered_units
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.worker.main import WorkerConfig, WorkerProcess, WorkerRuntime
 
@@ -110,28 +95,36 @@ class _NotInvoked:
         raise AssertionError(f"el manejador no debía ejecutarse (usó «{name}»)")
 
 
-async def _never_due(transaction: Transaction) -> None:
-    raise AssertionError("ninguna tarea vence con el reloj simulado de la prueba")
-
-
 def u02_catalog(environment: WorkerEnvironment) -> OutboxCatalog:
-    """Eventos, consumidores y tareas periódicas que U-02 registra al arrancar el worker."""
-    unused = _NotInvoked()
-    catalog = OutboxCatalog()
-    register_u02_event_types(catalog.event_types)
-    register_alerts_consumer(catalog.consumers)
-    register_integrity_on_demand(catalog.consumers, cast(IntegrityVerifier, unused))
-    tasks = catalog.periodic_tasks
-    register_expire_concessions(tasks, cast(ConcessionService, unused))
-    register_session_tasks(tasks, audit=cast(AuditWriter, unused), clock=environment.clock)
-    register_write_checkpoints(tasks, _never_due)
-    register_verify_chains(tasks, cast(IntegrityService, unused))
-    register_key_rotation_reminder(tasks, _never_due)
-    register_create_partitions(tasks, _never_due)
-    register_evidence_sample(tasks, _never_due)
-    register_archive_audit_partitions(tasks, _never_due)
-    register_restore_drill_age(tasks, _never_due)
-    return catalog
+    """El catálogo de la raíz de producción: el que compone ``build_worker_runtime`` con las
+    unidades del registro (``shared.runtime.units``). Ningún manejador se ejecuta: sus
+    dependencias, salvo la base y los contextos que se consultan al construir, son
+    ``_NotInvoked``."""
+    unused: Any = _NotInvoked()
+    services = UnitServices(
+        clock=environment.clock,
+        metrics=get_metrics(),
+        provider_organization_id=environment.provider_organization_id,
+        database=environment.database,
+        contexts=environment.contexts,
+        authorizer=unused,
+        audit=unused,
+        outbox=unused,
+        writer=unused,
+        signing=unused,
+        checkpoints=unused,
+        kms=unused,
+    )
+    return outbox_catalog(registered_units(), services)
+
+
+def u02_tasks(catalog: OutboxCatalog) -> dict[str, Any]:
+    """Las tareas de U-02 del catálogo (U-03 y U-04 añaden las suyas al mismo registro)."""
+    return {
+        task.task_name: task
+        for task in catalog.periodic_tasks.tasks()
+        if task.unit is ActorUnit.U02
+    }
 
 
 @dataclass
@@ -221,8 +214,7 @@ def _check_cadence(name: str, schedule: Schedule, kind: ScheduleKind, offset: in
 def test_the_ten_design_tasks_are_registered_with_their_cadence(
     environment: WorkerEnvironment,
 ) -> None:
-    registry = u02_catalog(environment).periodic_tasks
-    registered = {task.task_name: task for task in registry.tasks()}
+    registered = u02_tasks(u02_catalog(environment))
     assert len(DESIGN_TASKS) == 10
     assert set(registered) == set(DESIGN_TASKS) | set(OTHER_U02_TASKS)
     for name, (kind, offset) in {**DESIGN_TASKS, **OTHER_U02_TASKS}.items():

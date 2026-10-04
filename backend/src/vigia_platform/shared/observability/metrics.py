@@ -99,6 +99,7 @@ class MetricName(enum.StrEnum):
     # Recursos del proceso
     DB_POOL_IN_USE = "db_pool_in_use"
     DB_POOL_SIZE = "db_pool_size"
+    DB_POOL_RECONNECTS_TOTAL = "db_pool_reconnects_total"
     CPU_POOL_WAIT_MS = "cpu_pool_wait_ms"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
@@ -208,6 +209,9 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.DB_POOL_IN_USE, _G, "{connection}", "Conexiones del pool en uso.", "NFR-NUC-38",
           "pool_class"),
     _spec(_N.DB_POOL_SIZE, _G, "{connection}", "Tamaño del pool.", "NFR-NUC-38", "pool_class"),
+    _spec(_N.DB_POOL_RECONNECTS_TOTAL, _C, "{connection}",
+          "Reconexiones tras releer la credencial rotada de la base.", "runbook 6.6",
+          "pool_class"),
     _spec(_N.CPU_POOL_WAIT_MS, _H, "ms", "Espera en cola del pool de hilos de CPU.",
           "PAT-NUC-REN-05"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
@@ -391,6 +395,7 @@ class PlatformMetrics:
         )
         self.db_pool_in_use = gauge(_N.DB_POOL_IN_USE)
         self.db_pool_size = gauge(_N.DB_POOL_SIZE)
+        self.db_pool_reconnects_total = counter(_N.DB_POOL_RECONNECTS_TOTAL)
         self.cpu_pool_wait_ms = histogram(_N.CPU_POOL_WAIT_MS)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)

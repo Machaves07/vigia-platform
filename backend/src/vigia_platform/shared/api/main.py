@@ -11,7 +11,10 @@ El proceso por defecto de la imagen (``backend/Dockerfile``). Sirve con uvicorn 
    (``vigia_platform.<módulo>:<función>``, asíncrono, recibe la ``AppConfig``), igual que
    ``vigia-worker`` con ``VIGIA_WORKER_RUNTIME``. Sin él, o si la construcción falla
    (``ApiStartupError``: etiquetas, rutas sin declaración…), el proceso sale con
-   ``STARTUP_FAILURE_EXIT_CODE`` sin abrir el puerto.
+   ``STARTUP_FAILURE_EXIT_CODE`` sin abrir el puerto. El de producción es
+   ``vigia_platform.shared.runtime.api:build_api_runtime`` (A-52); si falla por una variable
+   (``RuntimeConfigInvalid``), la salida de errores lleva una línea ``config_invalid`` que la
+   nombra, sin su valor.
 3. **Arranque supervisado.** ``/health/live`` responde 200 en cuanto el puerto está abierto; las
    comprobaciones de PAT-NUC-RES-02 corren en segundo plano y, si a los 60 s alguna sigue
    fallando, el proceso termina con ``STARTUP_FAILURE_EXIT_CODE`` (``shared.api.app``).
@@ -51,6 +54,7 @@ from vigia_platform.shared.api.app import (
     create_app,
 )
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
+from vigia_platform.shared.runtime.config import report_invalid
 
 __all__ = [
     "API_PORT",
@@ -196,8 +200,9 @@ async def serve(
     try:
         runtime = await builder(config)
         app = create_app(config, runtime=runtime)
-    except Exception:
+    except Exception as error:
         _log.exception("la composición de vigia-api falló: el proceso no arranca")
+        report_invalid(error)  # la variable que falta, sin su valor
         return STARTUP_FAILURE_EXIT_CODE
     uvicorn_server = build_server(app, server)
 

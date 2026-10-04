@@ -55,6 +55,14 @@ pool; ``dispose`` espera a lo abandonado como mucho el tope del intento y cancel
 Comprobación previa de cada conexión (``pool_pre_ping``) y ``sslmode=verify-full`` por defecto.
 
 Métricas: ``db_pool_size`` y ``db_pool_in_use`` con el atributo ``pool_class``.
+
+**Credencial rotada** (runbook 6.6; A-52): con ``Database.create(..., credentials=…)`` el usuario
+y la contraseña de cada conexión nueva salen de ``CredentialSource.current()`` y no de la URL. Si
+PostgreSQL rechaza la autenticación (``28P01``/``28000``) al abrir una conexión, el pool pide
+``CredentialSource.renew`` con la credencial rechazada y repite la apertura **una vez**;
+``db_pool_reconnects_total`` suma la reconexión. La fuente relee el secreto una sola vez aunque
+falle una ráfaga de conexiones a la vez (``shared.runtime.db_credentials``). Las conexiones ya
+abiertas siguen vivas tras una rotación: PostgreSQL no las corta.
 """
 
 from __future__ import annotations
@@ -96,6 +104,7 @@ __all__ = [
     "RETRY_AFTER_SECONDS",
     "ChainLockedTimeout",
     "ConnectionPort",
+    "CredentialSource",
     "Database",
     "DatabaseHealth",
     "DatabaseSettings",
@@ -108,6 +117,7 @@ __all__ = [
     "Transaction",
     "TransactionAborted",
     "TransientDatabaseError",
+    "authentication_rejected",
     "current_route_class",
     "route_class_scope",
     "scope_parameters",
@@ -138,6 +148,8 @@ _LOCK_TIMEOUT_SQLSTATE: Final = "55P03"
 """``lock_not_available``: lo que produce ``lock_timeout``."""
 _TRANSIENT_SQLSTATES: Final = frozenset({"57014", "40001", "40P01"})
 """``query_canceled`` (``statement_timeout``), ``serialization_failure``, ``deadlock_detected``."""
+_AUTHENTICATION_SQLSTATES: Final = frozenset({"28P01", "28000"})
+"""``invalid_password`` e ``invalid_authorization_specification``: la credencial no vale."""
 
 
 # --- Errores -----------------------------------------------------------------------------------
@@ -224,6 +236,33 @@ def _classify(error: BaseException) -> _FailureKind:
     if isinstance(error, sa_exc.DBAPIError) and error.connection_invalidated:
         return _FailureKind.CONNECTION
     return _FailureKind.OTHER
+
+
+def authentication_rejected(error: BaseException) -> bool:
+    """``True`` si PostgreSQL rechazó la credencial (``28P01`` o ``28000``) al conectar.
+
+    Recorre el error de SQLAlchemy, el del adaptador y su causa: según el punto donde falla la
+    apertura, el SQLSTATE llega en uno u otro.
+    """
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(
+            current,
+            asyncpg.exceptions.InvalidPasswordError
+            | asyncpg.exceptions.InvalidAuthorizationSpecificationError,
+        ):
+            return True
+        if getattr(current, "sqlstate", None) in _AUTHENTICATION_SQLSTATES:
+            return True
+        for linked in (getattr(current, "orig", None), current.__cause__, current.__context__):
+            if isinstance(linked, BaseException):
+                pending.append(linked)
+    return False
 
 
 def _translate(
@@ -419,6 +458,19 @@ class PoolPort(Protocol):
     async def dispose(self) -> None: ...
 
 
+class CredentialSource(Protocol):
+    """Usuario y contraseña de las conexiones nuevas, releídos tras una rotación (runbook 6.6).
+
+    ``current`` es síncrono y no va a la red (lo llama el controlador al abrir cada conexión);
+    ``renew`` relee la credencial si ``rejected`` sigue siendo la vigente, y no hace nada si otra
+    apertura ya la renovó.
+    """
+
+    def current(self) -> tuple[str, str]: ...
+
+    async def renew(self, rejected: tuple[str, str]) -> None: ...
+
+
 class _EngineConnection:
     __slots__ = ("_connection", "_driver")
 
@@ -460,12 +512,38 @@ class _EngineConnection:
 
 
 class _EnginePool:
-    __slots__ = ("engine",)
+    __slots__ = ("_credentials", "_reconnected", "engine")
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        credentials: CredentialSource | None = None,
+        reconnected: Callable[[], None] | None = None,
+    ) -> None:
         self.engine = engine
+        self._credentials = credentials
+        self._reconnected = reconnected
 
     async def acquire(self) -> ConnectionPort:
+        credentials = self._credentials
+        if credentials is None:
+            return await self._acquire()
+        used = credentials.current()
+        try:
+            return await self._acquire()
+        except Exception as error:
+            if not authentication_rejected(error):
+                raise
+        # Rotación: la credencial con la que se abrió ya no vale. Se relee una vez y se repite
+        # la apertura una sola vez; si vuelve a fallar, el error sube.
+        _log.warning("la base rechazó la credencial: se relee el secreto y se reconecta")
+        await credentials.renew(used)
+        connection = await self._acquire()
+        if self._reconnected is not None:
+            self._reconnected()
+        return connection
+
+    async def _acquire(self) -> ConnectionPort:
         connection = self.engine.connect()
         await connection.start()
         try:
@@ -479,7 +557,25 @@ class _EnginePool:
         await self.engine.dispose()
 
 
-def _create_engine(settings: DatabaseSettings, pool_class: PoolClass, size: int) -> AsyncEngine:
+def _create_engine(
+    settings: DatabaseSettings,
+    pool_class: PoolClass,
+    size: int,
+    credentials: CredentialSource | None = None,
+) -> AsyncEngine:
+    engine = _new_engine(settings, pool_class, size)
+    if credentials is not None:
+        source = credentials
+
+        def provide(_: object, __: object, ___: object, parameters: dict[str, Any]) -> None:
+            # Cada conexión nueva sale con la credencial vigente, nunca con la de la URL.
+            parameters["user"], parameters["password"] = source.current()
+
+        event.listen(engine.sync_engine, "do_connect", provide)
+    return engine
+
+
+def _new_engine(settings: DatabaseSettings, pool_class: PoolClass, size: int) -> AsyncEngine:
     return create_async_engine(
         settings.url,
         pool_size=size,
@@ -688,14 +784,24 @@ class Database:
         *,
         metrics: PlatformMetrics | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        credentials: CredentialSource | None = None,
     ) -> Database:
-        """Crea los motores de ``settings.process`` con sus métricas de pool."""
-        metrics = metrics if metrics is not None else get_metrics()
+        """Crea los motores de ``settings.process`` con sus métricas de pool.
+
+        Con ``credentials``, usuario y contraseña de cada conexión salen de ahí (y no de la URL)
+        y una autenticación rechazada relee la credencial y reconecta (runbook 6.6).
+        """
+        instruments = metrics if metrics is not None else get_metrics()
         pools: dict[PoolClass, PoolPort] = {}
         for pool_class, size in settings.pool_sizes.items():
-            engine = _create_engine(settings, pool_class, size)
-            _install_pool_metrics(engine, pool_class, size, metrics)
-            pools[pool_class] = _EnginePool(engine)
+            engine = _create_engine(settings, pool_class, size, credentials)
+            _install_pool_metrics(engine, pool_class, size, instruments)
+            attributes = {"pool_class": pool_class.value}
+
+            def reconnected(attributes: Mapping[str, str] = attributes) -> None:
+                instruments.db_pool_reconnects_total.add(1, attributes)
+
+            pools[pool_class] = _EnginePool(engine, credentials, reconnected)
         return cls(
             pools,
             process=settings.process,
