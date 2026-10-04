@@ -12,10 +12,15 @@ operación de aquí es atómica:
   nada escrito.
 - **Reemplazo** (``replaces_node_id``, BR-GOB-68, respuesta 15): el viejo tiene que ser un nodo con
   ficha de flota de **la misma planta** y sin baja (si no, ``replaced_node_not_found``). En la
-  misma transacción se declara el nuevo, se retira con fecha cada asignación del viejo, se asignan
-  sus zonas al nuevo (y después las de ``zone_ids`` que no tuviera), y el viejo queda ``revoked``
-  (con sus credenciales revocadas y la marca de la lista) y con ``decommissioned_at``. El instante
-  de la retirada es el de la asignación nueva: ``assignment_at`` explica el hueco.
+  misma transacción el viejo queda ``revoked`` (con sus credenciales revocadas, su código de alta
+  ``superseded`` y la marca de la lista), se retira con fecha cada asignación suya y queda con
+  ``decommissioned_at``; después se declara el nuevo y se le asignan las zonas del viejo (y las de
+  ``zone_ids`` que no tuviera). El instante de la retirada es el de la asignación nueva:
+  ``assignment_at`` explica el hueco.
+
+Candados en el orden único de ``fleet.application.common``, todos al empezar: código del nodo →
+ficha del viejo → filas de zona por ``zone_id``. Asignar y retirar zona toman la ficha del nodo
+(``FOR SHARE``) y después la fila de la zona.
 - ``assign_zone`` (``POST /nodes/{node_id}/zones``) y ``unassign_zone``
   (``POST /nodes/{node_id}/zones/{zone_id}/unassignment``, con ``reason_es``): sin rotación ni
   configuración nueva (BR-GOB-70); retirar marca ``unassigned_at``, nunca borra. Un nodo dado de
@@ -153,11 +158,22 @@ class NodeDeclarationService:
         writer = with_unit(authorized, ActorUnit.U03)
         now = deps.clock.now()
         async with deps.database.transaction(writer) as transaction:
+            # Los candados, antes de escribir nada y en el orden de ``common``: código del nodo →
+            # ficha del viejo → filas de zona (las pedidas y las que el viejo deja).
+            if isinstance(code, str):
+                await deps.nodes.lock_node_code(transaction, code)
             old: FleetNode | None = None
+            inherited: tuple[uuid.UUID, ...] = ()
             if replaces_node_id is not None:
                 old = await deps.nodes.node_in_plant(transaction, replaces_node_id, plant_id)
                 if old is None or old.record.decommissioned:
                     raise FleetRejected(FleetDetailCode.REPLACED_NODE_NOT_FOUND)
+                inherited = await deps.nodes.current_zones(transaction, old.node_id)
+            await deps.nodes.lock_zones(transaction, (*zones, *inherited))
+            if old is not None:
+                # El viejo se revoca y se retira antes de declarar el nuevo: sus credenciales y
+                # sus códigos se cambian antes de tomar la cadena de la planta.
+                await self._retire(authorized, transaction, old, inherited, now)
             try:
                 node = await deps.identity.declare_node(
                     authorized, plant_id, code, transaction=transaction
@@ -190,9 +206,6 @@ class NodeDeclarationService:
                 resource=ResourceRef("node", node.node_id),
                 transaction=transaction,
             )
-            inherited: tuple[uuid.UUID, ...] = ()
-            if old is not None:
-                inherited = await self._retire(authorized, transaction, old, now)
             assignments = [
                 await self._assign(authorized, transaction, node.node_id, zone_id)
                 for zone_id in (*inherited, *(zone for zone in zones if zone not in inherited))
@@ -208,11 +221,22 @@ class NodeDeclarationService:
         )
 
     async def _retire(
-        self, authorized: ScopeContext, transaction: Transaction, old: FleetNode, now: datetime
-    ) -> tuple[uuid.UUID, ...]:
-        """Retira las zonas del nodo reemplazado, lo revoca y lo da de baja; sus zonas."""
+        self,
+        authorized: ScopeContext,
+        transaction: Transaction,
+        old: FleetNode,
+        zones: tuple[uuid.UUID, ...],
+        now: datetime,
+    ) -> None:
+        """Revoca el nodo reemplazado, le retira ``zones`` y lo da de baja (todo ya bloqueado).
+
+        La revocación va primero: cambia la identidad, las credenciales y los códigos del viejo
+        (nivel 4 del orden) antes de escribir el primer registro (nivel 5).
+        """
         deps = self._deps
-        zones = await deps.nodes.current_zones(transaction, old.node_id)
+        await revoke_in(
+            deps, authorized, transaction, old, REPLACEMENT_REASON, now, served_zones=zones
+        )
         for zone_id in zones:
             try:
                 await deps.identity.unassign_node(
@@ -224,14 +248,10 @@ class NodeDeclarationService:
                 )
             except IdentityRejected as error:
                 raise from_identity(error) from None
-        await revoke_in(
-            deps, authorized, transaction, old, REPLACEMENT_REASON, now, served_zones=zones
-        )
         revoked = await deps.nodes.lock(transaction, old.node_id)
         if revoked is None:
             raise ResourceNotFound()
         await decommission_in(deps, authorized, transaction, revoked, REPLACEMENT_REASON, now)
-        return zones
 
     async def assign_zone(
         self, context: ScopeContext, node_id: uuid.UUID, zone_id: uuid.UUID
@@ -250,6 +270,7 @@ class NodeDeclarationService:
                 raise ResourceNotFound()
             if node.record.decommissioned:
                 raise FleetRejected(FleetDetailCode.NODE_NOT_DECLARED)
+            await deps.nodes.lock_zones(transaction, (zone_id,))
             return await self._assign(authorized, transaction, node_id, zone_id)
 
     async def unassign_zone(
@@ -265,6 +286,10 @@ class NodeDeclarationService:
         )
         writer = with_unit(authorized, ActorUnit.U03)
         async with deps.database.transaction(writer) as transaction:
+            # Ficha del nodo y después la fila de zona, como al asignar y al reemplazar.
+            if await deps.nodes.share(transaction, node_id) is None:
+                raise ResourceNotFound()
+            await deps.nodes.lock_zones(transaction, (zone_id,))
             try:
                 assignment_id = await deps.identity.unassign_node(
                     authorized,

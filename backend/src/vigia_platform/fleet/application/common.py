@@ -12,6 +12,25 @@
   registrados (el mínimo de U-03, A-45), límites 10 a 500. Nunca llega a un registro
   estructurado, una métrica, una traza ni un evento (NFR-GOB-25): solo al expediente.
 - ``write``: el registro de U-03 en la transacción de la operación.
+
+**Orden de los candados** (único para toda operación de identidad del nodo que escribe en una
+planta: declaración, reemplazo, asignar y retirar zona, emisión de código y re-alta, revocación y
+baja). Cada operación toma **al empezar**, antes de escribir nada, los que necesita de los dos
+primeros niveles, y los demás en este mismo orden:
+
+1. la exclusión del ``code`` de nodo en la organización (solo la declaración: ``lock_node_code``);
+2. la ficha de flota de cada nodo existente que cambia (``FOR UPDATE``, o ``FOR SHARE`` al asignar
+   y retirar zona), por ``node_id``;
+3. las filas de ``identity.zone`` que va a asignar o retirar, por ``zone_id`` (``lock_zones``; U-02
+   vuelve a tomarlas dentro de ``IdentityCommandPort``, ya son suyas);
+4. la identidad, las credenciales y los códigos de alta de esos nodos;
+5. la exclusión de la cadena de la planta (el primer registro del expediente);
+6. la fila global de la marca de la lista de revocación (``mark_dirty``).
+
+Por eso el reemplazo revoca y retira al viejo **antes** de declarar el nuevo (las credenciales y
+los códigos del viejo, antes que la cadena), y la emisión bloquea la ficha también con el nodo
+``declared``. Las pruebas concurrentes cruzadas de ``test_fleet_lock_order.py`` lanzan a la vez
+cada par de operaciones que comparten candados.
 """
 
 from __future__ import annotations

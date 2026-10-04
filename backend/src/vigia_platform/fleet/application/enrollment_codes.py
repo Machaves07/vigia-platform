@@ -10,10 +10,12 @@ planta del nodo), en una transacción:
   con la marca de la lista; cualquier otro caso (incluida la baja) → ``fleet_node_not_declared``;
 - el ``active`` anterior pasa a ``superseded`` y se anexa el nuevo con su sal y su hash; registro
   ``enrollment_code_issued`` (``source_key = code_id``, **nunca** el código ni su hash) y
-  auditoría. **A lo sumo un ``active`` por nodo** lo garantiza el índice único parcial: dos
-  emisiones simultáneas chocan en él y la perdedora se revierte entera (``ConcurrentIssue``,
-  ``conflict``). No se reintenta dentro: un reintento con la ficha bloqueada se cruzaría con la
-  exclusión de la cadena del expediente que tiene la otra (bloqueo mutuo);
+  auditoría. La emisión decide con la **ficha bloqueada** (``FOR UPDATE``, el primer candado del
+  orden de ``fleet.application.common``): dos emisiones del mismo nodo se ordenan, y una
+  revocación o un reemplazo simultáneos terminan antes de que la emisión lea el estado. **A lo sumo
+  un ``active`` por nodo** lo garantiza además el índice único parcial: si dos emisiones llegaran a
+  anexar a la vez, la perdedora se revierte entera (``ConcurrentIssue``, ``conflict``), sin
+  reintento dentro;
 - la respuesta lleva el código en claro (**la única vez**: ``disclosed_at`` es ese instante), su
   vencimiento (24 h) y las huellas SHA-256 de las raíces publicadas en ``ca/root.pem``
   (``node_ca_root_sha256``: una, o dos durante una sustitución de raíz; D-6).
@@ -240,18 +242,13 @@ class EnrollmentCodeService:
         deps = self._deps
         now = deps.clock.now()
         async with deps.database.transaction(writer) as transaction:
-            node = await deps.nodes.read(transaction, node_id)
+            # Se decide siempre con la ficha bloqueada (primer candado del orden de ``common``):
+            # una revocación o un reemplazo simultáneos terminan antes, y la emisión ve su estado.
+            node = await deps.nodes.lock(transaction, node_id)
             if node is None:
                 raise ResourceNotFound()
             credentials = await deps.nodes.credentials(transaction, node_id)
             eligibility = code_eligibility(node.status, node.record, credentials, now)
-            if eligibility is CodeEligibility.RE_ENROLLMENT:
-                # La re-alta cambia el nodo: se decide otra vez con la ficha bloqueada.
-                node = await deps.nodes.lock(transaction, node_id)
-                if node is None:
-                    raise ResourceNotFound()
-                credentials = await deps.nodes.credentials(transaction, node_id)
-                eligibility = code_eligibility(node.status, node.record, credentials, now)
             if eligibility is CodeEligibility.REJECTED:
                 raise FleetRejected(FleetDetailCode.NODE_NOT_DECLARED)
             revoked_credentials: tuple[uuid.UUID, ...] = ()

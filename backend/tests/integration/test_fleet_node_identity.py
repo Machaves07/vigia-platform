@@ -779,6 +779,34 @@ def test_revocation_and_decommission_leave_no_usable_enrollment_code(
     assert _verify(fleet, node, code) == "enrollment_code_invalid"
 
 
+def test_decommission_supersedes_a_code_left_active_on_a_revoked_node(fleet: FleetStack) -> None:
+    # Revisión de VIG-147 (ronda 2, menor 2): un nodo revocado antes de que la revocación
+    # invalidara su código (datos anteriores al cambio) llega a la baja con un código active; la
+    # baja tampoco lo deja vivo.
+    site = fleet.site()
+    plant, _ = _zones(site)
+    installer = fleet.installer(site)
+    node = fleet.declare(installer, plant, []).json()["node_id"]
+    assert fleet.issue(installer, node).status_code == 201
+    assert fleet.revoke(installer, node).status_code == 200
+    # El registro no vuelve atrás (superseded → active, P4): se anexa un active con los datos del
+    # anterior, como lo habría dejado una revocación sin este cambio.
+    fleet.execute(
+        "INSERT INTO fleet.enrollment_code (code_id, organization_id, plant_id, node_id, code_hash,"
+        " code_salt, issued_at, issued_by, expires_at, disclosed_at, status, ledger_record_id)"
+        " SELECT $2, organization_id, plant_id, node_id, code_hash, code_salt, issued_at,"
+        " issued_by, expires_at, disclosed_at, 'active', ledger_record_id"
+        " FROM fleet.enrollment_code WHERE node_id = $1",
+        uuid.UUID(node),
+        uuid.uuid4(),
+    )
+    assert sorted(row["status"] for row in fleet.codes(node)) == ["active", "superseded"]
+
+    assert fleet.decommission(installer, node).status_code == 200
+
+    assert [row["status"] for row in fleet.codes(node)] == ["superseded", "superseded"]
+
+
 def test_a_replaced_node_keeps_no_usable_enrollment_code(fleet: FleetStack) -> None:
     site = fleet.site()
     plant, zones = _zones(site)

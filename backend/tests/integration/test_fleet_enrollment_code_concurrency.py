@@ -6,11 +6,14 @@ distintas para cada operación (``asyncio.gather`` sobre el pool de la base):
 - **Consumo**: 8 altas presentan a la vez el mismo código válido. Todas lo verifican antes de que
   ninguna consuma (barrera), así que solo la condición ``status = 'active'`` del ``UPDATE`` de
   ``consume`` impide un segundo uso: exactamente un éxito y 7 ``enrollment_code_used``.
-- **Emisión**: 8 emisiones para el mismo nodo pasan todas ``supersede_active`` antes de que
-  ninguna anexe su código (barrera), así que solo el índice único parcial
-  ``enrollment_code_one_active_per_node`` impide dos ``active``: una responde con su código y las
-  7 perdedoras chocan en él (``ConcurrentIssue``, ``conflict``) sin dejar código ni registro;
-  queda exactamente un ``active``.
+- **Emisión, ficha bloqueada** (revisión de la ronda 2): 3 emisiones simultáneas del mismo nodo se
+  ordenan en la ficha (``FOR UPDATE``): cada una retiene su transacción tras ``supersede_active``
+  y ninguna otra la alcanza; terminan las 3 y queda exactamente un ``active`` (el último).
+- **Emisión, índice**: con la ficha sin bloquear (``UnlockedNodes``, la segunda barrera sola), 8
+  emisiones pasan todas ``supersede_active`` antes de que ninguna anexe su código (barrera), así
+  que solo el índice único parcial ``enrollment_code_one_active_per_node`` impide dos ``active``:
+  una responde con su código y las 7 perdedoras chocan en él (``ConcurrentIssue``, ``conflict``)
+  sin dejar código ni registro.
 
 - **Marca global de la lista** (revisión de la ronda 1): 8 revocaciones de nodos de organizaciones
   distintas llegan juntas a la marca (barrera) y ``dirty_generation`` sube exactamente 8; una
@@ -39,6 +42,7 @@ import pytest
 from tests.fleet_http_support import REASON, FleetStack, fleet_stack
 from tests.integration.conftest import PostgresEndpoint
 from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnrollmentStore
+from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.adapters.postgres.revocation_mark_store import (
     PostgresRevocationMarkStore,
 )
@@ -48,6 +52,7 @@ from vigia_platform.fleet.application.enrollment_codes import (
 )
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.domain.enums import EnrollmentAttemptResult
+from vigia_platform.fleet.domain.node_fleet_record import FleetNode
 from vigia_platform.node_api.identity import PostgresNodeContextStore
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Transaction
@@ -55,6 +60,10 @@ from vigia_platform.shared.db import Transaction
 pytestmark = pytest.mark.integration
 
 PARTIES: Final = 8
+QUEUED: Final = 3
+HOLD_SECONDS: Final = 5.0
+"""Cuánto retiene cada emisión su transacción esperando que otra la alcance. Con la ficha
+bloqueada nunca llega nadie y la espera se agota sin decidir nada (retro 14)."""
 BARRIER_TIMEOUT_SECONDS: Final = 30.0
 GATE_SECONDS: Final = 15.0
 """Cuánto espera la revocación a que la re-alta marque antes que ella. Con el orden de candados
@@ -85,6 +94,36 @@ class BarrierEnrollmentStore(PostgresEnrollmentStore):
         if self.passes <= PARTIES:
             async with asyncio.timeout(BARRIER_TIMEOUT_SECONDS):
                 await self.barrier.wait()
+        return changed
+
+
+class UnlockedNodes(PostgresNodeFleetStore):
+    """La ficha leída sin bloquear: deja al índice único como la única barrera de la emisión."""
+
+    async def lock(self, transaction: Transaction, node_id: uuid.UUID) -> FleetNode | None:
+        return await self.read(transaction, node_id)
+
+
+class HoldingEnrollmentStore(PostgresEnrollmentStore):
+    """Retiene cada emisión tras ``supersede_active`` hasta que otra la alcance, o
+    ``HOLD_SECONDS``: con la ficha bloqueada ninguna la alcanza y la espera se agota sin decidir
+    nada; sin el candado, las demás pasan a la vez y chocan en el índice."""
+
+    def __init__(self) -> None:
+        self.inside = 0
+        self.overlapped = asyncio.Event()
+
+    async def supersede_active(
+        self, transaction: Transaction, node_id: uuid.UUID
+    ) -> tuple[uuid.UUID, ...]:
+        changed = await super().supersede_active(transaction, node_id)
+        self.inside += 1
+        if self.inside > 1:
+            self.overlapped.set()
+        with contextlib.suppress(TimeoutError):
+            async with asyncio.timeout(HOLD_SECONDS):
+                await self.overlapped.wait()
+        self.inside -= 1
         return changed
 
 
@@ -187,10 +226,36 @@ def test_eight_simultaneous_consumptions_of_one_code_leave_one_success(fleet: Fl
     assert [row["status"] for row in fleet.codes(node)] == ["used"]
 
 
+def test_simultaneous_issues_queue_on_the_record_and_leave_one_active_code(
+    fleet: FleetStack,
+) -> None:
+    installer, node = _declared_node(fleet)
+    store = HoldingEnrollmentStore()
+    service = fleet.codes_service(enrollment=store)
+    context = _context(fleet, installer)
+
+    async def race() -> list[Any]:
+        return list(
+            await asyncio.gather(
+                *(service.issue(context, uuid.UUID(node)) for _ in range(QUEUED)),
+                return_exceptions=True,
+            )
+        )
+
+    outcomes = fleet.run(race())
+
+    # Ninguna emisión alcanzó a otra dentro de su transacción: todas terminan, en fila.
+    assert all(isinstance(outcome, IssuedCode) for outcome in outcomes), outcomes
+    assert not store.overlapped.is_set()
+    rows = fleet.codes(node)
+    assert sorted(row["status"] for row in rows) == ["active"] + ["superseded"] * (QUEUED - 1)
+    assert len(fleet.records("enrollment_code_issued", _organization(fleet, node))) == QUEUED
+
+
 def test_eight_simultaneous_issues_leave_exactly_one_active_code(fleet: FleetStack) -> None:
     installer, node = _declared_node(fleet)
     store = BarrierEnrollmentStore()
-    service = fleet.codes_service(enrollment=store)
+    service = fleet.codes_service(enrollment=store, nodes=UnlockedNodes(fleet.deps.database))
     context = _context(fleet, installer)
 
     async def race() -> list[Any]:

@@ -7,13 +7,17 @@ operación es de una planta, la **planta** (el nodo que se reemplaza tiene que s
 la ruta: ``node_in_plant``).
 
 La identidad del nodo (``identity.node_identity``) y sus asignaciones de zona solo se **leen**
-aquí, como en ``node_api.identity``: todo cambio de identidad va por ``IdentityCommandPort``.
+aquí, como en ``node_api.identity``: todo cambio de identidad va por ``IdentityCommandPort``. Las
+filas de ``identity.zone`` y la exclusión del código de nodo se **bloquean** aquí al empezar una
+operación (``lock_zones``, ``lock_node_code``; orden de los candados en
+``fleet.application.common``).
 ``node_fleet_record`` es 🔒 (proyección): solo cambian las columnas de ``gob_0018``.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Final
 
@@ -107,6 +111,14 @@ _CURRENT_ZONES: Final = text(
     " WHERE organization_id = :organization_id AND node_id = :node_id AND unassigned_at IS NULL"
     " ORDER BY assigned_at, assignment_id"
 )
+_LOCK_ZONE: Final = text(
+    "SELECT zone_id FROM identity.zone"
+    " WHERE organization_id = :organization_id AND zone_id = :zone_id FOR UPDATE"
+)
+_LOCK_NODE_CODE: Final = text(
+    "SELECT pg_advisory_xact_lock(hashtextextended("
+    "'fleet_node_code|' || :organization_id || '|' || :code, 0))"
+)
 _ASSIGNMENT: Final = text(
     "SELECT assignment_id, zone_id, node_id, assigned_at, unassigned_at"
     " FROM identity.zone_node_assignment"
@@ -191,27 +203,61 @@ class PostgresNodeFleetStore:
         row = result.first()
         return None if row is None else _node(row)
 
+    async def _locked(
+        self, transaction: Transaction, statement: Any, parameters: dict[str, Any]
+    ) -> FleetNode | None:
+        """Bloquea la ficha con ``statement`` y devuelve el nodo **leído después**.
+
+        Con ``READ COMMITTED``, si la sentencia esperó a otra transacción, PostgreSQL vuelve a leer
+        solo la fila bloqueada (la ficha): la identidad unida seguiría siendo la de antes de la
+        espera (un nodo ya revocado se vería ``declared``). La segunda lectura, con la ficha ya
+        bloqueada, ve lo que confirmó la otra.
+        """
+        if (await transaction.execute(statement, parameters)).first() is None:
+            return None
+        return await self.read(transaction, parameters["node_id"])
+
     async def lock(self, transaction: Transaction, node_id: uuid.UUID) -> FleetNode | None:
         """El nodo, bloqueando su ficha hasta el final de la transacción (``FOR UPDATE``)."""
-        result = await transaction.execute(_LOCK_NODE, _key(transaction.context, node_id))
-        row = result.first()
-        return None if row is None else _node(row)
+        return await self._locked(transaction, _LOCK_NODE, _key(transaction.context, node_id))
 
     async def share(self, transaction: Transaction, node_id: uuid.UUID) -> FleetNode | None:
         """El nodo leído en la transacción, sin dejar que otra lo dé de baja a la vez."""
-        result = await transaction.execute(_NODE_IN_TRANSACTION, _key(transaction.context, node_id))
-        row = result.first()
-        return None if row is None else _node(row)
+        return await self._locked(
+            transaction, _NODE_IN_TRANSACTION, _key(transaction.context, node_id)
+        )
 
     async def node_in_plant(
         self, transaction: Transaction, node_id: uuid.UUID, plant_id: uuid.UUID
     ) -> FleetNode | None:
         """El nodo de **esa** planta, bloqueado (el que se reemplaza, BR-GOB-68)."""
-        result = await transaction.execute(
-            _LOCK_NODE_IN_PLANT, {**_key(transaction.context, node_id), "plant_id": plant_id}
+        return await self._locked(
+            transaction,
+            _LOCK_NODE_IN_PLANT,
+            {**_key(transaction.context, node_id), "plant_id": plant_id},
         )
-        row = result.first()
-        return None if row is None else _node(row)
+
+    async def lock_node_code(self, transaction: Transaction, code: str) -> None:
+        """La exclusión del ``code`` de nodo en la organización hasta el final de la transacción:
+        dos declaraciones con el mismo código no llegan a la vez al índice único."""
+        await transaction.execute(
+            _LOCK_NODE_CODE,
+            {"organization_id": str(transaction.context.organization_id), "code": code},
+        )
+
+    async def lock_zones(self, transaction: Transaction, zone_ids: Sequence[uuid.UUID]) -> None:
+        """Bloquea las filas de ``zone_ids`` (``FOR UPDATE``) en orden de ``zone_id``.
+
+        Son las mismas filas que bloquea ``IdentityCommandPort`` al asignar o retirar; tomarlas
+        todas al empezar, y siempre en el mismo orden, evita que dos operaciones se esperen la una
+        a la otra. Una zona que no existe (o fuera de alcance) no bloquea nada: U-02 la rechaza
+        después.
+        """
+        for zone_id in sorted(set(zone_ids)):
+            await transaction.execute(
+                _LOCK_ZONE,
+                {"organization_id": transaction.context.organization_id, "zone_id": zone_id},
+            )
 
     async def insert(self, transaction: Transaction, record: NodeFleetRecord) -> None:
         if record.organization_id != transaction.context.organization_id:

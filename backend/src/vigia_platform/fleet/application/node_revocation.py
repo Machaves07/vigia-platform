@@ -17,10 +17,10 @@ transacción corta (PAT-GOB-RES-02):
    almacén de confianza. La marca por organización existe solo como métrica
    (``node_revocations_total``).
 
-**Orden de los candados** (el mismo en la revocación, el reemplazo y la re-alta de
-``enrollment_codes``): ficha del nodo → identidad y credenciales → exclusión de la cadena de la
-planta (el registro) → fila global de la marca. Tomar la marca antes de escribir el registro
-bloquearía mutuamente una revocación y una re-alta de la misma planta.
+**Orden de los candados**: el único de ``fleet.application.common`` (ficha del nodo → identidad,
+credenciales y códigos → exclusión de la cadena de la planta → fila global de la marca). Tomar la
+marca antes de escribir el registro bloquearía mutuamente una revocación y una re-alta de la misma
+planta.
 
 Revocar un nodo ya revocado no escribe nada otra vez (el registro no se reescribe, P4): responde
 la revocación que ya consta.
