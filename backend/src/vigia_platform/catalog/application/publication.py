@@ -11,7 +11,8 @@ estándar, retiro, cámaras, cobertura mínima, señales, umbrales, ventanas y m
    nombre visible de quien declara. Se guardan en NFC: así el escritor del expediente no cambia
    ni una letra del sobre ya firmado.
 2. **En una sola transacción**, en este orden: exclusión de la zona (``pg_advisory_xact_lock``);
-   versión vigente; familia admitida en la planta (``admission_for`` de LC-GOB-02, si no
+   candado de la regresión de la zona (``RegressionMarker.lock``, antes de escribir nada); versión
+   vigente; familia admitida en la planta (``admission_for`` de LC-GOB-02, si no
    ``family_not_admitted``); plan puro (``plan_publication``: versión de estándar + 1,
    ``ZoneCatalog`` canónico con ``version = catalog_version``, ``catalog_version`` + 1,
    predicado, cámaras y cobertura satisfacible); ``SigningPort.sign(purpose=catalog)`` con
@@ -34,9 +35,11 @@ versión que dejó la primera y publica la siguiente. Si la espera supera ``lock
 clave ``(zone_id, catalog_version)`` choca (respaldo), la perdedora recibe un error transitorio:
 nunca un número repetido ni un hueco.
 
-``stored_envelope`` (``catalog.read``) devuelve el sobre guardado tal cual: **nunca** canonicaliza
-ni firma (PAT-GOB-REN-02, NFR-GOB-10). ``single_occupancy`` y ``aggregation_window_minutes`` nunca
-entran en el sobre ni en el evento (NFR-GOB-38). Ningún paso lee la hora del sistema.
+``stored_envelope``, ``catalog_version`` y ``catalog_history`` (``catalog.read``) devuelven lo
+guardado tal cual: **nunca** canonicalizan ni firman (PAT-GOB-REN-02, NFR-GOB-10); bajo concesión,
+cada lectura queda auditada en su transacción (A-56). ``single_occupancy`` y
+``aggregation_window_minutes`` nunca entran en el sobre ni en el evento (NFR-GOB-38). Ningún paso
+lee la hora del sistema.
 """
 
 from __future__ import annotations
@@ -46,6 +49,8 @@ import dataclasses
 import os
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Final, Protocol
 
 from sqlalchemy import exc as sa_exc
@@ -68,6 +73,7 @@ from vigia_platform.catalog.domain.catalog_version import (
     InitialZoneParameters,
     NewStandard,
     NewStandardVersion,
+    RetireStandard,
     SetSignals,
     StandardDraft,
     ZoneCatalogVersion,
@@ -104,11 +110,15 @@ from vigia_platform.shared.signing import SigningKeyUnavailable, SigningNotReady
 from vigia_platform.shared.signing.keys import to_millisecond
 
 __all__ = [
+    "MAX_CATALOG_VERSION",
+    "MAX_PAGE_SIZE",
     "PUBLISHED_RECORD_TYPE",
     "RETIRED_RECORD_TYPE",
+    "RETIREMENT_TOLERANCE",
     "SIGN_TIMEOUT_SECONDS",
     "SINGLE_OCCUPANCY_RECORD_TYPE",
     "AdmissionLookup",
+    "CatalogHistoryPage",
     "CatalogPublicationFailed",
     "CatalogPublicationService",
     "CatalogPublicationUnavailable",
@@ -124,6 +134,12 @@ SINGLE_OCCUPANCY_RECORD_TYPE: Final = "single_occupancy_declared"
 CATALOG_UPDATED: Final = "catalog_updated"
 SIGN_TIMEOUT_SECONDS: Final = 5.0
 """Tope de ``SigningPort.sign`` (PAT-GOB-RES-03: 5 s, ``kms:Sign``)."""
+MAX_PAGE_SIZE: Final = 200
+"""Versiones por página del historial (interfaces §3.1)."""
+MAX_CATALOG_VERSION: Final = 2**31 - 1
+"""``catalog_version`` es ``integer`` en la base."""
+RETIREMENT_TOLERANCE: Final = timedelta(minutes=5)
+"""Desfase admitido entre ``effective_from`` y el reloj de la plataforma `[estimación propia]`."""
 
 _REASON: Final = FreeTextField(
     PUBLISHED_RECORD_TYPE, "/reason_es", MIN_REASON_CHARS, MAX_REASON_CHARS
@@ -173,8 +189,14 @@ class AdmissionLookup(Protocol):
 class RegressionMarker(Protocol):
     """Punto de extensión: la marca de regresión, dentro de la transacción de la publicación.
 
-    La implementación real llega con TASK-209; aquí la nula. Lo que lance revierte la publicación.
+    La real es ``catalog.application.regression.RegressionService`` (TASK-209); sin marcador, la
+    nula. Lo que lance revierte la publicación. ``lock`` corre justo después del candado de la
+    zona y antes de escribir ningún registro: así el orden de los candados es siempre zona →
+    regresión → cadena del expediente, también frente a una marca de ``model_version`` que no
+    publica (sin interbloqueos).
     """
+
+    async def lock(self, transaction: Transaction, zone_id: uuid.UUID) -> None: ...
 
     async def mark(
         self,
@@ -188,7 +210,10 @@ class RegressionMarker(Protocol):
 
 @repository
 class NullRegressionMarker:
-    """No marca nada (TASK-209 trae la marca real)."""
+    """No marca nada (la marca real es ``RegressionService``, TASK-209)."""
+
+    async def lock(self, transaction: Transaction, zone_id: uuid.UUID) -> None:
+        return None
 
     async def mark(
         self,
@@ -199,6 +224,14 @@ class NullRegressionMarker:
         changed_fields: tuple[CatalogChangedField, ...],
     ) -> None:
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogHistoryPage:
+    """Una página del historial; ``next_before`` es el cursor de la siguiente (o ``None``)."""
+
+    items: tuple[ZoneCatalogVersion, ...]
+    next_before: int | None
 
 
 # --- Errores ---------------------------------------------------------------------------------
@@ -360,8 +393,23 @@ class CatalogPublicationService:
         ``CatalogRejected`` con su ``detail_code``, ``CatalogRequestInvalid`` o
         ``CatalogPublicationUnavailable`` (transitorio); en todos, nada queda escrito.
         """
+        return await self._publish_version(context, zone_id, change, reason_es)
+
+    async def _publish_version(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        change: CatalogChange,
+        reason_es: str,
+        *,
+        authorized_check: Callable[[], None] | None = None,
+    ) -> ZoneCatalogVersion:
+        """``publish_catalog_version``; ``authorized_check`` corre tras autorizar la zona, para
+        que una zona fuera del alcance responda ``not_found`` sea cual sea el cuerpo."""
         reason = self._text(reason_es, _REASON)
         zone, authorized = await self._zone(context, zone_id, PermissionKey.CATALOG_MANAGE)
+        if authorized_check is not None:
+            authorized_check()
         role = authorized.actor.role_in_use
         if role is None:  # ``authorize`` siempre lo fija; sin él no se registra autor.
             raise ResourceNotFound()
@@ -405,6 +453,7 @@ class CatalogPublicationService:
         role: Role,
     ) -> ZoneCatalogVersion:
         await self._repository.lock_zone(transaction, zone.zone_id)
+        await self._regression.lock(transaction, zone.zone_id)
         previous = await self._repository.current(transaction, zone.zone_id)
         await self._require_admission(context, zone, change, previous)
         now = to_millisecond(self._clock.now())
@@ -587,6 +636,104 @@ class CatalogPublicationService:
         """Las versiones de los estándares de la zona con su vigencia (``standard_valid_at``)."""
         zone, authorized = await self._zone(context, zone_id, PermissionKey.CATALOG_READ)
         return await self._repository.standard_history(authorized, zone.zone_id)
+
+    async def catalog_version(
+        self, context: ScopeContext, zone_id: uuid.UUID, catalog_version: int | None = None
+    ) -> ZoneCatalogVersion:
+        """La versión ``catalog_version`` (la vigente si es ``None``), con su sobre guardado.
+
+        ``ResourceNotFound`` si la zona o la versión no existen o están fuera del alcance
+        (``catalog.read``); nunca firma ni canonicaliza. Bajo concesión, auditada (A-56).
+        """
+        if catalog_version is not None and (
+            type(catalog_version) is not int or not 1 <= catalog_version <= MAX_CATALOG_VERSION
+        ):
+            raise ResourceNotFound()
+        zone, authorized = await self._zone(context, zone_id, PermissionKey.CATALOG_READ)
+        async with self._database.transaction(authorized) as transaction:
+            version = await self._repository.version_in(transaction, zone.zone_id, catalog_version)
+            if version is None:
+                raise ResourceNotFound()
+            await self._audited(authorized, zone, 1, transaction)
+        return version
+
+    async def catalog_history(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        *,
+        before: int | None = None,
+        limit: int = MAX_PAGE_SIZE,
+    ) -> CatalogHistoryPage:
+        """Las versiones de la zona, la más reciente primero, en páginas de hasta 200.
+
+        ``before`` es el cursor: las versiones con número menor. Una zona sin catálogo da una
+        página vacía.
+        """
+        if type(limit) is not int or not 1 <= limit <= MAX_PAGE_SIZE:
+            raise CatalogRequestInvalid
+        if before is not None and (
+            type(before) is not int or not 1 <= before <= MAX_CATALOG_VERSION
+        ):
+            raise CatalogRequestInvalid
+        zone, authorized = await self._zone(context, zone_id, PermissionKey.CATALOG_READ)
+        async with self._database.transaction(authorized) as transaction:
+            # Una de más: dice si hay página siguiente sin otra consulta.
+            found = await self._repository.history(
+                transaction, zone.zone_id, before=before, limit=limit + 1
+            )
+            await self._audited(authorized, zone, min(len(found), limit), transaction)
+        items = found[:limit]
+        following = items[-1].catalog_version if len(found) > limit else None
+        return CatalogHistoryPage(items=items, next_before=following)
+
+    async def _audited(
+        self, authorized: ScopeContext, zone: ZoneRef, count: int, transaction: Transaction
+    ) -> None:
+        if authorized.concession_id is not None:
+            # BR-NUC-38 y A-56: la lectura del proveedor, auditada en la misma transacción.
+            await self._audit.append(
+                authorized,
+                AuditOperation.CATALOG_READ,
+                plant_id=zone.plant_id,
+                zone_id=zone.zone_id,
+                result_count=count,
+                transaction=transaction,
+            )
+
+    # --- Retiro ------------------------------------------------------------------------------
+
+    async def retire_standard(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        standard_id: uuid.UUID,
+        effective_from: datetime,
+        reason_es: str,
+    ) -> ZoneCatalogVersion:
+        """Retira el estándar (BR-GOB-09): una versión nueva sin él, que rige desde su emisión.
+
+        ``effective_from`` es el instante que declara la persona: ni retroactivo (P4) ni
+        programado. Más allá de ``RETIREMENT_TOLERANCE`` del reloj de la plataforma,
+        ``CatalogRequestInvalid`` sin escribir nada (tras autorizar la zona).
+        """
+        if type(standard_id) is not uuid.UUID:
+            raise ResourceNotFound()
+
+        def effective_now() -> None:
+            if not isinstance(effective_from, datetime) or effective_from.utcoffset() is None:
+                raise CatalogRequestInvalid
+            now = to_millisecond(self._clock.now())
+            if abs(to_millisecond(effective_from) - now) > RETIREMENT_TOLERANCE:
+                raise CatalogRequestInvalid
+
+        return await self._publish_version(
+            context,
+            zone_id,
+            RetireStandard(standard_id=standard_id),
+            reason_es,
+            authorized_check=effective_now,
+        )
 
 
 def _state(version: ZoneCatalogVersion) -> CatalogState:

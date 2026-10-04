@@ -74,6 +74,15 @@ _VERSION: Final = text(
     " WHERE organization_id = :organization_id AND zone_id = :zone_id"
     " AND catalog_version = :catalog_version"
 )
+_HISTORY: Final = text(
+    "SELECT organization_id, plant_id, zone_id, catalog_version, issued_at, issued_by,"
+    " role_in_use, reason_es, changed_fields, payload, envelope, single_occupancy,"
+    " aggregation_window_minutes, ledger_record_id, superseded_at"
+    " FROM catalog.zone_catalog_version"
+    " WHERE organization_id = :organization_id AND zone_id = :zone_id"
+    " AND (CAST(:before AS integer) IS NULL OR catalog_version < CAST(:before AS integer))"
+    " ORDER BY catalog_version DESC LIMIT :limit"
+)
 _CURRENT_ENVELOPE: Final = text(
     "SELECT envelope FROM catalog.zone_catalog_version"
     " WHERE organization_id = :organization_id AND zone_id = :zone_id"
@@ -269,6 +278,33 @@ class PostgresCatalogRepository:
                 {**_zone_key(context, zone_id), "catalog_version": catalog_version},
             )
         return _version(rows[0]) if rows else None
+
+    async def version_in(
+        self, transaction: Transaction, zone_id: uuid.UUID, catalog_version: int | None = None
+    ) -> ZoneCatalogVersion | None:
+        """Como ``version``, dentro de ``transaction`` (la lectura y su auditoría, juntas)."""
+        if catalog_version is None:
+            return await self.current(transaction, zone_id)
+        result = await transaction.execute(
+            _VERSION,
+            {**_zone_key(transaction.context, zone_id), "catalog_version": catalog_version},
+        )
+        row = result.first()
+        return None if row is None else _version(row)
+
+    async def history(
+        self, transaction: Transaction, zone_id: uuid.UUID, *, before: int | None, limit: int
+    ) -> tuple[ZoneCatalogVersion, ...]:
+        """Versiones de la zona anteriores a ``before``, de la más reciente a la más antigua."""
+        result = await transaction.execute(
+            _HISTORY,
+            {
+                **_zone_key(transaction.context, zone_id),
+                "before": before,
+                "limit": limit,
+            },
+        )
+        return tuple(_version(row) for row in result.all())
 
     async def envelope(
         self, transaction: Transaction, zone_id: uuid.UUID, catalog_version: int | None = None

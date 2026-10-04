@@ -157,6 +157,9 @@ class RecordingMarker:
         self.calls: list[tuple[uuid.UUID, int | None, int, tuple[CatalogChangedField, ...]]] = []
         self.fail = False
 
+    async def lock(self, transaction: Transaction, zone_id: uuid.UUID) -> None:
+        assert isinstance(transaction, Transaction)
+
     async def mark(
         self,
         transaction: Transaction,

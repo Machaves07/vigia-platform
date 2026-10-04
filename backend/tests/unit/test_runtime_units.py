@@ -147,8 +147,8 @@ def test_u02_record_types_come_from_the_registry() -> None:
     u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
     assert len(u02) == 14
     # U-03: solo los tipos que ya escribe una ruta registrada (VIG-142 la admisión; VIG-146 el
-    # acta de alcance, la transición de compuerta y la política de planta; VIG-147 la identidad
-    # del nodo).
+    # acta de alcance, la transición de compuerta y la política de planta; VIG-148 el catálogo,
+    # el retiro, la marca unipersonal y la marca de regresión; VIG-147 la identidad del nodo).
     assert names - u02 == {
         "standard_admission_test",
         "mounting_gate_record",
@@ -159,6 +159,10 @@ def test_u02_record_types_come_from_the_registry() -> None:
         "node_decommissioned",
         "enrollment_code_issued",
         "enrollment_attempt_rejected",
+        "catalog_version_published",
+        "catalog_standard_retired",
+        "single_occupancy_declared",
+        "walk_test_regression_marked",
     }
 
 

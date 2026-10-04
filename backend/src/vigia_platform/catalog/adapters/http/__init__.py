@@ -7,6 +7,11 @@
   (``commissioning.run``) de una zona (LC-GOB-03, VIG-146).
 - ``plant_policy``: política de hallazgos incerrables de la planta (``commissioning.run`` y
   ``catalog.read``; LC-GOB-03, VIG-146).
+- ``catalog``, ``standards`` y ``parameters``: catálogo versionado y firmado de la zona, sus
+  estándares y sus cinco rutas de parámetros (``catalog.read`` y ``catalog.manage``; LC-GOB-01,
+  VIG-148).
+- ``regression``: estado de la regresión del walk-test (``catalog.read``) y recaptura del encuadre
+  (``commissioning.run``; LC-GOB-09, VIG-148).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``CatalogHttp`` en ``app.state``, que la
@@ -18,14 +23,27 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from vigia_platform.catalog.adapters.http.admissions import admissions_router
+from vigia_platform.catalog.adapters.http.catalog import catalog_router
 from vigia_platform.catalog.adapters.http.documents import documents_router
 from vigia_platform.catalog.adapters.http.gates import gates_router
+from vigia_platform.catalog.adapters.http.parameters import parameters_router
 from vigia_platform.catalog.adapters.http.plant_policy import plant_policy_router
+from vigia_platform.catalog.adapters.http.regression import regression_router
 from vigia_platform.catalog.adapters.http.services import CATALOG_STATE_KEY, CatalogHttp
+from vigia_platform.catalog.adapters.http.standards import standards_router
 
 __all__ = ["CATALOG_STATE_KEY", "CatalogHttp", "catalog_routers"]
 
 
 def catalog_routers() -> tuple[APIRouter, ...]:
     """Los enrutadores de ``catalog`` que registra ``platform_units()``."""
-    return (admissions_router(), documents_router(), gates_router(), plant_policy_router())
+    return (
+        admissions_router(),
+        documents_router(),
+        gates_router(),
+        plant_policy_router(),
+        catalog_router(),
+        standards_router(),
+        parameters_router(),
+        regression_router(),
+    )
