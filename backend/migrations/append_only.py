@@ -35,5 +35,18 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "shared.audit_entry",
         "shared.outbox_event",
         "shared.dead_letter",
+        # catalog (TASK-202, gob_0017)
+        "catalog.zone_catalog_version",
+        "catalog.declared_standard_version",
+        "catalog.family_admission",
+        "catalog.gate_state_history",
+        "catalog.mounting_gate_record",
+        "catalog.use_agreement",
+        "catalog.agreement_confirmation",
+        "catalog.plant_policy",
+        "catalog.walk_test_step",
+        "catalog.walk_test_pass",
+        "catalog.occlusion_test",
+        "catalog.commissioning_record",
     }
 )
