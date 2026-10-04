@@ -45,8 +45,20 @@ from fastapi import APIRouter
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
 
-from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDINGS
+from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp, catalog_routers
+from vigia_platform.catalog.adapters.postgres.admission_repository import (
+    PostgresAdmissionRepository,
+)
+from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.application.free_text_validator import (
+    register_u03_free_text_validator,
+)
+from vigia_platform.catalog.detail_codes import (
+    CATALOG_DETAIL_CODE_LABEL_BINDINGS,
+    CatalogDetailCode,
+)
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
+from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
@@ -172,6 +184,9 @@ class UnitServices:
     audit: AuditWriter
     outbox: Outbox
     writer: EscritorExpediente
+    free_text: FreeTextPolicyRegistry
+    """La política de texto libre del escritor, ya sellada (A-45): la usan los servicios que
+    validan un texto antes de guardarlo fuera del expediente (p. ej. ``justification_es``)."""
     signing: SigningService
     checkpoints: CheckpointService
     kms: KmsPort
@@ -368,6 +383,35 @@ def _shared_routers() -> tuple[APIRouter, ...]:
     return (health_router(), *shared_routers())
 
 
+# --- U-03 ----------------------------------------------------------------------------------------
+
+
+_CATALOG_WRITTEN_TYPES: Final = frozenset({ADMISSION_RECORD_TYPE})
+"""Tipos de ``catalog.record_types`` que ya escribe una ruta registrada."""
+
+
+def _catalog_record_types(registry: RecordTypeRegistry) -> None:
+    for definition in CATALOG_RECORD_TYPES:
+        if definition.record_type in _CATALOG_WRITTEN_TYPES:
+            registry.register(definition)
+
+
+def _catalog_state(services: UnitServices) -> Mapping[str, object]:
+    return {
+        CATALOG_STATE_KEY: CatalogHttp(
+            admissions=AdmissionService(
+                repository=PostgresAdmissionRepository(services.database),
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                free_text=services.free_text,
+                clock=services.clock,
+            )
+        )
+    }
+
+
 REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
     PlatformUnit(
         name="shared",
@@ -405,11 +449,18 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
         consumers=_ledger_consumers,
         periodic_tasks=_ledger_tasks,
     ),
-    # U-03 (VIG-139): por ahora solo las etiquetas de sus 21 enumeraciones y de sus detail_code
-    # (NFR-GOB-67). Tipos, eventos, detail_code y validador los conecta VIG-163 (TASK-227).
+    # U-03 (VIG-139): las etiquetas de sus 21 enumeraciones y de sus detail_code (NFR-GOB-67).
+    # VIG-142: rutas de la admisión, detail_code del catálogo, el tipo que escriben
+    # (``standard_admission_test``) y el validador mínimo de texto libre de U-03 (A-45, D-7). El
+    # resto de tipos y los eventos los conecta VIG-163 (TASK-227).
     PlatformUnit(
         name="catalog",
+        routers=catalog_routers,
+        detail_codes=tuple(code.value for code in CatalogDetailCode),
         labels={**CATALOG_LABEL_BINDINGS, **CATALOG_DETAIL_CODE_LABEL_BINDINGS},
+        record_types=_catalog_record_types,
+        free_text=register_u03_free_text_validator,
+        api_state=_catalog_state,
     ),
     PlatformUnit(
         name="fleet",
