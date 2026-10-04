@@ -116,7 +116,12 @@ def _instance(env: SessionEnvironment, database: Database) -> Any:
 @pytest.fixture(scope="module")
 def instances(postgres_endpoint: PostgresEndpoint) -> Iterator[Instances]:
     with session_environment(postgres_endpoint, "pr_gob_28") as env:
-        second = app_database(env.migrated, worker_pool_size=2)
+        second = app_database(
+            env.migrated,
+            worker_pool_size=2,
+            lock_timeout_ms=60_000,
+            pool_timeout_seconds=60.0,
+        )
         try:
             built = Instances(
                 env,

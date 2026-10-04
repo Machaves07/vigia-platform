@@ -47,6 +47,11 @@ def build(environ: Mapping[str, str]) -> Any:
             url=environ["VIGIA_TEST_DATABASE_URL"],
             process=ProcessKind.API,
             sslmode=SslMode.DISABLE,  # el contenedor local no tiene TLS
+            # Topes holgados: estas pruebas no tratan de los topes y el runner puede ir cargado.
+            connect_timeout_seconds=60.0,
+            statement_timeout_ms=60_000,
+            lock_timeout_ms=60_000,
+            pool_timeout_seconds=60.0,
         )
     )
     contexts = ScopeContexts(
