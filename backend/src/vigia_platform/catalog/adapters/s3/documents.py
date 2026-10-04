@@ -2,13 +2,13 @@
 
 Sobre el ``StoragePort`` heredado (LC-NUC-30), ligado al depósito de evidencias. Dos operaciones:
 
-- ``prepare_upload(grant)``: comprueba con ``head_object`` que la clave nueva aún no tiene objeto
-  y firma la URL de **un solo** ``PUT`` con ``presign_put``: vence a los 15 minutos y lleva
-  **firmados** el tipo de contenido y la suma SHA-256 concedidos (``x-amz-checksum-sha256`` en
-  base64). Un ``PUT`` con otro tipo o sin la suma no pasa la firma; unos bytes con otra suma dan
-  ``BadDigest``. La consulta previa hace que la concesión **falle cerrada** con el almacén caído
-  (FS-GOB-01): firmar una URL no toca la red y, sin ella, se emitiría una concesión que nadie
-  podría usar;
+- ``prepare_upload(grant, now)``: comprueba con ``head_object`` que la clave nueva aún no tiene
+  objeto y firma la URL de **un solo** ``PUT`` con ``presign_put``: vence a lo sumo con la
+  concesión (15 minutos desde ``issued_at``) y lleva **firmados** el tipo de contenido y la suma
+  SHA-256 concedidos (``x-amz-checksum-sha256`` en base64). Un ``PUT`` con otro tipo o sin la
+  suma no pasa la firma; unos bytes con otra suma dan ``BadDigest``. La consulta previa hace que
+  la concesión **falle cerrada** con el almacén caído (FS-GOB-01): firmar una URL no toca la red
+  y, sin ella, se emitiría una concesión que nadie podría usar;
 - ``heads(keys)``: los metadatos de cada objeto con ``ChecksumMode=ENABLED``, **en paralelo** y en
   el pool de hilos (PAT-GOB-REN-05). Nunca se descarga un documento: este adaptador no expone
   ``get_object``.
@@ -17,13 +17,18 @@ Tiempos de espera de NFR-GOB-43 ``[objetivos propios]``: firma de URL 5 s y cons
 10 s, además de los de ``StorageSettings`` (conexión 5 s, lectura 10 s, sin reintentos). Vencer
 cualquiera, o un fallo de ``botocore`` al firmar (credenciales del rol no disponibles), termina en
 ``StorageUnavailable``: transitorio, con ``retry_after_seconds``.
+
+**Límite conocido (heredado de U-02).** ``S3Storage.presign_put`` llama a
+``generate_presigned_url`` de forma síncrona dentro del bucle de eventos, sin pasar por el pool de
+hilos: el tope de 5 s de la firma corta un almacén asíncrono colgado, pero no un bloqueo de
+``botocore`` al refrescar las credenciales del rol. Corregirlo es de ``shared.storage``.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Mapping, Sequence
-from datetime import timedelta
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import datetime, timedelta
 from typing import Final, Protocol
 
 from botocore import exceptions as botocore_exceptions  # type: ignore[import-untyped]
@@ -104,18 +109,23 @@ class DocumentObjectStore:
         results = await asyncio.gather(*(self.head(key) for key in unique))
         return dict(zip(unique, results, strict=True))
 
-    async def prepare_upload(self, grant: DocumentUploadGrant) -> PresignedRequest:
-        """URL de un solo ``PUT`` con tipo y suma firmados, vigente 15 minutos."""
+    async def prepare_upload(
+        self, grant: DocumentUploadGrant, now: Callable[[], datetime]
+    ) -> PresignedRequest:
+        """URL de un solo ``PUT`` con tipo y suma firmados, que vence **no después** que la
+        concesión: su vigencia son los segundos enteros que le quedan a ``grant.expires_at``
+        cuando se firma (la autorización y la consulta previa ya consumieron algunos)."""
         if await self.head(grant.storage_key) is not None:
             raise DocumentKeyTaken()
+        remaining = int((grant.expires_at - now()).total_seconds())
+        if remaining < 1:
+            # La concesión se agotó esperando al almacén: no queda vigencia que firmar.
+            raise StorageUnavailable("presign_put")
+        ttl = min(timedelta(seconds=remaining), DOCUMENT_GRANT_TTL)
         return await self._bounded(
             "presign_put",
             self._storage.presign_put(
-                grant.storage_key,
-                grant.content_type.value,
-                grant.sha256,
-                {},
-                DOCUMENT_GRANT_TTL,
+                grant.storage_key, grant.content_type.value, grant.sha256, {}, ttl
             ),
             self._presign_timeout,
         )

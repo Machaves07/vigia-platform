@@ -156,6 +156,9 @@ class Documents:
     client: httpx.AsyncClient
     a: Site
     b: Site
+    fragile: DocumentService
+    """Topes cortos (2 s): solo para las pruebas de almacén detenido o colgado."""
+    fragile_client: httpx.AsyncClient
 
     def run(self, awaitable: Any) -> Any:
         return self.authz.run(awaitable)
@@ -198,14 +201,18 @@ class Documents:
     # --- Peticiones -----------------------------------------------------------------------------
 
     def post(
-        self, cookie: SessionCookie, concession: uuid.UUID | None, body: Any
+        self,
+        cookie: SessionCookie,
+        concession: uuid.UUID | None,
+        body: Any,
+        *,
+        fragile: bool = False,
     ) -> httpx.Response:
         headers = {**SAME_ORIGIN, "Cookie": f"{SESSION_COOKIE_NAME}={cookie.value}"}
         if concession is not None:
             headers[CONCESSION_HEADER] = str(concession)
-        response: httpx.Response = self.run(
-            self.client.post("/documents", json=body, headers=headers)
-        )
+        client = self.fragile_client if fragile else self.client
+        response: httpx.Response = self.run(client.post("/documents", json=body, headers=headers))
         return response
 
     def grants(self, organization_id: uuid.UUID) -> list[Any]:
@@ -282,9 +289,12 @@ class Documents:
         refs: list[Any],
         plant_id: uuid.UUID,
         kinds: tuple[DocumentKind, ...] = (DocumentKind.SCOPE_RECORD,),
+        *,
+        fragile: bool = False,
     ) -> VerifiedDocuments:
+        service = self.fragile if fragile else self.service
         verified: VerifiedDocuments = self.run(
-            self.service.verify_document_refs(context, refs, kinds, plant_id)
+            service.verify_document_refs(context, refs, kinds, plant_id)
         )
         return verified
 
@@ -324,7 +334,16 @@ def documents(
             registry.seal()
 
         authz.run(synchronize())
-        real = S3Storage(localstack_endpoint.storage_settings(bucket), clock)
+        # Topes holgados en todo lo que no prueba el tope (retro 15): un LocalStack lento en un
+        # equipo cargado no hace fallar una prueba de camino feliz.
+        real = S3Storage(
+            replace(
+                localstack_endpoint.storage_settings(bucket),
+                connect_timeout_seconds=TIMEOUT_SECONDS,
+                read_timeout_seconds=TIMEOUT_SECONDS,
+            ),
+            clock,
+        )
         stopped = S3Storage(
             replace(
                 localstack_endpoint.storage_settings(bucket),
@@ -335,17 +354,24 @@ def documents(
             clock,
         )
         storage = CountingStorage(real)
-        service = DocumentService(
-            database=sessions.database,
-            audit=sessions.audit,
-            authorizer=authz.authorizer,
-            store=DocumentObjectStore(
-                storage,
-                presign_timeout_seconds=STORE_TIMEOUT_SECONDS,
-                head_timeout_seconds=STORE_TIMEOUT_SECONDS,
-            ),
-            clock=clock,
-        )
+
+        def service_with(timeout_seconds: float) -> DocumentService:
+            return DocumentService(
+                database=sessions.database,
+                audit=sessions.audit,
+                authorizer=authz.authorizer,
+                store=DocumentObjectStore(
+                    storage,
+                    presign_timeout_seconds=timeout_seconds,
+                    head_timeout_seconds=timeout_seconds,
+                ),
+                clock=clock,
+            )
+
+        # El servicio de todas las pruebas, con topes de 30 s; el de topes cortos, solo para las
+        # de almacén detenido o colgado, donde el tope es el sujeto de la prueba.
+        service = service_with(TIMEOUT_SECONDS)
+        fragile = service_with(STORE_TIMEOUT_SECONDS)
         writer = EscritorExpediente(
             database=sessions.database,
             registry=registry,
@@ -354,25 +380,30 @@ def documents(
             outbox=sessions.outbox,
             clock=clock,
         )
-        app = World(clock=clock).app(
-            units=None,
-            runtime={
-                "sessions": authz.contexts,
-                "authorizer": ContextAuthorizer(
-                    audit=authz.audit,
-                    provider_organization_id=authz.provider_organization_id,
-                    provider_queries=LedgerProviderQueryLedger(writer),
-                    clock=clock,
-                ),
-                "state": {CATALOG_STATE_KEY: CatalogHttp(documents=service)},
-            },
-            public_origin=ORIGIN,
-        )
-        client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://testserver",
-            timeout=TIMEOUT_SECONDS,
-        )
+
+        def client_for(documents_service: DocumentService) -> httpx.AsyncClient:
+            app = World(clock=clock).app(
+                units=None,
+                runtime={
+                    "sessions": authz.contexts,
+                    "authorizer": ContextAuthorizer(
+                        audit=authz.audit,
+                        provider_organization_id=authz.provider_organization_id,
+                        provider_queries=LedgerProviderQueryLedger(writer),
+                        clock=clock,
+                    ),
+                    "state": {CATALOG_STATE_KEY: CatalogHttp(documents=documents_service)},
+                },
+                public_origin=ORIGIN,
+            )
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+                timeout=TIMEOUT_SECONDS,
+            )
+
+        client = client_for(service)
+        fragile_client = client_for(fragile)
         world = Documents(
             authz,
             s3,
@@ -384,11 +415,14 @@ def documents(
             client,
             authz.add_site(plants=2, zones_per_plant=1),
             authz.add_site(plants=2, zones_per_plant=1),
+            fragile,
+            fragile_client,
         )
         try:
             yield world
         finally:
             authz.run(client.aclose())
+            authz.run(fragile_client.aclose())
 
 
 @pytest.fixture(autouse=True)
@@ -748,7 +782,7 @@ def test_a_down_or_slow_store_grants_nothing_and_recovers(documents: Documents, 
     organization = site.organization_id
     before = (len(documents.grants(organization)), len(documents.audit(organization)))
     documents.storage.target = documents.stopped if state == "detenido" else Hung()
-    response = documents.post(cookie, concession, _body(plant))
+    response = documents.post(cookie, concession, _body(plant), fragile=True)
     assert response.status_code == 503, response.text
     body = response.json()
     assert body["code"] == "storage_unavailable"
@@ -769,7 +803,7 @@ def test_verification_with_the_store_down_fails_closed_and_recovers(
     ref = documents.uploaded(context, plant, PDF + state.encode())
     documents.storage.target = documents.stopped if state == "detenido" else Hung()
     with pytest.raises(StorageUnavailable) as raised:
-        documents.verify(context, [ref], plant)
+        documents.verify(context, [ref], plant, fragile=True)
     assert raised.value.retry_after_seconds == 5
     assert documents.status(ref.document_id) == "issued"
     documents.storage.target = documents.real

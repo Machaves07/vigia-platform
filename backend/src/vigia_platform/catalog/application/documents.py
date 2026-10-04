@@ -231,7 +231,7 @@ class DocumentService:
             raise ResourceNotFound()
         # Una clave UUID v7 recién generada no tiene objeto; si lo tuviera, ``DocumentKeyTaken``
         # (``conflict``): nunca se firma una URL que sobrescriba.
-        upload = await self._store.prepare_upload(grant)
+        upload = await self._store.prepare_upload(grant, self._clock.now)
         async with self._database.transaction(authorized) as transaction:
             await self._grants.insert(transaction, grant)
             await self._audit.append(

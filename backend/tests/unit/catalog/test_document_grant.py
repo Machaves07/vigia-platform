@@ -385,6 +385,7 @@ class CountingStorage:
     in_flight: int = 0
     peak: int = 0
     expected_parallel: int = 0
+    ttls: list[timedelta] = field(default_factory=list)
     _all_in: asyncio.Event | None = None
 
     def _count(self, name: str) -> None:
@@ -433,7 +434,7 @@ class CountingStorage:
         if self.hang_presign:
             await asyncio.Event().wait()
         assert dict(required_headers) == {}
-        assert ttl == DOCUMENT_GRANT_TTL
+        self.ttls.append(ttl)
         return PresignedRequest(
             "PUT",
             f"https://almacen.vigia.test/{key}?X-Amz-Expires=900",
@@ -445,14 +446,52 @@ class CountingStorage:
         )
 
 
+def _at(moment: datetime) -> Any:
+    """El ``now`` de ``prepare_upload``: un reloj parado en ``moment``."""
+    return lambda: moment
+
+
 def test_the_timeouts_are_those_of_nfr_gob_43() -> None:
     assert (PRESIGN_TIMEOUT_SECONDS, HEAD_TIMEOUT_SECONDS) == (5.0, 10.0)
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "expected"),
+    [
+        (timedelta(0), DOCUMENT_GRANT_TTL),
+        (timedelta(milliseconds=1), timedelta(seconds=899)),
+        (timedelta(seconds=10, milliseconds=400), timedelta(seconds=889)),
+        (timedelta(minutes=14, seconds=59), timedelta(seconds=1)),
+    ],
+    ids=["al_emitir", "un_ms", "tras_10_s", "un_segundo"],
+)
+def test_the_url_never_outlives_the_grant(elapsed: timedelta, expected: timedelta) -> None:
+    # La firma llega después de autorizar, comprobar la planta y consultar la clave: la URL
+    # vence con los segundos enteros que le quedan a la concesión, nunca más tarde.
+    storage = CountingStorage()
+    grant = _issue()
+    asyncio.run(DocumentObjectStore(storage).prepare_upload(grant, _at(T0 + elapsed)))
+    (ttl,) = storage.ttls
+    assert ttl == expected
+    assert T0 + elapsed + ttl <= grant.expires_at
+
+
+@pytest.mark.parametrize(
+    "elapsed",
+    [timedelta(minutes=14, seconds=59, milliseconds=1), DOCUMENT_GRANT_TTL, timedelta(hours=1)],
+    ids=["menos_de_un_segundo", "vencida", "muy_vencida"],
+)
+def test_a_grant_exhausted_while_waiting_is_never_signed(elapsed: timedelta) -> None:
+    storage = CountingStorage()
+    with pytest.raises(StorageUnavailable):
+        asyncio.run(DocumentObjectStore(storage).prepare_upload(_issue(), _at(T0 + elapsed)))
+    assert storage.ttls == [] and "presign_put" not in storage.calls
 
 
 def test_prepare_upload_checks_the_fresh_key_then_signs_type_and_checksum() -> None:
     storage = CountingStorage()
     grant = _issue()
-    upload = asyncio.run(DocumentObjectStore(storage).prepare_upload(grant))
+    upload = asyncio.run(DocumentObjectStore(storage).prepare_upload(grant, _at(T0)))
     assert upload.method == "PUT"
     assert dict(upload.headers) == {
         "content-type": "application/pdf",
@@ -465,7 +504,7 @@ def test_prepare_upload_never_signs_over_an_existing_object() -> None:
     grant = _issue()
     storage = CountingStorage(objects={grant.storage_key: _head(grant)})
     with pytest.raises(DocumentKeyTaken):
-        asyncio.run(DocumentObjectStore(storage).prepare_upload(grant))
+        asyncio.run(DocumentObjectStore(storage).prepare_upload(grant, _at(T0)))
     assert "presign_put" not in storage.calls
 
 
@@ -486,7 +525,7 @@ def test_a_down_or_slow_store_is_storage_unavailable_with_retry(storage: Countin
     # Dobles que nunca responden: el tope es el sujeto de la prueba y siempre vence (1 s).
     store = DocumentObjectStore(storage, presign_timeout_seconds=1.0, head_timeout_seconds=1.0)
     with pytest.raises(StorageUnavailable) as raised:
-        asyncio.run(store.prepare_upload(_issue()))
+        asyncio.run(store.prepare_upload(_issue(), _at(T0)))
     assert raised.value.code == "storage_unavailable"
     assert raised.value.retry_after_seconds == RETRY_AFTER_SECONDS
 
@@ -494,7 +533,7 @@ def test_a_down_or_slow_store_is_storage_unavailable_with_retry(storage: Countin
 def test_other_errors_are_not_swallowed() -> None:
     storage = CountingStorage(presign_error=ValueError("clave no válida"))
     with pytest.raises(ValueError, match="clave"):
-        asyncio.run(DocumentObjectStore(storage).prepare_upload(_issue()))
+        asyncio.run(DocumentObjectStore(storage).prepare_upload(_issue(), _at(T0)))
 
 
 def test_heads_run_in_parallel_and_never_download() -> None:
