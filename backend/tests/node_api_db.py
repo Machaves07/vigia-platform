@@ -52,7 +52,7 @@ async def insert_zone(
         zone_id,
         organization_id,
         plant_id,
-        f"ZN-{secrets.token_hex(3).upper()}",
+        f"ZN-{secrets.token_hex(8).upper()}",
         BASE_TIME,
         user_id,
     )
@@ -76,7 +76,7 @@ async def insert_node(
             node_id,
             organization_id,
             plant_id,
-            f"ND-{secrets.token_hex(3).upper()}",
+            f"ND-{secrets.token_hex(8).upper()}",
             BASE_TIME,
         )
         await admin.execute(
