@@ -41,6 +41,7 @@ from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
 from vigia_platform.fleet.application.orphan_clips import OrphanClipSweeper, OrphanSweepReport
 from vigia_platform.fleet.domain.clip_upload_grant import ORPHAN_AFTER
 from vigia_platform.fleet.domain.verification_clip import ObjectFacts
+from vigia_platform.shared.context import ContextAbsent
 from vigia_platform.shared.observability.metrics import MetricName
 from vigia_platform.shared.storage import StorageUnavailable
 
@@ -291,6 +292,18 @@ def test_node_clip_counts_give_orphans_and_evidence_clips_of_the_window(clips: C
     assert found[node.db.node_id].day_clips == 1  # las de ayer quedan fuera de la ventana
     assert found[other.db.node_id].orphan_clips == 1
     assert found[other.db.node_id].day_clips == 0
-    nothing: Any = None
+
+    async def empty_window() -> Any:
+        async with clips.authz.sessions.database.transaction(
+            clips.system(organization[0])
+        ) as transaction:
+            return await clips.sweeper.node_clip_counts(
+                transaction, until=clips.now(), window=timedelta(0)
+            )
+
     with pytest.raises(ValueError, match="ventana"):
-        clips.run(clips.sweeper.node_clip_counts(nothing, until=clips.now(), window=timedelta(0)))
+        clips.run(empty_window())
+    # Sin transacción, la guarda del repositorio (``@repository``) corta antes que nada.
+    nothing: Any = None
+    with pytest.raises(ContextAbsent):
+        clips.run(clips.sweeper.node_clip_counts(nothing, until=clips.now()))
