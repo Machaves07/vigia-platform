@@ -328,7 +328,8 @@ def test_new_partitions_are_protected_and_not_granted_to_the_application(
 ) -> None:
     now = datetime(2041, 6, 1, tzinfo=UTC)
     report = environment.create(now)
-    assert len(report.created) == 3 * 4  # tres tablas, el mes en curso y tres más
+    # Seis tablas (tres de U-02 y tres de fleet, gob_0018), el mes en curso y tres más.
+    assert len(report.created) == len(PartitionedTable) * 4 == 6 * 4
     for result in report.created:
         rows = environment.fetch(
             "SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = $1::regclass"
@@ -367,7 +368,7 @@ def test_month_with_rows_in_the_default_partition_is_blocked_without_aborting(
     report = environment.create(datetime(2090, 7, 2, tzinfo=UTC), until=month)
     assert [(r.table, r.month) for r in report.blocked] == [(PartitionedTable.EVIDENCE, month)]
     created = {r.table for r in report.created}
-    assert created == {PartitionedTable.LEDGER_RECORD, PartitionedTable.AUDIT_ENTRY}
+    assert created == set(PartitionedTable) - {PartitionedTable.EVIDENCE}
     assert partition_name(PartitionedTable.EVIDENCE, month) not in partition_bounds(
         environment, PartitionedTable.EVIDENCE
     )
