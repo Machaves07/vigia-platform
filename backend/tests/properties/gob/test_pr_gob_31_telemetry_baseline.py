@@ -28,18 +28,20 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
 import pytest
-from hypothesis import HealthCheck, Phase, find, given, settings
+from hypothesis import HealthCheck, Phase, assume, find, given, settings
 from hypothesis import strategies as st
 from opentelemetry.trace import Status, StatusCode
 
 from tests.properties.gob import telemetry_harness
 from tests.properties.gob.telemetry_harness import TelemetryCapture, sensitive_values
 from tests.properties.gob.u03_records import event_payload, string_paths, u03_event_registry
+from vigia_platform.ledger.schema_rules import field_nodes
 from vigia_platform.shared.observability import logging as obs_logging
 from vigia_platform.shared.observability import redaction, tracing
 from vigia_platform.shared.observability.metrics import CATALOG, MetricKind
@@ -92,6 +94,32 @@ class Injection:
     path: str
 
 
+HEX_DIGEST_KINDS: Final = frozenset({"hardware_fingerprint", "presigned_url"})
+"""Valores sensibles que son 64 hexadecimales (la huella y la firma de la URL)."""
+
+
+def has_field_shape(event_name: str, path: str, value: str) -> bool:
+    """``value`` cumple ya la forma cerrada del campo (su patrón o su lista de valores).
+
+    Es el límite de toda regla de esquema: un identificador técnico (``TechnicalId`` del
+    contrato, ``^[a-z][a-z0-9_.-]{0,63}$``) admite 64 hexadecimales que empiecen por letra, y
+    nada distingue esa huella de un ``model_version`` legítimo. Ahí la barrera es que ninguna ruta
+    ponga una huella en ese campo (PR-GOB-31 sobre el código de cada ruta), no la carga.
+    """
+    compiled = EVENTS.get(event_name)
+    assert compiled is not None
+    nodes, _ = field_nodes(compiled.payload_schema)
+    for node in nodes:
+        if node.path != path or node.schema.get("type") != "string":
+            continue
+        pattern = node.schema.get("pattern")
+        if isinstance(pattern, str) and re.fullmatch(pattern, value):
+            return True
+        if value in node.schema.get("enum", ()):
+            return True
+    return False
+
+
 @st.composite
 def _injection(draw: st.DrawFn, channels: Sequence[str]) -> Injection:
     kind, values = draw(sensitive_values())
@@ -99,6 +127,9 @@ def _injection(draw: st.DrawFn, channels: Sequence[str]) -> Injection:
     key = draw(st.one_of(st.sampled_from(_ALLOWED_KEYS), _unknown_keys))
     compiled = draw(st.sampled_from(EVENT_TYPES))
     path = draw(st.sampled_from(string_paths(compiled.payload_schema)))
+    if channel == "event_field":
+        # Un valor con la forma legítima del campo no es una fuga que una carga pueda impedir.
+        assume(not any(has_field_shape(compiled.event_name, path, value) for value in values))
     return Injection(kind, values, channel, key, compiled.event_name, path)
 
 
@@ -245,18 +276,36 @@ def test_no_generated_sensitive_value_reaches_any_output(
 def test_every_string_field_of_every_event_refuses_every_sensitive_value(
     data: st.DataObject, compiled: Any
 ) -> None:
-    """La carga de un evento nunca admite un valor sensible, en ningún campo de cadena."""
-    _, values = data.draw(sensitive_values())
+    """La carga de un evento nunca admite un valor sensible, en ningún campo de cadena.
+
+    Salvo cuando el valor ya tiene la forma cerrada del campo (``has_field_shape``): eso solo le
+    pasa a un hexadecimal de 64 en un ``TechnicalId``, y la prueba lo comprueba.
+    """
+    kind, values = data.draw(sensitive_values())
     path = data.draw(st.sampled_from(string_paths(compiled.payload_schema)))
     payload = data.draw(event_payload(compiled))
+    refused: list[str] = []
     with TelemetryCapture() as capture:
         capture.publish(compiled.event_name, payload)
         for value in values:
+            if has_field_shape(compiled.event_name, path, value):
+                assert kind in HEX_DIGEST_KINDS, (kind, path)
+                continue
             document = json.loads(json.dumps(payload))
             if _set_path(document, path, value):
                 with pytest.raises(OutboxRejected):
                     capture.publish(compiled.event_name, document)
-    assert capture.leaks(values) == []
+            refused.append(value)
+    assert capture.leaks(refused) == []
+
+
+def test_a_hex_digest_has_the_shape_of_a_technical_id() -> None:
+    """El límite de la regla anterior, a la vista: regresión de la semilla 2613962578 del CI."""
+    fingerprint = "a" + "0" * 63
+    assert has_field_shape("regression_cleared", "/model_version", fingerprint)
+    assert not has_field_shape("regression_cleared", "/model_version", "0" * 64)
+    assert not has_field_shape("regression_cleared", "/zone_id", fingerprint)
+    assert not has_field_shape("node_enrolled", "/node_id", fingerprint)
 
 
 def test_the_harness_sees_what_is_legitimately_emitted() -> None:
