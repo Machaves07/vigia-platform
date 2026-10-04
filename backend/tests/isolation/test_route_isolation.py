@@ -79,6 +79,12 @@ from tests.second_factor_support import FakeKms
 from tests.session_support import ORIGIN_KEY
 from tests.signing_support import ENVIRONMENT
 from tests.writer_support import save_record_types, unit_context
+from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
+from vigia_platform.catalog.adapters.postgres.admission_repository import (
+    PostgresAdmissionRepository,
+)
+from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
@@ -137,6 +143,10 @@ NBSP: Final = chr(0x00A0)
 ZERO_WIDTH_SPACE: Final = chr(0x200B)
 INSTALLER_KEYS: Final = frozenset(key.value for key in permissions_of(Role.PROVIDER_INSTALLER))
 """La columna ``provider_installer`` de la matriz (BR-NUC-37)."""
+ADMISSION_TYPES: Final = tuple(
+    d for d in CATALOG_RECORD_TYPES if d.record_type == ADMISSION_RECORD_TYPE
+)
+"""El tipo que escriben las rutas de admisión (los que registra la unidad ``catalog``)."""
 
 
 def _stamp(moment: datetime) -> str:
@@ -379,6 +389,21 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ),
     ("POST", "/zones/{zone_id}/live-view-token"): Case(
         Kind.RESOURCE, lambda i: Call("POST", f"/zones/{i.zone}/live-view-token")
+    ),
+    # --- catalog (U-03; el aislamiento exhaustivo de U-03 es de VIG-165) ---
+    ("POST", "/plants/{plant_id}/admissions"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/plants/{i.plant}/admissions",
+            json={
+                "family": "coexistence",
+                "answers": {"standard": True, "remedy": True, "subject": True},
+            },
+        ),
+    ),
+    ("GET", "/plants/{plant_id}/admissions"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/admissions")
     ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
@@ -673,7 +698,7 @@ class Isolation:
             " FROM pg_catalog.pg_attribute AS a"
             " JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid"
             " JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace"
-            " WHERE n.nspname IN ('identity', 'ledger', 'shared')"
+            " WHERE n.nspname IN ('identity', 'ledger', 'shared', 'catalog')"
             " AND a.attname = 'organization_id' AND NOT a.attisdropped"
             " AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
         )
@@ -726,7 +751,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         authz = env.authz
         sessions = authz.sessions
         registry = RecordTypeRegistry()
-        for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES):
+        for definition in (*U02_RECORD_TYPES, *COVERAGE_TYPES, *ADMISSION_TYPES):
             registry.register(definition)
 
         async def synchronize() -> None:
@@ -872,6 +897,19 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                 "identity": identity,
                 "ledger": ledger,
                 "platform": platform,
+                "state": {
+                    CATALOG_STATE_KEY: CatalogHttp(
+                        admissions=AdmissionService(
+                            repository=PostgresAdmissionRepository(sessions.database),
+                            database=sessions.database,
+                            writer=writer,
+                            authorizer=authz.authorizer,
+                            audit=sessions.audit,
+                            free_text=free_text,
+                            clock=sessions.clock,
+                        )
+                    )
+                },
             },
             static_dir=STATIC,
             public_origin=ORIGIN,
@@ -1107,6 +1145,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /zones/{zone_id}/coverage",
         "GET /zones/{zone_id}/coverage/at",
         "POST /zones/{zone_id}/live-view-token",
+        "GET /plants/{plant_id}/admissions",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.

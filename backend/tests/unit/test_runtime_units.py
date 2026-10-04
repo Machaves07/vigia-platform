@@ -55,7 +55,7 @@ from vigia_platform.shared.api.app import (
 )
 from vigia_platform.shared.api.declarations import iter_declared_routes
 from vigia_platform.shared.api.errors import ApiStartupError
-from vigia_platform.shared.context import ContextAbsent
+from vigia_platform.shared.context import ActorUnit, ContextAbsent
 from vigia_platform.shared.db import DatabaseHealth, ProcessKind
 from vigia_platform.shared.runtime import units
 from vigia_platform.shared.runtime.admin import compose_admin_runtime
@@ -141,9 +141,13 @@ def test_platform_units_and_label_bindings_come_from_the_registry() -> None:
 
 def test_u02_record_types_come_from_the_registry() -> None:
     registry = record_type_registry(registered_units())
-    names = {compiled.record_type for compiled in registry.latest()}
+    latest = registry.latest()
+    names = {compiled.record_type for compiled in latest}
     assert {"key_rotated", "key_set_published"} <= names
-    assert len(names) == 14
+    u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
+    assert len(u02) == 14
+    # U-03 (VIG-142): por ahora solo el tipo que ya escribe una ruta registrada.
+    assert names - u02 == {"standard_admission_test"}
 
 
 def test_the_registry_rejects_duplicates_and_bad_names(monkeypatch: pytest.MonkeyPatch) -> None:
