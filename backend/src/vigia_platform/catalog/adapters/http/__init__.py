@@ -12,6 +12,11 @@
   VIG-148).
 - ``regression``: estado de la regresión del walk-test (``catalog.read``) y recaptura del encuadre
   (``commissioning.run``; LC-GOB-09, VIG-148).
+- ``agreements``: política de firmantes de la planta, acuerdo de uso, confirmación de cada
+  firmante y aprobación (``commissioning.run``, ``catalog.read`` y ``transparency.read``;
+  LC-GOB-04, VIG-149).
+- ``transparency``: vista de transparencia del COPASST (``transparency.read``; LC-GOB-04,
+  VIG-149).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``CatalogHttp`` en ``app.state``, que la
@@ -23,6 +28,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from vigia_platform.catalog.adapters.http.admissions import admissions_router
+from vigia_platform.catalog.adapters.http.agreements import agreements_router
 from vigia_platform.catalog.adapters.http.catalog import catalog_router
 from vigia_platform.catalog.adapters.http.documents import documents_router
 from vigia_platform.catalog.adapters.http.gates import gates_router
@@ -31,6 +37,7 @@ from vigia_platform.catalog.adapters.http.plant_policy import plant_policy_route
 from vigia_platform.catalog.adapters.http.regression import regression_router
 from vigia_platform.catalog.adapters.http.services import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.http.standards import standards_router
+from vigia_platform.catalog.adapters.http.transparency import transparency_router
 
 __all__ = ["CATALOG_STATE_KEY", "CatalogHttp", "catalog_routers"]
 
@@ -46,4 +53,6 @@ def catalog_routers() -> tuple[APIRouter, ...]:
         standards_router(),
         parameters_router(),
         regression_router(),
+        agreements_router(),
+        transparency_router(),
     )

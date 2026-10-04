@@ -134,6 +134,10 @@ class AuditOperation(enum.StrEnum):
     DOCUMENT_UPLOAD_GRANTED = "document_upload_granted"
     """U-03 (LC-GOB-05, VIG-143): concesión de subida de un documento firmado de planta, como
     ``evidence_read_granted``; la emite un instalador bajo concesión (BR-NUC-38)."""
+    SIGNATORY_POLICY_CHANGED = "signatory_policy_changed"
+    """U-03 (LC-GOB-04, VIG-149): ``PUT /plants/{plant_id}/signatory-policy``. La política de
+    firmantes es una proyección sin tipo de registro (DE §2.7): esta entrada es su rastro, con
+    ``filters`` ``{minimum, required_roles}``; la emite un instalador bajo concesión."""
 
 
 class AuditOutcome(enum.StrEnum):

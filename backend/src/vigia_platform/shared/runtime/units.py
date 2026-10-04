@@ -49,6 +49,9 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp,
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
@@ -62,6 +65,7 @@ from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
 )
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
+from vigia_platform.catalog.application.agreements import USE_AGREEMENT_SIGNED, AgreementService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
@@ -82,6 +86,8 @@ from vigia_platform.catalog.application.scope_record import (
     MOUNTING_GATE_RECORD,
     ScopeRecordService,
 )
+from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
+from vigia_platform.catalog.application.transparency import TransparencyService
 from vigia_platform.catalog.detail_codes import (
     CATALOG_DETAIL_CODE_LABEL_BINDINGS,
     CatalogDetailCode,
@@ -437,6 +443,7 @@ _CATALOG_WRITTEN_TYPES: Final = frozenset(
         RETIRED_RECORD_TYPE,
         SINGLE_OCCUPANCY_RECORD_TYPE,
         MARKED_RECORD_TYPE,
+        USE_AGREEMENT_SIGNED,
     }
 )
 """Tipos de ``catalog.record_types`` que ya escribe una ruta registrada."""
@@ -468,10 +475,13 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     )
     catalog = PostgresCatalogRepository(services.database)
     policies = PostgresPlantPolicyRepository(services.database)
-    # LC-GOB-03 (VIG-146): compuertas con su sobre GateState firmado por SigningPort.
+    agreements = PostgresAgreementRepository()
+    # LC-GOB-03 (VIG-146): compuertas con su sobre GateState firmado por SigningPort; revocar el
+    # uso revoca el acuerdo vigente (VIG-149).
     gates = GateService(
         repository=PostgresGateRepository(services.database),
         catalog=catalog,
+        agreements=agreements,
         database=services.database,
         writer=services.writer,
         authorizer=services.authorizer,
@@ -552,6 +562,33 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
             ),
             catalog=publication,
             regression=regression,
+            # LC-GOB-04 (VIG-149): firmantes, acuerdo de uso y transparencia.
+            signatory_policies=SignatoryPolicyService(
+                repository=agreements,
+                plants=policies,
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+            ),
+            agreements=AgreementService(
+                repository=agreements,
+                gates=gates,
+                policies=policies,
+                documents=documents,
+                identity=hierarchy,
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            transparency=TransparencyService(
+                repository=agreements,
+                gates=gates,
+                catalog=catalog,
+                database=services.database,
+                audit=services.audit,
+            ),
         )
     }
 
