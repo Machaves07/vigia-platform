@@ -1365,6 +1365,83 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/admissions":
+    "post":
+      "tags":
+        - "catálogo"
+      "summary": "Prueba de admisión de tres preguntas de una familia en la planta"
+      "operationId": "evaluate_plants__plant_id__admissions_post"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AdmissionBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AdmissionView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "get":
+      "tags":
+        - "catálogo"
+      "summary": "Evaluaciones de la prueba de admisión de la planta, la más reciente primero"
+      "operationId": "list_admissions_plants__plant_id__admissions_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AdmissionsPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -1449,6 +1526,129 @@
         - "concession_id"
         - "unit"
       "title": "ActorOut"
+    "AdmissionBody":
+      "properties":
+        "family":
+          "$ref": "#/components/schemas/PredicateFamily"
+        "answers":
+          "$ref": "#/components/schemas/AnswersBody"
+        "justification_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Justification Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "family"
+        - "answers"
+      "title": "AdmissionBody"
+    "AdmissionCriterion":
+      "type": "string"
+      "enum":
+        - "standard"
+        - "remedy"
+        - "subject"
+      "title": "AdmissionCriterion"
+      "description": "Criterio de la prueba de admisión que no se cumplió."
+    "AdmissionResult":
+      "type": "string"
+      "enum":
+        - "admitted"
+        - "rejected"
+      "title": "AdmissionResult"
+      "description": "Resultado de la prueba de admisión de tres preguntas (H-43)."
+    "AdmissionView":
+      "properties":
+        "admission_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Admission Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "family":
+          "$ref": "#/components/schemas/PredicateFamily"
+        "answers":
+          "$ref": "#/components/schemas/AnswersBody"
+        "justification_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Justification Es"
+        "result":
+          "$ref": "#/components/schemas/AdmissionResult"
+        "failed_criterion":
+          "anyOf":
+            - "$ref": "#/components/schemas/AdmissionCriterion"
+            - "type": "null"
+        "evaluated_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Evaluated By"
+        "role_in_use":
+          "$ref": "#/components/schemas/Role"
+        "evaluated_at":
+          "type": "string"
+          "title": "Evaluated At"
+        "ledger_record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Ledger Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "admission_id"
+        - "plant_id"
+        - "family"
+        - "answers"
+        - "justification_es"
+        - "result"
+        - "failed_criterion"
+        - "evaluated_by"
+        - "role_in_use"
+        - "evaluated_at"
+        - "ledger_record_id"
+      "title": "AdmissionView"
+      "description": "Una evaluación de la prueba, admitida o rechazada."
+    "AdmissionsPage":
+      "properties":
+        "admissions":
+          "items":
+            "$ref": "#/components/schemas/AdmissionView"
+          "type": "array"
+          "title": "Admissions"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "admissions"
+        - "next_after"
+      "title": "AdmissionsPage"
+    "AnswersBody":
+      "properties":
+        "standard":
+          "type": "boolean"
+          "title": "Standard"
+        "remedy":
+          "type": "boolean"
+          "title": "Remedy"
+        "subject":
+          "type": "boolean"
+          "title": "Subject"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard"
+        - "remedy"
+        - "subject"
+      "title": "AnswersBody"
+      "description": "Las tres preguntas (BR-GOB-13): estándar escrito, remedio de ingeniería o de proceso, y\ndato que pierde sentido al desagregarlo por persona."
     "ApiErrorBody":
       "additionalProperties": false
       "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."
@@ -2949,6 +3149,15 @@
         - "status"
         - "zones"
       "title": "PlantView"
+    "PredicateFamily":
+      "type": "string"
+      "enum":
+        - "coexistence"
+        - "guard_bypass"
+        - "dwell"
+        - "startup_transition"
+      "title": "PredicateFamily"
+      "description": "Familia del predicado de un estándar declarado."
     "ProfileBody":
       "properties":
         "display_name":
