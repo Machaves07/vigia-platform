@@ -44,9 +44,16 @@ pytestmark = pytest.mark.integration
 
 BACKEND = Path(__file__).resolve().parents[2]
 ALEMBIC_TIMEOUT_SECONDS = 180
-HEAD_SCHEMA_VERSION = len(list((BACKEND / "migrations" / "versions").glob("nuc_[0-9]*_*.py")))
+_LINKS = sorted(
+    path.name[:8]
+    for path in (BACKEND / "migrations" / "versions").glob(
+        "[a-z][a-z][a-z]_[0-9][0-9][0-9][0-9]_*.py"
+    )
+)
+HEAD_SCHEMA_VERSION = len(_LINKS)
 """Posición del último eslabón (lo que devuelve ``shared.vigia_schema_version()`` tras ``head``)."""
-HEAD_REVISION = f"nuc_{HEAD_SCHEMA_VERSION:04d}"
+HEAD_REVISION = max(_LINKS, key=lambda revision: int(revision[4:]))
+"""Revisión del último eslabón, de cualquier unidad (``nuc_``, ``gob_`` o ``laz_``)."""
 INSUFFICIENT_PRIVILEGE = "42501"
 CHECK_VIOLATION = "23514"
 
@@ -443,7 +450,8 @@ async def test_vigia_migrate_owns_the_schemas_and_can_extend_them(
         try:
             await connection.execute("CREATE TABLE shared.probe (x integer)")
             await connection.execute("ALTER TABLE shared.consumer ADD COLUMN probe integer")
-            await connection.execute("CREATE SCHEMA catalog")  # U-03 y U-04 crean los suyos
+            # U-03 y U-04 crean los suyos (catalog ya existe desde gob_0017): uno de sonda.
+            await connection.execute("CREATE SCHEMA schema_probe")
         finally:
             await transaction.rollback()
         # Dueño del esquema, pero sin escalar: ni roles nuevos ni atributos para vigia_app.

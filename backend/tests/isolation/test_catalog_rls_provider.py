@@ -1,0 +1,314 @@
+"""Aislamiento de ``catalog`` en la base: organización y concesión de proveedor (TASK-202).
+
+Criterio de TASK-202 (BR-NUC-01, BR-NUC-04, PR-NUC-52, adenda A-46, NFR-GOB-30): con dos
+organizaciones y una concesión de proveedor de **una sola planta**, el proveedor no ve ni escribe
+filas de otra planta ni de otra organización en **ninguna** tabla de ``catalog``; y la prueba
+falla si se quita ``provider_concession_scope`` de una tabla (sonda negativa).
+
+Datos: la proveedora y los clientes A y B de ``tests/identity_db.py`` (dos plantas cada uno) con
+una fila de cada una de las 18 tablas en cada planta (``tests/catalog_db.py``), y una concesión
+vigente del instalador sobre la planta 0 de A. Todo con ``vigia_app`` y el ``ScopeContext`` del
+proveedor (``actor_kind = provider_user`` y ``concession_id``), en transacciones revertidas.
+
+- ``test_provider_sees_only_the_conceded_plant``: lectura de cada tabla.
+- ``test_provider_writes_only_in_the_conceded_plant``: alta de una fila nueva de cada tabla en la
+  planta concedida (pasa la RLS), en la otra planta y en la otra organización (``42501``).
+- ``test_provider_updates_only_rows_of_the_conceded_plant``: ``UPDATE`` de las columnas que
+  ``vigia_app`` puede cambiar, sin filtro: solo alcanza la planta concedida.
+- ``test_revoked_or_expired_concession_sees_nothing``: sin concesión vigente, cero filas.
+- ``test_removing_the_provider_policy_is_detected``: para cada tabla, se quita su política dentro
+  de una transacción revertida y la comprobación de lectura y de escritura detecta la fuga.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import importlib.util
+import uuid
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import asyncpg  # type: ignore[import-untyped]
+import pytest
+import pytest_asyncio
+
+from tests.catalog_db import CATALOG_TABLES, ROW_BUILDERS, CatalogSeed, PlantScope, seed_catalog
+from tests.identity_db import MigratedDatabase, insert_concession, seeded_identity, set_scope
+from tests.integration.conftest import PostgresEndpoint
+
+pytestmark = pytest.mark.integration
+
+PROVIDER = "provider_user"
+INSUFFICIENT_PRIVILEGE = "42501"
+BACKEND = Path(__file__).resolve().parents[2]
+
+
+def _updatable_columns() -> dict[str, tuple[str, ...]]:
+    spec = importlib.util.spec_from_file_location(
+        "gob_0017_isolation", BACKEND / "migrations" / "versions" / "gob_0017_catalog_schema.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return {table: module.app_updatable_columns(table) for table in CATALOG_TABLES}
+
+
+UPDATABLE = _updatable_columns()
+
+
+@dataclass(frozen=True)
+class World:
+    database: MigratedDatabase
+    seed: CatalogSeed
+    concession_id: uuid.UUID
+    revoked_id: uuid.UUID
+    expired_id: uuid.UUID
+
+    @property
+    def conceded(self) -> PlantScope:
+        return self.seed.plant(self.seed.identity.a.organization_id, 0)
+
+    @property
+    def other_plant(self) -> PlantScope:
+        return self.seed.plant(self.seed.identity.a.organization_id, 1)
+
+    @property
+    def other_organization(self) -> PlantScope:
+        return self.seed.plant(self.seed.identity.b.organization_id, 0)
+
+
+@pytest.fixture(scope="module")
+def world(postgres_endpoint: PostgresEndpoint) -> Iterator[World]:
+    with seeded_identity(postgres_endpoint, "vigia_catalog_rls") as (database, identity):
+
+        async def prepare() -> World:
+            connection = await database.connect()
+            try:
+                seed = await seed_catalog(connection, identity)
+                a = identity.a
+                plant_id = a.plants[0].plant_id
+                concessions = [
+                    await insert_concession(
+                        connection,
+                        identity,
+                        a.organization_id,
+                        scope_level="plant",
+                        scope_id=plant_id,
+                        status=status,
+                        **extra,
+                    )
+                    for status, extra in (
+                        ("active", {}),
+                        ("revoked", {}),
+                        (
+                            "expired",
+                            {
+                                "granted_offset": -dt.timedelta(days=10),
+                                "duration": dt.timedelta(days=2),
+                            },
+                        ),
+                    )
+                ]
+            finally:
+                await connection.close()
+            return World(database, seed, *concessions)
+
+        yield asyncio.run(prepare())
+
+
+@pytest_asyncio.fixture
+async def app(world: World) -> AsyncIterator[Any]:
+    connection = await world.database.connect("vigia_app")
+    try:
+        yield connection
+    finally:
+        await connection.close()
+
+
+@pytest_asyncio.fixture
+async def superuser(world: World) -> AsyncIterator[Any]:
+    connection = await world.database.connect()
+    try:
+        yield connection
+    finally:
+        await connection.close()
+
+
+class _Rollback(Exception):
+    """Revierte la transacción de la prueba."""
+
+
+async def _visible(
+    connection: Any, organization_id: uuid.UUID, concession_id: uuid.UUID, table: str
+) -> set[tuple[uuid.UUID, uuid.UUID]]:
+    """(organización, planta) de las filas de ``table`` que ve el contexto del proveedor."""
+    await set_scope(connection, organization_id, actor_kind=PROVIDER, concession_id=concession_id)
+    rows = await connection.fetch(
+        f"SELECT DISTINCT organization_id, plant_id FROM catalog.{table}"  # noqa: S608
+    )
+    return {(row["organization_id"], row["plant_id"]) for row in rows}
+
+
+async def _insert_as_provider(
+    connection: Any,
+    organization_id: uuid.UUID,
+    concession_id: uuid.UUID,
+    target: PlantScope,
+    table: str,
+) -> str:
+    """``ok`` o el SQLSTATE del alta de una fila nueva de ``table`` en ``target`` (revertida).
+
+    El error sale del bloque de la transacción: así se revierte también cuando es un punto de
+    guardado dentro de otra (la sonda negativa).
+    """
+    sql, args = ROW_BUILDERS[table](target)
+    try:
+        async with connection.transaction():
+            await set_scope(
+                connection, organization_id, actor_kind=PROVIDER, concession_id=concession_id
+            )
+            await connection.execute(sql, *args)
+            raise _Rollback
+    except asyncpg.PostgresError as error:
+        return str(error.sqlstate)
+    except _Rollback:
+        return "ok"
+
+
+async def _read_leaks(connection: Any, world: World, table: str) -> list[str]:
+    leaks: list[str] = []
+    conceded = world.conceded
+    async with connection.transaction():
+        seen = await _visible(connection, conceded.organization_id, world.concession_id, table)
+    if seen != {(conceded.organization_id, conceded.plant_id)}:
+        leaks.append(f"{table}: ve {seen}")
+    other = world.other_organization
+    async with connection.transaction():
+        seen = await _visible(connection, other.organization_id, world.concession_id, table)
+    if seen:
+        leaks.append(f"{table}: ve la otra organización {seen}")
+    return leaks
+
+
+async def _write_leaks(connection: Any, world: World, table: str) -> list[str]:
+    leaks: list[str] = []
+    for target in (world.other_plant, world.other_organization):
+        result = await _insert_as_provider(
+            connection, target.organization_id, world.concession_id, target, table
+        )
+        if result != INSUFFICIENT_PRIVILEGE:
+            leaks.append(f"{table}: escribe en {target.plant_id} ({result})")
+    return leaks
+
+
+# --- Lectura y escritura -----
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table", CATALOG_TABLES)
+async def test_provider_sees_only_the_conceded_plant(table: str, app: Any, world: World) -> None:
+    assert await _read_leaks(app, world, table) == []
+    # Un usuario del cliente (sin concesión) sigue viendo sus dos plantas: la política solo acota
+    # al proveedor.
+    a = world.conceded
+    async with app.transaction():
+        await set_scope(app, a.organization_id)
+        rows = await app.fetch(f"SELECT DISTINCT plant_id FROM catalog.{table}")  # noqa: S608
+    assert {row["plant_id"] for row in rows} == {a.plant_id, world.other_plant.plant_id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table", CATALOG_TABLES)
+async def test_provider_writes_only_in_the_conceded_plant(
+    table: str, app: Any, world: World
+) -> None:
+    assert await _write_leaks(app, world, table) == []
+    conceded = world.conceded
+    result = await _insert_as_provider(
+        app, conceded.organization_id, world.concession_id, conceded, table
+    )
+    # En la planta concedida la RLS deja pasar; las tablas de una fila por zona o por planta ya
+    # tienen la suya (clave duplicada, después de la política).
+    singletons = {"zone_gate_state", "walk_test_regression", "plant_signatory_policy"}
+    assert result == ("23505" if table in singletons else "ok")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table", [t for t in CATALOG_TABLES if UPDATABLE[t]])
+async def test_provider_updates_only_rows_of_the_conceded_plant(
+    table: str, app: Any, world: World
+) -> None:
+    column = UPDATABLE[table][0]
+    conceded = world.conceded
+    try:
+        async with app.transaction():
+            await set_scope(
+                app,
+                conceded.organization_id,
+                actor_kind=PROVIDER,
+                concession_id=world.concession_id,
+            )
+            status = await app.fetchval(
+                f"WITH changed AS (UPDATE catalog.{table} SET {column} = {column}"  # noqa: S608
+                " RETURNING plant_id) SELECT array_agg(DISTINCT plant_id) FROM changed"
+            )
+            raise _Rollback
+    except _Rollback:
+        pass
+    assert set(status) == {conceded.plant_id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("which", ["revoked", "expired"])
+async def test_revoked_or_expired_concession_sees_nothing(
+    which: str, app: Any, world: World
+) -> None:
+    concession_id = world.revoked_id if which == "revoked" else world.expired_id
+    conceded = world.conceded
+    for table in CATALOG_TABLES:
+        async with app.transaction():
+            assert await _visible(app, conceded.organization_id, concession_id, table) == set()
+        result = await _insert_as_provider(
+            app, conceded.organization_id, concession_id, conceded, table
+        )
+        assert result == INSUFFICIENT_PRIVILEGE, table
+
+
+@pytest.mark.asyncio
+async def test_provider_actor_without_concession_sees_nothing(app: Any, world: World) -> None:
+    # Fallo cerrado: basta actor_kind de proveedor, aun sin concession_id.
+    conceded = world.conceded
+    for table in CATALOG_TABLES:
+        async with app.transaction():
+            await set_scope(app, conceded.organization_id, actor_kind=PROVIDER)
+            count = await app.fetchval(f"SELECT count(*) FROM catalog.{table}")  # noqa: S608
+        assert count == 0, table
+
+
+# --- Sonda negativa -----
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("table", CATALOG_TABLES)
+async def test_removing_the_provider_policy_is_detected(
+    table: str, superuser: Any, world: World
+) -> None:
+    """Sin ``provider_concession_scope`` en ``table``, las comprobaciones de arriba fallan.
+
+    Superusuario que quita la política y pasa a ``vigia_app`` dentro de una transacción que se
+    revierte siempre: la base de las demás pruebas no cambia.
+    """
+    try:
+        async with superuser.transaction():
+            await superuser.execute(f"DROP POLICY provider_concession_scope ON catalog.{table}")
+            await superuser.execute("SET LOCAL ROLE vigia_app")
+            async with superuser.transaction():  # punto de guardado: las lecturas
+                read = await _read_leaks(superuser, world, table)
+            write = await _write_leaks(superuser, world, table)
+            raise _Rollback
+    except _Rollback:
+        pass
+    assert read and write, (read, write)
