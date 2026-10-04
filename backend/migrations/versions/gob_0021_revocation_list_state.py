@@ -1,6 +1,6 @@
 """Estado global de la lista de revocación de ``vigia-node-ca`` (TASK-218; D-7, PAT-GOB-RES-02).
 
-Revisión gob_0020. La revocación de un nodo (capa 1, BR-GOB-66) deja en **su misma transacción**
+Revisión gob_0021. La revocación de un nodo (capa 1, BR-GOB-66) deja en **su misma transacción**
 la marca única de la lista de revocación: ``dirty_generation`` sube en uno y ``dirty_since``
 guarda el primer instante sin publicar. ``regenerate_revocation_list`` (TASK-220, contexto de
 operador) lee la marca, publica ``ca/crl.pem`` y deja ``published_generation`` en la generación
@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "gob_0020"
-down_revision: str | None = "gob_0019"
+revision: str = "gob_0021"
+down_revision: str | None = "gob_0020"
 branch_labels: None = None
 depends_on: None = None
 

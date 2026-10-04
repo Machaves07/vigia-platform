@@ -1467,6 +1467,163 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/gates":
+    "get":
+      "tags":
+        - "compuertas"
+      "summary": "Estado de las compuertas de montaje y de uso de la zona y su modo resultante"
+      "operationId": "gate_state_zones__zone_id__gates_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GateStateOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/gates/mounting/scope-record":
+    "post":
+      "tags":
+        - "compuertas"
+      "summary": "Acta de alcance: aprueba la compuerta de montaje (la zona pasa a comisionamiento)"
+      "operationId": "scope_record_zones__zone_id__gates_mounting_scope_record_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ScopeRecordBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ScopeRecordOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/gates/{gate}/revocation":
+    "post":
+      "tags":
+        - "compuertas"
+      "summary": "Revoca la compuerta de montaje o de uso con motivo; lo ya escrito permanece"
+      "operationId": "revocation_zones__zone_id__gates__gate__revocation_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "gate"
+          "in": "path"
+          "required": true
+          "schema":
+            "$ref": "#/components/schemas/GateKind"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RevocationBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/GateStateOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/policy":
+    "post":
+      "tags":
+        - "compuertas"
+      "summary": "Carga la versión siguiente de la política de hallazgos incerrables de la planta"
+      "operationId": "sign_policy_plants__plant_id__policy_post"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/PlantPolicyBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PlantPolicyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "get":
+      "tags":
+        - "compuertas"
+      "summary": "Política de hallazgos incerrables vigente de la planta (loaded = false si no hay)"
+      "operationId": "plant_policy_plants__plant_id__policy_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PlantPolicyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/plants/{plant_id}/nodes":
     "post":
       "tags":
@@ -2147,6 +2304,42 @@
       "required":
         - "step"
       "title": "BeginActivation"
+    "BlurVerificationBody":
+      "properties":
+        "declared":
+          "anyOf":
+            - "type": "boolean"
+            - "type": "null"
+          "title": "Declared"
+        "capture_document_ref":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Capture Document Ref"
+      "additionalProperties": false
+      "type": "object"
+      "title": "BlurVerificationBody"
+      "description": "Parte declarada del difuminado (D-2). Los dos campos son opcionales en la forma para que\nsu ausencia responda ``catalog_blur_not_verified``, no ``invalid_request``."
+    "CameraFramingBody":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "framing_description_es":
+          "type": "string"
+          "title": "Framing Description Es"
+        "reference_marker":
+          "type": "boolean"
+          "title": "Reference Marker"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "framing_description_es"
+        - "reference_marker"
+      "title": "CameraFramingBody"
     "ChainOut":
       "properties":
         "kind":
@@ -2862,6 +3055,53 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "GateKind":
+      "type": "string"
+      "enum":
+        - "mounting"
+        - "usage"
+      "title": "GateKind"
+      "description": "Las dos compuertas de una zona."
+    "GateStateOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "mounting":
+          "$ref": "#/components/schemas/MountingGateOut"
+        "usage":
+          "$ref": "#/components/schemas/UsageGateOut"
+        "resulting_mode":
+          "$ref": "#/components/schemas/ZoneMode"
+        "issued_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Issued At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "plant_id"
+        - "mounting"
+        - "usage"
+        - "resulting_mode"
+        - "issued_at"
+      "title": "GateStateOut"
+      "description": "``ZoneGateState`` (§2.4): la proyección, sin el sobre (que viaja al nodo por el latido)."
+    "GateStatus":
+      "type": "string"
+      "enum":
+        - "pending"
+        - "approved"
+        - "revoked"
+      "title": "GateStatus"
+      "description": "Estado de una compuerta (montaje o uso)."
     "GrantBody":
       "properties":
         "client_organization_id":
@@ -3474,6 +3714,35 @@
         - "privacy_notice_version"
         - "api_version"
       "title": "MeResponse"
+    "MountingGateOut":
+      "properties":
+        "status":
+          "$ref": "#/components/schemas/GateStatus"
+        "decided_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Decided At"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+        "decided_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Decided By"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+        - "decided_at"
+        - "record_id"
+        - "decided_by"
+      "title": "MountingGateOut"
     "NodeAssignmentView":
       "properties":
         "assignment_id":
@@ -3739,6 +4008,85 @@
         - "data_region"
         - "timezone"
       "title": "PlantBody"
+    "PlantPolicyBody":
+      "properties":
+        "version":
+          "type": "integer"
+          "title": "Version"
+        "signed_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Signed At"
+        "signed_by_display_name":
+          "type": "string"
+          "title": "Signed By Display Name"
+        "legal_opinion_reference":
+          "type": "string"
+          "title": "Legal Opinion Reference"
+        "criteria_summary_es":
+          "type": "string"
+          "title": "Criteria Summary Es"
+        "document_ref":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Document Ref"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "version"
+        - "signed_at"
+        - "signed_by_display_name"
+        - "legal_opinion_reference"
+        - "criteria_summary_es"
+        - "document_ref"
+      "title": "PlantPolicyBody"
+    "PlantPolicyOut":
+      "properties":
+        "loaded":
+          "type": "boolean"
+          "title": "Loaded"
+        "policy_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Policy Id"
+        "version":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Version"
+        "signed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Signed At"
+        "signed_by_display_name":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Signed By Display Name"
+        "legal_opinion_reference":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Legal Opinion Reference"
+        "document_sha256":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Document Sha256"
+        "criteria_summary_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Criteria Summary Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "loaded"
+      "title": "PlantPolicyOut"
+      "description": "``PlantPolicy`` de ``GateQueryPort.plant_policy`` (interfaces §1.2)."
     "PlantView":
       "properties":
         "plant_id":
@@ -4050,6 +4398,16 @@
         - "reason"
         - "verified_at"
       "title": "ResultOut"
+    "RevocationBody":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "RevocationBody"
     "RevokedBySide":
       "type": "string"
       "enum":
@@ -4100,6 +4458,52 @@
         - "plant_id"
         - "zone_id"
       "title": "ScopeOut"
+    "ScopeRecordBody":
+      "properties":
+        "scope_text_es":
+          "type": "string"
+          "title": "Scope Text Es"
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/CameraFramingBody"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Cameras"
+        "blur_verification":
+          "anyOf":
+            - "$ref": "#/components/schemas/BlurVerificationBody"
+            - "type": "null"
+        "document_ref":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Document Ref"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "scope_text_es"
+        - "cameras"
+      "title": "ScopeRecordBody"
+    "ScopeRecordOut":
+      "properties":
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "plant_policy_loaded_at_signing":
+          "type": "boolean"
+          "title": "Plant Policy Loaded At Signing"
+        "gates":
+          "$ref": "#/components/schemas/GateStateOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "record_id"
+        - "plant_policy_loaded_at_signing"
+        - "gates"
+      "title": "ScopeRecordOut"
     "SecondFactorRequest":
       "properties":
         "code":
@@ -4301,6 +4705,35 @@
         - "never_reported_ms"
         - "zone_not_active_ms"
       "title": "SummaryOut"
+    "UsageGateOut":
+      "properties":
+        "status":
+          "$ref": "#/components/schemas/GateStatus"
+        "decided_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Decided At"
+        "agreement_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Agreement Id"
+        "decided_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Decided By"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+        - "decided_at"
+        - "agreement_id"
+        - "decided_by"
+      "title": "UsageGateOut"
     "UserAssignmentView":
       "properties":
         "assignment_id":
@@ -4444,6 +4877,14 @@
         - "code"
         - "name"
       "title": "ZoneBody"
+    "ZoneMode":
+      "type": "string"
+      "enum":
+        - "no_capture"
+        - "commissioning"
+        - "productive"
+      "title": "ZoneMode"
+      "description": "Modo de operación de una zona, derivado de sus compuertas."
     "ZoneView":
       "properties":
         "zone_id":

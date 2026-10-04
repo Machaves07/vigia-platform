@@ -177,11 +177,11 @@ def gate_interval(
     gate: str = "mounting",
     status: str = "approved",
 ) -> tuple[str, list[Any]]:
-    """Intervalo de ``gate_state_history`` (revocado lleva motivo)."""
+    """Intervalo de ``gate_state_history`` (revocado lleva motivo; decidido, ``record_id``)."""
     return (
         "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id, gate, status,"
-        " effective_from, effective_until, decided_by, reason_es, ledger_record_id)"
-        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        " effective_from, effective_until, decided_by, reason_es, ledger_record_id, record_id)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         [
             scope.organization_id,
             scope.plant_id,
@@ -193,6 +193,7 @@ def gate_interval(
             scope.user_id,
             REASON if status == "revoked" else None,
             uuid.uuid4(),
+            None if status == "pending" else uuid.uuid4(),
         ],
     )
 

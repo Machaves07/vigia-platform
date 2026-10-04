@@ -146,9 +146,14 @@ def test_u02_record_types_come_from_the_registry() -> None:
     assert {"key_rotated", "key_set_published"} <= names
     u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
     assert len(u02) == 14
-    # U-03: solo los tipos que ya escribe una ruta registrada (VIG-142 y VIG-147).
+    # U-03: solo los tipos que ya escribe una ruta registrada (VIG-142 la admisión; VIG-146 el
+    # acta de alcance, la transición de compuerta y la política de planta; VIG-147 la identidad
+    # del nodo).
     assert names - u02 == {
         "standard_admission_test",
+        "mounting_gate_record",
+        "gate_state_changed",
+        "plant_policy_signed",
         "node_communication_state_changed",
         "node_revoked",
         "node_decommissioned",

@@ -122,7 +122,7 @@ REVOCATION_LIST_STATE: Final = Table(
     _instant("next_update", nullable=True),
     _integer("entries"),
 )
-"""``gob_0020`` (TASK-218): marca única y estado de publicación de la lista global, sin RLS."""
+"""``gob_0021`` (TASK-218): marca única y estado de publicación de la lista global, sin RLS."""
 
 REVOCATION_LIST_DIRTY: Final = Table(
     "revocation_list_dirty",

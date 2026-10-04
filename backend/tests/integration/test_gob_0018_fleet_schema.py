@@ -252,7 +252,7 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
     assert {row["relname"] for row in rows} == {*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE}
-    # Excepción documentada (gob_0020, TASK-218): la marca global de la lista, sin datos de cliente.
+    # Excepción documentada (gob_0021, TASK-218): la marca global de la lista, sin datos de cliente.
     secured = [row for row in rows if row["relname"] != REVOCATION_STATE_TABLE]
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in secured), rows
     (state,) = [row for row in rows if row["relname"] == REVOCATION_STATE_TABLE]

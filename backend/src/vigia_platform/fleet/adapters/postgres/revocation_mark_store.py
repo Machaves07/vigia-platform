@@ -1,4 +1,4 @@
-"""Marca única de la lista de revocación global (TASK-218; gob_0020; D-7, PAT-GOB-RES-02).
+"""Marca única de la lista de revocación global (TASK-218; gob_0021; D-7, PAT-GOB-RES-02).
 
 ``fleet.revocation_list_state`` es una fila global sin datos de cliente. La revocación de un nodo
 (y la re-alta, que revoca la credencial anterior) llama a ``mark_dirty`` **en su propia

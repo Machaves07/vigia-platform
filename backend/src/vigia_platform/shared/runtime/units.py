@@ -49,11 +49,28 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp,
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
+from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
+    PostgresPlantPolicyRepository,
+)
+from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
+    PostgresScopeRecordRepository,
+)
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
+)
+from vigia_platform.catalog.application.gates import GATE_STATE_CHANGED, GateService
+from vigia_platform.catalog.application.plant_policy import (
+    PLANT_POLICY_SIGNED,
+    PlantPolicyService,
+)
+from vigia_platform.catalog.application.scope_record import (
+    MOUNTING_GATE_RECORD,
+    ScopeRecordService,
 )
 from vigia_platform.catalog.detail_codes import (
     CATALOG_DETAIL_CODE_LABEL_BINDINGS,
@@ -422,7 +439,9 @@ def _shared_routers() -> tuple[APIRouter, ...]:
 # --- U-03 ----------------------------------------------------------------------------------------
 
 
-_CATALOG_WRITTEN_TYPES: Final = frozenset({ADMISSION_RECORD_TYPE})
+_CATALOG_WRITTEN_TYPES: Final = frozenset(
+    {ADMISSION_RECORD_TYPE, GATE_STATE_CHANGED, MOUNTING_GATE_RECORD, PLANT_POLICY_SIGNED}
+)
 """Tipos de ``catalog.record_types`` que ya escribe una ruta registrada."""
 
 
@@ -440,6 +459,42 @@ def _document_settings(config: RuntimeConfig | None) -> DocumentSettings:
 
 
 def _catalog_state(services: UnitServices) -> Mapping[str, object]:
+    # LC-GOB-05 (VIG-143): POST /documents sobre vigia-evidence; las actas y la política de
+    # planta verifican sus documentos con el mismo servicio.
+    documents = DocumentService(
+        database=services.database,
+        audit=services.audit,
+        authorizer=services.authorizer,
+        store=DocumentObjectStore(services.require_evidence()),
+        clock=services.clock,
+        settings=_document_settings(services.config),
+    )
+    catalog = PostgresCatalogRepository(services.database)
+    policies = PostgresPlantPolicyRepository(services.database)
+    # LC-GOB-03 (VIG-146): compuertas con su sobre GateState firmado por SigningPort.
+    gates = GateService(
+        repository=PostgresGateRepository(services.database),
+        catalog=catalog,
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        signer=services.signing,
+        clock=services.clock,
+    )
+    hierarchy = HierarchyService(
+        IdentityDependencies(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+            authorizer=services.authorizer,
+            free_text=services.free_text,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        )
+    )
     return {
         CATALOG_STATE_KEY: CatalogHttp(
             admissions=AdmissionService(
@@ -451,14 +506,27 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 free_text=services.free_text,
                 clock=services.clock,
             ),
-            # LC-GOB-05 (VIG-143): POST /documents sobre vigia-evidence.
-            documents=DocumentService(
+            documents=documents,
+            gates=gates,
+            scope_records=ScopeRecordService(
+                gates=gates,
+                records=PostgresScopeRecordRepository(services.database),
+                catalog=catalog,
+                policies=policies,
+                documents=documents,
+                nodes=hierarchy,
+                writer=services.writer,
+                free_text=services.free_text,
+            ),
+            plant_policies=PlantPolicyService(
+                repository=policies,
+                documents=documents,
                 database=services.database,
-                audit=services.audit,
+                writer=services.writer,
                 authorizer=services.authorizer,
-                store=DocumentObjectStore(services.require_evidence()),
+                audit=services.audit,
+                free_text=services.free_text,
                 clock=services.clock,
-                settings=_document_settings(services.config),
             ),
         )
     }

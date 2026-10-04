@@ -87,9 +87,28 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
+from vigia_platform.catalog.adapters.postgres.catalog_repository import (
+    PostgresCatalogRepository,
+)
+from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
+    PostgresPlantPolicyRepository,
+)
+from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
+    PostgresScopeRecordRepository,
+)
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.documents import DocumentService
+from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.plant_policy import (
+    PLANT_POLICY_SIGNED,
+    PlantPolicyService,
+)
+from vigia_platform.catalog.application.scope_record import (
+    MOUNTING_GATE_RECORD,
+    ScopeRecordService,
+)
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
@@ -169,10 +188,25 @@ ZERO_WIDTH_SPACE: Final = chr(0x200B)
 INSTALLER_KEYS: Final = frozenset(key.value for key in permissions_of(Role.PROVIDER_INSTALLER))
 """La columna ``provider_installer`` de la matriz (BR-NUC-37)."""
 ADMISSION_TYPES: Final = tuple(
-    d for d in CATALOG_RECORD_TYPES if d.record_type == ADMISSION_RECORD_TYPE
+    d
+    for d in CATALOG_RECORD_TYPES
+    if d.record_type in (ADMISSION_RECORD_TYPE, MOUNTING_GATE_RECORD, PLANT_POLICY_SIGNED)
 )
-"""El tipo que escriben las rutas de admisión (los que registra la unidad ``catalog``)."""
+"""Los tipos que escriben las rutas del catálogo; ``gate_state_changed`` ya lo trae
+``COVERAGE_TYPES`` (la versión de prueba con la que se siembran las compuertas de U-02)."""
 DOCUMENT: Final = b"%PDF-1.7 acta de alcance sintetica"
+
+
+def _document_ref(ids: Ids, kind: str = "blur_check_capture") -> dict[str, Any]:
+    """Una referencia bien formada que no corresponde a ninguna concesión (``invalid_request``)."""
+    document_id = uuid7()
+    return {
+        "document_id": str(document_id),
+        "storage_key": f"org/{ids.organization}/plant/{ids.plant}/documents/{document_id}.pdf",
+        "sha256": hashlib.sha256(DOCUMENT + kind.encode()).hexdigest(),
+        "content_type": "application/pdf",
+        "size_bytes": len(DOCUMENT),
+    }
 
 
 class StubDocumentStorage:
@@ -524,6 +558,51 @@ CASES: Final[dict[tuple[str, str], Case]] = {
         Kind.RESOURCE,
         lambda i: Call("POST", f"/nodes/{i.retired_node}/decommission", json={"reason_es": REASON}),
     ),
+    ("GET", "/zones/{zone_id}/gates"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/gates")
+    ),
+    ("POST", "/zones/{zone_id}/gates/mounting/scope-record"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/zones/{i.zone}/gates/mounting/scope-record",
+            json={
+                "scope_text_es": "Se observa la celda de prensado durante el turno",
+                "cameras": [
+                    {
+                        "camera_id": str(i.label),
+                        "framing_description_es": "Encuadre cenital de la celda",
+                        "reference_marker": True,
+                    }
+                ],
+                "blur_verification": {"declared": True, "capture_document_ref": _document_ref(i)},
+            },
+        ),
+    ),
+    ("POST", "/zones/{zone_id}/gates/{gate}/revocation"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST", f"/zones/{i.zone}/gates/mounting/revocation", json={"reason_es": REASON}
+        ),
+    ),
+    ("POST", "/plants/{plant_id}/policy"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/plants/{i.plant}/policy",
+            json={
+                "version": 1,
+                "signed_at": _stamp(T0),
+                "signed_by_display_name": "Gerencia de la planta",
+                "legal_opinion_reference": "Concepto jurídico CJ-1",
+                "criteria_summary_es": "Resumen sintético de los criterios",
+                "document_ref": _document_ref(i, "plant_policy"),
+            },
+        ),
+    ),
+    ("GET", "/plants/{plant_id}/policy"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/policy")
+    ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
         Kind.PROVIDER_ONLY,
@@ -540,6 +619,21 @@ PROVIDER_SIDE_ONLY: Final = frozenset(
 )
 """Clave de la columna, pero solo desde la proveedora sin concesión (A-46): bajo concesión,
 ``not_found`` tras su ``provider_query``."""
+
+STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
+    # La zona de B no tiene catálogo: los encuadres no son sus cámaras.
+    ("POST", "/zones/{zone_id}/gates/mounting/scope-record"): "invalid_request",
+    # La compuerta de montaje de B está pending: no hay nada que revocar.
+    ("POST", "/zones/{zone_id}/gates/{gate}/revocation"): "conflict",
+    # El document_ref no corresponde a ninguna concesión de B.
+    ("POST", "/plants/{plant_id}/policy"): "invalid_request",
+}
+"""Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
+no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
+una compuerta aprobada; una política, la versión siguiente). Bajo concesión basta que la ruta
+autorice y llegue al negocio: el código de negocio de la tabla, nunca ``not_found``. El camino
+completo del instalador bajo concesión está en ``tests/integration/test_catalog_gates.py`` y
+``test_catalog_plant_policy.py``."""
 
 
 def declared(routes: Sequence[BaseRoute]) -> dict[tuple[str, str], Any]:
@@ -1078,6 +1172,26 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             audit=sessions.audit,
             provider_organization_id=provider,
         )
+        documents = DocumentService(
+            database=sessions.database,
+            audit=sessions.audit,
+            authorizer=authz.authorizer,
+            store=DocumentObjectStore(StubDocumentStorage()),
+            clock=env.clock,
+        )
+        catalog_repository = PostgresCatalogRepository(sessions.database)
+        policy_repository = PostgresPlantPolicyRepository(sessions.database)
+        gates = GateService(
+            repository=PostgresGateRepository(sessions.database),
+            catalog=catalog_repository,
+            database=sessions.database,
+            writer=writer,
+            authorizer=authz.authorizer,
+            audit=sessions.audit,
+            free_text=free_text,
+            signer=signing,
+            clock=env.clock,
+        )
         app = World(clock=sessions.clock).app(
             units=None,
             permissions=None,
@@ -1103,12 +1217,27 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             free_text=free_text,
                             clock=sessions.clock,
                         ),
-                        documents=DocumentService(
+                        documents=documents,
+                        gates=gates,
+                        scope_records=ScopeRecordService(
+                            gates=gates,
+                            records=PostgresScopeRecordRepository(sessions.database),
+                            catalog=catalog_repository,
+                            policies=policy_repository,
+                            documents=documents,
+                            nodes=HierarchyService(deps),
+                            writer=writer,
+                            free_text=free_text,
+                        ),
+                        plant_policies=PlantPolicyService(
+                            repository=policy_repository,
+                            documents=documents,
                             database=sessions.database,
-                            audit=sessions.audit,
+                            writer=writer,
                             authorizer=authz.authorizer,
-                            store=DocumentObjectStore(StubDocumentStorage()),
-                            clock=env.clock,
+                            audit=sessions.audit,
+                            free_text=free_text,
+                            clock=sessions.clock,
                         ),
                     ),
                     FLEET_STATE_KEY: fleet_http(
@@ -1327,9 +1456,14 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
                 failures.append(f"{route} ({name}): provider_query {documents}")
         if in_column and (method, path) not in PROVIDER_SIDE_ONLY:
             allowed_routes.append(route)
-            if not 200 <= own.response.status_code < 300:
+            stateful = STATEFUL_WRITES.get((method, path))
+            if stateful is not None:
+                # Autorizó y llegó al negocio (no se escribe nada, así que no hay auditoría).
+                if _code(own.response) != stateful:
+                    failures.append(f"{route}: en la columna y responde {own.response.text}")
+            elif not 200 <= own.response.status_code < 300:
                 failures.append(f"{route}: en la columna y responde {own.response.text}")
-            if not own.audit:
+            if stateful is None and not own.audit:
                 failures.append(f"{route}: sin auditoría normal de la petición del proveedor")
             if case.kind is Kind.RESOURCE and _code(missing.response) != "not_found":
                 failures.append(f"{route}: inexistente responde {missing.response.text}")
@@ -1368,6 +1502,11 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /nodes/{node_id}/enrollment-attempts",
         "POST /nodes/{node_id}/revocation",
         "POST /nodes/{node_id}/decommission",
+        "GET /zones/{zone_id}/gates",
+        "POST /zones/{zone_id}/gates/mounting/scope-record",
+        "POST /zones/{zone_id}/gates/{gate}/revocation",
+        "POST /plants/{plant_id}/policy",
+        "GET /plants/{plant_id}/policy",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.
