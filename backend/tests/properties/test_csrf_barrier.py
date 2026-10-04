@@ -23,6 +23,7 @@ from hypothesis import strategies as st
 
 from tests.middleware_support import (
     CLIENT_ORG,
+    NODE_HEARTBEAT_PATH,
     ORIGIN,
     PROVIDER_ORG,
     SAME_ORIGIN,
@@ -292,7 +293,7 @@ def test_safe_methods_do_not_pass_the_barrier(harness: Harness, method: str) -> 
 def test_node_routes_are_outside_the_barrier_by_construction(harness: Harness) -> None:
     with TestClient(harness.app()) as client:
         response = client.post(
-            "/api/nodes/heartbeat",
+            NODE_HEARTBEAT_PATH,
             headers={"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"},
             json={"sequence": 1},
         )

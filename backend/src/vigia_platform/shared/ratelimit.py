@@ -14,9 +14,11 @@ límite: en cualquier ventana de un minuto un proceso acepta al menos el límite
 nunca más del límite más la ráfaga (PR-NUC-44).
 
 **Claves** (lista cerrada, ``KEY_PATTERN``): ``session:<sha256>``, ``origin:<hmac>``,
-``public:<hmac>`` y, para U-03 (pendiente nº 37), ``node:<node_id>:<operación>``. El origen de red
-nunca se guarda en claro: ``origin_key`` lo reduce a un HMAC-SHA256 con una clave aleatoria del
-proceso, así que ni un volcado de memoria contiene direcciones.
+``public:<hmac>`` y, para U-03 (pendiente nº 37), ``node:<node_id>:<operación>``; además (TASK-206)
+``enrollment:<hmac>:<ventana>`` (el alta por origen, con una clave por ventana: ``quarter`` de
+15 minutos y ``day``) y ``brake:node`` (el freno global de emergencia de las rutas del contrato).
+El origen de red nunca se guarda en claro: ``origin_key`` lo reduce a un HMAC-SHA256 con una clave
+aleatoria del proceso, así que ni un volcado de memoria contiene direcciones.
 
 **Aritmética entera**: el crédito de un cubo se cuenta en «fichas x nanosegundos de ventana»;
 cada nanosegundo suma ``limit`` unidades y una petición cuesta ``window_ns``. Así no hay errores
@@ -28,16 +30,19 @@ nuevo; si aun así se supera el tope, se descarta el menos usado recientemente (
 recupera un cubo lleno: el límite sigue siendo aproximado, nunca más estricto de lo debido).
 
 ``retry_after_seconds`` de una respuesta ``Limited`` es siempre un entero de 1 a 3 600: lo que
-falta para la siguiente ficha, redondeado hacia arriba.
+falta para la siguiente ficha, redondeado hacia arriba. Hacia un nodo se acota a 1..60
+(``contract_retry_after``, NFR-GOB-33).
 """
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import hmac
 import os
 import re
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -45,23 +50,36 @@ from vigia_platform.shared.clock import Clock
 
 __all__ = [
     "AUTHENTICATED_ORIGIN_BUDGET",
+    "BRAKE_KEY",
+    "BRAKE_OFF",
+    "CONTRACT_MAX_RETRY_AFTER_SECONDS",
     "DEFAULT_MAX_KEYS",
     "KEY_PATTERN",
+    "MAX_BRAKE_PER_MINUTE",
     "MAX_RETRY_AFTER_SECONDS",
     "PUBLIC_ORIGIN_BUDGET",
     "SESSION_BUDGET",
     "Allowed",
     "Budget",
+    "EnrollmentWindow",
     "Limited",
     "RateLimiter",
+    "brake_filters",
+    "contract_retry_after",
+    "enrollment_origin_key",
     "node_key",
     "origin_key",
+    "parse_brake",
     "public_key",
     "session_key",
 ]
 
 _NS_PER_SECOND: Final = 1_000_000_000
 MAX_RETRY_AFTER_SECONDS: Final = 3_600
+CONTRACT_MAX_RETRY_AFTER_SECONDS: Final = 60
+"""Tope de ``retry_after_seconds`` en un ``rate_limited`` del contrato (NFR-GOB-33)."""
+BRAKE_KEY: Final = "brake:node"
+"""Cubo del freno global de emergencia de las rutas del contrato (TASK-206)."""
 DEFAULT_MAX_KEYS: Final = 100_000
 """Tope de cubos por proceso ``[objetivo propio]``: unos 20 MB en el peor caso."""
 DEFAULT_PRUNE_EVERY: Final = 1_024
@@ -69,6 +87,8 @@ DEFAULT_PRUNE_EVERY: Final = 1_024
 KEY_PATTERN: Final = re.compile(
     r"(?:session|origin|public):[0-9a-f]{64}"
     r"|node:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[a-z][a-z0-9_]{0,63}"
+    r"|enrollment:[0-9a-f]{64}:(?:quarter|day)"
+    r"|brake:node"
 )
 """Forma cerrada de una clave del limitador; ninguna lleva una dirección ni un secreto en claro."""
 
@@ -263,6 +283,55 @@ def origin_key(address: object, *, secret: bytes | None = None) -> str:
 def public_key(address: object, *, secret: bytes | None = None) -> str:
     """Clave por origen de red en rutas públicas (cubo distinto del autenticado)."""
     return f"public:{_origin_digest(address, secret or _ProcessSecret.value)}"
+
+
+class EnrollmentWindow(enum.StrEnum):
+    """Las dos ventanas del límite del alta por origen (NFR-GOB-33): 15 minutos y un día."""
+
+    QUARTER = "quarter"
+    DAY = "day"
+
+
+def enrollment_origin_key(
+    address: object, window: EnrollmentWindow, *, secret: bytes | None = None
+) -> str:
+    """Clave del alta por origen de red en ``window``: HMAC de la dirección, nunca en claro."""
+    window = EnrollmentWindow(window)
+    return f"enrollment:{_origin_digest(address, secret or _ProcessSecret.value)}:{window.value}"
+
+
+def contract_retry_after(seconds: int) -> int:
+    """``retry_after_seconds`` de un ``rate_limited`` del contrato: el del cubo acotado a 1..60."""
+    return min(max(int(seconds), 1), CONTRACT_MAX_RETRY_AFTER_SECONDS)
+
+
+# --- Freno global de las rutas del contrato (TASK-206) -------------------------------------------
+
+BRAKE_OFF: Final = "off"
+MAX_BRAKE_PER_MINUTE: Final = 1_000_000
+
+
+def brake_filters(per_minute: int | None) -> dict[str, str]:
+    """Los ``filters`` de la entrada ``node_rate_brake_set``: ``{"per_minute": "<n>"|"off"}``.
+
+    La escribe ``vigia-admin set-node-rate-brake`` y la lee ``node_api.limits`` (la auditoría es
+    el ajuste del freno global de emergencia, NFR-GOB-33).
+    """
+    if per_minute is None:
+        return {"per_minute": BRAKE_OFF}
+    if type(per_minute) is not int or not 1 <= per_minute <= MAX_BRAKE_PER_MINUTE:
+        raise ValueError(f"el freno debe ser de 1 a {MAX_BRAKE_PER_MINUTE} por minuto")
+    return {"per_minute": str(per_minute)}
+
+
+def parse_brake(filters: object) -> int | None:
+    """El límite por minuto de una entrada ``node_rate_brake_set`` (``None``: sin freno)."""
+    value = filters.get("per_minute") if isinstance(filters, Mapping) else None
+    if value == BRAKE_OFF or not isinstance(value, str) or not value.isascii():
+        return None
+    if not value.isdigit() or not 1 <= int(value) <= MAX_BRAKE_PER_MINUTE:
+        return None
+    return int(value)
 
 
 def node_key(node_id: object, operation: str) -> str:

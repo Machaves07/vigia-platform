@@ -99,7 +99,12 @@ from vigia_platform.ledger.domain.coverage import (
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types import register_u02_record_types
 from vigia_platform.ledger.registry import ChainLevel, RecordTypeRegistry
+from vigia_platform.node_api.identity import NodeIdentity, PostgresNodeContextStore
+from vigia_platform.node_api.limits import AuditBrakeSource, EmergencyBrake, NodeRateLimits
+from vigia_platform.node_api.observability import NodeResponses
+from vigia_platform.node_api.router import NodeApiGate, NodeOperation, node_router
 from vigia_platform.shared.adapters.http import DEFAULT_VERIFIER_PATH, shared_routers
+from vigia_platform.shared.api.declarations import NODE_GATE_STATE_KEY, NodeRoute
 from vigia_platform.shared.api.errors import ApiErrorCode
 from vigia_platform.shared.api.health import health_router
 from vigia_platform.shared.archive.audit_archive import (
@@ -135,6 +140,7 @@ from vigia_platform.shared.outbox.registries import (
     PeriodicTaskRegistry,
 )
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
+from vigia_platform.shared.ratelimit import RateLimiter
 from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
@@ -434,6 +440,42 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     }
 
 
+PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = ()
+"""Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
+222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. Mientras esté vacía,
+``app.yaml`` no tiene rutas ``/api/nodes/`` (el trabajo de conformidad de ``nightly.yml`` se
+omite hasta TASK-230)."""
+
+
+def _node_routers() -> tuple[APIRouter, ...]:
+    return (node_router(PUBLISHED_NODE_ROUTES),)
+
+
+def _node_operations(services: UnitServices) -> Mapping[NodeRoute, NodeOperation]:
+    """Los manejadores de negocio de las rutas publicadas (ninguno todavía)."""
+    return {}
+
+
+def _node_api_state(services: UnitServices) -> Mapping[str, object]:
+    """La verificación previa común de las rutas del contrato (``NodeApiGate``, TASK-206)."""
+    database = services.database
+    contexts = services.contexts
+    clock = services.clock
+    brake = EmergencyBrake(
+        AuditBrakeSource(database=database, provider_context=contexts.provider_audit_context),
+        clock,
+    )
+    return {
+        NODE_GATE_STATE_KEY: NodeApiGate(
+            identity=NodeIdentity(contexts=contexts, store=PostgresNodeContextStore(database)),
+            limits=NodeRateLimits(RateLimiter(clock), brake=brake, metrics=services.metrics),
+            clock=clock,
+            responses=NodeResponses(clock, metrics=services.metrics),
+            operations=_node_operations(services),
+        )
+    }
+
+
 REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
     PlatformUnit(
         name="shared",
@@ -488,6 +530,8 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
         name="fleet",
         labels={**FLEET_LABEL_BINDINGS, **FLEET_DETAIL_CODE_LABEL_BINDINGS},
     ),
+    # VIG-144 (TASK-206): el adaptador único de las rutas del contrato (LC-GOB-19, A-51).
+    PlatformUnit(name="node_api", routers=_node_routers, api_state=_node_api_state),
 )
 """Las unidades registradas, en orden de registro. U-03 y U-04 añaden aquí su entrada."""
 

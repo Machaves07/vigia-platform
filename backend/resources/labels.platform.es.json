@@ -80,7 +80,8 @@
     "session": "sesión",
     "outbox_event": "evento de la bandeja",
     "periodic_iteration": "iteración periódica",
-    "admin_command": "orden administrativa"
+    "admin_command": "orden administrativa",
+    "node_request": "petición de nodo"
   },
   "signing_purpose": {
     "catalog": "catálogo",

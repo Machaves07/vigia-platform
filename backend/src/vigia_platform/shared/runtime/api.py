@@ -14,7 +14,9 @@ Construye:
   ``SigningService`` con ``LedgerRotationRecorder`` y la infraestructura común
   (``shared.runtime.core``);
 - ``CpuPool`` de ``VIGIA_THREADPOOL_SIZE`` (Argon2id, TOTP, firmas), ``RateLimiter``,
-  ``ScopeContexts`` y el autorizador por ruta (``ContextAuthorizer``);
+  los mamparos por clase de ruta de ``VIGIA_BULKHEAD_NODE`` y ``VIGIA_BULKHEAD_PERSON``
+  (``Bulkheads``, LC-GOB-20), ``ScopeContexts`` y el autorizador por ruta
+  (``ContextAuthorizer``);
 - los servicios de las rutas: ``IdentityHttp``, ``LedgerHttp``, ``PlatformHttp`` y los que cada
   unidad deja en ``app.state`` (``units.api_state``);
 - los sincronizadores de tipos de registro y del catálogo de la bandeja (``registries``).
@@ -72,6 +74,7 @@ from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.shared.adapters.http import PlatformHttp
 from vigia_platform.shared.api.app import AppConfig, AppRuntime
 from vigia_platform.shared.api.middleware import AuditCsrfRejections, ContextAuthorizer
+from vigia_platform.shared.bulkheads import Bulkheads
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
@@ -257,6 +260,9 @@ async def compose_api_runtime(
         ),
         origin_secret=origin_key,
         rate_limiter=RateLimiter(clock),
+        # Los semáforos por clase de ruta con los tamaños de VIGIA_BULKHEAD_NODE y
+        # VIGIA_BULKHEAD_PERSON (LC-GOB-20; revisión de VIG-140).
+        bulkheads=Bulkheads(settings=runtime.bulkheads, clock=clock, metrics=metrics),
         identity=identity,
         ledger=ledger,
         platform=platform,

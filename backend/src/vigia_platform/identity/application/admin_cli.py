@@ -22,6 +22,10 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
   paquete (D-6).
 - ``restore-audit-partition``: descarga, verifica y extrae un archivo de auditoría en un
   directorio nuevo; solo lectura (runbook 6.5).
+- ``set-node-rate-brake --per-minute N|--off --operator``: freno global de emergencia de las
+  rutas del contrato sin despliegue (NFR-GOB-33, TASK-206). Escribe ``node_rate_brake_set`` en la
+  auditoría de la proveedora con el valor en ``filters``: esa entrada **es** el ajuste, y cada
+  ``vigia-api`` la lee con una caché de 10 s (``node_api.limits``).
 
 **Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
 almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
@@ -117,6 +121,7 @@ from vigia_platform.shared.node_ca import (
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
 from vigia_platform.shared.outbox.registries import REGISTRY_NAME
 from vigia_platform.shared.outbox.replay import ReplayReceipt
+from vigia_platform.shared.ratelimit import MAX_BRAKE_PER_MINUTE, brake_filters
 from vigia_platform.shared.runtime.config import RuntimeConfigInvalid
 from vigia_platform.shared.secrets import SecretsUnavailable
 from vigia_platform.shared.signing.keys import (
@@ -717,7 +722,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_operator(drill)
     _add_common(drill)
+
+    brake = commands.add_parser(
+        "set-node-rate-brake",
+        help="fija o quita el freno global de las rutas del contrato",
+        description=(
+            "Escribe node_rate_brake_set en la auditoría de la proveedora: cada vigia-api lo "
+            "aplica en menos de 10 s a todas las rutas de nodos, sin despliegue (NFR-GOB-33)."
+        ),
+    )
+    limit = brake.add_mutually_exclusive_group(required=True)
+    limit.add_argument(
+        "--per-minute",
+        type=_brake_argument,
+        metavar="N",
+        help=f"peticiones de nodo por minuto y proceso (1 a {MAX_BRAKE_PER_MINUTE})",
+    )
+    limit.add_argument("--off", action="store_true", help="quita el freno")
+    _add_operator(brake)
+    _add_common(brake)
     return parser
+
+
+def _brake_argument(value: str) -> int:
+    if not value.isascii() or not value.isdigit() or not 1 <= int(value) <= MAX_BRAKE_PER_MINUTE:
+        raise argparse.ArgumentTypeError(f"debe ser un entero de 1 a {MAX_BRAKE_PER_MINUTE}")
+    return int(value)
 
 
 # --- Órdenes ------------------------------------------------------------------------------------
@@ -1322,6 +1352,40 @@ async def _record_restore_drill(
     )
 
 
+async def _set_node_rate_brake(
+    args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
+) -> None:
+    """El freno global de las rutas del contrato: la entrada de auditoría es el ajuste."""
+    _require_provider(config)
+    per_minute: int | None = None if args.off else args.per_minute
+    filters = brake_filters(per_minute)
+    operator = await _operator_context(args, runtime)
+    if args.dry_run:
+        _emit(
+            streams,
+            {
+                "command": "set-node-rate-brake",
+                "dry_run": True,
+                "operator_user_id": str(operator.actor.id),
+                "per_minute": filters["per_minute"],
+            },
+        )
+        return
+    receipt = await runtime.audit.append(
+        operator, AuditOperation.NODE_RATE_BRAKE_SET, filters=filters
+    )
+    _emit(
+        streams,
+        {
+            "command": "set-node-rate-brake",
+            "dry_run": False,
+            "per_minute": filters["per_minute"],
+            "audit_entry_id": str(receipt.entry_id),
+            "chain_sequence": receipt.chain_sequence,
+        },
+    )
+
+
 type Command = Callable[[argparse.Namespace, AdminConfig, AdminRuntime, Streams], Awaitable[None]]
 
 COMMANDS: Final[Mapping[str, Command]] = {
@@ -1333,6 +1397,7 @@ COMMANDS: Final[Mapping[str, Command]] = {
     "create-partitions": _create_partitions,
     "restore-audit-partition": _restore_audit_partition,
     "record-restore-drill": _record_restore_drill,
+    "set-node-rate-brake": _set_node_rate_brake,
 }
 
 
