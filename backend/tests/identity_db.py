@@ -189,7 +189,7 @@ def _email(label: str) -> str:
 
 
 def _code(label: str) -> str:
-    return f"{label}-{secrets.token_hex(3).upper()}"
+    return f"{label}-{secrets.token_hex(8).upper()}"
 
 
 def _public_key() -> str:
