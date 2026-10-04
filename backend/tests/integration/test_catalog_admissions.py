@@ -446,6 +446,35 @@ def test_admission_for_never_crosses_plants_or_organizations(admissions: Admissi
     assert admissions.run(service.admission_for(own, plant_b, family)) is not None
 
 
+def test_the_statements_filter_the_organization_even_without_rls(admissions: Admissions) -> None:
+    # Como superusuario la RLS no aplica: lo que separa las organizaciones es el filtro de
+    # organización de cada sentencia (defensa en profundidad; sin él, esta prueba falla).
+    site = admissions.authz.add_site(plants=1, zones_per_plant=1)
+    other = admissions.authz.add_site(plants=1, zones_per_plant=1)
+    plant = next(iter(site.plants))
+    assert admissions.post(admissions.member(site), plant, _body("dwell")).status_code == 201
+    migrated = admissions.authz.sessions.migrated
+    database = app_database(migrated, url=migrated.as_role().sqlalchemy_url, worker_pool_size=1)
+    repository = PostgresAdmissionRepository(database)
+    own = unit_context(site.organization_id, ActorUnit.U03)
+    foreign = unit_context(other.organization_id, ActorUnit.U03)
+    family = PredicateFamily.DWELL
+
+    async def page(context: Any) -> Any:
+        async with database.transaction(context) as transaction:
+            return await repository.page(transaction, plant, after=None, limit=10)
+
+    try:
+        assert admissions.run(repository.admitted(own, plant, family)) is not None
+        assert len(admissions.run(page(own))) == 1
+        assert admissions.run(repository.plant_exists(own, plant))
+        assert admissions.run(repository.admitted(foreign, plant, family)) is None
+        assert admissions.run(page(foreign)) == ()
+        assert not admissions.run(repository.plant_exists(foreign, plant))
+    finally:
+        admissions.run(database.dispose())
+
+
 def test_admission_for_ignores_rejected_evaluations(admissions: Admissions) -> None:
     site = admissions.authz.add_site(plants=1, zones_per_plant=1)
     plant = next(iter(site.plants))
