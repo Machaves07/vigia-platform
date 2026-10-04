@@ -2102,6 +2102,180 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/commissioning-clips":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Clips de verificación del difuminado de la zona, el más reciente primero"
+      "operationId": "commissioning_clips_zones__zone_id__commissioning_clips_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 36
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommissioningClipsOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/api/nodes/clip-uploads":
+    "post":
+      "tags":
+        - "clips"
+      "summary": "Concesión de subida de un clip."
+      "operationId": "post_clip_upload"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClipUploadGrant"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 16384
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/clip-uploads/{clip_id}/confirmation":
+    "post":
+      "tags":
+        - "clips"
+      "summary": "Confirmación de un clip de verificación."
+      "operationId": "post_clip_upload_confirmation"
+      "parameters":
+        - "name": "clip_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Clip Id"
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/VerificationClipReceipt"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "x-vigia-mutual-tls": true
+      "x-vigia-content-encodings": []
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -2945,6 +3119,53 @@
         - "organization_id"
         - "checkpoints"
       "title": "CheckpointsOut"
+    "ClipUploadGrant":
+      "properties":
+        "clip_id":
+          "$ref": "#/components/schemas/UUIDv7"
+        "purpose":
+          "$ref": "#/components/schemas/ClipUploadPurpose"
+        "upload_url":
+          "type": "string"
+          "maxLength": 2048
+          "minLength": 9
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]*$"
+          "title": "Upload Url"
+        "method":
+          "type": "string"
+          "const": "PUT"
+          "title": "Method"
+        "expires_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "max_size_bytes":
+          "type": "integer"
+          "maximum": 52428800.0
+          "minimum": 1.0
+          "title": "Max Size Bytes"
+        "required_headers":
+          "$ref": "#/components/schemas/RequiredHeaders"
+        "storage_key":
+          "$ref": "#/components/schemas/StorageKey"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "clip_id"
+        - "purpose"
+        - "upload_url"
+        - "method"
+        - "expires_at"
+        - "max_size_bytes"
+        - "required_headers"
+        - "storage_key"
+      "title": "ClipUploadGrant"
+      "description": "Concesión de subida de un clip, respuesta de `POST clip-uploads` (domain-entities.md §4 y notas fechadas; entradas A-05 y A-29 de la adenda). La plataforma liga `storage_key` a organización, planta, zona y nodo. El nodo hace `PUT` a `upload_url` con **exactamente** las cabeceras de `required_headers`; el almacén rechaza un `PUT` sin la suma de verificación. `expires_at` es como máximo 15 minutos después de la emisión (verificado por la plataforma). `purpose` devuelve el propósito declarado en la solicitud (pendiente nº 32): la evidencia se confirma al presentar su registro; un clip de verificación se confirma con `POST clip-uploads/{clip_id}/confirmation`, que devuelve `VerificationClipReceipt`."
+    "ClipUploadPurpose":
+      "type": "string"
+      "enum":
+        - "evidence"
+        - "verification"
+      "title": "ClipUploadPurpose"
+      "description": "Propósito de una subida de clip (`ClipUploadRequest.purpose` y `ClipUploadGrant.purpose`; pendiente nº 32)."
     "ClipWindowBody":
       "properties":
         "pre_seconds":
@@ -2958,6 +3179,61 @@
       "additionalProperties": false
       "type": "object"
       "title": "ClipWindowBody"
+    "CommissioningClipOut":
+      "properties":
+        "clip_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Clip Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "blur_check_result":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Blur Check Result"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "clip_id"
+        - "zone_id"
+        - "node_id"
+        - "received_at"
+        - "sha256"
+        - "blur_check_result"
+      "title": "CommissioningClipOut"
+      "description": "Un ``VerificationClip`` de la zona (forma de la «Versión 1.5»)."
+    "CommissioningClipsOut":
+      "properties":
+        "clips":
+          "items":
+            "$ref": "#/components/schemas/CommissioningClipOut"
+          "type": "array"
+          "title": "Clips"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "clips"
+        - "next_after"
+      "title": "CommissioningClipsOut"
     "CompleteActivation":
       "properties":
         "step":
@@ -3066,6 +3342,13 @@
       "required":
         - "concessions"
       "title": "ConcessionsView"
+    "ContentType":
+      "type": "string"
+      "enum":
+        - "video/mp4"
+        - "image/jpeg"
+      "title": "ContentType"
+      "description": "Tipo de contenido del archivo, si la concesión lo fija. Valor técnico (tipo MIME) que nunca se muestra a una persona: no tiene etiqueta en `labels.es.json` y `label_es` lo excluye de forma explícita (A-42)."
     "CoverageStatusOut":
       "properties":
         "zone_id":
@@ -4697,6 +4980,79 @@
         - "current"
         - "pending"
       "title": "RegressionState"
+    "RejectionCode":
+      "type": "string"
+      "enum":
+        - "schema_invalid"
+        - "payload_too_large"
+        - "contract_version_unsupported"
+        - "contract_version_retired"
+        - "node_not_enrolled"
+        - "node_revoked"
+        - "node_zone_mismatch"
+        - "zone_gate_not_approved"
+        - "clip_missing"
+        - "clip_hash_mismatch"
+        - "clip_too_large"
+        - "clip_not_anonymized"
+        - "enrollment_code_invalid"
+        - "enrollment_code_expired"
+        - "enrollment_code_used"
+        - "signature_invalid"
+        - "idempotency_conflict"
+        - "timestamp_out_of_window"
+        - "temporarily_unavailable"
+        - "rate_limited"
+        - "storage_unavailable"
+      "title": "RejectionCode"
+      "description": "Código de rechazo de la plataforma. Transitorios (`retryable = true`, BR-CTR-30): `temporarily_unavailable`, `rate_limited` y `storage_unavailable`; todos los demás son permanentes (`retryable = false`)."
+    "RejectionCompatibilityResult":
+      "type": "string"
+      "enum":
+        - "rejected_major"
+        - "rejected_retired"
+        - "rejected_newer"
+      "title": "RejectionCompatibilityResult"
+      "description": "Resultado de la política de compatibilidad que produjo un rechazo por versión (`RejectionResponse.compatibility_result`): subconjunto de `compatibility_result` sin los resultados aceptados (A-42)."
+    "RejectionResponse":
+      "properties":
+        "code":
+          "$ref": "#/components/schemas/RejectionCode"
+        "retryable":
+          "type": "boolean"
+          "title": "Retryable"
+        "field":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 256
+              "minLength": 1
+              "pattern": "^[A-Za-z0-9_.\\[\\]-]{1,256}$"
+            - "type": "null"
+          "title": "Field"
+        "message_es":
+          "type": "string"
+          "maxLength": 512
+          "minLength": 1
+          "title": "Message Es"
+        "retry_after_seconds":
+          "anyOf":
+            - "type": "integer"
+              "maximum": 86400.0
+              "minimum": 1.0
+            - "type": "null"
+          "title": "Retry After Seconds"
+        "compatibility_result":
+          "anyOf":
+            - "$ref": "#/components/schemas/RejectionCompatibilityResult"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "retryable"
+        - "message_es"
+      "title": "RejectionResponse"
+      "description": "Cuerpo de todo rechazo de la ingesta (domain-entities.md §4 y nota fechada; BR-CTR-30). `retryable` lo fija la clase del código y el esquema lo exige: transitorio (`temporarily_unavailable`, `rate_limited`, `storage_unavailable`; 429 o 503) con `retryable = true`, permanente (todos los demás; 400, 401, 403, 409, 413, 422) con `retryable = false`. `compatibility_result` es opcional y solo aparece en los rechazos por versión, con el resultado que los produjo: `rejected_major` o `rejected_newer` con `code = contract_version_unsupported`, `rejected_retired` con `code = contract_version_retired` (BR-CTR-20, BR-CTR-21). `rejected_newer` nunca es un `code`. `message_es` es genérico: nombra el campo y la regla, nunca contenido del registro, rutas internas ni trazas (BR-CTR-16)."
     "ReplayOut":
       "properties":
         "event_id":
@@ -4722,6 +5078,29 @@
         - "organization_id"
         - "status"
       "title": "ReplayOut"
+    "RequiredHeaders":
+      "properties":
+        "x-amz-checksum-sha256":
+          "type": "string"
+          "maxLength": 44
+          "minLength": 44
+          "pattern": "^[A-Za-z0-9+/]{43}=$"
+          "title": "X-Amz-Checksum-Sha256"
+        "x-amz-meta-vigia-anonymized":
+          "type": "string"
+          "const": "1"
+          "title": "X-Amz-Meta-Vigia-Anonymized"
+        "content-type":
+          "anyOf":
+            - "$ref": "#/components/schemas/ContentType"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "x-amz-checksum-sha256"
+        - "x-amz-meta-vigia-anonymized"
+      "title": "RequiredHeaders"
+      "description": "Mapa de cabeceras del `PUT`, a lo sumo 8 entradas. Siempre incluye `x-amz-checksum-sha256` (el SHA-256 declarado en la solicitud, en base64) y `x-amz-meta-vigia-anonymized` con valor `1`, la marca de anonimización del objeto almacenado (BR-CTR-14); la plataforma responde `clip_not_anonymized` si falta. Solo admite las cabeceras declaradas aquí; una nueva entra como propiedad opcional (BR-CTR-23)."
     "ResultOut":
       "properties":
         "chain":
@@ -5036,6 +5415,12 @@
         - "concession_max_days"
         - "concession_default_days"
       "title": "SettingsView"
+    "Sha256Hex":
+      "type": "string"
+      "maxLength": 64
+      "minLength": 64
+      "pattern": "^[0-9a-f]{64}$"
+      "title": "Sha256Hex"
     "SignalsBody":
       "properties":
         "signals":
@@ -5148,6 +5533,11 @@
         - "changes"
         - "reason_es"
       "title": "StandardVersionBody"
+    "StorageKey":
+      "type": "string"
+      "maxLength": 512
+      "minLength": 1
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9!_.*'()/=-]{0,511}$"
     "SubjectOut":
       "properties":
         "kind":
@@ -5240,6 +5630,24 @@
         - "publication"
         - "reason_es"
       "title": "ThresholdsBody"
+    "Timestamp":
+      "type": "string"
+      "maxLength": 24
+      "minLength": 24
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+      "title": "Timestamp"
+    "UUID":
+      "type": "string"
+      "maxLength": 36
+      "minLength": 36
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      "title": "UUID"
+    "UUIDv7":
+      "type": "string"
+      "maxLength": 36
+      "minLength": 36
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      "title": "UUIDv7"
     "UsageGateOut":
       "properties":
         "status":
@@ -5352,6 +5760,28 @@
         - "status"
         - "requested_at"
       "title": "VerificationAccepted"
+    "VerificationClipReceipt":
+      "properties":
+        "clip_id":
+          "$ref": "#/components/schemas/UUIDv7"
+        "zone_id":
+          "$ref": "#/components/schemas/UUID"
+        "node_id":
+          "$ref": "#/components/schemas/UUID"
+        "received_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "sha256":
+          "$ref": "#/components/schemas/Sha256Hex"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "clip_id"
+        - "zone_id"
+        - "node_id"
+        - "received_at"
+        - "sha256"
+      "title": "VerificationClipReceipt"
+      "description": "Recibo de un clip de verificación del difuminado, respuesta de `POST clip-uploads/{clip_id}/confirmation` (pendiente nº 32, domain-entities.md §4). Solo existe para concesiones con `purpose = verification`: el nodo sube en `commissioning` un clip difuminado de 10 s sin hallazgo y U-03 lo guarda como `VerificationClip` de la zona. Repetir la confirmación devuelve el mismo recibo."
     "VerifierOut":
       "properties":
         "name":

@@ -109,6 +109,10 @@ class MetricName(enum.StrEnum):
     # Rutas del contrato (U-03, NFR-GOB-54)
     NODE_REQUESTS_TOTAL = "node_requests_total"
     NODE_REQUEST_BODY_BYTES = "node_request_body_bytes"
+    # Concesiones de clip por nodo (U-03, NFR-GOB-55)
+    CLIP_GRANTS_ISSUED_TOTAL = "clip_grants_issued_total"
+    CLIP_GRANTS_USED_TOTAL = "clip_grants_used_total"
+    CLIP_GRANTS_ORPHANED_TOTAL = "clip_grants_orphaned_total"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -239,6 +243,16 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "route", "result", "rejection_code"),
     _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
           "NFR-GOB-54", "route"),
+    # Concesiones de clip (NFR-GOB-55, LC-GOB-13): emitidas, usadas y huérfanas por nodo. Solo
+    # contadores y solo node_id (NFR-GOB-13: sin histogramas por nodo ni etiqueta de zona).
+    _spec(_N.CLIP_GRANTS_ISSUED_TOTAL, _C, "{grant}", "Concesiones de clip emitidas por nodo.",
+          "NFR-GOB-55", "node_id"),
+    _spec(_N.CLIP_GRANTS_USED_TOTAL, _C, "{grant}",
+          "Concesiones de clip usadas (clip de verificación confirmado) por nodo.", "NFR-GOB-55",
+          "node_id"),
+    _spec(_N.CLIP_GRANTS_ORPHANED_TOTAL, _C, "{grant}",
+          "Clips sin registro que los cite en 24 h, contados una vez por nodo.", "NFR-GOB-55",
+          "node_id"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -428,6 +442,9 @@ class PlatformMetrics:
         self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
         self.node_requests_total = counter(_N.NODE_REQUESTS_TOTAL)
         self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
+        self.clip_grants_issued_total = counter(_N.CLIP_GRANTS_ISSUED_TOTAL)
+        self.clip_grants_used_total = counter(_N.CLIP_GRANTS_USED_TOTAL)
+        self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)

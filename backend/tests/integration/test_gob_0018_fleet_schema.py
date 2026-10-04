@@ -106,6 +106,19 @@ def _load_migration() -> Any:
 MIGRATION = _load_migration()
 
 
+def _load_reissue_migration() -> Any:
+    """``gob_0021`` (TASK-222) amplía dos permisos y un disparador de estas tablas."""
+    path = BACKEND / "migrations" / "versions" / "gob_0021_clip_grant_reissue_first_served.py"
+    spec = importlib.util.spec_from_file_location("gob_0021_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+REISSUE_MIGRATION = _load_reissue_migration()
+
+
 @dataclass(frozen=True)
 class Fleet:
     database: MigratedDatabase
@@ -333,6 +346,8 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         for table in FLEET_TABLES
         if MIGRATION.app_updatable_columns(table)
     }
+    for table, columns in REISSUE_MIGRATION.APP_UPDATABLE_ADDITIONS.items():
+        expected[table] |= set(columns)
     expected[GLOBAL_TABLE] = {"crl_number", "published_at", "crl_sha256"}
     assert granted == expected
     # Tablas ⛓ sin cierre y la ranura de la alarma: ningún UPDATE.
@@ -378,8 +393,11 @@ async def test_triggers_are_always_enabled(superuser: Any) -> None:
         if table == "fleet_alarm":
             expected |= {"open_alarm_slot": "A", "release_alarm_slot": "A"}
         assert triggers[table] == expected, table
-    for table in ("enrollment_code", "node_credential", "clip_upload_grant"):
+    for table in ("enrollment_code", "node_credential"):
         assert triggers[table] == {"state_transition": "A"}, table
+    assert triggers["clip_upload_grant"] == dict.fromkeys(
+        REISSUE_MIGRATION.CLIP_GRANT_TRIGGERS, "A"
+    )
     assert set(triggers) == {
         *APPEND_ONLY_TABLES,
         "enrollment_code",

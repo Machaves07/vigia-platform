@@ -83,6 +83,8 @@ from tests.session_support import ORIGIN_KEY
 from tests.signing_support import ENVIRONMENT
 from tests.writer_support import save_record_types, unit_context
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
+from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
+from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
 )
@@ -666,6 +668,33 @@ CASES: Final[dict[tuple[str, str], Case]] = {
             f"/zones/{i.zone}/framing-recaptures",
             json={"camera_id": str(i.label), "captured_at": _stamp(T0), "reason_es": REASON},
         ),
+    ),
+    # --- fleet (VIG-152) ---
+    ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
+    ),
+    # --- Rutas del contrato (VIG-152): con el certificado de un nodo de A, la zona o el clip de
+    # B responden node_zone_mismatch (tests/integration/test_fleet_clip_uploads_localstack.py).
+    ("POST", "/api/nodes/clip-uploads"): Case(
+        Kind.NODE,
+        lambda i: Call(
+            "POST",
+            "/api/nodes/clip-uploads",
+            json={
+                "clip_id": str(i.record),
+                "camera_id": str(i.label),
+                "zone_id": str(i.zone),
+                "media_kind": "video",
+                "content_type": "video/mp4",
+                "sha256": "ab" * 32,
+                "size_bytes": 1024,
+                "duration_ms": 10_000,
+                "purpose": "verification",
+            },
+        ),
+    ),
+    ("POST", "/api/nodes/clip-uploads/{clip_id}/confirmation"): Case(
+        Kind.NODE, lambda i: Call("POST", f"/api/nodes/clip-uploads/{i.record}/confirmation")
     ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
@@ -1312,7 +1341,15 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             free_text=free_text,
                             clock=sessions.clock,
                         ),
-                    )
+                    ),
+                    FLEET_STATE_KEY: FleetHttp(
+                        commissioning_clips=CommissioningClips(
+                            database=sessions.database,
+                            authorizer=authz.authorizer,
+                            audit=sessions.audit,
+                            clock=sessions.clock,
+                        )
+                    ),
                 },
             },
             static_dir=STATIC,
@@ -1566,6 +1603,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /zones/{zone_id}/catalog/versions/{catalog_version}",
         "GET /zones/{zone_id}/regression",
         "POST /zones/{zone_id}/framing-recaptures",
+        "GET /zones/{zone_id}/commissioning-clips",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.
