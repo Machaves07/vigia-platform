@@ -1,14 +1,15 @@
 """Cadena fija de middleware de ``vigia-api`` (LC-NUC-20; PAT-NUC-SEG-02, SEG-06, MAN-01).
 
-Toda petición pasa por once eslabones en un orden fijo (``CHAIN``): (1) ``correlation_id``
+Toda petición pasa por doce eslabones en un orden fijo (``CHAIN``): (1) ``correlation_id``
 generado; (2) manejador global de errores; (3) cabeceras de seguridad; el eslabón de clase de ruta
-``node``/``person`` del pendiente nº 37, que fija el pool de la base; (4) límite de cuerpo;
-(5) tasa por origen; (6) sesión y contexto; (7) tasa por sesión; (8) barrera anti-falsificación;
-(9) aviso de tratamiento; y (10) autorización por ruta, la dependencia obligatoria de cada ruta
+``node``/``person`` del pendiente nº 37, que fija el pool de la base; (4) límite de cuerpo; el
+mamparo por clase de ruta de LC-GOB-20 (``shared.bulkheads``); (5) tasa por origen; (6) sesión y
+contexto; (7) tasa por sesión; (8) barrera anti-falsificación; (9) aviso de tratamiento; y
+(10) autorización por ruta, la dependencia obligatoria de cada ruta
 (``declarations.requires``/``authenticated``/``unauthenticated``). Los detalles de cada uno
 están en ``steps``.
 
-``install_chain`` instala los diez middleware en ese orden; ``verify_chain`` es la prueba de
+``install_chain`` instala los once middleware en ese orden; ``verify_chain`` es la prueba de
 arranque: la fábrica no arranca (``ApiStartupError``) si el orden instalado no es exactamente
 ``CHAIN``. Además, cada petición deja su traza y la autorización de la ruta exige la traza
 completa y en orden (``request_state``): una cadena alterada después de arrancar tampoco deja
@@ -37,6 +38,7 @@ from vigia_platform.shared.api.middleware.headers import (
 )
 from vigia_platform.shared.api.middleware.routing import RouteTable, route_class_of
 from vigia_platform.shared.api.middleware.steps import (
+    BULKHEAD_EXEMPT_ROUTES,
     DEFAULT_BODY_LIMIT_BYTES,
     PRIVACY_NOTICE_ACCEPT,
     STEP_CLASSES,
@@ -50,6 +52,7 @@ from vigia_platform.shared.api.middleware.steps import (
 from vigia_platform.shared.api.request_state import CHAIN, MIDDLEWARE_CHAIN, ChainStep
 
 __all__ = [
+    "BULKHEAD_EXEMPT_ROUTES",
     "CHAIN",
     "DEFAULT_BODY_LIMIT_BYTES",
     "MIDDLEWARE_CHAIN",
