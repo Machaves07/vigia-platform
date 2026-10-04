@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from functools import cache
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,10 +21,14 @@ from aws_cdk import App
 
 from config import ContextError, EnvironmentConfig, NodesTlsMode
 from stacks.compute import (
+    ADMIN_RUNTIME,
+    API_RUNTIME,
     API_TUNING,
     COLLECTOR_CONFIG,
     EVIDENCE_UPLOAD_PREFIXES,
     NO_IMAGE_DIGEST,
+    RUNTIME_VARIABLES,
+    WORKER_RUNTIME,
     deploy_role_owned,
     read_image_digest,
     registry_owned,
@@ -798,6 +803,78 @@ def test_csp_store_origin_is_the_evidence_bucket_of_the_environment(
     origin = render(environment["VIGIA_CSP_STORE_ORIGINS"], _compute(deployment))
     assert origin == f"https://{bucket}.s3.us-east-1.amazonaws.com"
     assert " " not in origin
+
+
+RUNTIME_REFERENCE = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
+"""``_RUNTIME_REFERENCE`` de los tres puntos de entrada del backend (se comprueba abajo que es el
+mismo patrón): una variable solo puede nombrar un constructor del propio paquete."""
+BACKEND_SRC = Path(__file__).resolve().parents[2] / "backend" / "src"
+ENTRY_POINTS = (
+    "vigia_platform/shared/api/main.py",
+    "vigia_platform/shared/worker/main.py",
+    "vigia_platform/identity/application/admin_cli.py",
+)
+PROVIDER = "0192f2b0-0000-4000-8000-0000000000aa"
+
+
+def test_task_definitions_name_the_production_runtime_builders(deployment: Synthesized) -> None:
+    """VIG-137 (A-52): cada proceso nombra su constructor de ``vigia_platform.shared.runtime``,
+    con una referencia que acepta su ``_RUNTIME_REFERENCE`` y que existe en el backend."""
+    for source in ENTRY_POINTS:
+        assert RUNTIME_REFERENCE.pattern in (BACKEND_SRC / source).read_text(encoding="utf-8")
+    for family, (variable, reference) in RUNTIME_VARIABLES.items():
+        environment = _environment(_container(_task_definition(deployment, family), family))
+        assert environment[variable] == reference
+        assert RUNTIME_REFERENCE.fullmatch(reference), reference
+        module, function = reference.split(":")
+        path = BACKEND_SRC / Path(*module.split(".")).with_suffix(".py")
+        assert f"async def {function}(" in path.read_text(encoding="utf-8"), reference
+        others = {name for name, _ in RUNTIME_VARIABLES.values()} - {variable}
+        assert not others & set(environment), family
+    migrate = _environment(_container(_task_definition(deployment, "migrate"), "migrate"))
+    assert not {name for name, _ in RUNTIME_VARIABLES.values()} & set(migrate)
+    assert tuple(reference for _, reference in RUNTIME_VARIABLES.values()) == (
+        API_RUNTIME,
+        WORKER_RUNTIME,
+        ADMIN_RUNTIME,
+    )
+
+
+def test_api_and_admin_receive_the_public_origin(deployment: Synthesized) -> None:
+    """Base de los enlaces de invitación y origen de la barrera anti-falsificación."""
+    template = _compute(deployment)
+    for family in ("api", "admin"):
+        environment = _environment(_container(_task_definition(deployment, family), family))
+        origin = render(environment["VIGIA_PUBLIC_ORIGIN"], template)
+        assert origin.startswith("https://"), origin
+        assert "/" not in origin.removeprefix("https://"), origin
+    worker = _environment(_container(_task_definition(deployment, "worker"), "worker"))
+    assert "VIGIA_PUBLIC_ORIGIN" not in worker
+
+
+def test_provider_organization_reaches_the_processes_only_with_its_context(
+    pilot: Synthesized,
+) -> None:
+    families = ("api", "worker", "admin")
+    for family in families:
+        assert "VIGIA_PROVIDER_ORGANIZATION_ID" not in _environment(
+            _container(_task_definition(pilot, family), family)
+        )
+    deployment = _synth(provider_organization_id=PROVIDER)
+    for family in families:
+        environment = _environment(_container(_task_definition(deployment, family), family))
+        assert environment["VIGIA_PROVIDER_ORGANIZATION_ID"] == PROVIDER
+    migrate = _environment(_container(_task_definition(deployment, "migrate"), "migrate"))
+    assert "VIGIA_PROVIDER_ORGANIZATION_ID" not in migrate
+
+
+@pytest.mark.parametrize(
+    "value",
+    [PROVIDER.upper(), "no-es-un-uuid", f"{PROVIDER} ", "{" + PROVIDER + "}"],
+)
+def test_a_malformed_provider_organization_stops_the_synthesis(value: str) -> None:
+    with pytest.raises(ContextError, match="provider_organization_id"):
+        _synth(provider_organization_id=value)
 
 
 def test_statement_timeout_and_tmp_budget_are_only_in_the_worker(pilot: Synthesized) -> None:

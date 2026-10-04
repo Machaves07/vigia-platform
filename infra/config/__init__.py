@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 
 from config.environment import (
     BOOTSTRAP_QUALIFIER,
@@ -13,6 +14,7 @@ from config.environment import (
     CONTEXT_KEYS,
     CONTEXT_NAT_PER_AZ,
     CONTEXT_NODES_TLS_MODE,
+    CONTEXT_PROVIDER_ORGANIZATION,
     REGION,
     ContextError,
     EnvironmentConfig,
@@ -23,6 +25,7 @@ from config.environment import (
     parse_flag,
     parse_instance,
     parse_nodes_tls_mode,
+    parse_provider_organization,
     require,
 )
 from config.pilot import pilot_config
@@ -31,6 +34,7 @@ from config.staging import staging_config
 __all__ = [
     "BOOTSTRAP_QUALIFIER",
     "CONTEXT_KEYS",
+    "CONTEXT_PROVIDER_ORGANIZATION",
     "REGION",
     "ContextError",
     "EnvironmentConfig",
@@ -42,7 +46,14 @@ __all__ = [
 
 
 def load_config(context: Mapping[str, object]) -> EnvironmentConfig:
-    """Construye la configuración a partir de los seis valores de contexto obligatorios."""
+    """Construye la configuración a partir de los seis valores de contexto obligatorios y del
+    opcional ``provider_organization_id``."""
+    config = _load_required(context)
+    provider = parse_provider_organization(context.get(CONTEXT_PROVIDER_ORGANIZATION))
+    return replace(config, provider_organization_id=provider)
+
+
+def _load_required(context: Mapping[str, object]) -> EnvironmentConfig:
     environment, ephemeral = parse_environment(require(context, CONTEXT_ENVIRONMENT))
     instance = parse_instance(require(context, CONTEXT_INSTANCE))
     first_deploy = parse_flag(CONTEXT_FIRST_DEPLOY, require(context, CONTEXT_FIRST_DEPLOY))

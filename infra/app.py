@@ -1,7 +1,8 @@
 """Aplicación CDK de U-02 (infrastructure-design §2.3, TASK-144).
 
 Lee el contexto (``environment``, ``instance``, ``first_deploy``, ``ca_rotation``,
-``nat_per_az``, ``nodes_tls_mode``; valores por defecto en ``cdk.json``), registra las pilas del despliegue en su orden y aplica las
+``nat_per_az``, ``nodes_tls_mode``; valores por defecto en ``cdk.json``; y el opcional
+``provider_organization_id``), registra las pilas del despliegue en su orden y aplica las
 etiquetas globales ``project=vigia``, ``unit=U-02``, ``managed_by=cdk`` y
 ``environment=<entorno>``. Calificador de arranque ``vigia`` (``cdk bootstrap --qualifier
 vigia``); la cuenta no se fija, así que ``cdk synth`` no necesita credenciales.
@@ -15,7 +16,7 @@ from __future__ import annotations
 from aws_cdk import App, Tags
 from constructs import Construct
 
-from config import CONTEXT_KEYS, EnvironmentConfig, load_config
+from config import CONTEXT_KEYS, CONTEXT_PROVIDER_ORGANIZATION, EnvironmentConfig, load_config
 from stacks import register_stacks
 
 UNIT = "U-02"
@@ -33,7 +34,8 @@ def global_tags(config: EnvironmentConfig) -> dict[str, str]:
 
 def read_config(app: App) -> EnvironmentConfig:
     """Configuración del despliegue a partir del contexto de la aplicación."""
-    return load_config({key: app.node.try_get_context(key) for key in CONTEXT_KEYS})
+    keys = (*CONTEXT_KEYS, CONTEXT_PROVIDER_ORGANIZATION)
+    return load_config({key: app.node.try_get_context(key) for key in keys})
 
 
 def apply_tags(scope: Construct, config: EnvironmentConfig) -> None:
