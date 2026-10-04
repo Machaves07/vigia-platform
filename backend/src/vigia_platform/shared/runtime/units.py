@@ -63,6 +63,9 @@ from vigia_platform.catalog.adapters.postgres.regression_repository import (
 from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
     PostgresScopeRecordRepository,
 )
+from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
+    PostgresWalkTestRepository,
+)
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.agreements import USE_AGREEMENT_SIGNED, AgreementService
@@ -88,6 +91,7 @@ from vigia_platform.catalog.application.scope_record import (
 )
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
+from vigia_platform.catalog.application.walk_test import COMMISSIONING_STEP, WalkTestService
 from vigia_platform.catalog.detail_codes import (
     CATALOG_DETAIL_CODE_LABEL_BINDINGS,
     CatalogDetailCode,
@@ -436,6 +440,7 @@ def _shared_routers() -> tuple[APIRouter, ...]:
 _CATALOG_WRITTEN_TYPES: Final = frozenset(
     {
         ADMISSION_RECORD_TYPE,
+        COMMISSIONING_STEP,
         GATE_STATE_CHANGED,
         MOUNTING_GATE_RECORD,
         PLANT_POLICY_SIGNED,
@@ -588,6 +593,20 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 catalog=catalog,
                 database=services.database,
                 audit=services.audit,
+            ),
+            # LC-GOB-06 (VIG-150): sesión de walk-test; las pruebas de oclusión llegan con
+            # VIG-154 (hasta entonces, ninguna).
+            walk_tests=WalkTestService(
+                repository=PostgresWalkTestRepository(),
+                catalog=catalog,
+                gates=gates,
+                nodes=hierarchy,
+                identity=hierarchy,
+                database=services.database,
+                writer=services.writer,
+                audit=services.audit,
+                free_text=services.free_text,
+                clock=services.clock,
             ),
         )
     }
