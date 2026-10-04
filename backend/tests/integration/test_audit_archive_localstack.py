@@ -119,6 +119,9 @@ class World:
             clock=clock,
             kms_key_id=self.kms_key_id,
             batch_size=batch_size,
+            # Solo la auditoría: la lista ampliada de fleet la prueba
+            # test_fleet_partition_archive_localstack.py (TASK-203).
+            tables=(),
         )
 
     def fetch(self, query: str, *args: Any) -> list[Any]:
