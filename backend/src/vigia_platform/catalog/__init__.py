@@ -1,1 +1,1 @@
-"""Módulo del catálogo y las compuertas (esquema ``catalog``): estándares, actas y acuerdos."""
+"""Módulo de catálogo (esquema ``catalog``): catálogo, compuertas, acuerdos y comisionamiento."""
