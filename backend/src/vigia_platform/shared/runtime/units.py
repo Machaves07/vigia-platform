@@ -54,6 +54,9 @@ from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGat
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
     PostgresPlantPolicyRepository,
 )
+from vigia_platform.catalog.adapters.postgres.regression_repository import (
+    PostgresRegressionRepository,
+)
 from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
     PostgresScopeRecordRepository,
 )
@@ -68,6 +71,13 @@ from vigia_platform.catalog.application.plant_policy import (
     PLANT_POLICY_SIGNED,
     PlantPolicyService,
 )
+from vigia_platform.catalog.application.publication import (
+    PUBLISHED_RECORD_TYPE,
+    RETIRED_RECORD_TYPE,
+    SINGLE_OCCUPANCY_RECORD_TYPE,
+    CatalogPublicationService,
+)
+from vigia_platform.catalog.application.regression import MARKED_RECORD_TYPE, RegressionService
 from vigia_platform.catalog.application.scope_record import (
     MOUNTING_GATE_RECORD,
     ScopeRecordService,
@@ -418,7 +428,16 @@ def _shared_routers() -> tuple[APIRouter, ...]:
 
 
 _CATALOG_WRITTEN_TYPES: Final = frozenset(
-    {ADMISSION_RECORD_TYPE, GATE_STATE_CHANGED, MOUNTING_GATE_RECORD, PLANT_POLICY_SIGNED}
+    {
+        ADMISSION_RECORD_TYPE,
+        GATE_STATE_CHANGED,
+        MOUNTING_GATE_RECORD,
+        PLANT_POLICY_SIGNED,
+        PUBLISHED_RECORD_TYPE,
+        RETIRED_RECORD_TYPE,
+        SINGLE_OCCUPANCY_RECORD_TYPE,
+        MARKED_RECORD_TYPE,
+    }
 )
 """Tipos de ``catalog.record_types`` que ya escribe una ruta registrada."""
 
@@ -461,6 +480,39 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
         signer=services.signing,
         clock=services.clock,
     )
+    admissions = AdmissionService(
+        repository=PostgresAdmissionRepository(services.database),
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        clock=services.clock,
+    )
+    # LC-GOB-09 (VIG-148): la marca de regresión, dentro de la transacción de la publicación.
+    regression = RegressionService(
+        repository=PostgresRegressionRepository(services.database),
+        catalog=catalog,
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        clock=services.clock,
+    )
+    # LC-GOB-01 (VIG-145, VIG-148): catálogo firmado por SigningPort, con la admisión de LC-GOB-02.
+    publication = CatalogPublicationService(
+        repository=catalog,
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        admissions=admissions,
+        signer=services.signing,
+        clock=services.clock,
+        regression_marker=regression,
+    )
     hierarchy = HierarchyService(
         IdentityDependencies(
             database=services.database,
@@ -475,15 +527,7 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     )
     return {
         CATALOG_STATE_KEY: CatalogHttp(
-            admissions=AdmissionService(
-                repository=PostgresAdmissionRepository(services.database),
-                database=services.database,
-                writer=services.writer,
-                authorizer=services.authorizer,
-                audit=services.audit,
-                free_text=services.free_text,
-                clock=services.clock,
-            ),
+            admissions=admissions,
             documents=documents,
             gates=gates,
             scope_records=ScopeRecordService(
@@ -506,6 +550,8 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 free_text=services.free_text,
                 clock=services.clock,
             ),
+            catalog=publication,
+            regression=regression,
         )
     }
 

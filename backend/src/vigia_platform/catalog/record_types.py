@@ -524,7 +524,12 @@ AffectedRows = (
 
 
 class WalkTestRegressionMarked(ContentModel):
-    """Marca de acta no vigente, sin bloqueo operativo (respuesta 13)."""
+    """Marca de acta no vigente, sin bloqueo operativo (respuesta 13).
+
+    La recaptura del encuadre (A-55, nota U03-H-14) lleva además la cámara, el instante de la
+    línea base nueva y el motivo del instalador (BR-GOB-56: ningún cambio de encuadre sin
+    motivo); ninguna otra causa los admite (VIG-148).
+    """
 
     zone_id: UUID
     cause: RegressionCause
@@ -532,9 +537,17 @@ class WalkTestRegressionMarked(ContentModel):
     model_version: TechnicalId | None = None
     affected_row_ids: AffectedRows
     marked_at: Timestamp
+    camera_id: UUID | None = None
+    captured_at: Timestamp | None = None
+    reason_es: ReasonEs | None = None
 
     @model_validator(mode="after")
     def _coherent(self) -> Self:
+        framing = self.cause is RegressionCause.FRAMING_RECAPTURED
+        if not framing and (
+            self.camera_id is not None or self.captured_at is not None or self.reason_es is not None
+        ):
+            raise ValueError("la cámara, la captura y el motivo son de framing_recaptured")
         if self.cause is RegressionCause.CATALOG_CHANGE and self.catalog_version is None:
             raise ValueError("catalog_change nombra la versión del catálogo que la disparó")
         if self.cause is RegressionCause.MODEL_VERSION_CHANGE and self.model_version is None:
@@ -654,6 +667,7 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _catalog(
         "walk_test_regression_marked",
         WalkTestRegressionMarked,
+        free_text_paths=("/reason_es",),
         outbox_events=("regression_marked",),
     ),
     _catalog(
