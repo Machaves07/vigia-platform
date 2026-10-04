@@ -182,9 +182,7 @@ def test_identity_is_one_indexed_statement_per_request_and_never_cached(world: W
     assert len(after_first) == 1, after_first
     # La misma sentencia, con los marcadores del controlador ($1, $2).
     expected = (
-        str(NODE_IDENTITY_STATEMENT)
-        .replace(":node_id", "$1")
-        .replace(":certificate_serial", "$2")
+        str(NODE_IDENTITY_STATEMENT).replace(":node_id", "$1").replace(":certificate_serial", "$2")
     )
     assert after_first[0] == expected
     assert len(world.statements.data()) == 2

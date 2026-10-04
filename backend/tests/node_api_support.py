@@ -91,6 +91,8 @@ VERSION = str(CONTRACT_VERSION)
 class TestAuthority:
     """Autoridad ECDSA P-256 de prueba (marca ``test-only`` en su nombre)."""
 
+    __test__ = False  # no es una clase de pruebas de pytest
+
     key: ec.EllipticCurvePrivateKey = field(
         default_factory=lambda: ec.generate_private_key(ec.SECP256R1())
     )

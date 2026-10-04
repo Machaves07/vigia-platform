@@ -133,6 +133,7 @@ def test_help_is_in_spanish(capsys: pytest.CaptureFixture[str]) -> None:
         "create-partitions",
         "restore-audit-partition",
         "record-restore-drill",
+        "set-node-rate-brake",
     ],
 )
 def test_every_command_has_spanish_help_and_dry_run(
@@ -394,6 +395,8 @@ def test_create_organization_requires_typing_the_code() -> None:
         ("replay-dead-letter", str(uuid.uuid4()), "u02_alerts"),
         ("create-partitions", "--until", "2027-03"),
         ("record-restore-drill", "--result", "ok"),
+        ("set-node-rate-brake", "--per-minute", "120"),
+        ("set-node-rate-brake", "--off"),
     ],
 )
 def test_operator_commands_dry_run_write_nothing(arguments: tuple[str, ...]) -> None:
@@ -412,6 +415,7 @@ def test_operator_commands_dry_run_write_nothing(arguments: tuple[str, ...]) -> 
         (("replay-dead-letter", str(uuid.uuid4()), "u02_alerts"), "replay"),
         (("create-partitions", "--until", "2027-03"), "partitions.create"),
         (("record-restore-drill", "--result", "failed"), "drill:failed"),
+        (("set-node-rate-brake", "--per-minute", "90"), "audit:node_rate_brake_set"),
     ],
 )
 def test_operator_commands_call_the_service_as_the_operator(
@@ -428,6 +432,31 @@ def test_operator_commands_call_the_service_as_the_operator(
     code, _, err = other.run(*arguments, "--operator", str(uuid.uuid4()))
     assert code == ExitCode.REJECTED and json.loads(err)["error"] == "operator_invalid"
     assert other.calls.writes == []
+
+
+@pytest.mark.parametrize(
+    ("arguments", "value"),
+    [(("--per-minute", "1"), "1"), (("--per-minute", "1000000"), "1000000"), (("--off",), "off")],
+)
+def test_the_node_rate_brake_is_the_audit_entry(arguments: tuple[str, ...], value: str) -> None:
+    # TASK-206: la entrada de auditoría de la proveedora es el ajuste del freno global.
+    world = FakeWorld()
+    code, out, err = world.run("set-node-rate-brake", *arguments, "--operator", str(OPERATOR_ID))
+    assert code == 0, err
+    assert world.audit.entries == [("node_rate_brake_set", "success", {"per_minute": value})]
+    assert output(out)["per_minute"] == value
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [(), ("--per-minute", "0"), ("--per-minute", "-5"), ("--per-minute", "1000001"),
+     ("--per-minute", "1e3"), ("--per-minute", "10", "--off")],
+)  # fmt: skip
+def test_the_node_rate_brake_rejects_a_bad_value(arguments: tuple[str, ...]) -> None:
+    world = FakeWorld()
+    code, _, _ = world.run("set-node-rate-brake", *arguments, "--operator", str(OPERATOR_ID))
+    assert code == ExitCode.USAGE
+    assert world.calls.writes == []
 
 
 def test_rotate_key_is_authorized_with_its_permission() -> None:
@@ -693,6 +722,7 @@ def test_parser_lists_every_command() -> None:
         "create-partitions",
         "restore-audit-partition",
         "record-restore-drill",
+        "set-node-rate-brake",
     ):
         assert command in help_text
 

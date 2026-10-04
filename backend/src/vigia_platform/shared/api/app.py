@@ -35,7 +35,9 @@ especificación sin red (NFR-NUC-52).
 Las unidades registran sus enrutadores y sus ``detail_code`` en ``platform_units()``; la matriz
 de permisos llega en ``permissions`` (``identity.authz``, TASK-125). La fábrica instala la cadena
 fija de middleware (``shared.api.middleware``, TASK-134) y no arranca si su orden no es el de
-PAT-NUC-SEG-06. La sesión, la auditoría de ``csrf_rejected``, la versión vigente del aviso de
+PAT-NUC-SEG-06. Bajo ``/api/nodes`` (clase ``node``) toda respuesta de error, de la cadena o de
+FastAPI, es la del contrato (``node_api.observability.NodeResponses``, TASK-206): nunca un
+``ApiError``. La sesión, la auditoría de ``csrf_rejected``, la versión vigente del aviso de
 tratamiento y el autorizador por ruta llegan en ``AppRuntime``; el origen de la aplicación
 (``VIGIA_PUBLIC_ORIGIN``) y los del almacén para la política de contenido
 (``VIGIA_CSP_STORE_ORIGINS``) en ``AppConfig``.

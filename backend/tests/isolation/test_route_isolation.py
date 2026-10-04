@@ -17,7 +17,10 @@ caso, con el tipo de aislamiento que le corresponde:
 - ``SESSION``: solo la persona de la sesión (``authenticated``);
 - ``PROVIDER_ONLY``: solo la proveedora (``platform.*``, ``/provider/concessions``): desde A,
   igual que inexistente;
-- ``PUBLIC``: sin sesión no hay organización de contexto; el caso dice por qué.
+- ``PUBLIC``: sin sesión no hay organización de contexto; el caso dice por qué;
+- ``NODE``: ruta del contrato (``node_route``, A-51; TASK-206): con el certificado de un nodo de A
+  y un recurso de B responde ``node_zone_mismatch`` o ``not_found``. ``uncovered`` también exige
+  su caso.
 
 En todos los casos con sesión, ninguna petición de A cambia una sola fila de B (huella de cada
 tabla con ``organization_id`` calculada como superusuario) ni devuelve un identificador de B.
@@ -122,9 +125,16 @@ from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
 from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.node_api.router import node_router
 from vigia_platform.shared.adapters.http import PlatformHttp
 from vigia_platform.shared.api.app import build_openapi_app
-from vigia_platform.shared.api.declarations import iter_declared_routes, requires
+from vigia_platform.shared.api.declarations import (
+    NodeRoute,
+    check_routes,
+    iter_declared_routes,
+    requires,
+)
+from vigia_platform.shared.api.errors import DetailCodeRegistry
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
@@ -162,6 +172,10 @@ class Kind(enum.Enum):
     SESSION = "session"
     PROVIDER_ONLY = "provider_only"
     PUBLIC = "public"
+    NODE = "node"
+    """Ruta del contrato (``node_route``, A-51): con el certificado de un nodo de A y un recurso
+    de B responde ``node_zone_mismatch`` o ``not_found`` (TASK-206; los casos de cada ruta
+    publicada los añade su tarea y TASK-228)."""
 
 
 @dataclass(frozen=True)
@@ -476,6 +490,33 @@ def test_a_route_without_case_is_named() -> None:
         assert not missing, f"rutas sin caso de aislamiento en tests/isolation: {missing}"
 
 
+def test_contract_routes_are_in_the_catalog_and_need_their_case() -> None:
+    # TASK-206: iter_declared_routes incluye las rutas declaradas con NodeRoute, así que
+    # ``uncovered`` exige un caso por ruta del contrato (otra organización → node_zone_mismatch
+    # o not_found) igual que por ruta de personas.
+    contract = node_router((NodeRoute.FINDING, NodeRoute.ZONE_CATALOG)).routes
+    routes = [*build_openapi_app().routes, *contract]
+    assert uncovered(routes) == [
+        "GET /api/nodes/zones/{zone_id}/catalog",
+        "POST /api/nodes/findings",
+    ]
+    found = declared(contract)
+    assert all(declaration.node is not None for declaration in found.values())
+
+
+def test_a_route_under_api_nodes_without_declaration_is_named_and_does_not_start() -> None:
+    async def probe() -> dict[str, str]:  # pragma: no cover - no se llama
+        return {}
+
+    sonda = APIRoute("/api/nodes/sonda", probe, methods=["GET"])
+    routes = [*build_openapi_app().routes, sonda]
+    assert uncovered(routes) == ["GET /api/nodes/sonda"]
+    registry = DetailCodeRegistry()
+    registry.seal()
+    problems = check_routes(routes, frozenset(), registry, docs_enabled=True)
+    assert any("no declara node_route" in problem for problem in problems), problems
+
+
 def test_cases_name_only_registered_routes_and_match_their_declaration() -> None:
     # Un caso de una ruta que ya no existe tampoco pasa: el catálogo no se queda viejo.
     routes = build_openapi_app().routes
@@ -494,6 +535,8 @@ def test_cases_name_only_registered_routes_and_match_their_declaration() -> None
             assert declaration.unauthenticated is not None, key
         elif case.kind is Kind.SESSION:
             assert declaration.session is not None, key
+        elif case.kind is Kind.NODE:
+            assert declaration.node is not None and case.call is not None, key
         else:
             assert declaration.permission is not None, key
             assert case.call is not None, key

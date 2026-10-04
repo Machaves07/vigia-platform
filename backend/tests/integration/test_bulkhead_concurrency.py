@@ -43,7 +43,7 @@ from vigia_platform.shared.db import RouteClass
 from vigia_platform.shared.observability.metrics import MetricName
 
 NODE, PERSON = RouteClass.NODE, RouteClass.PERSON
-NODE_HOLD = "/api/nodes/zones/hold/catalog"
+NODE_HOLD = "/api/nodes/clip-uploads/hold/confirmation"
 """La ruta de nodo que retiene la petición hasta que la prueba la suelta."""
 
 
@@ -70,12 +70,14 @@ def _unit(holds: Holds) -> UnitRegistration:
     router = APIRouter()
 
     # Una ruta del contrato (A-51) con tres comportamientos según el segmento de la ruta:
-    # /api/nodes/zones/{hold|boom|listen}/catalog.
-    @router.get(NodeRoute.ZONE_CATALOG.path, dependencies=[node_route(NodeRoute.ZONE_CATALOG)])
-    async def node_route_handler(zone_id: str, request: Request) -> dict[str, str]:
-        if zone_id == "boom":
+    # /api/nodes/clip-uploads/{hold|boom|listen}/confirmation (el arnés ya declara el catálogo).
+    @router.post(
+        NodeRoute.CLIP_CONFIRMATION.path, dependencies=[node_route(NodeRoute.CLIP_CONFIRMATION)]
+    )
+    async def node_route_handler(clip_id: str, request: Request) -> dict[str, str]:
+        if clip_id == "boom":
             raise RuntimeError("fallo del manejador")
-        if zone_id == "listen":
+        if clip_id == "listen":
             holds.entered["listen"] += 1
             while not await request.is_disconnected():
                 await asyncio.sleep(0)
@@ -147,7 +149,7 @@ def _is_temporarily_unavailable(response: httpx.Response) -> bool:
 
 def test_36_simultaneous_nodes_admit_35_reject_one_at_once_and_a_person_is_served() -> None:
     async def test(s: Scenario) -> None:
-        nodes = [asyncio.create_task(s.client.get(NODE_HOLD)) for _ in range(36)]
+        nodes = [asyncio.create_task(s.client.post(NODE_HOLD)) for _ in range(36)]
         # Las 36 llegan a la vez: 35 quedan dentro del manejador y una sale ya rechazada.
         await until(lambda: s.holds.entered["node"] == 35 and sum(t.done() for t in nodes) == 1)
         (rejected,) = [task.result() for task in nodes if task.done()]
@@ -171,12 +173,12 @@ def test_36_simultaneous_nodes_admit_35_reject_one_at_once_and_a_person_is_serve
 
 def test_a_node_rejected_by_the_bulkhead_is_served_once_a_slot_frees() -> None:
     async def test(s: Scenario) -> None:
-        nodes = [asyncio.create_task(s.client.get(NODE_HOLD)) for _ in range(35)]
+        nodes = [asyncio.create_task(s.client.post(NODE_HOLD)) for _ in range(35)]
         await until(lambda: s.holds.entered["node"] == 35)
-        assert _is_temporarily_unavailable(await s.client.get(NODE_HOLD))
+        assert _is_temporarily_unavailable(await s.client.post(NODE_HOLD))
         s.holds.let_go("node")
         await until(lambda: s.bulkheads.in_use(NODE) == 34)
-        retry = asyncio.create_task(s.client.get(NODE_HOLD))
+        retry = asyncio.create_task(s.client.post(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 36)
         s.holds.let_go("node", 35)
         assert (await retry).status_code == 200
@@ -222,7 +224,7 @@ def test_the_16th_person_gets_temporarily_unavailable_at_2_seconds() -> None:
         assert _is_temporarily_unavailable(await sixteenth)
         assert s.timer.clock.monotonic() == PERSON_WAIT_SECONDS
         # Los nodos no se ven afectados por el mamparo de personas lleno.
-        node = asyncio.create_task(s.client.get(NODE_HOLD))
+        node = asyncio.create_task(s.client.post(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 1)
         s.holds.let_go("node")
         assert (await node).status_code == 200
@@ -257,7 +259,7 @@ def test_health_probes_do_not_wait_for_the_person_bulkhead() -> None:
 
 def test_a_raising_handler_returns_the_slot() -> None:
     async def test(s: Scenario) -> None:
-        response = await s.client.get("/api/nodes/zones/boom/catalog")
+        response = await s.client.post("/api/nodes/clip-uploads/boom/confirmation")
         # Clase node: un error interno es el transitorio del contrato, nunca un ApiError.
         assert response.status_code == 503
         assert response.json()["code"] == "temporarily_unavailable"
@@ -269,7 +271,7 @@ def test_a_raising_handler_returns_the_slot() -> None:
 
 def test_a_cancelled_request_returns_the_slot() -> None:
     async def test(s: Scenario) -> None:
-        request = asyncio.create_task(s.client.get(NODE_HOLD))
+        request = asyncio.create_task(s.client.post(NODE_HOLD))
         await until(lambda: s.holds.entered["node"] == 1)
         assert gauge(s.reader, MetricName.BULKHEAD_IN_USE, NODE) == 1
         request.cancel()
@@ -302,10 +304,10 @@ def test_a_client_disconnect_returns_the_slot() -> None:
             "type": "http",
             "asgi": {"version": "3.0"},
             "http_version": "1.1",
-            "method": "GET",
+            "method": "POST",
             "scheme": "https",
-            "path": "/api/nodes/zones/listen/catalog",
-            "raw_path": b"/api/nodes/zones/listen/catalog",
+            "path": "/api/nodes/clip-uploads/listen/confirmation",
+            "raw_path": b"/api/nodes/clip-uploads/listen/confirmation",
             "root_path": "",
             "query_string": b"",
             "headers": [(b"host", b"app.vigia.test")],

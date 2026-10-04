@@ -82,6 +82,9 @@ def _node_headers_ok(response: Any) -> None:
         "/api/nodes",
         "/api/nodes/conformance-profile",
         "/api/nodes/no-existe",
+        # La plantilla coincide, pero el identificador no está en forma canónica.
+        "/api/nodes/zones/0192F0C4-0000-7000-8000-0000000000AA/catalog",
+        "/api/nodes/clip-uploads/0192F0C4-0000-7000-8000-0000000000C1/confirmation",
     ],
 )
 def test_non_canonical_or_unknown_node_paths_are_not_found_without_body(

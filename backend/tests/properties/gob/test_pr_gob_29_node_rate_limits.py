@@ -367,6 +367,63 @@ def test_pr_gob_29_the_brake_bounds_the_whole_instance(
         assert len(inside) <= 2 * per_minute
 
 
+class _SlowSource(_Source):
+    """Fuente que cede el bucle a mitad de lectura: así se solapan las peticiones concurrentes."""
+
+    def __init__(self, value: int | None, release: asyncio.Event) -> None:
+        super().__init__(value)
+        self.release = release
+
+    async def current(self) -> int | None:
+        self.reads += 1
+        await self.release.wait()
+        return self.value
+
+
+def test_concurrent_requests_never_pass_more_than_the_burst() -> None:
+    # Garantía «nunca más del presupuesto más la ráfaga» con peticiones a la vez en un proceso:
+    # el cubo comprueba y consume sin ceder el bucle.
+    clock = SimulatedClock(START)
+    limits = _limits(clock)
+    node = uuid.uuid4()
+
+    async def one() -> bool:
+        try:
+            await limits.admit(NodeRoute.FINDING, node_id=node, address=ORIGIN)
+        except NodeRejection:
+            return False
+        return True
+
+    async def burst() -> list[bool]:
+        return list(await asyncio.gather(*(one() for _ in range(300))))
+
+    results = asyncio.run(burst())
+    assert sum(results) == NODE_BUDGETS[NodeRoute.FINDING].budget.capacity == 60
+
+
+def test_concurrent_requests_read_a_stale_brake_once() -> None:
+    # Garantía «una lectura del freno por caché vencida»: 50 peticiones a la vez con la caché
+    # vencida leen la auditoría una sola vez (el candado de EmergencyBrake).
+    clock = SimulatedClock(START)
+
+    async def scenario() -> tuple[int, list[object]]:
+        release = asyncio.Event()
+        source = _SlowSource(7, release)
+        brake = EmergencyBrake(source, clock)
+        tasks = [asyncio.ensure_future(brake.budget()) for _ in range(50)]
+        while source.reads == 0:
+            await asyncio.sleep(0)
+        for _ in range(10):
+            await asyncio.sleep(0)  # el resto llega al candado mientras la lectura espera
+        release.set()
+        budgets = await asyncio.gather(*tasks)
+        return source.reads, [budget.limit if budget else None for budget in budgets]
+
+    reads, limits_seen = asyncio.run(scenario())
+    assert reads == 1
+    assert limits_seen == [7] * 50
+
+
 def test_the_brake_is_read_with_a_short_cache_and_survives_a_read_failure() -> None:
     clock = SimulatedClock(START)
     source = _Source(None)
