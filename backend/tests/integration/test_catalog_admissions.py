@@ -590,6 +590,28 @@ def test_under_concession_the_installer_reads_audited_and_never_admits(
     assert count["n"] == 1
 
 
+@pytest.mark.parametrize(
+    "fetch_site", [None, "cross-site", "same-site", "none"], ids=["sin", "cross", "same", "none"]
+)
+def test_a_forged_admission_is_forbidden_and_writes_nothing(
+    admissions: Admissions, fetch_site: str | None
+) -> None:
+    # La barrera CSRF de la cadena (PR-NUC-53) también protege la ruta real de admisión.
+    site = admissions.authz.add_site(plants=1, zones_per_plant=1)
+    plant = next(iter(site.plants))
+    headers = admissions.headers(admissions.member(site))
+    del headers["Sec-Fetch-Site"]
+    if fetch_site is not None:
+        headers["Sec-Fetch-Site"] = fetch_site
+
+    response = admissions.run(
+        admissions.client.post(f"/plants/{plant}/admissions", json=_body(), headers=headers)
+    )
+
+    assert _code(response) == (403, "forbidden", None)
+    assert admissions.rows(plant) == [] and admissions.records(plant) == []
+
+
 # --- G-6 y texto libre -------------------------------------------------------------------------
 
 
