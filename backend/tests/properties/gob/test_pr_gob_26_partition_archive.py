@@ -595,17 +595,21 @@ def destructive_statements(draw: st.DrawFn) -> str:
 @given(destructive_statements())
 def test_any_generated_migration_with_a_destructive_statement_is_rejected(statement: str) -> None:
     registry = load_registry()
+    # El eslabón siguiente a la cabeza de la cadena: el lint exige que el número sea la posición.
+    chain = sorted(VERSIONS.glob("*_[0-9][0-9][0-9][0-9]_*.py"), key=lambda p: p.name[4:8])
+    head = chain[-1].name[:8]
+    following = f"gob_{int(head[4:]) + 1:04d}"
     with tempfile.TemporaryDirectory() as directory:
         versions = Path(directory)
         for path in sorted(VERSIONS.glob("*.py")):
             (versions / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-        (versions / "gob_0019_generated.py").write_text(
+        (versions / f"{following}_generated.py").write_text(
             "\n".join(
                 [
                     '"""Migración generada."""',
                     "from alembic import op",
-                    "revision = 'gob_0019'",
-                    "down_revision = 'gob_0018'",
+                    f"revision = '{following}'",
+                    f"down_revision = '{head}'",
                     "branch_labels = None",
                     "depends_on = None",
                     "",
