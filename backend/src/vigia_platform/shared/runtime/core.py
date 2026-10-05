@@ -274,6 +274,7 @@ def build_core(
         archive=archive,
         verifier_path=verifier_path,
         config=config,
+        secrets=secrets,
     )
     outbox_catalog(units, services, into=catalog)
 

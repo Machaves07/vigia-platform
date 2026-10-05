@@ -159,11 +159,13 @@ def test_a_healthy_staging_has_no_failures_and_says_why_it_skips() -> None:
     results = _run()
     assert {n for n, r in results.items() if r.status == "ok"} == {1, 2, 5, 6, 7}
     # VIG-152 publica las primeras rutas del contrato: la conformidad (4) deja de omitirse y falla
-    # a propósito hasta que VIG-164 (TASK-230) la escriba. Nunca pasa en vacío.
-    assert {n for n, r in results.items() if r.status == "failed"} == {4}
-    assert "escríbela en tools/deploy_checks.py" in results[4].detail
-    for number in (3, 8, 10, 11, 12, 13):
-        assert results[number].status == "skipped" and results[number].detail
+    # a propósito hasta que VIG-164 (TASK-230) la escriba. VIG-151 publica el alta: la segunda
+    # mitad de la 3 y las 10 a 13 también fallan a propósito hasta que TASK-234 las escriba.
+    # Nunca pasan en vacío.
+    assert {n for n, r in results.items() if r.status == "failed"} == {3, 4, 10, 11, 12, 13}
+    for number in (3, 4, 10, 11, 12, 13):
+        assert "escríbela en tools/deploy_checks.py" in results[number].detail
+    assert results[8].status == "skipped" and results[8].detail
     assert "U-05" in results[8].detail
     assert results[9].detail == "solo en pilot"
 
@@ -359,10 +361,10 @@ def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
     assert pilot[9].status == "failed"
 
 
-def test_the_current_repository_has_contract_routes_but_neither_enrollment_nor_frontend() -> None:
-    # VIG-152: concesión y confirmación de clip; el alta llega con su propia tarea.
+def test_the_current_repository_has_contract_routes_and_enrollment_but_no_frontend() -> None:
+    # VIG-152: concesión y confirmación de clip; VIG-151: el alta (y la rotación).
     target = _target()
-    assert target.has_contract_routes() and not target.has_enrollment()
+    assert target.has_contract_routes() and target.has_enrollment()
     assert not target.has_frontend()
     assert "/health/live" in target.openapi_paths()
 

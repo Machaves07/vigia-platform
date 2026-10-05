@@ -201,12 +201,20 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
 
 def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
     # VIG-152 (TASK-222): la concesión de clip y la confirmación del clip de verificación.
-    assert PUBLISHED_NODE_ROUTES == (NodeRoute.CLIP_UPLOAD, NodeRoute.CLIP_CONFIRMATION)
+    # VIG-151 (TASK-219): el alta y la rotación de la credencial.
+    assert PUBLISHED_NODE_ROUTES == (
+        NodeRoute.CLIP_UPLOAD,
+        NodeRoute.CLIP_CONFIRMATION,
+        NodeRoute.ENROLLMENT,
+        NodeRoute.CREDENTIAL_ROTATION,
+    )
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
     assert {path for path in paths if path.startswith(NODE_PREFIX)} == {
         NodeRoute.CLIP_UPLOAD.path,
         NodeRoute.CLIP_CONFIRMATION.path,
+        NodeRoute.ENROLLMENT.path,
+        NodeRoute.CREDENTIAL_ROTATION.path,
     }
 
 
