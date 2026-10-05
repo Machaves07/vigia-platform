@@ -96,6 +96,10 @@ _MARK_DECOMMISSIONED: Final = text(
     " WHERE organization_id = :organization_id AND node_id = :node_id"
     " AND revoked_at IS NOT NULL AND decommissioned_at IS NULL RETURNING node_id"
 )
+_SET_LIVE_VIEW_URL: Final = text(
+    "UPDATE fleet.node_fleet_record SET live_view_local_url = :url"
+    " WHERE organization_id = :organization_id AND node_id = :node_id"
+)
 _CREDENTIALS: Final = text(
     "SELECT credential_id, status, expires_at FROM fleet.node_credential"
     " WHERE organization_id = :organization_id AND node_id = :node_id"
@@ -292,6 +296,15 @@ class PostgresNodeFleetStore:
         """Re-alta desde ``revoked``: la ficha deja de estar revocada (la historia queda en el
         expediente, ``node_revoked``)."""
         await transaction.execute(_CLEAR_REVOCATION, _key(transaction.context, node_id))
+
+    async def set_live_view_local_url(
+        self, transaction: Transaction, node_id: uuid.UUID, url: str | None
+    ) -> None:
+        """``live_view_local_url`` que el nodo anunció en su latido (nula si dejó de anunciarla;
+        nº 31, TASK-223). La ficha ya está bloqueada por el latido."""
+        await transaction.execute(
+            _SET_LIVE_VIEW_URL, {**_key(transaction.context, node_id), "url": url}
+        )
 
     async def mark_decommissioned(
         self, transaction: Transaction, node_id: uuid.UUID, decommissioned_at: datetime

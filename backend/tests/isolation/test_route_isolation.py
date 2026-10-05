@@ -623,6 +623,26 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("GET", "/zones/{zone_id}/gates"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/gates")
     ),
+    # --- Rutas del contrato (``node_route``; TASK-223): con el certificado de un nodo de A, la
+    # organización, la planta, el nodo o la zona de B responden ``node_zone_mismatch``. Sus pruebas
+    # con base están en tests/integration/test_fleet_heartbeat.py y
+    # test_fleet_zone_catalog_route.py; la cobertura exhaustiva de U-03 la completa TASK-228
+    # (VIG-165).
+    ("POST", "/api/nodes/heartbeats"): Case(
+        Kind.NODE,
+        lambda i: Call(
+            "POST",
+            "/api/nodes/heartbeats",
+            json={
+                "organization_id": str(i.organization),
+                "plant_id": str(i.plant),
+                "node_id": str(i.node),
+            },
+        ),
+    ),
+    ("GET", "/api/nodes/zones/{zone_id}/catalog"): Case(
+        Kind.NODE, lambda i: Call("GET", f"/api/nodes/zones/{i.zone}/catalog")
+    ),
     ("POST", "/zones/{zone_id}/gates/mounting/scope-record"): Case(
         Kind.RESOURCE,
         lambda i: Call(
@@ -951,11 +971,12 @@ def test_contract_routes_are_in_the_catalog_and_need_their_case() -> None:
     # TASK-206: iter_declared_routes incluye las rutas declaradas con NodeRoute, así que
     # ``uncovered`` exige un caso por ruta del contrato (otra organización → node_zone_mismatch
     # o not_found) igual que por ruta de personas.
-    contract = node_router((NodeRoute.FINDING, NodeRoute.ZONE_CATALOG)).routes
+    # Dos rutas aún sin publicar (el latido y el catálogo ya tienen su caso, TASK-223).
+    contract = node_router((NodeRoute.FINDING, NodeRoute.UPDATE_RESULT)).routes
     routes = [*build_openapi_app().routes, *contract]
     assert uncovered(routes) == [
-        "GET /api/nodes/zones/{zone_id}/catalog",
         "POST /api/nodes/findings",
+        "POST /api/nodes/update-results",
     ]
     found = declared(contract)
     assert all(declaration.node is not None for declaration in found.values())

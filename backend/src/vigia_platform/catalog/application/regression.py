@@ -53,7 +53,7 @@ from vigia_platform.catalog.domain.regression import (
     publication_rows,
 )
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
-from vigia_platform.identity.authz.context import with_unit
+from vigia_platform.identity.authz.context import NodeScope, with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter
 from vigia_platform.ledger.application.writer import (
@@ -217,12 +217,16 @@ class RegressionService:
         model_version: str,
         *,
         transaction: Transaction | None = None,
+        node: NodeScope | None = None,
     ) -> tuple[WalkTestRegression, ...]:
         """``model_version_change`` con la matriz completa en cada zona del nodo.
 
         Cada zona tiene que existir y estar dentro del alcance del contexto (las zonas asignadas
-        al nodo); si no, ``ResourceNotFound`` y nada escrito. Con ``transaction`` (abierta con un
-        contexto de U-03) corre dentro de ella, en la transacción corta del latido: quien la abre
+        al nodo); si no, ``ResourceNotFound`` y nada escrito. Con ``node`` (el latido, TASK-223:
+        el contexto de nodo de A-51 no lleva ``allowed_scopes``), el alcance es el del nodo: su
+        organización, su planta y las zonas que tiene asignadas en el instante de la petición.
+        Con ``transaction`` (abierta con un contexto de U-03) corre dentro de ella, en la
+        transacción corta del latido: quien la abre
         **no debe escribir registros del expediente antes** de llamar a la marca, porque el
         registro retendría la cabeza de la cadena antes de los candados de regresión (orden
         regresión → cadena; si no, interbloqueo con una publicación de la misma planta).
@@ -231,15 +235,21 @@ class RegressionService:
         zones = tuple(sorted(set(zone_ids)))
         if not 1 <= len(zones) <= MAX_MODEL_ZONES or any(type(z) is not uuid.UUID for z in zones):
             raise RegressionRequestInvalid
+        if node is not None and not isinstance(node, NodeScope):
+            raise TypeError("node debe ser NodeScope")
         if transaction is not None:
-            return await self._model_marks(transaction, zones, version)
+            return await self._model_marks(transaction, zones, version, node)
         if not isinstance(context, ScopeContext):
             raise ResourceNotFound()
         async with self._database.transaction(with_unit(context, ActorUnit.U03)) as opened:
-            return await self._model_marks(opened, zones, version)
+            return await self._model_marks(opened, zones, version, node)
 
     async def _model_marks(
-        self, transaction: Transaction, zones: tuple[uuid.UUID, ...], model_version: str
+        self,
+        transaction: Transaction,
+        zones: tuple[uuid.UUID, ...],
+        model_version: str,
+        node: NodeScope | None = None,
     ) -> tuple[WalkTestRegression, ...]:
         context = transaction.context
         if context.actor.unit is not ActorUnit.U03:
@@ -248,7 +258,7 @@ class RegressionService:
         refs: list[ZoneRef] = []
         for zone_id in zones:
             zone = await self._repository.zone(transaction, zone_id)
-            if zone is None or not context.covers(zone.plant_id, zone.zone_id):
+            if zone is None or not _in_scope(context, zone, node):
                 raise ResourceNotFound()
             refs.append(zone)
         # Todos los candados de regresión, en orden de zona, **antes** de escribir ningún registro:
@@ -419,6 +429,18 @@ class RegressionService:
 
 def _ids(zone: ZoneRef) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     return zone.organization_id, zone.plant_id, zone.zone_id
+
+
+def _in_scope(context: ScopeContext, zone: ZoneRef, node: NodeScope | None) -> bool:
+    """¿Alcanza el contexto a la zona? Con ``node``, solo las zonas asignadas a ese nodo, de su
+    organización y de su planta; sin él, las asignaciones del contexto."""
+    if node is None:
+        return context.covers(zone.plant_id, zone.zone_id)
+    return (
+        node.organization_id == context.organization_id == zone.organization_id
+        and node.plant_id == zone.plant_id
+        and node.covers_zone(zone.zone_id)
+    )
 
 
 def _record_id(written: Receipt | LedgerRejection) -> uuid.UUID:

@@ -155,18 +155,15 @@ def _run(
 # --- Conjunto ---------------------------------------------------------------------------
 
 
-def test_a_healthy_staging_has_no_failures_and_says_why_it_skips() -> None:
-    results = _run()
+def test_a_healthy_staging_has_no_failures_and_says_why_it_skips(tmp_path: Path) -> None:
+    # Un repositorio sin rutas del contrato ni interfaz (el de antes de VIG-152 y TASK-223:
+    # desde entonces la nº 4 se exige, ver test_conformance_fails_once_any_contract_route_exists).
+    results = _run(_target(repository=_repository(tmp_path)))
     assert {n for n, r in results.items() if r.status == "ok"} == {1, 2, 5, 6, 7}
-    # VIG-152 publica las primeras rutas del contrato: la conformidad (4) deja de omitirse y falla
-    # a propósito hasta que VIG-164 (TASK-230) la escriba. VIG-151 publica el alta: la segunda
-    # mitad de la 3 y las 10 a 13 también fallan a propósito hasta que TASK-234 las escriba.
-    # Nunca pasan en vacío.
-    assert {n for n, r in results.items() if r.status == "failed"} == {3, 4, 10, 11, 12, 13}
-    for number in (3, 4, 10, 11, 12, 13):
-        assert "escríbela en tools/deploy_checks.py" in results[number].detail
-    assert results[8].status == "skipped" and results[8].detail
-    assert "U-05" in results[8].detail
+    assert {n for n, r in results.items() if r.status == "failed"} == set()
+    for number in (3, 4, 8, 10, 11, 12, 13):
+        assert results[number].status == "skipped" and results[number].detail
+    assert "U-03" in results[4].detail and "U-05" in results[8].detail
     assert results[9].detail == "solo en pilot"
 
 
@@ -362,11 +359,15 @@ def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
 
 
 def test_the_current_repository_has_contract_routes_and_enrollment_but_no_frontend() -> None:
-    # VIG-152: concesión y confirmación de clip; VIG-151: el alta (y la rotación).
+    # VIG-152 (concesión y confirmación de clip) y TASK-223 (latido y catálogo por zona)
+    # publican rutas del contrato: la conformidad (nº 4) deja de omitirse y falla hasta que
+    # TASK-230 la escriba (nunca pasa en vacío). VIG-151 publica el alta: la 3 y las 10 a 13
+    # también fallan hasta que TASK-234 las escriba (test_the_u03_checks_fail_once_...).
     target = _target()
     assert target.has_contract_routes() and target.has_enrollment()
     assert not target.has_frontend()
     assert "/health/live" in target.openapi_paths()
+    assert _run(target)[4].status == "failed"
 
 
 # --- Orden ------------------------------------------------------------------------------------

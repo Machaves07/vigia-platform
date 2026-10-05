@@ -95,11 +95,14 @@ def chain_units() -> tuple[UnitRegistration, ...]:
     ``ledger`` (y su cuerpo, PR-NUC-38) las prueba ``tests/examples/test_ledger_routes.py``; las
     de ``catalog`` (cuerpo, CSRF y servicios reales), ``test_catalog_admissions.py`` y
     ``test_catalog_documents_localstack.py`` de ``tests/integration/``; las de ``fleet`` (VIG-147),
-    ``test_fleet_node_identity.py`` y el aislamiento de ``tests/isolation``."""
+    ``test_fleet_node_identity.py`` y el aislamiento de ``tests/isolation``. Tampoco las de
+    ``node_api``: desde TASK-223 publica el latido y el catálogo por zona, y este arnés declara sus
+    propias rutas del contrato con ``HarnessNodeGate`` (las reales las prueban
+    ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``)."""
     return tuple(
         unit
         for unit in platform_units()
-        if unit.name not in ("identity", "ledger", "catalog", "fleet")
+        if unit.name not in ("identity", "ledger", "catalog", "fleet", "node_api")
     )
 
 

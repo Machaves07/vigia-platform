@@ -2818,6 +2818,140 @@
       "x-vigia-content-encodings":
         - "identity"
         - "gzip"
+  "/api/nodes/heartbeats":
+    "post":
+      "tags":
+        - "configuration"
+      "summary": "Latido del nodo."
+      "operationId": "post_heartbeat"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HeartbeatResponse"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 65536
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/zones/{zone_id}/catalog":
+    "get":
+      "tags":
+        - "configuration"
+      "summary": "Catálogo vigente de una zona."
+      "operationId": "get_zone_catalog"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Zone Id"
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__SignedEnvelope"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "x-vigia-mutual-tls": true
+      "x-vigia-content-encodings": []
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -3476,6 +3610,22 @@
         - "versions"
         - "next_after"
       "title": "CatalogHistoryOut"
+    "CatalogVersion":
+      "properties":
+        "zone_id":
+          "$ref": "#/components/schemas/UUID"
+        "version":
+          "type": "integer"
+          "maximum": 2147483647.0
+          "minimum": 1.0
+          "title": "Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "version"
+      "title": "CatalogVersion"
+      "description": "Versión disponible del catálogo de una zona."
     "CatalogVersionDetail":
       "properties":
         "zone_id":
@@ -3940,6 +4090,16 @@
         - "clips"
         - "next_after"
       "title": "CommissioningClipsOut"
+    "CompatibilityResult":
+      "type": "string"
+      "enum":
+        - "accepted"
+        - "accepted_with_notice"
+        - "rejected_major"
+        - "rejected_retired"
+        - "rejected_newer"
+      "title": "CompatibilityResult"
+      "description": "Resultado de la política de compatibilidad de versiones."
     "CompleteActivation":
       "properties":
         "step":
@@ -4088,6 +4248,26 @@
         - "image/jpeg"
       "title": "ContentType"
       "description": "Tipo de contenido del archivo, si la concesión lo fija. Valor técnico (tipo MIME) que nunca se muestra a una persona: no tiene etiqueta en `labels.es.json` y `label_es` lo excluye de forma explícita (A-42)."
+    "ContractNotice":
+      "properties":
+        "result":
+          "$ref": "#/components/schemas/CompatibilityResult"
+        "retires_at":
+          "anyOf":
+            - "$ref": "#/components/schemas/Timestamp"
+            - "type": "null"
+        "message_es":
+          "type": "string"
+          "maxLength": 512
+          "minLength": 1
+          "title": "Message Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "result"
+        - "message_es"
+      "title": "ContractNotice"
+      "description": "Aviso de compatibilidad (BR-CTR-21). Con `result = accepted_with_notice`, `retires_at` es obligatorio: la versión del nodo se retira en esa fecha. El texto es `message_es` (renombrado desde `message`, nota fechada de 2026-09-23)."
     "CoverageStatusOut":
       "properties":
         "zone_id":
@@ -4979,6 +5159,58 @@
         - "mute_after_seconds"
       "title": "HeartbeatConfiguration"
       "description": "Parámetros iniciales del latido. `mute_after_seconds` es un valor derivado, `5 × interval_seconds` (300 con el intervalo de 60 s); la plataforma nunca emite una configuración que rompa esa igualdad (entrada A-04 de la adenda, verificada en el modelo). Si `HeartbeatResponse.heartbeat_interval_seconds` cambia el intervalo, el umbral de mudo pasa a cinco veces el intervalo efectivo (BR-CTR-51)."
+    "HeartbeatResponse":
+      "properties":
+        "server_time":
+          "$ref": "#/components/schemas/Timestamp"
+        "gate_states":
+          "items":
+            "$ref": "#/components/schemas/SignedGateState"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Gate States"
+        "catalog_versions_available":
+          "items":
+            "$ref": "#/components/schemas/CatalogVersion"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Catalog Versions Available"
+        "target_software_version":
+          "anyOf":
+            - "$ref": "#/components/schemas/SemVer"
+            - "type": "null"
+        "contract_notice":
+          "$ref": "#/components/schemas/ContractNotice"
+        "platform_public_keys":
+          "$ref": "#/components/schemas/SignedPublicKeySet"
+        "revoked":
+          "type": "boolean"
+          "title": "Revoked"
+        "heartbeat_interval_seconds":
+          "type": "integer"
+          "maximum": 600.0
+          "minimum": 15.0
+          "title": "Heartbeat Interval Seconds"
+        "mute_after_seconds":
+          "type": "integer"
+          "maximum": 3000.0
+          "minimum": 75.0
+          "title": "Mute After Seconds"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "server_time"
+        - "gate_states"
+        - "catalog_versions_available"
+        - "contract_notice"
+        - "platform_public_keys"
+        - "revoked"
+        - "heartbeat_interval_seconds"
+        - "mute_after_seconds"
+      "title": "HeartbeatResponse"
+      "description": "Respuesta de `POST heartbeats` (domain-entities.md §2.5 y notas fechadas): lo que el nodo aprende en cada latido. Es el **único canal** por el que la plataforma comunica al nodo cambios de compuerta, de catálogo, de versión objetivo, de claves públicas y de revocación; la plataforma nunca inicia conexiones al nodo (BR-CTR-55). Las compuertas llegan solo por `gate_states`: no tienen ruta propia. `platform_public_keys` es un `SignedEnvelope<PublicKeySet>` firmado con una clave de propósito `key_set` que el nodo ya tiene fijada; un conjunto que no verifica no se aplica. `contract_notice.message_es` es el único texto libre, genérico y en español (BR-CTR-13, BR-CTR-16). La ventana de mantenimiento no viaja en esta respuesta (decisión D-5). Reglas que verifica el modelo: `mute_after_seconds = 5 × heartbeat_interval_seconds` (pendiente nº 35, BR-CTR-51); una entrada de `gate_states` y de `catalog_versions_available` por cada zona del nodo, cada zona a lo sumo una vez."
     "HierarchyOrganizationView":
       "properties":
         "organization_id":
@@ -6843,6 +7075,12 @@
         - "user_id"
         - "sessions_closed"
       "title": "SecondFactorResetView"
+    "SemVer":
+      "type": "string"
+      "maxLength": 64
+      "minLength": 5
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+      "title": "SemVer"
     "SessionView":
       "properties":
         "created_at":
@@ -7145,6 +7383,9 @@
     "SignedGateState":
       "$ref": "#/components/schemas/vigia_contracts__models__gate_state__SignedEnvelope"
       "title": "SignedGateState"
+    "SignedPublicKeySet":
+      "$ref": "#/components/schemas/vigia_contracts__models__public_key_set__SignedEnvelope"
+      "title": "SignedPublicKeySet"
     "SignedZoneCatalog":
       "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__SignedEnvelope"
       "title": "SignedZoneCatalog"
@@ -7863,6 +8104,50 @@
       "properties":
         "payload":
           "$ref": "#/components/schemas/vigia_contracts__models__gate_state__Payload"
+        "payload_canonical_sha256":
+          "$ref": "#/components/schemas/Sha256Hex"
+        "signature":
+          "type": "string"
+          "maxLength": 88
+          "minLength": 88
+          "pattern": "^[A-Za-z0-9+/]{86}==$"
+          "title": "Signature"
+        "key_id":
+          "$ref": "#/components/schemas/KeyId"
+        "signed_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "payload"
+        - "payload_canonical_sha256"
+        - "signature"
+        - "key_id"
+        - "signed_at"
+      "title": "SignedEnvelope"
+      "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga."
+    "vigia_contracts__models__public_key_set__Payload":
+      "properties":
+        "keys":
+          "items":
+            "$ref": "#/components/schemas/PublicKey"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Keys"
+        "issued_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "keys"
+        - "issued_at"
+      "title": "PublicKeySet"
+      "description": "Conjunto vigente de claves públicas de la plataforma (nota de domain-entities.md §3.5). Viaja como `SignedEnvelope<PublicKeySet>` en `HeartbeatResponse.platform_public_keys`, firmado con una clave de propósito `key_set` que el nodo ya tiene fijada; un conjunto que no verifica no se aplica."
+    "vigia_contracts__models__public_key_set__SignedEnvelope":
+      "properties":
+        "payload":
+          "$ref": "#/components/schemas/vigia_contracts__models__public_key_set__Payload"
         "payload_canonical_sha256":
           "$ref": "#/components/schemas/Sha256Hex"
         "signature":

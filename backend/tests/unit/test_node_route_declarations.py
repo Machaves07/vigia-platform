@@ -8,8 +8,8 @@
   (también fuera de ``/api/nodes``), con ``body_limit`` en una ruta del contrato o con una entrada
   repetida.
 - ``node_router`` monta solo las rutas pedidas, cada una con su ``node_route`` resuelta por
-  ``operation_id``, y nunca ``conformance-profile``; la aplicación de producción no publica
-  ninguna todavía (``app.yaml`` no cambia).
+  ``operation_id``, y nunca ``conformance-profile``; la aplicación de producción publica el latido
+  y el catálogo por zona (TASK-223).
 - Sin ``NodeGate`` instalada la ruta deniega con el transitorio del contrato.
 """
 
@@ -200,19 +200,24 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
 
 
 def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
-    # VIG-152 (TASK-222): la concesión de clip y la confirmación del clip de verificación.
-    # VIG-151 (TASK-219): el alta y la rotación de la credencial.
+    # VIG-152 (TASK-222): concesión de clip y confirmación del clip de verificación.
+    # TASK-223: latido y catálogo por zona. VIG-151 (TASK-219): el alta y la rotación de la
+    # credencial. Las demás llegan con sus tareas.
     assert PUBLISHED_NODE_ROUTES == (
+        NodeRoute.HEARTBEAT,
         NodeRoute.CLIP_UPLOAD,
         NodeRoute.CLIP_CONFIRMATION,
+        NodeRoute.ZONE_CATALOG,
         NodeRoute.ENROLLMENT,
         NodeRoute.CREDENTIAL_ROTATION,
     )
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
     assert {path for path in paths if path.startswith(NODE_PREFIX)} == {
+        NodeRoute.HEARTBEAT.path,
         NodeRoute.CLIP_UPLOAD.path,
         NodeRoute.CLIP_CONFIRMATION.path,
+        NodeRoute.ZONE_CATALOG.path,
         NodeRoute.ENROLLMENT.path,
         NodeRoute.CREDENTIAL_ROTATION.path,
     }

@@ -495,22 +495,38 @@ class GateService:
         return envelope
 
     async def renew_gate_envelope(
-        self, context: ScopeContext, zone_id: uuid.UUID
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        *,
+        expiring_before: datetime | None = None,
     ) -> Mapping[str, Any] | None:
         """Vuelve a emitir el sobre con el mismo estado y un ``issued_at`` nuevo (A-55).
 
         Sin historia, sin ``gate_state_changed`` y sin evento; ``None`` si la zona nunca cambió
         (no hay sobre que renovar). Con la firma caída, ``GateUnavailable`` y el sobre anterior
-        intacto. El llamador (el latido, TASK-223) decide cuándo: aquí no hay umbral.
+        intacto. El llamador (el latido, TASK-223) decide cuándo. Con ``expiring_before`` (añadido
+        por TASK-223), el umbral se comprueba **otra vez con la exclusión de la zona tomada**: si
+        otro latido ya renovó el sobre (vence en ``expiring_before`` o después), se devuelve el
+        guardado sin firmar, así que dos latidos concurrentes firman una sola vez.
         """
         if not isinstance(context, ScopeContext) or type(zone_id) is not uuid.UUID:
             raise ResourceNotFound()
+        threshold = None if expiring_before is None else _instant(expiring_before)
 
         async def renew(transaction: Transaction) -> Mapping[str, Any] | None:
             await self._repository.lock_projection(transaction, zone_id)
             current = await self._repository.state(transaction, zone_id)
             if current is None:
                 return None
+            valid_until = current.valid_until
+            if (
+                threshold is not None
+                and valid_until is not None
+                and valid_until >= threshold
+                and current.envelope is not None
+            ):
+                return current.envelope
             issued = handover_instant(self._clock.now(), last_issued=current.issued_at)
             state = dataclasses.replace(current, issued_at=issued, envelope=None)
             envelope = await self._sign(gate_state_payload(state, issued))
