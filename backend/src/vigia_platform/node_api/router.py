@@ -113,6 +113,9 @@ class NodeRequest:
     """El cuerpo validado con el modelo estricto de U-01."""
     idempotency_key: str | None = None
     path: Mapping[str, str] = field(default_factory=dict)
+    source_address: str | None = field(default=None, repr=False)
+    """El origen de red (el mismo que usa el límite por origen): solo para el ``source_ip_hash``
+    del intento de alta (TASK-219); nunca sale en claro."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +278,7 @@ class NodeApiGate:
             document=document,
             idempotency_key=idempotency_key,
             path={key: str(value) for key, value in request.path_params.items()},
+            source_address=_client_address(scope),
         )
 
     @staticmethod

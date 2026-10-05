@@ -27,6 +27,9 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
 - documentos firmados (LC-GOB-05, §6 de U-03): ``VIGIA_DOCUMENTS_PREFIX`` (``documents/``, el
   único que admite la restricción ``document_upload_grant_storage_key_format`` de ``gob_0017``:
   otro prefijo exige una migración) y ``VIGIA_DOCUMENTS_MAX_BYTES`` (de 1 a 20 971 520);
+- alta del nodo (TASK-219): ``VIGIA_NODES_BASE_URL`` (``https://nodes.<dominio>/api/nodes``, la
+  que se entrega al nodo) y ``VIGIA_ENROLLMENT_SOURCE_KEY_SECRET`` (el secreto de la clave estable
+  del hash de origen de los intentos), opcionales: sin ellas el alta responde transitorio;
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -80,6 +83,11 @@ _PATH: Final = re.compile(r"/[A-Za-z0-9/_.-]{1,1023}")
 _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _DIGITS: Final = re.compile(r"[0-9]{1,9}")
 _DOCUMENTS_PREFIX: Final = re.compile(r"documents/")
+_NODES_BASE_URL: Final = re.compile(
+    r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+){0,16}/?"
+)
+"""``Endpoints.ingest_base_url`` del contrato: ``https``, sin consulta ni fragmento."""
+_SECRET_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9:/_+=.@-]{0,2047}")
 
 
 class RuntimeConfigInvalid(ValueError):
@@ -184,6 +192,12 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable("uvicorn_workers", "VIGIA_UVICORN_WORKERS", _integer(1, 16)),
     _Variable("documents_prefix", "VIGIA_DOCUMENTS_PREFIX", _text(_DOCUMENTS_PREFIX)),
     _Variable("documents_max_bytes", "VIGIA_DOCUMENTS_MAX_BYTES", _integer(1, 20_971_520)),
+    _Variable("nodes_base_url", "VIGIA_NODES_BASE_URL", _text(_NODES_BASE_URL)),
+    _Variable(
+        "enrollment_source_key_secret",
+        "VIGIA_ENROLLMENT_SOURCE_KEY_SECRET",
+        _text(_SECRET_ID),
+    ),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -228,6 +242,12 @@ class RuntimeConfig(BaseModel):
     uvicorn_workers: int = 2
     documents_prefix: str = "documents/"
     documents_max_bytes: int = 20_971_520
+    nodes_base_url: str | None = None
+    """``initial_configuration.endpoints.ingest_base_url`` del alta (``https://nodes.<dominio>``
+    ``/api/nodes``); sin ella, el alta responde transitorio."""
+    enrollment_source_key_secret: str | None = None
+    """ARN o nombre del secreto con la clave estable del hash de origen del alta (≥ 32 bytes, la
+    misma en todas las instancias); sin ella, el alta falla cerrada (TASK-218, TASK-219)."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:
