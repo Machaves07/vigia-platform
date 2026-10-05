@@ -298,6 +298,28 @@ def test_admin_node_ca_and_archive_only_with_their_variables() -> None:
     assert admin.node_ca is None
 
 
+def test_admin_revocation_list_only_with_key_bucket_and_trust_store() -> None:
+    """TASK-220: ``regenerate-revocation-list`` necesita la clave, ``vigia-edge`` y el almacén."""
+    trust_store = (
+        "arn:aws:elasticloadbalancing:us-east-1:000000000000:truststore/vigia-node-trust/0123"
+    )
+    base = {"VIGIA_NODE_CA_KEY_ARN": "alias/vigia-node-ca", "VIGIA_EDGE_BUCKET": "vigia-edge-test"}
+    complete = _admin_config(**base, VIGIA_NODE_TRUST_STORE_ARN=trust_store)
+    admin = asyncio.run(
+        compose_admin_runtime(complete, PROVIDER_ID, _runtime(), reader=FakeReader())
+    )
+    assert admin.revocation_list is not None
+    assert complete.crl_key == "ca/crl.pem"
+    assert not cast(LazyDatabase, admin.database).opened  # construir no abre la base
+    without_store = _admin_config(**base)
+    admin = asyncio.run(
+        compose_admin_runtime(without_store, PROVIDER_ID, _runtime(), reader=FakeReader())
+    )
+    assert admin.revocation_list is None
+    with pytest.raises(ValueError):
+        _admin_config(**base, VIGIA_NODE_TRUST_STORE_ARN="no-es-un-arn")
+
+
 # --- Errores de composición ----------------------------------------------------------------------
 
 

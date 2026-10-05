@@ -29,18 +29,21 @@ from typing import Any
 
 from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from cryptography import x509
+from opentelemetry.sdk.metrics.export import HistogramDataPoint, InMemoryMetricReader
 
+from tests.factories import make_context
 from vigia_platform.fleet.domain.enums import CredentialStatus
 from vigia_platform.fleet.domain.revocation_list import (
     CredentialRevocationFacts,
     RevocationListStatus,
 )
 from vigia_platform.shared.context import ActorKind
+from vigia_platform.shared.observability.metrics import MetricName
 from vigia_platform.shared.storage import ChecksumType, ObjectHead
-from tests.factories import make_context
 
 TRUST_STORE_ARN = (
-    "arn:aws:elasticloadbalancing:us-east-1:000000000000:truststore/vigia-node-trust/0123456789abcdef"
+    "arn:aws:elasticloadbalancing:us-east-1:000000000000"
+    ":truststore/vigia-node-trust/0123456789abcdef"
 )
 """ARN sintético (cuenta 000000000000 de LocalStack): nunca uno real (A-47)."""
 HANG_LIMIT_SECONDS = 60.0
@@ -228,6 +231,24 @@ async def _in_thread(function: Callable[[], None]) -> None:
 
 def crl_of(data: bytes) -> x509.CertificateRevocationList:
     return x509.load_pem_x509_crl(data)
+
+
+def histogram_points(reader: InMemoryMetricReader, name: MetricName) -> list[dict[str, Any]]:
+    """Los atributos de cada punto del histograma ``name``."""
+    data = reader.get_metrics_data()
+    points: list[dict[str, Any]] = []
+    if data is None:
+        return points
+    for resource in data.resource_metrics:
+        for scope in resource.scope_metrics:
+            for metric in scope.metrics:
+                if metric.name == name.value:
+                    points.extend(
+                        dict(point.attributes or {})
+                        for point in metric.data.data_points
+                        if isinstance(point, HistogramDataPoint)
+                    )
+    return points
 
 
 # --- Estado, credenciales y alcance en memoria -------------------------------------------------

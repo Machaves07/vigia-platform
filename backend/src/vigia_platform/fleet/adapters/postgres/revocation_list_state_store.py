@@ -53,7 +53,7 @@ _RECORD: Final = text(
     "UPDATE fleet.revocation_list_state SET"
     " published_generation = GREATEST(published_generation, :generation),"
     " dirty_since = CASE WHEN dirty_generation > GREATEST(published_generation, :generation)"
-    " THEN :started_at END,"
+    " THEN CAST(:started_at AS timestamptz) END,"
     " published_at = :published_at, object_version_id = :object_version_id,"
     " next_update = :next_update, entries = :entries"
     " WHERE singleton AND :generation <= dirty_generation"

@@ -82,24 +82,27 @@ class RevocationReason(enum.StrEnum):
 
 
 class PublishStep(enum.StrEnum):
-    """El paso que falló (código del registro estructurado; nunca un ARN ni un número de serie)."""
+    """El paso que falló (código del registro estructurado; nunca un ARN ni un número de serie).
 
-    SIGN = "revocation_list_sign"
-    PUT_OBJECT = "revocation_list_put_object"
-    LIST_REVOCATIONS = "revocation_list_list_revocations"
-    ADD_REVOCATIONS = "revocation_list_add_revocations"
-    VERIFY_REVOCATIONS = "revocation_list_verify_revocations"
-    REMOVE_REVOCATIONS = "revocation_list_remove_revocations"
+    Menos de 20 caracteres: la política de atributos toma por token una tira más larga.
+    """
+
+    SIGN = "crl_sign"
+    PUT_OBJECT = "crl_put_object"
+    LIST_REVOCATIONS = "crl_list_previous"
+    ADD_REVOCATIONS = "crl_add_revocation"
+    VERIFY_REVOCATIONS = "crl_verify_count"
+    REMOVE_REVOCATIONS = "crl_remove_previous"
 
 
 class RevocationListPublishFailed(Exception):
     """Un paso de la firma o de la publicación falló o superó su tope: la marca no se toca.
 
     El mensaje es constante y en español: nunca lleva el ARN, la clave, el PEM ni un número de
-    serie (NFR-GOB-13, 25).
+    serie (NFR-GOB-13, 25). ``code`` es el ``last_error_code`` y el ``code`` del registro.
     """
 
-    code: Final = "revocation_list_publish_failed"
+    code: Final = "crl_publish_failed"
 
     def __init__(self, step: PublishStep) -> None:
         super().__init__("la lista de revocación no se pudo publicar")

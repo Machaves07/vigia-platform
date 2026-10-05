@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import time
 import uuid
 
 import pytest
@@ -70,7 +69,7 @@ from vigia_platform.fleet.domain.revocation_list import (
     plan_revocation_list,
     revoked_certificates,
 )
-from vigia_platform.shared.clock import SimulatedClock
+from vigia_platform.shared.clock import SimulatedClock, SystemClock
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.observability.metrics import MetricName
 from vigia_platform.shared.outbox.registries import (
@@ -85,6 +84,8 @@ NOW = dt.datetime(2026, 10, 5, 12, 0, 0, tzinfo=dt.UTC)
 DAY = dt.timedelta(days=1)
 SECOND = dt.timedelta(seconds=1)
 STEP_TIMEOUT = 5.0
+WALL = SystemClock()
+"""Reloj de pared, solo para medir los topes de producción."""
 WALL_MARGIN = 2.0
 """Margen de pared sobre el tope de 5 s: segundos, nunca milisegundos (retro 14)."""
 
@@ -254,7 +255,7 @@ def test_the_task_is_registered_global_every_60_seconds_for_u03() -> None:
         ActorUnit.U03,
         TaskIteration.GLOBAL,
     )
-    assert SCHEDULE == Schedule.every(60)
+    assert Schedule.every(60) == SCHEDULE
 
 
 def test_registry_iteration_defaults_to_per_organization_and_rejects_anything_else() -> None:
@@ -304,7 +305,10 @@ class Harness:
 
     def publisher(self) -> TrustStorePublisher:
         return TrustStorePublisher(
-            storage=self.edge, elb=self.store, trust_store_arn=TRUST_STORE_ARN, bucket=self.edge.bucket
+            storage=self.edge,
+            elb=self.store,
+            trust_store_arn=TRUST_STORE_ARN,
+            bucket=self.edge.bucket,
         )
 
     def credential(
@@ -324,7 +328,9 @@ class Harness:
         return row
 
     def counter(self) -> float:
-        return sum(v for _, v in metric_points(self.reader, MetricName.REVOCATION_LIST_PUBLISH_FAILED))
+        return sum(
+            v for _, v in metric_points(self.reader, MetricName.REVOCATION_LIST_PUBLISH_FAILED)
+        )
 
     def gauge(self, name: MetricName) -> list[float]:
         return [v for _, v in metric_points(self.reader, name)]
@@ -352,7 +358,9 @@ def _plan_with(serials: list[int]) -> object:
 
 
 @pytest.mark.asyncio
-async def test_the_signed_list_verifies_with_the_root_and_carries_number_dates_and_reasons() -> None:
+async def test_the_signed_list_verifies_with_the_root_and_carries_number_dates_and_reasons() -> (
+    None
+):
     harness = Harness()
     root = await harness.publish_root()
     plan = plan_revocation_list(
@@ -395,7 +403,9 @@ async def test_kms_failure_or_a_foreign_root_fail_closed_at_the_sign_step() -> N
     assert failed.value.step is PublishStep.SIGN
     other = Harness()
     await other.publish_root()
-    foreign = NodeCaRevocationListSigner(kms=harness.kms, key_id=harness.kms.key_id, roots=other.edge)
+    foreign = NodeCaRevocationListSigner(
+        kms=harness.kms, key_id=harness.kms.key_id, roots=other.edge
+    )
     harness.kms.fail = False
     with pytest.raises(RevocationListPublishFailed):
         await foreign.sign(_plan_with([1]))  # type: ignore[arg-type]
@@ -406,10 +416,10 @@ async def test_a_hanging_kms_ends_within_five_seconds() -> None:
     harness = Harness()
     await harness.publish_root()
     harness.kms.hang = True
-    started = time.monotonic()
+    started = WALL.monotonic()
     with pytest.raises(RevocationListPublishFailed):
         await harness.signer().sign(_plan_with([1]))  # type: ignore[arg-type]
-    assert time.monotonic() - started <= STEP_TIMEOUT + WALL_MARGIN
+    assert WALL.monotonic() - started <= STEP_TIMEOUT + WALL_MARGIN
 
 
 # --- Publicación ------------------------------------------------------------------------------
@@ -427,7 +437,9 @@ async def _signed(harness: Harness, serials: list[int], number: int = 1) -> Sign
 
 
 @pytest.mark.asyncio
-async def test_publication_versions_the_object_adds_it_checks_the_count_and_retires_the_old() -> None:
+async def test_publication_versions_the_object_adds_it_checks_the_count_and_retires_the_old() -> (
+    None
+):
     harness = Harness()
     await harness.publish_root()
     publisher = harness.publisher()
@@ -529,11 +541,11 @@ async def test_each_step_that_does_not_answer_ends_within_five_seconds() -> None
 
     async def attempt(step: PublishStep, harness: Harness) -> tuple[PublishStep, float]:
         signed = await _signed(harness, [1, 2], 2)
-        started = time.monotonic()
+        started = WALL.monotonic()
         try:
             await harness.publisher().publish(signed)
         except RevocationListPublishFailed as failure:
-            return failure.step, time.monotonic() - started
+            return failure.step, WALL.monotonic() - started
         raise AssertionError(f"{step} no falló")
 
     try:
@@ -589,16 +601,21 @@ async def test_a_clean_and_fresh_list_does_nothing_but_report() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_publication_keeps_the_mark_counts_and_fails_the_handler() -> None:
+async def test_a_failed_publication_keeps_the_mark_counts_and_fails_the_handler(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     harness = Harness()
     await harness.publish_root()
     harness.credential(0, CredentialStatus.REVOKED)
     harness.states.mark_dirty(NOW)
     harness.store.switch.fail.add("add")
     service = _service(harness)
-    with pytest.raises(RevocationListPublishFailed) as failed:
+    with caplog.at_level(logging.ERROR), pytest.raises(RevocationListPublishFailed) as failed:
         await service(harness.scope)
     assert failed.value.step is PublishStep.ADD_REVOCATIONS
+    # El paso llega al registro con su código (no como «other»): menos de 20 caracteres.
+    fields = [getattr(r, "vigia_fields", {}) for r in caplog.records]
+    assert {"task": TASK_NAME, "code": "crl_add_revocation"} in fields
     assert harness.states.dirty and harness.states.published_generation == 0
     assert harness.counter() == 1
     # Al restablecerse, el primer ciclo publica y limpia la marca.

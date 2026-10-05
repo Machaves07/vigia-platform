@@ -164,7 +164,6 @@ PENDING_UNIT_TASKS: Final = {
     "detect_mute_nodes": "U-03",
     "evaluate_fleet_alarms": "U-03",
     "expire_enrollment_codes": "U-03",
-    "regenerate_revocation_list": "U-03",
     "mark_orphan_clips": "U-03",
     "expire_walk_test_sessions": "U-03",
     "alert_expiring_certificates": "U-03",

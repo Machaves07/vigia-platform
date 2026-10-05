@@ -88,8 +88,10 @@ SCHEDULE: Final = Schedule.every(60)
 
 _log = get_logger("fleet.revocation_list")
 
+# ``task`` ya trae ``regenerate_revocation_list`` en la lista cerrada; el paso que falló va al
+# registro como ``code``: solo valores de esta lista (NFR-NUC-41).
 with contextlib.suppress(ValueError):
-    redaction.DEFAULT_POLICY.register("task", [TASK_NAME])
+    redaction.DEFAULT_POLICY.register("code", [step.value for step in PublishStep])
 
 
 class CycleOutcome(enum.StrEnum):
