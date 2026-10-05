@@ -3131,6 +3131,131 @@
                 "$ref": "#/components/schemas/ApiErrorBody"
       "x-vigia-mutual-tls": true
       "x-vigia-content-encodings": []
+  "/api/nodes/credential-rotations":
+    "post":
+      "tags":
+        - "credentials"
+      "summary": "Rotación de la credencial del nodo."
+      "operationId": "post_credential_rotation"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeCredential"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/enrollment":
+    "post":
+      "tags":
+        - "credentials"
+      "summary": "Alta del nodo."
+      "operationId": "post_enrollment"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeEnrollmentResponse"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": false
+      "x-vigia-max-bytes": 16384
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
   "/api/nodes/heartbeats":
     "post":
       "tags":
@@ -4141,6 +4266,18 @@
         - "superseded_at"
       "title": "CatalogVersionSummary"
       "description": "Una entrada del historial: qué cambió, por qué, quién y cuándo (H-44)."
+    "CertificateChainPem":
+      "type": "string"
+      "maxLength": 32768
+      "minLength": 1
+      "pattern": "^(-{5}BEGIN CERTIFICATE-{5}\\r?\\n([A-Za-z0-9+/=]{1,76}\\r?\\n)+-{5}END CERTIFICATE-{5}\\r?\\n)*-{5}BEGIN CERTIFICATE-{5}\\r?\\n([A-Za-z0-9+/=]{1,76}\\r?\\n)+-{5}END CERTIFICATE-{5}(\\r?\\n)?$"
+      "title": "CertificateChainPem"
+    "CertificatePem":
+      "type": "string"
+      "maxLength": 8192
+      "minLength": 1
+      "pattern": "^-{5}BEGIN CERTIFICATE-{5}\\r?\\n([A-Za-z0-9+/=]{1,76}\\r?\\n)+-{5}END CERTIFICATE-{5}(\\r?\\n)?$"
+      "title": "CertificatePem"
     "ChainOut":
       "properties":
         "kind":
@@ -4807,6 +4944,28 @@
         - "required_count"
         - "required_camera_ids"
       "title": "CoverageValues"
+    "CredentialPolicy":
+      "properties":
+        "validity_days":
+          "type": "integer"
+          "const": 365
+          "title": "Validity Days"
+        "rotate_before_days":
+          "type": "integer"
+          "const": 30
+          "title": "Rotate Before Days"
+        "alert_before_days":
+          "type": "integer"
+          "const": 15
+          "title": "Alert Before Days"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "validity_days"
+        - "rotate_before_days"
+        - "alert_before_days"
+      "title": "CredentialPolicy"
+      "description": "Ciclo de vida del certificado de cliente (NFR-CTR-13): vigencia de 365 días, rotación iniciada por el nodo 30 días antes del vencimiento y alerta en el inventario si faltan menos de 15 días sin rotar."
     "CurrentWalkTestOut":
       "properties":
         "zone_id":
@@ -5120,6 +5279,20 @@
         - "min_duration_ms"
       "title": "DwellPredicate"
       "description": "Plantilla `dwell`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms` entre 1 000 y 3 600 000."
+    "Endpoints":
+      "properties":
+        "ingest_base_url":
+          "type": "string"
+          "maxLength": 256
+          "minLength": 9
+          "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?$"
+          "title": "Ingest Base Url"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "ingest_base_url"
+      "title": "Endpoints"
+      "description": "Direcciones de la plataforma que usa el nodo."
     "EnergyAsserted":
       "properties":
         "signal_role":
@@ -5704,6 +5877,25 @@
         - "min_duration_ms"
       "title": "GuardBypassPredicate"
       "description": "Plantilla `guard_bypass`: `all_of` contiene presencia y resguardo afirmado (declarado cerrado con persona dentro) y, opcionalmente, energía afirmada; en cualquier orden y sin repetir; `min_duration_ms = 0`."
+    "HeartbeatConfiguration":
+      "properties":
+        "interval_seconds":
+          "type": "integer"
+          "maximum": 600.0
+          "minimum": 15.0
+          "title": "Interval Seconds"
+        "mute_after_seconds":
+          "type": "integer"
+          "maximum": 3000.0
+          "minimum": 75.0
+          "title": "Mute After Seconds"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "interval_seconds"
+        - "mute_after_seconds"
+      "title": "HeartbeatConfiguration"
+      "description": "Parámetros iniciales del latido. `mute_after_seconds` es un valor derivado, `5 × interval_seconds` (300 con el intervalo de 60 s); la plataforma nunca emite una configuración que rompa esa igualdad (entrada A-04 de la adenda, verificada en el modelo). Si `HeartbeatResponse.heartbeat_interval_seconds` cambia el intervalo, el umbral de mudo pasa a cinco veces el intervalo efectivo (BR-CTR-51)."
     "HeartbeatNotice":
       "type": "string"
       "enum":
@@ -6236,6 +6428,19 @@
         - "status"
       "title": "LiveStatus"
       "description": "Respuesta de ``/health/live``."
+    "LiveViewConfiguration":
+      "properties":
+        "token_max_age_seconds":
+          "type": "integer"
+          "maximum": 3600.0
+          "minimum": 60.0
+          "title": "Token Max Age Seconds"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "token_max_age_seconds"
+      "title": "LiveViewConfiguration"
+      "description": "Parámetros de la vista en vivo del nodo."
     "LiveViewTokenOut":
       "properties":
         "token":
@@ -6558,6 +6763,62 @@
         - "assigned_at"
         - "unassigned_at"
       "title": "NodeAssignmentView"
+    "NodeCamera":
+      "properties":
+        "camera_id":
+          "$ref": "#/components/schemas/UUID"
+        "code":
+          "$ref": "#/components/schemas/Code"
+        "stream_reference":
+          "$ref": "#/components/schemas/TechnicalId"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "code"
+        - "stream_reference"
+      "title": "NodeCamera"
+      "description": "Cámara asignada al nodo. `stream_reference` nombra el flujo; nunca contiene una dirección con credenciales."
+    "NodeCredential":
+      "properties":
+        "node_id":
+          "$ref": "#/components/schemas/UUID"
+        "organization_id":
+          "$ref": "#/components/schemas/UUID"
+        "plant_id":
+          "$ref": "#/components/schemas/UUID"
+        "certificate":
+          "$ref": "#/components/schemas/CertificatePem"
+        "server_certificate_pem":
+          "$ref": "#/components/schemas/CertificatePem"
+        "ca_chain":
+          "$ref": "#/components/schemas/CertificateChainPem"
+        "expires_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "platform_public_keys":
+          "items":
+            "$ref": "#/components/schemas/PublicKey"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Platform Public Keys"
+        "initial_configuration":
+          "anyOf":
+            - "$ref": "#/components/schemas/NodeInitialConfiguration"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "organization_id"
+        - "plant_id"
+        - "certificate"
+        - "server_certificate_pem"
+        - "ca_chain"
+        - "expires_at"
+        - "platform_public_keys"
+      "title": "NodeCredential"
+      "description": "Credencial emitida al nodo: respuesta del alta (con `initial_configuration`, `#/$defs/NodeEnrollmentResponse`) y de la rotación (sin `initial_configuration`, `credential_rotation_request.schema.json#/$defs/CredentialRotationResponse`). El sujeto del certificado de cliente contiene `node_id`, `organization_id` y `plant_id` (BR-CTR-47). `server_certificate_pem` lo firma `vigia-node-ca` y se renueva en cada rotación."
     "NodeDeclarationBody":
       "properties":
         "code":
@@ -6601,6 +6862,107 @@
         - "revoked_at"
         - "decommissioned_at"
       "title": "NodeDecommissionView"
+    "NodeEnrollmentResponse":
+      "properties":
+        "node_id":
+          "$ref": "#/components/schemas/UUID"
+        "organization_id":
+          "$ref": "#/components/schemas/UUID"
+        "plant_id":
+          "$ref": "#/components/schemas/UUID"
+        "certificate":
+          "$ref": "#/components/schemas/CertificatePem"
+        "server_certificate_pem":
+          "$ref": "#/components/schemas/CertificatePem"
+        "ca_chain":
+          "$ref": "#/components/schemas/CertificateChainPem"
+        "expires_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "platform_public_keys":
+          "items":
+            "$ref": "#/components/schemas/PublicKey"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Platform Public Keys"
+        "initial_configuration":
+          "$ref": "#/components/schemas/NodeInitialConfiguration"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "organization_id"
+        - "plant_id"
+        - "certificate"
+        - "server_certificate_pem"
+        - "ca_chain"
+        - "expires_at"
+        - "platform_public_keys"
+        - "initial_configuration"
+      "title": "NodeEnrollmentResponse"
+      "description": "Respuesta del alta: `NodeCredential` con `initial_configuration`."
+    "NodeInitialConfiguration":
+      "properties":
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/SignedZoneCatalog"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Zones"
+        "gate_states":
+          "items":
+            "$ref": "#/components/schemas/SignedGateState"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Gate States"
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/NodeCamera"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Cameras"
+        "endpoints":
+          "$ref": "#/components/schemas/Endpoints"
+        "heartbeat":
+          "$ref": "#/components/schemas/HeartbeatConfiguration"
+        "gate_cache_ttl_seconds":
+          "type": "integer"
+          "const": 604800
+          "title": "Gate Cache Ttl Seconds"
+        "sent_records_retention_days":
+          "type": "integer"
+          "maximum": 90.0
+          "minimum": 1.0
+          "title": "Sent Records Retention Days"
+        "time_sources":
+          "items":
+            "$ref": "#/components/schemas/TimeSource"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Time Sources"
+        "live_view":
+          "$ref": "#/components/schemas/LiveViewConfiguration"
+        "credential":
+          "$ref": "#/components/schemas/CredentialPolicy"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zones"
+        - "gate_states"
+        - "cameras"
+        - "endpoints"
+        - "heartbeat"
+        - "gate_cache_ttl_seconds"
+        - "sent_records_retention_days"
+        - "time_sources"
+        - "live_view"
+        - "credential"
+      "title": "NodeInitialConfiguration"
+      "description": "Configuración inicial del nodo entregada en el alta. Reglas entre campos que verifica el modelo: `heartbeat.mute_after_seconds = 5 × heartbeat.interval_seconds` (entrada A-04 de la adenda, pendiente nº 35); una entrada de `gate_states` por cada zona de `zones`; `live_view.token_max_age_seconds` nunca menor que la vigencia del token de vista que emite U-02 (600 s)."
     "NodeInventoryDetail":
       "properties":
         "node":
@@ -8155,6 +8517,9 @@
     "SignedPublicKeySet":
       "$ref": "#/components/schemas/vigia_contracts__models__public_key_set__SignedEnvelope"
       "title": "SignedPublicKeySet"
+    "SignedZoneCatalog":
+      "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__SignedEnvelope"
+      "title": "SignedZoneCatalog"
     "SigningPurpose":
       "type": "string"
       "enum":
@@ -8525,6 +8890,11 @@
         - "publication"
         - "reason_es"
       "title": "ThresholdsBody"
+    "TimeSource":
+      "type": "string"
+      "maxLength": 128
+      "minLength": 1
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
     "Timestamp":
       "type": "string"
       "maxLength": 24

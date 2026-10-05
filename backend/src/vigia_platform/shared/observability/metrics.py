@@ -116,6 +116,9 @@ class MetricName(enum.StrEnum):
     # Flota (U-03, TASK-218): intentos de alta y revocaciones
     ENROLLMENT_ATTEMPTS_TOTAL = "enrollment_attempts_total"
     NODE_REVOCATIONS_TOTAL = "node_revocations_total"
+    # Credenciales de nodo (U-03, TASK-219): rotaciones y duración de kms:Sign de vigia-node-ca
+    NODE_CREDENTIAL_ROTATIONS_TOTAL = "node_credential_rotations_total"
+    NODE_CA_SIGN_DURATION_MS = "node_ca_sign_duration_ms"
     # Flota (U-03, TASK-223, NFR-GOB-55): por nodo, solo contadores y medidores (NFR-GOB-13)
     FLEET_HEARTBEATS_TOTAL = "fleet_heartbeats_total"
     FLEET_HEARTBEAT_GAP_SECONDS = "fleet_heartbeat_gap_seconds"
@@ -271,6 +274,12 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.NODE_REVOCATIONS_TOTAL, _C, "{revocation}",
           "Revocaciones de nodo (marca de la lista de revocación) por organización.", "D-7",
           "organization_id"),
+    # Credenciales (TASK-219): sin el PEM, el código ni la huella (NFR-GOB-25); las altas
+    # aceptadas y rechazadas las cuenta enrollment_attempts_total por resultado.
+    _spec(_N.NODE_CREDENTIAL_ROTATIONS_TOTAL, _C, "{rotation}",
+          "Rotaciones de credencial de nodo confirmadas.", "BR-GOB-64"),
+    _spec(_N.NODE_CA_SIGN_DURATION_MS, _H, "ms",
+          "Duración de cada kms:Sign de vigia-node-ca por resultado.", "NFR-GOB-43", "result"),
     # Latido (TASK-223, NFR-GOB-55): seis series por nodo (aceptados, ignorados y cuatro
     # medidores), nunca histogramas por nodo ni etiquetas de zona (NFR-GOB-13).
     _spec(_N.FLEET_HEARTBEATS_TOTAL, _C, "{heartbeat}",
@@ -479,6 +488,8 @@ class PlatformMetrics:
         self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)
         self.enrollment_attempts_total = counter(_N.ENROLLMENT_ATTEMPTS_TOTAL)
         self.node_revocations_total = counter(_N.NODE_REVOCATIONS_TOTAL)
+        self.node_credential_rotations_total = counter(_N.NODE_CREDENTIAL_ROTATIONS_TOTAL)
+        self.node_ca_sign_duration_ms = histogram(_N.NODE_CA_SIGN_DURATION_MS)
         self.fleet_heartbeats_total = counter(_N.FLEET_HEARTBEATS_TOTAL)
         self.fleet_heartbeat_gap_seconds = gauge(_N.FLEET_HEARTBEAT_GAP_SECONDS)
         self.fleet_node_reachable = gauge(_N.FLEET_NODE_REACHABLE)
