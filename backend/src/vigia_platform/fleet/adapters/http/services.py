@@ -1,4 +1,4 @@
-"""Servicios de las rutas de ``fleet`` (``app.state``) (TASK-218; A-52).
+"""Servicios de las rutas de ``fleet`` (``app.state``) (TASK-218, TASK-222; A-52).
 
 ``FleetHttp`` lo deja la unidad ``fleet`` en ``app.state`` (``PlatformUnit.api_state``),
 construido con la infraestructura común (``UnitServices``). Las rutas lo toman en cada petición:
@@ -12,6 +12,7 @@ from typing import Final
 
 from fastapi import Request
 
+from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.enrollment_codes import EnrollmentCodeService
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
@@ -27,11 +28,13 @@ _log = get_logger("fleet.http")
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FleetHttp:
-    """Los servicios que usan las rutas de SCR-07 de esta tarea."""
+    """Los servicios que usan las rutas de ``fleet``."""
 
     declarations: NodeDeclarationService | None = None
     enrollment_codes: EnrollmentCodeService | None = None
     revocations: NodeRevocationService | None = None
+    commissioning_clips: CommissioningClips | None = None
+    """``GET /zones/{zone_id}/commissioning-clips`` (TASK-222)."""
 
 
 def installed[T](service: T | None) -> T:

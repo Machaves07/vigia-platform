@@ -109,6 +109,10 @@ class MetricName(enum.StrEnum):
     # Rutas del contrato (U-03, NFR-GOB-54)
     NODE_REQUESTS_TOTAL = "node_requests_total"
     NODE_REQUEST_BODY_BYTES = "node_request_body_bytes"
+    # Concesiones de clip por nodo (U-03, NFR-GOB-55)
+    CLIP_GRANTS_ISSUED_TOTAL = "clip_grants_issued_total"
+    CLIP_GRANTS_USED_TOTAL = "clip_grants_used_total"
+    CLIP_GRANTS_ORPHANED_TOTAL = "clip_grants_orphaned_total"
     # Flota (U-03, TASK-218): intentos de alta y revocaciones
     ENROLLMENT_ATTEMPTS_TOTAL = "enrollment_attempts_total"
     NODE_REVOCATIONS_TOTAL = "node_revocations_total"
@@ -248,6 +252,16 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "route", "result", "rejection_code"),
     _spec(_N.NODE_REQUEST_BODY_BYTES, _H, "By", "Tamaño del cuerpo recibido por ruta del contrato.",
           "NFR-GOB-54", "route"),
+    # Concesiones de clip (NFR-GOB-55, LC-GOB-13): emitidas, usadas y huérfanas por nodo. Solo
+    # contadores y solo node_id (NFR-GOB-13: sin histogramas por nodo ni etiqueta de zona).
+    _spec(_N.CLIP_GRANTS_ISSUED_TOTAL, _C, "{grant}", "Concesiones de clip emitidas por nodo.",
+          "NFR-GOB-55", "node_id"),
+    _spec(_N.CLIP_GRANTS_USED_TOTAL, _C, "{grant}",
+          "Concesiones de clip usadas (clip de verificación confirmado) por nodo.", "NFR-GOB-55",
+          "node_id"),
+    _spec(_N.CLIP_GRANTS_ORPHANED_TOTAL, _C, "{grant}",
+          "Clips sin registro que los cite en 24 h, contados una vez por nodo.", "NFR-GOB-55",
+          "node_id"),
     # Flota (TASK-218): todo intento de alta, también el de un nodo desconocido, que no deja fila
     # (reason = node_unknown); y la marca por organización de la lista de revocación (D-7: solo
     # métrica).
@@ -460,6 +474,9 @@ class PlatformMetrics:
         self.bulkhead_rejected_total = counter(_N.BULKHEAD_REJECTED_TOTAL)
         self.node_requests_total = counter(_N.NODE_REQUESTS_TOTAL)
         self.node_request_body_bytes = histogram(_N.NODE_REQUEST_BODY_BYTES)
+        self.clip_grants_issued_total = counter(_N.CLIP_GRANTS_ISSUED_TOTAL)
+        self.clip_grants_used_total = counter(_N.CLIP_GRANTS_USED_TOTAL)
+        self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)
         self.enrollment_attempts_total = counter(_N.ENROLLMENT_ATTEMPTS_TOTAL)
         self.node_revocations_total = counter(_N.NODE_REVOCATIONS_TOTAL)
         self.fleet_heartbeats_total = counter(_N.FLEET_HEARTBEATS_TOTAL)
