@@ -47,6 +47,8 @@ from tests.fleet_db import (
     GLOBAL_TABLE,
     HEADERS,
     PARTITIONED_TABLES,
+    REVOCATION_STATE_COLUMNS,
+    REVOCATION_STATE_TABLE,
     FleetScope,
     FleetSeed,
     clip_upload_grant,
@@ -249,8 +251,12 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    assert {row["relname"] for row in rows} == {*FLEET_TABLES, GLOBAL_TABLE}
-    assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in rows), rows
+    assert {row["relname"] for row in rows} == {*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE}
+    # Excepción documentada (gob_0021, TASK-218): la marca global de la lista, sin datos de cliente.
+    secured = [row for row in rows if row["relname"] != REVOCATION_STATE_TABLE]
+    assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in secured), rows
+    (state,) = [row for row in rows if row["relname"] == REVOCATION_STATE_TABLE]
+    assert not state["relrowsecurity"]
     assert {row["owner"] for row in rows} == {"vigia_migrate"}
     assert {row["relname"] for row in rows if row["kind"] == "p"} == set(PARTITIONED_TABLES)
 
@@ -276,14 +282,14 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
 
     # Ningún DELETE ni TRUNCATE para vigia_app; SELECT en todas, INSERT salvo en la ranura y la
     # marca global.
-    for table in (*FLEET_TABLES, GLOBAL_TABLE):
+    for table in (*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE):
         privileges = {
             privilege: await superuser.fetchval(
                 "SELECT has_table_privilege('vigia_app', $1, $2)", f"fleet.{table}", privilege
             )
             for privilege in ("SELECT", "INSERT", "DELETE", "TRUNCATE")
         }
-        insert = table not in {"open_fleet_alarm", GLOBAL_TABLE}
+        insert = table not in {"open_fleet_alarm", GLOBAL_TABLE, REVOCATION_STATE_TABLE}
         assert privileges == {
             "SELECT": True,
             "INSERT": insert,
@@ -334,6 +340,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         if MIGRATION.app_updatable_columns(table)
     }
     expected[GLOBAL_TABLE] = {"crl_number", "published_at", "crl_sha256"}
+    expected[REVOCATION_STATE_TABLE] = set(REVOCATION_STATE_COLUMNS)
     assert granted == expected
     # Tablas ⛓ sin cierre y la ranura de la alarma: ningún UPDATE.
     for table in (

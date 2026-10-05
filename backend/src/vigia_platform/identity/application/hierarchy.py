@@ -25,6 +25,14 @@ la unidad U-02 (``with_unit``) aunque el contexto venga de U-03. La autorizació
 (``commissioning.run``…) la hace la ruta de U-03; aquí, con un contexto de sesión, la planta tiene
 que estar en su alcance.
 
+Las cuatro admiten ``transaction`` (TASK-218, extensión aditiva como
+``EscritorExpediente.write(..., transaction=...)``): con ella, la operación va en la transacción
+del llamador, de la organización del contexto, y solo existe si él confirma (la declaración con
+sus zonas, el reemplazo y la revocación de U-03 son una sola transacción); las lecturas previas
+van también en ella. Sin ella abren la suya, como siempre. ``unassign_node`` admite además el
+``node_id`` que debe tener la zona (si es otro, ``zone_without_node``) y ``reason_es``, que queda
+en ``node_zone_unassigned`` (versión 2).
+
 **Génesis** (``OrganizationGenesis.create_client_organization``, la llama la orden administrativa
 de TASK-132): con un contexto de orden administrativa con ``platform.organizations.create``, crea
 la organización cliente y escribe ``organization_created`` (secuencia 1 de su cadena), su primera
@@ -40,9 +48,10 @@ Todos los nombres pasan la política de texto libre (``FreeTextPolicyRegistry``)
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final, Literal, Protocol
@@ -81,6 +90,7 @@ from vigia_platform.identity.authz.context import operator_in_organization, with
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.audit_writer import AuditOperation, ResourceRef
 from vigia_platform.ledger.application.writer import RecordScope
+from vigia_platform.ledger.free_text import FreeTextField, FreeTextRejected
 from vigia_platform.shared.context import (
     ActorKind,
     ActorUnit,
@@ -132,6 +142,8 @@ NodeStatus = Literal["declared", "enrolled", "revoked", "re_enrollment_pending"]
 _NODE_STATUSES: Final = frozenset({"declared", "enrolled", "revoked", "re_enrollment_pending"})
 _PERSON_ACTORS: Final = frozenset({ActorKind.USER, ActorKind.PROVIDER_USER, ActorKind.OPERATOR})
 """Quien asigna un nodo a una zona queda en ``assigned_by`` (una cuenta, nunca el sistema)."""
+UNASSIGNMENT_REASON: Final = FreeTextField("node_zone_unassigned", "/reason_es", 10, 500)
+"""``reason_es`` de ``node_zone_unassigned`` v2: los límites de su esquema."""
 
 
 # --- Valores ------------------------------------------------------------------------------------
@@ -228,10 +240,15 @@ class IdentityQueryPort(Protocol):
 
 
 class IdentityCommandPort(Protocol):
-    """``IdentityCommandPort`` (business-logic-model §10.1)."""
+    """``IdentityCommandPort`` (business-logic-model §10.1); ``transaction`` es de TASK-218."""
 
     async def declare_node(
-        self, context: ScopeContext, plant_id: uuid.UUID, code: str
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        code: str,
+        *,
+        transaction: Transaction | None = None,
     ) -> NodeView: ...
 
     async def update_node(
@@ -240,13 +257,28 @@ class IdentityCommandPort(Protocol):
         node_id: uuid.UUID,
         status: NodeStatus,
         live_view_local_url: str | None,
+        *,
+        transaction: Transaction | None = None,
     ) -> NodeView: ...
 
     async def assign_node_to_zone(
-        self, context: ScopeContext, node_id: uuid.UUID, zone_id: uuid.UUID
+        self,
+        context: ScopeContext,
+        node_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        *,
+        transaction: Transaction | None = None,
     ) -> uuid.UUID: ...
 
-    async def unassign_node(self, context: ScopeContext, zone_id: uuid.UUID) -> uuid.UUID: ...
+    async def unassign_node(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        *,
+        node_id: uuid.UUID | None = None,
+        reason_es: str | None = None,
+        transaction: Transaction | None = None,
+    ) -> uuid.UUID: ...
 
 
 # --- Validación ---------------------------------------------------------------------------------
@@ -535,6 +567,34 @@ def _code_taken(error: sa_exc.IntegrityError, *constraints: str) -> bool:
     return unique_violation(error) in constraints
 
 
+@contextlib.asynccontextmanager
+async def _within(
+    deps: IdentityDependencies, context: ScopeContext, transaction: Transaction | None
+) -> AsyncIterator[Transaction]:
+    """La transacción del llamador (de la organización de ``context``) o una propia."""
+    if transaction is None:
+        async with deps.database.transaction(context) as opened:
+            yield opened
+        return
+    if (
+        not isinstance(transaction, Transaction)
+        or transaction.context.organization_id != context.organization_id
+    ):
+        raise TypeError("transaction debe ser una Transaction de la organización del contexto")
+    yield transaction
+
+
+def _checked_reason(deps: IdentityDependencies, value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise IdentityRejected(IdentityRejection.INVALID_VALUE, field="/reason_es")
+    try:
+        return deps.free_text.apply(value, UNASSIGNMENT_REASON)
+    except FreeTextRejected:
+        raise IdentityRejected(IdentityRejection.FREE_TEXT_REJECTED, field="/reason_es") from None
+
+
 # --- Servicio de jerarquía ----------------------------------------------------------------------
 
 
@@ -696,6 +756,22 @@ class HierarchyService:
             return None
         return view
 
+    async def _node_in(
+        self, context: ScopeContext, node_id: uuid.UUID, transaction: Transaction | None
+    ) -> NodeView | None:
+        """``node_identity``; con ``transaction``, leída dentro de ella (ve lo no confirmado)."""
+        if transaction is None:
+            return await self.node_identity(context, node_id)
+        if type(node_id) is not uuid.UUID:
+            return None
+        row = (await transaction.execute(_NODE, {"node_id": node_id})).first()
+        if row is None:
+            return None
+        view = _node_view(row)
+        if not _whole_organization(context) and not context.covers(view.plant_id):
+            return None
+        return view
+
     async def assigned_node(self, context: ScopeContext, zone_id: uuid.UUID) -> NodeView | None:
         """El nodo vigente de la zona, o ``None`` (sin nodo, inexistente o fuera de alcance)."""
         if type(zone_id) is not uuid.UUID:
@@ -712,7 +788,14 @@ class HierarchyService:
 
     # --- IdentityCommandPort -------------------------------------------------------------------
 
-    async def declare_node(self, context: ScopeContext, plant_id: uuid.UUID, code: str) -> NodeView:
+    async def declare_node(
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        code: str,
+        *,
+        transaction: Transaction | None = None,
+    ) -> NodeView:
         """Declara la identidad de un nodo de ``plant_id`` (``node_declared``)."""
         deps = self._deps
         node_code = checked_code(code)
@@ -722,14 +805,14 @@ class HierarchyService:
         node_id = new_uuid4(deps.random_bytes)
         now = deps.clock.now()
         try:
-            async with deps.database.transaction(writer_context) as transaction:
+            async with _within(deps, writer_context, transaction) as current:
                 await _require_absent(
-                    transaction,
+                    current,
                     _NODE_CODE_TAKEN,
                     organization_id=context.organization_id,
                     code=node_code,
                 )
-                await transaction.execute(
+                await current.execute(
                     _INSERT_NODE,
                     {
                         "node_id": node_id,
@@ -742,7 +825,7 @@ class HierarchyService:
                 await write_record(
                     deps,
                     writer_context,
-                    transaction,
+                    current,
                     "node_declared",
                     {
                         "node_id": str(node_id),
@@ -763,6 +846,8 @@ class HierarchyService:
         node_id: uuid.UUID,
         status: NodeStatus,
         live_view_local_url: str | None,
+        *,
+        transaction: Transaction | None = None,
     ) -> NodeView:
         """Fija ``status`` y ``live_view_local_url`` (nula si el nodo no la anunció)."""
         if status not in _NODE_STATUSES:
@@ -773,12 +858,13 @@ class HierarchyService:
             or _LIVE_VIEW_URL.fullmatch(live_view_local_url) is None
         ):
             raise IdentityRejected(IdentityRejection.INVALID_VALUE, field="/live_view_local_url")
-        current = await self.node_identity(context, node_id)
-        if current is None:
+        if transaction is None and await self.node_identity(context, node_id) is None:
             raise ResourceNotFound()
-        async with self._deps.database.transaction(context) as transaction:
+        async with _within(self._deps, context, transaction) as current:
+            if transaction is not None and await self._node_in(context, node_id, current) is None:
+                raise ResourceNotFound()
             row = (
-                await transaction.execute(
+                await current.execute(
                     _UPDATE_NODE,
                     {
                         "node_id": node_id,
@@ -792,30 +878,42 @@ class HierarchyService:
         return _node_view(row)
 
     async def assign_node_to_zone(
-        self, context: ScopeContext, node_id: uuid.UUID, zone_id: uuid.UUID
+        self,
+        context: ScopeContext,
+        node_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        *,
+        transaction: Transaction | None = None,
     ) -> uuid.UUID:
         """Asigna ``node_id`` a ``zone_id`` de la misma planta; la zona no puede tener otro nodo
         vigente (BR-NUC-08). Devuelve el identificador de la asignación."""
         deps = self._deps
         if context.actor.kind not in _PERSON_ACTORS:
             raise PermissionError("la asignación de un nodo la hace una persona identificada")
-        node = await self.node_identity(context, node_id)
-        if node is None or type(zone_id) is not uuid.UUID:
-            raise ResourceNotFound()
+        found: NodeView | None = None
+        if transaction is None:
+            found = await self.node_identity(context, node_id)
+            if found is None or type(zone_id) is not uuid.UUID:
+                raise ResourceNotFound()
         writer_context = with_unit(context, ActorUnit.U02)
         assignment_id = uuid7(deps.clock, deps.random_bytes)
         now = deps.clock.now()
-        async with deps.database.transaction(writer_context) as transaction:
-            zone = (await transaction.execute(_LOCK_ZONE, {"zone_id": zone_id})).first()
+        async with _within(deps, writer_context, transaction) as current:
+            if transaction is not None:
+                found = await self._node_in(context, node_id, current)
+            if found is None or type(zone_id) is not uuid.UUID:
+                raise ResourceNotFound()
+            node = found
+            zone = (await current.execute(_LOCK_ZONE, {"zone_id": zone_id})).first()
             if zone is None:
                 raise ResourceNotFound()
             plant_id = as_uuid(zone.plant_id)
             _require_plant_in_scope(context, plant_id)
             if plant_id != node.plant_id:
                 raise IdentityRejected(IdentityRejection.NODE_PLANT_MISMATCH, field="/zone_id")
-            if (await transaction.execute(_CURRENT_ASSIGNMENT, {"zone_id": zone_id})).first():
+            if (await current.execute(_CURRENT_ASSIGNMENT, {"zone_id": zone_id})).first():
                 raise IdentityRejected(IdentityRejection.ZONE_HAS_NODE, field="/zone_id")
-            await transaction.execute(
+            await current.execute(
                 _INSERT_NODE_ASSIGNMENT,
                 {
                     "assignment_id": assignment_id,
@@ -830,7 +928,7 @@ class HierarchyService:
             await write_record(
                 deps,
                 writer_context,
-                transaction,
+                current,
                 "node_zone_assigned",
                 {
                     "assignment_id": str(assignment_id),
@@ -847,42 +945,56 @@ class HierarchyService:
                 plant_id=plant_id,
                 zone_id=zone_id,
                 resource=ResourceRef("node", node.node_id),
-                transaction=transaction,
+                transaction=current,
             )
         return assignment_id
 
-    async def unassign_node(self, context: ScopeContext, zone_id: uuid.UUID) -> uuid.UUID:
-        """Retira el nodo vigente de ``zone_id`` (actualización de cierre; nunca borra)."""
+    async def unassign_node(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        *,
+        node_id: uuid.UUID | None = None,
+        reason_es: str | None = None,
+        transaction: Transaction | None = None,
+    ) -> uuid.UUID:
+        """Retira el nodo vigente de ``zone_id`` (actualización de cierre; nunca borra).
+
+        Con ``node_id``, la zona tiene que tenerlo a él (si no, ``zone_without_node``);
+        ``reason_es`` pasa la política de texto libre y queda en el registro.
+        """
         deps = self._deps
         if type(zone_id) is not uuid.UUID:
             raise ResourceNotFound()
+        reason = _checked_reason(deps, reason_es)
         writer_context = with_unit(context, ActorUnit.U02)
         now = deps.clock.now()
-        async with deps.database.transaction(writer_context) as transaction:
-            zone = (await transaction.execute(_LOCK_ZONE, {"zone_id": zone_id})).first()
+        async with _within(deps, writer_context, transaction) as tx:
+            zone = (await tx.execute(_LOCK_ZONE, {"zone_id": zone_id})).first()
             if zone is None:
                 raise ResourceNotFound()
             plant_id = as_uuid(zone.plant_id)
             _require_plant_in_scope(context, plant_id)
-            current = (await transaction.execute(_CURRENT_ASSIGNMENT, {"zone_id": zone_id})).first()
-            if current is None:
+            current = (await tx.execute(_CURRENT_ASSIGNMENT, {"zone_id": zone_id})).first()
+            if current is None or (node_id is not None and as_uuid(current.node_id) != node_id):
                 raise IdentityRejected(IdentityRejection.ZONE_WITHOUT_NODE, field="/zone_id")
             assignment_id = as_uuid(current.assignment_id)
-            await transaction.execute(
-                _CLOSE_NODE_ASSIGNMENT, {"assignment_id": assignment_id, "now": now}
-            )
+            await tx.execute(_CLOSE_NODE_ASSIGNMENT, {"assignment_id": assignment_id, "now": now})
+            content: dict[str, Any] = {
+                "assignment_id": str(assignment_id),
+                "zone_id": str(zone_id),
+                "node_id": str(as_uuid(current.node_id)),
+                "unassigned_at": format_timestamp(now),
+                "unassigned_by": str(context.actor.id),
+            }
+            if reason is not None:
+                content["reason_es"] = reason
             await write_record(
                 deps,
                 writer_context,
-                transaction,
+                tx,
                 "node_zone_unassigned",
-                {
-                    "assignment_id": str(assignment_id),
-                    "zone_id": str(zone_id),
-                    "node_id": str(as_uuid(current.node_id)),
-                    "unassigned_at": format_timestamp(now),
-                    "unassigned_by": str(context.actor.id),
-                },
+                content,
                 scope=RecordScope(plant_id=plant_id),
             )
             await deps.audit.append(
@@ -891,7 +1003,7 @@ class HierarchyService:
                 plant_id=plant_id,
                 zone_id=zone_id,
                 resource=ResourceRef("node", as_uuid(current.node_id)),
-                transaction=transaction,
+                transaction=tx,
             )
         return assignment_id
 
