@@ -310,6 +310,12 @@
     "fleet_code_in_use": "El código ya existe.",
     "fleet_replaced_node_not_found": "El nodo reemplazado no existe.",
     "fleet_version_outside_contract_window": "La versión no está en la ventana de compatibilidad.",
-    "fleet_free_text_rejected": "El texto no cumple la política de texto libre: revísalo e inténtalo de nuevo."
+    "fleet_free_text_rejected": "El texto no cumple la política de texto libre: revísalo e inténtalo de nuevo.",
+    "fleet_threshold_invalid": "Cada umbral del panel es un número entero mayor o igual que 1.",
+    "fleet_assignment_range_too_long": "El periodo pedido supera los 366 días: pídalo por tramos."
+  },
+  "heartbeat_notice": {
+    "no_heartbeat_since": "Sin latido desde",
+    "no_heartbeat_received": "Sin latido recibido todavía"
   }
 }

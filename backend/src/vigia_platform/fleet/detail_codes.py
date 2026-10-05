@@ -40,6 +40,10 @@ class FleetDetailCode(enum.StrEnum):
     REPLACED_NODE_NOT_FOUND = "fleet_replaced_node_not_found"
     VERSION_OUTSIDE_CONTRACT_WINDOW = "fleet_version_outside_contract_window"
     FREE_TEXT_REJECTED = "fleet_free_text_rejected"
+    THRESHOLD_INVALID = "fleet_threshold_invalid"
+    """Un umbral del panel que no es un entero de 1 a 2 147 483 647 (BR-GOB-79; TASK-224)."""
+    ASSIGNMENT_RANGE_TOO_LONG = "fleet_assignment_range_too_long"
+    """``assignment_history`` con más de 366 días (PAT-GOB-REN-04; TASK-224)."""
 
 
 FLEET_API_ERROR_CODES: Final[Mapping[FleetDetailCode, ApiErrorCode]] = {
@@ -52,6 +56,8 @@ FLEET_API_ERROR_CODES: Final[Mapping[FleetDetailCode, ApiErrorCode]] = {
     FleetDetailCode.REPLACED_NODE_NOT_FOUND: ApiErrorCode.INVALID_REQUEST,
     FleetDetailCode.VERSION_OUTSIDE_CONTRACT_WINDOW: ApiErrorCode.INVALID_REQUEST,
     FleetDetailCode.FREE_TEXT_REJECTED: ApiErrorCode.INVALID_REQUEST,
+    FleetDetailCode.THRESHOLD_INVALID: ApiErrorCode.INVALID_REQUEST,
+    FleetDetailCode.ASSIGNMENT_RANGE_TOO_LONG: ApiErrorCode.INVALID_REQUEST,
 }
 """``api_error_code`` de U-02 bajo el que viaja cada ``detail_code`` (BLM §4.1).
 
