@@ -89,9 +89,9 @@ class RevocationListMachine(RuleBasedStateMachine):
         self.kms = MemoryKms()
         self.edge = MemoryEdge()
         self.store = FakeTrustStore(self.edge.fetch)
-        self.states = MemoryStates()
         self.credentials = MemoryCredentials()
         self.organizations = [self.world.a.organization_id, self.world.b.organization_id]
+        self.states = MemoryStates(self.organizations)
         self.scope = MemoryScope(list(self.organizations))
         self.metrics, self.reader = metrics_with_reader()
         body, _ = asyncio.run(root_bundle_for(self.kms, self.clock.now()))

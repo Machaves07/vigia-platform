@@ -47,6 +47,7 @@ from sqlalchemy import text
 from tests.admin_support import OffsetClock
 from tests.authz_support import SYSTEM_ACTOR_ID
 from tests.dispatch_support import metric_points, metrics_with_reader
+from tests.factories import make_context
 from tests.fleet_credentials_support import MemoryKms, root_bundle_for
 from tests.identity_db import IdentitySeed, MigratedDatabase, seeded_identity
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, versioned_bucket
@@ -91,6 +92,7 @@ from vigia_platform.identity.application.admin_cli import (
 from vigia_platform.identity.authz.context import ScopeContexts
 from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.shared.clock import SystemClock
+from vigia_platform.shared.context import ActorKind
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
 from vigia_platform.shared.observability.alerts_consumer import register_alerts_consumer
 from vigia_platform.shared.observability.metrics import MetricName
@@ -461,6 +463,47 @@ def test_one_global_list_is_read_with_one_context_per_organization(crl: CrlWorld
     assert {(kind, origin) for _, kind, origin, _ in recording.reads} == {
         ("system", "periodic_iteration")
     }
+
+
+def test_a_suspended_organization_keeps_its_revocations_listed(crl: CrlWorld) -> None:
+    """D-7: la lista es de todas las organizaciones. Una suspendida (``shared.
+    vigia_active_organizations`` la omite) se lee igual, con su contexto, y su revocada sigue en
+    ``ca/crl.pem``: el balanceador la sigue rechazando y el ``Describe`` cuenta lo de la base."""
+    a = crl.credential("a", "revoked")
+    b = crl.credential("b", "revoked")
+    crl.execute(
+        "UPDATE identity.organization SET status = 'suspended' WHERE organization_id = $1",
+        crl.seed.b.organization_id,
+    )
+    crl.mark_dirty()
+    service = crl.service()
+    recording = RecordingCredentials()
+    service._credentials = recording
+    catalog, _ = crl.catalog(service)
+    _due(crl, catalog)
+    (report,) = crl.run(crl.scheduler(catalog, "worker-a").run_pending())
+    assert report.outcome is TaskOutcome.SUCCEEDED
+    listed = {entry.serial_number for entry in crl.published()}
+    assert {a, b} <= listed
+    assert listed == crl.expected_serials()
+    (stored,) = crl.store.current()
+    assert stored.entries == len(crl.expected_serials())
+    by_organization = {organization: serials for organization, _, _, serials in recording.reads}
+    assert b in by_organization[crl.seed.b.organization_id]
+    assert a not in by_organization[crl.seed.b.organization_id]
+
+
+def test_only_the_system_actor_lists_every_organization(crl: CrlWorld) -> None:
+    """``fleet.vigia_revocation_list_organizations`` no devuelve nada fuera del actor ``system``."""
+
+    async def listed(context: Any) -> tuple[uuid.UUID, ...]:
+        async with crl.database.transaction(context) as transaction:
+            return await PostgresRevocationListStateStore().organizations(transaction)
+
+    system: tuple[uuid.UUID, ...] = crl.run(listed(crl.contexts.provider_audit_context()))
+    assert {crl.seed.a.organization_id, crl.seed.b.organization_id} <= set(system)
+    user = make_context(kind=ActorKind.USER, organization_id=crl.seed.a.organization_id)
+    assert crl.run(listed(user)) == ()
 
 
 def test_the_repository_read_filters_by_organization_even_without_row_security(

@@ -8,6 +8,10 @@ y ``regenerate_revocation_list`` la lee y la limpia aquí:
   control del ciclo, que la mantiene abierta hasta registrar. Excluye dos publicadores a la vez
   (el worker y ``vigia-admin``): sin ella, uno podría retirar del almacén la lista que el otro
   acaba de añadir. Si otro la tiene, el ciclo no hace nada.
+- ``organizations``: **todas** las organizaciones, también las ``suspended`` (D-7), por
+  ``fleet.vigia_revocation_list_organizations()`` (gob_0025; solo identificadores, solo con actor
+  ``system``); ``shared.vigia_active_organizations()`` dejaría fuera las revocadas de una
+  organización suspendida.
 - ``status``: la fila, sin bloquearla (una revocación nunca espera a la publicación).
 - ``reserve_crl_number``: ``crl_number + 1`` en **su propia** transacción corta, antes de firmar:
   un número nunca se repite aunque la publicación falle después de escribir el objeto.
@@ -24,6 +28,7 @@ espera circular.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Final
 
@@ -40,6 +45,9 @@ PUBLICATION_LOCK: Final = "revocation_list_publication"
 
 _TRY_LOCK: Final = text(
     "SELECT pg_try_advisory_xact_lock(hashtextextended(:lock_key, 0)) AS locked"
+)
+_ORGANIZATIONS: Final = text(
+    "SELECT organization_id FROM fleet.vigia_revocation_list_organizations()"
 )
 _STATUS: Final = text(
     "SELECT dirty_generation, published_generation, published_at, next_update, entries,"
@@ -73,6 +81,11 @@ class PostgresRevocationListStateStore:
     async def try_lock_publication(self, transaction: Transaction) -> bool:
         row = (await transaction.execute(_TRY_LOCK, {"lock_key": PUBLICATION_LOCK})).one()
         return bool(row.locked)
+
+    async def organizations(self, transaction: Transaction) -> tuple[uuid.UUID, ...]:
+        """Todas las organizaciones, en orden; vacío fuera del actor ``system``."""
+        rows = (await transaction.execute(_ORGANIZATIONS)).all()
+        return tuple(uuid.UUID(str(row.organization_id)) for row in rows)
 
     async def status(self, transaction: Transaction) -> RevocationListStatus:
         row = (await transaction.execute(_STATUS)).first()

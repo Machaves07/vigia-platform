@@ -12,7 +12,8 @@ organización): un ciclo por ejecución del planificador, bajo su arrendamiento.
    worker), no hace nada;
 2. lee la fila global y decide (``cycle_reason``): marca puesta, regeneración diaria o forzada;
    sin motivo, solo actualiza las métricas;
-3. **un** barrido: las credenciales de cada organización activa en **su** transacción de solo
+3. **un** barrido: las credenciales de cada organización, activa o suspendida
+   (``fleet.vigia_revocation_list_organizations``), en **su** transacción de solo
    lectura con ``context_for_organization`` (la RLS intacta; ningún contexto nuevo: es la lectura
    del «contexto de operador» del diseño, nota de TASK-220), agregadas en memoria;
 4. reserva el ``CRLNumber`` (transacción corta propia), firma con ``kms:Sign`` y comprueba la
@@ -38,6 +39,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -71,6 +73,7 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
+from vigia_platform.shared.worker.leases import LeaseLost
 
 __all__ = [
     "SCHEDULE",
@@ -128,6 +131,10 @@ class RevocationListStateStore(Protocol):
 
     async def try_lock_publication(self, transaction: Transaction) -> bool: ...
 
+    async def organizations(self, transaction: Transaction) -> Sequence[uuid.UUID]:
+        """**Todas** las organizaciones, también las suspendidas (D-7)."""
+        ...
+
     async def status(self, transaction: Transaction) -> RevocationListStatus: ...
 
     async def reserve_crl_number(self, transaction: Transaction) -> int: ...
@@ -180,8 +187,19 @@ class RevocationListService:
         return self._metrics if self._metrics is not None else get_metrics()
 
     async def __call__(self, scope: GlobalTaskScope) -> None:
-        """El manejador de ``regenerate_revocation_list``: un fallo cuenta en la ejecución."""
-        cycle = await self.run_cycle(scope)
+        """El manejador de ``regenerate_revocation_list``: un fallo cuenta en la ejecución.
+
+        Un ciclo cortado a mitad (el tope del planificador lo cancela o la base cae) tampoco
+        publicó: suma ``revocation_list_publish_failed`` como uno fallido. La pérdida del
+        arrendamiento no: otro worker tiene el ciclo.
+        """
+        try:
+            cycle = await self.run_cycle(scope)
+        except LeaseLost:
+            raise
+        except BaseException:
+            self._platform_metrics().revocation_list_publish_failed.add(1)
+            raise
         if cycle.outcome is CycleOutcome.FAILED and cycle.failed_step is not None:
             raise RevocationListPublishFailed(cycle.failed_step)
 
@@ -207,7 +225,7 @@ class RevocationListService:
                     generation=status.published_generation,
                     mark_cleared=True,
                 )
-            entries = await self._sweep(scope, started)
+            entries = await self._sweep(scope, control, started)
             if dry_run:
                 return RevocationListCycle(
                     outcome=CycleOutcome.DRY_RUN,
@@ -218,10 +236,16 @@ class RevocationListService:
                 )
             return await self._publish(scope, control, status, reason, entries, started)
 
-    async def _sweep(self, scope: GlobalTaskScope, now: datetime) -> tuple[RevokedCertificate, ...]:
-        """Un barrido: cada organización en su transacción de solo lectura, en memoria."""
+    async def _sweep(
+        self, scope: GlobalTaskScope, control: Transaction, now: datetime
+    ) -> tuple[RevokedCertificate, ...]:
+        """Un barrido: cada organización en su transacción de solo lectura, en memoria.
+
+        Todas las organizaciones, no solo las activas de ``scope.organizations()``: las revocadas
+        de una organización suspendida siguen en la lista (D-7).
+        """
         facts: list[CredentialRevocationFacts] = []
-        for organization_id in await scope.organizations():
+        for organization_id in await self._states.organizations(control):
             async with scope.read(organization_id) as transaction:
                 facts.extend(await self._credentials.revocation_facts(transaction, now))
         return revoked_certificates(facts, now)

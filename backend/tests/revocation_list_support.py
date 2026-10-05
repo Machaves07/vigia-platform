@@ -257,7 +257,9 @@ def histogram_points(reader: InMemoryMetricReader, name: MetricName) -> list[dic
 class MemoryStates:
     """``RevocationListStateStore`` con la semántica de ``PostgresRevocationListStateStore``."""
 
-    def __init__(self) -> None:
+    def __init__(self, organization_ids: list[uuid.UUID] | None = None) -> None:
+        self.organization_ids = list(organization_ids or [])
+        """Todas las organizaciones, suspendidas incluidas (como la función de gob_0025)."""
         self.dirty_generation = 0
         self.published_generation = 0
         self.dirty_since: dt.datetime | None = None
@@ -288,6 +290,9 @@ class MemoryStates:
 
     def _unlock(self) -> None:
         self.locked = False
+
+    async def organizations(self, transaction: Any) -> tuple[uuid.UUID, ...]:
+        return tuple(self.organization_ids)
 
     async def status(self, transaction: Any) -> RevocationListStatus:
         return RevocationListStatus(

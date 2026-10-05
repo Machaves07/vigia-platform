@@ -29,6 +29,8 @@ import uuid
 
 import pytest
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtensionOID
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -295,10 +297,10 @@ class Harness:
         self.kms = MemoryKms()
         self.edge = MemoryEdge()
         self.store = FakeTrustStore(self.edge.fetch)
-        self.states = MemoryStates()
         self.credentials = MemoryCredentials()
         self.clock = SimulatedClock(NOW)
         self.organizations = [uuid.uuid4(), uuid.uuid4()]
+        self.states = MemoryStates(self.organizations)
         self.scope = MemoryScope(self.organizations)
         self.metrics, self.reader = metrics_with_reader()
         self.root: x509.Certificate | None = None
@@ -418,6 +420,28 @@ async def test_kms_failure_or_a_foreign_root_fail_closed_at_the_sign_step() -> N
     harness.kms.fail = False
     with pytest.raises(RevocationListPublishFailed):
         await foreign.sign(_plan_with([1]))  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_a_signature_by_another_key_is_caught_before_publishing() -> None:
+    """KMS anuncia la clave de la raíz pero firma con otra: la comprobación con la clave pública
+    de la raíz lo detecta y no se publica nada (la firma se verifica antes de publicar)."""
+    harness = Harness()
+    await harness.publish_root()
+    other = ec.generate_private_key(ec.SECP256R1())
+
+    async def sign_with_another_key(key_id: str, message: bytes) -> bytes:
+        harness.kms.signs += 1
+        return other.sign(message, ec.ECDSA(hashes.SHA256()))
+
+    harness.kms.sign = sign_with_another_key  # type: ignore[method-assign]
+    harness.credential(0, REVOKED)
+    harness.states.mark_dirty(NOW)
+    cycle = await _service(harness).run_cycle(harness.scope)
+    assert (cycle.outcome, cycle.failed_step) == (CycleOutcome.FAILED, PublishStep.SIGN)
+    assert harness.kms.signs == 1
+    assert not harness.store.added and not harness.edge.versions.get("ca/crl.pem")
+    assert harness.states.dirty and harness.counter() == 1
 
 
 @pytest.mark.asyncio
@@ -694,6 +718,32 @@ async def test_a_lost_lease_publishes_nothing() -> None:
         await _service(harness).run_cycle(harness.scope)
     assert "ca/crl.pem" not in harness.edge.versions
     assert harness.states.dirty and not harness.states.locked
+    # Como manejador, la pérdida del arrendamiento no es un fallo de publicación: otro worker sigue.
+    with pytest.raises(LeaseLost):
+        await _service(harness)(harness.scope)
+    assert harness.counter() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_handler_cancelled_mid_cycle_counts_as_a_failed_publication() -> None:
+    """El tope del planificador cancela el manejador a mitad (KMS colgado): la marca sigue y el
+    contador de la alarma suma, aunque el ciclo no llegue a su propio registro de fallo."""
+    harness = Harness()
+    await harness.publish_root()
+    harness.credential(0, REVOKED)
+    harness.states.mark_dirty(NOW)
+    harness.kms.hang = True
+    running = asyncio.create_task(_service(harness)(harness.scope))
+    for _ in range(10_000):  # hasta que el ciclo está dentro de kms:Sign; sin reloj de pared
+        if harness.kms.signs or harness.kms.public_reads:
+            break
+        await asyncio.sleep(0)
+    assert harness.kms.signs or harness.kms.public_reads
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert harness.counter() == 1
+    assert harness.states.dirty and "ca/crl.pem" not in harness.edge.versions
 
 
 @pytest.mark.asyncio
