@@ -119,7 +119,12 @@ from vigia_platform.fleet.application.enrollment_codes import (
     RootsUnavailable,
 )
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
-from vigia_platform.fleet.application.ingest import IngestDependencies, IngestService
+from vigia_platform.fleet.application.ingest import (
+    INGEST_REJECTED_RECORD_TYPE,
+    IngestDependencies,
+    IngestService,
+)
+from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.fleet.application.node_declaration import (
     COMMUNICATION_RECORD_TYPE,
     NodeDeclarationService,
@@ -661,11 +666,17 @@ _FLEET_WRITTEN_TYPES: Final = frozenset(
         DECOMMISSIONED_RECORD_TYPE,
         ISSUED_RECORD_TYPE,
         ATTEMPT_RECORD_TYPE,
+        *(kind.record_type for kind in IngestKind),
+        INGEST_REJECTED_RECORD_TYPE,
     }
 )
-"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218)."""
-_FLEET_PUBLISHED_EVENTS: Final = frozenset({"node_revoked", "node_decommissioned"})
-"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218)."""
+"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218; la
+ingesta, VIG-156)."""
+_FLEET_PUBLISHED_EVENTS: Final = frozenset(
+    {"node_revoked", "node_decommissioned", *(kind.event_name for kind in IngestKind)}
+)
+"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218; la ingesta,
+VIG-156)."""
 
 
 def _fleet_record_types(registry: RecordTypeRegistry) -> None:

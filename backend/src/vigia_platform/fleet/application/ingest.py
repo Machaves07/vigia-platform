@@ -574,6 +574,28 @@ class IngestService:
             )
             received = to_millisecond(received_at)
             async with deps.database.transaction(context) as transaction:
+                # Cadena de la planta antes que la de auditoría, como toda operación de U-03 que
+                # escribe las dos en una transacción (orden de candados del módulo).
+                if code in RECORDED_CODES:
+                    content: dict[str, Any] = {
+                        "node_id": str(node.node_id),
+                        "record_kind": kind.record_kind.value,
+                        "code": code.value,
+                        "correlation_id": str(context.correlation_id),
+                        "received_at": format_timestamp(received),
+                    }
+                    if zone is not None:
+                        content["zone_id"] = str(zone)
+                    written = await deps.writer.write(
+                        context,
+                        INGEST_REJECTED_RECORD_TYPE,
+                        content,
+                        scope=RecordScope(plant_id=node.plant_id),
+                        occurred_at=received,
+                        transaction=transaction,
+                    )
+                    if isinstance(written, LedgerRejection):
+                        raise FleetWriteFailed(written)
                 await deps.audit.append(
                     context,
                     AuditOperation.INGEST_REJECTED,
@@ -584,27 +606,6 @@ class IngestService:
                     filters={"record_kind": kind.record_kind.value, "code": code.value},
                     transaction=transaction,
                 )
-                if code not in RECORDED_CODES:
-                    return
-                content: dict[str, Any] = {
-                    "node_id": str(node.node_id),
-                    "record_kind": kind.record_kind.value,
-                    "code": code.value,
-                    "correlation_id": str(context.correlation_id),
-                    "received_at": format_timestamp(received),
-                }
-                if zone is not None:
-                    content["zone_id"] = str(zone)
-                written = await deps.writer.write(
-                    context,
-                    INGEST_REJECTED_RECORD_TYPE,
-                    content,
-                    scope=RecordScope(plant_id=node.plant_id),
-                    occurred_at=received,
-                    transaction=transaction,
-                )
-                if isinstance(written, LedgerRejection):
-                    raise FleetWriteFailed(written)
 
     @staticmethod
     def _attributes(node: NodeScope, zone_id: uuid.UUID | None) -> dict[str, str]:
