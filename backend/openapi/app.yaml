@@ -2892,6 +2892,140 @@
                 "$ref": "#/components/schemas/ApiErrorBody"
       "x-vigia-mutual-tls": true
       "x-vigia-content-encodings": []
+  "/api/nodes/heartbeats":
+    "post":
+      "tags":
+        - "configuration"
+      "summary": "Latido del nodo."
+      "operationId": "post_heartbeat"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HeartbeatResponse"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 65536
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/zones/{zone_id}/catalog":
+    "get":
+      "tags":
+        - "configuration"
+      "summary": "Catálogo vigente de una zona."
+      "operationId": "get_zone_catalog"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "title": "Zone Id"
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__SignedEnvelope"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "x-vigia-mutual-tls": true
+      "x-vigia-content-encodings": []
 "components":
   "schemas":
     "ActivationEnrollment":
@@ -3497,6 +3631,28 @@
         - "cameras"
         - "reason_es"
       "title": "CamerasBody"
+    "CatalogCamera":
+      "properties":
+        "camera_id":
+          "$ref": "#/components/schemas/UUID"
+        "code":
+          "$ref": "#/components/schemas/Code"
+        "role_in_zone":
+          "$ref": "#/components/schemas/CameraRoleInZone"
+        "declared_min_fps":
+          "type": "number"
+          "maximum": 60.0
+          "minimum": 1.0
+          "title": "Declared Min Fps"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "code"
+        - "role_in_zone"
+        - "declared_min_fps"
+      "title": "CatalogCamera"
+      "description": "Cámara declarada en el catálogo de la zona."
     "CatalogChangedField":
       "type": "string"
       "enum":
@@ -3528,6 +3684,22 @@
         - "versions"
         - "next_after"
       "title": "CatalogHistoryOut"
+    "CatalogVersion":
+      "properties":
+        "zone_id":
+          "$ref": "#/components/schemas/UUID"
+        "version":
+          "type": "integer"
+          "maximum": 2147483647.0
+          "minimum": 1.0
+          "title": "Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "version"
+      "title": "CatalogVersion"
+      "description": "Versión disponible del catálogo de una zona."
     "CatalogVersionDetail":
       "properties":
         "zone_id":
@@ -3864,6 +4036,25 @@
         - "verification"
       "title": "ClipUploadPurpose"
       "description": "Propósito de una subida de clip (`ClipUploadRequest.purpose` y `ClipUploadGrant.purpose`; pendiente nº 32)."
+    "ClipWindow":
+      "properties":
+        "pre_seconds":
+          "type": "integer"
+          "maximum": 30.0
+          "minimum": 5.0
+          "title": "Pre Seconds"
+        "post_seconds":
+          "type": "integer"
+          "maximum": 30.0
+          "minimum": 5.0
+          "title": "Post Seconds"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "pre_seconds"
+        - "post_seconds"
+      "title": "ClipWindow"
+      "description": "Segundos de video antes y después del tramo que cubren los clips (BR-CTR-39); 10 y 10 por defecto."
     "ClipWindowBody":
       "properties":
         "pre_seconds":
@@ -3886,6 +4077,35 @@
       "additionalProperties": false
       "type": "object"
       "title": "CloseStepBody"
+    "Code":
+      "type": "string"
+      "maxLength": 32
+      "minLength": 2
+      "pattern": "^[A-Z0-9-]{2,32}$"
+      "title": "Code"
+    "CoexistencePredicate":
+      "properties":
+        "all_of":
+          "items":
+            "anyOf":
+              - "$ref": "#/components/schemas/PresenceCondition"
+              - "$ref": "#/components/schemas/EnergyAsserted"
+          "type": "array"
+          "maxItems": 2
+          "minItems": 2
+          "title": "All Of"
+        "min_duration_ms":
+          "type": "integer"
+          "maximum": 0.0
+          "minimum": 0.0
+          "title": "Min Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "all_of"
+        - "min_duration_ms"
+      "title": "CoexistencePredicate"
+      "description": "Plantilla `coexistence`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms = 0`."
     "CommissioningClipOut":
       "properties":
         "clip_id":
@@ -3941,6 +4161,16 @@
         - "clips"
         - "next_after"
       "title": "CommissioningClipsOut"
+    "CompatibilityResult":
+      "type": "string"
+      "enum":
+        - "accepted"
+        - "accepted_with_notice"
+        - "rejected_major"
+        - "rejected_retired"
+        - "rejected_newer"
+      "title": "CompatibilityResult"
+      "description": "Resultado de la política de compatibilidad de versiones."
     "CompleteActivation":
       "properties":
         "step":
@@ -4089,6 +4319,26 @@
         - "image/jpeg"
       "title": "ContentType"
       "description": "Tipo de contenido del archivo, si la concesión lo fija. Valor técnico (tipo MIME) que nunca se muestra a una persona: no tiene etiqueta en `labels.es.json` y `label_es` lo excluye de forma explícita (A-42)."
+    "ContractNotice":
+      "properties":
+        "result":
+          "$ref": "#/components/schemas/CompatibilityResult"
+        "retires_at":
+          "anyOf":
+            - "$ref": "#/components/schemas/Timestamp"
+            - "type": "null"
+        "message_es":
+          "type": "string"
+          "maxLength": 512
+          "minLength": 1
+          "title": "Message Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "result"
+        - "message_es"
+      "title": "ContractNotice"
+      "description": "Aviso de compatibilidad (BR-CTR-21). Con `result = accepted_with_notice`, `retires_at` es obligatorio: la versión del nodo se retira en esa fecha. El texto es `message_es` (renombrado desde `message`, nota fechada de 2026-09-23)."
     "CorrectionBody":
       "properties":
         "started_at":
@@ -4274,6 +4524,25 @@
         - "user_id"
         - "status"
       "title": "DeactivatedView"
+    "DeclaredBy":
+      "properties":
+        "user_id":
+          "$ref": "#/components/schemas/UUID"
+        "display_name":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Display Name"
+        "role":
+          "$ref": "#/components/schemas/TechnicalId"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "role"
+      "title": "DeclaredBy"
+      "description": "Firmante responsable de un estándar: usuario de la plataforma, no persona observada. `display_name` es uno de los textos libres admitidos por BR-CTR-13; `role` es un identificador técnico (código de rol de la plataforma) para cumplir la metapropiedad de BR-CTR-13."
     "DeclaredNodeView":
       "properties":
         "node_id":
@@ -4341,6 +4610,51 @@
         - "cameras"
         - "minimum_coverage"
       "title": "DeclaredScopeOut"
+    "DeclaredStandard":
+      "properties":
+        "standard_id":
+          "$ref": "#/components/schemas/UUID"
+        "version":
+          "type": "integer"
+          "maximum": 2147483647.0
+          "minimum": 1.0
+          "title": "Version"
+        "family":
+          "$ref": "#/components/schemas/PredicateFamily"
+        "title_es":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Title Es"
+        "declared_text":
+          "type": "string"
+          "maxLength": 4000
+          "minLength": 1
+          "title": "Declared Text"
+        "declared_by":
+          "$ref": "#/components/schemas/DeclaredBy"
+        "effective_from":
+          "$ref": "#/components/schemas/Timestamp"
+        "tier_policy":
+          "type": "string"
+          "const": "tier_1_when_signal_valid"
+          "title": "Tier Policy"
+        "predicate":
+          "$ref": "#/components/schemas/Predicate"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+        - "family"
+        - "title_es"
+        - "declared_text"
+        - "declared_by"
+        - "effective_from"
+        - "tier_policy"
+        - "predicate"
+      "title": "DeclaredStandard"
+      "description": "Estándar de seguridad tal como la planta lo declaró (domain-entities.md §3.2). Viaja dentro de `ZoneCatalog.standards`. Cada cambio de texto, predicado o parámetro produce una versión nueva; una versión emitida nunca se edita. `declared_text` es el único texto libre del contrato escrito por la planta. El predicado sigue la gramática booleana cerrada de §3.2.1 y su forma depende de `family`: el esquema empareja cada familia con su plantilla (`oneOf`), así que un predicado con la forma de otra familia es inválido. La gramática no puede expresar, por construcción, ausencia de personas ni negación de presencia (P2), disyunciones, comparaciones o conteos de personas, velocidades, tiempos de ciclo ni ninguna magnitud de productividad (P7)."
     "DocumentContentType":
       "type": "string"
       "enum":
@@ -4454,6 +4768,63 @@
         - "required_headers"
         - "expires_at"
       "title": "DocumentUploadOut"
+    "DwellPredicate":
+      "properties":
+        "all_of":
+          "items":
+            "anyOf":
+              - "$ref": "#/components/schemas/PresenceCondition"
+              - "$ref": "#/components/schemas/EnergyAsserted"
+          "type": "array"
+          "maxItems": 2
+          "minItems": 2
+          "title": "All Of"
+        "min_duration_ms":
+          "type": "integer"
+          "maximum": 3600000.0
+          "minimum": 1000.0
+          "title": "Min Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "all_of"
+        - "min_duration_ms"
+      "title": "DwellPredicate"
+      "description": "Plantilla `dwell`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms` entre 1 000 y 3 600 000."
+    "EnergyAsserted":
+      "properties":
+        "signal_role":
+          "type": "string"
+          "const": "energy"
+          "title": "condition_signal_role"
+        "value":
+          "type": "string"
+          "const": "asserted"
+          "title": "condition_signal_value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_role"
+        - "value"
+      "title": "EnergyAsserted"
+      "description": "Condición `{signal_role: energy, value: asserted}`: máquina energizada."
+    "EnergyDeasserted":
+      "properties":
+        "signal_role":
+          "type": "string"
+          "const": "energy"
+          "title": "condition_signal_role"
+        "value":
+          "type": "string"
+          "const": "deasserted"
+          "title": "condition_signal_value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_role"
+        - "value"
+      "title": "EnergyDeasserted"
+      "description": "Condición `{signal_role: energy, value: deasserted}`: máquina en reposo (arranque desde reposo)."
     "EnrollRequest":
       "properties":
         "code":
@@ -4611,6 +4982,25 @@
       "additionalProperties": false
       "type": "object"
       "title": "EpisodeBody"
+    "EpisodeParameters":
+      "properties":
+        "grouping_window_ms":
+          "type": "integer"
+          "maximum": 300000.0
+          "minimum": 1000.0
+          "title": "Grouping Window Ms"
+        "max_segment_ms":
+          "type": "integer"
+          "maximum": 3600000.0
+          "minimum": 60000.0
+          "title": "Max Segment Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "grouping_window_ms"
+        - "max_segment_ms"
+      "title": "EpisodeParameters"
+      "description": "Agrupación de observaciones en episodios de zona y tope de duración de cada tramo (BR-CTR-33, BR-CTR-34)."
     "EvidenceOut":
       "properties":
         "evidence_id":
@@ -4813,6 +5203,99 @@
         - "scope_id"
         - "reason"
       "title": "GrantBody"
+    "GuardAsserted":
+      "properties":
+        "signal_role":
+          "type": "string"
+          "const": "guard"
+          "title": "condition_signal_role"
+        "value":
+          "type": "string"
+          "const": "asserted"
+          "title": "condition_signal_value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_role"
+        - "value"
+      "title": "GuardAsserted"
+      "description": "Condición `{signal_role: guard, value: asserted}`: resguardo en su nivel afirmado (declarado cerrado)."
+    "GuardBypassPredicate":
+      "properties":
+        "all_of":
+          "items":
+            "anyOf":
+              - "$ref": "#/components/schemas/PresenceCondition"
+              - "$ref": "#/components/schemas/GuardAsserted"
+              - "$ref": "#/components/schemas/EnergyAsserted"
+          "type": "array"
+          "maxItems": 3
+          "minItems": 2
+          "title": "All Of"
+        "min_duration_ms":
+          "type": "integer"
+          "maximum": 0.0
+          "minimum": 0.0
+          "title": "Min Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "all_of"
+        - "min_duration_ms"
+      "title": "GuardBypassPredicate"
+      "description": "Plantilla `guard_bypass`: `all_of` contiene presencia y resguardo afirmado (declarado cerrado con persona dentro) y, opcionalmente, energía afirmada; en cualquier orden y sin repetir; `min_duration_ms = 0`."
+    "HeartbeatResponse":
+      "properties":
+        "server_time":
+          "$ref": "#/components/schemas/Timestamp"
+        "gate_states":
+          "items":
+            "$ref": "#/components/schemas/SignedGateState"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Gate States"
+        "catalog_versions_available":
+          "items":
+            "$ref": "#/components/schemas/CatalogVersion"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Catalog Versions Available"
+        "target_software_version":
+          "anyOf":
+            - "$ref": "#/components/schemas/SemVer"
+            - "type": "null"
+        "contract_notice":
+          "$ref": "#/components/schemas/ContractNotice"
+        "platform_public_keys":
+          "$ref": "#/components/schemas/SignedPublicKeySet"
+        "revoked":
+          "type": "boolean"
+          "title": "Revoked"
+        "heartbeat_interval_seconds":
+          "type": "integer"
+          "maximum": 600.0
+          "minimum": 15.0
+          "title": "Heartbeat Interval Seconds"
+        "mute_after_seconds":
+          "type": "integer"
+          "maximum": 3000.0
+          "minimum": 75.0
+          "title": "Mute After Seconds"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "server_time"
+        - "gate_states"
+        - "catalog_versions_available"
+        - "contract_notice"
+        - "platform_public_keys"
+        - "revoked"
+        - "heartbeat_interval_seconds"
+        - "mute_after_seconds"
+      "title": "HeartbeatResponse"
+      "description": "Respuesta de `POST heartbeats` (domain-entities.md §2.5 y notas fechadas): lo que el nodo aprende en cada latido. Es el **único canal** por el que la plataforma comunica al nodo cambios de compuerta, de catálogo, de versión objetivo, de claves públicas y de revocación; la plataforma nunca inicia conexiones al nodo (BR-CTR-55). Las compuertas llegan solo por `gate_states`: no tienen ruta propia. `platform_public_keys` es un `SignedEnvelope<PublicKeySet>` firmado con una clave de propósito `key_set` que el nodo ya tiene fijada; un conjunto que no verifica no se aplica. `contract_notice.message_es` es el único texto libre, genérico y en español (BR-CTR-13, BR-CTR-16). La ventana de mantenimiento no viaja en esta respuesta (decisión D-5). Reglas que verifica el modelo: `mute_after_seconds = 5 × heartbeat_interval_seconds` (pendiente nº 35, BR-CTR-51); una entrada de `gate_states` y de `catalog_versions_available` por cada zona del nodo, cada zona a lo sumo una vez."
     "HierarchyOrganizationView":
       "properties":
         "organization_id":
@@ -5000,6 +5483,21 @@
         - "assignments"
       "title": "InviteBody"
     "JsonValue": {}
+    "KeyId":
+      "type": "string"
+      "maxLength": 64
+      "minLength": 1
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+      "title": "KeyId"
+    "KeyPurpose":
+      "type": "string"
+      "enum":
+        - "catalog"
+        - "gate"
+        - "live_view_token"
+        - "key_set"
+      "title": "KeyPurpose"
+      "description": "Propósito de una clave pública de la plataforma (`PublicKey.purpose`)."
     "KeyRotatedOut":
       "properties":
         "purpose":
@@ -5427,6 +5925,27 @@
         - "privacy_notice_version"
         - "api_version"
       "title": "MeResponse"
+    "MinimumCoverage":
+      "properties":
+        "required_count":
+          "type": "integer"
+          "maximum": 8.0
+          "minimum": 1.0
+          "title": "Required Count"
+        "required_camera_ids":
+          "items":
+            "$ref": "#/components/schemas/UUID"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 0
+          "title": "Required Camera Ids"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "required_count"
+        - "required_camera_ids"
+      "title": "MinimumCoverage"
+      "description": "Cobertura mínima (RF-CTR-03, RF-BOR-07; entradas A-03 y A-06 de la adenda): la zona la conserva cuando **todas** las cámaras de `required_camera_ids` están observables **y** al menos `required_count` cámaras de la zona están observables en total; una cámara `degraded` o `not_observable` cuenta como no observable. Restricciones que verifica el modelo: `len(required_camera_ids) ≤ required_count ≤ len(cameras)` y toda cámara requerida está en `cameras` (pendiente nº 34)."
     "MinimumCoverageBody":
       "properties":
         "required_count":
@@ -5449,6 +5968,24 @@
         - "required_camera_ids"
         - "reason_es"
       "title": "MinimumCoverageBody"
+    "MountingGate":
+      "properties":
+        "status":
+          "$ref": "#/components/schemas/GateStatus"
+        "decided_at":
+          "anyOf":
+            - "$ref": "#/components/schemas/Timestamp"
+            - "type": "null"
+        "record_id":
+          "anyOf":
+            - "$ref": "#/components/schemas/UUID"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "MountingGate"
+      "description": "Compuerta de montaje de la zona."
     "MountingGateOut":
       "properties":
         "status":
@@ -5967,6 +6504,13 @@
         - "slow_movement"
       "title": "Posture"
       "description": "Postura de una fila de la matriz del walk-test (respuesta 9)."
+    "Predicate":
+      "anyOf":
+        - "$ref": "#/components/schemas/CoexistencePredicate"
+        - "$ref": "#/components/schemas/GuardBypassPredicate"
+        - "$ref": "#/components/schemas/DwellPredicate"
+        - "$ref": "#/components/schemas/StartupTransitionPredicate"
+      "title": "Predicate"
     "PredicateFamily":
       "type": "string"
       "enum":
@@ -5976,6 +6520,18 @@
         - "startup_transition"
       "title": "PredicateFamily"
       "description": "Familia del predicado de un estándar declarado."
+    "PresenceCondition":
+      "properties":
+        "presence":
+          "type": "boolean"
+          "const": true
+          "title": "Presence"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "presence"
+      "title": "PresenceCondition"
+      "description": "Condición de presencia en la zona. Solo admite `true`: la gramática no puede afirmar ausencia (P2)."
     "ProfileBody":
       "properties":
         "display_name":
@@ -6125,6 +6681,38 @@
         - "occurred_at"
         - "reason"
       "title": "ProviderQueryItem"
+    "PublicKey":
+      "properties":
+        "key_id":
+          "$ref": "#/components/schemas/KeyId"
+        "algorithm":
+          "type": "string"
+          "const": "Ed25519"
+          "title": "Algorithm"
+        "public_key":
+          "type": "string"
+          "maxLength": 44
+          "minLength": 44
+          "pattern": "^[A-Za-z0-9+/]{43}=$"
+          "title": "Public Key"
+        "purpose":
+          "$ref": "#/components/schemas/KeyPurpose"
+        "valid_from":
+          "$ref": "#/components/schemas/Timestamp"
+        "valid_until":
+          "anyOf":
+            - "$ref": "#/components/schemas/Timestamp"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "key_id"
+        - "algorithm"
+        - "public_key"
+        - "purpose"
+        - "valid_from"
+      "title": "PublicKey"
+      "description": "Clave pública Ed25519 de la plataforma para verificar catálogos, compuertas, tokens de vista en vivo y conjuntos de claves (domain-entities.md §3.4 y nota de §3.5). Ninguna estructura del contrato lleva una clave privada (BR-CTR-46)."
     "ReactivateBody":
       "properties":
         "assignments":
@@ -6554,6 +7142,12 @@
         - "user_id"
         - "sessions_closed"
       "title": "SecondFactorResetView"
+    "SemVer":
+      "type": "string"
+      "maxLength": 64
+      "minLength": 5
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+      "title": "SemVer"
     "SessionView":
       "properties":
         "created_at":
@@ -6672,6 +7266,70 @@
       "minLength": 64
       "pattern": "^[0-9a-f]{64}$"
       "title": "Sha256Hex"
+    "SignalDeclaration":
+      "properties":
+        "signal_id":
+          "$ref": "#/components/schemas/UUID"
+        "code":
+          "$ref": "#/components/schemas/Code"
+        "role":
+          "$ref": "#/components/schemas/SignalRole"
+        "asserted_level":
+          "$ref": "#/components/schemas/SignalLevel"
+        "source":
+          "$ref": "#/components/schemas/SignalSource"
+        "description_es":
+          "type": "string"
+          "maxLength": 120
+          "minLength": 1
+          "title": "Description Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_id"
+        - "code"
+        - "role"
+        - "asserted_level"
+        - "source"
+        - "description_es"
+      "title": "SignalDeclaration"
+      "description": "Señal declarada de la zona. El nodo convierte el nivel físico leído en `asserted` o `deasserted` comparándolo con `asserted_level`."
+    "SignalLevel":
+      "type": "string"
+      "enum":
+        - "high"
+        - "low"
+      "title": "SignalLevel"
+      "description": "Nivel físico de una señal."
+    "SignalRole":
+      "type": "string"
+      "enum":
+        - "energy"
+        - "guard"
+        - "start_command"
+        - "auxiliary"
+      "title": "SignalRole"
+      "description": "Rol de una señal declarada en el catálogo de la zona."
+    "SignalSource":
+      "properties":
+        "reader":
+          "type": "string"
+          "maxLength": 32
+          "minLength": 1
+          "pattern": "^[a-z][a-z0-9_.-]{0,31}$"
+          "title": "Reader"
+        "channel":
+          "type": "integer"
+          "maximum": 255.0
+          "minimum": 0.0
+          "title": "Channel"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reader"
+        - "channel"
+      "title": "SignalSource"
+      "description": "Lector y canal de los que el nodo toma la señal."
     "SignalsBody":
       "properties":
         "signals":
@@ -6789,6 +7447,12 @@
         - "configured"
       "title": "SignatoryPolicyOut"
       "description": "``PlantSignatoryPolicy`` (DE §2.7); ``configured = false`` en una planta sin ella."
+    "SignedGateState":
+      "$ref": "#/components/schemas/vigia_contracts__models__gate_state__SignedEnvelope"
+      "title": "SignedGateState"
+    "SignedPublicKeySet":
+      "$ref": "#/components/schemas/vigia_contracts__models__public_key_set__SignedEnvelope"
+      "title": "SignedPublicKeySet"
     "SigningPurpose":
       "type": "string"
       "enum":
@@ -6906,6 +7570,47 @@
         - "changes"
         - "reason_es"
       "title": "StandardVersionBody"
+    "StartCommandAsserted":
+      "properties":
+        "signal_role":
+          "type": "string"
+          "const": "start_command"
+          "title": "condition_signal_role"
+        "value":
+          "type": "string"
+          "const": "asserted"
+          "title": "condition_signal_value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_role"
+        - "value"
+      "title": "StartCommandAsserted"
+      "description": "Condición `{signal_role: start_command, value: asserted}`: mando de arranque activo."
+    "StartupTransitionPredicate":
+      "properties":
+        "all_of":
+          "items":
+            "anyOf":
+              - "$ref": "#/components/schemas/PresenceCondition"
+              - "$ref": "#/components/schemas/StartCommandAsserted"
+              - "$ref": "#/components/schemas/EnergyDeasserted"
+          "type": "array"
+          "maxItems": 3
+          "minItems": 2
+          "title": "All Of"
+        "min_duration_ms":
+          "type": "integer"
+          "maximum": 60000.0
+          "minimum": 0.0
+          "title": "Min Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "all_of"
+        - "min_duration_ms"
+      "title": "StartupTransitionPredicate"
+      "description": "Plantilla `startup_transition`: `all_of` contiene presencia y mando de arranque afirmado y, opcionalmente, energía no afirmada (arranque desde reposo); en cualquier orden y sin repetir; `min_duration_ms` entre 0 y 60 000."
     "StepBody":
       "properties":
         "step_kind":
@@ -7050,6 +7755,12 @@
         - "never_reported_ms"
         - "zone_not_active_ms"
       "title": "SummaryOut"
+    "TechnicalId":
+      "type": "string"
+      "maxLength": 64
+      "minLength": 1
+      "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+      "title": "TechnicalId"
     "ThresholdValues":
       "properties":
         "review":
@@ -7068,6 +7779,28 @@
         - "review"
         - "publication"
       "title": "ThresholdValues"
+    "Thresholds":
+      "properties":
+        "review":
+          "type": "number"
+          "maximum": 1.0
+          "exclusiveMaximum": 1.0
+          "minimum": 0.0
+          "exclusiveMinimum": 0.0
+          "title": "Review"
+        "publication":
+          "type": "number"
+          "maximum": 1.0
+          "minimum": 0.0
+          "exclusiveMinimum": 0.0
+          "title": "Publication"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "review"
+        - "publication"
+      "title": "Thresholds"
+      "description": "Umbrales de confianza: `0 < review < publication ≤ 1`. El esquema acota cada umbral; la comparación `review < publication` la verifica el modelo."
     "ThresholdsBody":
       "properties":
         "review":
@@ -7143,6 +7876,24 @@
       "minLength": 36
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       "title": "UUIDv7"
+    "UsageGate":
+      "properties":
+        "status":
+          "$ref": "#/components/schemas/GateStatus"
+        "decided_at":
+          "anyOf":
+            - "$ref": "#/components/schemas/Timestamp"
+            - "type": "null"
+        "agreement_id":
+          "anyOf":
+            - "$ref": "#/components/schemas/UUID"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+      "title": "UsageGate"
+      "description": "Compuerta de uso de la zona (acuerdo a tres firmas, P9)."
     "UsageGateOut":
       "properties":
         "status":
@@ -7582,3 +8333,199 @@
         - "name"
         - "node_id"
       "title": "ZoneView"
+    "vigia_contracts__models__gate_state__Payload":
+      "properties":
+        "zone_id":
+          "$ref": "#/components/schemas/UUID"
+        "organization_id":
+          "$ref": "#/components/schemas/UUID"
+        "plant_id":
+          "$ref": "#/components/schemas/UUID"
+        "mounting_gate":
+          "$ref": "#/components/schemas/MountingGate"
+        "usage_gate":
+          "$ref": "#/components/schemas/UsageGate"
+        "resulting_mode":
+          "$ref": "#/components/schemas/ZoneMode"
+        "issued_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "valid_until":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "organization_id"
+        - "plant_id"
+        - "mounting_gate"
+        - "usage_gate"
+        - "resulting_mode"
+        - "issued_at"
+        - "valid_until"
+      "title": "GateState"
+      "description": "Estado de las compuertas de una zona (domain-entities.md §3.3). Siempre viaja firmado, como `SignedEnvelope<GateState>` (`#/$defs/SignedGateState`), con una clave de propósito `gate`, y solo por `HeartbeatResponse.gate_states` y `NodeInitialConfiguration.gate_states`: no tiene ruta propia (BR-CTR-55). `resulting_mode` se deriva de las dos compuertas y el esquema exige la derivación (BR-CTR-40): montaje no aprobada → `no_capture`; montaje aprobada y uso no aprobada → `commissioning`; ambas aprobadas → `productive`; una compuerta `revoked` cuenta como no aprobada. `valid_until − issued_at` es 7 días (BR-CTR-43); JSON Schema no resta marcas, así que lo verifica el modelo. Vencido `valid_until` sin refresco, el nodo retrocede al modo inmediatamente más restrictivo (BR-CTR-42)."
+    "vigia_contracts__models__gate_state__SignedEnvelope":
+      "properties":
+        "payload":
+          "$ref": "#/components/schemas/vigia_contracts__models__gate_state__Payload"
+        "payload_canonical_sha256":
+          "$ref": "#/components/schemas/Sha256Hex"
+        "signature":
+          "type": "string"
+          "maxLength": 88
+          "minLength": 88
+          "pattern": "^[A-Za-z0-9+/]{86}==$"
+          "title": "Signature"
+        "key_id":
+          "$ref": "#/components/schemas/KeyId"
+        "signed_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "payload"
+        - "payload_canonical_sha256"
+        - "signature"
+        - "key_id"
+        - "signed_at"
+      "title": "SignedEnvelope"
+      "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga."
+    "vigia_contracts__models__public_key_set__Payload":
+      "properties":
+        "keys":
+          "items":
+            "$ref": "#/components/schemas/PublicKey"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Keys"
+        "issued_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "keys"
+        - "issued_at"
+      "title": "PublicKeySet"
+      "description": "Conjunto vigente de claves públicas de la plataforma (nota de domain-entities.md §3.5). Viaja como `SignedEnvelope<PublicKeySet>` en `HeartbeatResponse.platform_public_keys`, firmado con una clave de propósito `key_set` que el nodo ya tiene fijada; un conjunto que no verifica no se aplica."
+    "vigia_contracts__models__public_key_set__SignedEnvelope":
+      "properties":
+        "payload":
+          "$ref": "#/components/schemas/vigia_contracts__models__public_key_set__Payload"
+        "payload_canonical_sha256":
+          "$ref": "#/components/schemas/Sha256Hex"
+        "signature":
+          "type": "string"
+          "maxLength": 88
+          "minLength": 88
+          "pattern": "^[A-Za-z0-9+/]{86}==$"
+          "title": "Signature"
+        "key_id":
+          "$ref": "#/components/schemas/KeyId"
+        "signed_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "payload"
+        - "payload_canonical_sha256"
+        - "signature"
+        - "key_id"
+        - "signed_at"
+      "title": "SignedEnvelope"
+      "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga."
+    "vigia_contracts__models__zone_catalog__Payload":
+      "properties":
+        "zone_id":
+          "$ref": "#/components/schemas/UUID"
+        "zone_code":
+          "$ref": "#/components/schemas/Code"
+        "plant_id":
+          "$ref": "#/components/schemas/UUID"
+        "organization_id":
+          "$ref": "#/components/schemas/UUID"
+        "version":
+          "type": "integer"
+          "maximum": 2147483647.0
+          "minimum": 1.0
+          "title": "Version"
+        "issued_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/CatalogCamera"
+          "type": "array"
+          "maxItems": 8
+          "minItems": 1
+          "title": "Cameras"
+        "minimum_coverage":
+          "$ref": "#/components/schemas/MinimumCoverage"
+        "signals":
+          "items":
+            "$ref": "#/components/schemas/SignalDeclaration"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 0
+          "title": "Signals"
+        "standards":
+          "items":
+            "$ref": "#/components/schemas/DeclaredStandard"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Standards"
+        "thresholds":
+          "$ref": "#/components/schemas/Thresholds"
+        "clip_window":
+          "$ref": "#/components/schemas/ClipWindow"
+        "episode":
+          "$ref": "#/components/schemas/EpisodeParameters"
+        "commissioning_watermark":
+          "type": "boolean"
+          "const": true
+          "title": "Commissioning Watermark"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "zone_code"
+        - "plant_id"
+        - "organization_id"
+        - "version"
+        - "issued_at"
+        - "cameras"
+        - "minimum_coverage"
+        - "signals"
+        - "standards"
+        - "thresholds"
+        - "clip_window"
+        - "episode"
+        - "commissioning_watermark"
+      "title": "ZoneCatalog"
+      "description": "Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen."
+    "vigia_contracts__models__zone_catalog__SignedEnvelope":
+      "properties":
+        "payload":
+          "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__Payload"
+        "payload_canonical_sha256":
+          "$ref": "#/components/schemas/Sha256Hex"
+        "signature":
+          "type": "string"
+          "maxLength": 88
+          "minLength": 88
+          "pattern": "^[A-Za-z0-9+/]{86}==$"
+          "title": "Signature"
+        "key_id":
+          "$ref": "#/components/schemas/KeyId"
+        "signed_at":
+          "$ref": "#/components/schemas/Timestamp"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "payload"
+        - "payload_canonical_sha256"
+        - "signature"
+        - "key_id"
+        - "signed_at"
+      "title": "SignedEnvelope"
+      "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga."

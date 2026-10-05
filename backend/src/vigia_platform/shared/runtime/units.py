@@ -44,6 +44,7 @@ from typing import Any, Final, Protocol
 from fastapi import APIRouter
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
+from vigia_contracts.versioning import Version
 
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp, catalog_routers
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
@@ -116,6 +117,7 @@ from vigia_platform.fleet.application.enrollment_codes import (
     NodeCaRoots,
     RootsUnavailable,
 )
+from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
 from vigia_platform.fleet.application.node_declaration import (
     COMMUNICATION_RECORD_TYPE,
     NodeDeclarationService,
@@ -125,6 +127,7 @@ from vigia_platform.fleet.application.node_revocation import (
     REVOKED_RECORD_TYPE,
     NodeRevocationService,
 )
+from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.fleet.events import FLEET_EVENT_TYPES
@@ -172,6 +175,9 @@ from vigia_platform.node_api.observability import NodeResponses
 from vigia_platform.node_api.router import NodeApiGate, NodeOperation, node_router
 from vigia_platform.node_api.routes.clip_confirmations import clip_confirmation_operation
 from vigia_platform.node_api.routes.clip_uploads import clip_upload_operation
+from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
+from vigia_platform.node_api.routes.zone_catalogs import zone_catalog_operation
+from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import DEFAULT_VERIFIER_PATH, shared_routers
 from vigia_platform.shared.api.declarations import NODE_GATE_STATE_KEY, NodeRoute
 from vigia_platform.shared.api.errors import ApiErrorCode
@@ -215,6 +221,7 @@ from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import S3Storage
+from vigia_platform.shared.tokens import LiveViewTokenService
 
 __all__ = [
     "REGISTERED_UNITS",
@@ -728,25 +735,101 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
 
 
 PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = (
+    NodeRoute.HEARTBEAT,
     NodeRoute.CLIP_UPLOAD,
     NodeRoute.CLIP_CONFIRMATION,
+    NodeRoute.ZONE_CATALOG,
 )
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. VIG-152 (TASK-222)
-publica la concesión de clip y la confirmación del clip de verificación: desde entonces
-``app.yaml`` tiene rutas ``/api/nodes/`` y el trabajo de conformidad de ``nightly.yml`` falla, a
-propósito, hasta que TASK-230 escriba su ejecución."""
+publica la concesión de clip y la confirmación del clip de verificación; TASK-223, el latido y el
+catálogo por zona. Desde entonces ``app.yaml`` tiene rutas ``/api/nodes/`` y el trabajo de
+conformidad de ``nightly.yml`` falla, a propósito, hasta que TASK-230 escriba su ejecución."""
 
 
 def _node_routers() -> tuple[APIRouter, ...]:
     return (node_router(PUBLISHED_NODE_ROUTES),)
 
 
-def _node_operations(services: UnitServices) -> Mapping[NodeRoute, NodeOperation]:
+def _heartbeat_service(services: UnitServices, policy: VersionPolicy) -> HeartbeatService:
+    """``fleet.heartbeat`` (TASK-223) con los puertos que usa: caché de claves, renovación del
+    sobre de compuertas (A-55), marca de regresión por ``model_version``, ``update_node`` de U-02
+    y la incorporación de los accesos locales a la vista en vivo."""
+    database = services.database
+    catalog = PostgresCatalogRepository(database)
+    gates = GateService(
+        repository=PostgresGateRepository(database),
+        catalog=catalog,
+        agreements=PostgresAgreementRepository(),
+        database=database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        signer=services.signing,
+        clock=services.clock,
+    )
+    regression = RegressionService(
+        repository=PostgresRegressionRepository(database),
+        catalog=catalog,
+        database=database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        clock=services.clock,
+    )
+    identity = HierarchyService(
+        IdentityDependencies(
+            database=database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+            authorizer=services.authorizer,
+            free_text=services.free_text,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        )
+    )
+    live_view = LiveViewTokenService(
+        database=database,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        outbox=services.outbox,
+        signer=services.signing,
+        clock=services.clock,
+        metrics=services.metrics,
+    )
+
+    def retires_at(version: str) -> str | None:
+        return policy.retires_at(Version.parse(version))
+
+    return HeartbeatService(
+        HeartbeatDependencies(
+            database=database,
+            writer=services.writer,
+            clock=services.clock,
+            key_sets=services.signing,
+            gates=gates,
+            regression=regression,
+            identity=identity,
+            live_view=live_view,
+            retires_at=retires_at,
+            nodes=PostgresNodeFleetStore(database),
+            metrics=services.metrics,
+        )
+    )
+
+
+def _node_operations(
+    services: UnitServices, policy: VersionPolicy
+) -> Mapping[NodeRoute, NodeOperation]:
     """Los manejadores de negocio de las rutas publicadas."""
     # LC-GOB-13 (VIG-152): concesiones de clip y clip de verificación sobre vigia-evidence.
     store = ClipObjectStore(services.require_evidence())
     return {
+        # TASK-223: latido y catálogo por zona.
+        NodeRoute.HEARTBEAT: heartbeat_operation(_heartbeat_service(services, policy)),
         NodeRoute.CLIP_UPLOAD: clip_upload_operation(
             ClipGrantService(
                 database=services.database,
@@ -763,6 +846,9 @@ def _node_operations(services: UnitServices) -> Mapping[NodeRoute, NodeOperation
                 metrics=services.metrics,
             )
         ),
+        NodeRoute.ZONE_CATALOG: zone_catalog_operation(
+            ZoneCatalogForNode(database=services.database)
+        ),
     }
 
 
@@ -771,6 +857,7 @@ def _node_api_state(services: UnitServices) -> Mapping[str, object]:
     database = services.database
     contexts = services.contexts
     clock = services.clock
+    policy = VersionPolicy()
     brake = EmergencyBrake(
         AuditBrakeSource(database=database, provider_context=contexts.provider_audit_context),
         clock,
@@ -781,7 +868,8 @@ def _node_api_state(services: UnitServices) -> Mapping[str, object]:
             limits=NodeRateLimits(RateLimiter(clock), brake=brake, metrics=services.metrics),
             clock=clock,
             responses=NodeResponses(clock, metrics=services.metrics),
-            operations=_node_operations(services),
+            policy=policy,
+            operations=_node_operations(services, policy),
         )
     }
 
