@@ -119,6 +119,9 @@ class NodeRequest:
     contract_version: str | None = None
     """El valor de ``X-Vigia-Contract-Version`` que pasó el paso 1 (TASK-221 lo compara con
     ``contract_version`` del cuerpo)."""
+    source_address: str | None = field(default=None, repr=False)
+    """El origen de red (el mismo que usa el límite por origen): solo para el ``source_ip_hash``
+    del intento de alta (TASK-219); nunca sale en claro."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,6 +309,7 @@ class NodeApiGate:
             idempotency_key=idempotency_key,
             path={key: str(value) for key, value in request.path_params.items()},
             contract_version=versions[0],
+            source_address=_client_address(scope),
         )
 
     async def _version_rejected(

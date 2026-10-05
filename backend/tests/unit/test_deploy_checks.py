@@ -358,12 +358,13 @@ def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
     assert pilot[9].status == "failed"
 
 
-def test_the_current_repository_has_contract_routes_but_neither_enrollment_nor_frontend() -> None:
+def test_the_current_repository_has_contract_routes_and_enrollment_but_no_frontend() -> None:
     # VIG-152 (concesión y confirmación de clip) y TASK-223 (latido y catálogo por zona)
     # publican rutas del contrato: la conformidad (nº 4) deja de omitirse y falla hasta que
-    # TASK-230 la escriba (nunca pasa en vacío). El alta llega con su propia tarea.
+    # TASK-230 la escriba (nunca pasa en vacío). VIG-151 publica el alta: la 3 y las 10 a 13
+    # también fallan hasta que TASK-234 las escriba (test_the_u03_checks_fail_once_...).
     target = _target()
-    assert target.has_contract_routes() and not target.has_enrollment()
+    assert target.has_contract_routes() and target.has_enrollment()
     assert not target.has_frontend()
     assert "/health/live" in target.openapi_paths()
     assert _run(target)[4].status == "failed"

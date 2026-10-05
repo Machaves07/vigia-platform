@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import os
 import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -100,6 +101,7 @@ from vigia_platform.catalog.detail_codes import (
 from vigia_platform.catalog.domain.documents import DocumentSettings
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
+from vigia_platform.fleet.adapters.ca.certificate_profiles import NodeCaIssuer
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp, fleet_routers
 from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
@@ -110,6 +112,18 @@ from vigia_platform.fleet.application.clip_confirmation import (
 )
 from vigia_platform.fleet.application.clip_grants import ClipGrantService
 from vigia_platform.fleet.application.common import FleetDependencies
+from vigia_platform.fleet.application.credential_rotation import (
+    ROTATED_RECORD_TYPE,
+    CredentialRotationService,
+)
+from vigia_platform.fleet.application.enrollment import (
+    ENROLLED_EVENT,
+    ENROLLED_RECORD_TYPE,
+    EnrollmentService,
+    SecretSourceKey,
+    SourceKeyProvider,
+    UnconfiguredSourceKey,
+)
 from vigia_platform.fleet.application.enrollment_codes import (
     ATTEMPT_RECORD_TYPE,
     ISSUED_RECORD_TYPE,
@@ -185,7 +199,9 @@ from vigia_platform.node_api.observability import NodeResponses
 from vigia_platform.node_api.router import NodeApiGate, NodeOperation, node_router
 from vigia_platform.node_api.routes.clip_confirmations import clip_confirmation_operation
 from vigia_platform.node_api.routes.clip_uploads import clip_upload_operation
+from vigia_platform.node_api.routes.credential_rotations import credential_rotation_operation
 from vigia_platform.node_api.routes.detection_reviews import detection_review_operation
+from vigia_platform.node_api.routes.enrollment import enrollment_operation
 from vigia_platform.node_api.routes.findings import finding_operation
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
 from vigia_platform.node_api.routes.observability_events import observability_event_operation
@@ -230,7 +246,7 @@ from vigia_platform.shared.outbox.registries import (
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
 from vigia_platform.shared.ratelimit import RateLimiter
 from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
-from vigia_platform.shared.secrets import KmsPort
+from vigia_platform.shared.secrets import KmsPort, SecretsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import S3Storage
@@ -296,6 +312,9 @@ class UnitServices:
     config: RuntimeConfig | None = None
     """La configuración leída del entorno (tamaños y prefijos de cada unidad); ``None`` en las
     pruebas que no la necesitan: cada unidad usa entonces los valores del diseño."""
+    secrets: SecretsPort | None = None
+    """El gestor de secretos con su caché (la clave estable del hash de origen del alta,
+    TASK-219); ``None`` en las pruebas que no lo necesitan."""
 
     def require_evidence(self) -> S3Storage:
         if self.evidence is None:
@@ -669,17 +688,24 @@ _FLEET_WRITTEN_TYPES: Final = frozenset(
         DECOMMISSIONED_RECORD_TYPE,
         ISSUED_RECORD_TYPE,
         ATTEMPT_RECORD_TYPE,
+        ENROLLED_RECORD_TYPE,
+        ROTATED_RECORD_TYPE,
         *(kind.record_type for kind in IngestKind),
         INGEST_REJECTED_RECORD_TYPE,
     }
 )
-"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218; la
-ingesta, VIG-156)."""
+"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218;
+TASK-219: ``node_enrolled`` y ``node_credential_rotated``; la ingesta, VIG-156)."""
 _FLEET_PUBLISHED_EVENTS: Final = frozenset(
-    {"node_revoked", "node_decommissioned", *(kind.event_name for kind in IngestKind)}
+    {
+        "node_revoked",
+        "node_decommissioned",
+        ENROLLED_EVENT,
+        *(kind.event_name for kind in IngestKind),
+    }
 )
-"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218; la ingesta,
-VIG-156)."""
+"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218, TASK-219 y la
+ingesta, VIG-156)."""
 
 
 def _fleet_record_types(registry: RecordTypeRegistry) -> None:
@@ -701,18 +727,25 @@ class _UnpublishedRoots:
         raise RootsUnavailable("este proceso no tiene el depósito vigia-edge")
 
 
-def _node_ca_roots(services: UnitServices) -> NodeCaRoots:
-    """``ca/root.pem`` de ``vigia-edge`` (``VIGIA_EDGE_BUCKET``), leído en cada emisión."""
+def _edge_storage(services: UnitServices) -> S3Storage | None:
+    """El depósito ``vigia-edge`` (``VIGIA_EDGE_BUCKET``), o ``None`` si el proceso no lo tiene."""
     config = services.config
     if config is None or config.edge_bucket is None:
-        return _UnpublishedRoots()
+        return None
     # ``runtime.core`` importa este módulo: se resuelve al construir, nunca al importar.
     from vigia_platform.shared.runtime.core import s3_storage
 
-    return BundleRoots(s3_storage(config, config.edge_bucket, services.clock))
+    return s3_storage(config, config.edge_bucket, services.clock)
 
 
-def _fleet_state(services: UnitServices) -> Mapping[str, object]:
+def _node_ca_roots(services: UnitServices) -> NodeCaRoots:
+    """``ca/root.pem`` de ``vigia-edge`` (``VIGIA_EDGE_BUCKET``), leído en cada emisión."""
+    storage = _edge_storage(services)
+    return _UnpublishedRoots() if storage is None else BundleRoots(storage)
+
+
+def _fleet_dependencies(services: UnitServices) -> FleetDependencies:
+    """Las dependencias de los servicios de identidad del nodo y de sus credenciales."""
     identity = HierarchyService(
         IdentityDependencies(
             database=services.database,
@@ -725,7 +758,7 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
             provider_organization_id=services.provider_organization_id,
         )
     )
-    deps = FleetDependencies(
+    return FleetDependencies(
         database=services.database,
         writer=services.writer,
         audit=services.audit,
@@ -736,10 +769,15 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
         nodes=PostgresNodeFleetStore(services.database),
         metrics=services.metrics,
     )
+
+
+def _fleet_state(services: UnitServices) -> Mapping[str, object]:
+    deps = _fleet_dependencies(services)
     return {
         FLEET_STATE_KEY: FleetHttp(
             declarations=NodeDeclarationService(deps),
-            # La clave estable del hash de origen la cablea la ruta del alta (VIG-151).
+            # La clave estable del hash de origen la usa la ruta del alta (VIG-151): la emisión y
+            # la lista de intentos no la necesitan.
             enrollment_codes=EnrollmentCodeService(deps, roots=_node_ca_roots(services)),
             revocations=NodeRevocationService(deps),
             # LC-GOB-13 (VIG-152): clips de verificación de la zona para el selector de U-05.
@@ -775,17 +813,61 @@ PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = (
     NodeRoute.FINDING,
     NodeRoute.DETECTION_REVIEW,
     NodeRoute.OBSERVABILITY_EVENT,
+    NodeRoute.ENROLLMENT,
+    NodeRoute.CREDENTIAL_ROTATION,
 )
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. VIG-152 (TASK-222)
 publica la concesión de clip y la confirmación del clip de verificación; TASK-223, el latido y el
-catálogo por zona; VIG-156 (TASK-221), las tres rutas de la ingesta. Desde entonces ``app.yaml``
+catálogo por zona; VIG-156 (TASK-221), las tres rutas de la ingesta; TASK-219, el alta y la
+rotación de la credencial. Desde entonces ``app.yaml``
 tiene rutas ``/api/nodes/`` y el trabajo de conformidad de ``nightly.yml`` falla, a propósito,
 hasta que TASK-230 escriba su ejecución."""
 
 
 def _node_routers() -> tuple[APIRouter, ...]:
     return (node_router(PUBLISHED_NODE_ROUTES),)
+
+
+def _source_key(services: UnitServices) -> SourceKeyProvider:
+    """La clave estable del hash de origen del alta (``VIGIA_ENROLLMENT_SOURCE_KEY_SECRET``)."""
+    config = services.config
+    secret = None if config is None else config.enrollment_source_key_secret
+    if secret is None or services.secrets is None:
+        return UnconfiguredSourceKey()
+    return SecretSourceKey(services.secrets, secret)
+
+
+def _credential_operations(
+    services: UnitServices, identity: NodeIdentity, limits: NodeRateLimits
+) -> Mapping[NodeRoute, NodeOperation]:
+    """LC-GOB-11 (VIG-151): alta y rotación con ``vigia-node-ca`` (KMS) y ``ca/root.pem``."""
+    config = services.config
+    deps = _fleet_dependencies(services)
+    issuer = NodeCaIssuer(
+        kms=services.kms,
+        key_id=None if config is None else config.node_ca_key_arn,
+        roots=_edge_storage(services),
+        clock=services.clock,
+        random_bytes=os.urandom,
+        metrics=services.metrics,
+    )
+    return {
+        NodeRoute.ENROLLMENT: enrollment_operation(
+            EnrollmentService(
+                deps,
+                issuer=issuer,
+                keys=services.signing,
+                source_key=_source_key(services),
+                ingest_base_url=None if config is None else config.nodes_base_url,
+            ),
+            identity,
+            limits,
+        ),
+        NodeRoute.CREDENTIAL_ROTATION: credential_rotation_operation(
+            CredentialRotationService(deps, issuer=issuer, keys=services.signing)
+        ),
+    }
 
 
 def _heartbeat_service(services: UnitServices, policy: VersionPolicy) -> HeartbeatService:
@@ -859,7 +941,10 @@ def _heartbeat_service(services: UnitServices, policy: VersionPolicy) -> Heartbe
 
 
 def _node_operations(
-    services: UnitServices, policy: VersionPolicy
+    services: UnitServices,
+    policy: VersionPolicy,
+    identity: NodeIdentity,
+    limits: NodeRateLimits,
 ) -> Mapping[NodeRoute, NodeOperation]:
     """Los manejadores de negocio de las rutas publicadas."""
     # LC-GOB-13 (VIG-152): concesiones de clip y clip de verificación sobre vigia-evidence.
@@ -878,6 +963,7 @@ def _node_operations(
         NodeRoute.FINDING: finding_operation(ingest),
         NodeRoute.DETECTION_REVIEW: detection_review_operation(ingest),
         NodeRoute.OBSERVABILITY_EVENT: observability_event_operation(ingest),
+        **_credential_operations(services, identity, limits),
         # TASK-223: latido y catálogo por zona.
         NodeRoute.HEARTBEAT: heartbeat_operation(_heartbeat_service(services, policy)),
         NodeRoute.CLIP_UPLOAD: clip_upload_operation(
@@ -912,14 +998,16 @@ def _node_api_state(services: UnitServices) -> Mapping[str, object]:
         AuditBrakeSource(database=database, provider_context=contexts.provider_audit_context),
         clock,
     )
+    identity = NodeIdentity(contexts=contexts, store=PostgresNodeContextStore(database))
+    limits = NodeRateLimits(RateLimiter(clock), brake=brake, metrics=services.metrics)
     return {
         NODE_GATE_STATE_KEY: NodeApiGate(
-            identity=NodeIdentity(contexts=contexts, store=PostgresNodeContextStore(database)),
-            limits=NodeRateLimits(RateLimiter(clock), brake=brake, metrics=services.metrics),
+            identity=identity,
+            limits=limits,
             clock=clock,
             responses=NodeResponses(clock, metrics=services.metrics),
             policy=policy,
-            operations=_node_operations(services, policy),
+            operations=_node_operations(services, policy, identity, limits),
         )
     }
 

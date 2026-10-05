@@ -208,6 +208,10 @@ T0: Final = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
 HOUR: Final = timedelta(hours=1)
 NBSP: Final = chr(0x00A0)
 ZERO_WIDTH_SPACE: Final = chr(0x200B)
+_CSR_PLACEHOLDER: Final = (
+    "-----BEGIN CERTIFICATE REQUEST-----\nAAAA\n-----END CERTIFICATE REQUEST-----\n"
+)
+"""Forma de una CSR para los casos del alta y la rotación (VIG-151); nunca una clave."""
 INSTALLER_KEYS: Final = frozenset(key.value for key in permissions_of(Role.PROVIDER_INSTALLER))
 """La columna ``provider_installer`` de la matriz (BR-NUC-37)."""
 ADMISSION_TYPES: Final = tuple(
@@ -931,6 +935,40 @@ CASES: Final[dict[tuple[str, str], Case]] = {
         )
         for path in ("findings", "detection-reviews", "observability-events")
     },
+    # VIG-151: el alta no lleva certificado; un código o una CSR (nombre común) de un nodo de B
+    # nunca dan una credencial de B ni de A: enrollment_code_invalid o schema_invalid
+    # (tests/integration/test_fleet_enrollment_flow.py). La rotación, con el certificado de A y el
+    # node_id de B en el cuerpo, es schema_invalid en node_id.
+    ("POST", "/api/nodes/enrollment"): Case(
+        Kind.NODE,
+        lambda i: Call(
+            "POST",
+            "/api/nodes/enrollment",
+            json={
+                "enrollment_code": "ABCDEFGHJKLM",
+                "key_algorithm": "ecdsa_p256",
+                "certificate_signing_request": _CSR_PLACEHOLDER,
+                "server_certificate_signing_request": _CSR_PLACEHOLDER,
+                "software_version": "1.4.0",
+                "contract_version": "1.0.0",
+                "hardware_fingerprint": "ab" * 32,
+                "requested_at": "2026-10-05T12:00:00.000Z",
+            },
+        ),
+    ),
+    ("POST", "/api/nodes/credential-rotations"): Case(
+        Kind.NODE,
+        lambda i: Call(
+            "POST",
+            "/api/nodes/credential-rotations",
+            json={
+                "node_id": str(i.node),
+                "certificate_signing_request": _CSR_PLACEHOLDER,
+                "server_certificate_signing_request": _CSR_PLACEHOLDER,
+                "requested_at": "2026-10-05T12:00:00.000Z",
+            },
+        ),
+    ),
     # --- platform ---
     ("POST", "/platform/dead-letter/{event_id}/{consumer}/replay"): Case(
         Kind.PROVIDER_ONLY,
@@ -1045,14 +1083,11 @@ def test_contract_routes_are_in_the_catalog_and_need_their_case() -> None:
     # TASK-206: iter_declared_routes incluye las rutas declaradas con NodeRoute, así que
     # ``uncovered`` exige un caso por ruta del contrato (otra organización → node_zone_mismatch
     # o not_found) igual que por ruta de personas.
-    # Dos rutas aún sin publicar (el latido, el catálogo y la ingesta ya tienen su caso, TASK-223
-    # y VIG-156).
-    contract = node_router((NodeRoute.CREDENTIAL_ROTATION, NodeRoute.UPDATE_RESULT)).routes
+    # La única ruta aún sin publicar (el latido, el catálogo, la ingesta, el alta y la rotación ya
+    # tienen su caso: TASK-223, VIG-156 y VIG-151).
+    contract = node_router((NodeRoute.UPDATE_RESULT,)).routes
     routes = [*build_openapi_app().routes, *contract]
-    assert uncovered(routes) == [
-        "POST /api/nodes/credential-rotations",
-        "POST /api/nodes/update-results",
-    ]
+    assert uncovered(routes) == ["POST /api/nodes/update-results"]
     found = declared(contract)
     assert all(declaration.node is not None for declaration in found.values())
 
