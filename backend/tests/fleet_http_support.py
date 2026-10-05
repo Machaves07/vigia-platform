@@ -6,7 +6,8 @@
 de U-02 y los cinco de la flota que escriben, la bandeja con los eventos ``node_revoked`` y
 ``node_decommissioned``, y la aplicación real con la cadena fija de middleware y
 ``ContextAuthorizer``. ``FleetStack`` da las personas (instalador del proveedor bajo concesión,
-miembros del cliente), las peticiones y lo que quedó escrito.
+miembros del cliente), las peticiones y lo que quedó escrito. Desde TASK-224, también el inventario
+(``FleetInventory``) y los umbrales por planta (``FleetThresholdsService``).
 
 Solo datos generados (NFR-CTR-43). Las marcas salen del reloj simulado, que arranca en la hora de
 la base (retro 14). Topes de las esperas de la base: 60 s (retro 15).
@@ -42,6 +43,8 @@ from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnro
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
+from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.domain.enrollment_attempt import SourceIpHasher
@@ -343,6 +346,19 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
                 deps, roots=BundleRoots(roots), source_hasher=SourceIpHasher(hash_key)
             ),
             revocations=NodeRevocationService(deps),
+            inventory=FleetInventory(
+                database=database,
+                authorizer=authz.authorizer,
+                audit=sessions.audit,
+                clock=sessions.clock,
+                provider_organization_id=authz.provider_organization_id,
+            ),
+            thresholds=FleetThresholdsService(
+                database=database,
+                authorizer=authz.authorizer,
+                audit=sessions.audit,
+                clock=sessions.clock,
+            ),
         )
         app = World(clock=sessions.clock).app(
             runtime={
