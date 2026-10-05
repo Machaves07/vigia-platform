@@ -1,6 +1,6 @@
-"""Servicios de las rutas de ``fleet`` (``app.state``) y su construcción por la raíz.
+"""Servicios de las rutas de ``fleet`` (``app.state``) (TASK-218, TASK-222; A-52).
 
-``FleetHttp`` lo deja la unidad ``fleet`` en ``app.state`` (``PlatformUnit.api_state``, A-52),
+``FleetHttp`` lo deja la unidad ``fleet`` en ``app.state`` (``PlatformUnit.api_state``),
 construido con la infraestructura común (``UnitServices``). Las rutas lo toman en cada petición:
 sin él, ``internal_error`` (fallo cerrado, nunca deja pasar).
 """
@@ -13,6 +13,9 @@ from typing import Final
 from fastapi import Request
 
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
+from vigia_platform.fleet.application.enrollment_codes import EnrollmentCodeService
+from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
+from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -27,6 +30,9 @@ _log = get_logger("fleet.http")
 class FleetHttp:
     """Los servicios que usan las rutas de ``fleet``."""
 
+    declarations: NodeDeclarationService | None = None
+    enrollment_codes: EnrollmentCodeService | None = None
+    revocations: NodeRevocationService | None = None
     commissioning_clips: CommissioningClips | None = None
     """``GET /zones/{zone_id}/commissioning-clips`` (TASK-222)."""
 

@@ -2275,6 +2275,250 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/nodes":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Declara un nodo de la planta con sus zonas (y, si procede, reemplaza a otro)"
+      "operationId": "declare_node_plants__plant_id__nodes_post"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NodeDeclarationBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/DeclaredNodeView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/zones":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Asigna una zona de su planta a un nodo en operación"
+      "operationId": "assign_zone_nodes__node_id__zones_post"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NodeZoneBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeAssignmentView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/zones/{zone_id}/unassignment":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Retira con fecha y motivo la asignación de una zona al nodo"
+      "operationId": "unassign_zone_nodes__node_id__zones__zone_id__unassignment_post"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NodeReasonBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeAssignmentView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/enrollment-codes":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Emite el código de alta del nodo (se muestra una sola vez)"
+      "operationId": "issue_enrollment_code_nodes__node_id__enrollment_codes_post"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EnrollmentCodeView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/enrollment-attempts":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Intentos de alta del nodo, el más reciente primero"
+      "operationId": "list_enrollment_attempts_nodes__node_id__enrollment_attempts_get"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EnrollmentAttemptsPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/revocation":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Revoca el nodo: efecto inmediato en las rutas del contrato"
+      "operationId": "revoke_node_nodes__node_id__revocation_post"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NodeReasonBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeRevocationView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/nodes/{node_id}/decommission":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Da de baja un nodo revocado; conserva todo lo que envió"
+      "operationId": "decommission_node_nodes__node_id__decommission_post"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NodeReasonBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeDecommissionView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/zones/{zone_id}/commissioning-clips":
     "get":
       "tags":
@@ -3753,6 +3997,47 @@
         - "user_id"
         - "status"
       "title": "DeactivatedView"
+    "DeclaredNodeView":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "declared_at":
+          "type": "string"
+          "title": "Declared At"
+        "replaces_node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Replaces Node Id"
+        "assignments":
+          "items":
+            "$ref": "#/components/schemas/NodeAssignmentView"
+          "type": "array"
+          "title": "Assignments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "plant_id"
+        - "code"
+        - "status"
+        - "declared_at"
+        - "replaces_node_id"
+        - "assignments"
+      "title": "DeclaredNodeView"
     "DeclaredScopeOut":
       "properties":
         "scope_text_es":
@@ -3921,6 +4206,100 @@
       "required":
         - "status"
       "title": "EnrollResponse"
+    "EnrollmentAttemptResult":
+      "type": "string"
+      "enum":
+        - "accepted"
+        - "enrollment_code_used"
+        - "enrollment_code_expired"
+        - "enrollment_code_invalid"
+        - "rate_limited"
+      "title": "EnrollmentAttemptResult"
+    "EnrollmentAttemptView":
+      "properties":
+        "attempt_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Attempt Id"
+        "node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Node Id"
+        "result":
+          "$ref": "#/components/schemas/EnrollmentAttemptResult"
+        "hardware_fingerprint":
+          "type": "string"
+          "title": "Hardware Fingerprint"
+        "software_version":
+          "type": "string"
+          "title": "Software Version"
+        "contract_version":
+          "type": "string"
+          "title": "Contract Version"
+        "attempted_at":
+          "type": "string"
+          "title": "Attempted At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attempt_id"
+        - "node_id"
+        - "result"
+        - "hardware_fingerprint"
+        - "software_version"
+        - "contract_version"
+        - "attempted_at"
+      "title": "EnrollmentAttemptView"
+    "EnrollmentAttemptsPage":
+      "properties":
+        "attempts":
+          "items":
+            "$ref": "#/components/schemas/EnrollmentAttemptView"
+          "type": "array"
+          "title": "Attempts"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attempts"
+        - "next_after"
+      "title": "EnrollmentAttemptsPage"
+    "EnrollmentCodeView":
+      "properties":
+        "code":
+          "type": "string"
+          "title": "Code"
+        "code_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Code Id"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "disclosed_at":
+          "type": "string"
+          "title": "Disclosed At"
+        "node_ca_root_sha256":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Node Ca Root Sha256"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "code_id"
+        - "expires_at"
+        - "disclosed_at"
+        - "node_ca_root_sha256"
+      "title": "EnrollmentCodeView"
+      "description": "El código de alta, mostrado **una sola vez**."
     "EnrollmentView":
       "properties":
         "provisioning_uri":
@@ -4784,6 +5163,109 @@
         - "record_id"
         - "decided_by"
       "title": "MountingGateOut"
+    "NodeAssignmentView":
+      "properties":
+        "assignment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignment Id"
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "assigned_at":
+          "type": "string"
+          "title": "Assigned At"
+        "unassigned_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Unassigned At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "assignment_id"
+        - "node_id"
+        - "zone_id"
+        - "assigned_at"
+        - "unassigned_at"
+      "title": "NodeAssignmentView"
+    "NodeDeclarationBody":
+      "properties":
+        "code":
+          "type": "string"
+          "title": "Code"
+        "zone_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 16
+          "title": "Zone Ids"
+        "replaces_node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Replaces Node Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "zone_ids"
+      "title": "NodeDeclarationBody"
+    "NodeDecommissionView":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "revoked_at":
+          "type": "string"
+          "title": "Revoked At"
+        "decommissioned_at":
+          "type": "string"
+          "title": "Decommissioned At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "revoked_at"
+        - "decommissioned_at"
+      "title": "NodeDecommissionView"
+    "NodeReasonBody":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "NodeReasonBody"
+    "NodeRevocationView":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "revoked_at":
+          "type": "string"
+          "title": "Revoked At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "status"
+        - "revoked_at"
+      "title": "NodeRevocationView"
     "NodeView":
       "properties":
         "node_id":
@@ -4814,6 +5296,17 @@
         - "status"
         - "live_view_local_url"
       "title": "NodeView"
+    "NodeZoneBody":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+      "title": "NodeZoneBody"
     "NoticeAcceptRequest":
       "properties":
         "notice_version":

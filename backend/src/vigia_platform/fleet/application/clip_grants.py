@@ -15,7 +15,7 @@ lector estricto de U-01 y el contexto del nodo (``NodeScope``):
    (FS-GOB-01, NFR-GOB-43): la URL nunca sale si la fila no se escribió;
 4. si ya la tiene, la **repetición** (PR-GOB-20, ``repeat_outcome``): misma petición, vigente y
    sin objeto → URL nueva con el tiempo que le queda; vencida y sin objeto → reemisión de la misma
-   fila (``gob_0021``); otra petición, objeto ya subido o concesión cerrada → ``ClipGrantConflict``.
+   fila (``gob_0022``); otra petición, objeto ya subido o concesión cerrada → ``ClipGrantConflict``.
 
 ``ClipGrantConflict`` es ``schema_invalid`` (422) con ``field = clip_id`` hacia el nodo: la
 operación ``post_clip_upload`` de ``ingest.yaml`` no declara ``409``, y A-37 limita cada operación a

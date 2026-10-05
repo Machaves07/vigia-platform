@@ -1,6 +1,6 @@
 """Reemisión de la concesión de clip y ``first_served_at`` del clip de verificación (TASK-222).
 
-Revisión gob_0021, aditiva sobre las tablas de ``gob_0018`` (LC-GOB-13; PR-GOB-20; nº 32).
+Revisión gob_0022, aditiva sobre las tablas de ``gob_0018`` (LC-GOB-13; PR-GOB-20; nº 32).
 
 - **Reemisión** («vencida y sin objeto → se reemite», decisión del redactor de TASK-222): la
   clave de ``fleet.clip_upload_grant`` es el ``clip_id`` del nodo, así que pedir de nuevo un clip
@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "gob_0021"
-down_revision: str | None = "gob_0020"
+revision: str = "gob_0022"
+down_revision: str | None = "gob_0021"
 branch_labels: None = None
 depends_on: None = None
 

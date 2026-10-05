@@ -130,6 +130,13 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # ledger.adapters.http (TASK-137): sin consultas propias; ``narrowed_context`` reduce el
         # contexto (función pura) y, si deniega, llama a ``Authorizer`` (registrado).
         "vigia_platform.ledger.adapters.http.services.narrowed_context",
+        # fleet.application (TASK-218): sin consultas propias; leen y escriben solo por los
+        # almacenes registrados de ``fleet`` (``@repository``), ``EscritorExpediente``,
+        # ``AuditWriter``, ``Authorizer`` e ``IdentityCommandPort`` sobre la ``Transaction`` dada.
+        "vigia_platform.fleet.application.common.authorized_node",
+        "vigia_platform.fleet.application.common.write",
+        "vigia_platform.fleet.application.node_revocation.revoke_in",
+        "vigia_platform.fleet.application.node_revocation.decommission_in",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

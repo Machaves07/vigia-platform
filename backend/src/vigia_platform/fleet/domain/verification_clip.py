@@ -16,7 +16,7 @@ tamaño, otro tipo u otra SHA-256 de objeto entero → ``clip_hash_mismatch``; m
 ``blur_check_result`` nace **nulo**: sin descargar el clip solo se comprueban la suma y el
 metadato (la marca del contenedor MP4 la muestrea U-02 a diario) y la comprobación automática del
 difuminado corre en la guarda de cierre del acta (TASK-216), que lo cierra de nulo a valor.
-``first_served_at`` (``gob_0021``) es la primera vez que la consola obtuvo el clip (tramo 3b de
+``first_served_at`` (``gob_0022``) es la primera vez que la consola obtuvo el clip (tramo 3b de
 NFR-GOB-70); tampoco cambia después.
 """
 

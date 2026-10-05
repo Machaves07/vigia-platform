@@ -231,6 +231,14 @@ INTEGER_KEYS: Final[Mapping[str, tuple[int, int]]] = {
 
 BOOLEAN_KEYS: Final = frozenset({"exception.escaped"})
 
+HASH_KEYS: Final = frozenset({"source_ip_tag"})
+"""Etiqueta del origen de un intento de alta (TASK-218, BR-GOB-61): los **16** primeros
+hexadecimales de su ``source_ip_hash`` (HMAC con la clave estable), para cruzar el registro con
+las filas de ``enrollment_attempt``. Exactamente 16: un valor de 64 (una huella de hardware, una
+firma de URL) se parece a un hash y nunca pasa por aquí (PR-GOB-31). Solo para registros
+estructurados: ninguna métrica la declara (cardinalidad)."""
+_SOURCE_TAG: Final = re.compile(r"^[0-9a-f]{16}$")
+
 
 class AttributePolicy:
     """Lista blanca de atributos con sus validadores (identificadores y enumeraciones)."""
@@ -246,7 +254,11 @@ class AttributePolicy:
     def keys(self) -> frozenset[str]:
         """Todos los nombres de atributo permitidos."""
         return frozenset(
-            IDENTIFIER_KEYS | self._enumerations.keys() | INTEGER_KEYS.keys() | BOOLEAN_KEYS
+            IDENTIFIER_KEYS
+            | self._enumerations.keys()
+            | INTEGER_KEYS.keys()
+            | BOOLEAN_KEYS
+            | HASH_KEYS
         )
 
     def register(self, key: str, values: Iterable[str]) -> None:
@@ -344,6 +356,8 @@ class AttributePolicy:
             return None
         if key in BOOLEAN_KEYS:
             return value if isinstance(value, bool) else None
+        if key in HASH_KEYS:
+            return value if isinstance(value, str) and _SOURCE_TAG.fullmatch(value) else replacement
         return None
 
     def clean(

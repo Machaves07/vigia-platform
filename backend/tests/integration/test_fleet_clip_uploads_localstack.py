@@ -307,7 +307,7 @@ def test_an_expired_grant_without_object_is_reissued_on_the_same_row(clips: Clip
 
 
 def test_the_database_refuses_to_renew_a_live_or_closed_grant(clips: ClipWorld) -> None:
-    # reissue_guard (gob_0021): issued_at solo se mueve en una concesión issued y vencida.
+    # reissue_guard (gob_0022): issued_at solo se mueve en una concesión issued y vencida.
     node = clips.node()
     issued = clips.issue(node, video("guarda"))
     context = clips.scope(node).context

@@ -231,7 +231,7 @@ class MemoryGrants:
             current is None
             or current.status is not UploadGrantStatus.ISSUED
             or current.issued_at != previous_issued_at
-            or grant.issued_at < current.expires_at  # reissue_guard de gob_0021
+            or grant.issued_at < current.expires_at  # reissue_guard de gob_0022
         ):
             return False
         self.grants[grant.clip_id] = replace(

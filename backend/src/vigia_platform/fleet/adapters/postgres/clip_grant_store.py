@@ -1,6 +1,6 @@
 """``fleet.clip_upload_grant`` y ``fleet.verification_clip`` sobre PostgreSQL (LC-GOB-13, 18).
 
-Tablas de ``gob_0018`` con la reemisión y ``first_served_at`` de ``gob_0021``. Toda sentencia va
+Tablas de ``gob_0018`` con la reemisión y ``first_served_at`` de ``gob_0022``. Toda sentencia va
 con el ``ScopeContext`` de la operación (el del nodo, el de la persona o el de la iteración
 periódica de una organización): la seguridad a nivel de fila filtra por organización y por
 concesión de proveedor, y además cada sentencia nombra **explícitos** la organización del

@@ -347,7 +347,7 @@ def test_the_u03_checks_fail_once_the_enrollment_route_exists(tmp_path: Path) ->
 
 
 def test_conformance_fails_once_any_contract_route_exists(tmp_path: Path) -> None:
-    results = _run(_target(repository=_repository(tmp_path, "/nodes/heartbeat")))
+    results = _run(_target(repository=_repository(tmp_path, "/api/nodes/heartbeat")))
     assert results[4].status == "failed"
     assert results[10].status == "skipped"
 

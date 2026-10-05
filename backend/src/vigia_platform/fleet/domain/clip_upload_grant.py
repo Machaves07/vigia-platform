@@ -14,7 +14,7 @@ PAT-GOB-SEG-03 y las entradas A-05 y A-29 de la adenda:
 
 **Repetición de la petición** (decisión del redactor, PR-GOB-20; ``repeat_outcome``): la misma
 ``clip_id`` con los mismos parámetros y la concesión vigente → URL nueva con el tiempo que le
-queda; vencida y sin objeto → se **reemite** (misma fila, ``issued_at`` nuevo, ``gob_0021``); con
+queda; vencida y sin objeto → se **reemite** (misma fila, ``issued_at`` nuevo, ``gob_0022``); con
 otros parámetros, con el objeto ya subido o con la concesión ya cerrada → conflicto.
 
 **Huérfanos** (BR-GOB-94 y sus notas; ``orphan_outcome``): una concesión ``evidence`` emitida
