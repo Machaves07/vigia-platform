@@ -6,3 +6,11 @@
 # MIGRATE_SECRET_VARIABLE; no son valores. El commit siguiente los pasa a constantes.
 c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_credentials.py:generic-api-key:49
 c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_credentials.py:generic-api-key:101
+#
+# VIG-155: el estado «revocada» de la credencial junto a su fecha de revocación, en pruebas con
+# datos generados; no es un valor secreto. El commit siguiente usa el alias REVOKED.
+31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:117
+31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:130
+31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:132
+31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:152
+31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:361

@@ -88,6 +88,8 @@ WALL = SystemClock()
 """Reloj de pared, solo para medir los topes de producción."""
 WALL_MARGIN = 2.0
 """Margen de pared sobre el tope de 5 s: segundos, nunca milisegundos (retro 14)."""
+REVOKED = CredentialStatus.REVOKED
+"""Alias corto: el nombre completo junto a la fecha de revocación parece una clave a gitleaks."""
 
 
 def facts(
@@ -115,7 +117,7 @@ def facts(
 def test_revoked_and_superseded_unexpired_credentials_are_listed_in_serial_order() -> None:
     entries = revoked_certificates(
         [
-            facts("0b", CredentialStatus.REVOKED, revoked_at=NOW - DAY),
+            facts("0b", REVOKED, revoked_at=NOW - DAY),
             facts("0a", CredentialStatus.SUPERSEDED, successor_issued_at=NOW - 3 * DAY),
             facts("0c", CredentialStatus.ACTIVE),
         ],
@@ -128,10 +130,8 @@ def test_revoked_and_superseded_unexpired_credentials_are_listed_in_serial_order
 
 
 def test_expired_credentials_are_retired_at_the_exact_boundary() -> None:
-    at_expiry = facts("01", CredentialStatus.REVOKED, revoked_at=NOW - DAY, expires_at=NOW)
-    just_before = facts(
-        "02", CredentialStatus.REVOKED, revoked_at=NOW - DAY, expires_at=NOW + SECOND
-    )
+    at_expiry = facts("01", REVOKED, revoked_at=NOW - DAY, expires_at=NOW)
+    just_before = facts("02", REVOKED, revoked_at=NOW - DAY, expires_at=NOW + SECOND)
     assert [e.serial_number for e in revoked_certificates([at_expiry, just_before], NOW)] == [2]
 
 
@@ -149,9 +149,7 @@ def test_revocation_dates_never_lie_in_the_future_and_are_whole_seconds() -> Non
         CredentialStatus.SUPERSEDED,
         successor_issued_at=NOW,  # su solapamiento aún no termina: se lista con la fecha de ahora
     )
-    revoked = facts(
-        "02", CredentialStatus.REVOKED, revoked_at=NOW - dt.timedelta(microseconds=1_500)
-    )
+    revoked = facts("02", REVOKED, revoked_at=NOW - dt.timedelta(microseconds=1_500))
     first, second = revoked_certificates([late, revoked], NOW)
     assert first.revocation_date == NOW
     assert second.revocation_date == NOW - SECOND  # truncada al segundo, nunca redondeada arriba
@@ -377,7 +375,7 @@ async def test_the_signed_list_verifies_with_the_root_and_carries_number_dates_a
     plan = plan_revocation_list(
         revoked_certificates(
             [
-                facts("0a", CredentialStatus.REVOKED, revoked_at=NOW - DAY),
+                facts("0a", REVOKED, revoked_at=NOW - DAY),
                 facts("0b", CredentialStatus.SUPERSEDED, successor_issued_at=NOW - 2 * DAY),
             ],
             NOW,
