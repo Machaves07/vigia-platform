@@ -30,7 +30,7 @@ import uuid
 import pytest
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from tests.dispatch_support import metric_points, metrics_with_reader
@@ -184,6 +184,16 @@ def _facts(draw: st.DrawFn) -> CredentialRevocationFacts:
 
 
 @given(st.lists(_facts(), max_size=30))
+# Contraejemplo reducido (regresión permanente): «0» y «00» son el mismo número de serie; la
+# comparación es por valor, como en la lista, no por el texto.
+@example(
+    [
+        facts(
+            "0", CredentialStatus.REVOKED, issued_at=NOW, expires_at=NOW + SECOND, revoked_at=NOW
+        ),
+        facts("00", CredentialStatus.ACTIVE, issued_at=NOW, expires_at=NOW + SECOND),
+    ]
+)
 def test_the_list_never_has_expired_or_active_credentials_nor_duplicates(
     items: list[CredentialRevocationFacts],
 ) -> None:
@@ -196,7 +206,8 @@ def test_the_list_never_has_expired_or_active_credentials_nor_duplicates(
         for f in items
         if f.status is CredentialStatus.ACTIVE
         and not any(
-            o.certificate_serial == f.certificate_serial and o.status is not CredentialStatus.ACTIVE
+            int(o.certificate_serial, 16) == int(f.certificate_serial, 16)
+            and o.status is not CredentialStatus.ACTIVE
             for o in items
         )
     }
