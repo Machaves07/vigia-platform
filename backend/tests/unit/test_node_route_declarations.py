@@ -8,8 +8,8 @@
   (también fuera de ``/api/nodes``), con ``body_limit`` en una ruta del contrato o con una entrada
   repetida.
 - ``node_router`` monta solo las rutas pedidas, cada una con su ``node_route`` resuelta por
-  ``operation_id``, y nunca ``conformance-profile``; la aplicación de producción no publica
-  ninguna todavía (``app.yaml`` no cambia).
+  ``operation_id``, y nunca ``conformance-profile``; la aplicación de producción publica el latido
+  y el catálogo por zona (TASK-223).
 - Sin ``NodeGate`` instalada la ruta deniega con el transitorio del contrato.
 """
 
@@ -199,11 +199,15 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
     assert check_routes(router.routes, PERMISSIONS, registry, docs_enabled=False) == []
 
 
-def test_production_publishes_no_contract_route_yet() -> None:
-    assert PUBLISHED_NODE_ROUTES == ()
+def test_production_publishes_the_heartbeat_and_the_zone_catalog() -> None:
+    # TASK-223: las dos primeras rutas del contrato; las demás llegan con sus tareas.
+    assert PUBLISHED_NODE_ROUTES == (NodeRoute.HEARTBEAT, NodeRoute.ZONE_CATALOG)
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
-    assert not any(path.startswith(NODE_PREFIX) for path in paths)
+    assert {path for path in paths if path.startswith(NODE_PREFIX)} == {
+        NodeRoute.HEARTBEAT.path,
+        NodeRoute.ZONE_CATALOG.path,
+    }
 
 
 # --- Sin NodeGate ------------------------------------------------------------------------------

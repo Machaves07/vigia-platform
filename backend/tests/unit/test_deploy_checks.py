@@ -155,8 +155,10 @@ def _run(
 # --- Conjunto ---------------------------------------------------------------------------
 
 
-def test_a_healthy_staging_has_no_failures_and_says_why_it_skips() -> None:
-    results = _run()
+def test_a_healthy_staging_has_no_failures_and_says_why_it_skips(tmp_path: Path) -> None:
+    # Un repositorio sin rutas del contrato ni interfaz (el de antes de TASK-223, que publica el
+    # latido y el catálogo por zona: desde entonces la nº 4 se exige, ver la prueba siguiente).
+    results = _run(_target(repository=_repository(tmp_path)))
     assert {n for n, r in results.items() if r.status == "ok"} == {1, 2, 5, 6, 7}
     assert {n for n, r in results.items() if r.status == "failed"} == set()
     for number in (3, 4, 8, 10, 11, 12, 13):
@@ -356,11 +358,14 @@ def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
     assert pilot[9].status == "failed"
 
 
-def test_the_current_repository_has_neither_u03_routes_nor_frontend() -> None:
+def test_the_current_repository_has_contract_routes_but_neither_enrollment_nor_frontend() -> None:
+    # TASK-223 publica POST heartbeats y GET zones/{zone_id}/catalog: la conformidad (nº 4) deja
+    # de omitirse y falla hasta que TASK-230 la escriba (nunca pasa en vacío).
     target = _target()
-    assert not target.has_enrollment() and not target.has_contract_routes()
+    assert target.has_contract_routes() and not target.has_enrollment()
     assert not target.has_frontend()
     assert "/health/live" in target.openapi_paths()
+    assert _run(target)[4].status == "failed"
 
 
 # --- Orden ------------------------------------------------------------------------------------
