@@ -3,7 +3,8 @@
 Contra PostgreSQL 16 real como ``vigia_app``, con **dos instancias** que no comparten nada en
 memoria (salvo el almacén de metadatos de los clips):
 
-- **10 envíos simultáneos del mismo hallazgo** (y de la misma detección y del mismo cierre huérfano):
+- **10 envíos simultáneos del mismo hallazgo** (y de la misma detección y del mismo cierre
+  huérfano):
   exactamente un registro, un evento, una marca de cierre huérfano y una transición de la concesión,
   y nueve ``accepted_duplicate`` con el **mismo** ``Receipt``; la cadena de la planta queda íntegra.
   Una barrera retiene la lectura del paso 5 hasta que llegan los diez, así que los diez pasan la

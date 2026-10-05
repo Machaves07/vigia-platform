@@ -6,7 +6,8 @@
   eventos de U-02 y de la flota **sin consumidores registrados** (D-3: la ingesta no depende de
   U-04) y el ``EvidenceVerifier`` real sobre ``EvidenceStore``, un almacén de metadatos en memoria
   que puede caerse (``down``) y que anota si alguna consulta llegó con una transacción abierta;
-- la auditoría real de U-02 (``AuditWriter``) y el ``IngestService`` real con ``PostgresIngestStore``;
+- la auditoría real de U-02 (``AuditWriter``) y el ``IngestService`` real con
+  ``PostgresIngestStore``;
 - la ``NodeApiGate`` real (identidad por certificado contra la base, sin límite de tasa: no es lo
   que se prueba) y la aplicación con la cadena fija y las tres rutas de la ingesta.
 
@@ -368,7 +369,9 @@ class IngestStack:
                     "version": version,
                     "family": "coexistence",
                     "title_es": "Zona de prensa",
-                    "declared_text": "Ninguna persona dentro del perímetro con la máquina energizada.",
+                    "declared_text": (
+                        "Ninguna persona dentro del perímetro con la máquina energizada."
+                    ),
                     "declared_by": {
                         "user_id": str(self.authz.operator_id),
                         "display_name": "Coordinación SST sintética",
@@ -399,7 +402,8 @@ class IngestStack:
     def publish_catalog(
         self, site: IngestSite, issued_at: dt.datetime, version: int = 1
     ) -> dict[str, Any]:
-        """La versión ``version`` vigente desde ``issued_at`` (cierra la anterior en ese instante)."""
+        """La versión ``version`` vigente desde ``issued_at`` (cierra la anterior en ese
+        instante)."""
         payload = self.catalog(site, issued_at, version)
         if version > 1:
             self.execute(
@@ -652,7 +656,8 @@ class IngestStack:
         opened_event_id: str | None = None,
         zone: uuid.UUID | None = None,
     ) -> dict[str, Any]:
-        """Un ``ObservabilityEventSubmission`` de cámara: apertura, o cierre de ``opened_event_id``."""
+        """Un ``ObservabilityEventSubmission`` de cámara: apertura, o cierre de
+        ``opened_event_id``."""
         started = started if started is not None else self.now() - dt.timedelta(minutes=10)
         common, node_time, _, ended = self._common(
             site,
@@ -726,7 +731,8 @@ class IngestStack:
             {**dict(row), "content": json.loads(row["content"])}
             for row in self.fetch(
                 "SELECT record_id, plant_id, scope_zone_id, scope_node_id, actor_kind, received_at,"
-                " occurred_at, correlation_id, ledger.vigia_bytes_to_jsonb(content)::text AS content"
+                " occurred_at, correlation_id,"
+                " ledger.vigia_bytes_to_jsonb(content)::text AS content"
                 " FROM ledger.ledger_record WHERE record_type = $1 AND organization_id = $2"
                 " ORDER BY chain_sequence",
                 record_type,

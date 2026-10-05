@@ -379,7 +379,8 @@ class IngestWorld:
         return view
 
     def set_usage(self, approved: bool, at: dt.datetime, zone: uuid.UUID | None = None) -> None:
-        """La compuerta de uso pasa a ``approved`` o deja de estarlo en ``at`` (cierra el abierto)."""
+        """La compuerta de uso pasa a ``approved`` o deja de estarlo en ``at`` (cierra el
+        abierto)."""
         spans = self.store.gates.setdefault(zone or self.zone, [])
         if spans and spans[-1].effective_until is None:
             last = spans[-1]

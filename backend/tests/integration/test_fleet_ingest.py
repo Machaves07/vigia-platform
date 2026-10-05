@@ -1,16 +1,20 @@
 """Ingesta contra PostgreSQL 16 real como ``vigia_app`` (TASK-221; LC-GOB-12; S-PLA-07).
 
-Sobre ``tests/fleet_ingest_support.py`` (escritor, auditoría y bandeja reales, ``NodeApiGate`` real con
+Sobre ``tests/fleet_ingest_support.py`` (escritor, auditoría y bandeja reales, ``NodeApiGate`` real
+con
 la identidad por certificado contra la base y la aplicación con la cadena fija):
 
-- un hallazgo aceptado: registro ``finding_received`` con el ``Receipt`` dentro (``platform_record_id``
+- un hallazgo aceptado: registro ``finding_received`` con el ``Receipt`` dentro
+  (``platform_record_id``
   = el del expediente), evidencias, evento con la carga de T-08, concesión ``issued → used`` (y
   ``mark_orphan_clips`` ya no la cuenta); repetido, ``accepted_duplicate`` con el recibo original;
 - detección para revisión sin consumidores: se escribe y publica su evento (BR-GOB-95); cierre de
-  evento sin apertura: se acepta y queda en ``fleet.observability_orphan_close``; eventos aceptados con
+  evento sin apertura: se acepta y queda en ``fleet.observability_orphan_close``; eventos aceptados
+  con
   el uso sin aprobar (BR-GOB-92);
 - **guardas de alcance** (BR-GOB-88, NFR-GOB-30): zona de otra organización, zona de la organización
-  nunca asignada y zona asignada **ahora** pero no en ``node_time.started_at``: ``node_zone_mismatch``
+  nunca asignada y zona asignada **ahora** pero no en ``node_time.started_at``:
+  ``node_zone_mismatch``
   con ``ingest_rejected`` sin contenido en la planta del certificado;
 - compuerta, catálogo, antigüedad y clips: sus códigos, su auditoría y ``ingest_rejected`` solo con
   ``zone_gate_not_approved`` y ``node_zone_mismatch`` (BR-GOB-96);
@@ -131,6 +135,25 @@ def test_an_accepted_finding_is_one_record_with_its_receipt_event_evidence_and_u
 
     assert uuid.UUID(clip["clip_id"]) not in stack.run(candidates())
     assert stack.audit(site.organization_id) == []
+
+
+def test_a_late_finding_whose_grant_is_already_orphan_is_accepted_and_the_grant_stays(
+    stack: IngestStack,
+) -> None:
+    """La cola del nodo puede vaciarse más de 24 h después de subir el clip: la concesión ya es
+    ``orphan`` (TASK-222) y la guarda de la base no admite ``orphan → used``; el registro se acepta
+    igual y la marca solo cambia las que siguen ``issued``."""
+    site = stack.site()
+    document = stack.finding(site)
+    clip = document["cameras"][0]["clips"][0]
+    for statement in (
+        "UPDATE fleet.clip_upload_grant SET status = 'used', used_at = $2 WHERE clip_id = $1",
+        "UPDATE fleet.clip_upload_grant SET status = 'orphan', orphaned_at = $2 WHERE clip_id = $1",
+    ):
+        stack.execute(statement, uuid.UUID(clip["clip_id"]), stack.now())
+    response = stack.post(site, FINDING, document)
+    assert response.status_code == 200, response.text
+    assert stack.grant_status(clip)[0] == "orphan"
 
 
 def test_a_repeated_finding_is_accepted_duplicate_with_the_original_receipt_and_writes_nothing(

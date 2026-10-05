@@ -8,9 +8,11 @@ Con ``clock_offsets`` (reloj declarado con los bordes de la cota de 5 minutos) y
   en el instante de recepción si ``synchronized = false`` (oráculo ``UsageHistory``, independiente
   del dominio). Los ``started_at`` caen en los cambios de la compuerta y a su alrededor, en los
   bordes de la tolerancia;
-- **antigüedad**: con ``sent_records_retention_days`` (sin configuración, 1, 30, 90 y fuera de rango,
+- **antigüedad**: con ``sent_records_retention_days`` (sin configuración, 1, 30, 90 y fuera de
+  rango,
   que se acota a 1..90), un registro con ``ended_at + tol < received_at - retención`` es siempre
-  ``timestamp_out_of_window`` (422, permanente) y nunca se acepta; uno dentro, sí. Vale para los tres
+  ``timestamp_out_of_window`` (422, permanente) y nunca se acepta; uno dentro, sí. Vale para los
+  tres
   tipos (los eventos también tienen antigüedad máxima).
 """
 
@@ -67,8 +69,14 @@ def _world(catalog: dict[str, Any]) -> tuple[IngestWorld, dict[str, Any]]:
 
 
 def _apply(world: IngestWorld, scenario: GateScenario, start: dt.datetime) -> UsageHistory:
-    """La historia de uso de ``scenario`` desde ``start`` (los cambios de montaje no cuentan)."""
+    """La historia de uso de ``scenario`` desde ``start`` (los cambios de montaje no cuentan).
+
+    Empieza siempre con una aprobación del uso en ``start``: sin ella, la mitad de las secuencias
+    no tendría ningún cambio de uso y no habría bordes de la tolerancia que mirar.
+    """
     history = UsageHistory()
+    history.change(start, True)
+    world.set_usage(True, start)
     moment = start
     for step in scenario.steps:
         moment += step.advance

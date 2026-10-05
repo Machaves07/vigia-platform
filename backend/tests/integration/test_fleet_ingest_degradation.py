@@ -1,4 +1,5 @@
-"""Degradación de la ingesta con dobles y fallos reales (FS-GOB-01, 03 y 04 en comportamiento; TASK-221).
+"""Degradación de la ingesta con dobles y fallos reales (FS-GOB-01, 03 y 04 en comportamiento;
+TASK-221).
 
 NFR-GOB-42 y 49, BL §5 y BR-GOB-96: un fallo de infraestructura responde **transitorio**, nada se
 acepta a medias ni de forma optimista, la ingesta no reintenta por su cuenta y el reintento del nodo
@@ -9,7 +10,8 @@ como ``vigia_app``:
   registro, ni evento, ni concesión usada, ni auditoría);
 - **base pausada** (un intermediario TCP que congela la conexión, como un contenedor en pausa), al
   empezar y a mitad de la transacción del registro: ``temporarily_unavailable`` y cero aceptaciones;
-- **cadena retenida** (otra transacción tiene la cabeza de la cadena de la planta): el escritor agota
+- **cadena retenida** (otra transacción tiene la cabeza de la cadena de la planta): el escritor
+  agota
   su ``lock_timeout`` (``chain_locked_timeout``) y la ruta responde ``temporarily_unavailable`` tras
   **una sola** escritura.
 

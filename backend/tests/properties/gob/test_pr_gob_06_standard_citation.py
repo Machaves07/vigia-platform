@@ -2,16 +2,20 @@
 
 BR-CTR-08, BR-GOB-90 y BL §2.4 (TASK-221). La historia del catálogo de la zona sale de
 ``catalog_versions`` (TASK-208): una primera publicación y sus cambios, compuestos por el dominio
-real (``plan_publication``) y publicados en instantes que avanzan 0 ms, 1 ms, 1 s o 1 h; cada versión
-rige en ``[publicada, siguiente)``. Un hallazgo o una detección del kit de U-01 se genera a partir de
+real (``plan_publication``) y publicados en instantes que avanzan 0 ms, 1 ms, 1 s o 1 h; cada
+versión
+rige en ``[publicada, siguiente)``. Un hallazgo o una detección del kit de U-01 se genera a partir
+de
 **una** de esas versiones y se coloca alrededor de su intervalo, con el reloj de ``clock_offsets``.
 
 Propiedades, por la aplicación real y el ``IngestService`` real (dobles de ``ingest_support``):
 
 - **invariante**: si se acepta, alguna versión vigente en algún instante de la ventana del hecho
-  (``[started_at - tol, ended_at + tol]``, o el instante de recepción sin reloj sincronizado) cita su
+  (``[started_at - tol, ended_at + tol]``, o el instante de recepción sin reloj sincronizado) cita
+  su
   ``{standard_id, version}`` (oráculo escrito aquí, sobre la historia publicada);
-- **no vacía**: si la versión de la que sale el registro es vigente en esa ventana, se acepta (el kit
+- **no vacía**: si la versión de la que sale el registro es vigente en esa ventana, se acepta (el
+  kit
   lo genera coherente con ella); si ninguna versión vigente en la ventana cita el estándar, es
   ``schema_invalid`` con ``field = standard`` y nada se escribe.
 """

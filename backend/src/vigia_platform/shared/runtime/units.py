@@ -124,7 +124,6 @@ from vigia_platform.fleet.application.ingest import (
     IngestDependencies,
     IngestService,
 )
-from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.fleet.application.node_declaration import (
     COMMUNICATION_RECORD_TYPE,
     NodeDeclarationService,
@@ -137,6 +136,7 @@ from vigia_platform.fleet.application.node_revocation import (
 from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
+from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.fleet.events import FLEET_EVENT_TYPES
 from vigia_platform.fleet.record_types import FLEET_RECORD_TYPES
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore

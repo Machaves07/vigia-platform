@@ -14,7 +14,8 @@ BR-GOB-92 (G-4, P9; TASK-221). La máquina intercala, sobre la aplicación real 
 **Propiedades**: un hallazgo o una detección se acepta **si y solo si** el oráculo independiente
 (``UsageHistory``) dice que el uso estuvo aprobado en algún instante de la ventana de la decisión
 (``[t - tol, t + tol]``, o el instante de recepción sin reloj sincronizado; la misma lectura que
-PR-GOB-17); si no, ``zone_gate_not_approved`` con su ``ingest_rejected``. Los eventos de observabilidad
+PR-GOB-17); si no, ``zone_gate_not_approved`` con su ``ingest_rejected``. Los eventos de
+observabilidad
 se aceptan **en todo modo**. **Invariante**: ningún ``finding_received`` ni
 ``detection_for_review_received`` del expediente tiene su ventana fuera de un uso aprobado.
 """
