@@ -19,10 +19,16 @@ confirma la primera. Ningún tope de pared decide el resultado. Cada prueba corr
   ni alarma). Es además la prueba cruzada del orden de candados (inventario → ficha → cadena): con
   el orden invertido, la tarea y el latido se interbloquean.
 - **En el otro orden** (la tarea primero), el latido espera y escribe después su ``reachable``.
+- **Entre lotes**: ``detect_mute_nodes`` con un lote por nodo y la revocación de un nodo del lote
+  siguiente en la misma planta terminan las dos (la tarea toma los candados de todos los lotes
+  antes de escribir en la cadena).
+- **Un cierre por alarma**: dos evaluaciones solapadas sobre un nodo recién revocado escriben un
+  solo ``fleet_alarm_cleared`` (la fila abierta bloqueada y vuelta a comprobar).
 
 Sondas negativas del PR: quitar el ``FOR UPDATE`` de las filas de histéresis, quitar el ``FOR
-UPDATE`` del inventario, invertir el orden inventario/ficha y quitar el disparador
-``open_alarm_slot``; cada una deja en rojo al menos una de estas pruebas.
+UPDATE`` del inventario, invertir el orden inventario/ficha, quitar el disparador
+``open_alarm_slot``, escribir la cadena lote a lote y quitar el ``FOR UPDATE`` y el ``cleared_at IS
+NULL`` del bloqueo de las alarmas abiertas; cada una deja en rojo al menos una de estas pruebas.
 
 Solo datos generados (NFR-CTR-43). Topes de la base de 60 s (retro 15).
 """
@@ -47,7 +53,7 @@ from tests.fleet_alarm_support import (
     run_in,
     system,
 )
-from tests.fleet_http_support import FleetStack, fleet_stack
+from tests.fleet_http_support import REASON, FleetStack, fleet_stack
 from tests.fleet_inventory_support import InventoryWorld, NodeState
 from tests.heartbeat_support import HeartbeatStack, heartbeat_stack
 from tests.integration.conftest import PostgresEndpoint
@@ -56,6 +62,11 @@ from vigia_platform.fleet.adapters.postgres.heartbeat_history_store import (
     PostgresHeartbeatHistoryStore,
 )
 from vigia_platform.fleet.application.fleet_alarms import AlarmReport
+from vigia_platform.fleet.application.mute_nodes import MuteDetector
+from vigia_platform.fleet.application.node_revocation import (
+    NodeRevocationService,
+    RevocationOutcome,
+)
 from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.signing.keys import to_millisecond
 
@@ -311,8 +322,6 @@ class GatedWriter:
 def test_a_heartbeat_after_the_mute_mark_waits_and_writes_reachable(
     beats: HeartbeatStack, attempt: int
 ) -> None:
-    from vigia_platform.fleet.application.mute_nodes import MuteDetector
-
     tasks = _tasks(beats)
     rows = AlarmRows(beats.fetch)
     site = beats.site(interval=15)
@@ -346,3 +355,72 @@ def test_a_heartbeat_after_the_mute_mark_waits_and_writes_reachable(
     (cleared,) = beats.run(run_in(database, site.organization_id, tasks.evaluator.evaluate)).cleared
     assert cleared.alarm_kind.value == "node_mute"
     assert last["last_heartbeat_at"] + timedelta(seconds=75) < beats.now()
+
+
+@pytest.mark.parametrize("attempt", ATTEMPTS)
+def test_detect_by_batches_and_a_revocation_in_the_next_batch_both_finish(
+    fleet: FleetStack, attempt: int
+) -> None:
+    # Dos nodos mudos de la misma planta, un lote por nodo: la tarea escribe el registro del
+    # primero en la cadena de la planta y se retiene; entonces se revoca el segundo (ficha →
+    # cadena). Con los candados de todos los lotes tomados antes de la cadena, la revocación espera
+    # la ficha que la tarea ya compartió y las dos terminan; con la cadena escrita lote a lote, la
+    # tarea pediría la ficha del segundo teniendo la cadena (bloqueo mutuo).
+    tasks = _tasks(fleet)
+    world = InventoryWorld.build(fleet)
+    rows = AlarmRows(fleet.fetch)
+    plant = world.plants[0]
+    first, second = sorted((world.add_node(plant), world.add_node(plant)))
+    silent = NodeState(heartbeat_age_ms=3_600_000)
+    world.write_states({first: silent, second: silent}, world.now())
+    gated = GatedWriter(fleet.writer)
+    detector = MuteDetector(tasks.deps, writer=gated, batch_size=1)  # type: ignore[arg-type]
+    revocations = NodeRevocationService(fleet.deps)
+    context = fleet.context(world.installer)
+
+    async def scenario() -> list[Any]:
+        detect = asyncio.create_task(run_in(fleet.database, world.organization, detector.detect))
+        await asyncio.wait_for(gated.entered.wait(), ARRIVAL_SECONDS)
+        revoke = asyncio.create_task(revocations.revoke(context, second, REASON))
+        await blocked_or_done(fleet.authz.sessions.admin, revoke)
+        gated.release.set()
+        return list(await asyncio.gather(detect, revoke, return_exceptions=True))
+
+    report, outcome = fleet.run(scenario())
+    assert isinstance(report, AlarmReport), report
+    assert isinstance(outcome, RevocationOutcome), outcome
+    assert report.transitions == [first, second]
+    assert outcome.dirty_generation is not None
+    assert fleet.node_row(second)["revoked_at"] is not None
+    for node in (first, second):
+        assert [record["state"] for record in rows.communication(node)] == ["mute"]
+
+
+@pytest.mark.parametrize("attempt", ATTEMPTS)
+def test_two_overlapping_evaluations_close_a_retired_node_alarm_once(
+    fleet: FleetStack, attempt: int
+) -> None:
+    # Un nodo revocado no tiene filas de histéresis que bloquear: las dos evaluaciones solapadas
+    # solo se serializan en la fila de la alarma abierta (``FOR UPDATE`` con ``cleared_at IS
+    # NULL``, vuelta a comprobar tras la espera). La segunda no vuelve a cerrarla.
+    tasks = _tasks(fleet)
+    world = InventoryWorld.build(fleet)
+    rows = AlarmRows(fleet.fetch)
+    node = world.add_node(world.plants[0])
+    world.write_state(node, NodeState(retires_at=RETIRES_AT), world.now())
+    evaluate = tasks.evaluator.evaluate
+    (alarm,) = fleet.run(run_in(fleet.database, world.organization, evaluate)).raised
+    fleet.tick(60)
+    world.write_state(node, NodeState(status="revoked", retires_at=RETIRES_AT), world.now())
+    first, second = fleet.run(
+        _overlapping(
+            fleet.authz.sessions.admin, fleet.database, world.organization, evaluate, evaluate
+        )
+    )
+    assert [cleared.alarm_id for cleared in first.cleared] == [alarm.alarm_id]
+    assert second == AlarmReport(), second
+    (event,) = rows.events("fleet_alarm_cleared", node)
+    (row,) = rows.alarms(node)
+    assert row["cleared_at"] is not None
+    assert str(row["cleared_event_id"]) == str(event["event_id"])
+    assert rows.slots(node) == set()

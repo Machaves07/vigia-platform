@@ -346,6 +346,18 @@ def test_verification_clips_and_orphans_outside_the_window_never_count(alarms: A
     assert alarms.evaluate().raised == []
 
 
+def test_verification_clips_do_not_dilute_the_five_percent(alarms: Alarms) -> None:
+    # 2 huérfanos de 20 clips de evidencia del día (10 %) con 40 de verificación en la ventana:
+    # si contaran en el denominador (2 de 60, 3,3 %), nunca alarmaría.
+    node = alarms.node()
+    diluted = NodeState(orphan_clips=2, day_clips=20, verification_orphans=40)
+    alarms.state(node, diluted)
+    assert alarms.evaluate().raised == []
+    alarms.cycle(24 * 3600)
+    alarms.state(node, diluted)
+    assert [a.alarm_kind.value for a in alarms.evaluate().raised] == ["orphan_clips_growing"]
+
+
 # --- Nodos retirados ------------------------------------------------------------------------------
 
 
@@ -561,9 +573,9 @@ def _fingerprint(alarms: Alarms, organization: uuid.UUID) -> dict[str, str]:
     return prints
 
 
-def _everything_bad(alarms: Alarms, world: InventoryWorld) -> uuid.UUID:
+def _everything_bad(alarms: Alarms, world: InventoryWorld, zone_index: int = 0) -> uuid.UUID:
     plant = world.plants[0]
-    zone = world.zones(plant)[0]
+    zone = world.zones(plant)[zone_index]
     node = world.add_node(plant, [zone])
     world.set_gate(zone, mounting="approved", usage="approved")
     world.write_state(
@@ -607,7 +619,13 @@ def test_each_task_only_touches_the_organization_of_its_context(alarms: Alarms) 
 
 def test_the_task_statements_filter_by_organization_even_without_rls(alarms: Alarms) -> None:
     """Como superusuario (sin RLS): con los parámetros de A, ninguna sentencia devuelve filas de B
-    aunque B las tenga que cumplirían todo lo demás (la prueba falla sin el filtro)."""
+    aunque B las tenga que cumplirían todo lo demás (la prueba falla sin el filtro).
+
+    B tiene dos nodos: ``theirs``, con sus alarmas ya abiertas (lo que leen las sentencias de
+    histéresis, de alarmas abiertas y de la consola), y ``fresh``, sembrado **después** de las
+    tareas de B, que todavía cumple las sentencias de mudos y de certificados (las que excluyen al
+    nodo con alarma abierta). Con la organización de B, cada sentencia sí los devuelve: lo que
+    los deja fuera con la de A es solo el filtro de organización."""
     other = alarms.other()
     mine = _everything_bad(alarms, alarms.world)
     theirs = _everything_bad(alarms, other)
@@ -615,9 +633,10 @@ def test_the_task_statements_filter_by_organization_even_without_rls(alarms: Ala
     alarms.detect(other)
     alarms.alert(other)
     assert alarms.rows.open_kinds(theirs)
+    fresh = _everything_bad(alarms, other, zone_index=1)
     now = alarms.now()
     organization = alarms.world.organization
-    everyone = [str(mine), str(theirs)]
+    everyone = [str(mine), str(theirs), str(fresh)]
     statements: dict[str, tuple[Any, dict[str, Any]]] = {
         "facts": (
             fleet_alarm_store._FACTS,
@@ -657,11 +676,27 @@ def test_the_task_statements_filter_by_organization_even_without_rls(alarms: Ala
             },
         ),
     }
+    # Los nodos de B que cada sentencia devuelve con la organización de B.
+    expected = {
+        "facts": {theirs, fresh},
+        "evaluations": {theirs},
+        "open": {theirs},
+        "mute": {fresh},
+        "expiring": {fresh},
+        "page": {theirs},
+    }
     for name, (statement, parameters) in statements.items():
+        found = {
+            str(row["node_id"])
+            for row in as_superuser(
+                alarms.stack, statement, {"organization_id": other.organization, **parameters}
+            )
+        }
+        assert {str(node) for node in expected[name]} <= found, name
         rows = as_superuser(
             alarms.stack, statement, {"organization_id": organization, **parameters}
         )
-        assert str(theirs) not in {str(row["node_id"]) for row in rows}, name
+        assert {str(row["node_id"]) for row in rows}.isdisjoint({str(theirs), str(fresh)}), name
 
 
 # --- Sentencias acotadas --------------------------------------------------------------------------

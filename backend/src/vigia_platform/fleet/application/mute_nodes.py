@@ -2,7 +2,8 @@
 
 BR-GOB-74 y 76; BL §2.6 (pseudocódigo y nota de cadencias); D-9; A-04 y A-09; PR-GOB-08;
 NFR-GOB-08, 47. Cada 60 s, por organización (``register_detect_mute_nodes``; el registro en la raíz
-es de TASK-227), por lotes de ``batch_size`` nodos en orden de (planta, nodo):
+es de TASK-227), con los candidatos bloqueados por lotes de ``batch_size`` nodos en orden de
+(planta, nodo):
 
 1. los nodos ``enrolled``, no revocados ni dados de baja, con ``now - last_heartbeat_at`` **mayor
    que** cinco veces su ``heartbeat_interval_seconds`` efectivo (60 s sin configuración) y no
@@ -20,9 +21,12 @@ es de TASK-227), por lotes de ``batch_size`` nodos en orden de (planta, nodo):
 
 Dos ejecuciones solapadas se serializan en el candado de cada fila del inventario: la segunda la
 encuentra ya ``mute`` (con su alarma) y no escribe nada. **Orden de los candados**, el del latido
-(``fleet.application.heartbeat``) para lo que comparten: (1) las filas de ``node_inventory``, por
-(planta, nodo); (2) las fichas de flota de esos nodos (``FOR SHARE``); (3) la cadena de cada planta,
-en orden de planta; (4) las ranuras de ``open_fleet_alarm`` de las alarmas que abre.
+(``fleet.application.heartbeat``) y el de la revocación (``fleet.application.common``: ficha →
+cadena) para lo que comparten: (1) las filas de ``node_inventory``, por (planta, nodo); (2) las
+fichas de flota de esos nodos (``FOR SHARE``); (3) la cadena de cada planta, en orden de planta;
+(4) las ranuras de ``open_fleet_alarm`` de las alarmas que abre. (1) y (2) se toman para **todos**
+los lotes antes de (3): con la cadena de una planta ya escrita por un lote, la ficha de un nodo de
+la misma planta en el lote siguiente invertiría el orden frente a una revocación de ese nodo.
 
 Ningún paso lee la hora del sistema: ``Clock`` inyectado.
 """
@@ -30,6 +34,7 @@ Ningún paso lee la hora del sistema: ``Clock`` inyectado.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Final
 
 from vigia_platform.fleet.application.common import FleetWriteFailed
@@ -43,7 +48,7 @@ from vigia_platform.fleet.application.fleet_alarms import (
 from vigia_platform.fleet.application.node_declaration import COMMUNICATION_RECORD_TYPE
 from vigia_platform.fleet.domain.enums import FleetAlarmKind
 from vigia_platform.fleet.domain.fleet_alarm import NewAlarm
-from vigia_platform.fleet.domain.mute_detection import mute_transition
+from vigia_platform.fleet.domain.mute_detection import MuteCandidate, mute_transition
 from vigia_platform.ledger.application.writer import (
     EscritorExpediente,
     LedgerRejection,
@@ -90,49 +95,56 @@ class MuteDetector:
         deps = self._deps
         now = now_of(deps.clock)
         report = AlarmReport()
+        candidates = await self._lock_all(transaction, now)
+        if not candidates:
+            return report
+        transitioning = [node for node in candidates if node.transitions]
+        await deps.store.mark_mute(transaction, [node.node_id for node in transitioning])
+        for node in transitioning:  # (3) en orden de planta
+            written = await self._writer.write(
+                transaction.context,
+                COMMUNICATION_RECORD_TYPE,
+                mute_transition(node.node_id, node.last_heartbeat_at),
+                scope=RecordScope(plant_id=node.plant_id),
+                occurred_at=now,
+                transaction=transaction,
+            )
+            if isinstance(written, LedgerRejection):
+                raise FleetWriteFailed(written)
+            report.transitions.append(node.node_id)
+        opened = await deps.store.open_alarms(transaction, [node.node_id for node in candidates])
+        report.raised += await raise_in(  # (4)
+            deps,
+            transaction,
+            [
+                NewAlarm(
+                    alarm_kind=FleetAlarmKind.NODE_MUTE,
+                    plant_id=node.plant_id,
+                    node_id=node.node_id,
+                    since=node.last_heartbeat_at,
+                )
+                for node in candidates
+                if (node.node_id, FleetAlarmKind.NODE_MUTE) not in opened
+            ],
+            now,
+        )
+        return report
+
+    async def _lock_all(self, transaction: Transaction, now: datetime) -> list[MuteCandidate]:
+        """(1) y (2) de **todos** los lotes, en orden de (planta, nodo), antes de escribir nada:
+        una sentencia por lote. Si la cadena de una planta se escribiera lote a lote, una revocación
+        o un latido de un nodo del lote siguiente (ficha → cadena) se interbloquearía con la tarea
+        (cadena → ficha)."""
+        locked: list[MuteCandidate] = []
         after: tuple[uuid.UUID, uuid.UUID] | None = None
         while True:
-            # (1) y (2): las filas del inventario y las fichas, bloqueadas en orden.
-            candidates = await deps.store.lock_mute_candidates(
+            batch = await self._deps.store.lock_mute_candidates(
                 transaction, now=now, after=after, limit=self._batch_size
             )
-            if candidates:
-                transitioning = [node for node in candidates if node.transitions]
-                await deps.store.mark_mute(transaction, [node.node_id for node in transitioning])
-                for node in transitioning:  # (3) en orden de planta
-                    written = await self._writer.write(
-                        transaction.context,
-                        COMMUNICATION_RECORD_TYPE,
-                        mute_transition(node.node_id, node.last_heartbeat_at),
-                        scope=RecordScope(plant_id=node.plant_id),
-                        occurred_at=now,
-                        transaction=transaction,
-                    )
-                    if isinstance(written, LedgerRejection):
-                        raise FleetWriteFailed(written)
-                    report.transitions.append(node.node_id)
-                opened = await deps.store.open_alarms(
-                    transaction, [node.node_id for node in candidates]
-                )
-                report.raised += await raise_in(
-                    deps,
-                    transaction,
-                    [
-                        NewAlarm(
-                            alarm_kind=FleetAlarmKind.NODE_MUTE,
-                            plant_id=node.plant_id,
-                            node_id=node.node_id,
-                            since=node.last_heartbeat_at,
-                        )
-                        for node in candidates
-                        if (node.node_id, FleetAlarmKind.NODE_MUTE) not in opened
-                    ],
-                    now,
-                )
-            if len(candidates) < self._batch_size:
-                return report
-            last = candidates[-1]
-            after = (last.plant_id, last.node_id)
+            locked += batch
+            if len(batch) < self._batch_size:
+                return locked
+            after = (batch[-1].plant_id, batch[-1].node_id)
 
 
 def register_detect_mute_nodes(
