@@ -159,6 +159,12 @@ class AuditOperation(enum.StrEnum):
     interfaces §3.4): esta entrada es su rastro, con ``filters`` de los tres valores nuevos; la
     emite un instalador bajo concesión (``fleet.manage``). Mismo criterio que
     ``signatory_policy_changed`` (A-58)."""
+    TARGET_VERSION_PUBLISHED = "target_version_published"
+    """U-03 (LC-GOB-17, VIG-162): ``POST /fleet/target-versions``, en la misma transacción que el
+    registro ``node_target_version_published``, con ``resource`` ``target_version_publication`` y
+    ``result_count`` = nodos alcanzados; la emite un instalador bajo concesión (``fleet.manage``),
+    que exige la auditoría normal de su escritura (BR-NUC-38). Mismo criterio que
+    ``node_revoked``."""
     WALK_TEST_REOPENED = "walk_test_reopened"
     """U-03 (LC-GOB-06, VIG-150): ``POST /walk-tests/{session_id}/reopen``. La reapertura no
     tiene tipo de registro (nota de TASK-214): esta entrada es su rastro, con ``resource``

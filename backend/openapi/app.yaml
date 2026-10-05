@@ -2930,6 +2930,31 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/fleet/target-versions":
+    "post":
+      "tags":
+        - "flota"
+      "summary": "Publica la versión objetivo de nodos de una planta (ventana informativa)"
+      "operationId": "publish_target_version_fleet_target_versions_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/TargetVersionBody"
+        "required": true
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/TargetVersionPublicationView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/api/nodes/clip-uploads":
     "post":
       "tags":
@@ -3415,6 +3440,83 @@
         - "records"
       "summary": "Presentación de un evento de observabilidad."
       "operationId": "post_observability_event"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Receipt"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Conflict"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 65536
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/update-results":
+    "post":
+      "tags":
+        - "records"
+      "summary": "Resultado de una actualización de software."
+      "operationId": "post_update_result"
       "responses":
         "200":
           "description": "Successful Response"
@@ -6613,6 +6715,37 @@
       "required":
         - "status"
       "title": "LoginResponse"
+    "MaintenanceWindowBody":
+      "properties":
+        "from":
+          "type": "string"
+          "format": "date-time"
+          "title": "From"
+        "to":
+          "type": "string"
+          "format": "date-time"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "MaintenanceWindowBody"
+      "description": "``{from, to}``: ``from`` es palabra reservada de Python, de ahí el alias."
+    "MaintenanceWindowView":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "MaintenanceWindowView"
     "ManagedUserView":
       "properties":
         "user_id":
@@ -7000,6 +7133,12 @@
         - "initial_configuration"
       "title": "NodeEnrollmentResponse"
       "description": "Respuesta del alta: `NodeCredential` con `initial_configuration`."
+    "NodeGroup":
+      "type": "string"
+      "enum":
+        - "plant"
+      "title": "NodeGroup"
+      "description": "``group`` de ``POST /fleet/target-versions`` (decisión del redactor, Notes de TASK-226)."
     "NodeInitialConfiguration":
       "properties":
         "zones":
@@ -8937,6 +9076,83 @@
         - "never_reported_ms"
         - "zone_not_active_ms"
       "title": "SummaryOut"
+    "TargetVersionBody":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "node_ids":
+          "anyOf":
+            - "items":
+                "type": "string"
+                "format": "uuid"
+              "type": "array"
+              "maxItems": 100
+              "minItems": 1
+            - "type": "null"
+          "title": "Node Ids"
+        "group":
+          "anyOf":
+            - "$ref": "#/components/schemas/NodeGroup"
+            - "type": "null"
+        "target_version":
+          "type": "string"
+          "maxLength": 64
+          "title": "Target Version"
+        "maintenance_window":
+          "$ref": "#/components/schemas/MaintenanceWindowBody"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "target_version"
+        - "maintenance_window"
+      "title": "TargetVersionBody"
+    "TargetVersionPublicationView":
+      "properties":
+        "publication_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Publication Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "target_version":
+          "type": "string"
+          "title": "Target Version"
+        "node_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Node Ids"
+        "maintenance_window":
+          "$ref": "#/components/schemas/MaintenanceWindowView"
+        "published_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Published By"
+        "published_at":
+          "type": "string"
+          "title": "Published At"
+        "ledger_record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Ledger Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "publication_id"
+        - "plant_id"
+        - "target_version"
+        - "node_ids"
+        - "maintenance_window"
+        - "published_by"
+        - "published_at"
+        - "ledger_record_id"
+      "title": "TargetVersionPublicationView"
     "TechnicalId":
       "type": "string"
       "maxLength": 64

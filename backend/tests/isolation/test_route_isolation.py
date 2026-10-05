@@ -139,6 +139,7 @@ from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsSer
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
+from vigia_platform.fleet.application.target_versions import TargetVersionService
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
@@ -177,6 +178,7 @@ from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
 from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.node_api.router import node_router
+from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import PlatformHttp
 from vigia_platform.shared.api.app import build_openapi_app
 from vigia_platform.shared.api.declarations import (
@@ -295,6 +297,14 @@ def fleet_http(deps: FleetDependencies, provider_organization_id: uuid.UUID) -> 
             authorizer=deps.authorizer,
             audit=deps.audit,
             clock=deps.clock,
+        ),
+        target_versions=TargetVersionService(
+            database=deps.database,
+            writer=deps.writer,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            clock=deps.clock,
+            policy=VersionPolicy(),
         ),
     )
 
@@ -664,6 +674,24 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("GET", "/plants/{plant_id}/fleet-thresholds"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/fleet-thresholds")
     ),
+    # VIG-162: la planta del cuerpo es la del alcance; un nodo de otra planta u organización
+    # responde not_found (tests/integration/test_fleet_target_versions.py).
+    ("POST", "/fleet/target-versions"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            "/fleet/target-versions",
+            json={
+                "plant_id": str(i.plant),
+                "node_ids": [str(i.node)],
+                "target_version": "1.0.0",
+                "maintenance_window": {
+                    "from": "2026-10-10T02:00:00.000Z",
+                    "to": "2026-10-10T04:00:00.000Z",
+                },
+            },
+        ),
+    ),
     ("GET", "/zones/{zone_id}/gates"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/gates")
     ),
@@ -686,6 +714,20 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ),
     ("GET", "/api/nodes/zones/{zone_id}/catalog"): Case(
         Kind.NODE, lambda i: Call("GET", f"/api/nodes/zones/{i.zone}/catalog")
+    ),
+    # VIG-162: la organización, la planta o el nodo de B en el cuerpo → node_zone_mismatch antes
+    # del esquema (tests/integration/test_fleet_target_versions.py).
+    ("POST", "/api/nodes/update-results"): Case(
+        Kind.NODE,
+        lambda i: Call(
+            "POST",
+            "/api/nodes/update-results",
+            json={
+                "organization_id": str(i.organization),
+                "plant_id": str(i.plant),
+                "node_id": str(i.node),
+            },
+        ),
     ),
     ("POST", "/zones/{zone_id}/gates/mounting/scope-record"): Case(
         Kind.RESOURCE,
@@ -1083,13 +1125,17 @@ def test_contract_routes_are_in_the_catalog_and_need_their_case() -> None:
     # TASK-206: iter_declared_routes incluye las rutas declaradas con NodeRoute, así que
     # ``uncovered`` exige un caso por ruta del contrato (otra organización → node_zone_mismatch
     # o not_found) igual que por ruta de personas.
-    # La única ruta aún sin publicar (el latido, el catálogo, la ingesta, el alta y la rotación ya
-    # tienen su caso: TASK-223, VIG-156 y VIG-151).
-    contract = node_router((NodeRoute.UPDATE_RESULT,)).routes
-    routes = [*build_openapi_app().routes, *contract]
-    assert uncovered(routes) == ["POST /api/nodes/update-results"]
+    # Desde VIG-162 (el resultado de actualización) se publican las diez y cada una tiene su caso;
+    # sin el suyo, la ruta se nombra.
+    contract = node_router(tuple(NodeRoute)).routes
     found = declared(contract)
+    assert len(found) == len(NodeRoute)
     assert all(declaration.node is not None for declaration in found.values())
+    assert set(found) <= set(declared(build_openapi_app().routes))
+    assert uncovered(build_openapi_app().routes) == []
+    without = {key: case for key, case in CASES.items() if key[1] != NodeRoute.UPDATE_RESULT.path}
+    missing = sorted(f"{m} {p}" for m, p in set(declared(contract)) - set(without))
+    assert missing == ["POST /api/nodes/update-results"]
 
 
 def test_a_route_under_api_nodes_without_declaration_is_named_and_does_not_start() -> None:
@@ -2057,6 +2103,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /fleet/nodes/{node_id}",
         "PUT /plants/{plant_id}/fleet-thresholds",
         "GET /plants/{plant_id}/fleet-thresholds",
+        "POST /fleet/target-versions",
         "GET /zones/{zone_id}/gates",
         "POST /zones/{zone_id}/gates/mounting/scope-record",
         "POST /zones/{zone_id}/gates/{gate}/revocation",

@@ -92,7 +92,17 @@ _INVENTORY: Final = text(
     " v.software_version, v.contract_version, v.model_version,"
     " v.contract_notice::text AS contract_notice, v.last_heartbeat_at,"
     " v.local_queue::text AS local_queue, v.clock::text AS clock,"
-    " v.signal_reader::text AS signal_reader, v.target_version, v.last_update_result,"
+    " v.signal_reader::text AS signal_reader,"
+    # Versión objetivo y último resultado (TASK-226): la proyección del inventario o, si el nodo
+    # aún no tiene fila (nunca envió latido), lo último que consta para él.
+    " COALESCE(v.target_version, (SELECT p.target_version"
+    " FROM fleet.target_version_publication AS p WHERE p.organization_id = n.organization_id"
+    " AND p.plant_id = n.plant_id AND n.node_id = ANY(p.node_ids)"
+    " ORDER BY p.published_at DESC, p.publication_id DESC LIMIT 1)) AS target_version,"
+    " COALESCE(v.last_update_result, (SELECT u.result FROM fleet.update_result AS u"
+    " WHERE u.organization_id = n.organization_id AND u.plant_id = n.plant_id"
+    " AND u.node_id = n.node_id ORDER BY u.reported_at DESC, u.update_result_id DESC LIMIT 1))"
+    " AS last_update_result,"
     " v.updated_at AS inventory_updated_at,"
     " COALESCE(comm.state, v.communication_state, 'unknown') AS communication_state,"
     " COALESCE(comm.since, n.created_at) AS since,"
