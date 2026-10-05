@@ -2763,6 +2763,173 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/fleet/nodes":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Inventario de flota con sus avisos, por páginas de hasta 100 nodos"
+      "operationId": "list_fleet_nodes_fleet_nodes_get"
+      "parameters":
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 100
+            "minimum": 1
+            "default": 100
+            "title": "Limit"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+        - "name": "communication_state"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/CommunicationState"
+              - "type": "null"
+            "title": "Communication State"
+        - "name": "warning"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/FleetAlarmKind"
+              - "type": "null"
+            "title": "Warning"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeInventoryPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/fleet/nodes/{node_id}":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Un nodo del inventario con su historia de latidos (90 días)"
+      "operationId": "fleet_node_fleet_nodes__node_id__get"
+      "parameters":
+        - "name": "node_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Node Id"
+        - "name": "history_after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "History After"
+        - "name": "history_limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 100
+            "minimum": 1
+            "default": 100
+            "title": "History Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NodeInventoryDetail"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/plants/{plant_id}/fleet-thresholds":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Umbrales del panel de flota de la planta (valores por defecto si no hay)"
+      "operationId": "plant_fleet_thresholds_plants__plant_id__fleet_thresholds_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/FleetThresholdsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "put":
+      "tags":
+        - "flota"
+      "summary": "Fija los umbrales del panel de flota de la planta"
+      "operationId": "put_plant_fleet_thresholds_plants__plant_id__fleet_thresholds_put"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/FleetThresholdsBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/FleetThresholdsView"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/api/nodes/clip-uploads":
     "post":
       "tags":
@@ -3851,6 +4018,39 @@
         - "redundant"
       "title": "CameraRoleInZone"
       "description": "Rol de una cámara dentro de su zona."
+    "CameraView":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Code"
+        "connected":
+          "type": "boolean"
+          "title": "Connected"
+        "measured_fps":
+          "type": "number"
+          "title": "Measured Fps"
+        "declared_min_fps":
+          "type": "number"
+          "title": "Declared Min Fps"
+        "observability_state":
+          "type": "string"
+          "title": "Observability State"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "code"
+        - "connected"
+        - "measured_fps"
+        - "declared_min_fps"
+        - "observability_state"
+      "title": "CameraView"
     "CamerasBody":
       "properties":
         "cameras":
@@ -4306,6 +4506,20 @@
       "additionalProperties": false
       "type": "object"
       "title": "ClipWindowBody"
+    "ClockView":
+      "properties":
+        "synchronized":
+          "type": "boolean"
+          "title": "Synchronized"
+        "offset_ms":
+          "type": "integer"
+          "title": "Offset Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "synchronized"
+        - "offset_ms"
+      "title": "ClockView"
     "CloseStepBody":
       "properties":
         "correction":
@@ -4399,6 +4613,13 @@
         - "clips"
         - "next_after"
       "title": "CommissioningClipsOut"
+    "CommunicationState":
+      "type": "string"
+      "enum":
+        - "unknown"
+        - "reachable"
+        - "mute"
+      "title": "CommunicationState"
     "CompatibilityResult":
       "type": "string"
       "enum":
@@ -4577,6 +4798,21 @@
         - "message_es"
       "title": "ContractNotice"
       "description": "Aviso de compatibilidad (BR-CTR-21). Con `result = accepted_with_notice`, `retires_at` es obligatorio: la versión del nodo se retira en esa fecha. El texto es `message_es` (renombrado desde `message`, nota fechada de 2026-09-23)."
+    "ContractNoticeView":
+      "properties":
+        "result":
+          "type": "string"
+          "title": "Result"
+        "retires_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Retires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "result"
+      "title": "ContractNoticeView"
     "CorrectionBody":
       "properties":
         "started_at":
@@ -4762,6 +4998,20 @@
         - "user_id"
         - "status"
       "title": "DeactivatedView"
+    "DeadLetterView":
+      "properties":
+        "code":
+          "type": "string"
+          "title": "Code"
+        "count":
+          "type": "integer"
+          "title": "Count"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "count"
+      "title": "DeadLetterView"
     "DeclaredBy":
       "properties":
         "user_id":
@@ -5323,6 +5573,77 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "FleetAlarmKind":
+      "type": "string"
+      "enum":
+        - "node_mute"
+        - "queue_over_threshold"
+        - "clock_drift"
+        - "version_retiring"
+        - "simulated_adapter_in_productive"
+        - "certificate_expiring"
+        - "camera_below_min_fps"
+        - "orphan_clips_growing"
+      "title": "FleetAlarmKind"
+      "description": "Las ocho clases de alarma de flota (manda sobre las listas de cinco y de siete)."
+    "FleetThresholdsBody":
+      "properties":
+        "queue_pending_threshold":
+          "type": "integer"
+          "title": "Queue Pending Threshold"
+        "queue_age_threshold_minutes":
+          "type": "integer"
+          "title": "Queue Age Threshold Minutes"
+        "clock_drift_threshold_ms":
+          "type": "integer"
+          "title": "Clock Drift Threshold Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "queue_pending_threshold"
+        - "queue_age_threshold_minutes"
+        - "clock_drift_threshold_ms"
+      "title": "FleetThresholdsBody"
+    "FleetThresholdsView":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "queue_pending_threshold":
+          "type": "integer"
+          "title": "Queue Pending Threshold"
+        "queue_age_threshold_minutes":
+          "type": "integer"
+          "title": "Queue Age Threshold Minutes"
+        "clock_drift_threshold_ms":
+          "type": "integer"
+          "title": "Clock Drift Threshold Ms"
+        "configured":
+          "type": "boolean"
+          "title": "Configured"
+        "updated_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Updated By"
+        "updated_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Updated At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "queue_pending_threshold"
+        - "queue_age_threshold_minutes"
+        - "clock_drift_threshold_ms"
+        - "configured"
+        - "updated_by"
+        - "updated_at"
+      "title": "FleetThresholdsView"
     "FramingRecaptureBody":
       "properties":
         "camera_id":
@@ -5482,6 +5803,13 @@
         - "min_duration_ms"
       "title": "GuardBypassPredicate"
       "description": "Plantilla `guard_bypass`: `all_of` contiene presencia y resguardo afirmado (declarado cerrado con persona dentro) y, opcionalmente, energía afirmada; en cualquier orden y sin repetir; `min_duration_ms = 0`."
+    "HeartbeatNotice":
+      "type": "string"
+      "enum":
+        - "no_heartbeat_since"
+        - "no_heartbeat_received"
+      "title": "HeartbeatNotice"
+      "description": "Rótulo del panel para un nodo sin latido reciente (BR-GOB-75): nunca «sin eventos»."
     "HeartbeatResponse":
       "properties":
         "server_time":
@@ -5534,6 +5862,30 @@
         - "mute_after_seconds"
       "title": "HeartbeatResponse"
       "description": "Respuesta de `POST heartbeats` (domain-entities.md §2.5 y notas fechadas): lo que el nodo aprende en cada latido. Es el **único canal** por el que la plataforma comunica al nodo cambios de compuerta, de catálogo, de versión objetivo, de claves públicas y de revocación; la plataforma nunca inicia conexiones al nodo (BR-CTR-55). Las compuertas llegan solo por `gate_states`: no tienen ruta propia. `platform_public_keys` es un `SignedEnvelope<PublicKeySet>` firmado con una clave de propósito `key_set` que el nodo ya tiene fijada; un conjunto que no verifica no se aplica. `contract_notice.message_es` es el único texto libre, genérico y en español (BR-CTR-13, BR-CTR-16). La ventana de mantenimiento no viaja en esta respuesta (decisión D-5). Reglas que verifica el modelo: `mute_after_seconds = 5 × heartbeat_interval_seconds` (pendiente nº 35, BR-CTR-51); una entrada de `gate_states` y de `catalog_versions_available` por cada zona del nodo, cada zona a lo sumo una vez."
+    "HeartbeatView":
+      "properties":
+        "heartbeat_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Heartbeat Id"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "sent_at":
+          "type": "string"
+          "title": "Sent At"
+        "payload_summary":
+          "additionalProperties": true
+          "type": "object"
+          "title": "Payload Summary"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "heartbeat_id"
+        - "received_at"
+        - "sent_at"
+        - "payload_summary"
+      "title": "HeartbeatView"
     "HierarchyOrganizationView":
       "properties":
         "organization_id":
@@ -6003,6 +6355,27 @@
         - "live_view_local_url"
         - "expires_at"
       "title": "LiveViewTokenOut"
+    "LocalQueueView":
+      "properties":
+        "pending":
+          "type": "integer"
+          "title": "Pending"
+        "oldest_pending_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Oldest Pending At"
+        "dead_letter":
+          "items":
+            "$ref": "#/components/schemas/DeadLetterView"
+          "type": "array"
+          "title": "Dead Letter"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "pending"
+        - "dead_letter"
+      "title": "LocalQueueView"
     "LoginRequest":
       "properties":
         "email":
@@ -6327,6 +6700,182 @@
         - "revoked_at"
         - "decommissioned_at"
       "title": "NodeDecommissionView"
+    "NodeInventoryDetail":
+      "properties":
+        "node":
+          "$ref": "#/components/schemas/NodeInventoryView"
+        "heartbeat_history":
+          "items":
+            "$ref": "#/components/schemas/HeartbeatView"
+          "type": "array"
+          "title": "Heartbeat History"
+        "next_history_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next History After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node"
+        - "heartbeat_history"
+        - "next_history_after"
+      "title": "NodeInventoryDetail"
+    "NodeInventoryPage":
+      "properties":
+        "nodes":
+          "items":
+            "$ref": "#/components/schemas/NodeInventoryView"
+          "type": "array"
+          "title": "Nodes"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "nodes"
+        - "next_after"
+      "title": "NodeInventoryPage"
+    "NodeInventoryView":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zones":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Zones"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "decommissioned_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Decommissioned At"
+        "replaces_node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Replaces Node Id"
+        "software_version":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Software Version"
+        "contract_version":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Contract Version"
+        "contract_notice":
+          "anyOf":
+            - "$ref": "#/components/schemas/ContractNoticeView"
+            - "type": "null"
+        "model_version":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Model Version"
+        "last_heartbeat_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Last Heartbeat At"
+        "communication_state":
+          "$ref": "#/components/schemas/CommunicationState"
+        "since":
+          "type": "string"
+          "title": "Since"
+        "heartbeat_notice":
+          "anyOf":
+            - "$ref": "#/components/schemas/HeartbeatNotice"
+            - "type": "null"
+        "local_queue":
+          "anyOf":
+            - "$ref": "#/components/schemas/LocalQueueView"
+            - "type": "null"
+        "clock":
+          "anyOf":
+            - "$ref": "#/components/schemas/ClockView"
+            - "type": "null"
+        "signal_reader":
+          "anyOf":
+            - "$ref": "#/components/schemas/SignalReaderView"
+            - "type": "null"
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/CameraView"
+          "type": "array"
+          "title": "Cameras"
+        "zone_states":
+          "items":
+            "$ref": "#/components/schemas/ZoneStateView"
+          "type": "array"
+          "title": "Zone States"
+        "warnings":
+          "items":
+            "$ref": "#/components/schemas/FleetAlarmKind"
+          "type": "array"
+          "title": "Warnings"
+        "target_version":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Target Version"
+        "last_update_result":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Last Update Result"
+        "live_view_local_url":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Live View Local Url"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "code"
+        - "plant_id"
+        - "zones"
+        - "status"
+        - "decommissioned_at"
+        - "replaces_node_id"
+        - "software_version"
+        - "contract_version"
+        - "contract_notice"
+        - "model_version"
+        - "last_heartbeat_at"
+        - "communication_state"
+        - "since"
+        - "heartbeat_notice"
+        - "local_queue"
+        - "clock"
+        - "signal_reader"
+        - "cameras"
+        - "zone_states"
+        - "warnings"
+        - "target_version"
+        - "last_update_result"
+        - "live_view_local_url"
+      "title": "NodeInventoryView"
+      "description": "``NodeInventory`` (interfaces §3.4 y «Versión 1.5»); sin latido, sus campos son ``null``."
     "NodeReasonBody":
       "properties":
         "reason_es":
@@ -7555,6 +8104,20 @@
         - "low"
       "title": "SignalLevel"
       "description": "Nivel físico de una señal."
+    "SignalReaderView":
+      "properties":
+        "available":
+          "type": "boolean"
+          "title": "Available"
+        "adapter":
+          "type": "string"
+          "title": "Adapter"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "available"
+        - "adapter"
+      "title": "SignalReaderView"
     "SignalRole":
       "type": "string"
       "enum":
@@ -8556,6 +9119,33 @@
         - "episode"
       "title": "ZoneParametersBody"
       "description": "Los parámetros de la versión 1 de la zona (solo con la zona aún sin catálogo)."
+    "ZoneStateView":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "mode":
+          "type": "string"
+          "title": "Mode"
+        "observability_state":
+          "type": "string"
+          "title": "Observability State"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "coverage_ok":
+          "type": "boolean"
+          "title": "Coverage Ok"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "mode"
+        - "observability_state"
+        - "catalog_version"
+        - "coverage_ok"
+      "title": "ZoneStateView"
     "ZoneView":
       "properties":
         "zone_id":

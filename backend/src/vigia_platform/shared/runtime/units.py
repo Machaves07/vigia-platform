@@ -118,12 +118,14 @@ from vigia_platform.fleet.application.enrollment_codes import (
     NodeCaRoots,
     RootsUnavailable,
 )
+from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
 from vigia_platform.fleet.application.ingest import (
     INGEST_REJECTED_RECORD_TYPE,
     IngestDependencies,
     IngestService,
 )
+from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import (
     COMMUNICATION_RECORD_TYPE,
     NodeDeclarationService,
@@ -136,6 +138,7 @@ from vigia_platform.fleet.application.node_revocation import (
 from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
+from vigia_platform.fleet.domain.fleet_warnings import INVENTORY_LABEL_BINDINGS
 from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.fleet.events import FLEET_EVENT_TYPES
 from vigia_platform.fleet.record_types import FLEET_RECORD_TYPES
@@ -746,6 +749,20 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 clock=services.clock,
             ),
+            # LC-GOB-15 (VIG-159): inventario con sus avisos y umbrales del panel por planta.
+            inventory=FleetInventory(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+                provider_organization_id=services.provider_organization_id,
+            ),
+            thresholds=FleetThresholdsService(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+            ),
         )
     }
 
@@ -960,12 +977,17 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
     # VIG-147 (TASK-218): rutas de identidad del nodo de SCR-07, sus detail_code, los tipos que
     # escriben y los eventos node_revoked y node_decommissioned. VIG-152: GET
     # /zones/{zone_id}/commissioning-clips; ``mark_orphan_clips`` lo registra VIG-163 (TASK-227)
-    # con ``register_mark_orphan_clips``.
+    # con ``register_mark_orphan_clips``. VIG-159: inventario (GET /fleet/nodes y su detalle) y
+    # umbrales por planta, con las etiquetas de ``heartbeat_notice``.
     PlatformUnit(
         name="fleet",
         routers=fleet_routers,
         detail_codes=tuple(code.value for code in FleetDetailCode),
-        labels={**FLEET_LABEL_BINDINGS, **FLEET_DETAIL_CODE_LABEL_BINDINGS},
+        labels={
+            **FLEET_LABEL_BINDINGS,
+            **FLEET_DETAIL_CODE_LABEL_BINDINGS,
+            **INVENTORY_LABEL_BINDINGS,
+        },
         record_types=_fleet_record_types,
         event_types=_fleet_event_types,
         api_state=_fleet_state,
