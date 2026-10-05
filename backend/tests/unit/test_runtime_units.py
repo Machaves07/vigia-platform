@@ -149,7 +149,8 @@ def test_u02_record_types_come_from_the_registry() -> None:
     # U-03: solo los tipos que ya escribe una ruta registrada (VIG-142 la admisión; VIG-146 el
     # acta de alcance, la transición de compuerta y la política de planta; VIG-148 el catálogo,
     # el retiro, la marca unipersonal y la marca de regresión; VIG-149 el acuerdo de uso;
-    # VIG-147 la identidad del nodo; VIG-151 el alta y la rotación de la credencial).
+    # VIG-147 la identidad del nodo; VIG-150 el cierre de cada paso del walk-test; VIG-151 el
+    # alta y la rotación de la credencial).
     assert names - u02 == {
         "node_enrolled",
         "node_credential_rotated",
@@ -167,6 +168,7 @@ def test_u02_record_types_come_from_the_registry() -> None:
         "single_occupancy_declared",
         "walk_test_regression_marked",
         "use_agreement_signed",
+        "commissioning_step",
     }
 
 

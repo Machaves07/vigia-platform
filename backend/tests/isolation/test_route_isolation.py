@@ -103,6 +103,9 @@ from vigia_platform.catalog.adapters.postgres.regression_repository import (
 from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
     PostgresScopeRecordRepository,
 )
+from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
+    PostgresWalkTestRepository,
+)
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
@@ -125,6 +128,7 @@ from vigia_platform.catalog.application.scope_record import (
 )
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
+from vigia_platform.catalog.application.walk_test import WalkTestService
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
@@ -321,6 +325,10 @@ class Ids:
     """Nodo revocado con ficha de flota: el de la baja."""
     agreement: uuid.UUID
     """Acuerdo de uso ``pending_signatures`` de la zona (VIG-149)."""
+    walk_test: uuid.UUID
+    """Sesión de walk-test ``in_progress`` de la zona, con matriz vacía (VIG-150)."""
+    step: uuid.UUID
+    """Paso abierto de esa sesión (VIG-150)."""
 
     @classmethod
     def missing(cls) -> Ids:
@@ -807,6 +815,44 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("GET", "/zones/{zone_id}/transparency"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/transparency")
     ),
+    # VIG-150: sesión de walk-test (la zona de cada organización tiene una en curso,
+    # ``Isolation.walk_test``, con un paso abierto).
+    ("POST", "/zones/{zone_id}/walk-tests"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/zones/{i.zone}/walk-tests", json={"passes_per_cell": 3}),
+    ),
+    ("GET", "/zones/{zone_id}/walk-tests/current"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/walk-tests/current")
+    ),
+    ("POST", "/walk-tests/{session_id}/steps"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/steps",
+            json={"step_kind": "framing", "responsible_user_id": str(i.label)},
+        ),
+    ),
+    ("POST", "/walk-tests/{session_id}/steps/{step_id}/close"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/steps/{i.step}/close",
+            # Una corrección sin marcas no cierra nada: el caso se puede repetir.
+            json={"correction": {"reason_es": REASON}},
+        ),
+    ),
+    ("POST", "/walk-tests/{session_id}/passes"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/passes",
+            json={"row_id": str(i.label), "result": "detected"},
+        ),
+    ),
+    ("POST", "/walk-tests/{session_id}/reopen"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("POST", f"/walk-tests/{i.walk_test}/reopen", json={"reason_es": REASON}),
+    ),
     # --- fleet (VIG-152) ---
     ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
@@ -905,6 +951,17 @@ STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     ("POST", "/zones/{zone_id}/use-agreements"): "invalid_request",
     # El montaje de B está pending: mounting_gate_pending, la primera guarda (VIG-149).
     ("POST", "/use-agreements/{agreement_id}/approval"): "conflict",
+    # VIG-150. El montaje de B está pending: mounting_gate_pending.
+    ("POST", "/zones/{zone_id}/walk-tests"): "conflict",
+    # El responsable del caso no es ningún usuario con alcance sobre la zona: el paso no se abre
+    # (el instalador y los usuarios con alcance sí; ver la integración) y el caso se repite igual.
+    ("POST", "/walk-tests/{session_id}/steps"): "invalid_request",
+    # Corrección sin marcas: invalid_request, y el paso sigue abierto para la siguiente vuelta.
+    ("POST", "/walk-tests/{session_id}/steps/{step_id}/close"): "invalid_request",
+    # La fila del caso no está en la matriz (vacía) de la sesión de B.
+    ("POST", "/walk-tests/{session_id}/passes"): "invalid_request",
+    # La sesión de B está en curso: solo se reabre una incomplete.
+    ("POST", "/walk-tests/{session_id}/reopen"): "conflict",
 }
 """Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
 no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
@@ -1205,6 +1262,44 @@ class Isolation:
         )
         return agreement_id
 
+    def walk_test(
+        self,
+        site: Site,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        node_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        """Una sesión ``in_progress`` de la zona, sin filas, y un paso abierto (filas sintéticas;
+        el flujo real está en ``tests/integration/test_catalog_walk_test.py``). Sus marcas son de
+        la hora del reloj, así que no vence durante la prueba."""
+        session_id, step_id = uuid7(), uuid7()
+        now = self.authz.now()
+        self.env.execute(
+            "INSERT INTO catalog.walk_test_session (session_id, organization_id, plant_id, zone_id,"
+            " node_id, catalog_version, kind, status, passes_per_cell, matrix_rows, started_at,"
+            " last_activity_at) VALUES ($1, $2, $3, $4, $5, 1, 'initial', 'in_progress', 3, '[]',"
+            " $6, $6)",
+            session_id,
+            site.organization_id,
+            plant_id,
+            zone_id,
+            node_id,
+            now,
+        )
+        self.env.execute(
+            "INSERT INTO catalog.walk_test_step (step_id, organization_id, plant_id, session_id,"
+            " step_kind, responsible_user_id, started_at) VALUES ($1, $2, $3, $4, 'framing', $5,"
+            " $6)",
+            step_id,
+            site.organization_id,
+            plant_id,
+            session_id,
+            user_id,
+            now,
+        )
+        return session_id, step_id
+
     def resources(self, site: Site, plant_index: int) -> Ids:
         """Un recurso de cada tipo en la planta ``plant_index`` de ``site`` (filas reales)."""
         authz = self.authz
@@ -1234,6 +1329,7 @@ class Isolation:
         fleet_node = self.fleet_node(organization_id, plant_id, user_id, revoked=False)
         retired_node = self.fleet_node(organization_id, plant_id, user_id, revoked=True)
         self.catalog(site, plant_id, zone_id, user_id)
+        walk_test_id, step_id = self.walk_test(site, plant_id, zone_id, node_id, user_id)
         return Ids(
             organization=organization_id,
             plant=plant_id,
@@ -1249,6 +1345,8 @@ class Isolation:
             spare_zone=spare_zone,
             retired_node=retired_node,
             agreement=self.agreement(site, plant_id, zone_id, user_id),
+            walk_test=walk_test_id,
+            step=step_id,
         )
 
     def fleet_node(
@@ -1624,6 +1722,18 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             database=sessions.database,
                             audit=sessions.audit,
                         ),
+                        walk_tests=WalkTestService(
+                            repository=PostgresWalkTestRepository(),
+                            catalog=catalog_repository,
+                            gates=gates,
+                            nodes=HierarchyService(deps),
+                            identity=HierarchyService(deps),
+                            database=sessions.database,
+                            writer=writer,
+                            audit=sessions.audit,
+                            free_text=free_text,
+                            clock=sessions.clock,
+                        ),
                     ),
                     FLEET_STATE_KEY: fleet_http(
                         FleetDependencies(
@@ -1904,6 +2014,12 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "POST /zones/{zone_id}/use-agreements",
         "POST /use-agreements/{agreement_id}/approval",
         "GET /zones/{zone_id}/transparency",
+        "POST /zones/{zone_id}/walk-tests",
+        "GET /zones/{zone_id}/walk-tests/current",
+        "POST /walk-tests/{session_id}/steps",
+        "POST /walk-tests/{session_id}/steps/{step_id}/close",
+        "POST /walk-tests/{session_id}/passes",
+        "POST /walk-tests/{session_id}/reopen",
         "GET /zones/{zone_id}/commissioning-clips",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
