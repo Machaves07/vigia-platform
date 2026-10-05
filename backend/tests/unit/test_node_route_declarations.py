@@ -199,11 +199,15 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
     assert check_routes(router.routes, PERMISSIONS, registry, docs_enabled=False) == []
 
 
-def test_production_publishes_no_contract_route_yet() -> None:
-    assert PUBLISHED_NODE_ROUTES == ()
+def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
+    # VIG-152 (TASK-222): la concesión de clip y la confirmación del clip de verificación.
+    assert PUBLISHED_NODE_ROUTES == (NodeRoute.CLIP_UPLOAD, NodeRoute.CLIP_CONFIRMATION)
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
-    assert not any(path.startswith(NODE_PREFIX) for path in paths)
+    assert {path for path in paths if path.startswith(NODE_PREFIX)} == {
+        NodeRoute.CLIP_UPLOAD.path,
+        NodeRoute.CLIP_CONFIRMATION.path,
+    }
 
 
 # --- Sin NodeGate ------------------------------------------------------------------------------

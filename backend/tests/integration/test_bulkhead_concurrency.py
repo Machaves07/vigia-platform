@@ -43,7 +43,7 @@ from vigia_platform.shared.db import RouteClass
 from vigia_platform.shared.observability.metrics import MetricName
 
 NODE, PERSON = RouteClass.NODE, RouteClass.PERSON
-NODE_HOLD = "/api/nodes/clip-uploads/hold/confirmation"
+NODE_HOLD = "/api/nodes/update-results?mode=hold"
 """La ruta de nodo que retiene la petición hasta que la prueba la suelta."""
 
 
@@ -69,15 +69,14 @@ class Holds:
 def _unit(holds: Holds) -> UnitRegistration:
     router = APIRouter()
 
-    # Una ruta del contrato (A-51) con tres comportamientos según el segmento de la ruta:
-    # /api/nodes/clip-uploads/{hold|boom|listen}/confirmation (el arnés ya declara el catálogo).
-    @router.post(
-        NodeRoute.CLIP_CONFIRMATION.path, dependencies=[node_route(NodeRoute.CLIP_CONFIRMATION)]
-    )
-    async def node_route_handler(clip_id: str, request: Request) -> dict[str, str]:
-        if clip_id == "boom":
+    # Una ruta del contrato (A-51) con tres comportamientos según ``mode``:
+    # /api/nodes/update-results?mode={hold|boom|listen}. Es una ruta que ni el arnés ni producción
+    # declaran todavía (la concesión y la confirmación de clip ya las publica VIG-152).
+    @router.post(NodeRoute.UPDATE_RESULT.path, dependencies=[node_route(NodeRoute.UPDATE_RESULT)])
+    async def node_route_handler(request: Request, mode: str = "hold") -> dict[str, str]:
+        if mode == "boom":
             raise RuntimeError("fallo del manejador")
-        if clip_id == "listen":
+        if mode == "listen":
             holds.entered["listen"] += 1
             while not await request.is_disconnected():
                 await asyncio.sleep(0)
@@ -259,7 +258,7 @@ def test_health_probes_do_not_wait_for_the_person_bulkhead() -> None:
 
 def test_a_raising_handler_returns_the_slot() -> None:
     async def test(s: Scenario) -> None:
-        response = await s.client.post("/api/nodes/clip-uploads/boom/confirmation")
+        response = await s.client.post("/api/nodes/update-results?mode=boom")
         # Clase node: un error interno es el transitorio del contrato, nunca un ApiError.
         assert response.status_code == 503
         assert response.json()["code"] == "temporarily_unavailable"
@@ -306,10 +305,10 @@ def test_a_client_disconnect_returns_the_slot() -> None:
             "http_version": "1.1",
             "method": "POST",
             "scheme": "https",
-            "path": "/api/nodes/clip-uploads/listen/confirmation",
-            "raw_path": b"/api/nodes/clip-uploads/listen/confirmation",
+            "path": "/api/nodes/update-results",
+            "raw_path": b"/api/nodes/update-results",
             "root_path": "",
-            "query_string": b"",
+            "query_string": b"mode=listen",
             "headers": [(b"host", b"app.vigia.test")],
             "client": ("192.0.2.10", 50000),
             "server": ("app.vigia.test", 443),
