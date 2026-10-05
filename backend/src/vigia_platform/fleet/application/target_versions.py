@@ -69,7 +69,7 @@ from vigia_platform.ledger.application.writer import (
     RecordScope,
 )
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent
 from vigia_platform.shared.signing.keys import to_millisecond
@@ -77,6 +77,7 @@ from vigia_platform.shared.signing.keys import to_millisecond
 __all__ = ["TargetVersionService"]
 
 
+@repository
 class TargetVersionService:
     """``POST /fleet/target-versions``: publica la versión objetivo de nodos de una planta."""
 
