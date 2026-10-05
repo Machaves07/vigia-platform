@@ -916,6 +916,25 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("POST", "/api/nodes/clip-uploads/{clip_id}/confirmation"): Case(
         Kind.NODE, lambda i: Call("POST", f"/api/nodes/clip-uploads/{i.record}/confirmation")
     ),
+    # --- Rutas de la ingesta (VIG-156): con el certificado de un nodo de A, la organización,
+    # la planta, el nodo o la zona de B responden node_zone_mismatch antes del esquema, y una zona
+    # de B nunca entra en ingest_rejected (tests/integration/test_fleet_ingest.py).
+    **{
+        ("POST", f"/api/nodes/{path}"): Case(
+            Kind.NODE,
+            lambda i, path=path: Call(
+                "POST",
+                f"/api/nodes/{path}",
+                json={
+                    "organization_id": str(i.organization),
+                    "plant_id": str(i.plant),
+                    "zone_id": str(i.zone),
+                    "node_id": str(i.node),
+                },
+            ),
+        )
+        for path in ("findings", "detection-reviews", "observability-events")
+    },
     # VIG-151: el alta no lleva certificado; un código o una CSR (nombre común) de un nodo de B
     # nunca dan una credencial de B ni de A: enrollment_code_invalid o schema_invalid
     # (tests/integration/test_fleet_enrollment_flow.py). La rotación, con el certificado de A y el
@@ -1064,13 +1083,11 @@ def test_contract_routes_are_in_the_catalog_and_need_their_case() -> None:
     # TASK-206: iter_declared_routes incluye las rutas declaradas con NodeRoute, así que
     # ``uncovered`` exige un caso por ruta del contrato (otra organización → node_zone_mismatch
     # o not_found) igual que por ruta de personas.
-    # Dos rutas aún sin publicar (el latido y el catálogo ya tienen su caso, TASK-223).
-    contract = node_router((NodeRoute.FINDING, NodeRoute.UPDATE_RESULT)).routes
+    # La única ruta aún sin publicar (el latido, el catálogo, la ingesta, el alta y la rotación ya
+    # tienen su caso: TASK-223, VIG-156 y VIG-151).
+    contract = node_router((NodeRoute.UPDATE_RESULT,)).routes
     routes = [*build_openapi_app().routes, *contract]
-    assert uncovered(routes) == [
-        "POST /api/nodes/findings",
-        "POST /api/nodes/update-results",
-    ]
+    assert uncovered(routes) == ["POST /api/nodes/update-results"]
     found = declared(contract)
     assert all(declaration.node is not None for declaration in found.values())
 

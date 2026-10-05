@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 23
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0023`` (las columnas de la
+MINIMUM_SCHEMA_VERSION: Final = 24
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0024`` (la proyección
+``fleet.observability_orphan_close`` que la ingesta escribe con cada cierre huérfano, VIG-156),
+que incluye ``gob_0023`` (las columnas de la
 reapertura en ``catalog.walk_test_session``, que la sesión de walk-test lee y escribe, VIG-150),
 que incluye ``gob_0022`` (reemisión de la concesión de clip y ``first_served_at`` del clip de
 verificación: sin ellos, las concesiones de clip no se reemiten ni el listado de clips de
