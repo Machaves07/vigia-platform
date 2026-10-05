@@ -324,21 +324,27 @@ class HeartbeatService:
             if not fresh:
                 # Otro primer latido confirmó antes: su fila ya existe y queda bloqueada aquí.
                 previous = await deps.inventory.lock(transaction, node_id)
+        # Con la fila del nodo bloqueada: ¿ya se aceptó este ``heartbeat_id``? (BR-GOB-71)
+        duplicate = not fresh and await deps.history.seen(
+            transaction,
+            plant_id=node.plant_id,
+            node_id=node_id,
+            heartbeat_id=_uuid(heartbeat.heartbeat_id),
+            since=received_at - HISTORY_RETENTION,
+        )
+        if duplicate:
+            # Nada se escribe: la respuesta del estado vigente, sin bloquear la ficha.
+            fleet = await deps.nodes.read(transaction, node_id)
+            if fleet is None:
+                raise HeartbeatUnavailable("el nodo no tiene ficha de flota")
+            composed = await self._read_response(transaction, node, snapshot, _retired(fleet))
+            return _Outcome(composed, duplicate=True, projection=None, previous=previous)
         # (2) La ficha de flota: ``revoked`` leído en la transacción.
         fleet = await deps.nodes.lock(transaction, node_id)
         if fleet is None:
             raise HeartbeatUnavailable("el nodo no tiene ficha de flota")
         retired = _retired(fleet)
         composed = await self._read_response(transaction, node, snapshot, retired)
-        heartbeat_id = _uuid(heartbeat.heartbeat_id)
-        if not fresh and await deps.history.seen(
-            transaction,
-            plant_id=node.plant_id,
-            node_id=node_id,
-            heartbeat_id=heartbeat_id,
-            since=received_at - HISTORY_RETENTION,
-        ):
-            return _Outcome(composed, duplicate=True, projection=None, previous=previous)
         projection = self._project(
             node, heartbeat, received_at, previous, snapshot, notice, retired
         )
@@ -490,11 +496,11 @@ class HeartbeatService:
         if composed.target_version is not None:
             document["target_software_version"] = composed.target_version
         stored = [composed.gates[zone].text for zone in composed.zones]
-        HeartbeatResponse.model_validate(
-            {**document, "gate_states": [json.loads(text) for text in stored]}
-        )
         head = json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        return (head[:-1] + ',"gate_states":[' + ",".join(stored) + "]}").encode("utf-8")
+        content = (head[:-1] + ',"gate_states":[' + ",".join(stored) + "]}").encode("utf-8")
+        # Se valida exactamente lo que se envía, con el lector estricto de U-01 (fallo cerrado).
+        HeartbeatResponse.model_validate_json(content)
+        return content
 
     async def _renew_expiring(self, node: NodeScope, composed: _Composed) -> _Composed | None:
         """A-55: renueva los sobres que vencen en menos de 24 h; ``None`` si no hubo ninguno."""

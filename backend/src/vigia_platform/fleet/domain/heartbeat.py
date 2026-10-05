@@ -249,7 +249,7 @@ def project(
     received = to_millisecond(received_at)
     last = received
     if previous is not None and previous.last_heartbeat_at is not None:
-        last = max(last, to_millisecond(previous.last_heartbeat_at))
+        last = max(last, previous.last_heartbeat_at)
     node_id = _uuid(heartbeat.node_id)
     observations = tuple(
         CameraObservation(_uuid(camera.camera_id), ObservabilityState(camera.observability_state))

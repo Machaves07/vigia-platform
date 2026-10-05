@@ -613,8 +613,9 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ),
     # --- Rutas del contrato (``node_route``; TASK-223): con el certificado de un nodo de A, la
     # organización, la planta, el nodo o la zona de B responden ``node_zone_mismatch``. Sus pruebas
-    # con base están en tests/integration/test_fleet_heartbeat.py y test_fleet_zone_catalog_route.py;
-    # la cobertura exhaustiva de U-03 la completa TASK-228 (VIG-165).
+    # con base están en tests/integration/test_fleet_heartbeat.py y
+    # test_fleet_zone_catalog_route.py; la cobertura exhaustiva de U-03 la completa TASK-228
+    # (VIG-165).
     ("POST", "/api/nodes/heartbeats"): Case(
         Kind.NODE,
         lambda i: Call(
