@@ -116,6 +116,12 @@ class MetricName(enum.StrEnum):
     # Flota (U-03, TASK-218): intentos de alta y revocaciones
     ENROLLMENT_ATTEMPTS_TOTAL = "enrollment_attempts_total"
     NODE_REVOCATIONS_TOTAL = "node_revocations_total"
+    # Flota (U-03, TASK-223, NFR-GOB-55): por nodo, solo contadores y medidores (NFR-GOB-13)
+    FLEET_HEARTBEATS_TOTAL = "fleet_heartbeats_total"
+    FLEET_HEARTBEAT_GAP_SECONDS = "fleet_heartbeat_gap_seconds"
+    FLEET_NODE_REACHABLE = "fleet_node_reachable"
+    FLEET_NODE_QUEUE_PENDING = "fleet_node_queue_pending"
+    FLEET_NODE_CLOCK_OFFSET_MS = "fleet_node_clock_offset_ms"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -265,6 +271,20 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.NODE_REVOCATIONS_TOTAL, _C, "{revocation}",
           "Revocaciones de nodo (marca de la lista de revocación) por organización.", "D-7",
           "organization_id"),
+    # Latido (TASK-223, NFR-GOB-55): seis series por nodo (aceptados, ignorados y cuatro
+    # medidores), nunca histogramas por nodo ni etiquetas de zona (NFR-GOB-13).
+    _spec(_N.FLEET_HEARTBEATS_TOTAL, _C, "{heartbeat}",
+          "Latidos por nodo: aceptados o ignorados por heartbeat_id repetido.", "NFR-GOB-55",
+          "node_id", "result"),
+    _spec(_N.FLEET_HEARTBEAT_GAP_SECONDS, _G, "s",
+          "Hueco entre el latido aceptado y el anterior del mismo nodo.", "NFR-GOB-55", "node_id"),
+    _spec(_N.FLEET_NODE_REACHABLE, _G, "1",
+          "Estado de comunicación del nodo: reachable (1) o no (0).", "NFR-GOB-55", "node_id"),
+    _spec(_N.FLEET_NODE_QUEUE_PENDING, _G, "{record}",
+          "Registros pendientes en la cola local del nodo.", "NFR-GOB-55", "node_id"),
+    _spec(_N.FLEET_NODE_CLOCK_OFFSET_MS, _G, "ms",
+          "Desviación del reloj del nodo respecto de su fuente de tiempo.", "NFR-GOB-55",
+          "node_id"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -459,6 +479,11 @@ class PlatformMetrics:
         self.clip_grants_orphaned_total = counter(_N.CLIP_GRANTS_ORPHANED_TOTAL)
         self.enrollment_attempts_total = counter(_N.ENROLLMENT_ATTEMPTS_TOTAL)
         self.node_revocations_total = counter(_N.NODE_REVOCATIONS_TOTAL)
+        self.fleet_heartbeats_total = counter(_N.FLEET_HEARTBEATS_TOTAL)
+        self.fleet_heartbeat_gap_seconds = gauge(_N.FLEET_HEARTBEAT_GAP_SECONDS)
+        self.fleet_node_reachable = gauge(_N.FLEET_NODE_REACHABLE)
+        self.fleet_node_queue_pending = gauge(_N.FLEET_NODE_QUEUE_PENDING)
+        self.fleet_node_clock_offset_ms = gauge(_N.FLEET_NODE_CLOCK_OFFSET_MS)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)

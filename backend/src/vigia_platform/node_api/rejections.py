@@ -55,6 +55,10 @@ from vigia_contracts.models.enumerations import RejectionCode, RejectionCompatib
 from vigia_contracts.models.rejection_response import RejectionResponse
 from vigia_contracts.versioning import CONTRACT_VERSION_HEADER
 
+from vigia_platform.catalog.application.regression import RegressionWriteFailed
+from vigia_platform.fleet.application.common import FleetWriteFailed
+from vigia_platform.fleet.application.heartbeat import HeartbeatUnavailable, NodeScopeMismatch
+from vigia_platform.fleet.application.zone_catalog_for_node import CatalogNotPublished
 from vigia_platform.identity.authz.context import NodeContextRejected
 from vigia_platform.ledger.application.writer import LedgerRejection, to_contract_rejection
 from vigia_platform.node_api.declarations import spec_of
@@ -162,7 +166,18 @@ MESSAGES: Final[Mapping[RejectionCode, str]] = MappingProxyType(
 )
 """``message_es`` genérico por código: nombra la regla, nunca contenido, rutas ni trazas."""
 
-DOMAIN_REJECTIONS: Final[Mapping[type[BaseException], RejectionCode]] = MappingProxyType({})
+DOMAIN_REJECTIONS: Final[Mapping[type[BaseException], RejectionCode]] = MappingProxyType(
+    {
+        # TASK-223 (latido y catálogo por zona): organización, planta, nodo o zona fuera del
+        # alcance del certificado; respuesta que aún no se puede componer (sin catálogo ni sobre
+        # de compuertas, sin claves); registro del expediente rechazado (se revierte entera).
+        NodeScopeMismatch: RejectionCode.NODE_ZONE_MISMATCH,
+        HeartbeatUnavailable: RejectionCode.TEMPORARILY_UNAVAILABLE,
+        CatalogNotPublished: RejectionCode.TEMPORARILY_UNAVAILABLE,
+        FleetWriteFailed: RejectionCode.TEMPORARILY_UNAVAILABLE,
+        RegressionWriteFailed: RejectionCode.TEMPORARILY_UNAVAILABLE,
+    }
+)
 """Excepciones de dominio de U-03 que una ruta de negocio puede dejar escapar, con su código.
 
 La amplían las tareas de las rutas (TASK-219, 221, 222, 223, 226) **aquí**, en el único lugar de
