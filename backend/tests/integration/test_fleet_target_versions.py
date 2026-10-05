@@ -787,6 +787,7 @@ def test_lock_order_a_publication_and_a_result_of_the_same_node_both_finish(
         entered = asyncio.Event()
         _holding(service, entered)
         version = f"1.0.{10 + round_}"
+        hb.tick()  # cada ronda publica después de la anterior (el reloj simulado no avanza solo)
         document = _document(hb, site, target_version=version, outcome="reverted")
 
         async def run(service: Any = service, entered: Any = entered, doc: Any = document) -> Any:
