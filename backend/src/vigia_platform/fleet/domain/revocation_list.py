@@ -180,7 +180,7 @@ def _whole_second(moment: datetime) -> datetime:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RevocationListStatus:
-    """La fila global ``fleet.revocation_list_state`` (gob_0021 y gob_0024)."""
+    """La fila global ``fleet.revocation_list_state`` (gob_0021 y gob_0025)."""
 
     dirty_generation: int
     published_generation: int

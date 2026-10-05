@@ -1,6 +1,6 @@
 """Número de la lista de revocación global de ``vigia-node-ca`` (TASK-220; D-7, LC-GOB-11).
 
-Revisión gob_0024. ``regenerate_revocation_list`` firma cada ``ca/crl.pem`` con un ``CRLNumber``
+Revisión gob_0025. ``regenerate_revocation_list`` firma cada ``ca/crl.pem`` con un ``CRLNumber``
 creciente (RFC 5280 §5.2.3). ``fleet.revocation_list_state`` (gob_0021) no tenía dónde guardarlo,
 y la columna ``crl_number`` de ``revocation_list_publication`` (gob_0018) solo la ve el contexto de
 operador (``operator_only``), que el barrido del worker no tiene (A-51: ningún contexto nuevo).
@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "gob_0024"
-down_revision: str | None = "gob_0023"
+revision: str = "gob_0025"
+down_revision: str | None = "gob_0024"
 branch_labels: None = None
 depends_on: None = None
 

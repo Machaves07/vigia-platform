@@ -42,6 +42,7 @@ __all__ = [
     "NODE_CREDENTIAL",
     "NODE_FLEET_RECORD",
     "NODE_INVENTORY",
+    "OBSERVABILITY_ORPHAN_CLOSE",
     "OPEN_FLEET_ALARM",
     "PLANT_FLEET_THRESHOLDS",
     "REVOCATION_LIST_DIRTY",
@@ -367,3 +368,16 @@ NODE_CONFIGURATION: Final = Table(
     _instant("updated_at"),
 )
 """Nota de §3.14 ``NodeConfiguration`` 🔒."""
+
+OBSERVABILITY_ORPHAN_CLOSE: Final = Table(
+    "observability_orphan_close",
+    METADATA,
+    _uuid("event_id", primary_key=True),
+    *_scope(),
+    _uuid("zone_id"),
+    _uuid("node_id"),
+    _uuid("opened_event_id"),
+    _uuid("ledger_record_id"),
+    _instant("received_at"),
+)
+"""Cierre huérfano de un evento de observabilidad ⛓ (``gob_0024``, TASK-221; BL §2.4)."""

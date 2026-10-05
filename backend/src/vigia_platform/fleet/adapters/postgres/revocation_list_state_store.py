@@ -1,6 +1,6 @@
 """Estado de publicación de la lista de revocación global sobre PostgreSQL (TASK-220; D-7).
 
-``fleet.revocation_list_state`` (gob_0021 y gob_0024) es una fila global sin datos de cliente ni
+``fleet.revocation_list_state`` (gob_0021 y gob_0025) es una fila global sin datos de cliente ni
 seguridad a nivel de fila; la revocación sube su marca (``PostgresRevocationMarkStore``, TASK-218)
 y ``regenerate_revocation_list`` la lee y la limpia aquí:
 
