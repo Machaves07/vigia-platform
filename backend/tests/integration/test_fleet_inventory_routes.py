@@ -418,6 +418,21 @@ def test_a_zone_administrator_sees_only_the_nodes_of_its_zone_and_never_the_deta
     assert _error(world.get(zone_admin, f"/fleet/nodes/{serving}"))[:2] == (404, "not_found")
 
 
+def test_only_the_assignments_with_fleet_read_widen_the_list(world: InventoryWorld) -> None:
+    # Coordinador de toda la organización (sin fleet.read) y administrador de una planta: la lista
+    # se reduce a la planta del rol que tiene la clave (narrowed), no a la organización.
+    first, second = world.plants
+    mine = world.declare(first, [])
+    theirs = world.declare(second, [])
+    authz = world.stack.authz
+    user = authz.add_user(world.organization)
+    authz.assign(world.organization, user, Role.COORDINATOR_SST)
+    authz.assign(world.organization, user, Role.ADMINISTRATOR, ScopeLevel.PLANT, first)
+    both = (authz.open_session(world.organization, user), None)
+    listed = {node["node_id"] for node in world.list_all(both)}
+    assert str(mine) in listed and str(theirs) not in listed
+
+
 def test_without_fleet_read_the_inventory_is_not_found(world: InventoryWorld) -> None:
     world.declare(world.plants[0], [])
     coordinator = world.stack.member(world.site, Role.COORDINATOR_SST)

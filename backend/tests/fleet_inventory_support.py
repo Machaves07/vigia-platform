@@ -31,6 +31,7 @@ from typing import Any, Final
 
 import httpx
 from sqlalchemy import event
+from sqlalchemy.dialects.postgresql.asyncpg import dialect as asyncpg_dialect
 
 from tests.authz_support import Site, StatementLog
 from tests.fleet_http_support import FleetStack, new_code
@@ -46,6 +47,7 @@ __all__ = [
     "INVENTORY_WRITTEN_TABLES",
     "InventoryWorld",
     "NodeState",
+    "as_superuser",
     "counting",
     "fingerprint",
 ]
@@ -561,6 +563,18 @@ def counting(stack: FleetStack) -> Iterator[StatementLog]:
     finally:
         for engine in engines:
             event.remove(engine, "before_cursor_execute", before)
+
+
+def as_superuser(stack: FleetStack, statement: Any, parameters: Mapping[str, Any]) -> list[Any]:
+    """Ejecuta una sentencia ``text()`` de la aplicación como **superusuario** (sin RLS).
+
+    Comprueba los filtros explícitos de organización, planta y zona de la sentencia (defensa en
+    profundidad sobre la RLS): sin ellos, el superusuario vería las filas de otra organización.
+    """
+    compiled = statement.compile(dialect=asyncpg_dialect())
+    order = compiled.positiontup or []
+    rows: list[Any] = stack.fetch(str(compiled), *(parameters[name] for name in order))
+    return rows
 
 
 def fingerprint(stack: FleetStack, organization_id: uuid.UUID) -> dict[str, str]:

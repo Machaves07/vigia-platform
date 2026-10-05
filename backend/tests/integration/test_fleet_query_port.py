@@ -26,9 +26,22 @@ from typing import Any
 import pytest
 
 from tests.fleet_http_support import FleetStack, fleet_stack
-from tests.fleet_inventory_support import InventoryWorld, NodeState, counting
+from tests.fleet_inventory_support import InventoryWorld, NodeState, as_superuser, counting
 from tests.integration.conftest import PostgresEndpoint
+from vigia_platform.fleet.adapters.postgres.assignment_queries import (
+    _ASSIGNMENT_AT,
+    _ASSIGNMENT_HISTORY,
+    _NODES_BY_ZONE,
+)
+from vigia_platform.fleet.adapters.postgres.inventory_queries import (
+    _HISTORY,
+    _INVENTORY,
+    _THRESHOLDS,
+    inventory_parameters,
+    scope_parameters,
+)
 from vigia_platform.fleet.application.inventory_read import FleetInventory
+from vigia_platform.fleet.domain.fleet_thresholds import FleetThresholds
 from vigia_platform.fleet.ports import (
     FleetQueryInvalid,
     FleetQueryPort,
@@ -186,6 +199,79 @@ def test_a_zone_context_sees_only_its_zone_and_the_nodes_serving_it(world: Inven
     for operation in _operations(port, zone, serving, world.now()).values():
         world.stack.run(operation(context))
     assert world.stack.run(port.node(context, serving)).zones == (zone,)
+
+
+def test_the_explicit_filters_isolate_even_without_row_level_security(
+    world: InventoryWorld,
+) -> None:
+    # Defensa en profundidad: las sentencias, ejecutadas como superusuario (sin RLS), siguen
+    # limitadas por su filtro explícito de organización, planta y zona.
+    first, second = world.plants
+    zone, sibling = world.zones(first)[:2]
+    mine = world.declare(first, [zone])
+    sibling_node = world.declare(first, [sibling])
+    elsewhere = world.declare(second, [world.zones(second)[0]])
+    other = InventoryWorld.build(world.stack)
+    their_zone = other.zones(other.plants[0])[0]
+    theirs = other.declare(other.plants[0], [their_zone])
+    other.write_thresholds(other.plants[0], FleetThresholds(plant_id=other.plants[0]))
+    now = world.now()
+    organization = _context(world)
+
+    def inventory(context: ScopeContext, **extra: Any) -> set[str]:
+        parameters = inventory_parameters(context, now, limit=100, **extra)
+        return {str(row["node_id"]) for row in as_superuser(world.stack, _INVENTORY, parameters)}
+
+    assert inventory(organization) == {str(mine), str(sibling_node), str(elsewhere)}
+    assert inventory(organization, node_id=theirs) == set()
+    assert inventory(_context(world, ScopeLevel.PLANT, first)) == {str(mine), str(sibling_node)}
+    zone_context = _context(world, ScopeLevel.ZONE, zone)
+    assert inventory(zone_context) == {str(mine)}
+    (row,) = as_superuser(
+        world.stack, _INVENTORY, inventory_parameters(zone_context, now, node_id=mine, limit=1)
+    )
+    assert list(row["zones"]) == [zone]
+
+    def by_zone(statement: Any, context: ScopeContext, zone_id: uuid.UUID) -> list[Any]:
+        parameters = {
+            "organization_id": context.organization_id,
+            "zone_id": zone_id,
+            **scope_parameters(context),
+            "at": now,
+            "start": now - DAY,
+            "end": now + DAY,
+        }
+        return as_superuser(world.stack, statement, parameters)
+
+    for statement in (_NODES_BY_ZONE, _ASSIGNMENT_AT, _ASSIGNMENT_HISTORY):
+        assert by_zone(statement, organization, zone), statement
+        assert by_zone(statement, organization, their_zone) == []
+        assert by_zone(statement, _context(world, ScopeLevel.PLANT, second), zone) == []
+        assert by_zone(statement, zone_context, sibling) == []
+    thresholds = {"organization_id": world.organization, "plant_id": other.plants[0]}
+    assert as_superuser(world.stack, _THRESHOLDS, thresholds) == []
+    history = {
+        "organization_id": world.organization,
+        "plant_id": other.plants[0],
+        "node_id": theirs,
+        "since": now - timedelta(days=90),
+        "after_received_at": None,
+        "after_heartbeat_id": None,
+        "limit": 10,
+    }
+    world.stack.execute(
+        "INSERT INTO fleet.heartbeat_history (heartbeat_id, organization_id, plant_id, node_id,"
+        " received_at, sent_at, payload_summary) VALUES ($1, $2, $3, $4, $5, $5, '{}')",
+        uuid.uuid4(),
+        other.organization,
+        other.plants[0],
+        theirs,
+        now,
+    )
+    assert as_superuser(world.stack, _HISTORY, history) == []
+    assert as_superuser(
+        world.stack, _HISTORY, {**history, "organization_id": other.organization}
+    ), "la sentencia sí ve la historia de su organización"
 
 
 def test_a_context_without_scopes_sees_nothing(world: InventoryWorld) -> None:
