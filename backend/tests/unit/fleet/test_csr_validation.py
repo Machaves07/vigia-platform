@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import uuid
+from typing import Any
 
 import pytest
 from cryptography import x509
@@ -22,7 +23,17 @@ from cryptography.x509.oid import NameOID
 from hypothesis import given
 from hypothesis import strategies as st
 
-from tests.fleet_credentials_support import csr_pem, local_ip, rsa_key
+from tests.fleet_credentials_support import (
+    BASIC_CONSTRAINTS_OID_DER,
+    SAN_OID_DER,
+    X400_SAN_VALUE,
+    basic_constraints_value,
+    csr_pem,
+    hostile_csr_pem,
+    local_ip,
+    rsa_key,
+    san_value,
+)
 from vigia_platform.fleet.adapters.ca.csr import (
     CLIENT_CSR_FIELD,
     MAX_CSR_PEM_CHARS,
@@ -114,6 +125,45 @@ def test_anything_that_is_not_a_csr_is_rejected(value: object) -> None:
     _rejected(value, SERVER_CSR_FIELD)
 
 
+HOSTILE_EXTENSIONS = {
+    "san_duplicada": (
+        (SAN_OID_DER, san_value(x509.DNSName("nodo.local"))),
+        (SAN_OID_DER, san_value(x509.DNSName("otro.local"))),
+    ),
+    "basic_constraints_duplicada": (
+        (BASIC_CONSTRAINTS_OID_DER, basic_constraints_value()),
+        (BASIC_CONSTRAINTS_OID_DER, basic_constraints_value()),
+    ),
+    "san_x400": ((SAN_OID_DER, X400_SAN_VALUE),),
+}
+"""CSR bien autofirmadas cuyas extensiones ``cryptography`` no lee: ``DuplicateExtension`` y
+``UnsupportedGeneralNameType``, que no heredan de ``ValueError`` (revisión de VIG-151, ronda 1)."""
+
+
+@pytest.mark.parametrize("case", sorted(HOSTILE_EXTENSIONS))
+@pytest.mark.parametrize("field", [CLIENT_CSR_FIELD, SERVER_CSR_FIELD])
+def test_a_well_signed_csr_with_unreadable_extensions_is_rejected(case: str, field: str) -> None:
+    pem = hostile_csr_pem(str(NODE), HOSTILE_EXTENSIONS[case])
+    # La autofirma es válida: el rechazo sale de las extensiones, no de la firma.
+    assert x509.load_pem_x509_csr(pem.encode()).is_signature_valid
+    _rejected(pem, field)
+
+
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda pem: "texto antes\n" + pem,
+        lambda pem: pem + "texto después\n",
+        lambda pem: pem + pem,
+        lambda pem: pem + "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
+    ],
+)
+def test_only_one_pem_block_without_surrounding_text_is_accepted(wrap: Any) -> None:
+    pem = csr_pem(str(NODE))
+    assert read_csr("\n " + pem + " \n", field=CLIENT_CSR_FIELD).node_id == NODE
+    _rejected(wrap(pem))
+
+
 @given(st.binary(max_size=600))
 def test_arbitrary_pem_bodies_never_escape_as_other_errors(body: bytes) -> None:
     import base64
@@ -143,6 +193,8 @@ def _server(*names: x509.GeneralName) -> object:
         (x509.DNSName("nodo-prensa.local"), "nodo-prensa.local"),
         (x509.DNSName("nodo1.planta.internal"), "nodo1.planta.internal"),
         (x509.DNSName("nodo1"), "nodo1"),
+        # Una IPv4 privada escrita como IPv6 mapeada se decide (y se emite) como IPv4.
+        (local_ip("::ffff:10.0.0.1"), ipaddress.ip_address("10.0.0.1")),
     ],
 )
 def test_a_single_local_announced_name_is_the_host(
@@ -158,6 +210,12 @@ def test_a_single_local_announced_name_is_the_host(
         (local_ip("8.8.8.8"),),
         (local_ip("127.0.0.1"),),
         (local_ip("0.0.0.0"),),  # noqa: S104 - es el valor que se rechaza
+        (local_ip("169.254.10.20"),),  # enlace local
+        (local_ip("fe80::1"),),  # enlace local IPv6
+        (local_ip("::ffff:127.0.0.1"),),  # bucle local mapeado
+        (local_ip("::ffff:8.8.8.8"),),  # pública mapeada
+        (x509.DNSName("localhost"),),
+        (x509.DNSName("localhost.localdomain"),),
         (x509.DNSName("vigia.example.com"),),
         (x509.DNSName("NODO.local"),),
         (x509.DNSName("1234"),),

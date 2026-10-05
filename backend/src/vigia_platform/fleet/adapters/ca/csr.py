@@ -1,11 +1,14 @@
 """Validación de las solicitudes de firma del nodo (BR-GOB-63; LC-GOB-11; tech-stack §2.2).
 
 ``read_csr`` carga una CSR PKCS #10 con ``cryptography.x509.load_pem_x509_csr`` y exige, en este
-orden: PEM de 1 a 8 192 caracteres; algoritmo **ECDSA con SHA-256**; clave pública EC
-**SECP256R1**; autofirma verificada (``is_signature_valid``); extensiones legibles; y un sujeto
-con **exactamente un** nombre común que es un UUID canónico (el ``node_id`` que propone el nodo).
-Cualquier otra forma es ``CsrRejected`` con el campo del cuerpo que la trajo: la ruta responde
-``schema_invalid`` con ese ``field`` (422, A-37).
+orden: PEM de 1 a 8 192 caracteres con **un solo** bloque ``CERTIFICATE REQUEST`` y nada más que
+espacios alrededor; algoritmo **ECDSA con SHA-256**; clave pública EC **SECP256R1**; autofirma
+verificada (``is_signature_valid``); extensiones legibles (una extensión repetida o un nombre
+alternativo de un tipo que ``cryptography`` no lee también es una CSR no válida); y un sujeto con
+**exactamente un** nombre común que es un UUID canónico (el ``node_id`` que propone el nodo).
+Cualquier otra forma, y **cualquier** excepción al leerla, es ``CsrRejected`` con el campo del
+cuerpo que la trajo: la ruta responde ``schema_invalid`` con ese ``field`` (422, A-37), nunca un
+transitorio.
 
 **Nada de la CSR pasa al certificado** salvo su clave pública (PAT-GOB-SEG-05): sujeto,
 extensiones y vigencia los compone ``certificate_profiles`` desde el estado de la plataforma. El
@@ -15,9 +18,10 @@ la dirección de la vista en vivo, y se vuelve a escribir desde cero tras compro
 **Dirección de la vista en vivo** (``announced_host``; pendiente nº 29, nota U03-H-07): si el nodo
 ya anunció ``live_view_local_url`` (A-35), manda su anfitrión; si no, el **único** nombre
 alternativo de la CSR de servidor. En los dos casos tiene que ser una dirección privada (IPv4
-privada o IPv6 local única, nunca bucle local ni sin especificar) o un nombre local (una etiqueta
-sola, o terminado en ``.local``, ``.lan``, ``.internal`` o ``.home.arpa``). Nunca una dirección
-pública ni un nombre de Internet: el certificado de servidor no vale fuera de la planta.
+privada o IPv6 local única; una IPv4 escrita como IPv6 mapeada se decide como IPv4; nunca bucle
+local, enlace local, multidifusión ni sin especificar) o un nombre local (una etiqueta sola, o
+terminado en ``.local``, ``.lan``, ``.internal`` o ``.home.arpa``; nunca ``localhost``). Nunca una
+dirección pública ni un nombre de Internet: el certificado de servidor no vale fuera de la planta.
 
 Módulo puro: sin FastAPI, sin SQLAlchemy y sin leer la hora del sistema.
 """
@@ -32,7 +36,6 @@ from typing import Final
 from urllib.parse import urlsplit
 
 from cryptography import x509
-from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID, SignatureAlgorithmOID
 
@@ -57,6 +60,9 @@ _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 _LABEL: Final = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 _LOCAL_SUFFIXES: Final = (".local", ".lan", ".internal", ".home.arpa")
 _MAX_HOST_CHARS: Final = 253
+_LOOPBACK_NAMES: Final = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+_PEM_BEGIN: Final = "-----BEGIN CERTIFICATE REQUEST-----"
+_PEM_END: Final = "-----END CERTIFICATE REQUEST-----"
 
 type LiveViewHost = ipaddress.IPv4Address | ipaddress.IPv6Address | str
 """La dirección privada o el nombre local de la vista en vivo del nodo."""
@@ -85,6 +91,14 @@ def read_csr(pem: object, *, field: str) -> NodeCsr:
     """La CSR de ``pem`` validada; ``CsrRejected(field)`` ante cualquier otra forma."""
     if not isinstance(pem, str) or not 0 < len(pem) <= MAX_CSR_PEM_CHARS:
         raise CsrRejected(field)
+    body = pem.strip()
+    if (
+        not body.startswith(_PEM_BEGIN)
+        or not body.endswith(_PEM_END)
+        or body.count("-----BEGIN") != 1
+        or body.count("-----END") != 1
+    ):
+        raise CsrRejected(field)  # un solo bloque, sin texto alrededor
     try:
         csr = x509.load_pem_x509_csr(pem.encode("ascii"))
         if csr.signature_algorithm_oid != SignatureAlgorithmOID.ECDSA_WITH_SHA256:
@@ -98,7 +112,13 @@ def read_csr(pem: object, *, field: str) -> NodeCsr:
             raise CsrRejected(field)
         announced = _announced(csr)
         common_names = csr.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-    except (ValueError, TypeError, UnicodeError, UnsupportedAlgorithm):
+    except CsrRejected:
+        raise
+    except Exception:
+        # Entrada hostil del nodo, no fallo de la plataforma: además de ValueError, TypeError,
+        # UnicodeError y UnsupportedAlgorithm, ``cryptography`` lanza ``DuplicateExtension`` o
+        # ``UnsupportedGeneralNameType`` (que no heredan de ValueError) al leer las extensiones.
+        # Todo es schema_invalid (422), nunca un transitorio.
         raise CsrRejected(field) from None
     if len(common_names) != 1:
         raise CsrRejected(field)
@@ -119,12 +139,15 @@ def _announced(csr: x509.CertificateSigningRequest) -> tuple[x509.GeneralName, .
 
 def _local_ip(text: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     try:
-        address = ipaddress.ip_address(text)
+        address: ipaddress.IPv4Address | ipaddress.IPv6Address = ipaddress.ip_address(text)
     except ValueError:
         return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped  # ::ffff:a.b.c.d se decide como a.b.c.d
     if (
         not address.is_private
         or address.is_loopback
+        or address.is_link_local
         or address.is_unspecified
         or address.is_multicast
         or address.is_reserved
@@ -135,7 +158,7 @@ def _local_ip(text: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None
 
 def _local_name(text: str) -> str | None:
     name = text.lower()
-    if not 0 < len(name) <= _MAX_HOST_CHARS or name != text:
+    if not 0 < len(name) <= _MAX_HOST_CHARS or name != text or name in _LOOPBACK_NAMES:
         return None
     labels = name.split(".")
     if not all(_LABEL.fullmatch(label) for label in labels):

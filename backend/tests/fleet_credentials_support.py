@@ -72,14 +72,79 @@ def _der(tag: int, value: bytes) -> bytes:
     return bytes([tag, 0x80 | len(raw)]) + raw + value
 
 
-def _sha1_csr(der: bytes, key: ec.EllipticCurvePrivateKey) -> bytes:
-    """La misma solicitud firmada con ECDSA-SHA1 (``cryptography`` ya no la construye)."""
+_ECDSA_WITH_SHA256: bytes = bytes.fromhex("300a06082a8648ce3d040302")
+"""``AlgorithmIdentifier`` de ``ecdsa-with-SHA256`` (1.2.840.10045.4.3.2)."""
+
+
+def _resigned(
+    der: bytes,
+    key: ec.EllipticCurvePrivateKey,
+    *,
+    algorithm: hashes.HashAlgorithm,
+    algorithm_id: bytes,
+) -> bytes:
+    """La ``CertificationRequestInfo`` de ``der`` firmada de nuevo con ``key``."""
     outer_start, _ = _tlv(der, 0)
     _, info_end = _tlv(der, outer_start)
     info = der[outer_start:info_end]
-    signature = key.sign(info, ec.ECDSA(hashes.SHA1()))  # noqa: S303 - la forma que se rechaza
-    body = info + _ECDSA_WITH_SHA1 + _der(0x03, b"\x00" + signature)
-    return _der(0x30, body)
+    signature = key.sign(info, ec.ECDSA(algorithm))
+    return _der(0x30, info + algorithm_id + _der(0x03, b"\x00" + signature))
+
+
+def _sha1_csr(der: bytes, key: ec.EllipticCurvePrivateKey) -> bytes:
+    """La misma solicitud firmada con ECDSA-SHA1 (``cryptography`` ya no la construye)."""
+    return _resigned(
+        der,
+        key,
+        algorithm=hashes.SHA1(),  # noqa: S303 - la forma que se rechaza
+        algorithm_id=_ECDSA_WITH_SHA1,
+    )
+
+
+SAN_OID_DER = bytes.fromhex("0603551d11")
+BASIC_CONSTRAINTS_OID_DER = bytes.fromhex("0603551d13")
+X400_SAN_VALUE = bytes.fromhex("3002a300")
+"""``SubjectAlternativeName`` con un único ``x400Address`` vacío (que ``cryptography`` no lee)."""
+_PLACEHOLDERS = ("1.2.3.4", "1.2.3.5", "1.2.3.6")
+"""OID de 3 bytes (``06 03 2a 03 0x``), del mismo tamaño que los de SAN y basicConstraints."""
+
+
+def hostile_csr_pem(
+    common_name: str, extensions: Sequence[tuple[bytes, bytes]], *, key: Any = None
+) -> str:
+    """CSR P-256 **bien autofirmada** con extensiones crudas ``(OID DER, valor DER)``.
+
+    Sirve para lo que ``CertificateSigningRequestBuilder`` no deja construir: una extensión
+    repetida (dos SAN, dos basicConstraints) o un ``GeneralName`` no soportado. Cada extensión nace
+    con un OID de relleno de 3 bytes, se reescribe con el OID pedido y la solicitud se vuelve a
+    firmar con ECDSA-SHA256: la autofirma verifica, el fallo está solo en las extensiones.
+    """
+    private = key if key is not None else new_key()
+    if len(extensions) > len(_PLACEHOLDERS):
+        raise ValueError("demasiadas extensiones")
+    builder = x509.CertificateSigningRequestBuilder().subject_name(
+        x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    )
+    for placeholder, (_, value) in zip(_PLACEHOLDERS, extensions, strict=False):
+        builder = builder.add_extension(
+            x509.UnrecognizedExtension(x509.ObjectIdentifier(placeholder), value), critical=False
+        )
+    der = builder.sign(private, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
+    for placeholder, (oid, _) in zip(_PLACEHOLDERS, extensions, strict=False):
+        encoded = bytes.fromhex("06032a03") + bytes([int(placeholder.rsplit(".", 1)[1])])
+        if der.count(encoded) != 1 or len(oid) != len(encoded):
+            raise ValueError("no se puede reescribir el OID de relleno")
+        der = der.replace(encoded, oid)
+    signed = _resigned(der, private, algorithm=hashes.SHA256(), algorithm_id=_ECDSA_WITH_SHA256)
+    return x509.load_der_x509_csr(signed).public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+def san_value(*names: x509.GeneralName) -> bytes:
+    return x509.SubjectAlternativeName(list(names)).public_bytes()
+
+
+def basic_constraints_value() -> bytes:
+    return x509.BasicConstraints(ca=False, path_length=None).public_bytes()
 
 
 def csr_pem(

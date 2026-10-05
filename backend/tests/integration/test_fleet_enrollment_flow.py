@@ -47,7 +47,16 @@ from vigia_contracts.models.api import (
     parse_rejection_response,
 )
 
-from tests.fleet_credentials_support import local_ip, rsa_key
+from tests.fleet_credentials_support import (
+    BASIC_CONSTRAINTS_OID_DER,
+    SAN_OID_DER,
+    X400_SAN_VALUE,
+    basic_constraints_value,
+    hostile_csr_pem,
+    local_ip,
+    rsa_key,
+    san_value,
+)
 from tests.fleet_enrollment_support import (
     ENROLLMENT_PATH,
     INGEST_BASE_URL,
@@ -204,6 +213,54 @@ def test_an_invalid_csr_is_schema_invalid_before_the_code(
     # Antes que el código: ni se consume ni deja intento.
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.attempts(setup.node_id) == []
+
+
+HOSTILE = {
+    "san_duplicada": (
+        (SAN_OID_DER, san_value(x509.DNSName("nodo.local"))),
+        (SAN_OID_DER, san_value(x509.DNSName("otro.local"))),
+    ),
+    "basic_constraints_duplicada": (
+        (BASIC_CONSTRAINTS_OID_DER, basic_constraints_value()),
+        (BASIC_CONSTRAINTS_OID_DER, basic_constraints_value()),
+    ),
+    "san_x400": ((SAN_OID_DER, X400_SAN_VALUE),),
+}
+
+
+@pytest.mark.parametrize("field", [CLIENT_CSR_FIELD, SERVER_CSR_FIELD])
+@pytest.mark.parametrize("case", sorted(HOSTILE))
+def test_a_hostile_csr_is_schema_invalid_in_enrollment_and_rotation(
+    world: EnrollmentWorld, case: str, field: str
+) -> None:
+    # Revisión de VIG-151, ronda 1: una extensión repetida o un GeneralName no soportado salían
+    # de read_csr como excepción no controlada y la ruta respondía 503 reintentable.
+    setup = world.declared()
+    code = world.code(setup)
+    body = world.body(setup, code)
+    body[field] = hostile_csr_pem(str(setup.node_id), HOSTILE[case])
+    response = world.post(ENROLLMENT_PATH, body)
+    rejection = parse_rejection_response(response.content)
+    assert (response.status_code, rejection.code.value, rejection.field) == (
+        422,
+        "schema_invalid",
+        field,
+    )
+    assert rejection.retryable is False
+    assert world.code_statuses(setup.node_id) == ["active"]
+    assert world.attempts(setup.node_id) == []
+
+    enrolled = world.enroll(setup, code)
+    rotation = world.rotation_body(setup.node_id)
+    rotation[field] = hostile_csr_pem(str(setup.node_id), HOSTILE[case])
+    refused = world.post(ROTATION_PATH, rotation, enrolled.headers)
+    rejection = parse_rejection_response(refused.content)
+    assert (refused.status_code, rejection.code.value, rejection.field) == (
+        422,
+        "schema_invalid",
+        field,
+    )
+    assert [row["status"] for row in world.credentials(setup.node_id)] == ["active"]
 
 
 def test_a_wrong_code_is_rejected_and_its_attempt_is_registered(world: EnrollmentWorld) -> None:
