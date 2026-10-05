@@ -23,6 +23,7 @@ from vigia_platform.catalog.application.regression import RegressionService
 from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
+from vigia_platform.catalog.application.walk_test import WalkTestService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -56,6 +57,8 @@ class CatalogHttp:
     """Acuerdo de uso: alta, confirmación y aprobación (LC-GOB-04, VIG-149)."""
     transparency: TransparencyService | None = None
     """``GET /zones/{zone_id}/transparency`` (LC-GOB-04, VIG-149)."""
+    walk_tests: WalkTestService | None = None
+    """Sesión de walk-test, pasos, pases y reapertura (LC-GOB-06, VIG-150)."""
 
 
 def installed[T](service: T | None) -> T:
