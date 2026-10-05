@@ -14,7 +14,7 @@ evaluación **levanta** o **baja** la alarma, sabiendo si hay una abierta. Nunca
 - El resto (``node_mute``, ``version_retiring``, ``simulated_adapter_in_productive`` y
   ``certificate_expiring``) se decide en la **primera** evaluación (``REQUIRED`` de 1).
 
-``Evaluation`` es lo que guarda ``fleet.fleet_alarm_evaluation`` (gob_0024) para las clases con
+``Evaluation`` es lo que guarda ``fleet.fleet_alarm_evaluation`` (gob_0025) para las clases con
 estado (``STATEFUL_KINDS``): el valor observado, cuántas evaluaciones seguidas lo repiten (con tope
 en ``REQUIRED_CONSECUTIVE``: más no cambia ninguna decisión) y desde cuándo.
 

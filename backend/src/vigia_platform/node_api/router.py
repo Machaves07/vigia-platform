@@ -26,9 +26,12 @@ orden fijo (BR-GOB-84, parte común de PR-GOB-02):
 4. **esquema**: el lector estricto de U-01 (``schema_invalid`` con ``field`` = ruta JSON) y las
    cabeceras y parámetros de la operación (``Idempotency-Key`` única, ``clip_id`` UUID v7).
 
-Entre (3) y (4), una operación puede declarar ``before_schema``: la parte del alcance que depende
-del cuerpo (TASK-221: organización, planta, nodo y zona del contenido), para que el paso 2 gane al
-4. El resultado queda en ``RequestState.node`` (``NodeRequest``) y la operación lo recibe.
+Entre (3) y (4), una operación puede declarar ``before_schema`` (sin consulta) y ``check_body``
+(con consulta): la parte del alcance que depende del cuerpo (TASK-221: organización, planta, nodo y
+zona del contenido asignada en el instante del hecho), para que el paso 2 gane al 4. El resultado
+queda en ``RequestState.node`` (``NodeRequest``) y la operación lo recibe. ``on_rejection`` recibe
+todo fallo posterior a resolver la identidad del nodo (y el de la versión, resolviéndola solo para
+eso) antes de responderlo: la ingesta deja así el rastro de cada rechazo permanente (BR-GOB-96).
 """
 
 from __future__ import annotations
@@ -50,7 +53,7 @@ from vigia_contracts.models._base import ContractModel
 from vigia_contracts.models.enumerations import CompatibilityResult, RejectionCode
 from vigia_contracts.server_skeleton import create_router
 
-from vigia_platform.identity.authz.context import NodeScope, PresentedNode
+from vigia_platform.identity.authz.context import NodeContextRejected, NodeScope, PresentedNode
 from vigia_platform.node_api.declarations import NodeOperationSpec, PathParameter, spec_of
 from vigia_platform.node_api.identity import NodeIdentity
 from vigia_platform.node_api.limits import NodeRateLimits
@@ -113,6 +116,9 @@ class NodeRequest:
     """El cuerpo validado con el modelo estricto de U-01."""
     idempotency_key: str | None = None
     path: Mapping[str, str] = field(default_factory=dict)
+    contract_version: str | None = None
+    """El valor de ``X-Vigia-Contract-Version`` que pasó el paso 1 (TASK-221 lo compara con
+    ``contract_version`` del cuerpo)."""
     source_address: str | None = field(default=None, repr=False)
     """El origen de red (el mismo que usa el límite por origen): solo para el ``source_ip_hash``
     del intento de alta (TASK-219); nunca sale en claro."""
@@ -130,6 +136,8 @@ class NodeReply:
 
 
 type BeforeSchema = Callable[[NodeScope | None, object], None]
+type CheckBody = Callable[[NodeScope, object, datetime], Awaitable[None]]
+type OnRejection = Callable[[NodeScope, BaseException, datetime], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +147,14 @@ class NodeOperation:
     handle: Callable[[NodeRequest], Awaitable[NodeReply]]
     before_schema: BeforeSchema | None = None
     """La parte del alcance que depende del cuerpo (JSON sin validar o ``None``)."""
+    check_body: CheckBody | None = None
+    """Como ``before_schema``, pero con consulta (TASK-221: la zona asignada en el instante del
+    hecho): recibe el alcance del nodo, el JSON sin validar y el instante de recepción."""
+    on_rejection: OnRejection | None = None
+    """Se llama con cualquier fallo de la petición una vez resuelta la identidad del nodo (también
+    el de la versión: la identidad se resuelve entonces solo para esto), antes de responderlo
+    (TASK-221: la auditoría de todo rechazo permanente, BR-GOB-96). Lo que lance sustituye al
+    fallo (fallo cerrado: sin rastro, transitorio)."""
 
 
 # --- Verificación previa -------------------------------------------------------------------------
@@ -245,28 +261,42 @@ class NodeApiGate:
             node_id=presented.node_id if presented is not None else None,
             address=_client_address(scope),
         )
+        operation = self._operations.get(route)
+        versions = headers.getlist(CONTRACT_VERSION_HEADER)
         # (1) versión.
-        result = check_version(headers.getlist(CONTRACT_VERSION_HEADER), self._policy, now)
+        try:
+            result = check_version(versions, self._policy, now)
+        except NodeRejection as rejection:
+            if certificate_rejection is None and presented is not None:
+                await self._version_rejected(operation, presented, correlation_id, rejection, now)
+            raise
         # (2) certificado y alcance.
         node: NodeScope | None = None
         if route.mutual_tls:
             if certificate_rejection is not None or presented is None:
                 raise certificate_rejection or NodeRejection(RejectionCode.NODE_NOT_ENROLLED)
             node = await self._identity.resolve(presented, correlation_id)
-            if spec.path_parameter is PathParameter.ZONE_ID:
+        try:
+            if node is not None and spec.path_parameter is PathParameter.ZONE_ID:
                 self._require_zone(node, request.path_params.get("zone_id"))
-        # (3) tamaño.
-        body = await self._body(request, spec)
-        operation = self._operations.get(route)
-        if operation is not None and operation.before_schema is not None:
-            operation.before_schema(node, _loose_json(body))
-        # (4) esquema.
-        document = spec.parser(body) if spec.parser is not None else None
-        idempotency_key = self._idempotency_key(spec, headers.getlist(IDEMPOTENCY_HEADER))
-        if spec.path_parameter is PathParameter.CLIP_ID:
-            clip_id = request.path_params.get("clip_id")
-            if not isinstance(clip_id, str) or _UUID7.fullmatch(clip_id) is None:
-                raise NodeRejection(RejectionCode.SCHEMA_INVALID, field="clip_id")
+            # (3) tamaño.
+            body = await self._body(request, spec)
+            loose = _loose_json(body)
+            if operation is not None and operation.before_schema is not None:
+                operation.before_schema(node, loose)
+            if operation is not None and operation.check_body is not None and node is not None:
+                await operation.check_body(node, loose, now)
+            # (4) esquema.
+            document = spec.parser(body) if spec.parser is not None else None
+            idempotency_key = self._idempotency_key(spec, headers.getlist(IDEMPOTENCY_HEADER))
+            if spec.path_parameter is PathParameter.CLIP_ID:
+                clip_id = request.path_params.get("clip_id")
+                if not isinstance(clip_id, str) or _UUID7.fullmatch(clip_id) is None:
+                    raise NodeRejection(RejectionCode.SCHEMA_INVALID, field="clip_id")
+        except Exception as error:
+            if node is not None and operation is not None and operation.on_rejection is not None:
+                await operation.on_rejection(node, error, now)
+            raise
         state.node = NodeRequest(
             route=route,
             correlation_id=correlation_id,
@@ -278,8 +308,29 @@ class NodeApiGate:
             document=document,
             idempotency_key=idempotency_key,
             path={key: str(value) for key, value in request.path_params.items()},
+            contract_version=versions[0],
             source_address=_client_address(scope),
         )
+
+    async def _version_rejected(
+        self,
+        operation: NodeOperation | None,
+        presented: PresentedNode,
+        correlation_id: uuid.UUID,
+        rejection: NodeRejection,
+        now: datetime,
+    ) -> None:
+        """El paso 1 rechazó: la operación que lo pide recibe el rechazo con la identidad del nodo.
+
+        Sin identidad (nodo no dado de alta o revocado) no hay organización donde registrarlo.
+        """
+        if operation is None or operation.on_rejection is None:
+            return
+        try:
+            node = await self._identity.resolve(presented, correlation_id)
+        except NodeContextRejected:
+            return
+        await operation.on_rejection(node, rejection, now)
 
     @staticmethod
     def _require_zone(node: NodeScope, value: object) -> None:

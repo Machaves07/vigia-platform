@@ -591,6 +591,7 @@ class EscritorExpediente:
         occurred_at: datetime | None = None,
         projection: Callable[[Transaction], Awaitable[None]] | None = None,
         transaction: Transaction | None = None,
+        record_id: uuid.UUID | None = None,
     ) -> Receipt | LedgerRejection:
         """Escribe un registro; ``Receipt`` tras confirmar, o el rechazo del primer fallo.
 
@@ -611,6 +612,10 @@ class EscritorExpediente:
         El ``Receipt`` llega antes de confirmar y vale solo si el llamador confirma; un fallo de
         la escritura (cadena ocupada, disparador) sale como excepción y revierte su transacción.
 
+        ``record_id`` (UUID v7) es el identificador que tendrá el registro si se escribe; sin él,
+        el escritor genera uno. Lo da quien tiene que citarlo en el propio contenido antes de
+        escribir (``receipt.platform_record_id`` de la ingesta de U-03, TASK-221).
+
         ``operation_duration_ms`` (NFR-NUC-01) mide, desde la llamada, cada escritura que llega al
         paso 7 en una transacción propia y termina con resultado: ``ledger_write_with_evidence``
         si verificó evidencias y ``ledger_write`` si no. Un rechazo de los pasos 1 a 6 o un
@@ -629,6 +634,8 @@ class EscritorExpediente:
             or transaction.context.organization_id != context.organization_id
         ):
             raise TypeError("transaction debe ser una Transaction de la organización del contexto")
+        if record_id is not None and (type(record_id) is not uuid.UUID or record_id.version != 7):
+            raise TypeError("record_id debe ser un uuid.UUID v7")
         try:
             prepared = await self._prepare(
                 context, record_type, content, scope, events, transaction
@@ -640,14 +647,15 @@ class EscritorExpediente:
         if transaction is not None:
             if projection is not None:
                 await projection(transaction)
-            record_id = uuid7(self._clock, self._random_bytes)
+            if record_id is None:
+                record_id = uuid7(self._clock, self._random_bytes)
             inserted = await self._insert(transaction, context, prepared, record_id, occurred_at)
             return Receipt(
                 record_id=inserted.record_id,
                 received_at=inserted.received_at,
                 status=AcceptanceStatus.ACCEPTED,
             )
-        result = await self._commit(context, prepared, occurred_at, projection)
+        result = await self._commit(context, prepared, occurred_at, projection, record_id)
         operation = (
             Operation.LEDGER_WRITE_WITH_EVIDENCE if prepared.evidences else Operation.LEDGER_WRITE
         )
@@ -916,8 +924,10 @@ class EscritorExpediente:
         prepared: _Prepared,
         occurred_at: datetime | None,
         projection: Callable[[Transaction], Awaitable[None]] | None = None,
+        record_id: uuid.UUID | None = None,
     ) -> Receipt | LedgerRejection:
-        record_id = uuid7(self._clock, self._random_bytes)
+        if record_id is None:
+            record_id = uuid7(self._clock, self._random_bytes)
         metrics = self._metrics_port()
         chain = {"chain_kind": "organization" if prepared.chain_plant is None else "plant"}
         started = 0.0

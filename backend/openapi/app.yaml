@@ -3196,6 +3196,83 @@
       "x-vigia-content-encodings":
         - "identity"
         - "gzip"
+  "/api/nodes/detection-reviews":
+    "post":
+      "tags":
+        - "records"
+      "summary": "Presentación de una detección para revisión."
+      "operationId": "post_detection_review"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Receipt"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Conflict"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 262144
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
   "/api/nodes/enrollment":
     "post":
       "tags":
@@ -3256,6 +3333,83 @@
       "x-vigia-content-encodings":
         - "identity"
         - "gzip"
+  "/api/nodes/findings":
+    "post":
+      "tags":
+        - "records"
+      "summary": "Presentación de un hallazgo."
+      "operationId": "post_finding"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Receipt"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Conflict"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 262144
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
   "/api/nodes/heartbeats":
     "post":
       "tags":
@@ -3287,6 +3441,83 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Forbidden"
+        "413":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Request Entity Too Large"
+        "429":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Too Many Requests"
+        "503":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Service Unavailable"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+      "parameters":
+        - "name": "X-Vigia-Contract-Version"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+        - "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "schema":
+            "type": "string"
+      "x-vigia-mutual-tls": true
+      "x-vigia-max-bytes": 65536
+      "x-vigia-content-encodings":
+        - "identity"
+        - "gzip"
+  "/api/nodes/observability-events":
+    "post":
+      "tags":
+        - "records"
+      "summary": "Presentación de un evento de observabilidad."
+      "operationId": "post_observability_event"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Receipt"
+        "400":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Bad Request"
+        "401":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unauthorized"
+        "403":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Forbidden"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Conflict"
         "413":
           "content":
             "application/json":
@@ -3392,6 +3623,13 @@
       "x-vigia-content-encodings": []
 "components":
   "schemas":
+    "AcceptanceStatus":
+      "type": "string"
+      "enum":
+        - "accepted"
+        - "accepted_duplicate"
+      "title": "AcceptanceStatus"
+      "description": "Resultado de aceptación de un registro por la plataforma."
     "ActivationEnrollment":
       "properties":
         "provisioning_uri":
@@ -7781,6 +8019,22 @@
       "required":
         - "assignments"
       "title": "ReactivateBody"
+    "Receipt":
+      "properties":
+        "platform_record_id":
+          "$ref": "#/components/schemas/UUID"
+        "received_at":
+          "$ref": "#/components/schemas/Timestamp"
+        "status":
+          "$ref": "#/components/schemas/AcceptanceStatus"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "platform_record_id"
+        - "received_at"
+        - "status"
+      "title": "Receipt"
+      "description": "Recibo que la plataforma añade a un registro al aceptarlo (domain-entities.md §2.7); también es el cuerpo de la respuesta de aceptación. El nodo nunca lo rellena. `received_at` ordena la cadena de hashes del expediente."
     "RecordCursorOut":
       "properties":
         "received_at":
