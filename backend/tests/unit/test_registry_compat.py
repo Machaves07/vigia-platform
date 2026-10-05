@@ -415,10 +415,12 @@ def test_u02_registers_its_fourteen_types_once() -> None:
     registry = RecordTypeRegistry()
     register_u02_record_types(registry)
     assert len(registry.record_types()) == 14
-    # audit_partition_archived con sus dos versiones (TASK-203: particiones de fleet).
-    assert len(U02_RECORD_TYPES) == 15
+    # audit_partition_archived (TASK-203) y node_zone_unassigned (TASK-218) con dos versiones.
+    assert len(U02_RECORD_TYPES) == 16
     assert registry.get("audit_partition_archived").schema_version == 2
     assert registry.get("audit_partition_archived", schema_version=1).schema_version == 1
+    assert registry.get("node_zone_unassigned").schema_version == 2
+    assert registry.get("node_zone_unassigned", schema_version=1).schema_version == 1
     assert {c.writer_unit for c in registry.latest()} == {ActorUnit.U02}
     with pytest.raises(RecordTypeRejected, match="se esperaba la versión 2 y llegó la 1"):
         register_u02_record_types(registry)

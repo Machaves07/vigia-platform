@@ -94,9 +94,12 @@ def chain_units() -> tuple[UnitRegistration, ...]:
     ``/me`` y aceptación del aviso, con dobles, para probar la cadena sin base. Las rutas de
     ``ledger`` (y su cuerpo, PR-NUC-38) las prueba ``tests/examples/test_ledger_routes.py``; las
     de ``catalog`` (cuerpo, CSRF y servicios reales), ``test_catalog_admissions.py`` y
-    ``test_catalog_documents_localstack.py`` de ``tests/integration/``."""
+    ``test_catalog_documents_localstack.py`` de ``tests/integration/``; las de ``fleet`` (VIG-147),
+    ``test_fleet_node_identity.py`` y el aislamiento de ``tests/isolation``."""
     return tuple(
-        unit for unit in platform_units() if unit.name not in ("identity", "ledger", "catalog")
+        unit
+        for unit in platform_units()
+        if unit.name not in ("identity", "ledger", "catalog", "fleet")
     )
 
 

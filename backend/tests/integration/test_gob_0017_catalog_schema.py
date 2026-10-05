@@ -75,8 +75,8 @@ def _load_migration(name: str = "gob_0017_catalog_schema") -> Any:
 
 
 MIGRATION = _load_migration()
-REOPENING = _load_migration("gob_0021_walk_test_reopening")
-"""``gob_0021`` añade a ``walk_test_session`` las columnas de la reapertura (TASK-214)."""
+REOPENING = _load_migration("gob_0022_walk_test_reopening")
+"""``gob_0022`` añade a ``walk_test_session`` las columnas de la reapertura (TASK-214)."""
 
 
 @dataclass(frozen=True)

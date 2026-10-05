@@ -60,8 +60,9 @@ Status = Literal["ok", "failed", "skipped", "manual"]
 
 ENROLLMENT_ROUTES: Final = ("/nodes/enrollment", "/api/nodes/enrollment")
 """Rutas de U-03 que habilitan las comprobaciones nº 3 (segunda mitad) y 10 a 13."""
-CONTRACT_PREFIXES: Final = ("/nodes/", "/api/nodes/")
-"""Rutas del contrato de U-01 servidas por la plataforma: habilitan la nº 4."""
+CONTRACT_PREFIXES: Final = ("/api/nodes/",)
+"""Rutas del contrato de U-01 servidas por la plataforma (``NODE_PREFIX``): habilitan la nº 4.
+``/nodes/{node_id}/…`` son rutas de **personas** de SCR-07 (TASK-218), no del contrato."""
 NOTICE_VERSION_FALLBACK: Final = "1"
 ALARM_POLL_SECONDS: Final = 60
 METRIC_WINDOW: Final = timedelta(minutes=5)

@@ -169,7 +169,7 @@ def session_rows(catalog: Mapping[str, Any], passes_per_cell: int) -> tuple[Sess
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WalkTestSession:
-    """``WalkTestSession`` 🔒 (DE §2.11), con la última reapertura (gob_0021)."""
+    """``WalkTestSession`` 🔒 (DE §2.11), con la última reapertura (gob_0022)."""
 
     session_id: uuid.UUID
     organization_id: uuid.UUID

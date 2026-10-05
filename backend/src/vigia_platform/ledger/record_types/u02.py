@@ -23,6 +23,10 @@ __all__ = ["U02_RECORD_TYPES"]
 Name = Annotated[StrictStr, Field(min_length=1, max_length=120)]
 """Nombre de organización, planta o zona: texto libre ≤ 120 (domain-entities §2)."""
 
+ReasonEs = Annotated[StrictStr, Field(min_length=10, max_length=500)]
+"""Motivo de la retirada de una zona: texto libre de 10 a 500 `[estimación propia]`, como el
+``reason_es`` de U-03."""
+
 ConcessionDays = Annotated[StrictInt, Field(ge=1, le=90)]
 Sequence64 = Annotated[StrictInt, Field(ge=1, le=2**63 - 1)]
 Count64 = Annotated[StrictInt, Field(ge=0, le=2**63 - 1)]
@@ -157,6 +161,19 @@ class NodeZoneUnassigned(ContentModel):
     unassigned_by: UUID
 
 
+class NodeZoneUnassignedV2(ContentModel):
+    """Versión 2 (TASK-218): ``reason_es`` opcional, el motivo que exige
+    ``POST /nodes/{node_id}/zones/{zone_id}/unassignment`` (interfaces §3.4). Solo amplía la
+    versión 1 (BR-NUC-52); es texto libre declarado (``free_text_paths``)."""
+
+    assignment_id: UUID
+    zone_id: UUID
+    node_id: UUID
+    unassigned_at: Timestamp
+    unassigned_by: UUID
+    reason_es: ReasonEs | None = None
+
+
 # --- concesiones del proveedor (respuesta 6) ---------------------------------------------
 
 
@@ -284,6 +301,13 @@ U02_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _u02("node_zone_assigned", _PLANT, NodeZoneAssigned),
     _u02("node_zone_unassigned", _PLANT, NodeZoneUnassigned),
     _u02(
+        "node_zone_unassigned",
+        _PLANT,
+        NodeZoneUnassignedV2,
+        free_text_paths=("/reason_es",),
+        schema_version=2,
+    ),
+    _u02(
         "provider_concession_granted",
         _ORG,
         ProviderConcessionGranted,
@@ -318,5 +342,6 @@ U02_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _u02("audit_partition_archived", _ORG, AuditPartitionArchived),
     _u02("audit_partition_archived", _ORG, AuditPartitionArchivedV2, schema_version=2),
 )
-"""Los catorce tipos de U-02, cada uno con todas sus versiones en orden: todos en la 1 y
-``audit_partition_archived`` también en la 2 (TASK-203)."""
+"""Los catorce tipos de U-02, cada uno con todas sus versiones en orden: todos en la 1,
+``audit_partition_archived`` también en la 2 (TASK-203) y ``node_zone_unassigned`` también en la
+2 (TASK-218, ``reason_es``)."""

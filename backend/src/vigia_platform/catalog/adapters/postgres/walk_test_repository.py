@@ -1,4 +1,4 @@
-"""Sesión de walk-test, pasos y pases sobre PostgreSQL (LC-GOB-06; gob_0017 y gob_0021).
+"""Sesión de walk-test, pasos y pases sobre PostgreSQL (LC-GOB-06; gob_0017 y gob_0022).
 
 - ``walk_test_session`` 🔒: la apertura es ``INSERT … ON CONFLICT (zone_id) WHERE status IN
   ('in_progress', 'reopened') DO NOTHING`` sobre el índice único parcial

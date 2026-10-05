@@ -301,7 +301,7 @@ WALK_TEST_SESSION: Final = Table(
     _instant("last_activity_at"),
     _instant("closed_at", nullable=True),
     _uuid("commissioning_record_id", nullable=True),
-    # gob_0021: la última reapertura (incomplete → reopened) con su motivo.
+    # gob_0022: la última reapertura (incomplete → reopened) con su motivo.
     _instant("reopened_at", nullable=True),
     _uuid("reopened_by", nullable=True),
     _text("reopen_reason_es", nullable=True),
