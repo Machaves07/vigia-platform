@@ -151,21 +151,44 @@ def _overlaps(world: World, interval: Interval, start: datetime, end: datetime) 
     return assigned <= end and (unassigned is None or unassigned > start)
 
 
+def _borders(intervals: list[Interval]) -> list[int]:
+    """Los bordes de las asignaciones en milisegundos desde el origen (y sus vecinos)."""
+    edges = [i.start for i in intervals] + [i.end for i in intervals if i.end is not None]
+    ms = [edge // timedelta(milliseconds=1) for edge in edges]
+    return sorted({m + d for m in ms for d in (-1, 0, 1) if m + d >= 0})
+
+
+def _instant(data: st.DataObject, intervals: list[Interval], label: str) -> int:
+    """Un instante cualquiera o, a veces, un borde exacto de una asignación (o su vecino)."""
+    borders = _borders(intervals)
+    if borders and data.draw(st.booleans(), label=f"{label} en un borde"):
+        return data.draw(st.sampled_from(borders), label=label)
+    return data.draw(st.integers(0, 500 * 86_400_000), label=label)
+
+
 @settings(suppress_health_check=[HealthCheck.too_slow])
-@given(
-    intervals=histories(),
-    offset=st.integers(0, 500 * 86_400_000),
-    length=st.one_of(
-        st.just(LIMIT // timedelta(milliseconds=1)),
-        st.integers(0, LIMIT // timedelta(milliseconds=1)),
-    ),
-    probe=st.integers(0, 500 * 86_400_000),
-)
+@given(intervals=histories(), data=st.data())
 def test_pr_gob_30_history_equals_assignment_at_on_the_borders(
-    world: World, intervals: list[Interval], offset: int, length: int, probe: int
+    world: World, intervals: list[Interval], data: st.DataObject
 ) -> None:
     run = world.inventory.stack.run
     zone = _zone_with(world, intervals)
+    offset = _instant(data, intervals, "from")
+    limit_ms = LIMIT // timedelta(milliseconds=1)
+    length = data.draw(
+        st.one_of(
+            st.just(limit_ms),
+            st.just(0),
+            st.integers(0, limit_ms),
+            st.sampled_from(
+                [b - offset for b in _borders(intervals) if 0 <= b - offset <= limit_ms]
+            )
+            if any(0 <= b - offset <= limit_ms for b in _borders(intervals))
+            else st.just(limit_ms),
+        ),
+        label="to - from",
+    )
+    probe = _instant(data, intervals, "instante")
     start = world.origin + timedelta(milliseconds=offset)
     end = start + timedelta(milliseconds=length)
     history = list(run(world.service.assignment_history(world.context, zone, start, end)))

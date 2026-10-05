@@ -127,7 +127,7 @@ def node_states(draw: st.DrawFn) -> NodeState:
         orphan_clips=draw(st.sampled_from((0, 1, 5, 6, 7, 50, 51))),
         orphan_clips_outside=draw(st.sampled_from((0, 60))),
         day_clips=draw(st.sampled_from((0, 20, 120))),
-        verification_orphans=draw(st.sampled_from((0, 3))),
+        verification_orphans=draw(st.sampled_from((0, 30))),
     )
 
 

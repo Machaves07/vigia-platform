@@ -44,6 +44,7 @@ from tests.fleet_inventory_support import (
 from tests.integration.conftest import PostgresEndpoint
 from vigia_platform.fleet.domain.enums import FleetAlarmKind
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
+from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 
@@ -547,6 +548,28 @@ def test_only_fleet_manage_changes_thresholds_and_other_plants_are_not_found(
             "SELECT 1 FROM fleet.plant_fleet_thresholds WHERE plant_id = ANY($1::uuid[])",
             [first, second],
         )
+        == []
+    )
+
+
+def test_the_service_itself_requires_fleet_manage(world: InventoryWorld) -> None:
+    # Segunda barrera: aunque la ruta ya exige fleet.manage, el servicio vuelve a autorizar sobre
+    # la planta; el administrador (fleet.read) no fija umbrales ni llamando al servicio.
+    plant = world.plants[0]
+    service = world.stack.services.thresholds
+    assert service is not None
+    with pytest.raises(ResourceNotFound):
+        world.stack.run(
+            service.put_thresholds(
+                world.stack.context(world.admin),
+                plant,
+                queue_pending_threshold=5,
+                queue_age_threshold_minutes=5,
+                clock_drift_threshold_ms=5,
+            )
+        )
+    assert (
+        world.stack.fetch("SELECT 1 FROM fleet.plant_fleet_thresholds WHERE plant_id = $1", plant)
         == []
     )
 
