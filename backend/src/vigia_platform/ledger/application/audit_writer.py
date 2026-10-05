@@ -149,6 +149,10 @@ class AuditOperation(enum.StrEnum):
     """U-03 (LC-GOB-04, VIG-149): ``PUT /plants/{plant_id}/signatory-policy``. La política de
     firmantes es una proyección sin tipo de registro (DE §2.7): esta entrada es su rastro, con
     ``filters`` ``{minimum, required_roles}``; la emite un instalador bajo concesión."""
+    INGEST_REJECTED = "ingest_rejected"
+    """U-03 (LC-GOB-12, TASK-221): rechazo **permanente** de una presentación del nodo (BR-GOB-96,
+    PAT-GOB-SEG-08), con ``outcome = denied``, el nodo como ``resource``, la zona si es de la
+    organización del certificado y ``filters`` ``{record_kind, code}``; nunca el contenido."""
     WALK_TEST_REOPENED = "walk_test_reopened"
     """U-03 (LC-GOB-06, VIG-150): ``POST /walk-tests/{session_id}/reopen``. La reapertura no
     tiene tipo de registro (nota de TASK-214): esta entrada es su rastro, con ``resource``

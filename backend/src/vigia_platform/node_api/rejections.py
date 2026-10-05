@@ -10,6 +10,8 @@ cuando no hay ruta del contrato (``NotFound``; como ``GET conformance-profile`` 
 **Qué se traduce** (``translate``):
 
 - ``NodeRejection``: el rechazo de la verificación previa o de una ruta de negocio, tal cual.
+- ``IngestRejected`` (``fleet.ingest``, TASK-221): su código y su ``field``, tal cual (los
+  transitorios, con ``retry_after_seconds``).
 - ``NodeContextRejected`` (``identity.authz``): ``node_not_enrolled``, ``node_revoked`` o
   ``node_zone_mismatch``.
 - ``ContractValidationError`` (U-01): ``schema_invalid`` con ``field`` = ruta JSON.
@@ -58,6 +60,7 @@ from vigia_contracts.versioning import CONTRACT_VERSION_HEADER
 from vigia_platform.catalog.application.regression import RegressionWriteFailed
 from vigia_platform.fleet.application.common import FleetWriteFailed
 from vigia_platform.fleet.application.heartbeat import HeartbeatUnavailable, NodeScopeMismatch
+from vigia_platform.fleet.application.ingest import IngestRejected
 from vigia_platform.fleet.application.zone_catalog_for_node import CatalogNotPublished
 from vigia_platform.identity.authz.context import NodeContextRejected
 from vigia_platform.ledger.application.writer import LedgerRejection, to_contract_rejection
@@ -298,6 +301,10 @@ def translate(error: BaseException) -> NodeRejection | None:
     """El rechazo del contrato de ``error``; ``None`` si la respuesta es ``404`` sin cuerpo."""
     if isinstance(error, NodeRejection):
         return error
+    if isinstance(error, IngestRejected):
+        if error.code in TRANSIENT_CODES:
+            return _transient(error.code)
+        return NodeRejection(error.code, field=error.field, body_level=error.body_level)
     if isinstance(error, NotFound):
         return None
     if isinstance(error, NodeContextRejected):

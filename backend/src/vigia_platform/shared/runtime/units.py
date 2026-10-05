@@ -101,6 +101,7 @@ from vigia_platform.catalog.domain.documents import DocumentSettings
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp, fleet_routers
+from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
 from vigia_platform.fleet.application.clip_confirmation import (
@@ -118,6 +119,7 @@ from vigia_platform.fleet.application.enrollment_codes import (
     RootsUnavailable,
 )
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
+from vigia_platform.fleet.application.ingest import IngestDependencies, IngestService
 from vigia_platform.fleet.application.node_declaration import (
     COMMUNICATION_RECORD_TYPE,
     NodeDeclarationService,
@@ -175,7 +177,10 @@ from vigia_platform.node_api.observability import NodeResponses
 from vigia_platform.node_api.router import NodeApiGate, NodeOperation, node_router
 from vigia_platform.node_api.routes.clip_confirmations import clip_confirmation_operation
 from vigia_platform.node_api.routes.clip_uploads import clip_upload_operation
+from vigia_platform.node_api.routes.detection_reviews import detection_review_operation
+from vigia_platform.node_api.routes.findings import finding_operation
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
+from vigia_platform.node_api.routes.observability_events import observability_event_operation
 from vigia_platform.node_api.routes.zone_catalogs import zone_catalog_operation
 from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import DEFAULT_VERIFIER_PATH, shared_routers
@@ -739,12 +744,16 @@ PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = (
     NodeRoute.CLIP_UPLOAD,
     NodeRoute.CLIP_CONFIRMATION,
     NodeRoute.ZONE_CATALOG,
+    NodeRoute.FINDING,
+    NodeRoute.DETECTION_REVIEW,
+    NodeRoute.OBSERVABILITY_EVENT,
 )
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. VIG-152 (TASK-222)
 publica la concesión de clip y la confirmación del clip de verificación; TASK-223, el latido y el
-catálogo por zona. Desde entonces ``app.yaml`` tiene rutas ``/api/nodes/`` y el trabajo de
-conformidad de ``nightly.yml`` falla, a propósito, hasta que TASK-230 escriba su ejecución."""
+catálogo por zona; VIG-156 (TASK-221), las tres rutas de la ingesta. Desde entonces ``app.yaml``
+tiene rutas ``/api/nodes/`` y el trabajo de conformidad de ``nightly.yml`` falla, a propósito,
+hasta que TASK-230 escriba su ejecución."""
 
 
 def _node_routers() -> tuple[APIRouter, ...]:
@@ -827,7 +836,20 @@ def _node_operations(
     """Los manejadores de negocio de las rutas publicadas."""
     # LC-GOB-13 (VIG-152): concesiones de clip y clip de verificación sobre vigia-evidence.
     store = ClipObjectStore(services.require_evidence())
+    # LC-GOB-12 (VIG-156): la ingesta; los clips los verifica el escritor (EvidenceVerifier).
+    ingest = IngestService(
+        IngestDependencies(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            clock=services.clock,
+            store=PostgresIngestStore(services.database),
+        )
+    )
     return {
+        NodeRoute.FINDING: finding_operation(ingest),
+        NodeRoute.DETECTION_REVIEW: detection_review_operation(ingest),
+        NodeRoute.OBSERVABILITY_EVENT: observability_event_operation(ingest),
         # TASK-223: latido y catálogo por zona.
         NodeRoute.HEARTBEAT: heartbeat_operation(_heartbeat_service(services, policy)),
         NodeRoute.CLIP_UPLOAD: clip_upload_operation(

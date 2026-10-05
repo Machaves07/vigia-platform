@@ -16,6 +16,8 @@ Escrituras, todas **condicionales** y con ``RETURNING`` (solo cuentan las filas 
   candado de la confirmación; serializa las confirmaciones del mismo clip, que leen el
   ``VerificationClip`` ya creado en vez de crear otro;
 - ``mark_used``: ``issued → used`` de la confirmación;
+- ``mark_cited``: ``issued → used`` de las concesiones ``evidence`` que cita un registro aceptado
+  de la ingesta (TASK-221), en su transacción;
 - ``mark_orphans``: ``issued → used → orphan`` en dos sentencias de la misma transacción (la
   guarda de ``gob_0018`` no admite ``issued → orphan``) y solo de las que seguían ``issued``;
 - ``mark_expired``: ``issued → expired`` solo de las que seguían ``issued`` y ya vencidas;
@@ -81,6 +83,17 @@ _REISSUE: Final = text(
 _MARK_USED: Final = text(
     "UPDATE fleet.clip_upload_grant SET status = 'used', used_at = :now"
     " WHERE organization_id = :organization_id AND node_id = :node_id AND clip_id = :clip_id"
+    " AND status = 'issued' RETURNING clip_id"
+)
+_MARK_CITED: Final = text(
+    "UPDATE fleet.clip_upload_grant SET status = 'used', used_at = :now"
+    " WHERE organization_id = :organization_id AND clip_id IN ("
+    "SELECT g.clip_id FROM fleet.clip_upload_grant AS g"
+    " WHERE g.organization_id = :organization_id AND g.plant_id = :plant_id"
+    " AND g.zone_id = :zone_id AND g.node_id = :node_id"
+    " AND g.clip_id = ANY(CAST(:clip_ids AS uuid[])) AND g.status = 'issued'"
+    " AND g.purpose = 'evidence' AND g.issued_at <= :now"
+    " ORDER BY g.clip_id FOR UPDATE)"
     " AND status = 'issued' RETURNING clip_id"
 )
 _INSERT_CLIP: Final = text(
@@ -349,6 +362,34 @@ class PostgresClipGrants:
             },
         )
         return result.first() is not None
+
+    async def mark_cited(
+        self,
+        transaction: Transaction,
+        *,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        node_id: uuid.UUID,
+        clip_ids: Sequence[uuid.UUID],
+        now: datetime,
+    ) -> tuple[uuid.UUID, ...]:
+        """``issued → used`` de las concesiones ``evidence`` del nodo y la zona que cita un registro
+        aceptado (TASK-221; la otra mitad de BR-GOB-94): ``mark_orphan_clips`` solo mira las que
+        siguen ``issued``. Bloquea las filas en orden de ``clip_id``; una ya cerrada no cambia."""
+        if not clip_ids:
+            return ()
+        result = await transaction.execute(
+            _MARK_CITED,
+            {
+                "organization_id": transaction.context.organization_id,
+                "plant_id": plant_id,
+                "zone_id": zone_id,
+                "node_id": node_id,
+                "clip_ids": _ids(clip_ids),
+                "now": now,
+            },
+        )
+        return tuple(_plain(row.clip_id) for row in result)
 
     # --- Consola -----------------------------------------------------------------------------
 

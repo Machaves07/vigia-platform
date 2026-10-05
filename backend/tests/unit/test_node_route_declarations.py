@@ -201,12 +201,16 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
 
 def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
     # VIG-152 (TASK-222): concesión de clip y confirmación del clip de verificación.
-    # TASK-223: latido y catálogo por zona. Las demás llegan con sus tareas.
+    # TASK-223: latido y catálogo por zona. VIG-156 (TASK-221): las tres rutas de la ingesta.
+    # Las demás llegan con sus tareas.
     assert PUBLISHED_NODE_ROUTES == (
         NodeRoute.HEARTBEAT,
         NodeRoute.CLIP_UPLOAD,
         NodeRoute.CLIP_CONFIRMATION,
         NodeRoute.ZONE_CATALOG,
+        NodeRoute.FINDING,
+        NodeRoute.DETECTION_REVIEW,
+        NodeRoute.OBSERVABILITY_EVENT,
     )
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
@@ -215,6 +219,9 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
         NodeRoute.CLIP_UPLOAD.path,
         NodeRoute.CLIP_CONFIRMATION.path,
         NodeRoute.ZONE_CATALOG.path,
+        NodeRoute.FINDING.path,
+        NodeRoute.DETECTION_REVIEW.path,
+        NodeRoute.OBSERVABILITY_EVENT.path,
     }
 
 
