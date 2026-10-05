@@ -60,6 +60,13 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
         yield built
 
 
+@pytest.fixture(autouse=True)
+def _release_instances(stack: HeartbeatStack) -> Iterator[None]:
+    # Cada prueba cierra las instancias que crea: sus pools no se acumulan en el módulo.
+    yield
+    stack.run(stack.release())
+
+
 def _accepted(stack: HeartbeatStack, site: NodeSite, **changes: Any) -> Any:
     stack.tick()
     response = stack.post(site, stack.body(site, **changes))

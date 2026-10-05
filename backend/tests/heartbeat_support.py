@@ -334,6 +334,14 @@ class HeartbeatStack:
         self._extra.append(built)
         return built
 
+    async def release(self) -> None:
+        """Cierra las instancias que creó una prueba (sus pools); se queda con la principal."""
+        for built in self._extra:
+            if built is not self.primary:
+                await built.client.aclose()
+                await built.database.dispose()
+        self._extra = [self.primary]
+
     async def close(self) -> None:
         for built in self._extra:
             await built.client.aclose()

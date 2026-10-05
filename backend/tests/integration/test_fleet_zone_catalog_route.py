@@ -33,6 +33,13 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
         yield built
 
 
+@pytest.fixture(autouse=True)
+def _release_instances(stack: HeartbeatStack) -> Iterator[None]:
+    # Cada prueba cierra las instancias que crea: sus pools no se acumulan en el módulo.
+    yield
+    stack.run(stack.release())
+
+
 def test_the_current_envelope_is_served_byte_for_byte(stack: HeartbeatStack) -> None:
     site = stack.site(zones=2)
     for zone in site.zones:

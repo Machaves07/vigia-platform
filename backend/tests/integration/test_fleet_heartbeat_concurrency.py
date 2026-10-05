@@ -81,6 +81,13 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
         yield built
 
 
+@pytest.fixture(autouse=True)
+def _release_instances(stack: HeartbeatStack) -> Iterator[None]:
+    # Cada prueba cierra las instancias que crea: sus pools no se acumulan en el módulo.
+    yield
+    stack.run(stack.release())
+
+
 class CountingInventory(PostgresInventoryProjection):
     """La proyección real; cuenta las escrituras de la fila del nodo que llegan a hacerse."""
 
