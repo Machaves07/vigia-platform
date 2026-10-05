@@ -50,7 +50,8 @@ hay aceptación optimista ni parcial.
 (1) las filas de ``fleet.clip_upload_grant`` citadas, por ``clip_id``; (2) la fila del cierre
 huérfano (``ON CONFLICT DO NOTHING`` sobre su clave); (3) la cabeza de la cadena de la planta (el
 disparador del ``INSERT``). ``ingest_rejected`` solo toma la (3), y ``mark_orphan_clips`` solo la
-(1), con el mismo orden de ``clip_id``.
+(1): sus dos sentencias que cambian concesiones (``mark_orphans`` y ``mark_expired``) toman las
+filas como ``mark_cited``, en una subconsulta ``ORDER BY clip_id FOR UPDATE``.
 
 Ningún paso lee la hora del sistema: ``received_at`` llega de la verificación previa (``Clock``).
 """

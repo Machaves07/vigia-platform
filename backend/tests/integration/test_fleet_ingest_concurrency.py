@@ -14,7 +14,9 @@ memoria (salvo el almacén de metadatos de los clips):
   después auditoría) y la secuencia de las operaciones de identidad del nodo en la misma planta
   (registro de la planta, retención, auditoría) terminan las dos;
 - una aceptación y ``mark_orphan_clips`` sobre las mismas concesiones terminan las dos, con un
-  resultado coherente.
+  resultado coherente, y el barrido (``mark_orphans`` y ``mark_expired``) toma las concesiones en
+  orden de ``clip_id``, como la aceptación (determinista: con la menor retenida, la mayor sigue
+  libre).
 
 Topes: la base 60 s (``LOCK_TIMEOUT_MS``), la barrera y la llegada 60 s (eventos, nunca topes de
 «llegó a tiempo»). Solo datos generados (NFR-CTR-43).
@@ -28,6 +30,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any, Final
 
+import asyncpg
 import pytest
 from vigia_contracts.models import api
 
@@ -294,3 +297,86 @@ def test_an_acceptance_and_the_orphan_sweep_on_the_same_grants_both_finish(
     assert status in {"used", "orphan"}
     assert (status == "orphan") == (uuid.UUID(clip["clip_id"]) in report.orphaned)
     assert len(stack.records(FINDING.record_type, site.organization_id)) == 1
+
+
+@pytest.mark.parametrize("uploaded", [True, False], ids=["mark_orphans", "mark_expired"])
+def test_the_orphan_sweep_takes_its_grants_in_clip_id_order(
+    stack: IngestStack, uploaded: bool
+) -> None:
+    """``mark_orphans`` (``issued → used``) y ``mark_expired`` bloquean las concesiones en orden de
+    ``clip_id``, como ``mark_cited``: con la menor retenida por otra transacción, el barrido espera
+    en ella **sin** haber tomado la mayor (que se escribió antes y va primero en el recorrido
+    físico). Si el barrido bloqueara en el orden del recorrido, tendría la mayor y una aceptación
+    que cita las dos (que las toma por ``clip_id``) se interbloquearía con él."""
+    site = stack.site()
+    clips = sorted(
+        (
+            stack.finding(site, grant=False, store=uploaded)["cameras"][0]["clips"][0]
+            for _ in range(2)
+        ),
+        key=lambda clip: uuid.UUID(clip["clip_id"]),
+    )
+    low, high = (uuid.UUID(clip["clip_id"]) for clip in clips)
+    for clip in reversed(clips):  # la mayor primero en el montón
+        stack.grant(site, clip, stack.now() - 25 * HOUR)
+    sweeper = OrphanClipSweeper(
+        database=stack.primary.database,
+        store=_Objects(stack),  # type: ignore[arg-type]
+        clock=stack.authz.sessions.clock,
+    )
+    context = stack.run(_node_scope(stack, site)).context
+    migrated = stack.authz.sessions.migrated
+
+    async def sweep() -> Any:
+        async with stack.primary.database.transaction(context) as transaction:
+            return await sweeper.sweep(transaction)
+
+    async def scenario() -> tuple[str, Any]:
+        holder, probe, observer = (
+            await migrated.connect(),
+            await migrated.connect(),
+            await migrated.connect(),
+        )
+        try:
+            held = holder.transaction()
+            await held.start()
+            try:
+                await holder.execute(
+                    "SELECT 1 FROM fleet.clip_upload_grant WHERE clip_id = $1 FOR UPDATE", low
+                )
+                task = asyncio.create_task(sweep())
+
+                async def waiting() -> None:
+                    while not task.done():
+                        if await observer.fetchval(
+                            "SELECT count(*) > 0 FROM pg_stat_activity"
+                            " WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                        ):
+                            return
+                        await asyncio.sleep(0.05)
+
+                await asyncio.wait_for(waiting(), BARRIER_SECONDS)
+                assert not task.done()
+                try:
+                    async with probe.transaction():
+                        await probe.execute(
+                            "SELECT 1 FROM fleet.clip_upload_grant WHERE clip_id = $1"
+                            " FOR UPDATE NOWAIT",
+                            high,
+                        )
+                    outcome = "free"
+                except asyncpg.LockNotAvailableError:
+                    outcome = "held by the sweep"
+            finally:
+                await held.rollback()
+            return outcome, await task
+        finally:
+            for connection in (holder, probe, observer):
+                await connection.close()
+
+    outcome, report = stack.run(scenario())
+    assert outcome == "free"
+    swept = report.orphaned if uploaded else report.expired
+    assert set(swept) == {low, high}
+    for clip in clips:
+        assert stack.grant_status(clip)[0] == ("orphan" if uploaded else "expired")

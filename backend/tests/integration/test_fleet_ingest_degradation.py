@@ -138,7 +138,8 @@ def test_a_paused_database_is_temporarily_unavailable_with_zero_acceptances(
         _transient(response, "temporarily_unavailable")
         assert _written(stack, site) == (0, 0, 0)
         assert stack.grant_status(document["cameras"][0]["clips"][0])[0] == "issued"
-        _retry_is_accepted_then_duplicate(stack, site, document, paused)
+        # El reintento del nodo, ya con la base sana, por una instancia con los topes normales.
+        _retry_is_accepted_then_duplicate(stack, site, document, stack.primary)
         stack.run(asyncio.sleep(0))
 
 
@@ -182,8 +183,9 @@ def test_a_retained_chain_is_temporarily_unavailable_after_a_single_write(
     _transient(response, "temporarily_unavailable")
     assert writes == 1, "sin reintento propio"
     assert len(stack.records("finding_received", site.organization_id)) == 1  # solo el primero
-    first = stack.post(site, FINDING, document, locked)
+    # El reintento del nodo, con la cadena libre, por una instancia con los topes normales.
+    first = stack.post(site, FINDING, document, stack.primary)
     assert api.parse_receipt(first.content).status.value == "accepted"
-    again = stack.post(site, FINDING, document, locked)
+    again = stack.post(site, FINDING, document, stack.primary)
     assert api.parse_receipt(again.content).status.value == "accepted_duplicate"
     assert len(stack.records("finding_received", site.organization_id)) == 2

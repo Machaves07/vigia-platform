@@ -25,6 +25,11 @@ Escrituras, todas **condicionales** y con ``RETURNING`` (solo cuentan las filas 
 
 Dos ejecuciones solapadas de ``mark_orphan_clips`` se serializan en el bloqueo de cada fila: la
 segunda vuelve a evaluar ``status = 'issued'``, ya no lo cumple y no cambia (ni cuenta) nada.
+
+``mark_cited``, ``mark_orphans`` (``issued → used``) y ``mark_expired`` toman sus filas en una
+subconsulta ``ORDER BY clip_id FOR UPDATE`` antes del ``UPDATE`` condicional: un ``UPDATE`` con
+``= ANY(...)`` bloquea en el orden físico del recorrido, y una aceptación de la ingesta y un barrido
+sobre las mismas concesiones podrían tomarlas en orden inverso e interbloquearse.
 """
 
 from __future__ import annotations
@@ -140,7 +145,11 @@ _ORPHAN_CANDIDATES: Final = text(
 )
 _TO_USED: Final = text(
     "UPDATE fleet.clip_upload_grant SET status = 'used', used_at = :now"
-    " WHERE organization_id = :organization_id AND clip_id = ANY(CAST(:clip_ids AS uuid[]))"
+    " WHERE organization_id = :organization_id AND clip_id IN ("
+    "SELECT g.clip_id FROM fleet.clip_upload_grant AS g"
+    " WHERE g.organization_id = :organization_id"
+    " AND g.clip_id = ANY(CAST(:clip_ids AS uuid[])) AND g.status = 'issued'"
+    " AND g.purpose = 'evidence' ORDER BY g.clip_id FOR UPDATE)"
     " AND status = 'issued' AND purpose = 'evidence' RETURNING clip_id"
 )
 _TO_ORPHAN: Final = text(
@@ -151,7 +160,11 @@ _TO_ORPHAN: Final = text(
 )
 _TO_EXPIRED: Final = text(
     "UPDATE fleet.clip_upload_grant SET status = 'expired'"
-    " WHERE organization_id = :organization_id AND clip_id = ANY(CAST(:clip_ids AS uuid[]))"
+    " WHERE organization_id = :organization_id AND clip_id IN ("
+    "SELECT g.clip_id FROM fleet.clip_upload_grant AS g"
+    " WHERE g.organization_id = :organization_id"
+    " AND g.clip_id = ANY(CAST(:clip_ids AS uuid[])) AND g.status = 'issued'"
+    " AND g.purpose = 'evidence' AND g.expires_at <= :now ORDER BY g.clip_id FOR UPDATE)"
     " AND status = 'issued' AND purpose = 'evidence' AND expires_at <= :now"
     " RETURNING clip_id, node_id"
 )
