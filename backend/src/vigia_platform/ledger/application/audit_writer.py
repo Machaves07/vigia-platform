@@ -149,6 +149,12 @@ class AuditOperation(enum.StrEnum):
     """U-03 (LC-GOB-04, VIG-149): ``PUT /plants/{plant_id}/signatory-policy``. La política de
     firmantes es una proyección sin tipo de registro (DE §2.7): esta entrada es su rastro, con
     ``filters`` ``{minimum, required_roles}``; la emite un instalador bajo concesión."""
+    FLEET_THRESHOLDS_CHANGED = "fleet_thresholds_changed"
+    """U-03 (LC-GOB-15, VIG-159): ``PUT /plants/{plant_id}/fleet-thresholds``. Los umbrales del
+    panel son una proyección sin tipo de registro (DE §3.10; «los cambios quedan registrados»,
+    interfaces §3.4): esta entrada es su rastro, con ``filters`` de los tres valores nuevos; la
+    emite un instalador bajo concesión (``fleet.manage``). Mismo criterio que
+    ``signatory_policy_changed`` (A-58)."""
     WALK_TEST_REOPENED = "walk_test_reopened"
     """U-03 (LC-GOB-06, VIG-150): ``POST /walk-tests/{session_id}/reopen``. La reapertura no
     tiene tipo de registro (nota de TASK-214): esta entrada es su rastro, con ``resource``

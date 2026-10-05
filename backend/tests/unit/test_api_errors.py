@@ -40,6 +40,7 @@ from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDIN
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
+from vigia_platform.fleet.domain.fleet_warnings import INVENTORY_LABEL_BINDINGS
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
@@ -356,8 +357,10 @@ U03_ENUMERATIONS = {
     *FLEET_LABEL_BINDINGS,
     *CATALOG_DETAIL_CODE_LABEL_BINDINGS,
     *FLEET_DETAIL_CODE_LABEL_BINDINGS,
+    *INVENTORY_LABEL_BINDINGS,
 }
-"""Las 21 de U-03 (domain-entities §4 de U-03) y sus ``detail_code`` (pendiente nº 33)."""
+"""Las 21 de U-03 (domain-entities §4 de U-03), sus ``detail_code`` (pendiente nº 33) y el rótulo
+del inventario ``heartbeat_notice`` (BR-GOB-75, VIG-159)."""
 
 
 def test_the_labels_file_covers_every_labelled_enumeration() -> None:

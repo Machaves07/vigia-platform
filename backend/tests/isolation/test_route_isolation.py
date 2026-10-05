@@ -135,6 +135,8 @@ from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNode
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
+from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
@@ -266,10 +268,23 @@ class StubDocumentStorage:
         )
 
 
-def fleet_http(deps: FleetDependencies) -> FleetHttp:
-    """Los servicios de las rutas de identidad del nodo (VIG-147) con una raíz de prueba y el
-    listado de clips de comisionamiento (VIG-152)."""
+def fleet_http(deps: FleetDependencies, provider_organization_id: uuid.UUID) -> FleetHttp:
+    """Los servicios de las rutas de identidad del nodo (VIG-147) con una raíz de prueba, el
+    listado de clips de comisionamiento (VIG-152) y el inventario y los umbrales (VIG-159)."""
     return FleetHttp(
+        inventory=FleetInventory(
+            database=deps.database,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            clock=deps.clock,
+            provider_organization_id=provider_organization_id,
+        ),
+        thresholds=FleetThresholdsService(
+            database=deps.database,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            clock=deps.clock,
+        ),
         declarations=NodeDeclarationService(deps),
         enrollment_codes=EnrollmentCodeService(
             deps, roots=BundleRoots(RootObjects(root_bundle(1)))
@@ -627,6 +642,27 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("POST", "/nodes/{node_id}/decommission"): Case(
         Kind.RESOURCE,
         lambda i: Call("POST", f"/nodes/{i.retired_node}/decommission", json={"reason_es": REASON}),
+    ),
+    # VIG-159: inventario (sin identificador, de la organización del contexto) y umbrales por
+    # planta; el aislamiento exhaustivo de U-03 es de VIG-165.
+    ("GET", "/fleet/nodes"): Case(Kind.OWN, lambda i: Call("GET", "/fleet/nodes")),
+    ("GET", "/fleet/nodes/{node_id}"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/fleet/nodes/{i.node}")
+    ),
+    ("PUT", "/plants/{plant_id}/fleet-thresholds"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "PUT",
+            f"/plants/{i.plant}/fleet-thresholds",
+            json={
+                "queue_pending_threshold": 50,
+                "queue_age_threshold_minutes": 15,
+                "clock_drift_threshold_ms": 2_000,
+            },
+        ),
+    ),
+    ("GET", "/plants/{plant_id}/fleet-thresholds"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/fleet-thresholds")
     ),
     ("GET", "/zones/{zone_id}/gates"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/gates")
@@ -1745,7 +1781,8 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             clock=sessions.clock,
                             identity=HierarchyService(deps),
                             nodes=PostgresNodeFleetStore(sessions.database),
-                        )
+                        ),
+                        authz.provider_organization_id,
                     ),
                 },
             },
@@ -1999,6 +2036,10 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /nodes/{node_id}/enrollment-attempts",
         "POST /nodes/{node_id}/revocation",
         "POST /nodes/{node_id}/decommission",
+        "GET /fleet/nodes",
+        "GET /fleet/nodes/{node_id}",
+        "PUT /plants/{plant_id}/fleet-thresholds",
+        "GET /plants/{plant_id}/fleet-thresholds",
         "GET /zones/{zone_id}/gates",
         "POST /zones/{zone_id}/gates/mounting/scope-record",
         "POST /zones/{zone_id}/gates/{gate}/revocation",
