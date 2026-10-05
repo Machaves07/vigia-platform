@@ -65,6 +65,10 @@ REVOCATION_STATE_COLUMNS = frozenset(
     }
 )
 
+ORPHAN_CLOSE_TABLE = "observability_orphan_close"
+"""``gob_0024`` (TASK-221): marca ⛓ del cierre huérfano de un evento de observabilidad, con RLS y
+las dos políticas de las tablas de ``fleet``, ``SELECT`` e ``INSERT`` para ``vigia_app``."""
+
 APPEND_ONLY_TABLES = (
     "enrollment_attempt",
     "heartbeat_history",

@@ -48,6 +48,7 @@ from tests.fleet_db import (
     HEADERS,
     PARTITIONED_TABLES,
     REVOCATION_STATE_COLUMNS,
+    ORPHAN_CLOSE_TABLE,
     REVOCATION_STATE_TABLE,
     FleetScope,
     FleetSeed,
@@ -264,7 +265,13 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    assert {row["relname"] for row in rows} == {*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE}
+    # gob_0024 (TASK-221) añade la marca del cierre huérfano, con el mismo aislamiento.
+    assert {row["relname"] for row in rows} == {
+        *FLEET_TABLES,
+        GLOBAL_TABLE,
+        REVOCATION_STATE_TABLE,
+        ORPHAN_CLOSE_TABLE,
+    }
     # Excepción documentada (gob_0021, TASK-218): la marca global de la lista, sin datos de cliente.
     secured = [row for row in rows if row["relname"] != REVOCATION_STATE_TABLE]
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in secured), rows
@@ -280,8 +287,8 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
     by_table: dict[str, dict[str, Any]] = {}
     for policy in policies:
         by_table.setdefault(policy["tablename"], {})[policy["policyname"]] = policy
-    assert set(by_table) == {*FLEET_TABLES, GLOBAL_TABLE}
-    for table in FLEET_TABLES:
+    assert set(by_table) == {*FLEET_TABLES, ORPHAN_CLOSE_TABLE, GLOBAL_TABLE}
+    for table in (*FLEET_TABLES, ORPHAN_CLOSE_TABLE):
         named = by_table[table]
         assert set(named) == {"organization_isolation", "provider_concession_scope"}, table
         isolation, provider = named["organization_isolation"], named["provider_concession_scope"]
@@ -295,7 +302,7 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
 
     # Ningún DELETE ni TRUNCATE para vigia_app; SELECT en todas, INSERT salvo en la ranura y la
     # marca global.
-    for table in (*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE):
+    for table in (*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE, ORPHAN_CLOSE_TABLE):
         privileges = {
             privilege: await superuser.fetchval(
                 "SELECT has_table_privilege('vigia_app', $1, $2)", f"fleet.{table}", privilege
@@ -376,7 +383,7 @@ def test_append_only_registry_lists_every_append_only_table() -> None:
     registry = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(registry)
     listed = {name for name in registry.APPEND_ONLY_TABLES if name.startswith("fleet.")}
-    assert listed == {f"fleet.{table}" for table in APPEND_ONLY_TABLES}
+    assert listed == {f"fleet.{table}" for table in (*APPEND_ONLY_TABLES, ORPHAN_CLOSE_TABLE)}
     assert set(MIGRATION.APPEND_ONLY_TABLES) == set(APPEND_ONLY_TABLES)
     assert set(MIGRATION.TABLES) == set(FLEET_TABLES)
 
@@ -391,7 +398,7 @@ async def test_triggers_are_always_enabled(superuser: Any) -> None:
     triggers: dict[str, dict[str, str]] = {}
     for row in rows:
         triggers.setdefault(row["relname"], {})[row["tgname"]] = row["tgenabled"]
-    for table in APPEND_ONLY_TABLES:
+    for table in (*APPEND_ONLY_TABLES, ORPHAN_CLOSE_TABLE):
         expected = {
             "append_only_update": "A",
             "append_only_delete": "A",
@@ -407,6 +414,7 @@ async def test_triggers_are_always_enabled(superuser: Any) -> None:
     )
     assert set(triggers) == {
         *APPEND_ONLY_TABLES,
+        ORPHAN_CLOSE_TABLE,
         "enrollment_code",
         "node_credential",
         "clip_upload_grant",
@@ -462,7 +470,7 @@ async def test_every_index_starts_with_the_scope_or_is_a_key(superuser: Any) -> 
         row["table_name"] for row in rows if row["columns"][:2] == ["organization_id", "plant_id"]
     }
     # Todas las de planta; la marca por organización y la global solo tienen su clave.
-    assert scoped == set(FLEET_TABLES) - {"revocation_list_dirty"}
+    assert scoped == {*FLEET_TABLES, ORPHAN_CLOSE_TABLE} - {"revocation_list_dirty"}
     loose = [
         row["index_name"]
         for row in rows
