@@ -121,6 +121,20 @@ def _load_reissue_migration() -> Any:
 REISSUE_MIGRATION = _load_reissue_migration()
 
 
+def _load_alarm_evaluation_migration() -> Any:
+    """``gob_0024`` (TASK-225): la tabla de histéresis de las alarmas, con RLS como el resto."""
+    path = BACKEND / "migrations" / "versions" / "gob_0024_fleet_alarm_evaluation_state.py"
+    spec = importlib.util.spec_from_file_location("gob_0024_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ALARM_EVALUATION_MIGRATION = _load_alarm_evaluation_migration()
+ALARM_EVALUATION_TABLE = ALARM_EVALUATION_MIGRATION.TABLE
+
+
 @dataclass(frozen=True)
 class Fleet:
     database: MigratedDatabase
@@ -264,7 +278,12 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    assert {row["relname"] for row in rows} == {*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE}
+    assert {row["relname"] for row in rows} == {
+        *FLEET_TABLES,
+        GLOBAL_TABLE,
+        REVOCATION_STATE_TABLE,
+        ALARM_EVALUATION_TABLE,
+    }
     # Excepción documentada (gob_0021, TASK-218): la marca global de la lista, sin datos de cliente.
     secured = [row for row in rows if row["relname"] != REVOCATION_STATE_TABLE]
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in secured), rows
@@ -280,8 +299,8 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
     by_table: dict[str, dict[str, Any]] = {}
     for policy in policies:
         by_table.setdefault(policy["tablename"], {})[policy["policyname"]] = policy
-    assert set(by_table) == {*FLEET_TABLES, GLOBAL_TABLE}
-    for table in FLEET_TABLES:
+    assert set(by_table) == {*FLEET_TABLES, GLOBAL_TABLE, ALARM_EVALUATION_TABLE}
+    for table in (*FLEET_TABLES, ALARM_EVALUATION_TABLE):
         named = by_table[table]
         assert set(named) == {"organization_isolation", "provider_concession_scope"}, table
         isolation, provider = named["organization_isolation"], named["provider_concession_scope"]
@@ -295,7 +314,7 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
 
     # Ningún DELETE ni TRUNCATE para vigia_app; SELECT en todas, INSERT salvo en la ranura y la
     # marca global.
-    for table in (*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE):
+    for table in (*FLEET_TABLES, GLOBAL_TABLE, REVOCATION_STATE_TABLE, ALARM_EVALUATION_TABLE):
         privileges = {
             privilege: await superuser.fetchval(
                 "SELECT has_table_privilege('vigia_app', $1, $2)", f"fleet.{table}", privilege
@@ -356,6 +375,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         expected[table] |= set(columns)
     expected[GLOBAL_TABLE] = {"crl_number", "published_at", "crl_sha256"}
     expected[REVOCATION_STATE_TABLE] = set(REVOCATION_STATE_COLUMNS)
+    expected[ALARM_EVALUATION_TABLE] = set(ALARM_EVALUATION_MIGRATION.APP_UPDATABLE_COLUMNS)
     assert granted == expected
     # Tablas ⛓ sin cierre y la ranura de la alarma: ningún UPDATE.
     for table in (
@@ -462,7 +482,7 @@ async def test_every_index_starts_with_the_scope_or_is_a_key(superuser: Any) -> 
         row["table_name"] for row in rows if row["columns"][:2] == ["organization_id", "plant_id"]
     }
     # Todas las de planta; la marca por organización y la global solo tienen su clave.
-    assert scoped == set(FLEET_TABLES) - {"revocation_list_dirty"}
+    assert scoped == (set(FLEET_TABLES) - {"revocation_list_dirty"}) | {ALARM_EVALUATION_TABLE}
     loose = [
         row["index_name"]
         for row in rows

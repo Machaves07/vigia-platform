@@ -135,6 +135,7 @@ from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNode
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
@@ -280,6 +281,12 @@ def fleet_http(deps: FleetDependencies, provider_organization_id: uuid.UUID) -> 
             authorizer=deps.authorizer,
             audit=deps.audit,
             clock=deps.clock,
+        ),
+        alarms=FleetAlarms(
+            database=deps.database,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            provider_organization_id=provider_organization_id,
         ),
         declarations=NodeDeclarationService(deps),
         enrollment_codes=EnrollmentCodeService(
@@ -659,6 +666,10 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ),
     ("GET", "/plants/{plant_id}/fleet-thresholds"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/plants/{i.plant}/fleet-thresholds")
+    ),
+    # VIG-161: alarmas de flota; con la planta de B como filtro, igual que inexistente.
+    ("GET", "/fleet/alarms"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", "/fleet/alarms", params={"plant_id": str(i.plant)})
     ),
     ("GET", "/zones/{zone_id}/gates"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/gates")
@@ -2002,6 +2013,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /fleet/nodes/{node_id}",
         "PUT /plants/{plant_id}/fleet-thresholds",
         "GET /plants/{plant_id}/fleet-thresholds",
+        "GET /fleet/alarms",
         "GET /zones/{zone_id}/gates",
         "POST /zones/{zone_id}/gates/mounting/scope-record",
         "POST /zones/{zone_id}/gates/{gate}/revocation",
