@@ -36,6 +36,7 @@ __all__ = [
     "ENROLLMENT_ATTEMPT",
     "ENROLLMENT_CODE",
     "FLEET_ALARM",
+    "FLEET_ALARM_EVALUATION",
     "HEARTBEAT_HISTORY",
     "METADATA",
     "NODE_CONFIGURATION",
@@ -276,6 +277,20 @@ OPEN_FLEET_ALARM: Final = Table(
     _instant("raised_at", nullable=True),
 )
 """La ranura de la alarma abierta por (clase, nodo); solo la escriben los disparadores."""
+
+FLEET_ALARM_EVALUATION: Final = Table(
+    "fleet_alarm_evaluation",
+    METADATA,
+    _uuid("organization_id", primary_key=True),
+    _uuid("plant_id"),
+    _uuid("node_id", primary_key=True),
+    Column("alarm_kind", Text, primary_key=True),
+    Column("observed", Boolean, nullable=False),
+    _integer("consecutive"),
+    _instant("observed_since"),
+    _instant("evaluated_at"),
+)
+"""Evaluaciones consecutivas de la histéresis de ``FleetAlarm`` (``gob_0024``, TASK-225) 🔒."""
 
 PLANT_FLEET_THRESHOLDS: Final = Table(
     "plant_fleet_thresholds",

@@ -43,11 +43,14 @@ from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnro
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.domain.enrollment_attempt import SourceIpHasher
+from vigia_platform.fleet.domain.fleet_alarm import CLEARED_EVENT, RAISED_EVENT
+from vigia_platform.fleet.events import FLEET_EVENT_TYPES
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import HierarchyService
@@ -66,13 +69,14 @@ from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
 from vigia_platform.shared.runtime.units import _fleet_event_types, _fleet_record_types
 
-__all__ = ["CONCESSION_HEADER", "FleetStack", "fleet_stack"]
+__all__ = ["CONCESSION_HEADER", "FleetStack", "fleet_stack", "register_alarm_event_types"]
 
 SAME_ORIGIN: Final = {"Sec-Fetch-Site": "same-origin"}
 CONCESSION_HEADER: Final = "X-Vigia-Concession"
 HOUR: Final = timedelta(hours=1)
 LOCK_TIMEOUT_MS: Final = 60_000
 REASON: Final = "Equipo retirado por mantenimiento"
+ALARM_EVENTS: Final = frozenset({RAISED_EVENT, CLEARED_EVENT})
 
 
 @dataclass
@@ -88,6 +92,8 @@ class FleetStack:
     client: httpx.AsyncClient
     services: FleetHttp
     logs: list[str] = field(default_factory=list)
+    outbox: Outbox | None = None
+    """La bandeja de la pila (las tareas de alarmas publican en ella, TASK-225)."""
 
     def run(self, awaitable: Any) -> Any:
         return self.authz.run(awaitable)
@@ -278,8 +284,18 @@ def new_code() -> str:
     return f"ND-{secrets.token_hex(4).upper()}"
 
 
+def register_alarm_event_types(catalog: OutboxCatalog) -> None:
+    """``fleet_alarm_raised`` y ``fleet_alarm_cleared`` (TASK-225): la raíz los registra con las
+    tres tareas (TASK-227); las pruebas de las alarmas, aquí."""
+    for event_type in FLEET_EVENT_TYPES:
+        if event_type.event_name in ALARM_EVENTS:
+            catalog.event_types.register(event_type)
+
+
 @contextlib.contextmanager
-def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> Iterator[FleetStack]:
+def fleet_stack(
+    endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8, alarm_events: bool = False
+) -> Iterator[FleetStack]:
     with authz_environment(endpoint, prefix) as authz:
         sessions = authz.sessions
         (now,) = authz.fetch("SELECT now() AS now")
@@ -291,6 +307,8 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
         catalog = OutboxCatalog()
         register_u02_event_types(catalog.event_types)
         _fleet_event_types(catalog.event_types)
+        if alarm_events:
+            register_alarm_event_types(catalog)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
@@ -359,6 +377,12 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
                 audit=sessions.audit,
                 clock=sessions.clock,
             ),
+            alarms=FleetAlarms(
+                database=database,
+                authorizer=authz.authorizer,
+                audit=sessions.audit,
+                provider_organization_id=authz.provider_organization_id,
+            ),
         )
         app = World(clock=sessions.clock).app(
             runtime={
@@ -378,6 +402,7 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
         stack = FleetStack(
             authz, database, writer, free_text, deps, roots, hash_key, app, client, services
         )
+        stack.outbox = outbox
         try:
             yield stack
         finally:

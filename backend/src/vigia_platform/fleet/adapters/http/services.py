@@ -1,4 +1,4 @@
-"""Servicios de las rutas de ``fleet`` (``app.state``) (TASK-218, TASK-222, TASK-224; A-52).
+"""Servicios de las rutas de ``fleet`` (``app.state``) (TASK-218, 222, 224 y 225; A-52).
 
 ``FleetHttp`` lo deja la unidad ``fleet`` en ``app.state`` (``PlatformUnit.api_state``),
 construido con la infraestructura común (``UnitServices``). Las rutas lo toman en cada petición:
@@ -14,6 +14,7 @@ from fastapi import Request
 
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.enrollment_codes import EnrollmentCodeService
+from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
@@ -41,6 +42,8 @@ class FleetHttp:
     """``GET /fleet/nodes`` y ``GET /fleet/nodes/{node_id}`` (TASK-224)."""
     thresholds: FleetThresholdsService | None = None
     """``GET`` y ``PUT /plants/{plant_id}/fleet-thresholds`` (TASK-224)."""
+    alarms: FleetAlarms | None = None
+    """``GET /fleet/alarms`` (TASK-225)."""
 
 
 def installed[T](service: T | None) -> T:
