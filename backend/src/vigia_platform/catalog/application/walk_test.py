@@ -164,8 +164,10 @@ class OcclusionTestsProvider(Protocol):
     ) -> tuple[Mapping[str, Any], ...]: ...
 
 
+@repository
 class NoOcclusionTests:
-    """Proveedor de esta tarea: ninguna prueba de oclusión (TASK-215 entrega el real)."""
+    """Proveedor de esta tarea: ninguna prueba de oclusión (TASK-215 entrega el real). Recibe la
+    transacción de la lectura, así que, como todo repositorio, exige su contexto (PR-NUC-02)."""
 
     async def occlusion_tests(
         self, transaction: Transaction, session: WalkTestSession
