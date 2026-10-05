@@ -1,6 +1,6 @@
 """Reapertura de la sesión de walk-test (TASK-214, LC-GOB-06; BL §3.3, interfaces §3.3).
 
-Revisión gob_0022, aditiva. ``POST /walk-tests/{session_id}/reopen`` pasa una sesión
+Revisión gob_0023, aditiva. ``POST /walk-tests/{session_id}/reopen`` pasa una sesión
 ``incomplete`` a ``reopened`` con motivo, y el motivo, quién y cuándo «quedan en la sesión y en la
 auditoría de U-02» (nota del redactor de TASK-214: no hay tipo de registro para la reapertura).
 ``gob_0017`` no tenía dónde guardarlos en la sesión:
@@ -25,8 +25,8 @@ from typing import Final
 
 from alembic import op
 
-revision: str = "gob_0022"
-down_revision: str | None = "gob_0021"
+revision: str = "gob_0023"
+down_revision: str | None = "gob_0022"
 branch_labels: None = None
 depends_on: None = None
 

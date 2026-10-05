@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 from vigia_contracts.models.enumerations import RejectionCode
 from vigia_contracts.models.rejection_response import RejectionResponse
 
+from tests.factories import uuid7
 from tests.middleware_support import (
     NODE_HEARTBEAT_PATH,
     NODE_READ_PATH,
@@ -87,8 +88,11 @@ prueban ``tests/properties/gob/test_pr_gob_02_prechecks_order.py`` y
 
 
 def _url(path: str, user_id: str | None = None) -> str:
-    return path.replace("{user_id}", user_id or str(uuid.uuid4())).replace(
-        "{zone_id}", str(uuid.uuid4())
+    return (
+        path.replace("{user_id}", user_id or str(uuid.uuid4()))
+        .replace("{zone_id}", str(uuid.uuid4()))
+        # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
+        .replace("{clip_id}", str(uuid7()))
     )
 
 

@@ -32,10 +32,12 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 22
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0022`` (las columnas de la
+MINIMUM_SCHEMA_VERSION: Final = 23
+"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0023`` (las columnas de la
 reapertura en ``catalog.walk_test_session``, que la sesión de walk-test lee y escribe, VIG-150),
-que incluye ``gob_0021`` (la marca global
+que incluye ``gob_0022`` (reemisión de la concesión de clip y ``first_served_at`` del clip de
+verificación: sin ellos, las concesiones de clip no se reemiten ni el listado de clips de
+comisionamiento se sirve, VIG-152), que incluye ``gob_0021`` (la marca global
 ``fleet.revocation_list_state`` que la revocación de un nodo sube en su transacción, TASK-218),
 que incluye ``gob_0020`` (``record_id`` en ``catalog.gate_state_history``: sin él, la historia de
 compuertas no puede escribirse), ``gob_0019`` (búsqueda del alta de nodo), ``gob_0018`` (esquema

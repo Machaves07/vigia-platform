@@ -348,8 +348,10 @@ VERIFICATION_CLIP: Final = Table(
     _instant("received_at"),
     _text("sha256"),
     _jsonb("blur_check_result", nullable=True),
+    _instant("first_served_at", nullable=True),
 )
-"""Nota de §3.13 ``VerificationClip`` ⛓; cierre ``blur_check_result``."""
+"""Nota de §3.13 ``VerificationClip`` ⛓; cierres ``blur_check_result`` y ``first_served_at``
+(``gob_0022``, TASK-222)."""
 
 NODE_CONFIGURATION: Final = Table(
     "node_configuration",
