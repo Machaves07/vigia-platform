@@ -90,6 +90,7 @@ GATE_TYPES: Final = (
     "mounting_gate_record",
     "plant_policy_signed",
     "use_agreement_signed",
+    "commissioning_step",
 )
 HOUR: Final = timedelta(hours=1)
 SCOPE_TEXT: Final = "Se observa la celda de soldadura 3 durante el turno; nunca a las personas."

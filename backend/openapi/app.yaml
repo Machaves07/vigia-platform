@@ -2275,6 +2275,205 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/walk-tests":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Abre la sesión de walk-test de la zona con la matriz derivada del catálogo"
+      "operationId": "open_walk_test_zones__zone_id__walk_tests_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/OpenWalkTestBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/WalkTestSessionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/walk-tests/current":
+    "get":
+      "tags":
+        - "comisionamiento"
+      "summary": "Sesión de walk-test en curso, incompleta o reabierta de la zona"
+      "operationId": "current_walk_test_zones__zone_id__walk_tests_current_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CurrentWalkTestOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/steps":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Abre un paso cronometrado por el servidor"
+      "operationId": "start_step_walk_tests__session_id__steps_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/StepBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/StepOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/steps/{step_id}/close":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Cierra el paso con la hora del servidor y su corrección anexa, si la hay"
+      "operationId": "close_step_walk_tests__session_id__steps__step_id__close_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+        - "name": "step_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Step Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CloseStepBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/StepOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/passes":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Registra un pase de una fila de la matriz (solo anexar)"
+      "operationId": "record_pass_walk_tests__session_id__passes_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/PassBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PassOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/reopen":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Reabre con motivo una sesión incompleta por inactividad"
+      "operationId": "reopen_walk_test_walk_tests__session_id__reopen_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReopenBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/WalkTestSessionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/plants/{plant_id}/nodes":
     "post":
       "tags":
@@ -4083,6 +4282,15 @@
         - "synchronized"
         - "offset_ms"
       "title": "ClockView"
+    "CloseStepBody":
+      "properties":
+        "correction":
+          "anyOf":
+            - "$ref": "#/components/schemas/CorrectionBody"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "title": "CloseStepBody"
     "Code":
       "type": "string"
       "maxLength": 32
@@ -4367,6 +4575,59 @@
       "required":
         - "result"
       "title": "ContractNoticeView"
+    "CorrectionBody":
+      "properties":
+        "started_at":
+          "anyOf":
+            - "type": "string"
+              "format": "date-time"
+            - "type": "null"
+          "title": "Started At"
+        "ended_at":
+          "anyOf":
+            - "type": "string"
+              "format": "date-time"
+            - "type": "null"
+          "title": "Ended At"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "CorrectionBody"
+    "CorrectionOut":
+      "properties":
+        "started_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Started At"
+        "ended_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Ended At"
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "corrected_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Corrected By"
+        "corrected_at":
+          "type": "string"
+          "title": "Corrected At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "started_at"
+        - "ended_at"
+        - "reason_es"
+        - "corrected_by"
+        - "corrected_at"
+      "title": "CorrectionOut"
     "CoverageStatusOut":
       "properties":
         "zone_id":
@@ -4467,6 +4728,22 @@
         - "required_count"
         - "required_camera_ids"
       "title": "CoverageValues"
+    "CurrentWalkTestOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "session":
+          "anyOf":
+            - "$ref": "#/components/schemas/WalkTestSessionOut"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "session"
+      "title": "CurrentWalkTestOut"
     "DeactivatedView":
       "properties":
         "user_id":
@@ -5936,6 +6213,44 @@
         - "second_factor_enrolled"
         - "assignments"
       "title": "ManagedUserView"
+    "MatrixRowOut":
+      "properties":
+        "row_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Row Id"
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "standard_version":
+          "type": "integer"
+          "title": "Standard Version"
+        "predicate_conditions":
+          "items":
+            "additionalProperties": true
+            "type": "object"
+          "type": "array"
+          "title": "Predicate Conditions"
+        "posture":
+          "$ref": "#/components/schemas/Posture"
+        "required_passes":
+          "type": "integer"
+          "title": "Required Passes"
+        "passes":
+          "$ref": "#/components/schemas/PassCountsOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "row_id"
+        - "standard_id"
+        - "standard_version"
+        - "predicate_conditions"
+        - "posture"
+        - "required_passes"
+        - "passes"
+      "title": "MatrixRowOut"
+      "description": "Una fila de ``matrix_rows`` con el conteo de sus pases."
     "MeResponse":
       "properties":
         "user":
@@ -6437,6 +6752,16 @@
         - "text"
         - "pending_legal_text"
       "title": "NoticeView"
+    "OpenWalkTestBody":
+      "properties":
+        "passes_per_cell":
+          "type": "integer"
+          "title": "Passes Per Cell"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "passes_per_cell"
+      "title": "OpenWalkTestBody"
     "OrganizationView":
       "properties":
         "organization_id":
@@ -6460,6 +6785,91 @@
         - "name"
         - "kind"
       "title": "OrganizationView"
+    "PassBody":
+      "properties":
+        "row_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Row Id"
+        "result":
+          "$ref": "#/components/schemas/PassResult"
+        "evidence_ref":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Evidence Ref"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "row_id"
+        - "result"
+      "title": "PassBody"
+    "PassCountsOut":
+      "properties":
+        "detected":
+          "type": "integer"
+          "title": "Detected"
+        "missed":
+          "type": "integer"
+          "title": "Missed"
+        "false_alarm":
+          "type": "integer"
+          "title": "False Alarm"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "detected"
+        - "missed"
+        - "false_alarm"
+      "title": "PassCountsOut"
+    "PassOut":
+      "properties":
+        "pass_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Pass Id"
+        "session_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Session Id"
+        "row_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Row Id"
+        "result":
+          "$ref": "#/components/schemas/PassResult"
+        "evidence_ref":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Evidence Ref"
+        "recorded_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Recorded By"
+        "recorded_at":
+          "type": "string"
+          "title": "Recorded At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "pass_id"
+        - "session_id"
+        - "row_id"
+        - "result"
+        - "evidence_ref"
+        - "recorded_by"
+        - "recorded_at"
+      "title": "PassOut"
+    "PassResult":
+      "type": "string"
+      "enum":
+        - "detected"
+        - "missed"
+        - "false_alarm"
+      "title": "PassResult"
     "PasswordChangeRequest":
       "properties":
         "current_password":
@@ -6634,6 +7044,15 @@
         - "status"
         - "zones"
       "title": "PlantView"
+    "Posture":
+      "type": "string"
+      "enum":
+        - "standing"
+        - "crouched"
+        - "partially_occluded"
+        - "slow_movement"
+      "title": "Posture"
+      "description": "Postura de una fila de la matriz del walk-test (respuesta 9)."
     "Predicate":
       "anyOf":
         - "$ref": "#/components/schemas/CoexistencePredicate"
@@ -7012,6 +7431,16 @@
         - "message_es"
       "title": "RejectionResponse"
       "description": "Cuerpo de todo rechazo de la ingesta (domain-entities.md §4 y nota fechada; BR-CTR-30). `retryable` lo fija la clase del código y el esquema lo exige: transitorio (`temporarily_unavailable`, `rate_limited`, `storage_unavailable`; 429 o 503) con `retryable = true`, permanente (todos los demás; 400, 401, 403, 409, 413, 422) con `retryable = false`. `compatibility_result` es opcional y solo aparece en los rechazos por versión, con el resultado que los produjo: `rejected_major` o `rejected_newer` con `code = contract_version_unsupported`, `rejected_retired` con `code = contract_version_retired` (BR-CTR-20, BR-CTR-21). `rejected_newer` nunca es un `code`. `message_es` es genérico: nombra el campo y la regla, nunca contenido del registro, rutas internas ni trazas (BR-CTR-16)."
+    "ReopenBody":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "ReopenBody"
     "ReplayOut":
       "properties":
         "event_id":
@@ -7745,6 +8174,93 @@
         - "min_duration_ms"
       "title": "StartupTransitionPredicate"
       "description": "Plantilla `startup_transition`: `all_of` contiene presencia y mando de arranque afirmado y, opcionalmente, energía no afirmada (arranque desde reposo); en cualquier orden y sin repetir; `min_duration_ms` entre 0 y 60 000."
+    "StepBody":
+      "properties":
+        "step_kind":
+          "$ref": "#/components/schemas/StepKind"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "step_kind"
+        - "responsible_user_id"
+      "title": "StepBody"
+    "StepKind":
+      "type": "string"
+      "enum":
+        - "physical_setup"
+        - "signal_mapping"
+        - "framing"
+        - "walk_test_passes"
+        - "occlusion_test"
+        - "latency_measurement"
+        - "review_and_signatures"
+        - "other"
+      "title": "StepKind"
+      "description": "Paso cronometrado del comisionamiento (ocho valores)."
+    "StepKindDurationOut":
+      "properties":
+        "step_kind":
+          "$ref": "#/components/schemas/StepKind"
+        "duration_ms":
+          "type": "integer"
+          "title": "Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "step_kind"
+        - "duration_ms"
+      "title": "StepKindDurationOut"
+      "description": "Duración de un tipo de paso, sin responsable (H-53)."
+    "StepOut":
+      "properties":
+        "step_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Step Id"
+        "session_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Session Id"
+        "step_kind":
+          "$ref": "#/components/schemas/StepKind"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "ended_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Ended At"
+        "correction":
+          "anyOf":
+            - "$ref": "#/components/schemas/CorrectionOut"
+            - "type": "null"
+        "effective_duration_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Effective Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "step_id"
+        - "session_id"
+        - "step_kind"
+        - "responsible_user_id"
+        - "started_at"
+        - "ended_at"
+        - "correction"
+        - "effective_duration_ms"
+      "title": "StepOut"
+      "description": "Un paso con sus marcas del servidor y, aparte, su corrección (BR-GOB-45)."
     "StorageKey":
       "type": "string"
       "maxLength": 512
@@ -8142,6 +8658,124 @@
         - "kind"
       "title": "VerifyRequest"
       "description": "La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o\n``audit`` (sin planta). Sin campos de más; ``plant_id`` es un UUID en texto."
+    "WalkTestKind":
+      "type": "string"
+      "enum":
+        - "initial"
+        - "regression_rerun"
+      "title": "WalkTestKind"
+    "WalkTestSessionOut":
+      "properties":
+        "session_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Session Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "kind":
+          "$ref": "#/components/schemas/WalkTestKind"
+        "status":
+          "$ref": "#/components/schemas/WalkTestStatus"
+        "passes_per_cell":
+          "type": "integer"
+          "title": "Passes Per Cell"
+        "rows":
+          "items":
+            "$ref": "#/components/schemas/MatrixRowOut"
+          "type": "array"
+          "title": "Rows"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "last_activity_at":
+          "type": "string"
+          "title": "Last Activity At"
+        "closed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed At"
+        "reopened_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reopened At"
+        "reopened_by":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Reopened By"
+        "reopen_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reopen Reason Es"
+        "steps":
+          "items":
+            "$ref": "#/components/schemas/StepOut"
+          "type": "array"
+          "title": "Steps"
+        "passes":
+          "items":
+            "$ref": "#/components/schemas/PassOut"
+          "type": "array"
+          "title": "Passes"
+        "total_duration_ms":
+          "type": "integer"
+          "title": "Total Duration Ms"
+        "steps_summary":
+          "items":
+            "$ref": "#/components/schemas/StepKindDurationOut"
+          "type": "array"
+          "title": "Steps Summary"
+        "occlusion_tests":
+          "items":
+            "additionalProperties": true
+            "type": "object"
+          "type": "array"
+          "title": "Occlusion Tests"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "session_id"
+        - "zone_id"
+        - "node_id"
+        - "catalog_version"
+        - "kind"
+        - "status"
+        - "passes_per_cell"
+        - "rows"
+        - "started_at"
+        - "last_activity_at"
+        - "closed_at"
+        - "reopened_at"
+        - "reopened_by"
+        - "reopen_reason_es"
+        - "steps"
+        - "passes"
+        - "total_duration_ms"
+        - "steps_summary"
+        - "occlusion_tests"
+      "title": "WalkTestSessionOut"
+      "description": "``WalkTestSession`` (DE §2.11) con lo registrado en ella."
+    "WalkTestStatus":
+      "type": "string"
+      "enum":
+        - "in_progress"
+        - "closed"
+        - "incomplete"
+        - "reopened"
+      "title": "WalkTestStatus"
     "WindowsBody":
       "properties":
         "clip_window":

@@ -17,6 +17,8 @@
   LC-GOB-04, VIG-149).
 - ``transparency``: vista de transparencia del COPASST (``transparency.read``; LC-GOB-04,
   VIG-149).
+- ``walk_tests``: sesión de walk-test con matriz derivada, pasos cronometrados, pases y reapertura
+  (``commissioning.run`` y ``catalog.read``; LC-GOB-06, VIG-150).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``CatalogHttp`` en ``app.state``, que la
@@ -38,6 +40,7 @@ from vigia_platform.catalog.adapters.http.regression import regression_router
 from vigia_platform.catalog.adapters.http.services import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.http.standards import standards_router
 from vigia_platform.catalog.adapters.http.transparency import transparency_router
+from vigia_platform.catalog.adapters.http.walk_tests import walk_tests_router
 
 __all__ = ["CATALOG_STATE_KEY", "CatalogHttp", "catalog_routers"]
 
@@ -55,4 +58,5 @@ def catalog_routers() -> tuple[APIRouter, ...]:
         regression_router(),
         agreements_router(),
         transparency_router(),
+        walk_tests_router(),
     )

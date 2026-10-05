@@ -65,9 +65,9 @@ UNIQUE_VIOLATION = "23505"
 EXCLUSION_VIOLATION = "23P01"
 
 
-def _load_migration() -> Any:
-    path = BACKEND / "migrations" / "versions" / "gob_0017_catalog_schema.py"
-    spec = importlib.util.spec_from_file_location("gob_0017_under_test", path)
+def _load_migration(name: str = "gob_0017_catalog_schema") -> Any:
+    path = BACKEND / "migrations" / "versions" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -75,6 +75,8 @@ def _load_migration() -> Any:
 
 
 MIGRATION = _load_migration()
+REOPENING = _load_migration("gob_0023_walk_test_reopening")
+"""``gob_0023`` añade a ``walk_test_session`` las columnas de la reapertura (TASK-214)."""
 
 
 @dataclass(frozen=True)
@@ -229,6 +231,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         for table in CATALOG_TABLES
         if MIGRATION.app_updatable_columns(table)
     }
+    expected["walk_test_session"] |= set(REOPENING.REOPENING_COLUMNS)
     assert granted == expected
     # Tablas ⛓ sin cierre ni estado: ningún UPDATE.
     for table in ("family_admission", "mounting_gate_record", "agreement_confirmation"):
