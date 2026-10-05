@@ -154,13 +154,11 @@ el denominador de ``node-rate-limited-high``."""
 INGEST_ROUTES: Final = ("/api/nodes/findings", "/api/nodes/observability-events")
 """Ingesta de hallazgos y eventos: el denominador de ``node-permanent-reject-rate``."""
 
-PENDING_UNIT_METRICS: Final = {
-    "revocation_list_seconds_to_expiry": "U-03, NFR-GOB-48 (nombre de su §8.1)",
-    "revocation_list_entries": "U-03, NFR-GOB-14 (entradas de la lista vigente, §8.4)",
-}
+PENDING_UNIT_METRICS: Final[dict[str, str]] = {}
 """Métricas de ``Vigia/Platform`` que una alarma vigila y que su unidad aún no publica en un
 catálogo: la unidad las emite con este nombre y la prueba cruzada exige que no estén en el
-catálogo del núcleo (al publicarse, salen de esta tabla)."""
+catálogo del núcleo (al publicarse, salen de esta tabla). ``revocation_list_seconds_to_expiry``
+y ``revocation_list_entries`` salieron al publicarlas U-03 (TASK-220)."""
 
 PENDING_UNIT_TASKS: Final = {
     "detect_mute_nodes": "U-03",

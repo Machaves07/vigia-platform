@@ -155,6 +155,11 @@ class AuditOperation(enum.StrEnum):
     interfaces §3.4): esta entrada es su rastro, con ``filters`` de los tres valores nuevos; la
     emite un instalador bajo concesión (``fleet.manage``). Mismo criterio que
     ``signatory_policy_changed`` (A-58)."""
+    REVOCATION_LIST_REGENERATED = "revocation_list_regenerated"
+    """U-03 (TASK-220, NFR-GOB-21): ``vigia-admin regenerate-revocation-list`` (y
+    ``revocation-list publish``) regeneró y publicó ``ca/crl.pem`` desde el estado de la base,
+    aunque no hubiera marca; ``outcome = error`` si no publicó. ``filters`` lleva el número de la
+    lista, sus entradas y la versión del objeto; nunca el PEM ni números de serie."""
     WALK_TEST_REOPENED = "walk_test_reopened"
     """U-03 (LC-GOB-06, VIG-150): ``POST /walk-tests/{session_id}/reopen``. La reapertura no
     tiene tipo de registro (nota de TASK-214): esta entrada es su rastro, con ``resource``

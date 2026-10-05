@@ -14,7 +14,9 @@ VIG-98 del 2026-10-03, punto 2). Un secreto inexistente aparece al usar la base,
 
 **Dependencias condicionales**: ``node_ca`` (``NodeCaPublisher``) solo con
 ``VIGIA_NODE_CA_KEY_ARN`` y ``VIGIA_EDGE_BUCKET`` (``first_deploy`` o ``ca_rotation``); ``archive``
-solo con ``VIGIA_ARCHIVE_BUCKET``. Sin ellas, la orden que las necesita se niega con su mensaje.
+solo con ``VIGIA_ARCHIVE_BUCKET``; ``revocation_list`` (``RevocationListCommand``, TASK-220) con
+esas dos y ``VIGIA_NODE_TRUST_STORE_ARN``. Sin ellas, la orden que las necesita se niega con su
+mensaje.
 
 El ``SigningService`` lleva ``LedgerRotationRecorder`` (``shared.runtime.core``): ``vigia-admin``
 nunca rota una clave sin su auditoría en la misma transacción.
@@ -27,6 +29,20 @@ import uuid
 from collections.abc import Sequence
 from typing import Final
 
+from vigia_platform.fleet.adapters.ca.crl_signing import NodeCaRevocationListSigner
+from vigia_platform.fleet.adapters.ca.trust_store_publisher import (
+    TrustStorePublisher,
+    build_elbv2_client,
+)
+from vigia_platform.fleet.adapters.postgres.credential_store import PostgresCredentialStore
+from vigia_platform.fleet.adapters.postgres.revocation_list_state_store import (
+    PostgresRevocationListStateStore,
+)
+from vigia_platform.fleet.application.revocation_list_task import (
+    RevocationListCommand,
+    RevocationListService,
+    register_regenerate_revocation_list,
+)
 from vigia_platform.identity.application.admin_cli import AdminConfig, AdminRuntime
 from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import OrganizationGenesis
@@ -35,8 +51,9 @@ from vigia_platform.shared.archive.partitions import PartitionMaintenance
 from vigia_platform.shared.archive.restore_drill import RestoreDrills
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.db import Database, ProcessKind
-from vigia_platform.shared.node_ca import NodeCaPublisher
+from vigia_platform.shared.node_ca import NodeCaPublisher, NodeCaSigner
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.outbox.registries import PeriodicTaskRegistry
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.runtime.config import RuntimeConfig
 from vigia_platform.shared.runtime.core import (
@@ -47,6 +64,9 @@ from vigia_platform.shared.runtime.core import (
 )
 from vigia_platform.shared.runtime.db_credentials import LazyDatabase, SecretStringReader
 from vigia_platform.shared.runtime.units import PlatformUnit, registered_units
+from vigia_platform.shared.storage import S3Storage
+from vigia_platform.shared.worker.leases import TransactionSource
+from vigia_platform.shared.worker.scheduler import OrganizationReads, TaskContexts
 
 __all__ = ["ADMIN_POOL_SIZE", "build_admin_runtime", "compose_admin_runtime"]
 
@@ -115,14 +135,27 @@ async def compose_admin_runtime(
         provider_organization_id=provider,
     )
     node_ca = None
+    revocation_list = None
     if config.node_ca_key_id is not None and config.edge_bucket is not None:
+        edge = s3_storage(runtime, config.edge_bucket, clock)
         node_ca = NodeCaPublisher(
-            storage=s3_storage(runtime, config.edge_bucket, clock),
+            storage=edge,
             kms=core.kms,
             environment=config.environment,
             random_bytes=os.urandom,
             object_key=config.root_certificate_key,
         )
+        if config.node_trust_store_arn is not None:
+            revocation_list = _revocation_list_command(
+                config,
+                runtime,
+                edge=edge,
+                kms=core.kms,
+                database=database,
+                contexts=services.contexts,
+                clock=clock,
+                metrics=metrics,
+            )
     return AdminRuntime(
         clock=clock,
         database=database,
@@ -143,5 +176,45 @@ async def compose_admin_runtime(
         audit=services.audit,
         node_ca=node_ca,
         archive=archive,
+        revocation_list=revocation_list,
         registries=core.synchronizers,
     )
+
+
+def _revocation_list_command(
+    config: AdminConfig,
+    runtime: RuntimeConfig,
+    *,
+    edge: S3Storage,
+    kms: NodeCaSigner,
+    database: TransactionSource,
+    contexts: TaskContexts,
+    clock: Clock,
+    metrics: PlatformMetrics,
+) -> RevocationListCommand:
+    """El ciclo forzado de la lista de revocación (TASK-220) con las lecturas por organización."""
+    key_id, trust_store = config.node_ca_key_id, config.node_trust_store_arn
+    if key_id is None or trust_store is None or config.edge_bucket is None:
+        raise ValueError("la lista de revocación necesita la clave, el depósito y el almacén")
+    service = RevocationListService(
+        states=PostgresRevocationListStateStore(),
+        credentials=PostgresCredentialStore(),
+        signer=NodeCaRevocationListSigner(
+            kms=kms, key_id=key_id, roots=edge, root_key=config.root_certificate_key
+        ),
+        publisher=TrustStorePublisher(
+            storage=edge,
+            elb=build_elbv2_client(
+                region=runtime.aws_region, endpoint_url=runtime.aws_endpoint_url
+            ),
+            trust_store_arn=trust_store,
+            bucket=config.edge_bucket,
+            object_key=config.crl_key,
+        ),
+        clock=clock,
+        metrics=metrics,
+    )
+    # La misma declaración que registra la raíz del worker (VIG-163), en un registro propio.
+    task = register_regenerate_revocation_list(PeriodicTaskRegistry(), service)
+    sweep = OrganizationReads(database=database, contexts=contexts, task=task)
+    return RevocationListCommand(service, sweep)
