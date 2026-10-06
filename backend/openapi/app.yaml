@@ -3064,6 +3064,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3136,6 +3142,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Forbidden"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3193,6 +3205,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3264,6 +3282,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3329,6 +3353,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3401,6 +3431,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3472,6 +3508,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3549,6 +3591,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":
@@ -3626,6 +3674,12 @@
               "schema":
                 "$ref": "#/components/schemas/RejectionResponse"
           "description": "Request Entity Too Large"
+        "422":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/RejectionResponse"
+          "description": "Unprocessable Entity"
         "429":
           "content":
             "application/json":

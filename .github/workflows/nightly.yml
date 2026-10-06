@@ -8,8 +8,9 @@
 #   la publica como artefacto para llevarla a un PR; seguimiento de VIG-91, punto 1);
 # - volumetría a escala objetivo (NFR-NUC-05) con su informe;
 # - FS-NUC-01 a 10 en el arnés de resiliencia; FS-NUC-10 es el ensayo de restauración;
-# - conformidad de U-01 contra la plataforma: preparada y omitida con motivo mientras la plataforma no
-#   exponga las rutas del contrato (llegan con U-03);
+# - conformidad de U-01 contra la plataforma (TASK-230): la suite completa del kit (perfil nightly)
+#   contra las rutas del contrato, con dos procesos tras el balanceador local y la comparación de
+#   métricas (NFR-GOB-54);
 # - informe archivado 90 días.
 #
 # Seguridad: igual que ci.yml (permisos de solo lectura, acciones fijadas por hash y la clave de
@@ -93,8 +94,8 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: pruebas perfil nightly con integration (sin bancos, volumetría ni resiliencia)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry
+      - name: pruebas perfil nightly con integration (sin bancos, volumetría, resiliencia ni conformidad)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance
 
   bancos:
     name: bancos (regresión del 50 %)
@@ -225,24 +226,53 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-  # Suite de conformidad de U-01 contra la plataforma (LC-NUC-35). Preparada y desactivada: se omite
-  # con motivo mientras openapi/app.yaml no tenga rutas del contrato. Cuando U-03 las añada, este
-  # trabajo falla hasta que alguien escriba aquí la ejecución: nunca pasa en vacío.
+  # Suite de conformidad de U-01 contra la plataforma (LC-NUC-35; NFR-GOB-61, 15 y 54; TASK-230):
+  # `vigia-conformance run --profile nightly` contra las diez rutas de node_api con mTLS, con dos
+  # procesos vigia-api tras el balanceador local, la idempotencia entre procesos y la comparación de
+  # las métricas de la plataforma con el informe del kit (tests/conformance/). El ConformanceReport,
+  # la salida de la orden y la comparación de métricas quedan 90 días en `informe-conformidad`.
   conformance:
     name: conformidad de U-01 contra la plataforma
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 240
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: rutas del contrato en la plataforma
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
         run: |
-          if grep -Eq '^  "/(api/)?nodes/' backend/openapi/app.yaml; then
-            echo "La plataforma ya expone rutas del contrato: escribe la ejecución de vigia-conformance en este trabajo." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "Conformidad omitida: la plataforma todavía no expone las rutas del contrato (llegan con U-03)." | tee -a "$GITHUB_STEP_SUMMARY"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: suite completa del kit contra la plataforma (perfil nightly)
+        env:
+          VIGIA_CONFORMANCE_REPORT_DIR: ${{ runner.temp }}/informes
+        run: |
+          mkdir -p "$RUNNER_TEMP/informes"
+          uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration tests/conformance
+      - name: informe de conformidad
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-conformidad
+          path: ${{ runner.temp }}/informes/
+          if-no-files-found: warn
+          retention-days: 90
 
   informe:
     name: informe nocturno

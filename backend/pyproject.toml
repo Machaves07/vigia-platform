@@ -58,6 +58,9 @@ dev = [
   # Solo para importar los generadores del kit de U-01 (PR-NUC-17): el paquete
   # vigia_contracts.conformance.generators importa numpy al cargarse.
   "numpy>=1.26",
+  # La orden `vigia-conformance run` del kit de U-01 contra la plataforma real (TASK-230,
+  # tests/conformance/): el extra trae av, jsonschema y regress. Solo para las pruebas.
+  "vigia-contracts[conformance]",
   "pytest-benchmark>=4",
   "coverage>=7",
   "testcontainers>=4.8",
