@@ -6,8 +6,9 @@ zona, en dos tiempos para que la firma no retenga la cadena del expediente:
 
 1. ``prepare_transition``: exclusión de la proyección de la zona (``pg_advisory_xact_lock``),
    proyección vigente, plan puro (``plan_transition``: ``revoked`` solo desde ``approved``),
-   instante del relevo (``handover_instant``: nunca antes del intervalo abierto ni de la última
-   emisión) y ``SigningPort.sign(purpose=gate)`` del ``GateState`` con tope de espera;
+   instante del relevo (``handover_instant``: nunca antes del intervalo abierto y estrictamente
+   después de la última emisión) y ``SigningPort.sign(purpose=gate)`` del ``GateState`` con tope
+   de espera;
 2. ``commit_transition``: ``gate_state_changed`` en la cadena de la planta con el evento homónimo
    ``{zone_id, gate, status, resulting_mode, record_id, reason_es_present}`` (nunca el motivo),
    cierre del intervalo abierto y apertura del siguiente (misma transacción) y la proyección con
@@ -34,6 +35,25 @@ evento, y la persona recibe ``temporarily_unavailable`` (``GateUnavailable``).
 NFR-GOB-10). ``renew_gate_envelope`` vuelve a emitir el sobre con el mismo estado y un
 ``issued_at`` nuevo, sin historia, registro ni evento (A-55: lo invoca el latido de TASK-223 cuando
 al sobre le quedan menos de 24 h). Ningún paso lee la hora del sistema: ``Clock`` inyectado.
+
+**Sobre inicial** (A-60, VIG-180): toda zona tiene un sobre firmado desde que existe, con montaje y
+uso ``pending`` y modo ``no_capture`` («no operar»), con la misma clave y la misma forma que el de
+una transición, y sin historia, registro ni evento (``pending`` no abre intervalo).
+
+- Al crear la zona (``identity.create_zone``, por el puerto ``ZoneGateGenesis``): ``sign_initial``
+  **antes** de abrir su transacción y ``save_initial`` dentro de ella, tras insertar la zona
+  (``effective_from`` = instante de creación). Con la firma caída la zona no se crea
+  (``GateUnavailable``, fallo cerrado).
+- Para la zona que ya existía sin sobre (anterior a A-60): ``ensure_initial_envelopes``, perezoso
+  e idempotente al primer uso (alta y latido). Una sola lectura de los sobres guardados; para cada
+  zona que falta, en su propia transacción, la exclusión de la proyección, la comprobación
+  **otra vez** con ella tomada y solo entonces la firma y el ``INSERT … ON CONFLICT DO NOTHING``:
+  dos usos simultáneos firman una sola vez y un sobre inicial nunca pisa una transición. Una
+  migración de Alembic no puede firmar (la clave privada solo la toca ``SigningService``), así que
+  esta emisión perezosa es la migración de datos de las zonas existentes.
+
+La primera transición sustituye al sobre inicial con un ``issued_at`` estrictamente mayor que el de
+cualquier sobre anterior de la zona.
 """
 
 from __future__ import annotations
@@ -73,6 +93,7 @@ from vigia_platform.catalog.domain.gates import (
 )
 from vigia_platform.catalog.domain.texts import has_content
 from vigia_platform.catalog.domain.time_windows import (
+    MILLISECOND,
     HalfOpenInterval,
     containing,
     handover_instant,
@@ -109,6 +130,7 @@ __all__ = [
     "GateTransition",
     "GateUnavailable",
     "GateWriteFailed",
+    "InitialGateEnvelope",
     "LedgerRaceLost",
     "PreparedTransition",
     "record_id_of",
@@ -191,6 +213,14 @@ class PreparedTransition:
         issued = self.state.issued_at
         assert issued is not None  # noqa: S101 - prepare_transition siempre lo fija
         return issued
+
+
+@dataclass(frozen=True, slots=True)
+class InitialGateEnvelope:
+    """El sobre inicial ``pending``/``pending`` de una zona (A-60), firmado y aún sin guardar."""
+
+    state: ZoneGateState
+    envelope: Mapping[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +327,9 @@ class GateService:
             open_start=previous.decided_at,
             last_issued=current.issued_at,
         )
+        if current.issued_at is not None and at <= current.issued_at:
+            # El sobre nuevo sustituye al guardado (también al inicial de A-60): siempre posterior.
+            at = utc_instant(current.issued_at) + MILLISECOND
         plan = plan_transition(
             current,
             gate,
@@ -503,12 +536,13 @@ class GateService:
     ) -> Mapping[str, Any] | None:
         """Vuelve a emitir el sobre con el mismo estado y un ``issued_at`` nuevo (A-55).
 
-        Sin historia, sin ``gate_state_changed`` y sin evento; ``None`` si la zona nunca cambió
-        (no hay sobre que renovar). Con la firma caída, ``GateUnavailable`` y el sobre anterior
-        intacto. El llamador (el latido, TASK-223) decide cuándo. Con ``expiring_before`` (añadido
-        por TASK-223), el umbral se comprueba **otra vez con la exclusión de la zona tomada**: si
-        otro latido ya renovó el sobre (vence en ``expiring_before`` o después), se devuelve el
-        guardado sin firmar, así que dos latidos concurrentes firman una sola vez.
+        Sin historia, sin ``gate_state_changed`` y sin evento; ``None`` si la zona no tiene sobre
+        guardado (no hay nada que renovar: lo emite ``ensure_initial_envelopes``). Con la firma
+        caída, ``GateUnavailable`` y el sobre anterior intacto. El llamador (el latido, TASK-223)
+        decide cuándo. Con ``expiring_before`` (añadido por TASK-223), el umbral se comprueba
+        **otra vez con la exclusión de la zona tomada**: si otro latido ya renovó el sobre (vence
+        en ``expiring_before`` o después), se devuelve el guardado sin firmar, así que dos latidos
+        concurrentes firman una sola vez.
         """
         if not isinstance(context, ScopeContext) or type(zone_id) is not uuid.UUID:
             raise ResourceNotFound()
@@ -535,6 +569,75 @@ class GateService:
 
         renewed: Mapping[str, Any] | None = await self.run(context, renew)
         return renewed
+
+    # --- Sobre inicial (A-60) ------------------------------------------------------------------
+
+    async def sign_initial(
+        self,
+        organization_id: uuid.UUID,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        at: datetime,
+    ) -> InitialGateEnvelope:
+        """El sobre ``pending``/``pending`` (``no_capture``) de la zona emitido en ``at``, firmado
+        como el de una transición; ``GateUnavailable`` si la firma no responde."""
+        for value in (organization_id, plant_id, zone_id):
+            if type(value) is not uuid.UUID:
+                raise TypeError("los identificadores de la zona son uuid.UUID")
+        issued = _instant(at)
+        state = dataclasses.replace(
+            ZoneGateState.initial(organization_id, plant_id, zone_id), issued_at=issued
+        )
+        envelope = await self._sign(gate_state_payload(state, issued))
+        return InitialGateEnvelope(dataclasses.replace(state, envelope=envelope), envelope)
+
+    async def save_initial(self, transaction: Transaction, initial: InitialGateEnvelope) -> None:
+        """Guarda ``initial`` en ``transaction``; si la zona ya tenía proyección,
+        ``GateWriteConflict`` (nunca dos sobres iniciales ni uno que pise una transición)."""
+        if not isinstance(initial, InitialGateEnvelope):
+            raise TypeError("initial debe salir de sign_initial")
+        if not await self._repository.insert_initial(transaction, initial.state, initial.envelope):
+            raise GateWriteConflict
+
+    async def ensure_initial_envelopes(
+        self, context: ScopeContext, zone_ids: Iterable[uuid.UUID]
+    ) -> tuple[uuid.UUID, ...]:
+        """Emite el sobre inicial de las zonas de ``zone_ids`` que aún no tienen ninguno y
+        devuelve las zonas a las que se lo emitió (en el orden de su identificador).
+
+        Las que ya tienen sobre no se firman (una lectura); las de otra organización o que la RLS
+        no deja ver, tampoco. ``GateUnavailable`` si la firma no responde: lo ya emitido queda.
+        """
+        if not isinstance(context, ScopeContext):
+            raise ResourceNotFound()
+        zones = sorted({zone for zone in zone_ids if type(zone) is uuid.UUID}, key=str)
+        if not zones:
+            return ()
+        stored = await self._repository.envelopes(context, zones)
+        issued: list[uuid.UUID] = []
+        for zone_id in zones:
+            if zone_id in stored:
+                continue
+
+            async def issue(transaction: Transaction, zone_id: uuid.UUID = zone_id) -> bool:
+                await self._repository.lock_projection(transaction, zone_id)
+                if await self._repository.state(transaction, zone_id) is not None:
+                    return False  # otro uso o una transición llegaron antes, con el candado
+                zone = await self._repository.zone(transaction, zone_id)
+                if zone is None:
+                    return False
+                initial = await self.sign_initial(
+                    zone.organization_id,
+                    zone.plant_id,
+                    zone.zone_id,
+                    handover_instant(self._clock.now()),
+                )
+                await self.save_initial(transaction, initial)
+                return True
+
+            if await self.run(context, issue):
+                issued.append(zone_id)
+        return tuple(issued)
 
     # --- Lecturas ----------------------------------------------------------------------------
 
@@ -587,7 +690,7 @@ class GateService:
         """Los sobres ``SignedEnvelope<GateState>`` guardados, **sin firmar** (NFR-GOB-10).
 
         Puerto interno del latido (TASK-223): las zonas fuera de la organización o del alcance
-        del contexto, o sin ninguna transición, no aparecen.
+        del contexto, o sin sobre guardado (anteriores a A-60 aún sin usar), no aparecen.
         """
         if not isinstance(context, ScopeContext):
             raise ResourceNotFound()

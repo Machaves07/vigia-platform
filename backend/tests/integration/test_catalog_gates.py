@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 from vigia_contracts.models.enumerations import GateStatus, ZoneMode
-from vigia_contracts.signing import verify
+from vigia_contracts.signing import SignatureInvalidError, verify
 
 from tests.gates_support import (
     FRAMING,
@@ -51,7 +51,10 @@ from tests.identity_db import BASE_TIME
 from tests.integration.conftest import PostgresEndpoint
 from tests.outbox_support import app_database
 from tests.writer_support import unit_context
-from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.gate_repository import (
+    GateWriteConflict,
+    PostgresGateRepository,
+)
 from vigia_platform.catalog.application.admission import CatalogRejected
 from vigia_platform.catalog.application.gates import (
     GateConflict,
@@ -69,7 +72,10 @@ from vigia_platform.catalog.domain.scope_record import (
     ScopeRecordRequest,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.identity.authz.context import with_unit
+from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, ScopeLevel
+from vigia_platform.shared.signing.keys import to_millisecond
 
 pytestmark = pytest.mark.integration
 
@@ -754,7 +760,7 @@ def test_reading_stored_envelopes_never_signs(faults: GatesWorld) -> None:
         stored = world.run(
             world.gates.stored_gate_envelopes(z1.installer, [z1.zone, z2.zone, fresh.zone])
         )
-        # z2 es de otra organización (otra concesión) y fresh no tiene transiciones.
+        # z2 es de otra organización (otra concesión) y fresh, anterior a A-60, aún no tiene sobre.
         assert stored == {z1.zone: expected["envelope"]}
 
     assert world.signer.calls == calls
@@ -795,6 +801,257 @@ def test_renewing_the_envelope_keeps_the_state_and_writes_no_history(faults: Gat
     assert world.projection(z.zone) == after
     world.signer.down = False
     assert world.run(world.gates.renew_gate_envelope(z.installer, Zone(world).zone)) is None
+
+
+# --- Sobre inicial al crear la zona (A-60, VIG-180) -----------------------------------------------
+
+
+def _initial_payload(world: GatesWorld, site: Any, plant: uuid.UUID, zone: uuid.UUID) -> Any:
+    projection = world.projection(zone)
+    assert projection is not None
+    return {
+        "zone_id": str(zone),
+        "organization_id": str(site.organization_id),
+        "plant_id": str(plant),
+        "mounting_gate": {"status": "pending"},
+        "usage_gate": {"status": "pending"},
+        "resulting_mode": "no_capture",
+        "issued_at": projection["envelope"]["payload"]["issued_at"],
+        "valid_until": projection["envelope"]["payload"]["valid_until"],
+    }
+
+
+async def _approve_usage(world: GatesWorld, context: ScopeContext, zone: uuid.UUID) -> Any:
+    """La aprobación del uso (lo que hace la del acuerdo) **sin** adelantar el reloj."""
+    gates = world.gates
+    _, authorized = await gates.zone(context, zone, PermissionKey.COMMISSIONING_RUN)
+    writer = with_unit(authorized, ActorUnit.U03)
+
+    async def body(transaction: Any) -> GateTransition:
+        return await gates.transition_gate(
+            transaction, writer, zone, GateKind.USAGE, GateStatus.APPROVED, uuid.uuid4()
+        )
+
+    return await gates.run(writer, body)
+
+
+def _usage_approval(world: GatesWorld, context: ScopeContext, zone: uuid.UUID) -> GateTransition:
+    transition: GateTransition = world.run(_approve_usage(world, context, zone))
+    return transition
+
+
+def test_creating_a_zone_leaves_exactly_one_signed_pending_envelope(world: GatesWorld) -> None:
+    site = world.site(zones=0)
+    (plant,) = site.plants
+    calls = world.signer.calls
+    now = world.authz.sessions.clock.now()
+
+    zone = world.created_zone(site, plant)
+
+    rows = world.fetch("SELECT count(*) AS n FROM catalog.zone_gate_state WHERE zone_id = $1", zone)
+    assert rows[0]["n"] == 1
+    projection = world.projection(zone)
+    assert projection is not None
+    assert (projection["mounting"], projection["usage"], projection["resulting_mode"]) == (
+        {"status": "pending"},
+        {"status": "pending"},
+        "no_capture",
+    )
+    # effective_from = instante de creación (el de ``zone_created``), al milisegundo.
+    (created,) = world.fetch("SELECT created_at FROM identity.zone WHERE zone_id = $1", zone)
+    assert projection["issued_at"] == to_millisecond(created["created_at"]) == to_millisecond(now)
+    assert projection["valid_until"] - projection["issued_at"] == SEVEN_DAYS
+    envelope = projection["envelope"]
+    payload = verify(envelope, world.signer.keyset(), "gate", world.signer.world.clock)
+    assert payload == _initial_payload(world, site, plant, zone)
+    assert world.signer.calls == calls + 1
+    # Sin historia, sin ``gate_state_changed`` y sin evento: ``pending`` no abre intervalo.
+    assert world.history(zone) == []
+    assert [r["record_type"] for r in world.records_of(zone)] == ["zone_created"]
+    assert world.events(plant, zone) == []
+    # Alterado, ya no verifica: ni la carga ni la firma.
+    forged = json.loads(json.dumps(envelope))
+    forged["payload"]["resulting_mode"] = "productive"
+    with pytest.raises(SignatureInvalidError):
+        verify(forged, world.signer.keyset(), "gate", world.signer.world.clock)
+    forged = json.loads(json.dumps(envelope))
+    forged["signature"] = forged["signature"][::-1]
+    with pytest.raises(SignatureInvalidError):
+        verify(forged, world.signer.keyset(), "gate", world.signer.world.clock)
+    # La lectura de la interfaz sigue siendo ``pending`` en las dos, ahora con su emisión.
+    state = world.run(world.gates.gate_state(world.installer(site), zone))
+    assert state.resulting_mode is ZoneMode.NO_CAPTURE
+    assert state.issued_at == projection["issued_at"]
+
+
+def test_with_signing_down_the_zone_is_not_created(faults: GatesWorld) -> None:
+    world = faults
+    site = world.site(zones=0)
+    (plant,) = site.plants
+    world.signer.down = True
+
+    with pytest.raises(GateUnavailable):
+        world.created_zone(site, plant)
+
+    assert world.fetch("SELECT 1 FROM identity.zone WHERE plant_id = $1", plant) == []
+    assert world.fetch("SELECT 1 FROM catalog.zone_gate_state WHERE plant_id = $1", plant) == []
+    world.signer.down = False
+    assert world.projection(world.created_zone(site, plant)) is not None
+
+
+def test_the_first_transition_replaces_the_initial_envelope_with_a_later_one(
+    world: GatesWorld,
+) -> None:
+    site = world.site(zones=0)
+    (plant,) = site.plants
+    zone = world.created_zone(site, plant)
+    initial = world.projection(zone)
+    assert initial is not None
+    installer = world.installer(site)
+
+    # El reloj no avanza: el sobre de la transición sigue siendo posterior al inicial.
+    transition = _usage_approval(world, installer, zone)
+
+    after = world.projection(zone)
+    assert after is not None
+    assert after["issued_at"] > initial["issued_at"]
+    assert after["issued_at"] - initial["issued_at"] == timedelta(milliseconds=1)
+    assert after["usage"]["status"] == "approved" and after["resulting_mode"] == "no_capture"
+    payload = verify(after["envelope"], world.signer.keyset(), "gate", world.signer.world.clock)
+    assert payload["usage_gate"]["status"] == "approved"
+    # La historia: un solo intervalo, abierto desde la transición (PR-GOB-03 sin cambios).
+    (row,) = world.history(zone)
+    assert (row["gate"], row["status"], row["effective_until"]) == ("usage", "approved", None)
+    assert row["effective_from"] == after["issued_at"] == transition.interval.effective_from
+    assert (
+        world.run(world.gates.state_at(installer, zone, GateKind.USAGE, initial["issued_at"]))
+        is None
+    )  # antes de la transición, ``pending``: ningún intervalo
+
+
+def test_a_zone_from_before_a60_gets_its_initial_envelope_once_and_lazily(
+    faults: GatesWorld,
+) -> None:
+    world = faults
+    z, other = Zone(world), Zone(world)
+    assert world.projection(z.zone) is None
+    calls = world.signer.calls
+
+    issued = world.run(world.gates.ensure_initial_envelopes(z.installer, [z.zone, other.zone]))
+
+    # ``other`` es de otra organización: ni se ve ni se firma.
+    assert issued == (z.zone,)
+    assert world.projection(other.zone) is None
+    assert world.signer.calls == calls + 1
+    projection = world.projection(z.zone)
+    assert projection is not None
+    payload = verify(
+        projection["envelope"], world.signer.keyset(), "gate", world.signer.world.clock
+    )
+    assert payload == _initial_payload(world, z.site, z.plant, z.zone)
+    assert world.written(z.plant, z.zone)[:4] == (0, 0, 0, 0)
+    # Idempotente: ya tiene sobre, ni con la firma caída se vuelve a firmar.
+    world.signer.down = True
+    assert world.run(world.gates.ensure_initial_envelopes(z.installer, [z.zone])) == ()
+    assert world.projection(z.zone) == projection
+    world.signer.down = False
+    # Tras una transición tampoco: un sobre inicial nunca pisa otro.
+    _approved(world, z)
+    approved = world.projection(z.zone)
+    assert world.run(world.gates.ensure_initial_envelopes(z.installer, [z.zone])) == ()
+    assert world.projection(z.zone) == approved
+    assert world.run(world.gates.ensure_initial_envelopes(z.installer, [])) == ()
+
+
+def test_an_initial_envelope_never_replaces_a_stored_one(world: GatesWorld) -> None:
+    # El respaldo del candado: ``INSERT … ON CONFLICT DO NOTHING`` y ``GateWriteConflict``.
+    z = Zone(world)
+    _approved(world, z)
+    approved = world.projection(z.zone)
+    context = unit_context(z.site.organization_id, ActorUnit.U03)
+
+    async def overwrite() -> None:
+        initial = await world.gates.sign_initial(
+            z.site.organization_id, z.plant, z.zone, world.authz.sessions.clock.now()
+        )
+        async with world.database.transaction(context) as transaction:
+            await world.gates.save_initial(transaction, initial)
+
+    with pytest.raises(GateWriteConflict):
+        world.run(overwrite())
+    assert world.projection(z.zone) == approved
+
+
+def test_with_signing_down_the_lazy_initial_envelope_writes_nothing(faults: GatesWorld) -> None:
+    world = faults
+    z = Zone(world)
+    world.signer.down = True
+    with pytest.raises(GateUnavailable):
+        world.run(world.gates.ensure_initial_envelopes(z.installer, [z.zone]))
+    assert world.projection(z.zone) is None
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 3])
+def test_two_simultaneous_lazy_uses_leave_one_initial_envelope_and_sign_once(
+    faults: GatesWorld, attempt: int
+) -> None:
+    world = faults
+    z = Zone(world)
+    calls = world.signer.calls
+
+    results = _race(
+        world,
+        [
+            lambda: world.gates.ensure_initial_envelopes(z.installer, [z.zone]),
+            lambda: world.gates.ensure_initial_envelopes(z.installer, [z.zone]),
+        ],
+    )
+
+    assert all(isinstance(result, tuple) for result in results), results
+    assert sorted(results, key=len) == [(), (z.zone,)], results
+    assert world.signer.calls == calls + 1
+    rows = world.fetch(
+        "SELECT count(*) AS n FROM catalog.zone_gate_state WHERE zone_id = $1", z.zone
+    )
+    assert rows[0]["n"] == 1
+    projection = world.projection(z.zone)
+    assert projection is not None and projection["resulting_mode"] == "no_capture"
+
+
+@pytest.mark.parametrize("attempt", [1, 2, 3])
+def test_a_lazy_use_behind_a_transition_never_replaces_it(faults: GatesWorld, attempt: int) -> None:
+    # La transición toma primero la exclusión de la zona (retenida en su firma); el uso perezoso
+    # espera el candado y, con él tomado, ve la transición: no firma ni escribe.
+    world = faults
+    z = Zone(world)
+    gate = threading.Event()
+    world.signer.gate = gate
+    calls = world.signer.calls
+    admin = world.authz.sessions.admin
+
+    async def race() -> list[Any]:
+        transition = asyncio.create_task(_approve_usage(world, z.installer, z.zone))
+        async with asyncio.timeout(WAIT_SECONDS):
+            while world.signer.calls == calls:  # la transición ya firma con el candado tomado
+                await asyncio.sleep(POLL_SECONDS)
+        lazy = asyncio.create_task(world.gates.ensure_initial_envelopes(z.installer, [z.zone]))
+        async with asyncio.timeout(WAIT_SECONDS):
+            while await _advisory_waiters(admin) < 1:
+                await asyncio.sleep(POLL_SECONDS)
+        gate.set()
+        return list(await asyncio.gather(transition, lazy, return_exceptions=True))
+
+    try:
+        approved, issued = world.run(race())
+    finally:
+        world.signer.gate = None
+
+    assert isinstance(approved, GateTransition), approved
+    assert issued == (), issued
+    assert world.signer.calls == calls + 1
+    projection = world.projection(z.zone)
+    assert projection is not None and projection["usage"]["status"] == "approved"
+    assert len(world.history(z.zone)) == 1
 
 
 # --- Consultas de la historia ---------------------------------------------------------------------

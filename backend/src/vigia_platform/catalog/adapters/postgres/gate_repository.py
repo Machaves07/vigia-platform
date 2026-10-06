@@ -2,7 +2,9 @@
 
 - ``zone_gate_state`` 🔒 es la proyección: una fila por zona, que se inserta o se actualiza
   (``vigia_app`` no tiene ``DELETE``); guarda el sobre ``SignedEnvelope<GateState>`` ya emitido,
-  que las lecturas devuelven **tal cual**, sin canonicalizar ni firmar (PAT-GOB-REN-02).
+  que las lecturas devuelven **tal cual**, sin canonicalizar ni firmar (PAT-GOB-REN-02). La fila
+  inicial ``pending``/``pending`` (A-60) entra con ``ON CONFLICT DO NOTHING``: nunca pisa el sobre
+  de una transición.
 - ``gate_state_history`` ⛓ es la verdad: solo ``INSERT`` y el cierre ``effective_until`` de nulo a
   su valor, una vez (lista blanca de ``gob_0017``). El cierre del intervalo abierto y la apertura
   del siguiente van en la **misma transacción**: dos rangos no acotados se solaparían y la
@@ -63,6 +65,14 @@ _UPSERT_STATE: Final = text(
     " issued_at = EXCLUDED.issued_at, envelope = EXCLUDED.envelope,"
     " valid_until = EXCLUDED.valid_until"
     " WHERE catalog.zone_gate_state.organization_id = EXCLUDED.organization_id"
+)
+_INSERT_INITIAL: Final = text(
+    "INSERT INTO catalog.zone_gate_state (zone_id, organization_id, plant_id, mounting, usage,"
+    " resulting_mode, issued_at, envelope, valid_until)"
+    " VALUES (:zone_id, :organization_id, :plant_id, CAST(:mounting AS jsonb),"
+    " CAST(:usage AS jsonb), :resulting_mode, :issued_at, CAST(:envelope AS jsonb),"
+    " :valid_until)"
+    " ON CONFLICT (zone_id) DO NOTHING"
 )
 _ENVELOPES: Final = text(
     "SELECT zone_id, envelope FROM catalog.zone_gate_state"
@@ -207,26 +217,21 @@ class PostgresGateRepository:
         self, transaction: Transaction, state: ZoneGateState, envelope: Mapping[str, Any]
     ) -> None:
         """Inserta o actualiza la proyección con su sobre ya firmado."""
-        if state.organization_id != transaction.context.organization_id:
-            raise ValueError("la proyección es de otra organización que la transacción")
-        if state.issued_at is None or state.valid_until is None:
-            raise ValueError("una proyección guardada lleva su emisión")
-        result = await transaction.execute(
-            _UPSERT_STATE,
-            {
-                "zone_id": state.zone_id,
-                "organization_id": state.organization_id,
-                "plant_id": state.plant_id,
-                "mounting": _dumps(state.mounting.as_json(GateKind.MOUNTING, with_author=True)),
-                "usage": _dumps(state.usage.as_json(GateKind.USAGE, with_author=True)),
-                "resulting_mode": state.resulting_mode.value,
-                "issued_at": state.issued_at,
-                "envelope": _dumps(dict(envelope)),
-                "valid_until": state.valid_until,
-            },
-        )
+        result = await transaction.execute(_UPSERT_STATE, _state_row(transaction, state, envelope))
         if _rowcount(result) != 1:
             raise GateWriteConflict
+
+    async def insert_initial(
+        self, transaction: Transaction, state: ZoneGateState, envelope: Mapping[str, Any]
+    ) -> bool:
+        """La proyección inicial ``pending``/``pending`` con su sobre (A-60), **solo** si la zona
+        no tiene ninguna: nunca pisa otro sobre. ``False`` si ya había una."""
+        if (state.mounting.status, state.usage.status) != (GateStatus.PENDING, GateStatus.PENDING):
+            raise ValueError("la proyección inicial es pending en las dos compuertas")
+        result = await transaction.execute(
+            _INSERT_INITIAL, _state_row(transaction, state, envelope)
+        )
+        return _rowcount(result) == 1
 
     async def envelopes(
         self, context: ScopeContext, zone_ids: Iterable[uuid.UUID]
@@ -307,6 +312,26 @@ class PostgresGateRepository:
             context, _HISTORY, {**_zone_key(context, zone_id), "from_": from_, "to_": to_}
         )
         return tuple(interval_from_row(row) for row in rows)
+
+
+def _state_row(
+    transaction: Transaction, state: ZoneGateState, envelope: Mapping[str, Any]
+) -> dict[str, Any]:
+    if state.organization_id != transaction.context.organization_id:
+        raise ValueError("la proyección es de otra organización que la transacción")
+    if state.issued_at is None or state.valid_until is None:
+        raise ValueError("una proyección guardada lleva su emisión")
+    return {
+        "zone_id": state.zone_id,
+        "organization_id": state.organization_id,
+        "plant_id": state.plant_id,
+        "mounting": _dumps(state.mounting.as_json(GateKind.MOUNTING, with_author=True)),
+        "usage": _dumps(state.usage.as_json(GateKind.USAGE, with_author=True)),
+        "resulting_mode": state.resulting_mode.value,
+        "issued_at": state.issued_at,
+        "envelope": _dumps(dict(envelope)),
+        "valid_until": state.valid_until,
+    }
 
 
 def _zone_key(context: ScopeContext, zone_id: uuid.UUID) -> dict[str, Any]:

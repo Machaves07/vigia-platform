@@ -63,7 +63,7 @@ from vigia_platform.catalog.domain.scope_record import CameraFraming, ScopeRecor
 from vigia_platform.catalog.events import register_catalog_event_types
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.identity.application.common import IdentityDependencies
-from vigia_platform.identity.application.hierarchy import HierarchyService
+from vigia_platform.identity.application.hierarchy import HierarchyService, ZoneSpec
 from vigia_platform.identity.authz.context import with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.writer import EscritorExpediente
@@ -190,6 +190,7 @@ class GatesWorld:
     storage: MemoryDocumentStorage
     documents: DocumentService
     hierarchy: HierarchyService
+    hierarchy_deps: IdentityDependencies
     gates: GateService = field(init=False)
     records: ScopeRecordService = field(init=False)
     policies: PlantPolicyService = field(init=False)
@@ -300,6 +301,18 @@ class GatesWorld:
         scope = self.run(self.authz.contexts.context_from_session(cookie))
         context: ScopeContext = scope.context
         return context
+
+    def created_zone(
+        self, site: Site, plant: uuid.UUID, gates: GateService | None = None
+    ) -> uuid.UUID:
+        """Una zona creada por ``create_zone`` de U-02 con ``gates`` como ``ZoneGateGenesis``
+        (A-60), como la cablea la raíz de composición de ``vigia-api``."""
+        administrator = self.member(site, Role.ADMINISTRATOR)
+        hierarchy = HierarchyService(self.hierarchy_deps, zone_gates=gates or self.gates)
+        code = f"ZN-{uuid.uuid4().hex[:8].upper()}"
+        view = self.run(hierarchy.create_zone(administrator, plant, ZoneSpec(code, "Zona nueva")))
+        zone_id: uuid.UUID = view.zone_id
+        return zone_id
 
     def equip(
         self,
@@ -590,20 +603,26 @@ def gates_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[GatesWorld]
             store=DocumentObjectStore(storage),
             clock=sessions.clock,
         )
-        hierarchy = HierarchyService(
-            IdentityDependencies(
-                database=database,
-                writer=writer,
-                audit=sessions.audit,
-                outbox=sessions.outbox,
-                authorizer=authz.authorizer,
-                free_text=free_text,
-                clock=sessions.clock,
-                provider_organization_id=authz.provider_organization_id,
-            )
+        hierarchy_deps = IdentityDependencies(
+            database=database,
+            writer=writer,
+            audit=sessions.audit,
+            outbox=sessions.outbox,
+            authorizer=authz.authorizer,
+            free_text=free_text,
+            clock=sessions.clock,
+            provider_organization_id=authz.provider_organization_id,
         )
         world = GatesWorld(
-            authz, database, writer, free_text, SignerDouble(signing), storage, documents, hierarchy
+            authz,
+            database,
+            writer,
+            free_text,
+            SignerDouble(signing),
+            storage,
+            documents,
+            HierarchyService(hierarchy_deps),
+            hierarchy_deps,
         )
         try:
             yield world
