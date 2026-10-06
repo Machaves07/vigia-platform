@@ -5,7 +5,8 @@ certificado contra la base y la aplicación con la cadena fija):
 
 - el primer latido proyecta ``NodeInventory``, ``CameraInventory`` y ``ZoneNodeState`` (con
   ``coverage_ok`` de BR-GOB-97), anexa ``HeartbeatHistory`` y escribe la vuelta a ``reachable``;
-  un ``heartbeat_id`` repetido no cambia nada y recibe la respuesta del estado vigente (BR-GOB-71);
+  un ``heartbeat_id`` repetido no cambia nada y recibe la misma respuesta byte a byte, con la hora
+  del original, en la misma instancia y en otra (BR-CTR-26, BR-GOB-71; VIG-182);
 - ``reachable`` solo tras ``unknown`` o ``mute`` (BR-GOB-73); ``last_heartbeat_at`` nunca retrocede;
 - la respuesta: sobres de compuertas guardados **byte a byte**, versiones de catálogo,
   ``mute_after_seconds`` cinco veces el intervalo (15, 60 y 600 s), ``target_software_version`` sin
@@ -93,6 +94,7 @@ def test_a_first_heartbeat_projects_the_inventory_and_returns_to_reachable(
     assert response.headers["content-type"].startswith("application/json")
     parsed = api.parse_heartbeat_response(response.content)
     assert parsed.revoked is False
+    assert response.json()["server_time"] == format_timestamp(received)
     assert parsed.heartbeat_interval_seconds == 60 and parsed.mute_after_seconds == 300
     assert {entry.zone_id for entry in parsed.catalog_versions_available} == {
         str(zone) for zone in site.zones
@@ -129,6 +131,7 @@ def test_a_repeated_heartbeat_id_changes_nothing_and_answers_the_current_state(
     site = stack.site()
     stack.tick()
     body = stack.body(site)
+    received = to_millisecond(stack.now())
     first = stack.post(site, body)
     assert first.status_code == 200, first.text
     before = (stack.inventory(site.node_id), stack.cameras(site.node_id), stack.zones(site.node_id))
@@ -141,9 +144,34 @@ def test_a_repeated_heartbeat_id_changes_nothing_and_answers_the_current_state(
     assert len(stack.history(site.node_id)) == 1
     assert len(stack.communication(site)) == 1
     assert stack.regression_marks(site) == []
-    first_document, again_document = json.loads(first.content), json.loads(again.content)
-    first_document.pop("server_time"), again_document.pop("server_time")
-    assert again_document == first_document
+    # La misma respuesta, byte a byte, con la hora del original (BR-CTR-26, VIG-182).
+    assert again.content == first.content
+    assert json.loads(again.content)["server_time"] == format_timestamp(received)
+
+
+def test_a_repeated_heartbeat_id_on_another_instance_gets_the_same_bytes(
+    stack: HeartbeatStack,
+) -> None:
+    # NFR-GOB-15: la hora del original sale de ``HeartbeatHistory``, no de la instancia que lo
+    # atendió; el duplicado llega a otra instancia (otro pool) segundos después y con otro cuerpo.
+    site = stack.site(zones=2)
+    other = stack.instance()
+    stack.tick()
+    body = stack.body(site)
+    received = to_millisecond(stack.now())
+    first = stack.post(site, body)
+    assert first.status_code == 200, first.text
+    before = (stack.inventory(site.node_id), stack.cameras(site.node_id), stack.zones(site.node_id))
+    records = len(stack.communication(site))
+    stack.tick(45)
+    again = stack.post(site, {**body, "uptime_seconds": body["uptime_seconds"] + 45}, other)
+    assert again.status_code == 200, again.text
+    assert again.content == first.content
+    assert json.loads(first.content)["server_time"] == format_timestamp(received)
+    after = (stack.inventory(site.node_id), stack.cameras(site.node_id), stack.zones(site.node_id))
+    assert after == before
+    assert len(stack.history(site.node_id)) == 1
+    assert len(stack.communication(site)) == records
 
 
 def test_reachable_is_written_only_after_unknown_or_mute(stack: HeartbeatStack) -> None:
