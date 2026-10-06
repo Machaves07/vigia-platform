@@ -29,7 +29,7 @@ from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 
-__all__ = ["PostgresRegressionRepository"]
+__all__ = ["PostgresRegressionRepository", "regression_from_row"]
 
 _LOCK: Final = text(
     "SELECT pg_advisory_xact_lock(hashtextextended('walk_test_regression|' || :zone_id, 0))"
@@ -87,7 +87,7 @@ def _stored(rows: AffectedRows | None) -> str | None:
     return json.dumps(ALL_ROWS if rows == ALL_ROWS else [str(row) for row in rows])
 
 
-def _regression(row: Row[Any]) -> WalkTestRegression:
+def regression_from_row(row: Row[Any]) -> WalkTestRegression:
     return WalkTestRegression(
         organization_id=_uuid(row.organization_id),
         plant_id=_uuid(row.plant_id),
@@ -138,7 +138,7 @@ class PostgresRegressionRepository:
         """La fila de la zona, o ``None`` si nunca se marcó."""
         result = await transaction.execute(_SELECT, _key(transaction.context, zone_id))
         row = result.first()
-        return None if row is None else _regression(row)
+        return None if row is None else regression_from_row(row)
 
     async def save(self, transaction: Transaction, regression: WalkTestRegression) -> None:
         """Inserta o actualiza la fila; siempre con el registro que la respalda."""

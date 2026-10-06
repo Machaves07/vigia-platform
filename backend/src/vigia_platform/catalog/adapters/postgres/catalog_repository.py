@@ -45,6 +45,8 @@ __all__ = [
     "CatalogWriteConflict",
     "PostgresCatalogRepository",
     "StoredZoneCamera",
+    "standard_from_row",
+    "version_from_row",
 ]
 
 CATALOG_VERSION_PRIMARY_KEY: Final = "zone_catalog_version_pkey"
@@ -182,7 +184,7 @@ def _dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
-def _version(row: Row[Any]) -> ZoneCatalogVersion:
+def version_from_row(row: Row[Any]) -> ZoneCatalogVersion:
     return ZoneCatalogVersion(
         organization_id=_uuid(row.organization_id),
         plant_id=_uuid(row.plant_id),
@@ -202,7 +204,7 @@ def _version(row: Row[Any]) -> ZoneCatalogVersion:
     )
 
 
-def _standard(row: Row[Any]) -> DeclaredStandardVersion:
+def standard_from_row(row: Row[Any]) -> DeclaredStandardVersion:
     declared_by = _json(row.declared_by)
     return DeclaredStandardVersion(
         organization_id=_uuid(row.organization_id),
@@ -263,7 +265,7 @@ class PostgresCatalogRepository:
         """La versión vigente de la zona (``superseded_at`` nulo), dentro de la transacción."""
         result = await transaction.execute(_CURRENT, _zone_key(transaction.context, zone_id))
         row = result.first()
-        return None if row is None else _version(row)
+        return None if row is None else version_from_row(row)
 
     async def version(
         self, context: ScopeContext, zone_id: uuid.UUID, catalog_version: int | None = None
@@ -277,7 +279,7 @@ class PostgresCatalogRepository:
                 _VERSION,
                 {**_zone_key(context, zone_id), "catalog_version": catalog_version},
             )
-        return _version(rows[0]) if rows else None
+        return version_from_row(rows[0]) if rows else None
 
     async def version_in(
         self, transaction: Transaction, zone_id: uuid.UUID, catalog_version: int | None = None
@@ -290,7 +292,7 @@ class PostgresCatalogRepository:
             {**_zone_key(transaction.context, zone_id), "catalog_version": catalog_version},
         )
         row = result.first()
-        return None if row is None else _version(row)
+        return None if row is None else version_from_row(row)
 
     async def history(
         self, transaction: Transaction, zone_id: uuid.UUID, *, before: int | None, limit: int
@@ -304,7 +306,7 @@ class PostgresCatalogRepository:
                 "limit": limit,
             },
         )
-        return tuple(_version(row) for row in result.all())
+        return tuple(version_from_row(row) for row in result.all())
 
     async def envelope(
         self, transaction: Transaction, zone_id: uuid.UUID, catalog_version: int | None = None
@@ -422,7 +424,7 @@ class PostgresCatalogRepository:
     ) -> tuple[DeclaredStandardVersion, ...]:
         """Todas las versiones de los estándares de la zona con su vigencia (PR-GOB-06)."""
         rows = await self._database.read(context, _STANDARD_HISTORY, _zone_key(context, zone_id))
-        return tuple(_standard(row) for row in rows)
+        return tuple(standard_from_row(row) for row in rows)
 
     # --- Cámaras -----------------------------------------------------------------------------
 
