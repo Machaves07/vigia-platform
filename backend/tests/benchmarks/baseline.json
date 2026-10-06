@@ -1,8 +1,8 @@
 {
   "description": "Línea base de los bancos de NFR-NUC-01 y NFR-NUC-02 (TASK-142). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1; una mediana 1,5 veces peor que esta falla nightly.",
-  "measured_at": "2026-10-02",
+  "measured_at": "2026-10-06",
   "environment": {
-    "commit": "0c9c637",
+    "commit": "a2f71bf",
     "python": "3.12.14",
     "machine": "x86_64",
     "system": "Linux",
@@ -42,6 +42,126 @@
       "median": 2871.392,
       "p95": 2940.453,
       "objective": 1000
+    },
+    "gob_ports_catalog_at": {
+      "label": "Catálogo vigente en un instante del año (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.912,
+      "p95": 9.35,
+      "objective": 5.0
+    },
+    "gob_ports_catalog_history": {
+      "label": "Historia del catálogo (52 versiones, una página) (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 9.109,
+      "p95": 14.984,
+      "objective": 50.0
+    },
+    "gob_ports_current_agreement": {
+      "label": "Acuerdo vigente de una zona con sus firmantes (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 8.864,
+      "p95": 19.703,
+      "objective": 5.0
+    },
+    "gob_ports_current_catalog": {
+      "label": "Catálogo vigente de una zona (32 estándares) (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.852,
+      "p95": 8.638,
+      "objective": 5.0
+    },
+    "gob_ports_gate_history": {
+      "label": "Historia de las dos compuertas en 366 días (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 7.081,
+      "p95": 9.197,
+      "objective": 50.0
+    },
+    "gob_ports_plant_policy": {
+      "label": "Política vigente de una planta (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.487,
+      "p95": 12.718,
+      "objective": 5.0
+    },
+    "gob_ports_regression_state": {
+      "label": "Estado de regresión de una zona (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.959,
+      "p95": 10.794,
+      "objective": 5.0
+    },
+    "gob_ports_single_occupancy": {
+      "label": "Marca unipersonal de una zona en un instante (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 8.402,
+      "p95": 15.689,
+      "objective": 5.0
+    },
+    "gob_ports_single_occupancy_many": {
+      "label": "Marca unipersonal de 50 zonas en un instante (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 11.519,
+      "p95": 20.556,
+      "objective": 50.0
+    },
+    "gob_ports_standard_at": {
+      "label": "Versión de un estándar vigente en un instante (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 8.606,
+      "p95": 12.04,
+      "objective": 5.0
+    },
+    "gob_ports_standard_version": {
+      "label": "Versión 1 de un estándar de la zona (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 7.234,
+      "p95": 10.257,
+      "objective": 5.0
+    },
+    "gob_ports_standards_at_many": {
+      "label": "200 referencias de estándar en instantes del año (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 28.477,
+      "p95": 42.042,
+      "objective": 50.0
+    },
+    "gob_ports_state": {
+      "label": "Estado de compuertas de una zona (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.986,
+      "p95": 10.077,
+      "objective": 5.0
+    },
+    "gob_ports_state_at": {
+      "label": "Compuerta de uso en un instante, desde la historia (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 6.579,
+      "p95": 9.286,
+      "objective": 5.0
+    },
+    "gob_ports_states_by_plant": {
+      "label": "Compuertas de las zonas de una planta (NFR-GOB-04)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 8.952,
+      "p95": 14.013,
+      "objective": 50.0
     },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",
