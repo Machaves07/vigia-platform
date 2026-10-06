@@ -2930,6 +2930,78 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/fleet/alarms":
+    "get":
+      "tags":
+        - "flota"
+      "summary": "Alarmas de flota por transición, activas y recientes, por páginas de hasta 100"
+      "operationId": "list_fleet_alarms_fleet_alarms_get"
+      "parameters":
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 100
+            "minimum": 1
+            "default": 100
+            "title": "Limit"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+        - "name": "node_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Node Id"
+        - "name": "alarm_kind"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/FleetAlarmKind"
+              - "type": "null"
+            "title": "Alarm Kind"
+        - "name": "status"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/AlarmStatus"
+              - "type": "null"
+            "title": "Status"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/FleetAlarmPage"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/api/nodes/clip-uploads":
     "post":
       "tags":
@@ -3814,6 +3886,13 @@
         - "revoked"
       "title": "AgreementStatus"
       "description": "Ciclo del acuerdo de uso: nunca vuelve atrás."
+    "AlarmStatus":
+      "type": "string"
+      "enum":
+        - "active"
+        - "cleared"
+      "title": "AlarmStatus"
+      "description": "Filtro de ``GET /fleet/alarms``: abiertas o ya cerradas."
     "AnswersBody":
       "properties":
         "standard":
@@ -5759,6 +5838,66 @@
         - "orphan_clips_growing"
       "title": "FleetAlarmKind"
       "description": "Las ocho clases de alarma de flota (manda sobre las listas de cinco y de siete)."
+    "FleetAlarmPage":
+      "properties":
+        "alarms":
+          "items":
+            "$ref": "#/components/schemas/FleetAlarmView"
+          "type": "array"
+          "title": "Alarms"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "alarms"
+        - "next_after"
+      "title": "FleetAlarmPage"
+    "FleetAlarmView":
+      "properties":
+        "alarm_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Alarm Id"
+        "alarm_kind":
+          "$ref": "#/components/schemas/FleetAlarmKind"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "zone_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Zone Id"
+        "raised_at":
+          "type": "string"
+          "title": "Raised At"
+        "cleared_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Cleared At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "alarm_id"
+        - "alarm_kind"
+        - "plant_id"
+        - "node_id"
+        - "zone_id"
+        - "raised_at"
+        - "cleared_at"
+      "title": "FleetAlarmView"
+      "description": "``FleetAlarm`` (DE §3.9): solo identificadores, la clase y marcas."
     "FleetThresholdsBody":
       "properties":
         "queue_pending_threshold":

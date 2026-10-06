@@ -59,9 +59,11 @@ def mute_starts_at(last_heartbeat_at: datetime) -> datetime:
 
 
 def is_mute_at(last_heartbeat_at: datetime, now: datetime, heartbeat_interval_seconds: int) -> bool:
-    """¿Pasó el umbral sin latido aceptado? La regla de la tarea de mudo (TASK-224)."""
+    """¿Pasaron **más de** cinco veces el intervalo sin latido aceptado? La regla de
+    ``detect_mute_nodes`` (BL §2.6: ``ahora - last_heartbeat_at > umbral``; TASK-225), la misma del
+    aviso ``node_mute``."""
     threshold = timedelta(seconds=mute_after_seconds(heartbeat_interval_seconds))
-    return now - last_heartbeat_at >= threshold
+    return now - last_heartbeat_at > threshold
 
 
 def returns_to_reachable(previous: CommunicationState | None, *, retired: bool) -> bool:

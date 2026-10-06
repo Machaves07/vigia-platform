@@ -159,6 +159,11 @@ class AuditOperation(enum.StrEnum):
     interfaces §3.4): esta entrada es su rastro, con ``filters`` de los tres valores nuevos; la
     emite un instalador bajo concesión (``fleet.manage``). Mismo criterio que
     ``signatory_policy_changed`` (A-58)."""
+    FLEET_SECURITY_ALERT = "fleet_security_alert"
+    """U-03 (LC-GOB-16, VIG-161; NFR-GOB-36, BR-GOB-78, G-11): alerta de seguridad de la flota en
+    la auditoría inalterable, con nodo (``resource`` ``node``), planta, zona, ``correlation_id`` y
+    ``filters`` ``{alert_kind, alarm_id}``; hoy ``alert_kind`` es
+    ``simulated_adapter_in_productive``, escrita en la transacción que levanta su alarma."""
     REVOCATION_LIST_REGENERATED = "revocation_list_regenerated"
     """U-03 (TASK-220, NFR-GOB-21): ``vigia-admin regenerate-revocation-list`` (y
     ``revocation-list publish``) regeneró y publicó ``ca/crl.pem`` desde el estado de la base,

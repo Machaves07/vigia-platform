@@ -132,6 +132,7 @@ from vigia_platform.fleet.application.enrollment_codes import (
     NodeCaRoots,
     RootsUnavailable,
 )
+from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
 from vigia_platform.fleet.application.ingest import (
@@ -800,6 +801,13 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 audit=services.audit,
                 clock=services.clock,
+            ),
+            # LC-GOB-16 (VIG-161): alarmas por transición; las tres tareas las registra VIG-163.
+            alarms=FleetAlarms(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                provider_organization_id=services.provider_organization_id,
             ),
         )
     }
