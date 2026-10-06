@@ -1,6 +1,6 @@
 """Estado de la histéresis de las alarmas de flota (TASK-225, LC-GOB-16; NFR-GOB-45, 47).
 
-Revisión gob_0025, aditiva. Ninguna entidad del diseño guarda las evaluaciones consecutivas que la
+Revisión gob_0026, aditiva. Ninguna entidad del diseño guarda las evaluaciones consecutivas que la
 histéresis necesita (nota de TASK-225: la tabla es decisión del redactor); ``gob_0018`` no dejó
 lugar para ellas.
 
@@ -30,8 +30,8 @@ from typing import Final
 
 from alembic import op
 
-revision: str = "gob_0025"
-down_revision: str | None = "gob_0024"
+revision: str = "gob_0026"
+down_revision: str | None = "gob_0025"
 branch_labels: None = None
 depends_on: None = None
 

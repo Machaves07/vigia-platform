@@ -119,6 +119,10 @@ class MetricName(enum.StrEnum):
     # Credenciales de nodo (U-03, TASK-219): rotaciones y duración de kms:Sign de vigia-node-ca
     NODE_CREDENTIAL_ROTATIONS_TOTAL = "node_credential_rotations_total"
     NODE_CA_SIGN_DURATION_MS = "node_ca_sign_duration_ms"
+    # Lista de revocación global de vigia-node-ca (U-03, TASK-220, NFR-GOB-46 y 48)
+    REVOCATION_LIST_PUBLISH_FAILED = "revocation_list_publish_failed"
+    REVOCATION_LIST_SECONDS_TO_EXPIRY = "revocation_list_seconds_to_expiry"
+    REVOCATION_LIST_ENTRIES = "revocation_list_entries"
     # Flota (U-03, TASK-223, NFR-GOB-55): por nodo, solo contadores y medidores (NFR-GOB-13)
     FLEET_HEARTBEATS_TOTAL = "fleet_heartbeats_total"
     FLEET_HEARTBEAT_GAP_SECONDS = "fleet_heartbeat_gap_seconds"
@@ -280,6 +284,17 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
           "Rotaciones de credencial de nodo confirmadas.", "BR-GOB-64"),
     _spec(_N.NODE_CA_SIGN_DURATION_MS, _H, "ms",
           "Duración de cada kms:Sign de vigia-node-ca por resultado.", "NFR-GOB-43", "result"),
+    # Lista de revocación global (TASK-220): sin atributos (ni número de serie, ni ARN, ni PEM;
+    # NFR-GOB-13, 25). La alarma revocation-list-publish-failed (VIG-167) vigila el contador:
+    # un ciclo fallido, o una lista vigente a menos de 24 h de vencer, suma uno.
+    _spec(_N.REVOCATION_LIST_PUBLISH_FAILED, _C, "{cycle}",
+          "Ciclos de la lista de revocación fallidos o con la lista a menos de 24 h de vencer.",
+          "NFR-GOB-46"),
+    _spec(_N.REVOCATION_LIST_SECONDS_TO_EXPIRY, _G, "s",
+          "Segundos hasta next_update de la lista de revocación vigente.", "NFR-GOB-48"),
+    _spec(_N.REVOCATION_LIST_ENTRIES, _G, "{certificate}",
+          "Entradas de la lista de revocación vigente (revocadas y sustituidas no vencidas).",
+          "NFR-GOB-14"),
     # Latido (TASK-223, NFR-GOB-55): seis series por nodo (aceptados, ignorados y cuatro
     # medidores), nunca histogramas por nodo ni etiquetas de zona (NFR-GOB-13).
     _spec(_N.FLEET_HEARTBEATS_TOTAL, _C, "{heartbeat}",
@@ -490,6 +505,9 @@ class PlatformMetrics:
         self.node_revocations_total = counter(_N.NODE_REVOCATIONS_TOTAL)
         self.node_credential_rotations_total = counter(_N.NODE_CREDENTIAL_ROTATIONS_TOTAL)
         self.node_ca_sign_duration_ms = histogram(_N.NODE_CA_SIGN_DURATION_MS)
+        self.revocation_list_publish_failed = counter(_N.REVOCATION_LIST_PUBLISH_FAILED)
+        self.revocation_list_seconds_to_expiry = gauge(_N.REVOCATION_LIST_SECONDS_TO_EXPIRY)
+        self.revocation_list_entries = gauge(_N.REVOCATION_LIST_ENTRIES)
         self.fleet_heartbeats_total = counter(_N.FLEET_HEARTBEATS_TOTAL)
         self.fleet_heartbeat_gap_seconds = gauge(_N.FLEET_HEARTBEAT_GAP_SECONDS)
         self.fleet_node_reachable = gauge(_N.FLEET_NODE_REACHABLE)

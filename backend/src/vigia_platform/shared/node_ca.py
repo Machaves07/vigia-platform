@@ -12,7 +12,8 @@ con la clave pública: un KMS que firmara con otra clave no deja un certificado 
 - ``build_root_certificate``: la raíz de ``ROOT_VALIDITY_YEARS`` años con ``BasicConstraints``
   (CA, longitud de cadena 0) y ``KeyUsage`` (``keyCertSign`` y ``cRLSign``), críticos.
 - ``NodeCaPublisher.publish_root``: ``vigia-admin bootstrap`` publica **solo**
-  ``vigia-edge/ca/root.pem``; la lista de revocación ``ca/crl.pem`` la publica el worker (D-7).
+  ``vigia-edge/ca/root.pem``; la lista de revocación ``ca/crl.pem`` la publica el worker (D-7)
+  y la firma ``sign_revocation_list``, con la misma técnica (TASK-220).
 - ``NodeCaPublisher.rotate_root``: ``vigia-admin rotate-node-ca`` (``ca_rotation=true``) firma
   la raíz nueva con la clave nueva y publica ``ca/root.pem`` como **paquete de dos raíces**, la
   vigente y la nueva (D-6, ``deployment-architecture.md`` §6.4): un nodo con credencial de la
@@ -58,6 +59,7 @@ __all__ = [
     "fingerprint",
     "read_bundle",
     "sign_certificate",
+    "sign_revocation_list",
     "two_root_bundle",
 ]
 
@@ -229,6 +231,33 @@ async def sign_certificate(
             "la firma de KMS no verifica con la clave pública de la autoridad"
         ) from None
     return certificate
+
+
+async def sign_revocation_list(
+    builder: x509.CertificateRevocationListBuilder,
+    kms: NodeCaSigner,
+    key_id: str,
+    *,
+    issuer_public_key: ec.EllipticCurvePublicKey,
+) -> x509.CertificateRevocationList:
+    """Firma la lista de revocación con ``kms:Sign`` sobre ``key_id`` (TASK-220).
+
+    La técnica de ``sign_certificate`` sobre ``TBSCertList``; comprueba la firma antes de
+    devolverla.
+    """
+    try:
+        builder.sign(_KmsBackedKey(issuer_public_key), hashes.SHA256())
+    except _TbsCaptured as captured:
+        tbs = captured.tbs
+    else:  # pragma: no cover - la primera pasada siempre se corta
+        raise NodeCaError("no se pudo recoger el TBSCertList")
+    signature = await kms.sign(key_id, tbs)
+    revocation_list = builder.sign(
+        _KmsBackedKey(issuer_public_key, tbs=tbs, signature=signature), hashes.SHA256()
+    )
+    if not revocation_list.is_signature_valid(issuer_public_key):
+        raise NodeCaError("la firma de KMS no verifica con la clave pública de la autoridad")
+    return revocation_list
 
 
 # --- Raíz ---------------------------------------------------------------------------------------

@@ -26,6 +26,10 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
   rutas del contrato sin despliegue (NFR-GOB-33, TASK-206). Escribe ``node_rate_brake_set`` en la
   auditoría de la proveedora con el valor en ``filters``: esa entrada **es** el ajuste, y cada
   ``vigia-api`` la lee con una caché de 10 s (``node_api.limits``).
+- ``regenerate-revocation-list --operator`` y ``revocation-list publish --operator`` (TASK-220,
+  NFR-GOB-21, runbook 6.2): el ciclo de ``regenerate_revocation_list`` forzado, sin esperar a la
+  marca; deja ``revocation_list_regenerated`` en la auditoría de la proveedora y sale con 5 si no
+  publica (el paso de la restauración antes de admitir tráfico de nodos).
 
 **Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
 almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
@@ -69,7 +73,7 @@ import sys
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final, NoReturn, Protocol, TextIO
 
@@ -162,6 +166,9 @@ _SECRET_NAME: Final = r"^[A-Za-z0-9][A-Za-z0-9/_+=.@-]{0,511}$"  # noqa: S105 - 
 _KMS_KEY_ID: Final = r"^[A-Za-z0-9][A-Za-z0-9:/_-]{0,2047}$"
 _BUCKET: Final = r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
 _OBJECT_KEY: Final = r"^[A-Za-z0-9][A-Za-z0-9!_.*'()/=-]{0,511}$"
+_ARN: Final = r"^arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:[A-Za-z0-9:/_.-]{1,1024}$"
+CRL_OBJECT_KEY: Final = "ca/crl.pem"
+"""``VIGIA_CRL_KEY`` por omisión (infraestructura §6)."""
 _LINK_BASE: Final = r"^https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$"
 _MONTH: Final = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
@@ -207,6 +214,10 @@ class AdminConfig(BaseModel):
     root_certificate_key: str = Field(default=ROOT_CERTIFICATE_KEY, pattern=_OBJECT_KEY)
     archive_bucket: str | None = Field(default=None, pattern=_BUCKET)
     """``VIGIA_ARCHIVE_BUCKET``: el de ``restore-audit-partition`` (runbook 6.5)."""
+    crl_key: str = Field(default=CRL_OBJECT_KEY, pattern=_OBJECT_KEY)
+    """``VIGIA_CRL_KEY``: la lista de revocación en ``vigia-edge`` (TASK-220)."""
+    node_trust_store_arn: str | None = Field(default=None, pattern=_ARN)
+    """``VIGIA_NODE_TRUST_STORE_ARN``: el almacén ``vigia-node-trust`` (TASK-220)."""
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> AdminConfig:
@@ -227,6 +238,8 @@ class AdminConfig(BaseModel):
             ("edge_bucket", "VIGIA_EDGE_BUCKET"),
             ("root_certificate_key", "VIGIA_ROOT_CERTIFICATE_KEY"),
             ("archive_bucket", "VIGIA_ARCHIVE_BUCKET"),
+            ("crl_key", "VIGIA_CRL_KEY"),
+            ("node_trust_store_arn", "VIGIA_NODE_TRUST_STORE_ARN"),
         ):
             value = environ.get(variable)
             if value:
@@ -368,6 +381,34 @@ class ArchiveReader(Protocol):
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes: ...
 
 
+class RevocationListResult(Protocol):
+    """``fleet.application.revocation_list_task.RevocationListCycle``."""
+
+    @property
+    def outcome(self) -> str: ...
+
+    @property
+    def crl_number(self) -> int | None: ...
+
+    @property
+    def entries(self) -> int: ...
+
+    @property
+    def object_version_id(self) -> str | None: ...
+
+    @property
+    def next_update(self) -> datetime | None: ...
+
+    @property
+    def failed_step(self) -> str | None: ...
+
+
+class RevocationListRegenerator(Protocol):
+    """``RevocationListCommand``: el ciclo de la lista de revocación, forzado (TASK-220)."""
+
+    async def regenerate(self, *, dry_run: bool) -> RevocationListResult: ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AdminRuntime:
     """Dependencias ya construidas de ``vigia-admin`` (las crea la raíz de composición)."""
@@ -387,6 +428,9 @@ class AdminRuntime:
     """Con ``VIGIA_NODE_CA_KEY_ARN`` y ``VIGIA_EDGE_BUCKET`` (arranque o sustitución de raíz)."""
     archive: ArchiveReader | None = None
     """Con ``VIGIA_ARCHIVE_BUCKET`` (``restore-audit-partition``)."""
+    revocation_list: RevocationListRegenerator | None = None
+    """Con ``VIGIA_NODE_CA_KEY_ARN``, ``VIGIA_EDGE_BUCKET`` y ``VIGIA_NODE_TRUST_STORE_ARN``
+    (``regenerate-revocation-list`` y ``revocation-list publish``)."""
     registries: tuple[Callable[[], Awaitable[None]], ...] = ()
     """Sincronizadores de los registros (tipos de registro y de evento): solo antes de escribir,
     nunca con ``--dry-run``."""
@@ -573,7 +617,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Configuración por el entorno: VIGIA_ENVIRONMENT, VIGIA_ADMIN_RUNTIME,\n"
             "VIGIA_PROVIDER_ORGANIZATION_ID, VIGIA_PUBLIC_ORIGIN, VIGIA_NODE_CA_KEY_ARN,\n"
-            "VIGIA_EDGE_BUCKET, VIGIA_ARCHIVE_BUCKET y VIGIA_BOOTSTRAP_INVITATION_SECRET.\n"
+            "VIGIA_EDGE_BUCKET, VIGIA_CRL_KEY, VIGIA_NODE_TRUST_STORE_ARN, VIGIA_ARCHIVE_BUCKET y\n"
+            "VIGIA_BOOTSTRAP_INVITATION_SECRET.\n"
             "Salida: 0 hecho, 2 uso, 3 sin confirmar, 4 rechazo, 5 dependencia no disponible."
         ),
     )
@@ -741,6 +786,41 @@ def build_parser() -> argparse.ArgumentParser:
     limit.add_argument("--off", action="store_true", help="quita el freno")
     _add_operator(brake)
     _add_common(brake)
+
+    regenerate = commands.add_parser(
+        "regenerate-revocation-list",
+        help="regenera y publica la lista de revocación de nodos desde la base",
+        description=(
+            "Regenera ca/crl.pem desde el estado de la base aunque no haya marca, la firma con\n"
+            "vigia-node-ca y la publica en vigia-edge y vigia-node-trust (NFR-GOB-21): el paso de\n"
+            "la restauración antes de admitir tráfico de nodos. Sale con 5 si no publica."
+        ),
+    )
+    _add_operator(regenerate)
+    _add_common(regenerate)
+
+    revocation_list = commands.add_parser(
+        "revocation-list",
+        help="lista de revocación de nodos (publish)",
+        description="Operaciones sobre la lista de revocación global de vigia-node-ca.",
+    )
+    actions = revocation_list.add_subparsers(
+        dest="revocation_list_action",
+        required=True,
+        metavar="ACCIÓN",
+        title="acciones",
+        parser_class=_Parser,
+    )
+    publish = actions.add_parser(
+        "publish",
+        help="fuerza la regeneración y publicación fuera del barrido (runbook 6.2)",
+        description=(
+            "Lo mismo que regenerate-revocation-list: regenera, firma y publica ca/crl.pem\n"
+            "sin esperar al barrido de 60 s. Con --dry-run solo lee y muestra lo que publicaría."
+        ),
+    )
+    _add_operator(publish)
+    _add_common(publish)
     return parser
 
 
@@ -1386,6 +1466,92 @@ async def _set_node_rate_brake(
     )
 
 
+_PUBLISHED: Final = "published"
+_DRY_RUN: Final = "dry_run"
+
+
+def _require_revocation_list(runtime: AdminRuntime) -> RevocationListRegenerator:
+    if runtime.revocation_list is None:
+        raise AdminError(
+            "revocation_list_unavailable",
+            "sin VIGIA_NODE_CA_KEY_ARN, VIGIA_EDGE_BUCKET y VIGIA_NODE_TRUST_STORE_ARN",
+            ExitCode.FAILURE,
+        )
+    return runtime.revocation_list
+
+
+def _revocation_list_output(result: RevocationListResult) -> dict[str, object]:
+    return {
+        "outcome": str(result.outcome),
+        "crl_number": result.crl_number,
+        "entries": result.entries,
+        "object_version_id": result.object_version_id,
+        "next_update": None if result.next_update is None else format_timestamp(result.next_update),
+    }
+
+
+async def _regenerate_revocation_list(
+    args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
+) -> None:
+    """Regenera y publica la lista de revocación desde la base, sin marca (NFR-GOB-21).
+
+    El mismo ciclo que ``regenerate_revocation_list``, forzado, con el candado de publicación: si
+    el worker publica en ese momento, sale con 5 y se repite. Deja ``revocation_list_regenerated``
+    en la auditoría de la proveedora con el contexto de la orden (``error`` si no publicó).
+    """
+    _require_provider(config)
+    regenerator = _require_revocation_list(runtime)
+    command = (
+        "revocation-list publish"
+        if args.command == "revocation-list"
+        else "regenerate-revocation-list"
+    )
+    operator = await _operator_context(args, runtime)
+    if args.dry_run:
+        preview = await regenerator.regenerate(dry_run=True)
+        _emit(
+            streams,
+            {
+                "command": command,
+                "dry_run": True,
+                "operator_user_id": str(operator.actor.id),
+                **_revocation_list_output(preview),
+            },
+        )
+        return
+    result = await regenerator.regenerate(dry_run=False)
+    published = result.outcome == _PUBLISHED
+    filters: dict[str, JsonValue] = {
+        "outcome": str(result.outcome),
+        "crl_number": result.crl_number,
+        "entries": result.entries,
+        "object_version_id": result.object_version_id,
+    }
+    if result.failed_step is not None:
+        filters["failed_step"] = str(result.failed_step)
+    receipt = await runtime.audit.append(
+        operator,
+        AuditOperation.REVOCATION_LIST_REGENERATED,
+        outcome=AuditOutcome.SUCCESS if published else AuditOutcome.ERROR,
+        filters=filters,
+    )
+    _emit(
+        streams,
+        {
+            "command": command,
+            "dry_run": False,
+            **_revocation_list_output(result),
+            "audit_entry_id": str(receipt.entry_id),
+        },
+    )
+    if not published:
+        raise AdminError(
+            "revocation_list_not_published",
+            "la lista de revocación no se publicó: la marca sigue y el barrido reintenta",
+            ExitCode.UNAVAILABLE,
+        )
+
+
 type Command = Callable[[argparse.Namespace, AdminConfig, AdminRuntime, Streams], Awaitable[None]]
 
 COMMANDS: Final[Mapping[str, Command]] = {
@@ -1398,6 +1564,8 @@ COMMANDS: Final[Mapping[str, Command]] = {
     "restore-audit-partition": _restore_audit_partition,
     "record-restore-drill": _record_restore_drill,
     "set-node-rate-brake": _set_node_rate_brake,
+    "regenerate-revocation-list": _regenerate_revocation_list,
+    "revocation-list": _regenerate_revocation_list,
 }
 
 

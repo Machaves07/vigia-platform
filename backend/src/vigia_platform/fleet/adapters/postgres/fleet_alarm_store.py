@@ -1,4 +1,4 @@
-"""Alarmas de flota sobre PostgreSQL (TASK-225; LC-GOB-16, LC-GOB-18; gob_0018 y gob_0025).
+"""Alarmas de flota sobre PostgreSQL (TASK-225; LC-GOB-16, LC-GOB-18; gob_0018 y gob_0026).
 
 Lecturas y escrituras de las tres tareas y de ``GET /fleet/alarms``. Toda sentencia nombra la
 organización de la transacción (defensa en profundidad sobre la RLS: las pruebas la ejecutan como

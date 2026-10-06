@@ -123,9 +123,9 @@ REISSUE_MIGRATION = _load_reissue_migration()
 
 
 def _load_alarm_evaluation_migration() -> Any:
-    """``gob_0025`` (TASK-225): la tabla de histéresis de las alarmas, con RLS como el resto."""
-    path = BACKEND / "migrations" / "versions" / "gob_0025_fleet_alarm_evaluation_state.py"
-    spec = importlib.util.spec_from_file_location("gob_0025_under_test", path)
+    """``gob_0026`` (TASK-225): la tabla de histéresis de las alarmas, con RLS como el resto."""
+    path = BACKEND / "migrations" / "versions" / "gob_0026_fleet_alarm_evaluation_state.py"
+    spec = importlib.util.spec_from_file_location("gob_0026_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -279,7 +279,7 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'fleet' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    # gob_0024 (TASK-221) añade la marca del cierre huérfano y gob_0025 (TASK-225) la histéresis
+    # gob_0024 (TASK-221) añade la marca del cierre huérfano y gob_0026 (TASK-225) la histéresis
     # de las alarmas, con el mismo aislamiento.
     assert {row["relname"] for row in rows} == {
         *FLEET_TABLES,

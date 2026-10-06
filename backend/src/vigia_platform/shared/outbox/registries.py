@@ -14,8 +14,12 @@ publicarse y a quién se entrega:
   tipo que no cumple lanza ``OutboxRegistrationRejected``.
 - ``ConsumerRegistry.register(Consumer)``: nombre, unidad, eventos suscritos, manejador y
   ``has_external_dependency`` (el que declara cortacircuito, BR-NUC-79).
-- ``PeriodicTaskRegistry.register(task_name, schedule, handler, unit=...)``: el horario es un
-  ``Schedule`` (cada N segundos, diario, semanal o mensual, en UTC); ejecutarla es de TASK-130.
+- ``PeriodicTaskRegistry.register(task_name, schedule, handler, unit=..., iteration=...)``: el
+  horario es un ``Schedule`` (cada N segundos, diario, semanal o mensual, en UTC); ejecutarla es
+  de TASK-130. ``iteration`` es ``per_organization`` por omisión (el manejador recibe la
+  transacción de cada organización); ``global`` (TASK-220, D-7) es la excepción documentada: el
+  manejador corre **una vez** por ejecución y recibe un ``GlobalTaskScope`` que le abre las
+  lecturas por organización. No se persiste: la fila de ``shared.periodic_task`` no cambia.
 
 ``OutboxCatalog`` agrupa los tres. ``check()`` contrasta las suscripciones: un consumidor suscrito
 a un evento no registrado impide arrancar (``OutboxStartupError``). ``synchronize(store, clock)``
@@ -27,10 +31,12 @@ publica; después de sellar no se registra nada más.
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import json
 import re
-from collections.abc import Awaitable, Callable, Mapping
+import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final, Protocol
@@ -60,6 +66,8 @@ __all__ = [
     "ConsumerRegistry",
     "EventType",
     "EventTypeRegistry",
+    "GlobalPeriodicHandler",
+    "GlobalTaskScope",
     "InMemoryOutboxCatalogStore",
     "OutboxCatalog",
     "OutboxCatalogStore",
@@ -74,6 +82,7 @@ __all__ = [
     "PersistedPeriodicTask",
     "Schedule",
     "ScheduleKind",
+    "TaskIteration",
 ]
 
 REGISTRY_NAME: Final = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -100,6 +109,41 @@ organización del evento (BR-NUC-80); el despachador (TASK-129) lo invoca y marc
 type PeriodicHandler = Callable[[Transaction], Awaitable[None]]
 """Manejador de una tarea periódica: una invocación por organización, cada una en su transacción
 con su contexto (BR-NUC-81); el planificador es de TASK-130."""
+
+
+class GlobalTaskScope(Protocol):
+    """Lo que recibe el manejador de una tarea ``global`` (TASK-220): una ejecución entera.
+
+    Ningún contexto nuevo: cada lectura es la transacción de **solo lectura** de una organización
+    con ``context_for_organization`` (la seguridad a nivel de fila intacta), y ``control`` la del
+    actor del sistema en la proveedora (``provider_audit_context``), para las filas globales sin
+    datos de cliente.
+    """
+
+    @property
+    def task_name(self) -> str: ...
+
+    async def organizations(self) -> Sequence[uuid.UUID]:
+        """Las organizaciones activas, en orden (las mismas que recorre ``per_organization``)."""
+        ...
+
+    def read(
+        self, organization_id: uuid.UUID
+    ) -> contextlib.AbstractAsyncContextManager[Transaction]:
+        """Transacción de solo lectura con el contexto de iteración de ``organization_id``."""
+        ...
+
+    def control(self) -> contextlib.AbstractAsyncContextManager[Transaction]:
+        """Transacción del actor del sistema en la proveedora (filas globales)."""
+        ...
+
+    async def ensure_lease(self) -> None:
+        """``LeaseLost`` si la ejecución ya no es de este proceso (antes de un efecto externo)."""
+        ...
+
+
+type GlobalPeriodicHandler = Callable[[GlobalTaskScope], Awaitable[None]]
+"""Manejador de una tarea ``global``: una invocación por ejecución (TASK-220, D-7)."""
 
 
 class PayloadModel(BaseModel):
@@ -504,14 +548,28 @@ def _next_on_grid(instant: datetime, origin: datetime, period: int, offset: int)
     return base + timedelta(microseconds=(elapsed // step + 1) * step)
 
 
+class TaskIteration(enum.StrEnum):
+    """Cómo recorre el planificador una ejecución de la tarea."""
+
+    PER_ORGANIZATION = "per_organization"
+    """Una invocación por organización activa, en su transacción y con su cursor (§4.3)."""
+    GLOBAL = "global"
+    """Una invocación por ejecución, sin cursor (TASK-220: la lista de revocación global, D-7)."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class PeriodicTask:
-    """Declaración de una tarea periódica; siempre itera las organizaciones (§4.3)."""
+    """Declaración de una tarea periódica; itera las organizaciones (§4.3) salvo la ``global``.
+
+    ``handler`` es un ``PeriodicHandler`` en ``per_organization`` y un ``GlobalPeriodicHandler``
+    en ``global``: el registro lo comprueba y el planificador lo invoca según ``iteration``.
+    """
 
     task_name: str
     unit: ActorUnit
     schedule: Schedule
-    handler: PeriodicHandler
+    handler: PeriodicHandler | GlobalPeriodicHandler
+    iteration: TaskIteration = TaskIteration.PER_ORGANIZATION
 
     def to_persisted(self) -> PersistedPeriodicTask:
         return PersistedPeriodicTask(
@@ -539,25 +597,36 @@ class PeriodicTaskRegistry:
         self,
         task_name: str,
         schedule: Schedule,
-        handler: PeriodicHandler,
+        handler: PeriodicHandler | GlobalPeriodicHandler,
         *,
         unit: ActorUnit,
+        iteration: TaskIteration = TaskIteration.PER_ORGANIZATION,
     ) -> PeriodicTask:
+        """Registra la tarea; ``iteration=global`` solo para la excepción documentada (D-7)."""
         if self._sealed:
             raise OutboxRegistrationRejected("la tarea", task_name, _sealed_problem("tareas"))
         problems = _name_problems("el nombre de la tarea", task_name)
         problems += _unit_problems(unit)
         declared_schedule: object = schedule
         declared_handler: object = handler
+        declared_iteration: object = iteration
         if not isinstance(declared_schedule, Schedule):
             problems.append("schedule debe ser un Schedule")
         if not callable(declared_handler):
             problems.append("handler debe ser invocable")
+        if not isinstance(declared_iteration, TaskIteration):
+            problems.append("iteration debe ser per_organization o global")
         if isinstance(task_name, str) and task_name in self._tasks:
             problems.append("la tarea ya está registrada")
         if problems:
             raise OutboxRegistrationRejected("la tarea", task_name, problems)
-        task = PeriodicTask(task_name=task_name, unit=unit, schedule=schedule, handler=handler)
+        task = PeriodicTask(
+            task_name=task_name,
+            unit=unit,
+            schedule=schedule,
+            handler=handler,
+            iteration=iteration,
+        )
         self._tasks[task_name] = task
         return task
 
