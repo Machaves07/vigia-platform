@@ -160,16 +160,20 @@ catálogo: la unidad las emite con este nombre y la prueba cruzada exige que no 
 catálogo del núcleo (al publicarse, salen de esta tabla). ``revocation_list_seconds_to_expiry``
 y ``revocation_list_entries`` salieron al publicarlas U-03 (TASK-220)."""
 
-PENDING_UNIT_TASKS: Final = {
-    "detect_mute_nodes": "U-03",
-    "evaluate_fleet_alarms": "U-03",
-    "expire_enrollment_codes": "U-03",
-    "mark_orphan_clips": "U-03",
-    "expire_walk_test_sessions": "U-03",
-    "alert_expiring_certificates": "U-03",
-}
+PENDING_UNIT_TASKS: Final[dict[str, str]] = {}
 """Tareas de ``PERIODIC_TASK_MAX_AGE_SECONDS`` que aún no están en la lista cerrada ``task`` de
-la política de atributos del núcleo: U-03 la amplía al registrarlas."""
+la política de atributos del núcleo. Las seis de U-03 salieron al registrarlas U-03 en la raíz
+y fijarlas en esa lista (VIG-163, TASK-227)."""
+
+FLEET_PERIODIC_TASKS: Final = (
+    "detect_mute_nodes",
+    "evaluate_fleet_alarms",
+    "expire_enrollment_codes",
+    "mark_orphan_clips",
+    "expire_walk_test_sessions",
+    "alert_expiring_certificates",
+)
+"""Las tareas por organización de U-03 del panel de edad del último éxito (LC-GOB-18)."""
 
 APPLICATION_ALARM_METRICS: Final = {
     # NFR-NUC-38 y §9.4.
@@ -1595,7 +1599,7 @@ class ObservabilityStack(VigiaStack):
                                 m5,
                                 {"task": task},
                             )
-                            for task in PENDING_UNIT_TASKS
+                            for task in FLEET_PERIODIC_TASKS
                         ],
                     ),
                     self._alarm_status(

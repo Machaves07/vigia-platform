@@ -143,10 +143,13 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         # U-03 (TASK-220): fija aquí porque, con 26 caracteres, ``register`` la tomaría por un
         # token; la alarma revocation-list-publish-failed la vigila por este valor.
         "regenerate_revocation_list",
-        # U-03 (TASK-227): las demás de 20 o más caracteres, por lo mismo; NFR-GOB-56 y la alarma
-        # periodic-task-stale-<tarea> (VIG-167) las miden por este valor.
+        # U-03 (TASK-227): las otras seis, fijas desde el arranque (las de 20 o más caracteres,
+        # además, ``register`` las tomaría por un token); NFR-GOB-56 y las alarmas
+        # periodic-task-stale-<tarea> las miden por este valor.
+        "detect_mute_nodes",
         "evaluate_fleet_alarms",
         "expire_enrollment_codes",
+        "mark_orphan_clips",
         "expire_walk_test_sessions",
         "alert_expiring_certificates",
     ),
