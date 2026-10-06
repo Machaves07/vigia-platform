@@ -122,7 +122,8 @@ def test_every_alarm_metric_is_in_the_catalog_or_declared_pending() -> None:
 
 
 def test_pending_metrics_belong_to_another_unit() -> None:
-    assert PENDING
+    # Vacía cuando toda unidad ya publica sus métricas en el catálogo (TASK-220 sacó las dos de
+    # la lista de revocación).
     assert all(origin.startswith("U-0") for origin in PENDING.values())
     used = {name for metrics in ALARMS.values() for name, _ in metrics}
     assert set(PENDING) <= used

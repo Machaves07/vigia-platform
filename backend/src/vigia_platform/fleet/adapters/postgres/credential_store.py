@@ -12,7 +12,10 @@ nodo: la seguridad a nivel de fila limita a esa organización y cada sentencia l
   transiciones que admite ``gob_0018``: ``active → overlapping``, ``overlapping → superseded``);
 - ``mark_enrolled``: ``enrolled_at`` y la huella de hardware en ``node_fleet_record``. La huella
   solo se fija si estaba vacía o ya era esa (la re-alta exige la misma, G-2): con otra, ninguna
-  fila cambia y el alta se revierte.
+  fila cambia y el alta se revierte;
+- ``revocation_facts``: las credenciales ``revoked``, ``superseded`` y ``overlapping`` no vencidas
+  de la organización, con el ``issued_at`` de su sucesora: lo que lee el barrido de la lista de
+  revocación (TASK-220) en la transacción de solo lectura de cada organización.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from sqlalchemy.engine import Row
 from vigia_platform.fleet.domain.enums import CredentialStatus
 from vigia_platform.fleet.domain.node_credential import KEY_ALGORITHM, NodeCredential
 from vigia_platform.fleet.domain.node_subject import subject_document
+from vigia_platform.fleet.domain.revocation_list import CredentialRevocationFacts
 from vigia_platform.shared.context import repository
 from vigia_platform.shared.db import Transaction
 
@@ -55,6 +59,16 @@ _TRANSITION: Final = text(
     "UPDATE fleet.node_credential SET status = :status"
     " WHERE organization_id = :organization_id AND credential_id = :credential_id"
     " AND status = :expected RETURNING credential_id"
+)
+_REVOCATION_FACTS: Final = text(
+    "SELECT c.certificate_serial, c.status, c.issued_at, c.expires_at, c.revoked_at,"
+    " (SELECT min(s.issued_at) FROM fleet.node_credential s"
+    " WHERE s.organization_id = c.organization_id AND s.rotated_from = c.credential_id)"
+    " AS successor_issued_at"
+    " FROM fleet.node_credential c"
+    " WHERE c.organization_id = :organization_id"
+    " AND c.status IN ('revoked', 'superseded', 'overlapping') AND c.expires_at > :now"
+    " ORDER BY c.certificate_serial"
 )
 _MARK_ENROLLED: Final = text(
     "UPDATE fleet.node_fleet_record SET enrolled_at = :enrolled_at,"
@@ -153,6 +167,29 @@ class PostgresCredentialStore:
             },
         )
         return result.first() is not None
+
+    async def revocation_facts(
+        self, transaction: Transaction, now: datetime
+    ) -> tuple[CredentialRevocationFacts, ...]:
+        """Las credenciales no vencidas que pueden ir a la lista de revocación (TASK-220).
+
+        Solo las de la organización del contexto: la RLS y el filtro de la sentencia.
+        """
+        result = await transaction.execute(
+            _REVOCATION_FACTS,
+            {"organization_id": transaction.context.organization_id, "now": now},
+        )
+        return tuple(
+            CredentialRevocationFacts(
+                certificate_serial=str(row.certificate_serial),
+                status=CredentialStatus(row.status),
+                issued_at=row.issued_at,
+                expires_at=row.expires_at,
+                revoked_at=row.revoked_at,
+                successor_issued_at=row.successor_issued_at,
+            )
+            for row in result.all()
+        )
 
     async def mark_enrolled(
         self,
