@@ -122,6 +122,8 @@ from vigia_platform.fleet.application.ingest import IngestDependencies, IngestSe
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
+from vigia_platform.fleet.application.target_versions import TargetVersionService
+from vigia_platform.fleet.application.update_results import UpdateResultService
 from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
@@ -182,6 +184,7 @@ from vigia_platform.node_api.routes.enrollment import enrollment_operation
 from vigia_platform.node_api.routes.findings import finding_operation
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
 from vigia_platform.node_api.routes.observability_events import observability_event_operation
+from vigia_platform.node_api.routes.update_results import update_result_operation
 from vigia_platform.node_api.routes.zone_catalogs import zone_catalog_operation
 from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import DEFAULT_VERIFIER_PATH, shared_routers
@@ -731,6 +734,16 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 clock=services.clock,
             ),
+            # LC-GOB-17 (VIG-162): versión objetivo dentro de la ventana del contrato, con la
+            # misma política de versiones que la verificación previa de las rutas del contrato.
+            target_versions=TargetVersionService(
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+                policy=VersionPolicy(),
+            ),
             # LC-GOB-16 (VIG-161): alarmas por transición; sus tres tareas, en ``fleet_tasks``.
             alarms=FleetAlarms(
                 database=services.database,
@@ -752,12 +765,14 @@ PUBLISHED_NODE_ROUTES: Final[tuple[NodeRoute, ...]] = (
     NodeRoute.OBSERVABILITY_EVENT,
     NodeRoute.ENROLLMENT,
     NodeRoute.CREDENTIAL_ROTATION,
+    NodeRoute.UPDATE_RESULT,
 )
 """Rutas del contrato que ``vigia-api`` publica (TASK-206): cada tarea de negocio (TASK-219, 221,
 222, 223, 226) añade aquí la suya y su manejador en ``_node_operations``. VIG-152 (TASK-222)
 publica la concesión de clip y la confirmación del clip de verificación; TASK-223, el latido y el
 catálogo por zona; VIG-156 (TASK-221), las tres rutas de la ingesta; TASK-219, el alta y la
-rotación de la credencial. Desde entonces ``app.yaml``
+rotación de la credencial; VIG-162 (TASK-226), el resultado de actualización. Desde entonces
+``app.yaml``
 tiene rutas ``/api/nodes/`` y el trabajo de conformidad de ``nightly.yml`` falla, a propósito,
 hasta que TASK-230 escriba su ejecución."""
 
@@ -921,6 +936,12 @@ def _node_operations(
         ),
         NodeRoute.ZONE_CATALOG: zone_catalog_operation(
             ZoneCatalogForNode(database=services.database)
+        ),
+        # LC-GOB-17 (VIG-162): el resultado de actualización que reporta el nodo.
+        NodeRoute.UPDATE_RESULT: update_result_operation(
+            UpdateResultService(
+                database=services.database, writer=services.writer, clock=services.clock
+            )
         ),
     }
 

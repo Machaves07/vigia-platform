@@ -19,6 +19,7 @@ from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsSer
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
+from vigia_platform.fleet.application.target_versions import TargetVersionService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -42,6 +43,8 @@ class FleetHttp:
     """``GET /fleet/nodes`` y ``GET /fleet/nodes/{node_id}`` (TASK-224)."""
     thresholds: FleetThresholdsService | None = None
     """``GET`` y ``PUT /plants/{plant_id}/fleet-thresholds`` (TASK-224)."""
+    target_versions: TargetVersionService | None = None
+    """``POST /fleet/target-versions`` (TASK-226)."""
     alarms: FleetAlarms | None = None
     """``GET /fleet/alarms`` (TASK-225)."""
 

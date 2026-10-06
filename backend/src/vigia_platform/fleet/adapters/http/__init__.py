@@ -8,6 +8,8 @@
   inventario con sus avisos y la historia de latidos (TASK-224).
 - ``fleet_thresholds``: ``GET``/``PUT /plants/{plant_id}/fleet-thresholds`` (``fleet.read`` /
   ``fleet.manage``), los umbrales del panel por planta (TASK-224).
+- ``target_versions``: ``POST /fleet/target-versions`` (``fleet.manage``), la versión objetivo de
+  nodos de una planta con su ventana de mantenimiento informativa (TASK-226).
 - ``fleet_alarms``: ``GET /fleet/alarms`` (``fleet.read``), las alarmas de flota por transición,
   activas y recientes (TASK-225).
 
@@ -26,6 +28,7 @@ from vigia_platform.fleet.adapters.http.fleet_thresholds import fleet_thresholds
 from vigia_platform.fleet.adapters.http.inventory import inventory_router
 from vigia_platform.fleet.adapters.http.nodes import nodes_router
 from vigia_platform.fleet.adapters.http.services import FLEET_STATE_KEY, FleetHttp
+from vigia_platform.fleet.adapters.http.target_versions import target_versions_router
 
 __all__ = ["FLEET_STATE_KEY", "FleetHttp", "fleet_routers"]
 
@@ -37,5 +40,6 @@ def fleet_routers() -> tuple[APIRouter, ...]:
         commissioning_clips_router(),
         inventory_router(),
         fleet_thresholds_router(),
+        target_versions_router(),
         alarms_router(),
     )

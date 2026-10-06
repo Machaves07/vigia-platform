@@ -7,7 +7,8 @@ de U-02 y los cinco de la flota que escriben, la bandeja con los eventos ``node_
 ``node_decommissioned``, y la aplicación real con la cadena fija de middleware y
 ``ContextAuthorizer``. ``FleetStack`` da las personas (instalador del proveedor bajo concesión,
 miembros del cliente), las peticiones y lo que quedó escrito. Desde TASK-224, también el inventario
-(``FleetInventory``) y los umbrales por planta (``FleetThresholdsService``).
+(``FleetInventory``) y los umbrales por planta (``FleetThresholdsService``); desde TASK-226, la
+versión objetivo (``TargetVersionService``).
 
 Solo datos generados (NFR-CTR-43). Las marcas salen del reloj simulado, que arranca en la hora de
 la base (retro 14). Topes de las esperas de la base: 60 s (retro 15).
@@ -48,6 +49,7 @@ from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsSer
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
+from vigia_platform.fleet.application.target_versions import TargetVersionService
 from vigia_platform.fleet.domain.enrollment_attempt import SourceIpHasher
 from vigia_platform.fleet.events import register_fleet_event_types
 from vigia_platform.fleet.record_types import register_fleet_record_types
@@ -60,6 +62,7 @@ from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
 from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
@@ -363,6 +366,14 @@ def fleet_stack(endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8) -> It
                 authorizer=authz.authorizer,
                 audit=sessions.audit,
                 clock=sessions.clock,
+            ),
+            target_versions=TargetVersionService(
+                database=database,
+                writer=writer,
+                authorizer=authz.authorizer,
+                audit=sessions.audit,
+                clock=sessions.clock,
+                policy=VersionPolicy(),
             ),
             alarms=FleetAlarms(
                 database=database,

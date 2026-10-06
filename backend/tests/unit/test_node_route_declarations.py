@@ -202,7 +202,8 @@ def test_node_router_with_every_route_never_mounts_conformance_profile() -> None
 def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
     # VIG-152 (TASK-222): concesión de clip y confirmación del clip de verificación.
     # TASK-223: latido y catálogo por zona. VIG-156 (TASK-221): las tres rutas de la ingesta.
-    # VIG-151 (TASK-219): el alta y la rotación de la credencial. Las demás llegan con sus tareas.
+    # VIG-151 (TASK-219): el alta y la rotación de la credencial. VIG-162 (TASK-226): el resultado
+    # de actualización; con él están las diez (``conformance-profile`` no se implementa, A-51).
     assert PUBLISHED_NODE_ROUTES == (
         NodeRoute.HEARTBEAT,
         NodeRoute.CLIP_UPLOAD,
@@ -213,7 +214,9 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
         NodeRoute.OBSERVABILITY_EVENT,
         NodeRoute.ENROLLMENT,
         NodeRoute.CREDENTIAL_ROTATION,
+        NodeRoute.UPDATE_RESULT,
     )
+    assert set(PUBLISHED_NODE_ROUTES) == set(NodeRoute)
     assert "node_api" in {unit.name for unit in platform_units()}
     paths = {route.path for route in iter_declared_routes(build_openapi_app().routes)}
     assert {path for path in paths if path.startswith(NODE_PREFIX)} == {
@@ -226,6 +229,7 @@ def test_production_publishes_only_the_routes_of_finished_tasks() -> None:
         NodeRoute.OBSERVABILITY_EVENT.path,
         NodeRoute.ENROLLMENT.path,
         NodeRoute.CREDENTIAL_ROTATION.path,
+        NodeRoute.UPDATE_RESULT.path,
     }
 
 
