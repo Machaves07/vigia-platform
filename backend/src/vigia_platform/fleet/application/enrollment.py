@@ -5,8 +5,9 @@ La ruta del contrato (``node_api.routes.enrollment``) ya validó versión, tama�
 CSR, sacó el ``node_id`` del nombre común y resolvió el **contexto de la organización del nodo
 declarado** (``EnrollmentScope``, A-51). ``EnrollmentService.enroll`` sigue el orden del diseño:
 
-1. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció, o el
-   único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no);
+1. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció y es
+   local, o el único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no). Una
+   URL guardada que no es local no bloquea la re-alta (VIG-185);
 2. **código** (``EnrollmentCodeService.verify`` de TASK-218, en tiempo constante sobre los códigos
    del nodo): inválido, usado o vencido → intento registrado con su resultado y rechazo
    permanente;
