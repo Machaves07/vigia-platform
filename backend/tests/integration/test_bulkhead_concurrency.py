@@ -70,8 +70,8 @@ def _unit(holds: Holds) -> UnitRegistration:
     router = APIRouter()
 
     # Una ruta del contrato (A-51) con tres comportamientos según ``mode``:
-    # /api/nodes/update-results?mode={hold|boom|listen}. Es una ruta que ni el arnés ni producción
-    # declaran todavía (la concesión y la confirmación de clip ya las publica VIG-152).
+    # /api/nodes/update-results?mode={hold|boom|listen}. El arnés no monta las rutas de producción
+    # (VIG-162 publica esta), así que la ruta es solo de la prueba.
     @router.post(NodeRoute.UPDATE_RESULT.path, dependencies=[node_route(NodeRoute.UPDATE_RESULT)])
     async def node_route_handler(request: Request, mode: str = "hold") -> dict[str, str]:
         if mode == "boom":
