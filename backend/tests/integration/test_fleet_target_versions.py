@@ -20,8 +20,10 @@ Aquí, como ``vigia_app`` y con los servicios reales:
   o nodo que los del certificado → ``node_zone_mismatch``; ``schema_invalid`` de lo que el esquema
   no expresa;
 - **orden de candados** (filas del inventario por ``node_id`` → cadena de la planta): publicación y
-  resultado del mismo nodo a la vez, publicación y latido a la vez, y dos publicaciones con los
-  nodos en orden inverso terminan siempre, sin ``temporarily_unavailable``.
+  resultado del mismo nodo a la vez; publicación y un latido que **escribe en la cadena** (vuelta de
+  ``mute`` a ``reachable`` y cambio de ``model_version``), en los dos órdenes y con la primera
+  retenida tras su primer registro; y dos publicaciones con los nodos en orden inverso: terminan
+  siempre, sin ``temporarily_unavailable``.
 
 Topes: la base 60 s, la retención de la primera operación 3 s (no es un tope de «llegó a tiempo»).
 Solo datos generados (NFR-CTR-43).
@@ -35,7 +37,7 @@ import json
 import secrets
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -56,6 +58,11 @@ from tests.fleet_versions_support import (
 from tests.heartbeat_support import HeartbeatStack, NodeSite, heartbeat_stack
 from tests.integration.conftest import PostgresEndpoint
 from tests.writer_support import verify_ledger_chains
+from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
+from vigia_platform.catalog.adapters.postgres.regression_repository import (
+    PostgresRegressionRepository,
+)
+from vigia_platform.catalog.application.regression import RegressionService
 from vigia_platform.fleet.application.target_versions import TargetVersionService
 from vigia_platform.fleet.domain.fleet_versions import NodeGroup
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
@@ -811,31 +818,116 @@ def test_lock_order_a_publication_and_a_result_of_the_same_node_both_finish(
     hb.run(verify_ledger_chains(hb.authz.sessions.migrated, site.organization_id))
 
 
-def test_lock_order_a_publication_and_a_heartbeat_of_the_same_node_both_finish(
+class HoldingWriter:
+    """Un escritor que, tras el **primer** registro, avisa y retiene la transacción
+    ``HOLD_SECONDS`` (como en ``test_fleet_heartbeat_concurrency.py``)."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.arrived = asyncio.Event()
+
+    async def write(self, *args: Any, **kwargs: Any) -> Any:
+        written = await self._inner.write(*args, **kwargs)
+        if not self.arrived.is_set():
+            self.arrived.set()
+            await asyncio.sleep(HOLD_SECONDS)
+        return written
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _race(
     hb: HeartbeatStack,
+    writer: HoldingWriter,
+    first: Callable[[], Awaitable[Any]],
+    second: Callable[[], Awaitable[Any]],
+) -> list[Any]:
+    """``first`` hasta su primer registro (retenido); entonces ``second``; los dos resultados."""
+
+    async def race() -> list[Any]:
+        held = asyncio.ensure_future(first())
+        arrival = asyncio.ensure_future(writer.arrived.wait())
+        await asyncio.wait({held, arrival}, timeout=60.0, return_when="FIRST_COMPLETED")
+        arrival.cancel()
+        assert writer.arrived.is_set(), "la primera operación no llegó a escribir"
+        follower = asyncio.ensure_future(second())
+        return list(await asyncio.gather(held, follower, return_exceptions=True))
+
+    outcomes: list[Any] = hb.run(race())
+    return outcomes
+
+
+@pytest.mark.parametrize("attempt", range(3))
+@pytest.mark.parametrize(
+    "heartbeat_first", [True, False], ids=["latido-primero", "publicación-primero"]
+)
+def test_lock_order_a_publication_and_a_heartbeat_that_writes_in_the_chain_never_deadlock(
+    hb: HeartbeatStack, heartbeat_first: bool, attempt: int
 ) -> None:
+    # El latido escribe en la cadena de la planta: vuelve de ``mute`` a ``reachable``
+    # (``node_communication_state_changed``) y cambia de ``model_version`` (marca de regresión,
+    # VIG-148). La primera operación queda retenida tras su primer registro, con sus candados.
     site = hb.site()
+    hb.tick()
     assert hb.post(site).status_code == 200
+    hb.set_communication_state(site.node_id, "mute")
+    hb.tick()
     context = installer_context(hb.authz, site.organization_id)
-    for round_ in range(ROUNDS):
-        service = publisher(hb.authz, hb.primary.database, hb.writer)
-        entered = asyncio.Event()
-        _holding(service, entered)
-        version = f"1.0.{20 + round_}"
-        hb.tick()
+    holding = HoldingWriter(hb.writer)
+    sessions = hb.authz.sessions
+    database = hb.database()
+    heartbeat_writer: Any = holding if heartbeat_first else hb.writer
+    regression = RegressionService(
+        repository=PostgresRegressionRepository(database),
+        catalog=PostgresCatalogRepository(database),
+        database=database,
+        writer=heartbeat_writer,
+        authorizer=hb.authz.authorizer,
+        audit=sessions.audit,
+        free_text=hb.free_text,
+        clock=sessions.clock,
+    )
+    instance = hb.instance(database, writer=heartbeat_writer, regression=regression)
+    service = publisher(
+        hb.authz,
+        database,
+        hb.writer if heartbeat_first else holding,  # type: ignore[arg-type]
+    )
+    body = hb.body(site, model_version="modelo-2.0")
+    version = f"1.0.{20 + attempt}"
 
-        async def run(service: Any = service, entered: Any = entered, v: str = version) -> Any:
-            publication = asyncio.ensure_future(
-                _publish_in(hb, site, [site.node_id], v, service=service, context=context)
-            )
-            await asyncio.wait_for(entered.wait(), 60.0)
-            heartbeat = await hb.send(site, hb.body(site))
-            return await publication, heartbeat
+    async def heartbeat() -> httpx.Response:
+        return await hb.send(site, body, instance)
 
-        _, heartbeat = hb.run(run())
-        assert heartbeat.status_code == 200, heartbeat.text
-        # El latido esperó a la publicación: ya la ve.
-        assert heartbeat.json()["target_software_version"] == version
+    async def publish() -> Any:
+        return await _publish_in(
+            hb, site, [site.node_id], version, service=service, context=context
+        )
+
+    try:
+        first, second = (heartbeat, publish) if heartbeat_first else (publish, heartbeat)
+        outcomes = _race(hb, holding, first, second)
+    finally:
+        hb.run(hb.release())
+    response, publication = outcomes if heartbeat_first else outcomes[::-1]
+    assert isinstance(response, httpx.Response), response
+    assert response.status_code == 200, response.text
+    assert not isinstance(publication, BaseException), publication
+    assert [record["state"] for record in hb.communication(site)] == ["reachable", "reachable"]
+    assert [m["content"]["cause"] for m in hb.regression_marks(site)] == ["model_version_change"]
+    document = response.json()
+    if heartbeat_first:
+        # El latido confirmó antes: la publicación vino después y su respuesta no la trae.
+        assert "target_software_version" not in document
+    else:
+        # La publicación confirmó antes: el latido esperó la fila del nodo y ya la ve.
+        assert document["target_software_version"] == version
+    (row,) = hb.fetch(
+        "SELECT target_version FROM fleet.node_inventory WHERE node_id = $1", site.node_id
+    )
+    assert row["target_version"] == version
+    hb.run(verify_ledger_chains(hb.authz.sessions.migrated, site.organization_id))
 
 
 def test_two_publications_with_the_nodes_in_opposite_order_both_finish(hb: HeartbeatStack) -> None:
