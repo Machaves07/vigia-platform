@@ -408,6 +408,13 @@ def _node_display_name(code: str) -> str:
     return (_NODE_DISPLAY_PREFIX + code)[:120] if code else SYSTEM_DISPLAY_NAME
 
 
+_RETIRED_CREDENTIAL: Final = frozenset({"revoked", "superseded"})
+"""Credenciales retiradas: ``node_revoked`` sea cual sea el estado del nodo. ``superseded``
+es la materialización del ``overlapping → revoked`` de BLM §3.5 (nota de §4) y va en la lista
+de revocación como ``revoked``: con el nodo ``re_enrollment_pending`` o ``declared`` responde
+igual que una revocada, no ``node_not_enrolled`` (PR-GOB-28)."""
+
+
 def _credential_reason(row: NodeRow, now: datetime) -> NodeContextReason | None:
     """Por qué la credencial no autentica en ``now`` (``None``: autentica)."""
     if row.credential_status == "active":
@@ -443,7 +450,7 @@ def _node_reason(
         row.node_status == "revoked"
         or row.revoked_at is not None
         or row.decommissioned_at is not None
-        or row.credential_status == "revoked"
+        or row.credential_status in _RETIRED_CREDENTIAL
     ):
         return NodeContextReason.REVOKED
     if row.node_status != "enrolled" or row.enrolled_at is None:
