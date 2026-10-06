@@ -44,6 +44,7 @@ from vigia_contracts.versioning import Version
 from tests.api_support import World
 from tests.authz_support import AuthzEnvironment, authz_environment
 from tests.examples.test_ledger_routes import StubEvidenceStorage
+from tests.fleet_http_support import register_alarm_event_types
 from tests.integration.conftest import PostgresEndpoint
 from tests.node_api_db import DbNode, issue
 from tests.node_api_support import DAY, VERSION, TestAuthority, alb_headers, node_unit
@@ -718,6 +719,7 @@ def heartbeat_stack(
     *,
     policy: VersionPolicy | None = None,
     metrics: PlatformMetrics | None = None,
+    alarm_events: bool = False,
 ) -> Iterator[HeartbeatStack]:
     signing = asyncio.run(bootstrapped_world())
     with authz_environment(endpoint, prefix) as authz:
@@ -735,6 +737,8 @@ def heartbeat_stack(
         register_u02_event_types(catalog.event_types)
         _fleet_event_types(catalog.event_types)
         register_catalog_event_types(catalog.event_types)
+        if alarm_events:
+            register_alarm_event_types(catalog)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)

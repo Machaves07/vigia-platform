@@ -137,6 +137,10 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         "vigia_platform.fleet.application.common.write",
         "vigia_platform.fleet.application.node_revocation.revoke_in",
         "vigia_platform.fleet.application.node_revocation.decommission_in",
+        # fleet.application (TASK-225): abren y cierran alarmas solo por ``FleetAlarmStore``
+        # (``@repository``) y el ``Outbox`` sobre la ``Transaction`` dada.
+        "vigia_platform.fleet.application.fleet_alarms.raise_in",
+        "vigia_platform.fleet.application.fleet_alarms.clear_in",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.
