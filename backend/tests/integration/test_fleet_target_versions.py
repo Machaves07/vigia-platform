@@ -22,8 +22,9 @@ Aquí, como ``vigia_app`` y con los servicios reales:
 - **orden de candados** (filas del inventario por ``node_id`` → cadena de la planta): publicación y
   resultado del mismo nodo a la vez; publicación y un latido que **escribe en la cadena** (vuelta de
   ``mute`` a ``reachable`` y cambio de ``model_version``), en los dos órdenes y con la primera
-  retenida tras su primer registro; y dos publicaciones con los nodos en orden inverso: terminan
-  siempre, sin ``temporarily_unavailable``.
+  retenida tras su primer registro; publicación y ``detect_mute_nodes`` (VIG-161) del mismo nodo,
+  igual; y dos publicaciones con los nodos en orden inverso: terminan siempre, sin
+  ``temporarily_unavailable``.
 
 Topes: la base 60 s, la retención de la primera operación 3 s (no es un tope de «llegó a tiempo»).
 Solo datos generados (NFR-CTR-43).
@@ -45,6 +46,7 @@ import httpx
 import pytest
 
 from tests.authz_support import Site
+from tests.fleet_alarm_support import alarm_tasks, run_in
 from tests.fleet_http_support import FleetStack, fleet_stack
 from tests.fleet_versions_support import (
     NodeApp,
@@ -63,6 +65,8 @@ from vigia_platform.catalog.adapters.postgres.regression_repository import (
     PostgresRegressionRepository,
 )
 from vigia_platform.catalog.application.regression import RegressionService
+from vigia_platform.fleet.application.fleet_alarms import AlarmReport
+from vigia_platform.fleet.application.mute_nodes import MuteDetector
 from vigia_platform.fleet.application.target_versions import TargetVersionService
 from vigia_platform.fleet.domain.fleet_versions import NodeGroup
 from vigia_platform.node_api.routes.heartbeats import heartbeat_operation
@@ -90,7 +94,8 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[FleetStack]:
 
 @pytest.fixture(scope="module")
 def hb(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
-    with heartbeat_stack(postgres_endpoint, "fleet_update_results") as built:
+    # Con los eventos de las alarmas: la detección de mudos (VIG-161) publica node_mute.
+    with heartbeat_stack(postgres_endpoint, "fleet_update_results", alarm_events=True) as built:
         yield built
 
 
@@ -927,6 +932,68 @@ def test_lock_order_a_publication_and_a_heartbeat_that_writes_in_the_chain_never
         "SELECT target_version FROM fleet.node_inventory WHERE node_id = $1", site.node_id
     )
     assert row["target_version"] == version
+    hb.run(verify_ledger_chains(hb.authz.sessions.migrated, site.organization_id))
+
+
+@pytest.mark.parametrize("attempt", range(3))
+@pytest.mark.parametrize(
+    "detect_first", [True, False], ids=["detección-primero", "publicación-primero"]
+)
+def test_lock_order_mute_detection_and_a_publication_of_the_same_node_never_deadlock(
+    hb: HeartbeatStack, detect_first: bool, attempt: int
+) -> None:
+    # ``detect_mute_nodes`` (VIG-161) toma las filas del inventario por (planta, nodo) y escribe en
+    # la cadena de la planta; la publicación, las filas de su planta por nodo y después la cadena.
+    # La primera operación queda retenida tras su primer registro, con sus candados.
+    sessions = hb.authz.sessions
+    outbox = hb.outbox
+    assert outbox is not None
+    site = hb.site(interval=15)
+    hb.tick()
+    assert hb.post(site).status_code == 200
+    hb.tick(600)  # el nodo calla: candidato a mudo
+    context = installer_context(hb.authz, site.organization_id)
+    holding = HoldingWriter(hb.writer)
+    database = hb.database()
+    tasks = alarm_tasks(
+        clock=sessions.clock,
+        outbox=outbox,
+        writer=hb.writer,
+        audit=sessions.audit,
+    )
+    detector = MuteDetector(
+        tasks.deps,
+        writer=holding if detect_first else hb.writer,  # type: ignore[arg-type]
+    )
+    service = publisher(
+        hb.authz,
+        database,
+        hb.writer if detect_first else holding,  # type: ignore[arg-type]
+    )
+    version = f"1.0.{50 + attempt}"
+
+    async def detect() -> AlarmReport:
+        return await run_in(database, site.organization_id, detector.detect)
+
+    async def publish() -> Any:
+        nodes = [site.node_id]
+        return await _publish_in(hb, site, nodes, version, service=service, context=context)
+
+    try:
+        first, second = (detect, publish) if detect_first else (publish, detect)
+        outcomes = _race(hb, holding, first, second)
+    finally:
+        hb.run(database.dispose())
+    report, publication = outcomes if detect_first else outcomes[::-1]
+    assert isinstance(report, AlarmReport), report
+    assert not isinstance(publication, BaseException), publication
+    assert report.transitions == [site.node_id]
+    assert [record["state"] for record in hb.communication(site)] == ["reachable", "mute"]
+    (row,) = hb.fetch(
+        "SELECT target_version, communication_state FROM fleet.node_inventory WHERE node_id = $1",
+        site.node_id,
+    )
+    assert (row["target_version"], row["communication_state"]) == (version, "mute")
     hb.run(verify_ledger_chains(hb.authz.sessions.migrated, site.organization_id))
 
 
