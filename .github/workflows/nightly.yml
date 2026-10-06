@@ -231,10 +231,12 @@ jobs:
   # procesos vigia-api tras el balanceador local, la idempotencia entre procesos y la comparación de
   # las métricas de la plataforma con el informe del kit (tests/conformance/). El ConformanceReport,
   # la salida de la orden y la comparación de métricas quedan 90 días en `informe-conformidad`.
+  # Tope: el máximo de un runner alojado. Con 50 ejemplos por comprobación, las de latido esperan
+  # al límite de tasa de producción (4 latidos por minuto y nodo, NFR-GOB-33).
   conformance:
     name: conformidad de U-01 contra la plataforma
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 360
     defaults:
       run:
         working-directory: backend

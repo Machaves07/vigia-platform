@@ -316,7 +316,9 @@ class MtlsProxy:
                     dropped_mtls=tuple(dropped),
                 )
             )
-        response_headers.append(("content-length", str(len(content))))
+        if request.method != b"HEAD":
+            # A un HEAD se le deja el Content-Length de la aplicación: es el tamaño del objeto.
+            response_headers.append(("content-length", str(len(content))))
         writer.write(connection.send(h11.Response(status_code=status, headers=response_headers)))
         if content:
             writer.write(connection.send(h11.Data(data=content)))
@@ -341,6 +343,7 @@ class MtlsProxy:
             (name, value)
             for name, value in response.headers.multi_items()
             if name.lower() not in _HOP_BY_HOP
+            or (method == "HEAD" and name.lower() == "content-length")
         ]
         return response.status_code, kept, content
 

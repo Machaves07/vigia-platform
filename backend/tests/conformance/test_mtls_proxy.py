@@ -50,6 +50,8 @@ FORGED: Final = {
     "x-amzn-mtls-otra": "cualquiera",
 }
 START_SECONDS: Final = 30.0
+OBJECT_SIZE: Final = 123_456
+"""Lo que la aplicación de eco anuncia en un ``HEAD`` (como S3: el tamaño del objeto)."""
 
 
 async def _echo(scope: Scope, receive: Receive, send: Send) -> None:
@@ -60,14 +62,18 @@ async def _echo(scope: Scope, receive: Receive, send: Send) -> None:
         [name.decode("latin-1"), value.decode("latin-1")] for name, value in scope["headers"]
     ]
     body = httpx.Response(200, json=headers).content
+    size = OBJECT_SIZE if scope["method"] == "HEAD" else len(body)
     await send(
         {
             "type": "http.response.start",
             "status": 200,
-            "headers": [(b"content-type", b"application/json")],
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(size).encode()),
+            ],
         }
     )
-    await send({"type": "http.response.body", "body": body})
+    await send({"type": "http.response.body", "body": b"" if scope["method"] == "HEAD" else body})
 
 
 @contextlib.contextmanager
@@ -242,3 +248,27 @@ def test_requests_alternate_between_processes_on_one_connection(world: World) ->
         statuses = [client.get(proxy.url + "/api/nodes/heartbeats").status_code for _ in range(4)]
     assert statuses == [200] * 4
     assert [exchange.backend for exchange in proxy.exchanges] == [0, 1, 0, 1]
+
+
+def test_a_head_keeps_the_content_length_of_the_application(world: World) -> None:
+    """S3 anuncia el tamaño del objeto en el ``Content-Length`` de un ``HEAD`` sin cuerpo: el
+    balanceador no lo reescribe (la verificación de un clip lee ese tamaño)."""
+    with (
+        echo_backend() as backend,
+        mtls_proxy("aws", [backend], world.tls, preserve_host=True) as proxy,
+        world.client() as client,
+    ):
+        response = client.head(proxy.url + "/vigia-evidence/objeto")
+    assert response.status_code == 200
+    assert response.headers["content-length"] == str(OBJECT_SIZE)
+    assert response.content == b""
+
+
+def test_the_storage_listener_keeps_the_host_of_the_signature(world: World) -> None:
+    with (
+        echo_backend() as backend,
+        mtls_proxy("aws", [backend], world.tls, preserve_host=True) as proxy,
+        world.client() as client,
+    ):
+        received = dict(client.get(proxy.url + "/vigia-evidence/objeto").json())
+    assert received["host"] == proxy.url.removeprefix("https://")

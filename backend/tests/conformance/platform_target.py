@@ -17,13 +17,14 @@
 
 **Aprovisionamiento** (``provision``), por los servicios reales del ``AppRuntime`` (en el bucle
 de la plataforma) con las personas que lo harían: la persona administradora del cliente crea la
-planta y las zonas (``HierarchyService``), admite la familia (``AdmissionService``) y publica el
-catálogo firmado de cada zona (``CatalogPublicationService``); el instalador del proveedor, con
-su concesión, declara el nodo, aprueba las compuertas (``GateService.transition_gate``, como el
-acta de alcance y el acuerdo de uso) y emite el código de alta (``EnrollmentCodeService``); el
-nodo se da de alta por la ruta del contrato ``POST /api/nodes/enrollment`` detrás del balanceador
-``app.``. Solo la organización cliente, sus usuarios, sus sesiones y la concesión se siembran por
-SQL, como en el resto de las pruebas (U-02 no expone su alta sin segundo factor).
+planta y las zonas (``HierarchyService``) y admite la familia (``AdmissionService``); el
+instalador del proveedor, con su concesión, declara el nodo (``NodeDeclarationService``) y emite
+el código de alta (``EnrollmentCodeService``); el nodo se da de alta por la ruta del contrato
+``POST /api/nodes/enrollment`` detrás del balanceador ``app.``. El catálogo de cada zona y sus
+compuertas salen del plan del dominio con los sobres firmados por el ``SigningService`` de la
+plataforma y los repositorios reales (``_publish`` dice por qué no por sus servicios). La
+organización cliente, sus usuarios, sus sesiones, la concesión y la asignación anterior de cada
+zona (``_previous_assignments``) se siembran por SQL, como en el resto de las pruebas.
 
 El nodo de prueba tiene dos zonas de una planta, una con la compuerta de uso aprobada y otra
 pendiente; el segundo nodo es de otra organización (como el objetivo en proceso del kit). El
@@ -33,10 +34,13 @@ temporal fuera del árbol; el código de alta solo existe en memoria durante el 
 **Tiempos.** El kit traslada cada registro para que termine un segundo antes de ahora y un tramo
 dura como mucho ``max_segment_ms`` (60 s en estos catálogos), y la plataforma evalúa la
 asignación, el catálogo y la compuerta en ``node_time.started_at`` con la tolerancia del reloj
-(``fleet.domain.clock_tolerance``). Por eso el nodo se declara (su asignación empieza) al menos
-``ASSIGNMENT_LEAD`` antes de publicar catálogos y compuertas, y la suite no empieza hasta
-``SUITE_LEAD`` después de ``in_force_since``: son precondiciones con el reloj real, nunca topes
-que decidan un resultado.
+(``fleet.domain.clock_tolerance``). Por eso cada zona lleva asignada al nodo ``ASSIGNED_SINCE``
+y la suite no empieza hasta ``SUITE_LEAD`` después de ``in_force_since`` (catálogo y compuertas):
+es una precondición con el reloj real, nunca un tope que decida un resultado.
+
+**Almacén.** LocalStack queda detrás del balanceador local con TLS (``VIGIA_AWS_ENDPOINT_URL``
+``https`` y ``AWS_CA_BUNDLE``): ``ClipUploadGrant.upload_url`` es ``https`` en el contrato y la
+plataforma no entrega una concesión ``http`` (``clip_uploads.grant_document``).
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -49,6 +53,7 @@ import dataclasses
 import datetime as dt
 import functools
 import json
+import logging
 import os
 import secrets
 import subprocess
@@ -117,6 +122,7 @@ from vigia_platform.shared.api.app import AppConfig, AppRuntime, create_app
 from vigia_platform.shared.api.main import ApiServerConfig, build_server
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext
+from vigia_platform.shared.observability.logging import JsonFormatter
 from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.runtime.api import compose_api_runtime
 from vigia_platform.shared.runtime.config import RuntimeConfig
@@ -124,7 +130,7 @@ from vigia_platform.shared.signing.keys import SigningPurpose
 
 __all__ = [
     "API_RUNTIME",
-    "ASSIGNMENT_LEAD",
+    "ASSIGNED_SINCE",
     "BACKEND",
     "BIN",
     "SUITE_LEAD",
@@ -166,9 +172,8 @@ BOOTSTRAP: Final = (
 )
 WALL: Final = SystemClock()
 """Reloj real: la plataforma y el kit usan la hora del sistema (objetivo por URL)."""
-ASSIGNMENT_LEAD: Final = dt.timedelta(seconds=75)
-"""Desde la declaración del nodo hasta la publicación: la asignación cubre la ventana de
-tolerancia de ``schema.clock_tolerance`` (``in_force_since`` menos 60 s, ± 10 s)."""
+ASSIGNED_SINCE: Final = dt.timedelta(days=400)
+"""Antigüedad de la asignación previa de cada zona: más que la retención del nodo (30 días)."""
 SUITE_LEAD: Final = dt.timedelta(seconds=65)
 """Desde ``in_force_since`` hasta la suite: el tramo más largo (60 s) ya empieza dentro."""
 MAX_SEGMENT_MS: Final = 60_000
@@ -430,18 +435,31 @@ class InProcessApi:
 
 
 @contextlib.contextmanager
-def in_process_api(environ: Mapping[str, str], port: int) -> Iterator[InProcessApi]:
+def in_process_api(
+    environ: Mapping[str, str], port: int, *, log_file: Path | None = None
+) -> Iterator[InProcessApi]:
     """``InProcessApi`` con las credenciales de LocalStack en el entorno del proceso (boto3 las
-    lee de ahí) durante su vida."""
+    lee de ahí) durante su vida. Con ``log_file``, sus registros (JSON con la redacción de la
+    plataforma, como los de los procesos ``vigia-api``) van a ese archivo."""
     saved = {name: os.environ.get(name) for name in _AWS_VARIABLES}
     for name in _AWS_VARIABLES:
         os.environ[name] = environ[name]
+    logger = logging.getLogger("vigia")
+    handler: logging.Handler | None = None
+    if log_file is not None:
+        handler = logging.FileHandler(log_file, encoding="utf-8")
+        handler.setFormatter(JsonFormatter())
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
     api = InProcessApi(environ)
     try:
         api.start(port)
         yield api
     finally:
         api.stop()
+        if handler is not None:
+            logger.removeHandler(handler)
+            handler.close()
         for name, value in saved.items():
             if value is None:
                 os.environ.pop(name, None)
@@ -499,6 +517,12 @@ class Provisioned:
     node_ca_file: Path
     ready_at: dt.datetime
     """Desde cuándo puede empezar la suite (``in_force_since`` + ``SUITE_LEAD``)."""
+    enrollment_codes: tuple[str, ...] = field(repr=False, default=())
+    """Los códigos de alta usados, solo en memoria: ninguna salida los contiene (PR-GOB-31)."""
+
+    def leaks(self, *texts: str) -> list[str]:
+        """Qué códigos de alta aparecen en ``texts`` (vacío si ninguno)."""
+        return [code for code in self.enrollment_codes if any(code in text for text in texts)]
 
     def wait_until_ready(self) -> None:
         delay = (self.ready_at - WALL.now()).total_seconds()
@@ -848,8 +872,11 @@ class Provisioner:
         self.api.call(go())
         return published
 
-    def _enroll(self, site: _Site) -> tuple[Path, Path]:
-        """Código de alta (instalador) y alta por ``POST /api/nodes/enrollment`` en ``app.``."""
+    def _enroll(self, site: _Site) -> tuple[Path, Path, str]:
+        """Código de alta (instalador) y alta por ``POST /api/nodes/enrollment`` en ``app.``.
+
+        Devuelve el certificado, la clave y el código usado: el código solo vive en memoria, para
+        comprobar que no aparece en ninguna salida (PR-GOB-31)."""
         fleet: FleetHttp = self.api.state(FLEET_STATE_KEY)
         assert site.node_id is not None
 
@@ -861,8 +888,9 @@ class Provisioner:
 
         client_key = ec.generate_private_key(ec.SECP256R1())
         node = str(site.node_id)
+        code = self.api.call(issue())
         body = {
-            "enrollment_code": self.api.call(issue()),
+            "enrollment_code": code,
             "key_algorithm": "ecdsa_p256",
             "certificate_signing_request": csr_pem(node, key=client_key),
             "server_certificate_signing_request": csr_pem(node, names=[local_ip()]),
@@ -878,7 +906,6 @@ class Provisioner:
             verify=str(self.verify_file),
             timeout=HTTP_SECONDS,
         )
-        del body  # el código de alta no sale de esta función (PR-GOB-31)
         assert response.status_code == 200, response.text
         certificate = x509.load_pem_x509_certificate(response.json()["certificate"].encode())
         certificate_file = self.directory / f"nodo-{node}.crt"
@@ -892,22 +919,54 @@ class Provisioner:
             )
         )
         key_file.chmod(0o600)
-        return certificate_file, key_file
+        return certificate_file, key_file, code
+
+    def _previous_assignments(self, site: _Site) -> None:
+        """Un intervalo de asignación anterior ``[ahora - ASSIGNED_SINCE, alta de la asignación)``
+        por zona, añadido (``zone_node_assignment`` es de solo anexar): el nodo lleva más de la
+        retención asignado a sus zonas, como un nodo en servicio. Sin él, un registro más antiguo
+        que la retención sería ``node_zone_mismatch`` (asignación en el instante del hecho, paso 2)
+        antes que ``timestamp_out_of_window``."""
+        rows = self.stack.fetch(
+            "SELECT organization_id, plant_id, zone_id, assigned_at"
+            " FROM identity.zone_node_assignment WHERE node_id = $1",
+            site.node_id,
+        )
+        assert len(rows) == len(site.zones)
+        self.stack.admin(
+            [
+                (
+                    "INSERT INTO identity.zone_node_assignment (assignment_id, organization_id,"
+                    " plant_id, zone_id, node_id, assigned_at, unassigned_at, assigned_by)"
+                    " VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    (
+                        uuid7(),
+                        row["organization_id"],
+                        row["plant_id"],
+                        row["zone_id"],
+                        site.node_id,
+                        row["assigned_at"] - ASSIGNED_SINCE,
+                        row["assigned_at"],
+                        self._operator,
+                    ),
+                )
+                for row in rows
+            ]
+        )
 
     def provision(self) -> Provisioned:
         primary_site = self._site((True, False))
         second_site = self._site((True,))
         for site in (primary_site, second_site):
             self._declare(site)
-        declared = max(site.declared_at for site in (primary_site, second_site) if site.declared_at)
-        delay = (declared + ASSIGNMENT_LEAD - WALL.now()).total_seconds()
-        if delay > 0:
-            time.sleep(delay)  # precondición de la tolerancia del reloj (ver el módulo)
+            self._previous_assignments(site)
         nodes = []
-        latest = declared
+        codes: list[str] = []
+        latest = WALL.now()
         for site in (primary_site, second_site):
             published = self._publish(site)
-            certificate_file, key_file = self._enroll(site)
+            certificate_file, key_file, code = self._enroll(site)
+            codes.append(code)
             zones = tuple(
                 ProvisionedZone(zone, catalog, approved, _ceil_ms(since))
                 for (zone, catalog, since), approved in zip(
@@ -950,6 +1009,7 @@ class Provisioner:
             self.verify_file,
             node_ca_file,
             latest + SUITE_LEAD,
+            tuple(codes),
         )
 
 

@@ -36,6 +36,7 @@ from vigia_contracts.conformance.checks._platform import Reply
 from vigia_contracts.conformance.checks._target import tls_context
 from vigia_contracts.conformance.cli import load_provision
 from vigia_contracts.conformance.stub_platform.metrics import LatencySummary, MetricsSnapshot
+from vigia_contracts.models.receipt import Receipt
 from vigia_contracts.server_skeleton import OPERATIONS
 
 from tests.conformance.conftest import (
@@ -44,7 +45,7 @@ from tests.conformance.conftest import (
     conformance_seed,
 )
 from tests.conformance.platform_target import ENROLLMENT_PATH, INGEST_PATH
-from vigia_platform.shared.api.declarations import NODE_PREFIX
+from vigia_platform.shared.api.declarations import NODE_PREFIX, NodeRoute
 
 METRIC: Final = "node_requests_total"
 UNMATCHED: Final = "unmatched"
@@ -59,15 +60,42 @@ def _template(path: str) -> re.Pattern[str]:
     return re.compile("^" + re.sub(r"\\\{[a-z_]+\\\}", "[^/]+", re.escape(path)) + "$")
 
 
+_MOUNTED: Final = {route.operation_id: OPERATIONS[route.operation_id] for route in NodeRoute}
+"""Las operaciones que la plataforma monta: ``conformance-profile`` no (A-51), y su petición
+sale en la métrica como ruta ``unmatched``."""
 _TEMPLATES: Final = tuple(
     (operation.method, _template(NODE_PREFIX + operation.path), operation_id)
-    for operation_id, operation in OPERATIONS.items()
+    for operation_id, operation in _MOUNTED.items()
 )
-_BY_PATH: Final = {NODE_PREFIX + op.path: op_id for op_id, op in OPERATIONS.items()}
+_BY_PATH: Final = {NODE_PREFIX + op.path: op_id for op_id, op in _MOUNTED.items()}
+RECEIPT_OPERATIONS: Final = frozenset(
+    operation_id
+    for operation_id, operation in OPERATIONS.items()
+    if any(
+        response.status_code == 200 and response.model is Receipt
+        for response in operation.responses
+    )
+)
+"""Las operaciones cuya respuesta correcta es un ``Receipt``: solo en ellas ve el kit si una
+aceptación es ``accepted_duplicate`` (en el latido, la concesión o el catálogo, un duplicado
+recibe la misma respuesta que el original). En las demás se comparan las aceptaciones juntas."""
+NO_RESPONSE: Final = "sin_respuesta"
+KIT_TIMEOUT_SECONDS: Final = 30.0
+"""El tope de ``checks._target._UrlEndpoint.client`` del kit (``timeout=30.0``)."""
+
+
+def comparable(outcomes: Outcomes) -> Counter[tuple[str, str]]:
+    """``outcomes`` con ``accepted_duplicate`` como ``accepted`` fuera de ``RECEIPT_OPERATIONS``."""
+    folded: Counter[tuple[str, str]] = Counter()
+    for (operation_id, result), count in outcomes.items():
+        if result == "accepted_duplicate" and operation_id not in RECEIPT_OPERATIONS:
+            result = "accepted"
+        folded[(operation_id, result)] += count
+    return folded
 
 
 def operation_of(method: str, path: str) -> str:
-    """La operación del esqueleto de ``method path`` (``unmatched`` si ninguna)."""
+    """La operación montada de ``method path`` (``unmatched`` si ninguna)."""
     for expected, pattern, operation_id in _TEMPLATES:
         if method == expected and pattern.match(path):
             return operation_id
@@ -99,14 +127,23 @@ class CountingTransport(httpx.AsyncBaseTransport):
         self._outcomes = outcomes
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        response = await self._inner.handle_async_request(request)
         path = request.url.path
-        if path.startswith(NODE_PREFIX + "/") or path == NODE_PREFIX:
+        if not (path.startswith(NODE_PREFIX + "/") or path == NODE_PREFIX):
+            return await self._inner.handle_async_request(request)
+        operation_id = operation_of(request.method, path)
+        # El cliente que el kit crea con ``transport_factory`` no fija tope (el de httpx, 5 s); el
+        # de su objetivo por URL, sí: 30 s. Se usa el mismo que la orden ``vigia-conformance``.
+        request.extensions["timeout"] = httpx.Timeout(KIT_TIMEOUT_SECONDS).as_dict()
+        try:
+            response = await self._inner.handle_async_request(request)
             content = await response.aread()
-            operation_id = operation_of(request.method, path)
-            self._outcomes[
-                (operation_id, kit_outcome(operation_id, response.status_code, content))
-            ] += 1
+        except httpx.HTTPError as error:
+            # El kit no recibió respuesta: queda nombrado en la comparación, nunca se pierde.
+            self._outcomes[(operation_id, f"{NO_RESPONSE}:{type(error).__name__}")] += 1
+            raise
+        self._outcomes[
+            (operation_id, kit_outcome(operation_id, response.status_code, content))
+        ] += 1
         return response
 
     async def aclose(self) -> None:
@@ -208,6 +245,24 @@ def test_compare_names_every_altered_counter() -> None:
     assert compare(extra, kit) == ["post_heartbeat rate_limited: plataforma 1, informe del kit 0"]
 
 
+def test_duplicates_are_only_told_apart_where_the_kit_sees_a_receipt() -> None:
+    assert {
+        "post_finding",
+        "post_detection_review",
+        "post_observability_event",
+        "post_update_result",
+    } == RECEIPT_OPERATIONS
+    outcomes = {
+        ("post_heartbeat", "accepted"): 2,
+        ("post_heartbeat", "accepted_duplicate"): 1,
+        ("post_finding", "accepted_duplicate"): 1,
+    }
+    assert comparable(outcomes) == {
+        ("post_heartbeat", "accepted"): 3,
+        ("post_finding", "accepted_duplicate"): 1,
+    }
+
+
 def test_operations_and_outcomes_are_read_like_the_kit() -> None:
     assert operation_of("POST", "/api/nodes/findings") == "post_finding"
     assert operation_of("GET", "/api/nodes/zones/0192f0c4-0000-7000-8000-000000000001/catalog") == (
@@ -217,6 +272,7 @@ def test_operations_and_outcomes_are_read_like_the_kit() -> None:
         "post_clip_upload_confirmation"
     )
     assert operation_of("GET", "/api/nodes/findings") == UNMATCHED
+    assert operation_of("GET", "/api/nodes/conformance-profile") == UNMATCHED  # A-51
     assert kit_outcome("post_heartbeat", 404, b"") == "not_found"
     rejection = json.dumps(
         {
@@ -239,8 +295,8 @@ def test_platform_metrics_match_the_kit_report(
     target = counting_target(platform_target)
     report = run_checks(target, profile, seed)
     after = platform_outcomes(reader)
-    platform = after - before
-    kit = target.outcomes
+    platform = comparable(after - before)
+    kit = comparable(target.outcomes)
     differences = compare(platform, kit)
     comparison = {
         "profile": profile,
@@ -259,7 +315,7 @@ def test_platform_metrics_match_the_kit_report(
     print(report.render_es())
 
     assert sum(kit.values()) > 0
-    assert report.metrics is not None and dict(report.metrics.outcomes) == dict(kit)
+    assert report.metrics is not None and dict(report.metrics.outcomes) == dict(target.outcomes)
     assert {result for _, result in kit} >= {"accepted", "accepted_duplicate"}
     assert differences == [], "\n".join(differences)
     assert report.passed, report.render_es()

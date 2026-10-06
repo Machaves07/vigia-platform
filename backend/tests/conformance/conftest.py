@@ -41,6 +41,7 @@ from tests.resilience.processes import ProcessGroup, process_group
 SEED_VARIABLE: Final = "VIGIA_CONFORMANCE_SEED"
 REPORT_DIR_VARIABLE: Final = "VIGIA_CONFORMANCE_REPORT_DIR"
 API_MODULE: Final = "vigia_platform.shared.api.main"
+API_LOG: Final = "api-en-proceso.log"
 """``vigia-api`` (``pyproject.toml``): el punto de entrada de la imagen, como módulo."""
 MAX_SEED: Final = 2**53 - 1
 
@@ -111,7 +112,7 @@ def platform_target(
             aws_url=aws.url,
             ca_bundle=tls.ca_file,
         ) as stack,
-        in_process_api(stack.environ, free_port()) as api,
+        in_process_api(stack.environ, free_port(), log_file=directory / API_LOG) as api,
     ):
         node_ca = directory / "vigia-node-ca.crt"
         node_ca.write_bytes(stack.node_ca_root())
