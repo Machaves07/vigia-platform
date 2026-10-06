@@ -130,6 +130,7 @@ from vigia_platform.shared.observability.metrics import PlatformMetrics, get_met
 from vigia_platform.shared.observability.redaction import (
     DEFAULT_POLICY,
     AttributePolicy,
+    is_route_template,
     redact_text,
 )
 from vigia_platform.shared.ratelimit import RateLimiter
@@ -685,12 +686,14 @@ def _registrable(values: Iterable[str]) -> list[str]:
 def _register_observability(app: FastAPI, policy: AttributePolicy) -> None:
     """Amplía las listas cerradas de la redacción con las rutas y los motivos de esta app.
 
-    Una plantilla con forma de token (p. ej. 20 o más caracteres seguidos sin punto) sale en
-    los registros como ``[redactado]``: la política no la admite y aquí no se registra.
+    Las plantillas declaradas se registran tramo a tramo (``register_routes``): con
+    ``register``, ``/api/nodes/heartbeats`` y las demás de 20 o más caracteres seguidos del
+    alfabeto de token saldrían como ``other`` en las métricas y ``[redactado]`` en los registros
+    (NFR-GOB-54, VIG-184).
     """
     templates = [route.path for route in iter_declared_routes(app.routes) if route.is_api_route]
-    templates.append(UNMATCHED_ROUTE)
-    policy.register("route", _registrable(templates))
+    policy.register_routes([t for t in templates if is_route_template(t)])
+    policy.register("route", _registrable([*templates, UNMATCHED_ROUTE]))
     policy.register(
         "reason", _registrable([c.value for c in ReadinessCheck] + [c.value for c in StartupCheck])
     )
