@@ -31,7 +31,7 @@ from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
 )
 from vigia_platform.catalog.domain.walk_test import INACTIVITY_LIMIT
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit
+from vigia_platform.shared.context import ActorUnit, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRegistry, Schedule
@@ -62,6 +62,7 @@ class WalkTestExpiryReport:
     incomplete_sessions: int
 
 
+@repository
 class WalkTestExpirer:
     """El manejador de ``expire_walk_test_sessions`` para la transacción de una organización."""
 

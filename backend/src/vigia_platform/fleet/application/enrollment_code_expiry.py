@@ -27,7 +27,7 @@ from typing import Final
 
 from vigia_platform.fleet.adapters.postgres.enrollment_store import PostgresEnrollmentStore
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit
+from vigia_platform.shared.context import ActorUnit, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRegistry, Schedule
 
@@ -46,6 +46,7 @@ EXPIRE_BATCH_SIZE: Final = 1000
 """Códigos vencidos por organización y ejecución `[objetivo propio]`."""
 
 
+@repository
 class EnrollmentCodeExpirer:
     """El manejador de ``expire_enrollment_codes`` para la transacción de una organización."""
 
