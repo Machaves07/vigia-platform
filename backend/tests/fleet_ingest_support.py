@@ -54,6 +54,8 @@ from vigia_platform.catalog.application.free_text_validator import (
 from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
 from vigia_platform.fleet.application.ingest import IngestDependencies, IngestService
 from vigia_platform.fleet.domain.ingest_order import IngestKind
+from vigia_platform.fleet.events import register_fleet_event_types
+from vigia_platform.fleet.record_types import register_fleet_record_types
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.evidence import ANONYMIZED_METADATA_KEY, EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -74,7 +76,6 @@ from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
-from vigia_platform.shared.runtime.units import _fleet_event_types, _fleet_record_types
 from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 from vigia_platform.shared.storage import ChecksumType, ObjectHead, StorageUnavailable
 
@@ -811,10 +812,10 @@ def ingest_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[IngestStac
         registry = RecordTypeRegistry()
         for definition in U02_RECORD_TYPES:
             registry.register(definition)
-        _fleet_record_types(registry)
+        register_fleet_record_types(registry)
         catalog = OutboxCatalog()
         register_u02_event_types(catalog.event_types)
-        _fleet_event_types(catalog.event_types)
+        register_fleet_event_types(catalog.event_types)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)

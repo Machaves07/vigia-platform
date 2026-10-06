@@ -299,6 +299,11 @@ class AppRuntime:
     registries: tuple[Callable[[], Awaitable[None]], ...] = ()
     """Sincronizadores de los registros (``RecordTypeRegistry.synchronize``,
     ``OutboxCatalog.synchronize``…) ya ligados a su almacén; cada uno sella su registro."""
+    node_ca: Callable[[], Awaitable[None]] | None = None
+    """Comprobación de arranque de la clave ``vigia-node-ca`` (NFR-GOB-20; TASK-227): falla si la
+    clave no es accesible o no es ECC P-256. La raíz de producción la fija en ``vigia-api`` y
+    ``vigia-worker``; ``None`` (procesos y pruebas sin autoridad de nodos) la da por superada.
+    Solo cuenta en el arranque: ``/health/ready`` no consulta KMS (FS-GOB-05)."""
     authorizer: Authorizer = field(default_factory=DenyAll)
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     on_startup_failure: Callable[[int], None] = _terminate
@@ -343,6 +348,7 @@ class StartupCheck(enum.StrEnum):
     DATABASE = "database"
     SIGNING_KEYS = "signing_keys"
     DATA_KEY = "data_key"
+    NODE_CA = "node_ca"
     REGISTRIES = "registries"
     STORAGE = "storage"
 
@@ -402,6 +408,12 @@ class StartupSupervisor:
         )
         return hmac.compare_digest(plaintext, data_key.plaintext)
 
+    async def _node_ca(self) -> bool:
+        check = self._runtime.node_ca
+        if check is not None:
+            await check()  # cualquier excepción o el tope cuentan como fallo
+        return True
+
     async def _registries(self) -> bool:
         if not self._registries_done:
             for synchronize in self._runtime.registries:
@@ -417,6 +429,7 @@ class StartupSupervisor:
             StartupCheck.DATABASE: self._database,
             StartupCheck.SIGNING_KEYS: self._signing_keys,
             StartupCheck.DATA_KEY: self._data_key,
+            StartupCheck.NODE_CA: self._node_ca,
             StartupCheck.REGISTRIES: self._registries,
             StartupCheck.STORAGE: self._storage,
         }[check]

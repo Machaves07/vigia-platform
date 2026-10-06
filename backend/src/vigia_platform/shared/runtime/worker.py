@@ -30,6 +30,7 @@ from vigia_platform.shared.runtime.config import RuntimeConfig
 from vigia_platform.shared.runtime.core import (
     build_core,
     load_credentials,
+    node_ca_check,
     open_database,
     s3_storage,
 )
@@ -61,6 +62,7 @@ async def compose_worker_runtime(
     provider = runtime.require("provider_organization_id")
     evidence_bucket: str = runtime.require("evidence_bucket")
     archive_bucket: str = runtime.require("archive_bucket")
+    node_ca_key: str = runtime.require("node_ca_key_arn")
     credentials = await load_credentials(runtime, reader)
     database = open_database(runtime, ProcessKind.WORKER, credentials, metrics)
     evidence = s3_storage(runtime, evidence_bucket, clock)
@@ -92,5 +94,7 @@ async def compose_worker_runtime(
         ),
         contexts=services.contexts,
         registries=core.synchronizers,
+        # NFR-GOB-20: la lista de revocación firma con vigia-node-ca; sin su clave no arranca.
+        node_ca=node_ca_check(core.kms, node_ca_key),
         metrics=metrics,
     )

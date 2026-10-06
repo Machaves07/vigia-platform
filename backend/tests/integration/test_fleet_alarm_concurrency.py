@@ -57,11 +57,18 @@ from tests.fleet_http_support import REASON, FleetStack, fleet_stack
 from tests.fleet_inventory_support import InventoryWorld, NodeState
 from tests.heartbeat_support import HeartbeatStack, heartbeat_stack
 from tests.integration.conftest import PostgresEndpoint
-from vigia_platform.fleet.adapters.postgres.fleet_alarm_store import AlarmAlreadyOpen
+from vigia_platform.fleet.adapters.postgres.fleet_alarm_store import (
+    AlarmAlreadyOpen,
+    PostgresFleetAlarmStore,
+)
 from vigia_platform.fleet.adapters.postgres.heartbeat_history_store import (
     PostgresHeartbeatHistoryStore,
 )
-from vigia_platform.fleet.application.fleet_alarms import AlarmReport
+from vigia_platform.fleet.application.fleet_alarms import (
+    AlarmDependencies,
+    AlarmReport,
+    FleetAlarmEvaluator,
+)
 from vigia_platform.fleet.application.mute_nodes import MuteDetector
 from vigia_platform.fleet.application.node_revocation import (
     NodeRevocationService,
@@ -80,13 +87,13 @@ Handler = Callable[[Transaction], Awaitable[AlarmReport]]
 
 @pytest.fixture(scope="module")
 def fleet(postgres_endpoint: PostgresEndpoint) -> Iterator[FleetStack]:
-    with fleet_stack(postgres_endpoint, "fleet_alarm_concurrency", alarm_events=True) as built:
+    with fleet_stack(postgres_endpoint, "fleet_alarm_concurrency") as built:
         yield built
 
 
 @pytest.fixture(scope="module")
 def beats(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
-    with heartbeat_stack(postgres_endpoint, "fleet_alarm_beats", alarm_events=True) as built:
+    with heartbeat_stack(postgres_endpoint, "fleet_alarm_beats") as built:
         yield built
 
 
@@ -256,6 +263,58 @@ def test_two_overlapping_detections_write_one_transition_and_one_alarm(
     assert [record["state"] for record in rows.communication(node)] == ["mute"]
     assert len(rows.alarms(node, "node_mute")) == 1
     assert rows.state(node) == "mute"
+
+
+class GatedFacts(PostgresFleetAlarmStore):
+    """El almacén real de alarmas; tras leer los hechos (sin candado), ``evaluate_fleet_alarms`` se
+    retiene hasta ``release``."""
+
+    def __init__(self) -> None:
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def evaluation_facts(self, transaction: Transaction, **arguments: Any) -> Any:
+        facts = await super().evaluation_facts(transaction, **arguments)
+        self.entered.set()
+        await asyncio.wait_for(self.release.wait(), ARRIVAL_SECONDS)
+        return facts
+
+
+@pytest.mark.parametrize("attempt", ATTEMPTS)
+def test_an_evaluation_with_a_stale_reachable_snapshot_keeps_a_fresh_node_mute(
+    fleet: FleetStack, attempt: int
+) -> None:
+    """Contraejemplo de PR-GOB-32 (TASK-227), reducido: ``evaluate_fleet_alarms`` lee los hechos
+    (el nodo aún ``reachable``), ``detect_mute_nodes`` marca el nodo y levanta ``node_mute`` y la
+    evaluación sigue y lee la alarma ya abierta. Su ``reachable`` es de antes del silencio (el
+    último latido es anterior a la alarma): no la baja, y la siguiente detección no la duplica."""
+    tasks = _tasks(fleet)
+    world = InventoryWorld.build(fleet)
+    rows = AlarmRows(fleet.fetch)
+    node = world.add_node(world.plants[0])
+    world.write_state(node, NodeState(heartbeat_age_ms=3_600_000), world.now())
+    gated = GatedFacts()
+    evaluator = FleetAlarmEvaluator(
+        AlarmDependencies(clock=fleet.authz.sessions.clock, outbox=tasks.deps.outbox, store=gated),
+        audit=fleet.authz.sessions.audit,
+    )
+
+    async def scenario() -> tuple[AlarmReport, AlarmReport]:
+        evaluate = asyncio.create_task(
+            run_in(fleet.database, world.organization, evaluator.evaluate)
+        )
+        await asyncio.wait_for(gated.entered.wait(), ARRIVAL_SECONDS)
+        detected = await run_in(fleet.database, world.organization, tasks.detector.detect)
+        gated.release.set()
+        return detected, await evaluate
+
+    detected, evaluated = fleet.run(scenario())
+    assert [alarm.alarm_kind.value for alarm in detected.raised] == ["node_mute"]
+    assert evaluated.cleared == []
+    fleet.tick(60)
+    fleet.run(run_in(fleet.database, world.organization, tasks.detector.detect))
+    assert len(rows.alarms(node, "node_mute")) == 1
+    assert rows.open_kinds(node) == {"node_mute"}
 
 
 class GatedHistory(PostgresHeartbeatHistoryStore):

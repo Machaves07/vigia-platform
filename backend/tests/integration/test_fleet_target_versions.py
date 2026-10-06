@@ -95,7 +95,7 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[FleetStack]:
 @pytest.fixture(scope="module")
 def hb(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
     # Con los eventos de las alarmas: la detección de mudos (VIG-161) publica node_mute.
-    with heartbeat_stack(postgres_endpoint, "fleet_update_results", alarm_events=True) as built:
+    with heartbeat_stack(postgres_endpoint, "fleet_update_results") as built:
         yield built
 
 

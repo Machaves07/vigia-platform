@@ -86,6 +86,7 @@ from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInv
 from vigia_platform.shared.runtime.core import (
     build_core,
     load_credentials,
+    node_ca_check,
     open_database,
     s3_storage,
 )
@@ -135,6 +136,7 @@ async def compose_api_runtime(
     selected = tuple(units) if units is not None else registered_units()
     provider = runtime.require("provider_organization_id")
     evidence_bucket: str = runtime.require("evidence_bucket")
+    node_ca_key: str = runtime.require("node_ca_key_arn")
     link_base = config.public_origin
     if link_base is None:
         raise RuntimeConfigInvalid("VIGIA_PUBLIC_ORIGIN", "ausente: este proceso la exige")
@@ -253,6 +255,8 @@ async def compose_api_runtime(
         signing=signing,
         kms=core.kms,
         registries=core.synchronizers,
+        # NFR-GOB-20: el alta y la rotación firman con vigia-node-ca; sin su clave no hay ready.
+        node_ca=node_ca_check(core.kms, node_ca_key),
         authorizer=ContextAuthorizer(
             audit=core.authorization_audit,
             provider_organization_id=provider,

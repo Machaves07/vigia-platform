@@ -352,10 +352,18 @@ class FleetAlarmEvaluator:
                 node, kind, Evaluation(kind in conditions, 1, now), open_alarms, now, decisions
             )
         mute = open_alarms.get((node.node_id, FleetAlarmKind.NODE_MUTE))
-        if mute is not None and node.communication_state is CommunicationState.REACHABLE:
-            # El nodo volvió: el último latido aceptado prueba que el silencio terminó.
-            since = node.inputs.last_heartbeat_at or now
-            decisions.clear.append((mute, min(since, now)))
+        returned = node.inputs.last_heartbeat_at
+        if (
+            mute is not None
+            and node.communication_state is CommunicationState.REACHABLE
+            and returned is not None
+            and returned >= mute.raised_at
+        ):
+            # El nodo volvió: un latido aceptado **después** de levantar la alarma prueba que el
+            # silencio terminó. Los hechos se leen sin candado: si ``detect_mute_nodes`` marcó el
+            # nodo y levantó la alarma entre esa lectura y la de las alarmas abiertas, el
+            # ``reachable`` leído es el de antes del silencio y no la baja (PR-GOB-32, TASK-227).
+            decisions.clear.append((mute, min(returned, now)))
         certificate = open_alarms.get((node.node_id, FleetAlarmKind.CERTIFICATE_EXPIRING))
         if certificate is not None and FleetAlarmKind.CERTIFICATE_EXPIRING not in conditions:
             decisions.clear.append((certificate, now))  # rotada: la vigente ya no vence pronto

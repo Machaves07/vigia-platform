@@ -64,6 +64,7 @@ __all__ = [
     "Consumer",
     "ConsumerHandler",
     "ConsumerRegistry",
+    "DiscardedCycle",
     "EventType",
     "EventTypeRegistry",
     "GlobalPeriodicHandler",
@@ -163,6 +164,15 @@ class OutboxRegistrationRejected(Exception):
         super().__init__(
             f"No se puede registrar {kind} «{self.name}»; la plataforma no arranca:\n{detail}"
         )
+
+
+class DiscardedCycle(Exception):
+    """El manejador de una tarea periódica descubre que una ejecución solapada ya hizo su trabajo
+    (p. ej. abrió antes la misma alarma) y su transacción ya no sirve: el planificador deshace lo
+    suyo y cuenta la organización como **ciclo descartado** (``discarded``), sin fallo ni alarma
+    de operación; el ciclo siguiente la vuelve a evaluar (NFR-GOB-08, 47; TASK-227)."""
+
+    code = "discarded_cycle"
 
 
 class OutboxStartupError(Exception):

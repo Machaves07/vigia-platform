@@ -62,7 +62,7 @@ from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import ActorKind, ContextOrigin
 from vigia_platform.shared.observability.metrics import MetricName, PlatformMetrics
 from vigia_platform.shared.outbox.publish import NewEvent, Outbox
-from vigia_platform.shared.outbox.registries import OutboxCatalog
+from vigia_platform.shared.outbox.registries import DiscardedCycle, OutboxCatalog
 from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.worker.leases import (
     LeaseLost,
@@ -205,6 +205,47 @@ def test_a_failing_organization_is_recorded_and_the_others_continue(
     row = env.run(env.task_row(PROBE_TASK))
     assert row.last_outcome == "succeeded" and row.progress_failures == 0
     assert row.last_success_at == env.clock.now()
+
+
+class AlreadyDone(DiscardedCycle):
+    """Una ejecución solapada ya hizo el trabajo de la organización (TASK-227)."""
+
+
+def test_a_discarded_cycle_rolls_back_without_counting_as_a_failure(
+    environment: WorkerEnvironment, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``DiscardedCycle`` (p. ej. ``AlarmAlreadyOpen``, nota de la revisión de VIG-161): se
+    deshace lo de esa organización como un fallo, pero cuenta como ``discarded``: el cursor avanza
+    sin fallo, la ejecución termina ``succeeded``, no hay registro de error y la métrica lo
+    distingue."""
+    env = environment
+    setup = Setup(env, 3)
+    first, discarded, last = setup.organizations
+
+    async def already_done(transaction: Any) -> None:
+        if transaction.context.organization_id == discarded:
+            raise AlreadyDone()
+
+    setup.probe.after = already_done
+    scheduler = setup.scheduler("worker-a")
+
+    with caplog.at_level(logging.INFO):
+        (report,) = env.run(scheduler.run_pending())
+
+    assert setup.effects() == [first, last]  # lo de la descartada se deshizo
+    assert [(r.organization_id, r.outcome, r.error_code) for r in report.results] == [
+        (first, OrganizationOutcome.SUCCEEDED, None),
+        (discarded, OrganizationOutcome.DISCARDED, None),
+        (last, OrganizationOutcome.SUCCEEDED, None),
+    ]
+    assert report.outcome is TaskOutcome.SUCCEEDED
+    row = env.run(env.task_row(PROBE_TASK))
+    assert row.last_outcome == "succeeded" and row.progress_failures == 0
+    assert row.last_success_at == env.clock.now()
+    assert not [r for r in caplog.records if "fallida" in r.getMessage()]
+    points = _histogram(setup.reader, setup.metrics, MetricName.PERIODIC_TASK_DURATION_MS)
+    by_org = {p["organization_id"]: p["result"] for p in points if p["task"] == PROBE_TASK}
+    assert by_org[str(discarded)] == "discarded"
 
 
 def test_an_organization_that_breaks_the_transaction_rolls_back_only_itself(

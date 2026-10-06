@@ -129,6 +129,9 @@ class MetricName(enum.StrEnum):
     FLEET_NODE_REACHABLE = "fleet_node_reachable"
     FLEET_NODE_QUEUE_PENDING = "fleet_node_queue_pending"
     FLEET_NODE_CLOCK_OFFSET_MS = "fleet_node_clock_offset_ms"
+    # Walk-test por organización (U-03, TASK-227, NFR-GOB-56)
+    WALK_TEST_SESSIONS_OPEN = "walk_test_sessions_open"
+    WALK_TEST_SESSIONS_INCOMPLETE = "walk_test_sessions_incomplete"
     SIGNING_KEY_DAYS_TO_EXPIRY = "signing_key_days_to_expiry"
     RESTORE_DRILL_AGE_DAYS = "restore_drill_age_days"
     SECRETS_REFRESH_FAILED = "secrets_refresh_failed"
@@ -309,6 +312,13 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.FLEET_NODE_CLOCK_OFFSET_MS, _G, "ms",
           "Desviación del reloj del nodo respecto de su fuente de tiempo.", "NFR-GOB-55",
           "node_id"),
+    # Sesiones de walk-test (TASK-227, NFR-GOB-56): las publica expire_walk_test_sessions al
+    # terminar cada organización; solo organization_id (ni zona ni sesión: NFR-GOB-13).
+    _spec(_N.WALK_TEST_SESSIONS_OPEN, _G, "{session}",
+          "Sesiones de walk-test abiertas (in_progress o reopened) por organización.",
+          "NFR-GOB-56", "organization_id"),
+    _spec(_N.WALK_TEST_SESSIONS_INCOMPLETE, _G, "{session}",
+          "Sesiones de walk-test incomplete por organización.", "NFR-GOB-56", "organization_id"),
     _spec(_N.SIGNING_KEY_DAYS_TO_EXPIRY, _G, "d", "Días hasta el vencimiento de la clave.",
           "NFR-NUC-38", "purpose"),
     # Alarma restore-drill-overdue (> 100 días; infrastructure-design §9.4, nota U02-H-14).
@@ -513,6 +523,8 @@ class PlatformMetrics:
         self.fleet_node_reachable = gauge(_N.FLEET_NODE_REACHABLE)
         self.fleet_node_queue_pending = gauge(_N.FLEET_NODE_QUEUE_PENDING)
         self.fleet_node_clock_offset_ms = gauge(_N.FLEET_NODE_CLOCK_OFFSET_MS)
+        self.walk_test_sessions_open = gauge(_N.WALK_TEST_SESSIONS_OPEN)
+        self.walk_test_sessions_incomplete = gauge(_N.WALK_TEST_SESSIONS_INCOMPLETE)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)
         self.restore_drill_age_days = gauge(_N.RESTORE_DRILL_AGE_DAYS)
         self.secrets_refresh_failed = counter(_N.SECRETS_REFRESH_FAILED)

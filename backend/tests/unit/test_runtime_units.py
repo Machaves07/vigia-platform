@@ -45,6 +45,7 @@ from tests.runtime_support import (
     with_probe_unit,
 )
 from tests.worker_support import StubKms, StubSigning, StubStorage
+from vigia_platform.fleet.registration import U03_RECORD_TYPES
 from vigia_platform.identity.application.admin_cli import AdminConfig
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
@@ -146,37 +147,9 @@ def test_u02_record_types_come_from_the_registry() -> None:
     assert {"key_rotated", "key_set_published"} <= names
     u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
     assert len(u02) == 14
-    # U-03: solo los tipos que ya escribe una ruta registrada (VIG-142 la admisión; VIG-146 el
-    # acta de alcance, la transición de compuerta y la política de planta; VIG-148 el catálogo,
-    # el retiro, la marca unipersonal y la marca de regresión; VIG-149 el acuerdo de uso;
-    # VIG-147 la identidad del nodo; VIG-150 el cierre de cada paso del walk-test; VIG-151 el
-    # alta y la rotación de la credencial; VIG-156 la ingesta y su rechazo; VIG-162 la versión
-    # objetivo y el resultado de actualización).
-    assert names - u02 == {
-        "node_target_version_published",
-        "update_result_received",
-        "node_enrolled",
-        "node_credential_rotated",
-        "standard_admission_test",
-        "mounting_gate_record",
-        "gate_state_changed",
-        "plant_policy_signed",
-        "node_communication_state_changed",
-        "node_revoked",
-        "node_decommissioned",
-        "enrollment_code_issued",
-        "enrollment_attempt_rejected",
-        "catalog_version_published",
-        "catalog_standard_retired",
-        "single_occupancy_declared",
-        "walk_test_regression_marked",
-        "use_agreement_signed",
-        "commissioning_step",
-        "finding_received",
-        "detection_for_review_received",
-        "observability_event_received",
-        "ingest_rejected",
-    }
+    # U-03: sus 26 tipos, también los que todavía no escribe ninguna ruta (VIG-163, TASK-227).
+    assert names - u02 == U03_RECORD_TYPES
+    assert len(U03_RECORD_TYPES) == 26
 
 
 def test_the_registry_rejects_duplicates_and_bad_names(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -338,6 +311,9 @@ def test_admin_revocation_list_only_with_key_bucket_and_trust_store() -> None:
         ("VIGIA_PROVIDER_ORGANIZATION_ID", "worker"),
         ("VIGIA_EVIDENCE_BUCKET", "worker"),
         ("VIGIA_ARCHIVE_BUCKET", "worker"),
+        # NFR-GOB-20 (VIG-163): la comprobación de arranque de vigia-node-ca necesita su clave.
+        ("VIGIA_NODE_CA_KEY_ARN", "api"),
+        ("VIGIA_NODE_CA_KEY_ARN", "worker"),
     ],
 )
 def test_a_process_requires_its_variables(variable: str, process: str, tmp_path: Path) -> None:

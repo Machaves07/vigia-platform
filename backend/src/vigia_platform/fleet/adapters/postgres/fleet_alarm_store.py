@@ -57,6 +57,7 @@ from vigia_platform.fleet.domain.mute_detection import MUTE_ELIGIBLE_STATUS, Mut
 from vigia_platform.ledger.domain.coverage import CommunicationState
 from vigia_platform.shared.context import repository
 from vigia_platform.shared.db import Transaction
+from vigia_platform.shared.outbox.registries import DiscardedCycle
 
 __all__ = [
     "AlarmAlreadyOpen",
@@ -259,9 +260,10 @@ _ALARM_PAGE: Final = text(
 )
 
 
-class AlarmAlreadyOpen(Exception):
+class AlarmAlreadyOpen(DiscardedCycle):
     """Otra transacción abrió antes la alarma de (clase, nodo): la ranura está ocupada. La
-    transacción ya falló y se deshace entera (el ciclo solapado no tiene efecto)."""
+    transacción ya falló y se deshace entera (el ciclo solapado no tiene efecto). En una tarea
+    periódica, el planificador lo cuenta como ciclo descartado, no como fallo (TASK-227)."""
 
     def __init__(self) -> None:
         super().__init__("la alarma de esa clase y ese nodo ya está abierta")

@@ -58,7 +58,7 @@ QUIET: Final = NodeState()
 
 @pytest.fixture(scope="module")
 def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[FleetStack]:
-    with fleet_stack(postgres_endpoint, "fleet_alarm_tasks", alarm_events=True) as built:
+    with fleet_stack(postgres_endpoint, "fleet_alarm_tasks") as built:
         yield built
 
 
