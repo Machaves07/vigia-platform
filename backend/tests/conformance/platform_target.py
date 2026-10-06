@@ -17,14 +17,14 @@
 
 **Aprovisionamiento** (``provision``), por los servicios reales del ``AppRuntime`` (en el bucle
 de la plataforma) con las personas que lo harían: la persona administradora del cliente crea la
-planta y las zonas (``HierarchyService``) y admite la familia (``AdmissionService``); el
-instalador del proveedor, con su concesión, declara el nodo (``NodeDeclarationService``) y emite
-el código de alta (``EnrollmentCodeService``); el nodo se da de alta por la ruta del contrato
-``POST /api/nodes/enrollment`` detrás del balanceador ``app.``. El catálogo de cada zona y sus
-compuertas salen del plan del dominio con los sobres firmados por el ``SigningService`` de la
-plataforma y los repositorios reales (``_publish`` dice por qué no por sus servicios). La
-organización cliente, sus usuarios, sus sesiones, la concesión y la asignación anterior de cada
-zona (``_previous_assignments``) se siembran por SQL, como en el resto de las pruebas.
+planta y las zonas (``HierarchyService``), admite la familia (``AdmissionService``) y publica el
+catálogo de cada zona (``CatalogPublicationService``); el instalador del proveedor, con su
+concesión, declara el nodo (``NodeDeclarationService``), aprueba las compuertas
+(``GateService.transition_gate``) y emite el código de alta (``EnrollmentCodeService``); el nodo
+se da de alta por la ruta del contrato ``POST /api/nodes/enrollment`` detrás del balanceador
+``app.``. La organización cliente, sus usuarios, sus sesiones, la concesión y la asignación
+anterior de cada zona (``_previous_assignments``) se siembran por SQL, como en el resto de las
+pruebas.
 
 El nodo de prueba tiene dos zonas de una planta, una con la compuerta de uso aprobada y otra
 pendiente; el segundo nodo es de otra organización (como el objetivo en proceso del kit). El
@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import datetime as dt
 import functools
 import json
@@ -86,28 +85,15 @@ from tests.integration.conftest import (
     versioned_bucket,
 )
 from tests.runtime_support import breach_list, database_secret
-from tests.writer_support import unit_context
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
-from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
-from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
 from vigia_platform.catalog.application.admission import AdmissionRequest
 from vigia_platform.catalog.domain.admission import AdmissionAnswers
 from vigia_platform.catalog.domain.catalog_version import (
     InitialZoneParameters,
     NewStandard,
     StandardDraft,
-    ZoneCatalogVersion,
-    ZoneRef,
-    plan_publication,
 )
 from vigia_platform.catalog.domain.enums import GateKind
-from vigia_platform.catalog.domain.gates import (
-    GateInterval,
-    ZoneGateState,
-    gate_state_payload,
-    plan_transition,
-)
-from vigia_platform.catalog.domain.standard import DeclaredBy
 from vigia_platform.catalog.domain.zone_camera import ZoneCamera
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
 from vigia_platform.identity.application.hierarchy import PlantSpec, ZoneSpec
@@ -117,16 +103,17 @@ from vigia_platform.identity.auth.sessions import (
     SessionCookie,
     new_session_cookie,
 )
+from vigia_platform.identity.authz.context import with_unit
+from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
 from vigia_platform.shared.api.app import AppConfig, AppRuntime, create_app
 from vigia_platform.shared.api.main import ApiServerConfig, build_server
 from vigia_platform.shared.clock import SystemClock
-from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext
 from vigia_platform.shared.observability.logging import JsonFormatter
 from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.runtime.api import compose_api_runtime
 from vigia_platform.shared.runtime.config import RuntimeConfig
-from vigia_platform.shared.signing.keys import SigningPurpose
 
 __all__ = [
     "API_RUNTIME",
@@ -767,107 +754,43 @@ class Provisioner:
     def _publish(self, site: _Site) -> list[tuple[uuid.UUID, Mapping[str, Any], dt.datetime]]:
         """Catálogo firmado de cada zona y compuertas: montaje aprobado; uso según la zona.
 
-        Con el plan puro del dominio (``plan_publication``, ``plan_transition``), los sobres
-        firmados por el ``SigningService`` de la plataforma (las claves de ``bootstrap``) y los
-        repositorios reales (``PostgresCatalogRepository``, ``PostgresGateRepository``), como las
-        pruebas de VIG-151, 156 y 157: la raíz de producción aún no registra los tipos de registro
-        ni los eventos del catálogo (``catalog_updated``, ``gate_state_changed``; los conecta
-        VIG-163, TASK-227), así que ``publish_catalog_version`` y ``transition_gate`` no pueden
-        escribir su registro en el expediente.
+        Por los servicios reales del ``AppRuntime``: la administradora publica la versión 1 del
+        catálogo (``CatalogPublicationService.publish_catalog_version``, con su registro
+        ``catalog_version_published`` y el evento ``catalog_updated``) y el instalador, con
+        ``commissioning.run`` sobre la zona, aprueba el montaje y, si toca, el uso
+        (``GateService.transition_gate``, lo que harán el acta de alcance y el acuerdo de uso; su
+        respaldo es un identificador sintético). Devuelve, por zona, el catálogo y desde cuándo
+        rigen catálogo y compuertas.
         """
-        runtime = self.api.runtime
-        assert runtime is not None and site.plant_id is not None
-        database = runtime.database
-        signing = runtime.signing
-        catalogs = PostgresCatalogRepository(database)
-        gates = PostgresGateRepository(database)
-        organization, plant = site.organization_id, site.plant_id
+        catalog: CatalogHttp = self.api.state(CATALOG_STATE_KEY)
+        gates = catalog.gates
         published: list[tuple[uuid.UUID, Mapping[str, Any], dt.datetime]] = []
 
-        async def sign(purpose: SigningPurpose, payload: Any) -> dict[str, Any]:
-            envelope = await asyncio.to_thread(signing.sign, purpose, payload)
-            document: dict[str, Any] = envelope.to_json_value()
-            return document
-
         async def go() -> None:
-            administrator = (await self._context(site.administrator, None)).actor.id
-            installer = (await self._context(site.installer, site.concession_id)).actor.id
-            context = unit_context(organization, ActorUnit.U03, kind=ActorKind.SYSTEM)
-            for zone, code, approved in zip(
-                site.zones, site.zone_codes, site.zones_approved, strict=True
-            ):
-                now = WALL.now()
-                change = _new_standard(zone)
-                ref = ZoneRef(
-                    organization_id=organization, plant_id=plant, zone_id=zone, zone_code=code
+            for zone, approved in zip(site.zones, site.zones_approved, strict=True):
+                administrator = await self._context(site.administrator, None)
+                version = await catalog.catalog.publish_catalog_version(
+                    administrator, zone, _new_standard(zone), REASON
                 )
-                plan = plan_publication(
-                    None,
-                    change,
-                    zone=ref,
-                    issued_at=now,
-                    declared_by=DeclaredBy(
-                        administrator, "Administración sintética", "administrator"
-                    ),
-                    reason_es=REASON,
-                    new_standard_id=uuid.uuid4(),
-                )
-                envelope = await sign(SigningPurpose.CATALOG, plan.catalog)
-                state = ZoneGateState.initial(organization, plant, zone)
-                intervals = []
+                since = version.issued_at
+                installer = await self._context(site.installer, site.concession_id)
+                _, authorized = await gates.zone(installer, zone, PermissionKey.COMMISSIONING_RUN)
+                writer = with_unit(authorized, ActorUnit.U03)
                 for kind in [GateKind.MOUNTING] + ([GateKind.USAGE] if approved else []):
-                    record = uuid.uuid4()
-                    state = plan_transition(
-                        state,
-                        kind,
-                        GateStatus.APPROVED,
-                        at=now,
-                        decided_by=installer,
-                        record_id=record,
-                        reason_es=None,
-                    ).state
-                    intervals.append(
-                        GateInterval(
-                            organization_id=organization,
-                            plant_id=plant,
-                            zone_id=zone,
-                            gate=kind,
-                            status=GateStatus.APPROVED,
-                            effective_from=now,
-                            effective_until=None,
-                            decided_by=installer,
-                            reason_es=None,
-                            record_id=record,
-                            ledger_record_id=uuid.uuid4(),
+
+                    async def transition(
+                        transaction: Any,
+                        kind: GateKind = kind,
+                        zone: uuid.UUID = zone,
+                        writer: ScopeContext = writer,
+                    ) -> Any:
+                        return await gates.transition_gate(
+                            transaction, writer, zone, kind, GateStatus.APPROVED, uuid.uuid4()
                         )
-                    )
-                state = dataclasses.replace(state, issued_at=now, envelope=None)
-                gate_envelope = await sign(SigningPurpose.GATE, gate_state_payload(state, now))
-                async with database.transaction(context) as transaction:
-                    await catalogs.insert_version(
-                        transaction,
-                        ZoneCatalogVersion(
-                            organization_id=organization,
-                            plant_id=plant,
-                            zone_id=zone,
-                            catalog_version=plan.catalog_version,
-                            issued_at=now,
-                            issued_by=administrator,
-                            role_in_use=Role.ADMINISTRATOR,
-                            reason_es=REASON,
-                            changed_fields=plan.changed_fields,
-                            payload=plan.catalog,
-                            envelope=envelope,
-                            single_occupancy=False,
-                            aggregation_window_minutes=60,
-                            ledger_record_id=uuid.uuid4(),
-                        ),
-                    )
-                    await catalogs.upsert_cameras(transaction, ref, change.initial.cameras, now)
-                    for interval in intervals:
-                        await gates.open_interval(transaction, interval)
-                    await gates.save_state(transaction, state, gate_envelope)
-                published.append((zone, dict(plan.catalog), now))
+
+                    done = await gates.run(writer, transition)
+                    since = max(since, done.interval.effective_from)
+                published.append((zone, dict(version.payload), since))
 
         self.api.call(go())
         return published
