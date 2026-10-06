@@ -448,3 +448,28 @@ def test_pr_gob_28_every_credential_change_is_seen_by_the_first_request_on_both_
     for value in _seeds_for_profile():
         seeded = hypothesis_seed(value)(CredentialMachine)
         run_state_machine_as_test(seeded, settings=settings(stateful_step_count=STEPS_PER_EXAMPLE))
+
+
+def test_pr_gob_28_a_superseded_credential_is_node_revoked_while_re_enrollment_is_pending(
+    instances: Instances,
+) -> None:
+    """Secuencia mínima de la semilla 699040756 (CI de ``c4cdbb8``), como ejemplo explícito.
+
+    Alta, rotación, 25 h (la primera sale de su solapamiento), rotación (la materializa
+    ``superseded``), revocación y código de re-alta (nodo ``re_enrollment_pending``): la credencial
+    ``superseded`` es una credencial retirada y responde ``node_revoked`` en las dos instancias,
+    como una ``revoked``, no ``node_not_enrolled``.
+    """
+    machine = CredentialMachine()
+    try:
+        machine.enroll(instance=0)
+        machine.rotate(instance=0)
+        machine.advance(hours=25)
+        machine.rotate(instance=0)
+        machine.revoke_node()
+        machine.issue_re_enrollment_code()
+        assert [c.status for c in machine.credentials] == ["superseded", "revoked", "revoked"]
+        assert machine.status == "re_enrollment_pending"
+        machine.the_first_request_on_both_instances_reflects_every_change()
+    finally:
+        machine.teardown()
