@@ -6,14 +6,14 @@ la publicación del catálogo (VIG-145) y las compuertas (VIG-146), y ``fleet.no
 
 - el sobre vigente ``catalog.zone_catalog_version.envelope`` de cada zona (``superseded_at IS
   NULL``);
-- el ``SignedEnvelope<GateState>`` conservado en ``catalog.zone_gate_state.envelope``: una zona sin
-  ninguna transición de compuertas no tiene sobre guardado (VIG-146 solo firma al cambiar);
+- el ``SignedEnvelope<GateState>`` conservado en ``catalog.zone_gate_state.envelope``: desde A-60
+  toda zona nace con su sobre inicial ``pending``; la anterior que aún no lo tiene sale sin sobre
+  y el alta se lo hace emitir (``GateService.ensure_initial_envelopes``);
 - las cámaras de ``catalog.zone_camera`` con su ``stream_reference`` (filas que nunca se borran:
   el cruce con el catálogo vigente lo hace ``node_configuration.initial_configuration``);
 - la fila de ``fleet.node_configuration`` del nodo, si existe.
 
-Nada aquí firma ni escribe: el alta no llama a ``SigningPort.sign``. Los sobres salen tal como se
-guardaron (el valor JSON de la columna).
+Nada aquí firma ni escribe. Los sobres salen tal como se guardaron (el valor JSON de la columna).
 """
 
 from __future__ import annotations

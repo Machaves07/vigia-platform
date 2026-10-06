@@ -60,8 +60,12 @@ from tests.node_api_support import (
 )
 from tests.signing_support import SigningWorld, bootstrapped_world
 from tests.writer_support import unit_context
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.application.gates import GateService
 from vigia_platform.catalog.domain.catalog_version import (
     InitialZoneParameters,
     NewStandard,
@@ -78,6 +82,8 @@ from vigia_platform.fleet.adapters.ca.certificate_profiles import NodeCaIssuer
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.credential_rotation import CredentialRotationService
 from vigia_platform.fleet.application.enrollment import EnrollmentService, FixedSourceKey
+from vigia_platform.identity.application.common import IdentityDependencies
+from vigia_platform.identity.application.hierarchy import HierarchyService, ZoneSpec
 from vigia_platform.node_api.identity import NodeIdentity, PostgresNodeContextStore
 from vigia_platform.node_api.limits import NodeRateLimits
 from vigia_platform.node_api.router import NodeApiGate, NodeOperation
@@ -85,6 +91,7 @@ from vigia_platform.node_api.routes.credential_rotations import credential_rotat
 from vigia_platform.node_api.routes.enrollment import enrollment_operation
 from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role
+from vigia_platform.shared.signing import SigningKeyUnavailable
 from vigia_platform.shared.signing.keys import SigningKeyRecord, SigningPurpose
 
 __all__ = [
@@ -130,6 +137,7 @@ class CountingSigning:
     def __init__(self, world: SigningWorld) -> None:
         self.world = world
         self.signs = 0
+        self.down = False
         self._lock = threading.Lock()
 
     def public_keys(self, purpose: SigningPurpose) -> tuple[SigningKeyRecord, ...]:
@@ -138,6 +146,8 @@ class CountingSigning:
     def sign(self, purpose: SigningPurpose, payload: Any) -> Any:
         with self._lock:
             self.signs += 1
+        if self.down:
+            raise SigningKeyUnavailable(purpose)
         return self.world.service.sign(purpose, payload)
 
 
@@ -183,10 +193,31 @@ class EnrollmentWorld:
     client: httpx.AsyncClient
     catalog: PostgresCatalogRepository = field(init=False)
     gates: PostgresGateRepository = field(init=False)
+    gate_signing: CountingSigning = field(init=False)
+    """La firma del sobre inicial de compuertas (A-60): cuenta aparte de ``keys``."""
 
     def __post_init__(self) -> None:
         self.catalog = PostgresCatalogRepository(self.fleet.database)
         self.gates = PostgresGateRepository(self.fleet.database)
+        self.gate_signing = CountingSigning(self.signing)
+
+    def gate_service(self) -> GateService:
+        """``GateService`` real (``catalog.gates``) que emite el sobre inicial perezoso del alta."""
+        fleet = self.fleet
+        deps = fleet.deps
+        return GateService(
+            repository=self.gates,
+            catalog=self.catalog,
+            agreements=PostgresAgreementRepository(),
+            database=fleet.database,
+            writer=fleet.writer,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            free_text=fleet.free_text,
+            signer=self.gate_signing,
+            clock=fleet.authz.sessions.clock,
+            sign_timeout_seconds=LONG_SECONDS,
+        )
 
     # --- Básicos ------------------------------------------------------------------------------
 
@@ -228,6 +259,7 @@ class EnrollmentWorld:
                 keys=self.keys,
                 source_key=FixedSourceKey(self.hash_key),
                 ingest_base_url=INGEST_BASE_URL,
+                gates=self.gate_service(),
             ),
             CredentialRotationService(base, issuer=chosen, keys=self.keys),
         )
@@ -268,12 +300,51 @@ class EnrollmentWorld:
 
     # --- Planta, nodo y sobres ----------------------------------------------------------------
 
-    def declared(self, zones: int = 1, *, cameras: int = 1, published: bool = True) -> NodeSetup:
-        """Nodo ``declared`` con ``zones`` zonas propias, publicadas con su compuerta."""
+    def created_zone(self, organization_id: uuid.UUID, plant: uuid.UUID) -> uuid.UUID:
+        """Una zona creada por ``create_zone`` de U-02 con el ``ZoneGateGenesis`` de
+        ``catalog.gates`` (A-60): nace con su sobre inicial firmado."""
+        authz = self.fleet.authz
+        administrator = authz.add_user(organization_id)
+        authz.assign(organization_id, administrator, Role.ADMINISTRATOR)
+        cookie = authz.open_session(organization_id, administrator)
+        context = self.run(authz.contexts.context_from_session(cookie)).context
+        hierarchy = HierarchyService(
+            IdentityDependencies(
+                database=self.fleet.database,
+                writer=self.fleet.writer,
+                audit=self.fleet.deps.audit,
+                outbox=self.fleet.outbox,
+                authorizer=self.fleet.deps.authorizer,
+                free_text=self.fleet.free_text,
+                clock=authz.sessions.clock,
+                provider_organization_id=authz.provider_organization_id,
+            ),
+            zone_gates=self.gate_service(),
+        )
+        code = f"ZN-{secrets.token_hex(4).upper()}"
+        view = self.run(hierarchy.create_zone(context, plant, ZoneSpec(code=code, name=code)))
+        zone_id: uuid.UUID = view.zone_id
+        return zone_id
+
+    def declared(
+        self,
+        zones: int = 1,
+        *,
+        cameras: int = 1,
+        published: bool = True,
+        created: bool = False,
+    ) -> NodeSetup:
+        """Nodo ``declared`` con ``zones`` zonas propias, publicadas con su compuerta; con
+        ``created``, las zonas las crea ``create_zone`` (con su sobre inicial, A-60) y se publica
+        solo el catálogo."""
         fleet = self.fleet
-        site = fleet.site(plants=1, zones=zones)
+        site = fleet.site(plants=1, zones=0 if created else zones)
         plant = next(iter(site.plants))
-        chosen = tuple(site.plants[plant])
+        chosen = (
+            tuple(self.created_zone(site.organization_id, plant) for _ in range(zones))
+            if created
+            else tuple(site.plants[plant])
+        )
         installer = fleet.installer(site)
         response = fleet.declare(installer, plant, list(chosen))
         assert response.status_code == 201, response.text
@@ -282,7 +353,7 @@ class EnrollmentWorld:
         )
         if published:
             for zone in chosen:
-                self.publish(setup, zone, cameras=cameras)
+                self.publish(setup, zone, cameras=cameras, gate=not created)
         return setup
 
     def publish(

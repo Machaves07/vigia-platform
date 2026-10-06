@@ -90,7 +90,12 @@ from vigia_platform.shared.runtime.core import (
     s3_storage,
 )
 from vigia_platform.shared.runtime.db_credentials import SecretStringReader
-from vigia_platform.shared.runtime.units import PlatformUnit, api_state, registered_units
+from vigia_platform.shared.runtime.units import (
+    PlatformUnit,
+    api_state,
+    gate_service,
+    registered_units,
+)
 from vigia_platform.shared.tokens import LiveViewTokenService
 
 __all__ = ["ORIGIN_KEY_BYTES", "build_api_runtime", "compose_api_runtime"]
@@ -200,7 +205,8 @@ async def compose_api_runtime(
         users=UserService(deps, senders=EmailSenderRegistry(), link_base=link_base),
         roles=RoleService(deps),
         second_factor_reset=SecondFactorResetService(deps, second_factor),
-        hierarchy=HierarchyService(deps),
+        # A-60 (VIG-180): la zona nace con su sobre GateState inicial firmado.
+        hierarchy=HierarchyService(deps, zone_gates=gate_service(services)),
         organization=OrganizationSettingsService(deps),
         concessions=ConcessionService(
             store=PostgresConcessionStore(database=database, audit=audit),

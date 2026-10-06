@@ -46,6 +46,7 @@ from vigia_contracts.models.api import (
     parse_node_enrollment_response,
     parse_rejection_response,
 )
+from vigia_contracts.signing import KeySet, verify
 
 from tests.fleet_credentials_support import (
     BASIC_CONSTRAINTS_OID_DER,
@@ -74,6 +75,7 @@ from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNode
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.domain.node_subject import NodeSubject, read_subject, serial_hex
 from vigia_platform.node_api.observability import NodeResponses
+from vigia_platform.shared.signing import NODE_PURPOSES
 
 pytestmark = pytest.mark.integration
 
@@ -273,21 +275,83 @@ def test_a_wrong_code_is_rejected_and_its_attempt_is_registered(world: Enrollmen
     assert len(world.fleet.records("enrollment_attempt_rejected", setup.organization_id)) == 1
 
 
-def test_a_zone_without_its_gate_envelope_is_transient_and_keeps_the_code(
+def _pending(world: EnrollmentWorld, envelope: Any) -> dict[str, Any]:
+    """La carga verificada de un sobre ``GateState`` con la clave ``gate`` publicada."""
+    keyset = KeySet(world.signing.clock)
+    keyset.pin_initial(
+        [k.to_contract() for p in NODE_PURPOSES for k in world.signing.service.public_keys(p)]
+    )
+    payload: dict[str, Any] = verify(envelope, keyset, "gate", world.signing.clock)
+    return payload
+
+
+def test_a_node_in_a_newly_created_zone_receives_its_initial_envelope_without_signing(
+    world: EnrollmentWorld,
+) -> None:
+    # A-60: la zona nace con su sobre (create_zone); el alta lo entrega tal cual, sin transitorio.
+    setup = world.declared(zones=2, created=True)
+    code = world.code(setup)
+    signs = (world.keys.signs, world.gate_signing.signs)
+
+    enrolled = world.enroll(setup, code)
+
+    assert (world.keys.signs, world.gate_signing.signs) == signs  # cero firmas en el alta
+    configuration = enrolled.body["initial_configuration"]
+    by_zone = {
+        uuid.UUID(envelope["payload"]["zone_id"]): envelope
+        for envelope in configuration["gate_states"]
+    }
+    assert set(by_zone) == set(setup.zones)
+    for zone in setup.zones:
+        _, gate = world.stored(zone)
+        assert by_zone[zone] == gate
+        payload = _pending(world, gate)
+        assert payload["mounting_gate"] == payload["usage_gate"] == {"status": "pending"}
+        assert payload["resulting_mode"] == "no_capture"  # «no operar»
+
+
+def test_a_zone_from_before_a60_receives_its_initial_envelope_once(
+    world: EnrollmentWorld,
+) -> None:
+    setup = world.declared(published=False)
+    world.publish(setup, setup.zones[0], gate=False)
+    assert world.stored(setup.zones[0])[1] is None
+    code = world.code(setup)
+    signs = (world.keys.signs, world.gate_signing.signs)
+
+    enrolled = world.enroll(setup, code)
+
+    # Una sola firma, la del sobre inicial (con la clave de compuertas); el resto, guardado.
+    assert (world.keys.signs, world.gate_signing.signs) == (signs[0], signs[1] + 1)
+    _, gate = world.stored(setup.zones[0])
+    assert enrolled.body["initial_configuration"]["gate_states"] == [gate]
+    payload = _pending(world, gate)
+    assert (payload["mounting_gate"], payload["usage_gate"], payload["resulting_mode"]) == (
+        {"status": "pending"},
+        {"status": "pending"},
+        "no_capture",
+    )
+
+
+def test_with_the_initial_envelope_signing_down_the_enrollment_is_transient_and_keeps_the_code(
     world: EnrollmentWorld,
 ) -> None:
     setup = world.declared(published=False)
     world.publish(setup, setup.zones[0], gate=False)
     code = world.code(setup)
-    response = world.post(ENROLLMENT_PATH, world.body(setup, code))
+    world.gate_signing.down = True
+    try:
+        response = world.post(ENROLLMENT_PATH, world.body(setup, code))
+    finally:
+        world.gate_signing.down = False
     rejection = parse_rejection_response(response.content)
     assert (response.status_code, rejection.code.value) == (503, "temporarily_unavailable")
     assert rejection.retryable and rejection.retry_after_seconds == 60
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.credentials(setup.node_id) == []
     assert world.attempts(setup.node_id) == []
-    # Con el sobre guardado, el mismo código sirve.
-    world.publish_gate(setup, setup.zones[0])
+    assert world.stored(setup.zones[0])[1] is None
+    # Con la firma de vuelta, el mismo código sirve.
     assert world.post(ENROLLMENT_PATH, world.body(setup, code)).status_code == 200
 
 
