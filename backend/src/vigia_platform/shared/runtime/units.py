@@ -69,38 +69,28 @@ from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
     PostgresWalkTestRepository,
 )
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
-from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
-from vigia_platform.catalog.application.agreements import USE_AGREEMENT_SIGNED, AgreementService
+from vigia_platform.catalog.application.admission import AdmissionService
+from vigia_platform.catalog.application.agreements import AgreementService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
 )
-from vigia_platform.catalog.application.gates import GATE_STATE_CHANGED, GateService
-from vigia_platform.catalog.application.plant_policy import (
-    PLANT_POLICY_SIGNED,
-    PlantPolicyService,
-)
-from vigia_platform.catalog.application.publication import (
-    PUBLISHED_RECORD_TYPE,
-    RETIRED_RECORD_TYPE,
-    SINGLE_OCCUPANCY_RECORD_TYPE,
-    CatalogPublicationService,
-)
-from vigia_platform.catalog.application.regression import MARKED_RECORD_TYPE, RegressionService
-from vigia_platform.catalog.application.scope_record import (
-    MOUNTING_GATE_RECORD,
-    ScopeRecordService,
-)
+from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.plant_policy import PlantPolicyService
+from vigia_platform.catalog.application.publication import CatalogPublicationService
+from vigia_platform.catalog.application.regression import RegressionService
+from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
-from vigia_platform.catalog.application.walk_test import COMMISSIONING_STEP, WalkTestService
+from vigia_platform.catalog.application.walk_test import WalkTestService
 from vigia_platform.catalog.detail_codes import (
     CATALOG_DETAIL_CODE_LABEL_BINDINGS,
     CatalogDetailCode,
 )
 from vigia_platform.catalog.domain.documents import DocumentSettings
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
-from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
+from vigia_platform.catalog.events import register_catalog_event_types
+from vigia_platform.catalog.record_types import register_catalog_record_types
 from vigia_platform.fleet.adapters.ca.certificate_profiles import NodeCaIssuer
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp, fleet_routers
 from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
@@ -112,21 +102,14 @@ from vigia_platform.fleet.application.clip_confirmation import (
 )
 from vigia_platform.fleet.application.clip_grants import ClipGrantService
 from vigia_platform.fleet.application.common import FleetDependencies
-from vigia_platform.fleet.application.credential_rotation import (
-    ROTATED_RECORD_TYPE,
-    CredentialRotationService,
-)
+from vigia_platform.fleet.application.credential_rotation import CredentialRotationService
 from vigia_platform.fleet.application.enrollment import (
-    ENROLLED_EVENT,
-    ENROLLED_RECORD_TYPE,
     EnrollmentService,
     SecretSourceKey,
     SourceKeyProvider,
     UnconfiguredSourceKey,
 )
 from vigia_platform.fleet.application.enrollment_codes import (
-    ATTEMPT_RECORD_TYPE,
-    ISSUED_RECORD_TYPE,
     BundleRoots,
     EnrollmentCodeService,
     NodeCaRoots,
@@ -135,28 +118,21 @@ from vigia_platform.fleet.application.enrollment_codes import (
 from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
-from vigia_platform.fleet.application.ingest import (
-    INGEST_REJECTED_RECORD_TYPE,
-    IngestDependencies,
-    IngestService,
-)
+from vigia_platform.fleet.application.ingest import IngestDependencies, IngestService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
-from vigia_platform.fleet.application.node_declaration import (
-    COMMUNICATION_RECORD_TYPE,
-    NodeDeclarationService,
-)
-from vigia_platform.fleet.application.node_revocation import (
-    DECOMMISSIONED_RECORD_TYPE,
-    REVOKED_RECORD_TYPE,
-    NodeRevocationService,
-)
+from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
+from vigia_platform.fleet.application.node_revocation import NodeRevocationService
 from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS, FleetDetailCode
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.fleet.domain.fleet_warnings import INVENTORY_LABEL_BINDINGS
-from vigia_platform.fleet.domain.ingest_order import IngestKind
-from vigia_platform.fleet.events import FLEET_EVENT_TYPES
-from vigia_platform.fleet.record_types import FLEET_RECORD_TYPES
+from vigia_platform.fleet.events import register_fleet_event_types
+from vigia_platform.fleet.record_types import register_fleet_record_types
+from vigia_platform.fleet.registration import (
+    catalog_tasks,
+    fleet_tasks,
+    missing_u03_registrations,
+)
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import identity_routers
 from vigia_platform.identity.adapters.session_store import register_session_tasks
@@ -246,7 +222,11 @@ from vigia_platform.shared.outbox.registries import (
 )
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
 from vigia_platform.shared.ratelimit import RateLimiter
-from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
+from vigia_platform.shared.runtime.config import (
+    RegistrationIncomplete,
+    RuntimeConfig,
+    RuntimeConfigInvalid,
+)
 from vigia_platform.shared.secrets import KmsPort, SecretsPort
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
 from vigia_platform.shared.signing.service import SigningService
@@ -264,6 +244,7 @@ __all__ = [
     "outbox_catalog",
     "record_type_registry",
     "registered_units",
+    "verify_required",
 ]
 
 _UNIT_NAME: Final = re.compile(r"[a-z][a-z0-9_]{0,31}")
@@ -344,6 +325,10 @@ def _no_state(_: UnitServices) -> Mapping[str, object]:
     return {}
 
 
+def _nothing_required(_: RecordTypeRegistry, __: OutboxCatalog) -> tuple[tuple[str, str], ...]:
+    return ()
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PlatformUnit:
     """Lo que una unidad aporta a ``vigia-api``, ``vigia-worker`` y ``vigia-admin``."""
@@ -358,6 +343,12 @@ class PlatformUnit:
     consumers: Callable[[ConsumerRegistry, UnitServices], None] = _nothing_with
     periodic_tasks: Callable[[PeriodicTaskRegistry, UnitServices], None] = _nothing_with
     api_state: Callable[[UnitServices], Mapping[str, object]] = _no_state
+    required: Callable[[RecordTypeRegistry, OutboxCatalog], Sequence[tuple[str, str]]] = (
+        _nothing_required
+    )
+    """Lo que la unidad exige encontrar en los registros ya compuestos de **todas** las unidades:
+    devuelve los pares (clase, nombre) que faltan; ``verify_required`` detiene la composición
+    (NFR-GOB-20, BR-NUC-52)."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or _UNIT_NAME.fullmatch(self.name) is None:
@@ -505,29 +496,6 @@ def _shared_routers() -> tuple[APIRouter, ...]:
 
 
 # --- U-03 ----------------------------------------------------------------------------------------
-
-
-_CATALOG_WRITTEN_TYPES: Final = frozenset(
-    {
-        ADMISSION_RECORD_TYPE,
-        COMMISSIONING_STEP,
-        GATE_STATE_CHANGED,
-        MOUNTING_GATE_RECORD,
-        PLANT_POLICY_SIGNED,
-        PUBLISHED_RECORD_TYPE,
-        RETIRED_RECORD_TYPE,
-        SINGLE_OCCUPANCY_RECORD_TYPE,
-        MARKED_RECORD_TYPE,
-        USE_AGREEMENT_SIGNED,
-    }
-)
-"""Tipos de ``catalog.record_types`` que ya escribe una ruta registrada."""
-
-
-def _catalog_record_types(registry: RecordTypeRegistry) -> None:
-    for definition in CATALOG_RECORD_TYPES:
-        if definition.record_type in _CATALOG_WRITTEN_TYPES:
-            registry.register(definition)
 
 
 def _document_settings(config: RuntimeConfig | None) -> DocumentSettings:
@@ -682,45 +650,6 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     }
 
 
-_FLEET_WRITTEN_TYPES: Final = frozenset(
-    {
-        COMMUNICATION_RECORD_TYPE,
-        REVOKED_RECORD_TYPE,
-        DECOMMISSIONED_RECORD_TYPE,
-        ISSUED_RECORD_TYPE,
-        ATTEMPT_RECORD_TYPE,
-        ENROLLED_RECORD_TYPE,
-        ROTATED_RECORD_TYPE,
-        *(kind.record_type for kind in IngestKind),
-        INGEST_REJECTED_RECORD_TYPE,
-    }
-)
-"""Tipos de ``fleet.record_types`` que ya escribe una ruta o un servicio registrado (TASK-218;
-TASK-219: ``node_enrolled`` y ``node_credential_rotated``; la ingesta, VIG-156)."""
-_FLEET_PUBLISHED_EVENTS: Final = frozenset(
-    {
-        "node_revoked",
-        "node_decommissioned",
-        ENROLLED_EVENT,
-        *(kind.event_name for kind in IngestKind),
-    }
-)
-"""Eventos de ``fleet.events`` que ya publica un servicio registrado (TASK-218, TASK-219 y la
-ingesta, VIG-156)."""
-
-
-def _fleet_record_types(registry: RecordTypeRegistry) -> None:
-    for definition in FLEET_RECORD_TYPES:
-        if definition.record_type in _FLEET_WRITTEN_TYPES:
-            registry.register(definition)
-
-
-def _fleet_event_types(registry: EventTypeRegistry) -> None:
-    for event_type in FLEET_EVENT_TYPES:
-        if event_type.event_name in _FLEET_PUBLISHED_EVENTS:
-            registry.register(event_type)
-
-
 class _UnpublishedRoots:
     """Sin ``VIGIA_EDGE_BUCKET``: no hay raíz publicada que mostrar, así que no se emite código."""
 
@@ -802,7 +731,7 @@ def _fleet_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 clock=services.clock,
             ),
-            # LC-GOB-16 (VIG-161): alarmas por transición; las tres tareas las registra VIG-163.
+            # LC-GOB-16 (VIG-161): alarmas por transición; sus tres tareas, en ``fleet_tasks``.
             alarms=FleetAlarms(
                 database=services.database,
                 authorizer=services.authorizer,
@@ -1058,23 +987,25 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
         periodic_tasks=_ledger_tasks,
     ),
     # U-03 (VIG-139): las etiquetas de sus 21 enumeraciones y de sus detail_code (NFR-GOB-67).
-    # VIG-142: rutas de la admisión, detail_code del catálogo, el tipo que escriben
-    # (``standard_admission_test``) y el validador mínimo de texto libre de U-03 (A-45, D-7). El
-    # resto de tipos y los eventos los conecta VIG-163 (TASK-227). VIG-143: POST /documents.
+    # VIG-142: rutas de la admisión, detail_code del catálogo y el validador mínimo de texto libre
+    # de U-03 (A-45, D-7). VIG-143: POST /documents. VIG-163 (TASK-227): los trece tipos y los
+    # cinco eventos del catálogo y ``expire_walk_test_sessions`` (``fleet.registration``).
     PlatformUnit(
         name="catalog",
         routers=catalog_routers,
         detail_codes=tuple(code.value for code in CatalogDetailCode),
         labels={**CATALOG_LABEL_BINDINGS, **CATALOG_DETAIL_CODE_LABEL_BINDINGS},
-        record_types=_catalog_record_types,
+        record_types=register_catalog_record_types,
+        event_types=register_catalog_event_types,
         free_text=register_u03_free_text_validator,
+        periodic_tasks=catalog_tasks,
         api_state=_catalog_state,
     ),
-    # VIG-147 (TASK-218): rutas de identidad del nodo de SCR-07, sus detail_code, los tipos que
-    # escriben y los eventos node_revoked y node_decommissioned. VIG-152: GET
-    # /zones/{zone_id}/commissioning-clips; ``mark_orphan_clips`` lo registra VIG-163 (TASK-227)
-    # con ``register_mark_orphan_clips``. VIG-159: inventario (GET /fleet/nodes y su detalle) y
-    # umbrales por planta, con las etiquetas de ``heartbeat_notice``.
+    # VIG-147 (TASK-218): rutas de identidad del nodo de SCR-07 y sus detail_code. VIG-152: GET
+    # /zones/{zone_id}/commissioning-clips. VIG-159: inventario (GET /fleet/nodes y su detalle) y
+    # umbrales por planta, con las etiquetas de ``heartbeat_notice``. VIG-163 (TASK-227): los
+    # trece tipos y los diez eventos de la flota, sus seis tareas y la comprobación de arranque
+    # de los 26 tipos, 15 eventos y 7 tareas de U-03 (``fleet.registration``).
     PlatformUnit(
         name="fleet",
         routers=fleet_routers,
@@ -1084,9 +1015,11 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
             **FLEET_DETAIL_CODE_LABEL_BINDINGS,
             **INVENTORY_LABEL_BINDINGS,
         },
-        record_types=_fleet_record_types,
-        event_types=_fleet_event_types,
+        record_types=register_fleet_record_types,
+        event_types=register_fleet_event_types,
+        periodic_tasks=fleet_tasks,
         api_state=_fleet_state,
+        required=missing_u03_registrations,
     ),
     # VIG-144 (TASK-206): el adaptador único de las rutas del contrato (LC-GOB-19, A-51).
     PlatformUnit(name="node_api", routers=_node_routers, api_state=_node_api_state),
@@ -1155,6 +1088,15 @@ def outbox_catalog(
         unit.periodic_tasks(catalog.periodic_tasks, services)
     catalog.check()
     return catalog
+
+
+def verify_required(
+    units: Iterable[PlatformUnit], record_types: RecordTypeRegistry, catalog: OutboxCatalog
+) -> None:
+    """``RegistrationIncomplete`` con todo lo que alguna unidad exige y no está registrado."""
+    missing = sorted({pair for unit in units for pair in unit.required(record_types, catalog)})
+    if missing:
+        raise RegistrationIncomplete(missing)
 
 
 def api_state(units: Iterable[PlatformUnit], services: UnitServices) -> dict[str, object]:

@@ -80,13 +80,13 @@ Handler = Callable[[Transaction], Awaitable[AlarmReport]]
 
 @pytest.fixture(scope="module")
 def fleet(postgres_endpoint: PostgresEndpoint) -> Iterator[FleetStack]:
-    with fleet_stack(postgres_endpoint, "fleet_alarm_concurrency", alarm_events=True) as built:
+    with fleet_stack(postgres_endpoint, "fleet_alarm_concurrency") as built:
         yield built
 
 
 @pytest.fixture(scope="module")
 def beats(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
-    with heartbeat_stack(postgres_endpoint, "fleet_alarm_beats", alarm_events=True) as built:
+    with heartbeat_stack(postgres_endpoint, "fleet_alarm_beats") as built:
         yield built
 
 

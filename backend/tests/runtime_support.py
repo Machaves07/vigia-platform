@@ -242,6 +242,7 @@ def runtime_environ(**changes: str | None) -> dict[str, str]:
         "VIGIA_PROVIDER_ORGANIZATION_ID": str(PROVIDER_ID),
         "VIGIA_EVIDENCE_BUCKET": "vigia-evidence-test",
         "VIGIA_ARCHIVE_BUCKET": "vigia-archive-test",
+        "VIGIA_NODE_CA_KEY_ARN": "alias/vigia-node-ca",
         "PGSSLMODE": "disable",
     }
     environ.update(changes)

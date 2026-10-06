@@ -140,6 +140,8 @@ from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsSer
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.fleet.application.node_declaration import NodeDeclarationService
 from vigia_platform.fleet.application.node_revocation import NodeRevocationService
+from vigia_platform.fleet.events import register_fleet_event_types
+from vigia_platform.fleet.record_types import register_fleet_record_types
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
@@ -196,7 +198,6 @@ from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
-from vigia_platform.shared.runtime.units import _fleet_event_types, _fleet_record_types
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import ObjectHead, PresignedRequest
 
@@ -1522,7 +1523,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         # Los tipos que escriben las rutas de la flota (VIG-147) mandan sobre las versiones de
         # prueba de la cobertura (``node_communication_state_changed``).
         fleet_types = RecordTypeRegistry()
-        _fleet_record_types(fleet_types)
+        register_fleet_record_types(fleet_types)
         fleet_names = {compiled.record_type for compiled in fleet_types.latest()}
         for definition in (
             *U02_RECORD_TYPES,
@@ -1534,7 +1535,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         # Los eventos de la revocación y la baja de un nodo (VIG-147), además de los de U-02.
         events = OutboxCatalog()
         register_u02_event_types(events.event_types)
-        _fleet_event_types(events.event_types)
+        register_fleet_event_types(events.event_types)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)

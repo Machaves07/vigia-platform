@@ -44,7 +44,6 @@ from vigia_contracts.versioning import Version
 from tests.api_support import World
 from tests.authz_support import AuthzEnvironment, authz_environment
 from tests.examples.test_ledger_routes import StubEvidenceStorage
-from tests.fleet_http_support import register_alarm_event_types
 from tests.integration.conftest import PostgresEndpoint
 from tests.node_api_db import DbNode, issue
 from tests.node_api_support import DAY, VERSION, TestAuthority, alb_headers, node_unit
@@ -70,6 +69,8 @@ from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.application.heartbeat import HeartbeatDependencies, HeartbeatService
 from vigia_platform.fleet.application.zone_catalog_for_node import ZoneCatalogForNode
+from vigia_platform.fleet.events import register_fleet_event_types
+from vigia_platform.fleet.record_types import register_fleet_record_types
 from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.authz.context import PresentedNode
@@ -96,7 +97,6 @@ from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
 from vigia_platform.shared.ratelimit import Allowed, Budget, Limited, RateLimiter
-from vigia_platform.shared.runtime.units import _fleet_event_types, _fleet_record_types
 from vigia_platform.shared.signing import SigningKeyUnavailable, SigningPurpose
 from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.tokens import LiveViewTokenService
@@ -719,7 +719,6 @@ def heartbeat_stack(
     *,
     policy: VersionPolicy | None = None,
     metrics: PlatformMetrics | None = None,
-    alarm_events: bool = False,
 ) -> Iterator[HeartbeatStack]:
     signing = asyncio.run(bootstrapped_world())
     with authz_environment(endpoint, prefix) as authz:
@@ -729,16 +728,14 @@ def heartbeat_stack(
         registry = RecordTypeRegistry()
         for definition in U02_RECORD_TYPES:
             registry.register(definition)
-        _fleet_record_types(registry)
+        register_fleet_record_types(registry)
         for definition in CATALOG_RECORD_TYPES:
             if definition.record_type == MARKED_RECORD_TYPE:
                 registry.register(definition)
         catalog = OutboxCatalog()
         register_u02_event_types(catalog.event_types)
-        _fleet_event_types(catalog.event_types)
+        register_fleet_event_types(catalog.event_types)
         register_catalog_event_types(catalog.event_types)
-        if alarm_events:
-            register_alarm_event_types(catalog)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)

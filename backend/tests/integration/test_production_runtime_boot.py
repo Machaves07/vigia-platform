@@ -9,11 +9,11 @@ PostgreSQL 16 recién migrado (testcontainers) y LocalStack (S3, KMS y Secrets M
    de ``vigia-node-ca`` con la raíz real (base como ``vigia_app`` por el secreto
    ``VIGIA_DB_APP_SECRET``).
 2. ``vigia-api`` arranca y ``/health/ready`` responde 200 dentro del plazo de arranque
-   (PAT-NUC-RES-02: base, claves, clave de datos, registros y centinela). Sus registros no
-   contienen la contraseña de ``vigia_app``.
-3. ``vigia-worker`` arranca, deja en ``shared.periodic_task`` las 11 tareas de U-02 y en
-   ``shared.consumer`` sus 2 consumidores (se borran antes de arrancarlo: los escribe él) y se
-   para en orden con 0 tras ``SIGTERM``.
+   (PAT-NUC-RES-02: base, claves, clave de datos, ``vigia-node-ca``, registros y centinela). Sus
+   registros no contienen la contraseña de ``vigia_app``.
+3. ``vigia-worker`` arranca, deja en ``shared.periodic_task`` las 11 tareas de U-02 y las 7 de
+   U-03 y en ``shared.consumer`` sus 2 consumidores (se borran antes de arrancarlo: los escribe
+   él) y se para en orden con 0 tras ``SIGTERM``.
 4. ``vigia-admin bootstrap --resume --dry-run`` arranca con la raíz real (lee la base, no escribe).
 5. ``vigia-admin restore-audit-partition`` con la base inaccesible (un secreto que no existe, o uno
    que apunta a un servidor que no responde) no lee el secreto ni intenta conectar: termina en la
@@ -90,6 +90,8 @@ STOP_SECONDS: Final = 150.0
 """Tope de la prueba para la parada ordenada (el worker espera hasta 115 s)."""
 U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
+U03_TASKS: Final = 7
+"""Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
 UNREACHABLE_HOST: Final = "192.0.2.1"  # TEST-NET-1 (RFC 5737): nunca responde
 BOOTSTRAP: Final = (
     "bootstrap",
@@ -330,6 +332,7 @@ def test_worker_boots_registers_u02_and_stops_in_order(stack: Stack) -> None:
 
     assert live.status_code == 200
     assert len([row for row in tasks if row["unit"] == "U-02"]) == U02_TASKS
+    assert len([row for row in tasks if row["unit"] == "U-03"]) == U03_TASKS
     assert len([row for row in consumers if row["unit"] == "U-02"]) == U02_CONSUMERS
     assert code == 0, output
     assert "parada ordenada completa" in output
@@ -498,5 +501,5 @@ def test_a_test_unit_reaches_the_database_at_startup(
     assert PROBE_EVENT in rows["event_type"]
     assert PROBE_CONSUMER in rows["consumer"]
     assert PROBE_TASK in rows["periodic_task"]
-    assert len(rows["periodic_task"]) == U02_TASKS + 1
+    assert len(rows["periodic_task"]) == U02_TASKS + U03_TASKS + 1
     assert reader.reads == 1

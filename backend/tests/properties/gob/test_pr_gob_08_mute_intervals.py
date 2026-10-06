@@ -230,7 +230,7 @@ class MuteIntervals(RuleBasedStateMachine):
 
 @pytest.fixture(scope="module")
 def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
-    with heartbeat_stack(postgres_endpoint, "pr_gob_08_mute", alarm_events=True) as built:
+    with heartbeat_stack(postgres_endpoint, "pr_gob_08_mute") as built:
         built.authz.sessions.clock.set(to_millisecond(built.now()))
         yield built
 
