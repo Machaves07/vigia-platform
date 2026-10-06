@@ -62,6 +62,7 @@ REVOCATION_STATE_COLUMNS = frozenset(
         "object_version_id",
         "next_update",
         "entries",
+        "crl_number",  # gob_0025 (TASK-220): el último CRLNumber reservado
     }
 )
 

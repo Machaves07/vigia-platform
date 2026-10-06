@@ -122,8 +122,10 @@ REVOCATION_LIST_STATE: Final = Table(
     _text("object_version_id", nullable=True),
     _instant("next_update", nullable=True),
     _integer("entries"),
+    Column("crl_number", BigInteger, nullable=False),
 )
-"""``gob_0021`` (TASK-218): marca única y estado de publicación de la lista global, sin RLS."""
+"""``gob_0021`` (TASK-218): marca única y estado de publicación de la lista global, sin RLS;
+``crl_number`` (``gob_0025``, TASK-220) es el último ``CRLNumber`` reservado."""
 
 REVOCATION_LIST_DIRTY: Final = Table(
     "revocation_list_dirty",

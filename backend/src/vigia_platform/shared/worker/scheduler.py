@@ -32,8 +32,20 @@ otro proceso retoma la tarea donde quedó; lo confirmado por organización no se
 Lo que el manejador haga fuera de la transacción de la organización debe ser idempotente por
 organización y ejecución (PAT-NUC-RES-05).
 
-Métricas: ``periodic_task_duration_ms`` por tarea, resultado y organización, y
-``periodic_task_last_success_age_seconds`` por tarea (desde ``last_success_at``).
+**Modo ``global``** (TASK-220, D-7; extensión aditiva: las tareas ``per_organization`` no cambian).
+Con el mismo arrendamiento y su renovación, el manejador corre **una vez** por ejecución, sin
+cursor por organización, con ``GlobalTaskRun``: ``organizations()``, ``read(organización)`` (la
+transacción de **solo lectura** de esa organización con ``context_for_organization``: la RLS
+intacta), ``control()`` (el actor del sistema en la proveedora, para filas globales sin datos de
+cliente) y ``ensure_lease()`` (``LeaseLost`` si la ejecución ya no es del proceso, antes de un
+efecto externo). Un fallo o el tope del manejador se registran como en una organización (registro
+de error con el código y métrica ``failed``) y la ejecución se libera con ``partial_failure``
+(sin ``last_success_at``); la base caída a mitad la interrumpe sin avanzar ``next_run_at``. Lo que
+el manejador haga fuera de sus transacciones debe ser idempotente por ejecución.
+
+Métricas: ``periodic_task_duration_ms`` por tarea, resultado y organización (sin organización en
+las ``global``), y ``periodic_task_last_success_age_seconds`` por tarea (desde
+``last_success_at``).
 """
 
 from __future__ import annotations
@@ -42,10 +54,10 @@ import asyncio
 import contextlib
 import enum
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Final, Protocol
+from typing import Final, Protocol, cast
 
 from sqlalchemy import text
 
@@ -56,7 +68,13 @@ from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.dispatcher import error_code
-from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRegistry
+from vigia_platform.shared.outbox.registries import (
+    GlobalPeriodicHandler,
+    PeriodicHandler,
+    PeriodicTask,
+    PeriodicTaskRegistry,
+    TaskIteration,
+)
 from vigia_platform.shared.worker.leases import (
     Lease,
     LeaseLost,
@@ -69,8 +87,10 @@ from vigia_platform.shared.worker.leases import (
 __all__ = [
     "DEFAULT_HANDLER_TIMEOUT_SECONDS",
     "DEFAULT_POLL_SECONDS",
+    "GlobalTaskRun",
     "HandlerTimeout",
     "OrganizationOutcome",
+    "OrganizationReads",
     "OrganizationResult",
     "PeriodicScheduler",
     "TaskContexts",
@@ -97,6 +117,8 @@ _DUE_TASKS: Final = text(
 _LAST_SUCCESS: Final = text(
     "SELECT task_name, last_success_at FROM shared.periodic_task WHERE last_success_at IS NOT NULL"
 )
+_READ_ONLY: Final = text("SET LOCAL transaction_read_only = on")
+"""Tras fijar el contexto: desde aquí la transacción no puede escribir (``read`` de ``global``)."""
 
 
 class TaskContexts(Protocol):
@@ -138,6 +160,9 @@ class TaskRunReport:
     outcome: TaskOutcome | None = None
     """Con qué se liberó; ``None`` si no se liberó (arrendamiento perdido)."""
     lease_lost: bool = False
+    global_outcome: OrganizationOutcome | None = None
+    """Resultado de la única invocación de una tarea ``global`` (``None`` en las demás)."""
+    global_error_code: str | None = None
 
     def count(self, outcome: OrganizationOutcome) -> int:
         return sum(1 for result in self.results if result.outcome is outcome)
@@ -162,6 +187,77 @@ class HandlerTimeout(Exception):
 
 class _Interrupted(Exception):
     """La ejecución se corta sin perder el arrendamiento (parada ordenada, base caída)."""
+
+
+class OrganizationReads:
+    """Las lecturas por organización de una tarea ``global`` (sin arrendamiento).
+
+    La usa ``GlobalTaskRun`` y la reutiliza ``vigia-admin`` para el mismo barrido fuera del
+    planificador (TASK-220): ningún contexto nuevo, solo ``context_for_organization`` y
+    ``provider_audit_context``.
+    """
+
+    def __init__(
+        self, *, database: TransactionSource, contexts: TaskContexts, task: PeriodicTask
+    ) -> None:
+        self._database = database
+        self._contexts = contexts
+        self._task = task
+
+    @property
+    def task_name(self) -> str:
+        return self._task.task_name
+
+    async def organizations(self) -> tuple[uuid.UUID, ...]:
+        async with self._database.transaction(self._contexts.provider_audit_context()) as tx:
+            rows = (await tx.execute(_ACTIVE_ORGANIZATIONS)).all()
+        return tuple(uuid.UUID(str(row.organization_id)) for row in rows)
+
+    @contextlib.asynccontextmanager
+    async def read(self, organization_id: uuid.UUID) -> AsyncIterator[Transaction]:
+        context = self._contexts.context_for_organization(self._task, organization_id)
+        async with self._database.transaction(context) as tx:
+            await tx.execute(_READ_ONLY)
+            yield tx
+
+    @contextlib.asynccontextmanager
+    async def control(self) -> AsyncIterator[Transaction]:
+        async with self._database.transaction(self._contexts.provider_audit_context()) as tx:
+            yield tx
+
+    async def ensure_lease(self) -> None:
+        """Fuera del planificador no hay arrendamiento: la exclusión es de quien llama."""
+        return None
+
+
+class GlobalTaskRun(OrganizationReads):
+    """Una ejecución de una tarea ``global`` con el arrendamiento del planificador."""
+
+    def __init__(
+        self,
+        *,
+        database: TransactionSource,
+        contexts: TaskContexts,
+        task: PeriodicTask,
+        leases: SqlLeaseStore,
+        holder: _Holder,
+        clock: Clock,
+    ) -> None:
+        super().__init__(database=database, contexts=contexts, task=task)
+        self._leases = leases
+        self._holder = holder
+        self._clock = clock
+
+    @property
+    def lease(self) -> Lease:
+        return self._holder.lease
+
+    async def ensure_lease(self) -> None:
+        if self._holder.lost:
+            raise LeaseLost()
+        async with self.control() as tx:
+            if not await self._leases.holds(tx, self._holder.lease, self._clock.now()):
+                raise LeaseLost()
 
 
 class PeriodicScheduler:
@@ -270,7 +366,10 @@ class PeriodicScheduler:
         _log.info("tarea periódica tomada", task=task_name)
         renewal = asyncio.create_task(self._keep_renewed(holder))
         try:
-            await self._iterate(task, holder, report, stop)
+            if task.iteration is TaskIteration.GLOBAL:
+                await self._run_global(task, holder, report, stop)
+            else:
+                await self._iterate(task, holder, report, stop)
         except LeaseLost:
             report.lease_lost = True
             _log.warning("tarea periódica abandonada: el arrendamiento ya no es del proceso")
@@ -283,9 +382,10 @@ class PeriodicScheduler:
                 await renewal
         outcome = report.outcome
         if outcome is None:
-            outcome = (
-                TaskOutcome.SUCCEEDED if holder.lease.failures == 0 else TaskOutcome.PARTIAL_FAILURE
+            failed = (
+                holder.lease.failures > 0 or report.global_outcome is OrganizationOutcome.FAILED
             )
+            outcome = TaskOutcome.PARTIAL_FAILURE if failed else TaskOutcome.SUCCEEDED
             report.outcome = outcome
         await self._release(task, holder.lease, outcome, report)
         return report
@@ -412,13 +512,67 @@ class PeriodicScheduler:
         )
         return OrganizationResult(organization_id, outcome, code)
 
+    async def _run_global(
+        self,
+        task: PeriodicTask,
+        holder: _Holder,
+        report: TaskRunReport,
+        stop: asyncio.Event | None,
+    ) -> None:
+        """Una sola invocación con ``GlobalTaskRun``, bajo el mismo arrendamiento y tope."""
+        if stop is not None and stop.is_set():
+            raise _Interrupted()
+        if holder.lost:
+            raise LeaseLost()
+        if not holder.usable(self._clock.now(), self._settings):
+            _log.warning("arrendamiento a punto de vencer sin renovar", task=task.task_name)
+            raise _Interrupted()
+        run = GlobalTaskRun(
+            database=self._database,
+            contexts=self._contexts,
+            task=task,
+            leases=self._leases,
+            holder=holder,
+            clock=self._clock,
+        )
+        handler = cast(GlobalPeriodicHandler, task.handler)
+        started = self._clock.monotonic()
+        failure: Exception | None = None
+        try:
+            async with asyncio.timeout(self._handler_timeout):
+                await handler(run)
+        except LeaseLost:
+            raise
+        except TimeoutError:
+            failure = HandlerTimeout()
+        except TransientDatabaseError:
+            _log.warning("tarea periódica interrumpida: la base no responde", task=task.task_name)
+            raise _Interrupted() from None
+        except Exception as error:
+            failure = error
+        elapsed_ms = max((self._clock.monotonic() - started) * 1000, 0.0)
+        outcome = OrganizationOutcome.SUCCEEDED if failure is None else OrganizationOutcome.FAILED
+        self._metrics.periodic_task_duration_ms.record(
+            elapsed_ms, {"task": task.task_name, "result": outcome.value}
+        )
+        report.global_outcome = outcome
+        if failure is None:
+            return
+        code = error_code(failure)
+        # El código sale de una constante o del nombre de una clase, nunca de datos.
+        with contextlib.suppress(ValueError):
+            redaction.DEFAULT_POLICY.register("code", [code])
+        report.global_error_code = code
+        _log.error("tarea periódica global fallida", task=task.task_name, code=code)
+
     async def _invoke(self, task: PeriodicTask, transaction: Transaction) -> Exception | None:
         """El manejador dentro de un ``SAVEPOINT`` y con su tope: si falla o vence, se deshace
         solo lo suyo."""
+        handler = cast(PeriodicHandler, task.handler)
         try:
             async with transaction.savepoint():
                 async with asyncio.timeout(self._handler_timeout):
-                    await task.handler(transaction)
+                    await handler(transaction)
         except TimeoutError:
             if transaction.failed:
                 # Cancelado en mitad de una sentencia: la transacción no sirve para registrarlo.

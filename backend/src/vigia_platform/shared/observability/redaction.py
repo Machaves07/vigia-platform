@@ -140,6 +140,9 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         "throttle_window_cleanup",
         "expire_concessions",
         "key_rotation_reminder",
+        # U-03 (TASK-220): fija aquí porque, con 26 caracteres, ``register`` la tomaría por un
+        # token; la alarma revocation-list-publish-failed la vigila por este valor.
+        "regenerate_revocation_list",
     ),
     "dependency": ("secrets_manager", "kms"),
     "purpose": ("catalog", "gate", "live_view_token", "key_set", "checkpoint"),
