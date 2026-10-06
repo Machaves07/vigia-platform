@@ -91,6 +91,23 @@ _MARK_INCOMPLETE: Final = text(
     " WHERE organization_id = :organization_id AND session_id = :session_id"
     " AND status IN ('in_progress', 'reopened') AND last_activity_at = :seen"
 )
+_EXPIRE_INACTIVE: Final = text(
+    "WITH due AS ("
+    " SELECT session_id FROM catalog.walk_test_session"
+    " WHERE organization_id = :organization_id AND status IN ('in_progress', 'reopened')"
+    " AND last_activity_at <= :inactive_since"
+    " ORDER BY session_id LIMIT :limit FOR UPDATE)"
+    " UPDATE catalog.walk_test_session AS session SET status = 'incomplete' FROM due"
+    " WHERE session.session_id = due.session_id"
+    " AND session.organization_id = :organization_id"
+    " AND session.status IN ('in_progress', 'reopened')"
+    " AND session.last_activity_at <= :inactive_since RETURNING session.session_id"
+)
+_SESSION_COUNTS: Final = text(
+    "SELECT count(*) FILTER (WHERE status IN ('in_progress', 'reopened')) AS open,"
+    " count(*) FILTER (WHERE status = 'incomplete') AS incomplete"
+    " FROM catalog.walk_test_session WHERE organization_id = :organization_id"
+)
 _REOPEN: Final = text(
     "UPDATE catalog.walk_test_session SET status = 'reopened', last_activity_at = :at,"
     " reopened_at = :at, reopened_by = :by, reopen_reason_es = :reason"
@@ -325,6 +342,35 @@ class PostgresWalkTestRepository:
             {**_session_key(transaction, session.session_id), "seen": session.last_activity_at},
         )
         return _rowcount(result) == 1
+
+    async def expire_inactive(
+        self, transaction: Transaction, inactive_since: datetime, *, limit: int
+    ) -> tuple[uuid.UUID, ...]:
+        """``in_progress | reopened → incomplete`` de hasta ``limit`` sesiones de la organización
+        sin actividad desde ``inactive_since`` (``expire_walk_test_sessions``, TASK-227).
+
+        Bloquea primero todas las filas en orden de ``session_id`` y después escribe, con la
+        condición repetida: una operación de la sesión que la tocó entretanto (``touch`` bajo el
+        candado de la fila) la deja fuera. Solo cambia ``status``; pasos, pases y matriz quedan.
+        """
+        result = await transaction.execute(
+            _EXPIRE_INACTIVE,
+            {
+                "organization_id": transaction.context.organization_id,
+                "inactive_since": inactive_since,
+                "limit": limit,
+            },
+        )
+        return tuple(sorted(_uuid(row.session_id) for row in result.all()))
+
+    async def session_counts(self, transaction: Transaction) -> tuple[int, int]:
+        """Sesiones abiertas (``in_progress`` o ``reopened``) e ``incomplete`` de la organización
+        de la transacción."""
+        result = await transaction.execute(
+            _SESSION_COUNTS, {"organization_id": transaction.context.organization_id}
+        )
+        row = result.one()
+        return int(row.open), int(row.incomplete)
 
     async def reopen(
         self, transaction: Transaction, seen: WalkTestSession, reopened: WalkTestSession

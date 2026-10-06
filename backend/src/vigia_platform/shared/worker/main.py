@@ -212,6 +212,8 @@ class WorkerRuntime:
     contexts: TaskContexts
     registries: tuple[Callable[[], Awaitable[None]], ...] = ()
     """Sincronizadores de los registros (``OutboxCatalog.synchronize``…), como en la API."""
+    node_ca: Callable[[], Awaitable[None]] | None = None
+    """Comprobación de arranque de ``vigia-node-ca`` (lista de revocación), como en la API."""
     metrics: PlatformMetrics | None = None
     owner: str = field(default_factory=worker_owner_id)
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
@@ -308,6 +310,7 @@ class WorkerProcess:
                 signing=runtime.signing,
                 kms=runtime.kms,
                 registries=runtime.registries,
+                node_ca=runtime.node_ca,
                 sleep=runtime.sleep,
                 on_startup_failure=self._startup_failed,
                 metrics=metrics,

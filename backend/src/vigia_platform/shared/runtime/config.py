@@ -12,8 +12,9 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   ``VIGIA_SECRETS_KEY_ARN``;
 - obligatorias según el proceso (``RuntimeConfig.require``): ``VIGIA_PROVIDER_ORGANIZATION_ID``
   y ``VIGIA_EVIDENCE_BUCKET`` en ``vigia-api`` y ``vigia-worker``; ``VIGIA_ARCHIVE_BUCKET`` en
-  ``vigia-worker``;
-- opcionales: ``VIGIA_NODE_CA_KEY_ARN``, ``VIGIA_EDGE_BUCKET``, ``VIGIA_CRL_KEY``,
+  ``vigia-worker``; ``VIGIA_NODE_CA_KEY_ARN`` en ``vigia-api`` y ``vigia-worker`` (su
+  comprobación de arranque, NFR-GOB-20; TASK-227), opcional en ``vigia-admin``;
+- opcionales: ``VIGIA_EDGE_BUCKET``, ``VIGIA_CRL_KEY``,
   ``VIGIA_NODE_TRUST_STORE_ARN``; ``PGSSLMODE`` y ``PGSSLROOTCERT`` (TLS de la base, como en
   ``vigia-migrate``; por defecto ``verify-full``); ``VIGIA_BREACH_LIST_PATH`` (respaldo local de
   contraseñas filtradas de ``vigia-api``; por defecto ``resources/pwned-top100k.txt``);
@@ -44,9 +45,9 @@ import json
 import re
 import sys
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Self, TextIO
+from typing import Any, ClassVar, Final, Self, TextIO
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
@@ -62,6 +63,7 @@ __all__ = [
     "ENDPOINT_ENVIRONMENTS",
     "KNOWN_VARIABLES",
     "VARIABLES",
+    "RegistrationIncomplete",
     "RuntimeConfig",
     "RuntimeConfigInvalid",
     "report_invalid",
@@ -98,20 +100,42 @@ class RuntimeConfigInvalid(ValueError):
         self.variable = variable
 
 
+class RegistrationIncomplete(Exception):
+    """A la composición le falta algo que una unidad declara obligatorio (NFR-GOB-20, BR-NUC-52):
+    un tipo de registro, un evento o una tarea periódica. ``missing`` son pares (clase, nombre),
+    constantes del código; el proceso no arranca."""
+
+    KINDS: ClassVar[frozenset[str]] = frozenset({"record_type", "event_type", "periodic_task"})
+
+    def __init__(self, missing: Sequence[tuple[str, str]]) -> None:
+        if not missing or any(kind not in self.KINDS for kind, _ in missing):
+            raise ValueError("RegistrationIncomplete necesita pares (clase, nombre) conocidos")
+        self.missing = tuple(sorted(missing))
+        names = ", ".join(f"{kind} «{name}»" for kind, name in self.missing)
+        super().__init__(f"faltan registros obligatorios de la composición: {names}")
+
+
 def report_invalid(error: BaseException, stream: TextIO | None = None) -> bool:
     """Escribe en la salida de errores la línea ``{"error": "config_invalid", "variable": …}``.
 
     Los registros estructurados solo llevan mensajes constantes y valores de listas cerradas
     cortas (``shared.observability``), así que no pueden nombrar una variable larga: esta línea
     es la que la nombra, como ``vigia-admin`` con su ``config_invalid``. Solo sale el nombre de una
-    variable conocida y el motivo fijo del código; nunca un valor. ``False`` si ``error`` no es
-    ``RuntimeConfigInvalid``.
+    variable conocida y el motivo fijo del código; nunca un valor. Con ``RegistrationIncomplete``,
+    la línea ``{"error": "registration_missing", "missing": [{"kind", "name"}…]}`` nombra lo que
+    falta (nombres del código, nunca datos). ``False`` si ``error`` no es ninguna de las dos.
     """
+    target = stream if stream is not None else sys.stderr
+    if isinstance(error, RegistrationIncomplete):
+        missing = [{"kind": kind, "name": name} for kind, name in error.missing]
+        line: dict[str, object] = {"error": "registration_missing", "missing": missing}
+        target.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
+        target.flush()
+        return True
     if not isinstance(error, RuntimeConfigInvalid):
         return False
     variable = error.variable if error.variable in KNOWN_VARIABLES else "?"
     line = {"error": "config_invalid", "variable": variable, "mensaje": str(error)}
-    target = stream if stream is not None else sys.stderr
     target.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
     target.flush()
     return True

@@ -1,14 +1,16 @@
-"""Hito «U-02 terminada»: tareas periódicas y consumidores registrados al arrancar (TASK-153).
+"""Tareas periódicas y consumidores registrados al arrancar (TASK-153; U-03: TASK-227).
 
 ``domain-entities.md`` §4.3 y su nota del 2026-09-20 fijan las **diez** tareas periódicas de
-U-02 y su cadencia; ``shared.worker.main`` exige que un worker no arranque sin todos sus
-consumidores registrados. Contra PostgreSQL 16 real, como ``vigia_app``:
+U-02 y su cadencia; la nota de U-03 en esa sección y NFR-GOB-12 añaden las **siete** de U-03;
+``shared.worker.main`` exige que un worker no arranque sin todos sus consumidores registrados.
+Contra PostgreSQL 16 real, como ``vigia_app``:
 
 - **Cadencias**: el catálogo que compone la raíz de producción (``shared.runtime.units``, A-52;
-  VIG-137) con las unidades registradas contiene las diez tareas de U-02 del diseño con su
-  cadencia (cada 5 min, cada 15 min, diaria a las 00:00 UTC, diaria, semanal o mensual); la única
-  otra tarea de U-02 es ``restore_drill_age`` (TASK-132), de modo que una tarea nueva o retirada
-  se nota aquí.
+  VIG-137) con las unidades registradas contiene **exactamente 11 + 7 tareas**: las diez de U-02
+  del diseño con su cadencia (cada 5 min, cada 15 min, diaria a las 00:00 UTC, diaria, semanal o
+  mensual) más ``restore_drill_age`` (TASK-132), y las siete de U-03 con su cadencia (cada 60 s,
+  cada hora o diaria), su unidad ``U-03`` y su iteración (por organización salvo
+  ``regenerate_revocation_list``, global, D-7); una tarea nueva o retirada se nota aquí.
 - **Arranque**: un ``WorkerProcess`` con ese catálogo supera el arranque supervisado, deja en
   ``shared.periodic_task`` una fila por tarea con su horario persistido y una próxima ejecución
   sobre la rejilla del horario, en ``shared.consumer`` sus dos consumidores, abre un bucle de
@@ -54,8 +56,12 @@ from vigia_platform.shared.observability.alerts_consumer import (
 from vigia_platform.shared.observability.metrics import get_metrics
 from vigia_platform.shared.outbox.dispatcher import Dispatcher
 from vigia_platform.shared.outbox.publish import Outbox
-from vigia_platform.shared.outbox.registries import OutboxCatalog, Schedule, ScheduleKind
-from vigia_platform.shared.outbox.u02_events import register_u02_event_types
+from vigia_platform.shared.outbox.registries import (
+    OutboxCatalog,
+    Schedule,
+    ScheduleKind,
+    TaskIteration,
+)
 from vigia_platform.shared.runtime.units import UnitServices, outbox_catalog, registered_units
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.worker.main import WorkerConfig, WorkerProcess, WorkerRuntime
@@ -84,6 +90,20 @@ OTHER_U02_TASKS: Final[dict[str, tuple[ScheduleKind, int | None]]] = {
     "restore_drill_age": (ScheduleKind.DAILY, None),  # TASK-132: métrica de la alarma diaria
 }
 """Tareas de U-02 que añadieron las tareas del plan, fuera de la lista del diseño."""
+
+U03_TASKS: Final[dict[str, tuple[ScheduleKind, int, TaskIteration]]] = {
+    # Nota de cadencias de BL §2.6 de U-03 y NFR-GOB-12: (horario, intervalo o desfase, iteración)
+    "detect_mute_nodes": (ScheduleKind.EVERY, _MINUTE, TaskIteration.PER_ORGANIZATION),
+    "evaluate_fleet_alarms": (ScheduleKind.EVERY, _MINUTE, TaskIteration.PER_ORGANIZATION),
+    "expire_enrollment_codes": (ScheduleKind.EVERY, _MINUTE, TaskIteration.PER_ORGANIZATION),
+    "mark_orphan_clips": (ScheduleKind.EVERY, 60 * _MINUTE, TaskIteration.PER_ORGANIZATION),
+    "expire_walk_test_sessions": (ScheduleKind.DAILY, 5 * 3600, TaskIteration.PER_ORGANIZATION),
+    "alert_expiring_certificates": (ScheduleKind.DAILY, 3 * 3600, TaskIteration.PER_ORGANIZATION),
+    # Barrido de 60 s con la marca y regeneración diaria interna (nota de NFR-GOB-12; D-7).
+    "regenerate_revocation_list": (ScheduleKind.EVERY, _MINUTE, TaskIteration.GLOBAL),
+}
+"""Las siete tareas de U-03: horario, intervalo (cada N s) o desfase (diaria, a las HH UTC) e
+iteración."""
 
 U02_CONSUMERS: Final = (ALERTS_CONSUMER, INTEGRITY_ON_DEMAND_CONSUMER)
 
@@ -119,13 +139,13 @@ def u02_catalog(environment: WorkerEnvironment) -> OutboxCatalog:
     return outbox_catalog(registered_units(), services)
 
 
+def unit_tasks(catalog: OutboxCatalog, unit: ActorUnit) -> dict[str, Any]:
+    """Las tareas de ``unit`` en el catálogo (cada unidad añade las suyas al mismo registro)."""
+    return {task.task_name: task for task in catalog.periodic_tasks.tasks() if task.unit is unit}
+
+
 def u02_tasks(catalog: OutboxCatalog) -> dict[str, Any]:
-    """Las tareas de U-02 del catálogo (U-03 y U-04 añaden las suyas al mismo registro)."""
-    return {
-        task.task_name: task
-        for task in catalog.periodic_tasks.tasks()
-        if task.unit is ActorUnit.U02
-    }
+    return unit_tasks(catalog, ActorUnit.U02)
 
 
 @dataclass
@@ -224,6 +244,43 @@ def test_the_ten_design_tasks_are_registered_with_their_cadence(
         _check_cadence(name, task.schedule, kind, offset)
 
 
+def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
+    environment: WorkerEnvironment,
+) -> None:
+    catalog = u02_catalog(environment)
+    every = {task.task_name: task for task in catalog.periodic_tasks.tasks()}
+    assert len(U03_TASKS) == 7
+    assert len(every) == 11 + 7
+    assert set(every) == set(DESIGN_TASKS) | set(OTHER_U02_TASKS) | set(U03_TASKS)
+    assert set(unit_tasks(catalog, ActorUnit.U03)) == set(U03_TASKS)
+    for name, (kind, value, iteration) in U03_TASKS.items():
+        task = every[name]
+        assert task.unit is ActorUnit.U03, name
+        assert task.iteration is iteration, name
+        _check_cadence(name, task.schedule, kind, value)
+    assert all(
+        task.iteration is TaskIteration.PER_ORGANIZATION for task in u02_tasks(catalog).values()
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "schedule"),
+    [
+        ("detect_mute_nodes", Schedule.every(2 * _MINUTE)),
+        ("mark_orphan_clips", Schedule.daily()),
+        ("expire_walk_test_sessions", Schedule.weekly(hour=5)),
+        ("alert_expiring_certificates", Schedule.daily()),
+        ("regenerate_revocation_list", Schedule.daily()),
+    ],
+)
+def test_a_u03_cadence_other_than_the_declared_one_is_detected(
+    name: str, schedule: Schedule
+) -> None:
+    kind, value, _ = U03_TASKS[name]
+    with pytest.raises(AssertionError, match=name):
+        _check_cadence(name, schedule, kind, value)
+
+
 @pytest.mark.parametrize(
     ("name", "schedule"),
     [
@@ -256,6 +313,8 @@ def test_worker_boots_with_every_task_and_consumer_registered(
 ) -> None:
     catalog = u02_catalog(environment)
     expected = {task.task_name: task.schedule for task in catalog.periodic_tasks.tasks()}
+    units = {task.task_name: task.unit.value for task in catalog.periodic_tasks.tasks()}
+    assert len(expected) == 11 + 7
     process, dispatcher, port = _worker(environment, catalog)
     booted_at = environment.clock.now()
 
@@ -288,7 +347,8 @@ def test_worker_boots_with_every_task_and_consumer_registered(
     assert [row["task_name"] for row in tasks] == sorted(expected)
     for row in tasks:
         schedule = expected[row["task_name"]]
-        assert row["unit"] == "U-02"
+        assert row["unit"] == units[row["task_name"]]
+        assert row["unit"] == ("U-03" if row["task_name"] in U03_TASKS else "U-02")
         assert row["schedule"] == schedule.text
         assert row["lease_owner"] is None  # nada venció: nadie tomó la tarea
         next_run = row["next_run_at"]
@@ -303,21 +363,41 @@ def test_worker_boots_with_every_task_and_consumer_registered(
 
 
 def _without(full: OutboxCatalog, name: str) -> OutboxCatalog:
-    """El catálogo de U-02 sin el consumidor o la tarea ``name``."""
+    """El catálogo de la raíz sin el consumidor o la tarea ``name`` (todo lo demás, igual)."""
     reduced = OutboxCatalog()
-    register_u02_event_types(reduced.event_types)
+    for compiled in full.event_types.compiled_types():
+        reduced.event_types.register(compiled.definition)
     for consumer in full.consumers.consumers():
         if consumer.consumer_name != name:
             reduced.consumers.register(consumer)
     for task in full.periodic_tasks.tasks():
         if task.task_name != name:
             reduced.periodic_tasks.register(
-                task.task_name, task.schedule, task.handler, unit=task.unit
+                task.task_name,
+                task.schedule,
+                task.handler,
+                unit=task.unit,
+                iteration=task.iteration,
             )
     return reduced
 
 
-@pytest.mark.parametrize("missing", [INTEGRITY_ON_DEMAND_CONSUMER, ALERTS_CONSUMER, *DESIGN_TASKS])
+def test_the_catalog_without_one_registration_differs_only_by_it(
+    environment: WorkerEnvironment,
+) -> None:
+    """Guarda de la prueba siguiente: el catálogo reducido solo pierde lo que se quita."""
+    full = u02_catalog(environment)
+    reduced = _without(full, "expire_enrollment_codes")
+    assert set(full.event_types.event_names()) == set(reduced.event_types.event_names())
+    names = {task.task_name for task in reduced.periodic_tasks.tasks()}
+    assert names == {task.task_name for task in full.periodic_tasks.tasks()} - {
+        "expire_enrollment_codes"
+    }
+
+
+@pytest.mark.parametrize(
+    "missing", [INTEGRITY_ON_DEMAND_CONSUMER, ALERTS_CONSUMER, *DESIGN_TASKS, *U03_TASKS]
+)
 def test_worker_missing_a_registration_does_not_start(
     environment: WorkerEnvironment, missing: str
 ) -> None:

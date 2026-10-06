@@ -242,7 +242,7 @@ class FleetAlarms(RuleBasedStateMachine):
 
 @pytest.fixture(scope="module")
 def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[HeartbeatStack]:
-    with heartbeat_stack(postgres_endpoint, "pr_gob_16", alarm_events=True) as built:
+    with heartbeat_stack(postgres_endpoint, "pr_gob_16") as built:
         built.authz.sessions.clock.set(to_millisecond(built.now()))
         yield built
 

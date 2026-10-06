@@ -25,6 +25,7 @@ También abre la base de ``vigia_app`` con la credencial de ``VIGIA_DB_APP_SECRE
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -50,6 +51,7 @@ from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind
 from vigia_platform.shared.key_rotation import LedgerKeyEventWriter, LedgerRotationRecorder
+from vigia_platform.shared.node_ca import NodeCaSigner, kms_public_key
 from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
@@ -69,6 +71,7 @@ from vigia_platform.shared.runtime.units import (
     free_text_registry,
     outbox_catalog,
     record_type_registry,
+    verify_required,
 )
 from vigia_platform.shared.secrets import (
     AwsSettings,
@@ -82,11 +85,13 @@ from vigia_platform.shared.storage import AddressingStyle, ObjectHead, S3Storage
 
 __all__ = [
     "DB_SECRET_VARIABLE",
+    "NODE_CA_CHECK_TIMEOUT_SECONDS",
     "SYSTEM_ACTOR_ID",
     "Core",
     "aws_settings",
     "build_core",
     "load_credentials",
+    "node_ca_check",
     "open_database",
     "s3_storage",
 ]
@@ -97,6 +102,9 @@ los tres procesos, para que el rastro de auditoría muestre un solo actor del si
 persona (P3) ni una organización: es un identificador fijo de la plataforma."""
 
 DB_SECRET_VARIABLE: Final = "VIGIA_DB_APP_SECRET"  # noqa: S105 - nombre de la variable
+
+NODE_CA_CHECK_TIMEOUT_SECONDS: Final = 5.0
+"""Tope de la comprobación de ``vigia-node-ca`` en el arranque (PAT-GOB-RES-03; el de KMS)."""
 
 type Synchronizer = Callable[[], Awaitable[None]]
 
@@ -142,6 +150,23 @@ async def load_credentials(
             DB_SECRET_VARIABLE,
             "nombra un secreto sin la forma de RDS (host, port, dbname, username, password)",
         ) from None
+
+
+def node_ca_check(kms: NodeCaSigner, key_id: str) -> Callable[[], Awaitable[None]]:
+    """La comprobación de arranque de ``vigia-node-ca`` (NFR-GOB-20, PAT-GOB-RES-03; TASK-227).
+
+    ``kms:GetPublicKey`` de ``key_id`` con tope de ``NODE_CA_CHECK_TIMEOUT_SECONDS``: la clave
+    debe existir, ser accesible con el rol del proceso y ser ECC P-256 (``kms_public_key``). Sin
+    ella el proceso no queda ``ready`` (alta y rotación en ``vigia-api``, lista de revocación en
+    ``vigia-worker``). Solo corre en el arranque: una caída posterior de KMS la declaran las rutas
+    (FS-GOB-05), nunca ``/health/ready``.
+    """
+
+    async def check() -> None:
+        async with asyncio.timeout(NODE_CA_CHECK_TIMEOUT_SECONDS):
+            await kms_public_key(kms, key_id)
+
+    return check
 
 
 def open_database(
@@ -277,6 +302,9 @@ def build_core(
         secrets=secrets,
     )
     outbox_catalog(units, services, into=catalog)
+    # NFR-GOB-20, BR-NUC-52: sin un tipo, un evento o una tarea que una unidad exige, el proceso
+    # no arranca (``RegistrationIncomplete`` nombra lo que falta).
+    verify_required(units, record_types, catalog)
 
     async def synchronize_record_types() -> None:
         async with database.transaction(contexts.provider_audit_context()) as transaction:

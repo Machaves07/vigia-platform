@@ -8,6 +8,11 @@
 - **Consumo** (``consume``): ``UPDATE … SET status = 'used' WHERE … AND status = 'active' AND
   expires_at > now``; el éxito es **una** fila afectada. Dos consumos simultáneos del mismo código:
   el segundo espera el candado de la fila, vuelve a evaluar la condición y no afecta ninguna.
+- **Vencimiento** (``expire_due``, ``expire_enrollment_codes``, TASK-227): bloquea primero los
+  ``active`` con ``expires_at <= now`` de la organización en orden de ``code_id`` (``SELECT … ORDER
+  BY … FOR UPDATE``) y después los pasa a ``expired`` con la misma condición. Frente a un consumo
+  simultáneo, el que llega segundo espera el candado de la fila, vuelve a evaluar ``status =
+  'active'`` y no la toca: el código queda ``used`` o ``expired``, nunca las dos cosas.
 - ``fleet.enrollment_attempt`` ⛓ (particionada por mes de ``attempted_at``): solo ``INSERT`` y
   ``SELECT``, por páginas de la planta y el nodo.
 
@@ -65,6 +70,15 @@ _CONSUME: Final = text(
     "UPDATE fleet.enrollment_code SET status = 'used'"
     " WHERE organization_id = :organization_id AND code_id = :code_id"
     " AND status = 'active' AND expires_at > :now RETURNING code_id"
+)
+_EXPIRE_DUE: Final = text(
+    "WITH due AS ("
+    " SELECT code_id FROM fleet.enrollment_code"
+    " WHERE organization_id = :organization_id AND status = 'active' AND expires_at <= :now"
+    " ORDER BY code_id LIMIT :limit FOR UPDATE)"
+    " UPDATE fleet.enrollment_code AS code SET status = 'expired' FROM due"
+    " WHERE code.code_id = due.code_id AND code.organization_id = :organization_id"
+    " AND code.status = 'active' AND code.expires_at <= :now RETURNING code.code_id"
 )
 _INSERT_ATTEMPT: Final = text(
     "INSERT INTO fleet.enrollment_attempt (attempt_id, organization_id, plant_id, node_id,"
@@ -214,6 +228,21 @@ class PostgresEnrollmentStore:
             },
         )
         return len(result.all()) == 1
+
+    async def expire_due(
+        self, transaction: Transaction, now: datetime, *, limit: int
+    ) -> tuple[uuid.UUID, ...]:
+        """``active → expired`` de hasta ``limit`` códigos de la organización ya vencidos en
+        ``now``; devuelve solo los que cambiaron (nada se borra)."""
+        result = await transaction.execute(
+            _EXPIRE_DUE,
+            {
+                "organization_id": transaction.context.organization_id,
+                "now": now,
+                "limit": limit,
+            },
+        )
+        return tuple(sorted(_uuid(row.code_id) for row in result.all()))
 
     async def insert_attempt(self, transaction: Transaction, attempt: EnrollmentAttempt) -> None:
         _same_organization(transaction, attempt.organization_id)

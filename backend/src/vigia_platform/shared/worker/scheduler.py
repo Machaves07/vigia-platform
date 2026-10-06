@@ -17,12 +17,14 @@ consulta cada ``poll_seconds`` qué tareas vencieron y ejecuta cada una con arre
    dentro de un ``SAVEPOINT`` y avanza el cursor (la valla de ``SqlLeaseStore.advance``). Si el
    manejador falla, se deshace lo suyo, el fallo **se registra** (cursor con el fallo sumado,
    registro de error con la tarea, la organización y el código, y la métrica con resultado
-   ``failed``) y la tarea **sigue con las demás** (BR-NUC-81). El manejador tiene un tope por
-   organización (``handler_timeout_seconds``, 300 s ``[objetivo propio]``): al vencer se cancela,
-   se deshace lo suyo y cuenta como fallo con código ``handler_timeout``. Sin tope, la renovación
-   mantendría para siempre una tarea colgada y ningún otro proceso podría tomarla. Si la valla
-   no se cumple, la transacción se deshace entera y el proceso abandona la tarea sin liberarla:
-   ya es de otro.
+   ``failed``) y la tarea **sigue con las demás** (BR-NUC-81). Si lanza ``DiscardedCycle`` (una
+   ejecución solapada ya hizo su trabajo, TASK-227), se deshace lo suyo igual, pero cuenta como
+   ``discarded``: el cursor avanza sin fallo y no hay registro de error. El manejador tiene un
+   tope por organización (``handler_timeout_seconds``, 300 s ``[objetivo propio]``): al vencer se
+   cancela, se deshace lo suyo y cuenta como fallo con código ``handler_timeout``. Sin tope, la
+   renovación mantendría para siempre una tarea colgada y ningún otro proceso podría tomarla. Si
+   la valla no se cumple, la transacción se deshace entera y el proceso abandona la tarea sin
+   liberarla: ya es de otro.
 4. ``release`` con ``next_run_at`` del horario y el resultado (``succeeded`` o
    ``partial_failure``). Una parada ordenada o la base caída a mitad liberan **sin** avanzar
    ``next_run_at`` (``interrupted``): otro proceso la toma enseguida y continúa por el cursor.
@@ -69,6 +71,7 @@ from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.dispatcher import error_code
 from vigia_platform.shared.outbox.registries import (
+    DiscardedCycle,
     GlobalPeriodicHandler,
     PeriodicHandler,
     PeriodicTask,
@@ -140,6 +143,9 @@ class OrganizationOutcome(enum.StrEnum):
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    DISCARDED = "discarded"
+    """El manejador lanzó ``DiscardedCycle``: una ejecución solapada ya hizo el trabajo. Se
+    deshace lo suyo y el cursor avanza sin fallo (TASK-227)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,8 +486,13 @@ class PeriodicScheduler:
             if not await self._leases.holds(tx, holder.lease, self._clock.now()):
                 raise LeaseLost()
             failure = await self._invoke(task, tx)
+            discarded = isinstance(failure, DiscardedCycle)
             advanced = await self._leases.advance(
-                tx, holder.lease, organization_id, failed=failure is not None, now=self._clock.now()
+                tx,
+                holder.lease,
+                organization_id,
+                failed=failure is not None and not discarded,
+                now=self._clock.now(),
             )
             if advanced is None:
                 # La valla: se deshace la transacción entera, con lo que hizo el manejador.
@@ -489,7 +500,7 @@ class PeriodicScheduler:
         # Confirmado: el avance y lo que hizo el manejador en la transacción.
         holder.lease = advanced
         elapsed_ms = max((self._clock.monotonic() - started) * 1000, 0.0)
-        outcome = OrganizationOutcome.SUCCEEDED if failure is None else OrganizationOutcome.FAILED
+        outcome = _outcome(failure)
         self._metrics.periodic_task_duration_ms.record(
             elapsed_ms,
             {
@@ -499,6 +510,13 @@ class PeriodicScheduler:
             },
         )
         if failure is None:
+            return OrganizationResult(organization_id, outcome)
+        if outcome is OrganizationOutcome.DISCARDED:
+            _log.info(
+                "ciclo descartado en una organización: otra ejecución ya lo hizo",
+                task=task.task_name,
+                organization_id=str(organization_id),
+            )
             return OrganizationResult(organization_id, outcome)
         code = error_code(failure)
         # El código sale de una constante o del nombre de una clase, nunca de datos.
@@ -551,12 +569,12 @@ class PeriodicScheduler:
         except Exception as error:
             failure = error
         elapsed_ms = max((self._clock.monotonic() - started) * 1000, 0.0)
-        outcome = OrganizationOutcome.SUCCEEDED if failure is None else OrganizationOutcome.FAILED
+        outcome = _outcome(failure)
         self._metrics.periodic_task_duration_ms.record(
             elapsed_ms, {"task": task.task_name, "result": outcome.value}
         )
         report.global_outcome = outcome
-        if failure is None:
+        if failure is None or outcome is OrganizationOutcome.DISCARDED:
             return
         code = error_code(failure)
         # El código sale de una constante o del nombre de una clase, nunca de datos.
@@ -585,3 +603,12 @@ class PeriodicScheduler:
                 raise
             return error
         return None
+
+
+def _outcome(failure: Exception | None) -> OrganizationOutcome:
+    """Éxito, ciclo descartado (``DiscardedCycle``) o fallo de una invocación."""
+    if failure is None:
+        return OrganizationOutcome.SUCCEEDED
+    if isinstance(failure, DiscardedCycle):
+        return OrganizationOutcome.DISCARDED
+    return OrganizationOutcome.FAILED
