@@ -38,7 +38,7 @@ from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 
-__all__ = ["GateWriteConflict", "PostgresGateRepository"]
+__all__ = ["GateWriteConflict", "PostgresGateRepository", "interval_from_row"]
 
 _ZONE: Final = text(
     "SELECT organization_id, plant_id, zone_id, code FROM identity.zone"
@@ -143,7 +143,7 @@ def _state(row: Row[Any]) -> ZoneGateState:
     )
 
 
-def _interval(row: Row[Any]) -> GateInterval:
+def interval_from_row(row: Row[Any]) -> GateInterval:
     return GateInterval(
         organization_id=_uuid(row.organization_id),
         plant_id=_uuid(row.plant_id),
@@ -297,7 +297,7 @@ class PostgresGateRepository:
             _STATE_AT,
             {**_zone_key(context, zone_id), "gate": GateKind(gate).value, "at": at},
         )
-        return tuple(_interval(row) for row in rows)
+        return tuple(interval_from_row(row) for row in rows)
 
     async def history(
         self, context: ScopeContext, zone_id: uuid.UUID, from_: datetime, to_: datetime
@@ -306,7 +306,7 @@ class PostgresGateRepository:
         rows = await self._database.read(
             context, _HISTORY, {**_zone_key(context, zone_id), "from_": from_, "to_": to_}
         )
-        return tuple(_interval(row) for row in rows)
+        return tuple(interval_from_row(row) for row in rows)
 
 
 def _zone_key(context: ScopeContext, zone_id: uuid.UUID) -> dict[str, Any]:
