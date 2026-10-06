@@ -36,6 +36,7 @@ from typing import Any, Final
 
 import pytest
 from vigia_contracts.models import api
+from vigia_contracts.signing import KeySet, verify
 
 from tests.heartbeat_support import (
     LIVE_VIEW_URL,
@@ -47,6 +48,9 @@ from tests.heartbeat_support import (
 )
 from tests.integration.conftest import PostgresEndpoint
 from tests.node_api_support import DAY, VERSION
+from tests.writer_support import unit_context
+from vigia_platform.shared.context import ActorKind, ActorUnit
+from vigia_platform.shared.signing import NODE_PURPOSES
 from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 
 pytestmark = pytest.mark.integration
@@ -265,10 +269,90 @@ def test_a_thousand_heartbeats_never_call_sign(stack: HeartbeatStack) -> None:
     assert len(stack.history(site.node_id)) == 1000
 
 
-def test_no_zone_with_catalog_and_gates_is_temporarily_unavailable_and_writes_nothing(
+def _gate_payload(stack: HeartbeatStack, envelope: Any) -> dict[str, Any]:
+    """La carga verificada de un sobre ``GateState`` con la clave ``gate`` publicada."""
+    keyset = KeySet(stack.signing.clock)
+    keyset.pin_initial(
+        [k.to_contract() for p in NODE_PURPOSES for k in stack.signing.service.public_keys(p)]
+    )
+    payload: dict[str, Any] = verify(envelope, keyset, "gate", stack.signing.clock)
+    return payload
+
+
+def _assert_no_operate(payload: dict[str, Any]) -> None:
+    assert (payload["mounting_gate"], payload["usage_gate"], payload["resulting_mode"]) == (
+        {"status": "pending"},
+        {"status": "pending"},
+        "no_capture",
+    )
+
+
+def test_a_node_in_a_newly_created_zone_receives_the_creation_envelope_without_signing(
+    stack: HeartbeatStack,
+) -> None:
+    # A-60: lo que deja ``create_zone`` (``sign_initial`` antes y ``save_initial`` en su
+    # transacción, con el mismo ``GateService``); el latido lo sirve tal cual.
+    site = stack.site(gates=False)
+    (zone,) = site.zones
+    gates = stack.primary.gates
+    context = unit_context(site.organization_id, ActorUnit.U02, kind=ActorKind.SYSTEM)
+
+    async def create() -> None:
+        initial = await gates.sign_initial(site.organization_id, site.plant_id, zone, stack.now())
+        async with stack.primary.database.transaction(context) as transaction:
+            await gates.save_initial(transaction, initial)
+
+    stack.run(create())
+    stored = stack.gate_text(zone)
+    before = stack.signer.calls
+
+    for _ in range(3):
+        response = _accepted(stack, site)
+        (served,) = response.json()["gate_states"]
+        assert stored.encode("utf-8") in response.content
+        _assert_no_operate(_gate_payload(stack, served))
+    assert stack.signer.calls == before
+
+
+def test_a_zone_from_before_a60_receives_its_signed_initial_envelope_once(
     stack: HeartbeatStack,
 ) -> None:
     site = stack.site(gates=False)
+    (zone,) = site.zones
+    before = stack.signer.calls
+
+    first = _accepted(stack, site)
+
+    assert stack.signer.calls == before + 1
+    stored = stack.gate_text(zone)
+    assert stored.encode("utf-8") in first.content
+    (served,) = first.json()["gate_states"]
+    _assert_no_operate(_gate_payload(stack, served))
+    second = _accepted(stack, site)
+    assert stack.signer.calls == before + 1  # ya guardado: no se vuelve a firmar
+    assert stored.encode("utf-8") in second.content
+
+
+def test_with_signing_down_a_zone_without_envelope_is_unavailable_and_writes_nothing(
+    stack: HeartbeatStack,
+) -> None:
+    site = stack.site(gates=False)
+    stack.tick()
+    stack.signer.down = True
+    try:
+        response = stack.post(site)
+    finally:
+        stack.signer.down = False
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "temporarily_unavailable"
+    assert stack.inventory(site.node_id) is None
+    assert stack.history(site.node_id) == [] and stack.communication(site) == []
+
+
+def test_no_zone_with_a_catalog_is_temporarily_unavailable_and_writes_nothing(
+    stack: HeartbeatStack,
+) -> None:
+    site = stack.site(catalogs=False)
     stack.tick()
     response = stack.post(site)
     assert response.status_code == 503, response.text

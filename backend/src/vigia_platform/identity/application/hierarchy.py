@@ -9,7 +9,9 @@
   (IANA). En la misma transacción escribe ``plant_created``, la génesis de la cadena de la planta
   (secuencia 1), y audita ``plant_created``.
 - ``create_zone``: ``hierarchy.manage`` sobre la planta; ``zone_created`` en la cadena de la planta
-  y auditoría ``zone_created``.
+  y auditoría ``zone_created``. Con ``zone_gates`` (``ZoneGateGenesis``, A-60), además el sobre
+  ``GateState`` inicial ``pending``/``pending`` firmado antes de la transacción y guardado en ella;
+  si la firma no responde, ``GateUnavailable`` (``temporarily_unavailable``) y nada escrito.
 
 **``IdentityQueryPort``** (U-03, U-04): ``hierarchy``, ``users_by_role_and_scope`` (destinatarios
 de notificaciones), ``node_identity`` y ``assigned_node``. Con un contexto de sesión devuelven
@@ -124,6 +126,7 @@ __all__ = [
     "ProviderGenesisRequest",
     "ProviderGenesisResult",
     "Recipient",
+    "ZoneGateGenesis",
     "ZoneSpec",
     "ZoneView",
 ]
@@ -219,6 +222,21 @@ class Recipient:
     role: Role
     display_name: str = field(repr=False)
     email: str = field(repr=False)
+
+
+class ZoneGateGenesis(Protocol):
+    """El sobre inicial de compuertas de una zona nueva (A-60): lo implementa ``catalog.gates``
+    (``GateService``) y lo inyecta la raíz de composición; U-02 no importa U-03."""
+
+    async def sign_initial(
+        self,
+        organization_id: uuid.UUID,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        at: datetime,
+    ) -> Any: ...
+
+    async def save_initial(self, transaction: Transaction, initial: Any) -> None: ...
 
 
 class IdentityQueryPort(Protocol):
@@ -602,8 +620,11 @@ def _checked_reason(deps: IdentityDependencies, value: object) -> str | None:
 class HierarchyService:
     """Plantas y zonas (interfaz), ``IdentityQueryPort`` e ``IdentityCommandPort``."""
 
-    def __init__(self, deps: IdentityDependencies) -> None:
+    def __init__(
+        self, deps: IdentityDependencies, *, zone_gates: ZoneGateGenesis | None = None
+    ) -> None:
         self._deps = deps
+        self._zone_gates = zone_gates
 
     def __repr__(self) -> str:
         return "HierarchyService()"
@@ -639,6 +660,14 @@ class HierarchyService:
         )
         now = deps.clock.now()
         zone_id = new_uuid4(deps.random_bytes)
+        gates = self._zone_gates
+        # A-60: el sobre inicial se firma antes de abrir la transacción (la firma nunca retiene
+        # la cadena de la planta); con la firma caída la zona no se crea.
+        initial = (
+            None
+            if gates is None
+            else await gates.sign_initial(authorized.organization_id, plant.scope_id, zone_id, now)
+        )
         try:
             async with deps.database.transaction(authorized) as transaction:
                 await _require_absent(
@@ -656,6 +685,8 @@ class HierarchyService:
                         "created_by": authorized.actor.id,
                     },
                 )
+                if gates is not None:
+                    await gates.save_initial(transaction, initial)
                 await write_record(
                     deps,
                     authorized,

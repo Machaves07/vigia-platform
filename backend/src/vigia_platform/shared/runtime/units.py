@@ -508,6 +508,26 @@ def _document_settings(config: RuntimeConfig | None) -> DocumentSettings:
     return DocumentSettings(prefix=config.documents_prefix, max_bytes=config.documents_max_bytes)
 
 
+def gate_service(services: UnitServices) -> GateService:
+    """LC-GOB-03 (VIG-146): compuertas con su sobre ``GateState`` firmado por ``SigningPort``.
+
+    También es el ``ZoneGateGenesis`` de ``identity.create_zone`` (A-60, VIG-180) y emite el sobre
+    inicial perezoso del alta y del latido."""
+    database = services.database
+    return GateService(
+        repository=PostgresGateRepository(database),
+        catalog=PostgresCatalogRepository(database),
+        agreements=PostgresAgreementRepository(),
+        database=database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        audit=services.audit,
+        free_text=services.free_text,
+        signer=services.signing,
+        clock=services.clock,
+    )
+
+
 def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     # LC-GOB-05 (VIG-143): POST /documents sobre vigia-evidence; las actas y la política de
     # planta verifican sus documentos con el mismo servicio.
@@ -524,18 +544,7 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
     agreements = PostgresAgreementRepository()
     # LC-GOB-03 (VIG-146): compuertas con su sobre GateState firmado por SigningPort; revocar el
     # uso revoca el acuerdo vigente (VIG-149).
-    gates = GateService(
-        repository=PostgresGateRepository(services.database),
-        catalog=catalog,
-        agreements=agreements,
-        database=services.database,
-        writer=services.writer,
-        authorizer=services.authorizer,
-        audit=services.audit,
-        free_text=services.free_text,
-        signer=services.signing,
-        clock=services.clock,
-    )
+    gates = gate_service(services)
     admissions = AdmissionService(
         repository=PostgresAdmissionRepository(services.database),
         database=services.database,
@@ -812,6 +821,7 @@ def _credential_operations(
                 keys=services.signing,
                 source_key=_source_key(services),
                 ingest_base_url=None if config is None else config.nodes_base_url,
+                gates=gate_service(services),
             ),
             identity,
             limits,
@@ -828,18 +838,7 @@ def _heartbeat_service(services: UnitServices, policy: VersionPolicy) -> Heartbe
     y la incorporación de los accesos locales a la vista en vivo."""
     database = services.database
     catalog = PostgresCatalogRepository(database)
-    gates = GateService(
-        repository=PostgresGateRepository(database),
-        catalog=catalog,
-        agreements=PostgresAgreementRepository(),
-        database=database,
-        writer=services.writer,
-        authorizer=services.authorizer,
-        audit=services.audit,
-        free_text=services.free_text,
-        signer=services.signing,
-        clock=services.clock,
-    )
+    gates = gate_service(services)
     regression = RegressionService(
         repository=PostgresRegressionRepository(database),
         catalog=catalog,

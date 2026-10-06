@@ -7,7 +7,10 @@ de U-01; PAT-GOB-REN-03) y el contexto de nodo de A-51. ``accept``:
 1. comprueba que organización, planta y nodo del cuerpo son los del certificado
    (``node_zone_mismatch``; las zonas que el nodo ya no tiene asignadas **no** rechazan: se
    ignoran, BR-GOB-70) y toma el conjunto de claves de la caché de ``SigningService``
-   (NFR-NUC-36): nunca firma;
+   (NFR-NUC-36): nunca firma, salvo el sobre de compuertas inicial (A-60, VIG-180) de una zona
+   asignada anterior a él que aún no tiene ninguno (``ensure_initial_envelopes``: una lectura y,
+   solo para esa zona, una firma una sola vez, en su propia transacción **antes** de la del latido,
+   así que no se anida con sus candados); con la firma caída la zona sigue omitida;
 2. abre **una transacción corta** (BR-GOB-72, 73):
 
    - candado de la fila del nodo en ``NodeInventory`` (``SELECT … FOR UPDATE``; el primer latido
@@ -150,11 +153,15 @@ class KeySetSource(Protocol):
 
 
 class GateRenewal(Protocol):
-    """``GateService.renew_gate_envelope`` (A-55)."""
+    """``GateService.renew_gate_envelope`` (A-55) y ``ensure_initial_envelopes`` (A-60)."""
 
     async def renew_gate_envelope(
         self, context: ScopeContext, zone_id: uuid.UUID, *, expiring_before: datetime | None = None
     ) -> Mapping[str, Any] | None: ...
+
+    async def ensure_initial_envelopes(
+        self, context: ScopeContext, zone_ids: Iterable[uuid.UUID]
+    ) -> tuple[uuid.UUID, ...]: ...
 
 
 class ModelRegressionMarker(Protocol):
@@ -288,6 +295,7 @@ class HeartbeatService:
             if compatibility is CompatibilityResult.ACCEPTED_WITH_NOTICE
             else None,
         )
+        await self._initial_gates(node)
         async with deps.database.transaction(node.context) as transaction:
             outcome = await self._within(transaction, node, heartbeat, notice)
             # Compuesta y validada dentro: si no se puede, la transacción se revierte entera.
@@ -501,6 +509,17 @@ class HeartbeatService:
         # Se valida exactamente lo que se envía, con el lector estricto de U-01 (fallo cerrado).
         HeartbeatResponse.model_validate_json(content)
         return content
+
+    async def _initial_gates(self, node: NodeScope) -> None:
+        """A-60: la zona asignada anterior al sobre inicial lo recibe antes de la transacción del
+        latido (una lectura; firma solo la zona que no tiene ninguno, una vez)."""
+        if not node.zone_ids:
+            return
+        try:
+            await self._deps.gates.ensure_initial_envelopes(node.context, node.zone_ids)
+        except GateUnavailable:
+            # Firma caída: la zona sigue sin sobre y se omite, como antes; el nodo no opera en ella.
+            _log.warning("sobre inicial de compuertas aplazado: firma no disponible")
 
     async def _renew_expiring(self, node: NodeScope, composed: _Composed) -> _Composed | None:
         """A-55: renueva los sobres que vencen en menos de 24 h; ``None`` si no hubo ninguno."""

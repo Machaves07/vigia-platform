@@ -16,8 +16,11 @@ declarado** (``EnrollmentScope``, A-51). ``EnrollmentService.enroll`` sigue el o
 4. **configuración inicial**: los sobres ya almacenados de cada zona asignada, sus cámaras y la
    ``NodeConfiguration`` (``PostgresBootstrapEnvelopes``), validada con el modelo estricto de
    U-01; las claves públicas de la plataforma desde la caché de ``SigningService``. **Cero**
-   llamadas a ``SigningPort.sign``. Una zona sin catálogo o sin sobre de compuerta (o un nodo sin
-   cámaras) es **transitorio** y no consume el código (decisión del redactor de TASK-219);
+   llamadas a ``SigningPort.sign``, salvo el sobre de compuerta inicial (A-60, VIG-180) de la zona
+   anterior a él que aún no tiene ninguno: ``GateService.ensure_initial_envelopes`` lo firma una
+   sola vez por zona, fuera de toda transacción del alta, y se vuelve a leer lo guardado. Una zona
+   sin catálogo (o un nodo sin cámaras), o la firma de ese sobre inicial caída, es
+   **transitorio** y no consume el código (decisión del redactor de TASK-219);
 5. **firma** de los dos certificados (``NodeCaIssuer``, ``kms:Sign`` con plazo): sin respuesta,
    transitorio y nada escrito;
 6. **una transacción** (BR-GOB-61): la ficha del nodo bloqueada (primer candado del orden de
@@ -44,7 +47,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final, Protocol
@@ -52,6 +55,7 @@ from typing import Any, Final, Protocol
 from pydantic import ValidationError
 from vigia_contracts.models.node_enrollment import NodeInitialConfiguration
 
+from vigia_platform.catalog.application.gates import GateUnavailable
 from vigia_platform.fleet.adapters.ca.certificate_profiles import (
     IssuedCertificates,
     NodeCaIssuer,
@@ -80,6 +84,7 @@ from vigia_platform.fleet.domain.node_fleet_record import FleetNode, NodeFleetRe
 from vigia_platform.fleet.domain.node_subject import NodeSubject, serial_hex
 from vigia_platform.fleet.record_types import enrollment_source_key
 from vigia_platform.identity.authz.context import EnrollmentScope
+from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
@@ -103,6 +108,7 @@ __all__ = [
     "EnrollmentRejected",
     "EnrollmentService",
     "FixedSourceKey",
+    "InitialGateEnvelopes",
     "IssuedCredential",
     "PlatformKeys",
     "SecretSourceKey",
@@ -212,6 +218,14 @@ class _UnusedRoots:
 # --- Piezas comunes con la rotación ---------------------------------------------------------------
 
 
+class InitialGateEnvelopes(Protocol):
+    """``GateService.ensure_initial_envelopes`` (A-60): el sobre inicial de la zona sin ninguno."""
+
+    async def ensure_initial_envelopes(
+        self, context: ScopeContext, zone_ids: Iterable[uuid.UUID]
+    ) -> tuple[uuid.UUID, ...]: ...
+
+
 class PlatformKeys(Protocol):
     """``SigningService.public_keys``: las claves publicadas, desde la caché del proceso."""
 
@@ -291,6 +305,7 @@ class EnrollmentService:
         keys: PlatformKeys,
         source_key: SourceKeyProvider,
         ingest_base_url: str | None,
+        gates: InitialGateEnvelopes,
         credentials: PostgresCredentialStore | None = None,
         envelopes: PostgresBootstrapEnvelopes | None = None,
     ) -> None:
@@ -299,6 +314,7 @@ class EnrollmentService:
         self._keys = keys
         self._source_key = source_key
         self._ingest_base_url = ingest_base_url
+        self._gates = gates
         self._credentials = credentials if credentials is not None else PostgresCredentialStore()
         self._envelopes = envelopes if envelopes is not None else PostgresBootstrapEnvelopes()
 
@@ -396,26 +412,22 @@ class EnrollmentService:
         )
 
     async def _bootstrap(self, enrollment: EnrollmentScope, node: FleetNode) -> _Bootstrap:
-        """Los sobres guardados, las cámaras y la configuración (sin firmar nada)."""
-        deps = self._deps
+        """Los sobres guardados, las cámaras y la configuración; solo firma el sobre inicial de
+        la zona que aún no tiene ninguno (A-60)."""
         base_url = self._ingest_base_url
         if base_url is None:
             _log.error("el alta no tiene VIGIA_NODES_BASE_URL")
             raise CredentialUnavailable("ingest_base_url", BOOTSTRAP_RETRY_AFTER_SECONDS)
-        async with deps.database.transaction(enrollment.context) as transaction:
-            zones = await deps.nodes.current_zones(transaction, node.node_id)
-            stored: Sequence[BootstrapZone] = await self._envelopes.zones(
-                transaction, node.plant_id, zones
-            )
+        zones, stored, configuration = await self._stored(enrollment, node)
+        missing = [zone.zone_id for zone in stored if zone.gate_envelope is None]
+        if missing:
+            # A-60: la zona anterior al sobre inicial lo recibe ahora (una sola vez por zona).
             try:
-                configuration: NodeConfiguration = await self._envelopes.configuration(
-                    transaction, node.plant_id, node.node_id
-                )
-            except ConfigurationUnavailable:
-                _log.error("la configuración guardada del nodo no cumple el contrato")
-                raise CredentialUnavailable(
-                    "configuration", BOOTSTRAP_RETRY_AFTER_SECONDS
-                ) from None
+                await self._gates.ensure_initial_envelopes(enrollment.context, missing)
+            except GateUnavailable:
+                _log.warning("alta aplazada: la firma del sobre inicial de compuertas no responde")
+                raise CredentialUnavailable("bootstrap", BOOTSTRAP_RETRY_AFTER_SECONDS) from None
+            zones, stored, configuration = await self._stored(enrollment, node)
         try:
             document = initial_configuration(configuration, stored, ingest_base_url=base_url)
         except ConfigurationUnavailable:
@@ -425,6 +437,25 @@ class EnrollmentService:
             _log.error("la configuración inicial no cumple el contrato")
             raise CredentialUnavailable("bootstrap", BOOTSTRAP_RETRY_AFTER_SECONDS)
         return _Bootstrap(zones=tuple(zones), configuration=document)
+
+    async def _stored(
+        self, enrollment: EnrollmentScope, node: FleetNode
+    ) -> tuple[Sequence[uuid.UUID], Sequence[BootstrapZone], NodeConfiguration]:
+        """Las zonas del nodo, lo guardado de cada una y su configuración (una transacción)."""
+        deps = self._deps
+        async with deps.database.transaction(enrollment.context) as transaction:
+            zones = await deps.nodes.current_zones(transaction, node.node_id)
+            stored = await self._envelopes.zones(transaction, node.plant_id, zones)
+            try:
+                configuration = await self._envelopes.configuration(
+                    transaction, node.plant_id, node.node_id
+                )
+            except ConfigurationUnavailable:
+                _log.error("la configuración guardada del nodo no cumple el contrato")
+                raise CredentialUnavailable(
+                    "configuration", BOOTSTRAP_RETRY_AFTER_SECONDS
+                ) from None
+        return zones, stored, configuration
 
     async def _commit(
         self,
