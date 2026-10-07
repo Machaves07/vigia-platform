@@ -6,14 +6,15 @@ escenario (clave P-256 en ``MemoryKms``, raíz en ``ca/root.pem`` del ``vigia-ed
 y el tope de producción de ``vigia-node-ca`` (``NODE_CA_DEADLINE_SECONDS``), métricas en memoria y
 ``/health/ready`` sobre la base de verdad (arranque supervisado en el bucle de la pila).
 
-**Inyección**: el punto de KMS de la clave de la autoridad **bloqueado 5 minutos** (``kms:Sign``
-no responde: ``MemoryKms.hang``). Durante el bloqueo, a la vez:
+**Inyección**: tras una línea base de 2 minutos, el punto de KMS de la clave de la autoridad
+**bloqueado 5 minutos** (``kms:Sign`` no responde: ``MemoryKms.hang``). Durante el bloqueo, a la
+vez:
 
 - **alta** (``POST /api/nodes/enrollment``) de nodos declarados con su código y **rotación**
   (``POST /api/nodes/credential-rotations``) de nodos dados de alta, repartidas en la ventana
   (los instantes salen de la semilla, dentro de los límites de tasa de cada ruta);
-- **tráfico normal** de tres nodos productivos: concesión de subida, subida del clip, hallazgo y
-  latido, con su latencia medida.
+- **tráfico normal** de tres nodos productivos, con su latencia medida: concesión de subida, subida
+  del clip y hallazgo una vez por segundo y nodo, y un latido cada 16 s.
 
 **Resultado esperado**:
 
@@ -21,11 +22,15 @@ no responde: ``MemoryKms.hang``). Durante el bloqueo, a la vez:
   ``retry_after_seconds`` entre 1 y 60) dentro del tope de la autoridad, sin escribir nada (el
   código de alta sigue activo; la credencial sigue ``active``; ningún ``node_enrolled`` ni
   ``node_credential_rotated``);
-- **ingesta, latido y concesiones no se ven afectados**: todas aceptadas, con su p95 dentro del
-  objetivo de NFR-GOB-01 (``tests/load/profiles.ABSOLUTE_TARGETS``);
-- **alarma**: cada firma vencida cuenta en ``node_ca_sign_duration_ms{result=timeout}`` y los 503
-  de la autoridad en ``node_requests_total`` (la tasa de errores del servidor supera el 1 % de la
-  alarma ``server-error-rate``);
+- **ingesta, latido y concesiones no se ven afectados**: todas aceptadas, y su p95 con la
+  autoridad bloqueada no se degrada frente a la línea base medida en la misma ejecución (2 veces
+  más 50 ms como mucho); el p95 frente al objetivo absoluto de NFR-GOB-01
+  (``tests/load/profiles.ABSOLUTE_TARGETS``) queda en el informe como tendencia, como en los
+  perfiles de carga (infrastructure-design §9.2);
+- **alarma**: cada firma vencida cuenta en ``node_ca_sign_duration_ms{result=timeout}``, cada 503
+  de la autoridad en ``node_requests_total`` y el p95 del alta supera el doble de su objetivo de
+  2 s: la condición de la alarma ``latency-node-enrollment`` (infrastructure-design §8.1). La
+  tasa de 5xx sobre todas las peticiones depende del volumen y queda solo en el informe;
 - la instancia sigue ``ready`` durante todo el bloqueo (la autoridad solo se comprueba al
   arrancar, NFR-GOB-20);
 - al volver la autoridad, el alta pendiente se completa con el mismo código.
@@ -63,8 +68,17 @@ pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
 BLOCK_SECONDS: Final = 300.0
 """El bloqueo de la autoridad: 5 minutos reales (PAT-GOB-RES-06)."""
+BASELINE_SECONDS: Final = 120.0
+"""La línea base, antes del bloqueo: el mismo tráfico con la autoridad respondiendo."""
+DEGRADATION_FACTOR: Final = 2.0
+DEGRADATION_SLACK_MS: Final = 50.0
+"""«No se ven afectados»: el p95 con la autoridad bloqueada no pasa de 2 veces el de la línea
+base más 50 ms (holgura del PC o del runner compartidos). Los objetivos absolutos de NFR-GOB-01
+son tendencia fuera del ``soak`` (infrastructure-design §9.2) y quedan en el informe."""
 ROUND_SECONDS: Final = 16.0
-"""Una ronda de tráfico por nodo: un latido cada 16 s, dentro de los 4 por minuto del nodo."""
+"""Un latido de cada nodo cada 16 s, dentro de los 4 por minuto del nodo."""
+CYCLE_SECONDS: Final = 1.0
+"""Concesión, subida y hallazgo de cada nodo cada segundo: 60 por minuto, dentro de su límite."""
 PRODUCTIVE: Final = 3
 DECLARED: Final = 5
 """Nodos declarados sin alta: el alta admite 5 intentos cada 15 minutos por nodo."""
@@ -73,6 +87,8 @@ ROTATE_EVERY: Final = (60.0, 80.0)
 """Entre rotaciones (de nodos distintos: la ruta admite 2 por hora y nodo)."""
 MARGIN_SECONDS: Final = 5.0
 TARGETS: Final = ABSOLUTE_TARGETS["NFR-GOB-01"]
+ENROLLMENT_ALARM_MS: Final = 2 * TARGETS["POST /api/nodes/enrollment"]["p95_ms"]
+"""``latency-node-enrollment``: p95 del alta por encima del doble de su objetivo de 2 s."""
 ROUTES: Final = {
     "concesión": "POST /api/nodes/clip-uploads",
     "hallazgo": "POST /api/nodes/findings",
@@ -131,8 +147,8 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
             f"punto de KMS de la clave de la autoridad bloqueado {BLOCK_SECONDS / 60:.0f} min"
         ),
         expected=(
-            "alta y rotación transitorias; ingesta, latido y concesiones dentro de su p95;"
-            " alarma emitida; la instancia sigue ready"
+            "alta y rotación transitorias; ingesta, latido y concesiones sin degradarse (p95"
+            " frente a la línea base); alarma emitida; la instancia sigue ready"
         ),
     ) as run:
         flow = Onboarding(gob)
@@ -142,15 +158,17 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
         rng = run.child()
 
         failures: list[dict[str, Any]] = []
-        latencies: dict[str, list[float]] = defaultdict(list)
-        traffic: dict[str, list[int]] = defaultdict(list)
+        # Por fase: ``base`` (la autoridad responde) y ``bloqueo`` (la autoridad no responde).
+        latencies: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        traffic: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
         ready: list[int] = []
+        phase = ["base"]
 
         async def timed(what: str, request: Any) -> httpx.Response:
             started = WALL.monotonic()
             response: httpx.Response = await request
-            latencies[what].append((WALL.monotonic() - started) * 1000)
-            traffic[what].append(response.status_code)
+            latencies[phase[0]][what].append((WALL.monotonic() - started) * 1000)
+            traffic[phase[0]][what].append(response.status_code)
             return response
 
         async def authority(deadline: float) -> None:
@@ -199,12 +217,18 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
                 await asyncio.sleep(rng.uniform(*ENROLL_EVERY))
 
         async def normal(deadline: float) -> None:
-            """Concesión, subida, hallazgo y latido de cada nodo productivo, ronda a ronda."""
+            """Concesión, subida y hallazgo de cada nodo productivo una vez por segundo y un latido
+            cada ``ROUND_SECONDS`` (dentro de los límites del nodo): la API casi siempre tiene una
+            petición en curso, también mientras el alta espera a la autoridad."""
             last = WALL.monotonic()
+            next_heartbeat = next_ready = last
             while WALL.monotonic() < deadline:
                 round_started = WALL.monotonic()
                 gob.advance(round_started - last)  # el reloj de la aplicación sigue al real
                 last = round_started
+                beat = round_started >= next_heartbeat
+                if beat:
+                    next_heartbeat = round_started + ROUND_SECONDS
                 for zone in zones:
                     data = secrets.token_bytes(256)
                     request = _clip_request(zone, data)
@@ -238,29 +262,35 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
                     await timed(
                         "hallazgo", flow.submit(zone, NodeRoute.FINDING, document, "finding_id")
                     )
-                    await timed(
-                        "latido",
-                        gob.node_send(
-                            "POST",
-                            NodeRoute.HEARTBEAT.path,
-                            certificate=zone.cert,
-                            body=flow.heartbeat(zone),
-                        ),
-                    )
-                async with gob.client() as client:
-                    ready.append((await client.get("/health/ready")).status_code)
-                await asyncio.sleep(max(0.0, ROUND_SECONDS - (WALL.monotonic() - round_started)))
+                    if beat:
+                        await timed(
+                            "latido",
+                            gob.node_send(
+                                "POST",
+                                NodeRoute.HEARTBEAT.path,
+                                certificate=zone.cert,
+                                body=flow.heartbeat(zone),
+                            ),
+                        )
+                if phase[0] == "bloqueo" and round_started >= next_ready:
+                    next_ready = round_started + ROUND_SECONDS
+                    async with gob.client() as client:
+                        ready.append((await client.get("/health/ready")).status_code)
+                await asyncio.sleep(max(0.0, CYCLE_SECONDS - (WALL.monotonic() - round_started)))
 
         async def drive() -> None:
-            deadline = WALL.monotonic() + BLOCK_SECONDS
-            await asyncio.gather(authority(deadline), normal(deadline))
-
-        with gob.lifespan():
+            # Línea base: el mismo tráfico con la autoridad respondiendo, en esta misma ejecución.
+            await normal(WALL.monotonic() + BASELINE_SECONDS)
+            phase[0] = "bloqueo"
             gob.kms.hang = True
             try:
-                gob.run(drive())
+                deadline = WALL.monotonic() + BLOCK_SECONDS
+                await asyncio.gather(authority(deadline), normal(deadline))
             finally:
                 gob.kms.hang = False
+
+        with gob.lifespan():
+            gob.run(drive())
             written = {
                 "rotated": len(gob.records(zones[0].organization_id, "node_credential_rotated")),
                 "credentials": [
@@ -293,17 +323,41 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
             if result == "temporarily_unavailable"
         )
         node_total = sum(node_results.values())
-        p95s = {what: round(p95(values), 1) for what, values in latencies.items()}
+        enrollment_p95_ms = round(
+            p95([item["seconds"] * 1000 for item in failures if item["kind"] == "alta"]), 1
+        )
+        p95s = {
+            name: {what: round(p95(values), 1) for what, values in by_route.items()}
+            for name, by_route in latencies.items()
+        }
+        allowed = {
+            what: round(DEGRADATION_FACTOR * p95s["base"][what] + DEGRADATION_SLACK_MS, 1)
+            for what in ROUTES
+        }
         run.observe(
             authority_attempts=failures,
-            traffic={what: dict(_count(codes_)) for what, codes_ in traffic.items()},
+            traffic={
+                name: {what: dict(_count(codes_)) for what, codes_ in by_route.items()}
+                for name, by_route in traffic.items()
+            },
+            samples={
+                name: {what: len(values) for what, values in by_route.items()}
+                for name, by_route in latencies.items()
+            },
             p95_ms=p95s,
-            targets_ms={what: TARGETS[route]["p95_ms"] for what, route in ROUTES.items()},
+            p95_allowed_while_blocked_ms=allowed,
+            targets_ms_trend={what: TARGETS[route]["p95_ms"] for what, route in ROUTES.items()},
+            within_absolute_target_while_blocked={
+                what: p95s["bloqueo"][what] <= TARGETS[route]["p95_ms"]
+                for what, route in ROUTES.items()
+            },
             ready_during_block=dict(_count(ready)),
             ready_after=ready_after,
             node_ca_sign_timeouts=timeouts,
             node_requests=[[list(key), value] for key, value in sorted(node_results.items())],
             server_error_rate=round(server_errors / node_total, 4) if node_total else None,
+            enrollment_p95_ms=enrollment_p95_ms,
+            enrollment_alarm_ms=ENROLLMENT_ALARM_MS,
             written_during_block=written,
             enrolled_after_recovery=recovered is not None,
         )
@@ -318,17 +372,20 @@ def test_fs_gob_05_node_ca_kms_blocked_five_minutes(
         assert written["rotated"] == 0
         assert written["declared_with_credential"] == 0
         assert set(written["credentials"]) == {"active"}
-        # Ingesta, latido y concesiones: aceptadas y dentro de su p95.
-        for what, statuses in traffic.items():
-            assert set(statuses) == {200}, (what, _count(statuses))
-        for what, route in ROUTES.items():
-            assert len(latencies[what]) >= 20, what
-            assert p95s[what] <= TARGETS[route]["p95_ms"], (what, p95s[what])
-        # Alarma: las firmas vencidas cuentan y los 503 superan el 1 % de las peticiones.
-        # Cada alta y cada rotación firman dos certificados (cliente y servidor) y los dos vencen.
+        # Ingesta, latido y concesiones: aceptadas y sin verse afectadas por el bloqueo.
+        for name, by_route in traffic.items():
+            for what, statuses in by_route.items():
+                assert set(statuses) == {200}, (name, what, _count(statuses))
+        for what in ROUTES:
+            assert len(latencies["base"][what]) >= 15 and len(latencies["bloqueo"][what]) >= 40
+            assert p95s["bloqueo"][what] <= allowed[what], (what, p95s, allowed)
+        # Alarma: cada firma vencida cuenta (cada alta y cada rotación firman dos certificados,
+        # cliente y servidor, y los dos vencen), cada 503 de la autoridad cuenta en
+        # node_requests_total y el p95 del alta supera el doble de su objetivo: la condición de
+        # latency-node-enrollment (infrastructure-design §8.1).
         assert timeouts >= len(failures)
         assert server_errors == len(failures)
-        assert server_errors / node_total > 0.01
+        assert enrollment_p95_ms > ENROLLMENT_ALARM_MS, enrollment_p95_ms
         # La instancia sigue lista durante todo el bloqueo y después.
         assert ready and set(ready) == {200}
         assert ready_after == 200
