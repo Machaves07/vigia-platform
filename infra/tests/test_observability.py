@@ -8,6 +8,7 @@ síntesis y en ``backend/tests/unit/test_alarm_metrics_crosscheck.py`` con ``obs
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from collections import Counter
@@ -25,11 +26,17 @@ from stacks.compute import COLLECTOR_CONFIG, cluster_name
 from stacks.data import db_identifier
 from stacks.observability import (
     APPLICATION_ALARM_METRICS,
+    FLEET_PANELS,
+    FLEET_PER_NODE_METRICS,
+    FLEET_PERIODIC_TASKS,
     LOG_PROCESSES,
     NFR_NUC_38_ALARMS,
     NODE_ROUTE_P95_TARGETS_MS,
     OPERATION_P95_TARGETS_MS,
+    PENDING_UNIT_METRICS,
+    PENDING_UNIT_TASKS,
     PERIODIC_TASK_MAX_AGE_SECONDS,
+    PROVISIONAL_NODE_ROUTE_TARGETS,
     USAGE_QUOTAS,
     dashboard_name,
 )
@@ -42,6 +49,38 @@ NAMESPACE = "Vigia/Platform"
 FIXED_DIMENSIONS = frozenset({"service", "environment"})
 COLLECTOR = INFRA / "otel" / "collector.yaml"
 DELETE_LOG_ACTIONS = ("logs:DeleteLogGroup", "logs:DeleteLogStream")
+NODE_DIMENSION = "node_id"
+BACKEND_CATALOG = (
+    INFRA.parent / "backend" / "src" / "vigia_platform" / "shared" / "observability" / "metrics.py"
+)
+
+
+def _backend_metrics() -> dict[str, str]:
+    """Nombre → clase (``_C``, ``_H`` o ``_G``) de cada métrica de ``CATALOG`` del backend, leído
+    con ``ast`` (la infraestructura no instala el backend)."""
+    tree = ast.parse(BACKEND_CATALOG.read_text(encoding="utf-8"))
+    names: dict[str, str] = {}
+    kinds: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "MetricName":
+            for item in node.body:
+                if isinstance(item, ast.Assign) and isinstance(item.value, ast.Constant):
+                    (member,) = item.targets
+                    assert isinstance(member, ast.Name)
+                    names[member.id] = str(item.value.value)
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(target, ast.Name) and target.id == "CATALOG":
+            assert isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Tuple)
+            for call in node.value.elts:
+                assert isinstance(call, ast.Call)
+                member, kind = call.args[0], call.args[1]
+                assert isinstance(member, ast.Attribute) and isinstance(kind, ast.Name)
+                kinds[member.attr] = kind.id
+    assert kinds and set(kinds) <= set(names)
+    return {names[member]: kind for member, kind in kinds.items()}
+
+
+BACKEND_METRICS = _backend_metrics()
 
 
 def _service_alarm_keys(config: EnvironmentConfig) -> set[str]:
@@ -350,9 +389,43 @@ def test_collector_declarations_only_use_closed_low_cardinality_attributes() -> 
         "alert_type",
         "app_version",
     }
-    for sets, _ in _collector_declarations():
+    for sets, selectors in _collector_declarations():
         for dimensions in sets:
+            if NODE_DIMENSION in dimensions:
+                # NFR-GOB-13: node_id solo en las ocho series por nodo, nunca un histograma.
+                assert dimensions == FIXED_DIMENSIONS | {NODE_DIMENSION}, sorted(dimensions)
+                assert collector_node_metrics(selectors) == set(FLEET_PER_NODE_METRICS)
+                continue
             assert FIXED_DIMENSIONS <= dimensions <= allowed, sorted(dimensions)
+
+
+def collector_node_metrics(selectors: list[str]) -> set[str]:
+    """Las métricas del catálogo del backend que los selectores dados publican."""
+    return {name for name in BACKEND_METRICS if any(re.search(s, name) for s in selectors)}
+
+
+def test_only_the_eight_per_node_counters_and_gauges_carry_node_id() -> None:
+    """NFR-GOB-13 y 55: a lo sumo 8 series por nodo, solo contadores y medidores."""
+    assert len(FLEET_PER_NODE_METRICS) == 8
+    for name in FLEET_PER_NODE_METRICS:
+        assert BACKEND_METRICS[name] in ("_C", "_G"), name
+    published = set()
+    for sets, selectors in _collector_declarations():
+        if any(NODE_DIMENSION in dimensions for dimensions in sets):
+            published |= collector_node_metrics(selectors)
+    assert published == set(FLEET_PER_NODE_METRICS)
+    histograms = {name for name, kind in BACKEND_METRICS.items() if kind == "_H"}
+    assert histograms and not histograms & published
+
+
+def test_bulkhead_wait_and_rejections_are_published_by_pool_class() -> None:
+    """Nota de la revisión de VIG-140: sin ``pool_class`` no hay serie por clase."""
+    declarations = _collector_declarations()
+    for name in ("bulkhead_wait_ms", "bulkhead_rejected_total", "bulkhead_in_use"):
+        assert any(
+            FIXED_DIMENSIONS | {"pool_class"} in sets and any(re.search(s, name) for s in selectors)
+            for sets, selectors in declarations
+        ), name
 
 
 def test_every_nfr_nuc_38_condition_has_its_alarms(deployment: Synthesized) -> None:
@@ -459,14 +532,95 @@ def test_periodic_task_alarms_use_each_task_threshold(pilot: Synthesized) -> Non
             assert (metric["Period"], alarm["EvaluationPeriods"]) == (60, 3)
 
 
-def test_node_latency_alarms_follow_nfr_gob_01(pilot: Synthesized) -> None:
-    alarms = _alarms(pilot)
+CONTRACT_ROUTES = {
+    # NFR-GOB-01.
+    "/api/nodes/findings": 500,
+    "/api/nodes/detection-reviews": 500,
+    "/api/nodes/observability-events": 200,
+    "/api/nodes/heartbeats": 150,
+    "/api/nodes/clip-uploads": 100,
+    "/api/nodes/zones/{zone_id}/catalog": 100,
+    "/api/nodes/enrollment": 2000,
+    # A-55, [objetivo propio] provisionales.
+    "/api/nodes/credential-rotations": 2000,
+    "/api/nodes/clip-uploads/{clip_id}/confirmation": 300,
+    "/api/nodes/update-results": 200,
+}
+"""Las diez rutas obligatorias del contrato (nota T-04 de U-03 §8.1) con su objetivo p95."""
+
+
+def test_node_latency_alarms_are_one_per_contract_route(deployment: Synthesized) -> None:
+    """Exactamente diez ``latency-node-*``: p95 por encima de 2 x objetivo durante 15 min."""
     routes = {}
-    for key, alarm in alarms.items():
+    for key, alarm in _alarms(deployment).items():
+        if not key.startswith("latency-node-"):
+            continue
+        ((metric),) = list(_metric_stats(alarm))
+        assert metric["MetricName"] == "http_server_duration_ms", key
+        assert set(_dimensions(metric)) == FIXED_DIMENSIONS | {"route"}, key
+        assert _dimensions(metric)["service"] == "vigia-api", key
+        assert metric["Stat"] == "p95", key
+        assert (metric["Period"], alarm["EvaluationPeriods"]) == (300, 3), key  # 15 min
+        assert alarm["ComparisonOperator"] == "GreaterThanThreshold", key
+        route = _dimensions(metric)["route"]
+        assert route not in routes, route
+        routes[route] = alarm["Threshold"]
+    assert routes == {route: 2 * target for route, target in CONTRACT_ROUTES.items()}
+    assert NODE_ROUTE_P95_TARGETS_MS == CONTRACT_ROUTES
+
+
+def test_the_three_provisional_latency_targets_say_so(pilot: Synthesized) -> None:
+    """A-55: rotación, confirmación y resultado de actualización no tienen cifra en NFR-GOB-01."""
+    assert set(PROVISIONAL_NODE_ROUTE_TARGETS) == {
+        "/api/nodes/credential-rotations",
+        "/api/nodes/clip-uploads/{clip_id}/confirmation",
+        "/api/nodes/update-results",
+    }
+    for key, alarm in _alarms(pilot).items():
         if key.startswith("latency-node-"):
             ((metric),) = list(_metric_stats(alarm))
-            routes[_dimensions(metric)["route"]] = alarm["Threshold"]
-    assert routes == {route: 2 * target for route, target in NODE_ROUTE_P95_TARGETS_MS.items()}
+            provisional = _dimensions(metric)["route"] in PROVISIONAL_NODE_ROUTE_TARGETS
+            description = str(alarm["AlarmDescription"])
+            assert ("provisional, A-55" in description) is provisional, key
+            assert ("NFR-GOB-01" in description) is not provisional, key
+
+
+def test_u03_periodic_tasks_have_their_seven_stale_alarms(deployment: Synthesized) -> None:
+    """Siete ``periodic-task-stale-*`` de U-03 con las tres cadencias (LC-GOB-18): 180 s en 3
+    periodos de 1 min, 3 h y 72 h. La prueba cruzada del backend las contrasta con ``U03_TASKS``."""
+    cadences = {
+        "detect_mute_nodes": 180,
+        "evaluate_fleet_alarms": 180,
+        "expire_enrollment_codes": 180,
+        "regenerate_revocation_list": 180,
+        "mark_orphan_clips": 3 * 3600,
+        "expire_walk_test_sessions": 72 * 3600,
+        "alert_expiring_certificates": 72 * 3600,
+    }
+    assert set(FLEET_PERIODIC_TASKS) == set(cadences)
+    assert not set(PENDING_UNIT_TASKS) & set(cadences)
+    assert not PENDING_UNIT_METRICS
+    alarms = _alarms(deployment)
+    for task, max_age in cadences.items():
+        alarm = alarms[f"periodic-task-stale-{task.replace('_', '-')}"]
+        ((metric),) = list(_metric_stats(alarm))
+        assert _dimensions(metric)["task"] == task
+        assert alarm["Threshold"] == max_age, task
+        fast = (60, 3) if max_age == 180 else (300, 1)
+        assert (metric["Period"], alarm["EvaluationPeriods"]) == fast, task
+
+
+def test_revocation_list_publish_failed_watches_the_cycle_counter(pilot: Synthesized) -> None:
+    """El contador de TASK-220 (también el ciclo cortado a mitad): uno o más en 5 min."""
+    alarm = _alarms(pilot)["revocation-list-publish-failed"]
+    ((metric),) = list(_metric_stats(alarm))
+    assert metric["MetricName"] == "revocation_list_publish_failed"
+    assert _dimensions(metric) == {"service": "vigia-worker", "environment": "pilot"}
+    assert (metric["Stat"], metric["Period"]) == ("Sum", 300)
+    assert (alarm["Threshold"], alarm["ComparisonOperator"]) == (
+        1,
+        "GreaterThanOrEqualToThreshold",
+    )
 
 
 def test_single_zone_alarm_watches_each_zone_of_tg_api(pilot: Synthesized) -> None:
@@ -663,6 +817,109 @@ def test_dashboard_has_the_panels_of_nfr_nuc_44_and_the_units(deployment: Synthe
     }
 
 
+FLEET_SECTION = "## Flota (U-03, n 18)"
+SEARCH = re.compile(r"SEARCH\('\{([^}]*)\} MetricName=\"([a-z_]+)\"")
+
+
+def _section(widgets: list[JsonObject], header: str) -> list[JsonObject]:
+    """Los widgets entre el título ``header`` y el título siguiente."""
+    start = next(
+        index
+        for index, w in enumerate(widgets)
+        if w["type"] == "text" and w["properties"]["markdown"] == header
+    )
+    section = []
+    for widget in widgets[start + 1 :]:
+        if widget["type"] == "text" and str(widget["properties"]["markdown"]).startswith("## "):
+            break
+        section.append(widget)
+    return section
+
+
+def _widget_metrics(widget: JsonObject) -> Iterator[tuple[str, frozenset[str], str]]:
+    """``(métrica, dimensiones, origen)`` de cada métrica de ``Vigia/Platform`` del widget:
+    las explícitas y las de cada ``SEARCH`` (``origen`` es ``metric`` o ``search``)."""
+    for entry in widget["properties"].get("metrics", []):
+        if isinstance(entry[0], str):
+            if entry[0] == NAMESPACE:
+                fields = [value for value in entry[2:] if isinstance(value, str)]
+                yield str(entry[1]), frozenset(fields[0::2]), "metric"
+            continue
+        for match in SEARCH.finditer(str(entry[0].get("expression", ""))):
+            namespace, *dimensions = (part.strip() for part in match.group(1).split(","))
+            assert namespace == NAMESPACE, match.group(0)
+            yield match.group(2), frozenset(dimensions), "search"
+
+
+def test_fleet_section_draws_each_panel_from_published_metrics(deployment: Synthesized) -> None:
+    """NFR-GOB-58 y U-03 §8.2: cada panel con métricas del catálogo del backend y ningún texto de
+    pendientes de U-03 en todo el tablero."""
+    _, widgets = _dashboard(deployment)
+    section = _section(widgets, FLEET_SECTION)
+    titles = [str(w["properties"].get("title")) for w in section]
+    assert len(FLEET_PANELS) == len(set(FLEET_PANELS)) == 9
+    for panel in FLEET_PANELS:
+        (widget,) = [w for w in section if w["properties"].get("title") == panel]
+        names = {name for name, _, _ in _widget_metrics(widget)}
+        assert names and names <= set(BACKEND_METRICS), (panel, names - set(BACKEND_METRICS))
+    assert "Alarmas de flota" in titles
+    assert not [w for w in section if w["type"] == "text"]
+    for widget in widgets:
+        if widget["type"] == "text":
+            markdown = str(widget["properties"]["markdown"])
+            assert markdown == FLEET_SECTION or "U-03" not in markdown, markdown
+            assert "fleet" not in markdown.lower(), markdown
+
+
+def test_dashboard_metrics_are_published_with_their_dimensions(deployment: Synthesized) -> None:
+    """Toda métrica de ``Vigia/Platform`` del tablero existe en el catálogo y ``awsemf`` la publica
+    con ese conjunto de dimensiones; ``node_id`` solo en contadores y medidores por nodo."""
+    _, widgets = _dashboard(deployment)
+    declarations = _collector_declarations()
+    seen = 0
+    for widget in widgets:
+        if widget["type"] != "metric":
+            continue
+        for name, dimensions, _ in _widget_metrics(widget):
+            seen += 1
+            assert name in BACKEND_METRICS, name
+            assert any(
+                dimensions in sets and any(re.search(s, name) for s in selectors)
+                for sets, selectors in declarations
+            ), (name, sorted(dimensions))
+            if NODE_DIMENSION in dimensions:
+                assert name in FLEET_PER_NODE_METRICS, name
+                assert BACKEND_METRICS[name] != "_H", name
+    assert seen
+
+
+def test_fleet_panels_cover_every_route_task_and_class(pilot: Synthesized) -> None:
+    _, widgets = _dashboard(pilot)
+    section = {str(w["properties"].get("title")): w for w in _section(widgets, FLEET_SECTION)}
+    text = json.dumps(section)
+    for route in CONTRACT_ROUTES:
+        assert text.count(f'"route", "{route}"') >= 3, route  # p95, 4xx y 5xx
+    for task in FLEET_PERIODIC_TASKS:
+        assert text.count(f'"task", "{task}"') >= 3, task  # duración, fallos y edad
+    pools = section["Semaforos y pools por clase"]
+    found = {(n, d) for n, d, _ in _widget_metrics(pools)}
+    for name in ("bulkhead_in_use", "bulkhead_size", "bulkhead_rejected_total", "bulkhead_wait_ms"):
+        assert (name, FIXED_DIMENSIONS | {"pool_class"}) in found, name
+    per_node = {
+        name
+        for widget in section.values()
+        for name, dimensions, _ in _widget_metrics(widget)
+        if NODE_DIMENSION in dimensions
+    }
+    assert per_node == {
+        "fleet_node_reachable",
+        "fleet_heartbeats_total",
+        "fleet_heartbeat_gap_seconds",
+        "fleet_node_queue_pending",
+        "clip_grants_orphaned_total",
+    }
+
+
 def test_pilot_dashboard_is_vigia_pilot(pilot: Synthesized) -> None:
     assert _dashboard(pilot)[0] == "vigia-pilot"
 
@@ -703,8 +960,6 @@ def test_waf_blocked_spike_reads_the_web_acl(permanent_deployment: Synthesized) 
 
 def test_alarm_tables_are_literals_the_backend_can_read() -> None:
     """La prueba cruzada del backend no importa CDK: lee estas tablas con ``ast``."""
-    import ast
-
     source = (INFRA / "stacks" / "observability.py").read_text(encoding="utf-8")
     literals = {
         target.id: node.value
@@ -721,6 +976,11 @@ def test_alarm_tables_are_literals_the_backend_can_read() -> None:
         "RESTORE_DRILL_OVERDUE_DAYS",
         "PENDING_UNIT_METRICS",
         "PENDING_UNIT_TASKS",
+        "NODE_ROUTE_P95_TARGETS_MS",
+        "PROVISIONAL_NODE_ROUTE_TARGETS",
+        "CERTIFICATE_NODE_ROUTES",
+        "FLEET_PERIODIC_TASKS",
+        "FLEET_PER_NODE_METRICS",
     ):
         ast.literal_eval(literals[name])
 
