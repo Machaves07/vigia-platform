@@ -55,6 +55,7 @@ from vigia_platform.shared.api.app import UnitRegistration
 from vigia_platform.shared.api.declarations import NODE_GATE_STATE_KEY, NodeRoute
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.ratelimit import Allowed, Budget, Limited, RateLimiter
 
 __all__ = [
@@ -394,6 +395,7 @@ def node_world(
     policy: VersionPolicy | None = None,
     routes: tuple[NodeRoute, ...] = tuple(NodeRoute),
     runtime: Mapping[str, Any] | None = None,
+    metrics: PlatformMetrics | None = None,
 ) -> NodeWorld:
     """``NodeWorld`` con dos organizaciones y un nodo dado de alta en cada una."""
     world = World()
@@ -409,7 +411,7 @@ def node_world(
         probe=probe,
         limiter=limiter,
         policy=policy,
-        responses=NodeResponses(clock),
+        responses=NodeResponses(clock, metrics=metrics),
     )
     app = node_app(world, gate, routes=routes, runtime=runtime)
     result = NodeWorld(world, store, TestAuthority(), probe, gate, app, a, b)

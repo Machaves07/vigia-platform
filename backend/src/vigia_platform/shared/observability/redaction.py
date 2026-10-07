@@ -20,7 +20,9 @@ Dos barreras, compartidas por ``logging``, ``metrics`` y ``tracing``:
   correos nunca son identificadores ni valores de una lista cerrada, así que nunca salen.
 
 Las listas cerradas que dependen de otros módulos (rutas, tipos de registro, consumidores,
-propósitos de clave…) se amplían al arrancar con ``AttributePolicy.register``.
+propósitos de clave…) se amplían al arrancar con ``AttributePolicy.register``; las plantillas de
+ruta declaradas, con ``AttributePolicy.register_routes``, que valida tramo a tramo para no tomar
+``/api/nodes/heartbeats`` por un token.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ __all__ = [
     "AttributePolicy",
     "AttributeValue",
     "is_finite_non_negative",
+    "is_route_template",
     "known_exception_type",
     "redact_text",
 ]
@@ -65,6 +68,10 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 _ENUM_MEMBER_VALUE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _REGISTERED_VALUE = re.compile(r"^[A-Za-z0-9_./{}:-]{1,128}$")
 _REGISTERED_NAME = re.compile(r"^[A-Za-z0-9_./{}: -]{1,128}$")
+# Tramo de una plantilla de ruta declarada: un parámetro (``{zone_id}``) o palabras en minúsculas
+# unidas por guiones, con un punto inicial opcional (``.well-known``). Sin dígitos, mayúsculas
+# ni ``_+=``: un token o un secreto nunca tiene esta forma.
+_ROUTE_SEGMENT = re.compile(r"^(?:\{[a-z][a-z0-9_]{0,31}\}|\.?[a-z]{1,32}(?:-[a-z]{1,32}){0,7})$")
 _HTTP_SPAN = re.compile(
     r"(?:HTTP )?(?P<method>[A-Z_]+)(?: (?P<route>/\S*))?(?P<suffix> http (?:send|receive))?"
 )
@@ -252,6 +259,20 @@ estructurados: ninguna métrica la declara (cardinalidad)."""
 _SOURCE_TAG: Final = re.compile(r"^[0-9a-f]{16}$")
 
 
+def is_route_template(value: object) -> bool:
+    """``value`` tiene forma de plantilla de ruta declarada (``/api/nodes/zones/{zone_id}``).
+
+    Cada tramo es un parámetro o palabras en minúsculas unidas por guiones; así una plantilla
+    larga sin barras ni puntos, que ``redact_text`` toma por un token, sigue siendo admisible.
+    """
+    return (
+        isinstance(value, str)
+        and _REGISTERED_VALUE.fullmatch(value) is not None
+        and value.startswith("/")
+        and (value == "/" or all(_ROUTE_SEGMENT.fullmatch(part) for part in value[1:].split("/")))
+    )
+
+
 class AttributePolicy:
     """Lista blanca de atributos con sus validadores (identificadores y enumeraciones)."""
 
@@ -290,10 +311,29 @@ class AttributePolicy:
                 or redact_text(value) != value
             ):
                 raise ValueError(f"valor de enumeración no admitido para {key!r}")
-        self._enumerations[key].update(accepted)
+        self._add(key, accepted)
+
+    def register_routes(self, templates: Iterable[str]) -> None:
+        """Amplía ``route`` y ``http.route`` con plantillas de ruta declaradas en el código.
+
+        ``register`` toma por un token una plantilla con 20 o más caracteres seguidos del alfabeto
+        de token (``/api/nodes/heartbeats``) y la rechazaría; aquí cada tramo se valida por
+        separado: un parámetro o palabras en minúsculas unidas por guiones (NFR-GOB-54). La
+        redacción de ``redact_text`` sobre texto libre no cambia.
+
+        Raises:
+            ValueError: una plantilla no tiene forma de ruta declarada.
+        """
+        accepted = list(templates)
+        if not all(is_route_template(template) for template in accepted):
+            raise ValueError("plantilla de ruta no admitida")
+        self._add("route", accepted)
+
+    def _add(self, key: str, values: list[str]) -> None:
+        self._enumerations[key].update(values)
         shared = _SHARED_REGISTRATION.get(key)
         if shared is not None:
-            self._enumerations[shared].update(accepted)
+            self._enumerations[shared].update(values)
 
     @staticmethod
     def _check_names(names: Iterable[str]) -> list[str]:
