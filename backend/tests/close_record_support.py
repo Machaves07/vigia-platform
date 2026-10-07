@@ -403,8 +403,8 @@ class CloseWorld:
             "INSERT INTO catalog.occlusion_test (test_id, organization_id, plant_id, session_id,"
             " camera_id, started_at, ended_at, deadline, verification, correlated_event_ids,"
             " declared_reason_es, recorded_by, ledger_record_id)"
-            " VALUES ($1, $2, $3, $4, $5, $6, $7, $7::timestamptz + interval '5 minutes', $8, $9, $10, $11,"
-            " $12)",
+            " VALUES ($1, $2, $3, $4, $5, $6, $7, $7::timestamptz + interval '5 minutes', $8, $9,"
+            " $10, $11, $12)",
             test,
             session.organization_id,
             session.plant_id,
