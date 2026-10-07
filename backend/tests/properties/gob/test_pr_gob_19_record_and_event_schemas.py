@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -138,12 +138,21 @@ def test_exactly_the_26_types_and_the_15_events_are_declared() -> None:
     assert len(U03_EVENTS) == 15
 
 
+LATEST_VERSIONS: Final = {"walk_test_result": 2}
+"""Tipos con una versión posterior a la 1 (TASK-216 amplía el acta); la 1 sigue registrada."""
+
+
 def test_every_type_is_written_by_u03_in_the_plant_chain_at_version_1() -> None:
+    versions: dict[str, set[int]] = {}
+    for compiled in REGISTRY.all_versions():
+        versions.setdefault(compiled.record_type, set()).add(compiled.schema_version)
     for compiled in TYPES:
         definition = compiled.definition
+        latest = LATEST_VERSIONS.get(compiled.record_type, 1)
         assert definition.writer_unit is ActorUnit.U03, compiled.record_type
         assert definition.chain_level is ChainLevel.PLANT, compiled.record_type
-        assert definition.schema_version == 1, compiled.record_type
+        assert definition.schema_version == latest, compiled.record_type
+        assert versions[compiled.record_type] == set(range(1, latest + 1)), compiled.record_type
         assert not definition.chain_follows_scope, compiled.record_type
         config = definition.content_model.model_config
         assert config.get("extra") == "forbid" and config.get("strict") is True

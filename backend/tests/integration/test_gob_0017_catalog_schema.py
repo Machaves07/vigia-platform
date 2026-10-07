@@ -77,6 +77,8 @@ def _load_migration(name: str = "gob_0017_catalog_schema") -> Any:
 MIGRATION = _load_migration()
 REOPENING = _load_migration("gob_0023_walk_test_reopening")
 """``gob_0023`` añade a ``walk_test_session`` las columnas de la reapertura (TASK-214)."""
+EXPOSURE = _load_migration("gob_0027_exposure_sample")
+"""``gob_0027`` añade ``exposure_sample`` ⛓, sin ``UPDATE`` para ``vigia_app`` (TASK-216)."""
 
 
 @dataclass(frozen=True)
@@ -247,7 +249,7 @@ def test_append_only_registry_lists_every_append_only_table() -> None:
     spec.loader.exec_module(registry)
     listed = {name for name in registry.APPEND_ONLY_TABLES if name.startswith("catalog.")}
     assert listed == {f"catalog.{table}" for table in APPEND_ONLY_TABLES}
-    assert set(MIGRATION.APPEND_ONLY_TABLES) == set(APPEND_ONLY_TABLES)
+    assert {*MIGRATION.APPEND_ONLY_TABLES, *EXPOSURE.APPEND_ONLY_TABLES} == set(APPEND_ONLY_TABLES)
 
 
 @pytest.mark.asyncio
@@ -444,6 +446,7 @@ _OUTSIDE_WHITELIST = {
     "walk_test_pass": ("result", "'missed'"),
     "occlusion_test": ("camera_id", "gen_random_uuid()"),
     "commissioning_record": ("total_hours", "1"),
+    "exposure_sample": ("displayed_at", "displayed_at + interval '1 second'"),
 }
 
 

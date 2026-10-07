@@ -44,21 +44,24 @@ __all__ = ["PostgresWalkTestRepository", "WalkTestWriteConflict"]
 _SESSION: Final = text(
     "SELECT session_id, organization_id, plant_id, zone_id, node_id, catalog_version, kind,"
     " status, passes_per_cell, matrix_rows, started_at, last_activity_at, closed_at,"
-    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es"
+    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es,"
+    " regression_basis_record_id"
     " FROM catalog.walk_test_session"
     " WHERE organization_id = :organization_id AND session_id = :session_id"
 )
 _LOCK_SESSION: Final = text(
     "SELECT session_id, organization_id, plant_id, zone_id, node_id, catalog_version, kind,"
     " status, passes_per_cell, matrix_rows, started_at, last_activity_at, closed_at,"
-    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es"
+    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es,"
+    " regression_basis_record_id"
     " FROM catalog.walk_test_session"
     " WHERE organization_id = :organization_id AND session_id = :session_id FOR UPDATE"
 )
 _OPEN_FOR_ZONE: Final = text(
     "SELECT session_id, organization_id, plant_id, zone_id, node_id, catalog_version, kind,"
     " status, passes_per_cell, matrix_rows, started_at, last_activity_at, closed_at,"
-    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es"
+    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es,"
+    " regression_basis_record_id"
     " FROM catalog.walk_test_session"
     " WHERE organization_id = :organization_id AND zone_id = :zone_id"
     " AND status IN ('in_progress', 'reopened')"
@@ -66,7 +69,8 @@ _OPEN_FOR_ZONE: Final = text(
 _CURRENT_FOR_ZONE: Final = text(
     "SELECT session_id, organization_id, plant_id, zone_id, node_id, catalog_version, kind,"
     " status, passes_per_cell, matrix_rows, started_at, last_activity_at, closed_at,"
-    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es"
+    " commissioning_record_id, reopened_at, reopened_by, reopen_reason_es,"
+    " regression_basis_record_id"
     " FROM catalog.walk_test_session"
     " WHERE organization_id = :organization_id AND zone_id = :zone_id"
     " AND status IN ('in_progress', 'reopened', 'incomplete')"
@@ -75,11 +79,18 @@ _CURRENT_FOR_ZONE: Final = text(
 _INSERT_SESSION: Final = text(
     "INSERT INTO catalog.walk_test_session (session_id, organization_id, plant_id, zone_id,"
     " node_id, catalog_version, kind, status, passes_per_cell, matrix_rows, started_at,"
-    " last_activity_at)"
+    " last_activity_at, regression_basis_record_id)"
     " VALUES (:session_id, :organization_id, :plant_id, :zone_id, :node_id, :catalog_version,"
     " :kind, 'in_progress', :passes_per_cell, CAST(:matrix_rows AS jsonb), :started_at,"
-    " :started_at)"
+    " :started_at, :regression_basis_record_id)"
     " ON CONFLICT (zone_id) WHERE status IN ('in_progress', 'reopened') DO NOTHING"
+)
+_CLOSE: Final = text(
+    "UPDATE catalog.walk_test_session SET status = 'closed', closed_at = :closed_at,"
+    " commissioning_record_id = :commissioning_record_id,"
+    " last_activity_at = GREATEST(last_activity_at, :closed_at)"
+    " WHERE organization_id = :organization_id AND session_id = :session_id"
+    " AND status IN ('in_progress', 'reopened')"
 )
 _TOUCH: Final = text(
     "UPDATE catalog.walk_test_session SET last_activity_at = GREATEST(last_activity_at, :at)"
@@ -209,6 +220,7 @@ def _session(row: Row[Any]) -> WalkTestSession:
         reopened_at=row.reopened_at,
         reopened_by=_optional_uuid(row.reopened_by),
         reopen_reason_es=row.reopen_reason_es,
+        regression_basis_record_id=_optional_uuid(row.regression_basis_record_id),
     )
 
 
@@ -322,9 +334,30 @@ class PostgresWalkTestRepository:
                 "passes_per_cell": session.passes_per_cell,
                 "matrix_rows": _dumps([row.to_json() for row in session.matrix_rows]),
                 "started_at": session.started_at,
+                "regression_basis_record_id": session.regression_basis_record_id,
             },
         )
         return _rowcount(result) == 1
+
+    async def close(
+        self,
+        transaction: Transaction,
+        session_id: uuid.UUID,
+        closed_at: datetime,
+        commissioning_record_id: uuid.UUID,
+    ) -> None:
+        """``in_progress | reopened → closed`` con su acta (TASK-216), bajo el candado de la sesión;
+        si ya no estaba abierta, ``WalkTestWriteConflict``."""
+        result = await transaction.execute(
+            _CLOSE,
+            {
+                **_session_key(transaction, session_id),
+                "closed_at": closed_at,
+                "commissioning_record_id": commissioning_record_id,
+            },
+        )
+        if _rowcount(result) != 1:
+            raise WalkTestWriteConflict
 
     async def touch(self, transaction: Transaction, session_id: uuid.UUID, at: datetime) -> None:
         """``last_activity_at`` llevado a ``at`` (nunca hacia atrás) de una sesión abierta; si no

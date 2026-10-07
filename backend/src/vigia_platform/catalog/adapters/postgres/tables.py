@@ -35,6 +35,7 @@ __all__ = [
     "COMMISSIONING_RECORD",
     "DECLARED_STANDARD_VERSION",
     "DOCUMENT_UPLOAD_GRANT",
+    "EXPOSURE_SAMPLE",
     "FAMILY_ADMISSION",
     "GATE_STATE_HISTORY",
     "METADATA",
@@ -305,6 +306,8 @@ WALK_TEST_SESSION: Final = Table(
     _instant("reopened_at", nullable=True),
     _uuid("reopened_by", nullable=True),
     _text("reopen_reason_es", nullable=True),
+    # gob_0027: la última marca de la regresión al abrir la reejecución (TASK-216).
+    _uuid("regression_basis_record_id", nullable=True),
 )
 """§2.11 ``WalkTestSession`` 🔒; una sesión abierta por zona."""
 
@@ -378,6 +381,20 @@ COMMISSIONING_RECORD: Final = Table(
     _uuid("ledger_record_id"),
 )
 """§2.15 ``CommissioningRecord`` ⛓, un acta por sesión."""
+
+EXPOSURE_SAMPLE: Final = Table(
+    "exposure_sample",
+    METADATA,
+    _uuid("sample_id", primary_key=True),
+    *_scope(),
+    _uuid("session_id"),
+    _uuid("pass_id"),
+    _instant("fetched_at"),
+    _instant("displayed_at"),
+    _uuid("recorded_by"),
+    _instant("recorded_at"),
+)
+"""Muestra de exposición del acta (gob_0027, TASK-216) ⛓: una por pase, reloj del navegador."""
 
 WALK_TEST_REGRESSION: Final = Table(
     "walk_test_regression",

@@ -326,6 +326,14 @@ def _fix_walk_test(document: JsonObject, draw: st.DrawFn) -> None:
     for row in rows:
         row["missed"] = min(row["missed"], 1_000_000 // len(rows))
     document["false_negatives_total"] = sum(row["missed"] for row in rows)
+    latency = document["latency"]
+    if latency.get("not_measured"):
+        # v2 (TASK-216): not_measured nombra, en orden, los tramos que faltan.
+        latency["not_measured"] = [
+            name
+            for name in ("node_tranche", "platform_tranche", "exposure_tranche", "served_tranche")
+            if latency.get(name) is None
+        ]
 
 
 def _fix_occlusion(document: JsonObject, draw: st.DrawFn) -> None:
