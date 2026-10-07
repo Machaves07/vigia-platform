@@ -32,7 +32,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import hashlib
-import os
 import secrets
 import time
 from collections import Counter
@@ -55,7 +54,7 @@ from tests.load.conftest import (  # noqa: F401
     run_profile,
     sealed_dataset,
 )
-from tests.load.profiles import SCALE_VARIABLE, LoadProfile
+from tests.load.profiles import scaled
 from tests.load.provision import LIVE_VIEW_HOST, SOFTWARE_VERSION, Fleet
 from tests.load.report import analyse
 from tests.load.test_load_ci import DRIVER_MARGIN_SECONDS, ledger_check
@@ -69,34 +68,11 @@ from vigia_platform.node_api.limits import MINIMUM_PER_MINUTE
 
 pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
-FULL: Final = LoadProfile(
-    "fs-gob-10",
-    nodes=100,
-    zones_per_node=1,
-    nodes_per_plant=20,
-    speed_factor=1.0,
-    steady_minutes=6.0,
-)
-SMOKE: Final = LoadProfile(
-    "fs-gob-10-smoke",
-    nodes=20,
-    zones_per_node=1,
-    nodes_per_plant=20,
-    speed_factor=1.0,
-    steady_minutes=4.0,
-)
 BURST: Final = 1_000
 """Concesiones de la ráfaga final de un mismo nodo: muy por encima de su límite por minuto."""
 BURST_CONCURRENCY: Final = 40
 GRANT_MINIMUM: Final = MINIMUM_PER_MINUTE["clip_upload"]
 """El mínimo de NFR-CTR-02 para las concesiones: 240 por minuto y nodo."""
-
-
-def _profile() -> LoadProfile:
-    scale = os.environ.get(SCALE_VARIABLE, "full").strip().lower() or "full"
-    if scale not in {"full", "smoke"}:
-        raise ValueError(f"{SCALE_VARIABLE} es full o smoke, no {scale!r}")
-    return FULL if scale == "full" else SMOKE
 
 
 @pytest.fixture(scope="module")
@@ -158,7 +134,7 @@ def _burst(platform: RestartablePlatform, fleet: Fleet) -> dict[str, Any]:
         }
         async with gate:
             response = await client.post(
-                url, json=body, headers={"X-Vigia-Contract-Version": CONTRACT_VERSION}
+                url, json=body, headers={"X-Vigia-Contract-Version": str(CONTRACT_VERSION)}
             )
         retry = response.json().get("retry_after_seconds") if response.status_code == 429 else None
         outcomes.append(
@@ -193,7 +169,7 @@ def test_fs_gob_10_rolling_restart_with_cold_token_buckets(
     clip_cache: Path,  # noqa: F811
     tmp_path: Path,
 ) -> None:
-    profile = _profile()
+    profile = scaled("fs-gob-10")
     with scenario(
         "FS-GOB-10",
         title="Instancia con el cubo de fichas frío tras un reinicio",
@@ -233,7 +209,12 @@ def test_fs_gob_10_rolling_restart_with_cold_token_buckets(
             )
             for name, moment in zip(order, moments, strict=True):
                 time.sleep(max(0.0, moment - (WALL.monotonic() - started)))
-                assert not driving.done(), "los nodos siguen enviando durante el reinicio"
+                if driving.done():  # los nodos tienen que seguir enviando durante el reinicio
+                    early = driving.result()
+                    raise AssertionError(
+                        f"los nodos terminaron antes del reinicio ({early.code}):\n"
+                        + early.output[-4000:]
+                    )
                 platform.restart(name)
             driven = driving.result()
         assert driven.code == 0, driven.output

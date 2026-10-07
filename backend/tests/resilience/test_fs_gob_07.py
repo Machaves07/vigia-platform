@@ -30,9 +30,7 @@ Solo en ``nightly`` (pesado: 100 nodos). Solo datos generados.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Final
 
 import pytest
 
@@ -46,7 +44,7 @@ from tests.load.conftest import (  # noqa: F401
     sealed_dataset,
 )
 from tests.load.console_client import evaluate
-from tests.load.profiles import SCALE_VARIABLE, LoadProfile
+from tests.load.profiles import scaled
 from tests.load.report import drains_of
 from tests.load.test_load_ci import assert_functional, ledger_check, run_load
 from tests.load.test_load_nightly import (
@@ -58,36 +56,6 @@ from tests.resilience.harness import scenario
 
 pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
-FULL: Final = LoadProfile(
-    "fs-gob-07",
-    nodes=100,
-    zones_per_node=3,
-    nodes_per_plant=20,
-    speed_factor=60.0,
-    steady_minutes=2.0,
-    queue_hours=1.0,
-    settle_hours=0.5,
-    console=True,
-)
-SMOKE: Final = LoadProfile(
-    "fs-gob-07-smoke",
-    nodes=20,
-    zones_per_node=3,
-    nodes_per_plant=20,
-    speed_factor=240.0,
-    steady_minutes=0.5,
-    queue_hours=1.0,
-    settle_hours=0.5,
-    console=True,
-)
-
-
-def _profile() -> LoadProfile:
-    scale = os.environ.get(SCALE_VARIABLE, "full").strip().lower() or "full"
-    if scale not in {"full", "smoke"}:
-        raise ValueError(f"{SCALE_VARIABLE} es full o smoke, no {scale!r}")
-    return FULL if scale == "full" else SMOKE
-
 
 def test_fs_gob_07_mass_reconnection_of_a_hundred_nodes_with_an_hour_of_queue(
     load_target: LoadTarget,  # noqa: F811
@@ -95,7 +63,7 @@ def test_fs_gob_07_mass_reconnection_of_a_hundred_nodes_with_an_hour_of_queue(
     clip_cache: Path,  # noqa: F811
     tmp_path: Path,
 ) -> None:
-    profile = _profile()
+    profile = scaled("fs-gob-07")
     with scenario(
         "FS-GOB-07",
         title="Reconexión masiva de 100 nodos con una hora de cola",
