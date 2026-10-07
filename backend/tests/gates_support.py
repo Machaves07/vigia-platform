@@ -70,7 +70,7 @@ from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
-from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.ledger.registry import RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
 from vigia_platform.shared.outbox.publish import Outbox
@@ -326,8 +326,11 @@ class GatesWorld:
     ) -> tuple[uuid.UUID, ...]:
         """Catálogo vigente con ``cameras`` cámaras en la zona y, si ``node``, un nodo asignado.
 
-        ``payload`` añade campos al catálogo sintético (estándares, cobertura mínima…)."""
+        ``payload`` añade campos al catálogo sintético (estándares, cobertura mínima…); si trae
+        ``cameras``, esas son las cámaras de la zona."""
         camera_ids = tuple(uuid.uuid4() for _ in range(cameras))
+        if payload is not None and "cameras" in payload:
+            camera_ids = tuple(uuid.UUID(c["camera_id"]) for c in payload["cameras"])
         self.execute(
             "INSERT INTO catalog.zone_catalog_version (organization_id, plant_id, zone_id,"
             " catalog_version, issued_at, issued_by, role_in_use, reason_es, changed_fields,"
@@ -554,8 +557,13 @@ class GatesWorld:
 
 
 @contextmanager
-def gates_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[GatesWorld]:
-    """El entorno de ``GatesWorld`` sobre una base migrada propia."""
+def gates_world(
+    endpoint: PostgresEndpoint, prefix: str, extra_types: Sequence[RecordType] = ()
+) -> Iterator[GatesWorld]:
+    """El entorno de ``GatesWorld`` sobre una base migrada propia.
+
+    ``extra_types`` añade tipos de registro a los de las compuertas (p. ej. los de la prueba de
+    oclusión, VIG-154)."""
     signing = asyncio.run(bootstrapped_world())
     with authz_environment(endpoint, prefix) as authz:
         sessions = authz.sessions
@@ -565,6 +573,7 @@ def gates_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[GatesWorld]
         for definition in (
             *U02_RECORD_TYPES,
             *(d for d in CATALOG_RECORD_TYPES if d.record_type in GATE_TYPES),
+            *extra_types,
         ):
             registry.register(definition)
         outbox_catalog = OutboxCatalog()

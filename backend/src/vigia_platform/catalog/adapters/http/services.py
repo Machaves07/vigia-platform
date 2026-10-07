@@ -17,6 +17,7 @@ from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import PlantPolicyService
 from vigia_platform.catalog.application.publication import CatalogPublicationService
 from vigia_platform.catalog.application.regression import RegressionService
@@ -59,6 +60,8 @@ class CatalogHttp:
     """``GET /zones/{zone_id}/transparency`` (LC-GOB-04, VIG-149)."""
     walk_tests: WalkTestService | None = None
     """Sesión de walk-test, pasos, pases y reapertura (LC-GOB-06, VIG-150)."""
+    occlusions: OcclusionService | None = None
+    """Prueba de oclusión y su reevaluación perezosa (LC-GOB-07, VIG-154)."""
 
 
 def installed[T](service: T | None) -> T:
