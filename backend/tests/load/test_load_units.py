@@ -222,7 +222,9 @@ def test_the_drain_rate_is_the_queue_over_the_time_since_the_platform_came_back(
     assert drain.queued == 50 and drain.accepted == 50
     assert drain.seconds == pytest.approx(4.9)
     assert drain.writes_per_second == pytest.approx(50 / 4.9)
-    assert set(drain.plant_writes_per_second) == {"p1", "p2"}
+    # Las 50 aceptaciones caben en una ventana de 10 s: pico de 5 por segundo, 2,5 por planta.
+    assert drain.peak_writes_per_second == pytest.approx(5.0)
+    assert drain.peak_plant_writes_per_second == {"p1": 2.5, "p2": 2.5}
 
 
 def test_an_unaccepted_queued_record_leaves_the_drain_without_rate() -> None:

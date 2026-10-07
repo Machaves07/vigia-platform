@@ -112,8 +112,8 @@ def trend(analysis: dict[str, Any]) -> dict[str, Any]:
     """NFR-GOB-02 frente a sus objetivos absolutos: tendencia fuera del ``soak``."""
     targets = ABSOLUTE_TARGETS["NFR-GOB-02"]
     drains = analysis["drains"]
-    aggregate = max((d["writes_per_second"] or 0.0 for d in drains), default=None)
-    plant = max((d["max_plant_chain_writes_per_second"] or 0.0 for d in drains), default=None)
+    aggregate = max((d["peak_writes_per_second"] or 0.0 for d in drains), default=None)
+    plant = max((d["peak_plant_chain_writes_per_second"] or 0.0 for d in drains), default=None)
     return {
         "blocking": False,
         "NFR-GOB-02": {

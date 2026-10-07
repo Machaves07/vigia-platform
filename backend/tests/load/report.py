@@ -12,7 +12,8 @@ Por perfil, un ``load-<perfil>-<semilla>.json`` en ``VIGIA_LOAD_REPORT_DIR`` (el
 - latencia por ruta del contrato (NFR-GOB-01, tendencia) y p95 por ruta del cliente sintético de
   consola (NFR-GOB-03 y 19);
 - ocupación de los mamparos por clase de ruta (``bulkhead_in_use``, ``bulkhead_size``,
-  ``bulkhead_wait_ms`` y ``bulkhead_rejected_total`` de la plataforma, NFR-GOB-19).
+  ``bulkhead_wait_ms`` y ``bulkhead_rejected_total``, NFR-GOB-19) del trabajador de ``vigia-api``
+  del proceso de la prueba, que atiende la mitad de las peticiones (el mamparo es por trabajador).
 
 Nunca identificadores de registros, cuerpos, URL prefirmadas, PEM ni códigos de alta:
 ``secret_findings`` lo comprueba sobre el informe y las salidas (PR-GOB-31).
@@ -65,6 +66,7 @@ TRAILING: Final = dt.timedelta(seconds=60)
 MINIMUM_PER_MINUTE: Final = {"submit_record": 60, "request_grant": 240}
 """NFR-CTR-02: por debajo, un ``rate_limited`` es un defecto de la plataforma."""
 SAMPLE_SECONDS: Final = 1.0
+PEAK_WINDOW: Final = dt.timedelta(seconds=10)
 
 
 def percentile(values: Sequence[float], q: float) -> float | None:
@@ -106,8 +108,12 @@ class Drain:
     queued: int
     accepted: int
     seconds: float | None
+    """Desde que la plataforma vuelve hasta el último encolado aceptado: incluye el retroceso del
+    cliente (hasta 5 minutos por registro, PAT-RES-02 de U-01), no solo el caudal."""
     writes_per_second: float | None
-    plant_writes_per_second: Mapping[str, float]
+    peak_writes_per_second: float | None
+    """Máximo de aceptaciones en una ventana de ``PEAK_WINDOW`` tras la vuelta (NFR-GOB-02)."""
+    peak_plant_writes_per_second: Mapping[str, float]
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -116,14 +122,31 @@ class Drain:
             "accepted": self.accepted,
             "seconds": _round(self.seconds),
             "writes_per_second": _round(self.writes_per_second),
-            "max_plant_chain_writes_per_second": _round(
-                max(self.plant_writes_per_second.values(), default=None)
+            "peak_writes_per_second": _round(self.peak_writes_per_second),
+            "peak_plant_chain_writes_per_second": _round(
+                max(self.peak_plant_writes_per_second.values(), default=None)
             ),
         }
 
 
-def _drain(phase: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -> Drain:
-    """Lo emitido durante la fase y cuánto tardó en aceptarse desde que la plataforma volvió."""
+def _peak(times: Sequence[dt.datetime]) -> float | None:
+    """Máximo de instantes en una ventana deslizante de ``PEAK_WINDOW``, por segundo."""
+    ordered = sorted(times)
+    if not ordered:
+        return None
+    best, start = 0, 0
+    for end, moment in enumerate(ordered):
+        while moment - ordered[start] >= PEAK_WINDOW:
+            start += 1
+        best = max(best, end - start + 1)
+    return best / PEAK_WINDOW.total_seconds()
+
+
+def _drain(
+    phase: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]], until: dt.datetime | None
+) -> Drain:
+    """Lo emitido durante la fase, cuánto tardó en aceptarse desde que la plataforma volvió y el
+    caudal pico de aceptaciones (de cualquier registro) entre la vuelta y ``until``."""
     start, end = _parse(phase["start"]), _parse(phase["end"])
     queued = [record for record in records.values() if start <= _parse(record["emitted_at"]) < end]
     accepted = [_parse(record["accepted_at"]) for record in queued if record["accepted_at"]]
@@ -131,15 +154,18 @@ def _drain(phase: Mapping[str, Any], records: Mapping[str, Mapping[str, Any]]) -
     if accepted and len(accepted) == len(queued):
         seconds = max((max(accepted) - end).total_seconds(), 0.001)
         rate = len(queued) / seconds
-    by_plant: dict[str, list[dt.datetime]] = defaultdict(list)
-    for record in queued:
+    after: list[tuple[dt.datetime, str]] = []
+    for record in records.values():
         if record["accepted_at"]:
-            by_plant[record["plant_id"]].append(_parse(record["accepted_at"]))
-    plant_rates = {
-        plant: len(times) / max((max(times) - end).total_seconds(), 0.001)
-        for plant, times in by_plant.items()
-    }
-    return Drain(phase["name"], len(queued), len(accepted), seconds, rate, plant_rates)
+            moment = _parse(record["accepted_at"])
+            if end <= moment and (until is None or moment < until):
+                after.append((moment, record["plant_id"]))
+    by_plant: dict[str, list[dt.datetime]] = defaultdict(list)
+    for moment, plant in after:
+        by_plant[plant].append(moment)
+    plant_peaks = {plant: _peak(times) or 0.0 for plant, times in by_plant.items()}
+    peak = _peak([moment for moment, _ in after])
+    return Drain(phase["name"], len(queued), len(accepted), seconds, rate, peak, plant_peaks)
 
 
 def _steady_rate(result: Mapping[str, Any]) -> float | None:
@@ -204,9 +230,7 @@ def analyse(result: Mapping[str, Any]) -> dict[str, Any]:
         events[f"{operation}:{outcome}"] += count
         if code:
             by_code[f"{operation}:{code}"] += count
-    drains = [
-        _drain(phase, result["records"]) for phase in result["phases"] if phase["unreachable"]
-    ]
+    drains = drains_of(result)
     return {
         "planned": journal["planned"],
         "emitted": len(journal["emitted"]),
@@ -231,7 +255,13 @@ def analyse(result: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def drains_of(result: Mapping[str, Any]) -> list[Drain]:
-    return [_drain(phase, result["records"]) for phase in result["phases"] if phase["unreachable"]]
+    """Un vaciado por fase ``unreachable``; su pico se mide hasta la siguiente caída."""
+    unreachable = [phase for phase in result["phases"] if phase["unreachable"]]
+    limits = [_parse(phase["start"]) for phase in unreachable[1:]] + [None]
+    return [
+        _drain(phase, result["records"], until)
+        for phase, until in zip(unreachable, limits, strict=True)
+    ]
 
 
 # --- Mamparos -------------------------------------------------------------------------------------

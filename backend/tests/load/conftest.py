@@ -1,10 +1,13 @@
 """Fixtures de los perfiles de carga (TASK-231; LC-GOB-22).
 
-Una sola plataforma por sesión (``load_target``), la del arnés de conformidad de TASK-230 con
-``LoadApi`` (``tests.load.provision``): base, LocalStack, ``bootstrap``, ``vigia-api`` en el
-proceso de la prueba con métricas en memoria y sus balanceadores ``app.`` y ``nodes.``. Cada
-prueba aprovisiona su propia flota (otra organización) y lanza los nodos simulados en un proceso
-aparte (``run_profile``).
+Una sola plataforma por sesión (``load_target``), la del arnés de conformidad de TASK-230: base,
+LocalStack y ``bootstrap``, con **dos trabajadores** de ``vigia-api`` como una tarea del piloto
+(LC-GOB-20: 2 trabajadores de uvicorn por tarea): ``LoadApi`` en el proceso de la prueba (con las
+métricas en memoria; ``tests.load.provision``) y un proceso ``vigia-api`` de verdad, los dos
+creyendo el ``X-Forwarded-For`` del balanceador local. Los balanceadores ``aws``, ``app.`` y
+``nodes.`` corren en procesos propios (``tests.load.balancer``), como el balanceador real fuera de
+la tarea. Cada prueba aprovisiona su propia flota (otra organización) y lanza los nodos simulados
+en un proceso aparte (``run_profile``).
 
 La semilla sale de ``VIGIA_LOAD_SEED`` o es aleatoria; se imprime en el resumen
 (``pytest_terminal_summary``), en la salida de cada prueba y en cada informe. Los informes van a
@@ -26,13 +29,23 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conformance.mtls_proxy import MtlsProxy, ServerTls, mtls_proxy, server_tls
-from tests.conformance.platform_target import BACKEND, PlatformStack, platform_stack
+from tests.conformance.conftest import API_MODULE
+from tests.conformance.mtls_proxy import ServerTls, server_tls
+from tests.conformance.platform_target import (
+    BACKEND,
+    PlatformStack,
+    api_process_environment,
+    platform_stack,
+    wait_ready,
+)
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from tests.load.balancer import Balancer, balancer_process
 from tests.load.profiles import LoadProfile, write_sealed_dataset
-from tests.load.provision import Fleet, FleetProvisioner, LoadApi, load_api
+from tests.load.provision import LOCAL_BALANCER, Fleet, FleetProvisioner, LoadApi, load_api
 from tests.load.report import report_directory
 from tests.resilience.harness import WALL, free_port
+from tests.resilience.processes import process_group
+from vigia_platform.shared.api.main import FORWARDED_VARIABLE
 
 SEED_VARIABLE: Final = "VIGIA_LOAD_SEED"
 MAX_SEED: Final = 2**53 - 1
@@ -61,10 +74,15 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
 
 @dataclass(frozen=True)
 class LoadTarget:
+    """La plataforma de la sesión: dos trabajadores de ``vigia-api`` (el del proceso de la prueba,
+    con las métricas en memoria, y un proceso ``vigia-api`` de verdad), como los 2 trabajadores
+    de uvicorn por tarea de LC-GOB-20, detrás de los balanceadores ``app.`` y ``nodes.`` en sus
+    propios procesos, con reparto por petición."""
+
     stack: PlatformStack
     api: LoadApi
-    app: MtlsProxy
-    nodes: MtlsProxy
+    app: Balancer
+    nodes: Balancer
     tls: ServerTls
     directory: Path
 
@@ -80,9 +98,11 @@ class LoadTarget:
         return provisioner.fleet(profile)
 
     def logs(self) -> dict[str, str]:
+        """Los registros de los trabajadores y de los balanceadores (``*.log`` y ``*.out``)."""
         return {
             path.name: path.read_text(encoding="utf-8", errors="replace")
-            for path in self.directory.glob("*.log")
+            for pattern in ("*.log", "*.out")
+            for path in self.directory.glob(pattern)
         }
 
 
@@ -95,7 +115,9 @@ def load_target(
     directory = tmp_path_factory.mktemp("carga")  # fuera del árbol, nunca versionado
     tls = server_tls(directory, WALL.now())
     with (
-        mtls_proxy("aws", [localstack_endpoint.url], tls, preserve_host=True) as aws,
+        balancer_process(
+            "aws", [localstack_endpoint.url], tls, directory, preserve_host=True
+        ) as aws,
         platform_stack(
             postgres_endpoint,
             localstack_endpoint,
@@ -104,12 +126,19 @@ def load_target(
             ca_bundle=tls.ca_file,
         ) as stack,
         load_api(stack.environ, free_port(), log_file=directory / API_LOG) as api,
+        process_group(directory) as group,
     ):
+        port = free_port()
+        environ = {**api_process_environment(stack, port), FORWARDED_VARIABLE: LOCAL_BALANCER[0]}
+        worker = group.start("api-b", API_MODULE, environ)
+        worker_url = f"http://127.0.0.1:{port}"
+        wait_ready(worker_url, alive=lambda: worker.process.poll() is None)
+        backends = [api.url, worker_url]
         node_ca = directory / "vigia-node-ca.crt"
         node_ca.write_bytes(stack.node_ca_root())
         with (
-            mtls_proxy("app", [api.url], tls) as app,
-            mtls_proxy("nodes", [api.url], tls, client_ca=node_ca) as nodes,
+            balancer_process("app", backends, tls, directory) as app,
+            balancer_process("nodes", backends, tls, directory, client_ca=node_ca) as nodes,
         ):
             yield LoadTarget(stack, api, app, nodes, tls, directory)
 
