@@ -622,11 +622,13 @@ def test_ci_tools_are_installed_by_hash() -> None:
     assert f"coverage=={locked[1]} " in coverage
 
 
-def test_the_coverage_job_needs_both_backend_jobs() -> None:
+def test_the_coverage_job_needs_every_backend_job_with_coverage() -> None:
+    """Sin integración y las dos mitades de la integración (retro 23 C): ninguna cifra baja."""
     ci = _ci()
     job = next(job for job in ci["jobs"].values() if job["name"].startswith("cobertura"))
-    assert sorted(job["needs"]) == ["backend", "backend-integracion"]
-    for job_id in ("backend", "backend-integracion"):
+    backend_jobs = ["backend", "backend-integracion", "backend-integracion-2"]
+    assert sorted(job["needs"]) == backend_jobs
+    for job_id in backend_jobs:
         steps = ci["jobs"][job_id]["steps"]
         assert any("coverage run -m pytest" in str(step.get("run")) for step in steps)
 
