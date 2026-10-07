@@ -15,12 +15,15 @@ from fastapi import Request
 
 from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
+from vigia_platform.catalog.application.close_record import CloseRecordService
 from vigia_platform.catalog.application.documents import DocumentService
+from vigia_platform.catalog.application.exposure import ExposureService
 from vigia_platform.catalog.application.gates import GateService
 from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import PlantPolicyService
 from vigia_platform.catalog.application.publication import CatalogPublicationService
 from vigia_platform.catalog.application.regression import RegressionService
+from vigia_platform.catalog.application.regression_rerun import RegressionRerunService
 from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
@@ -62,6 +65,12 @@ class CatalogHttp:
     """Sesión de walk-test, pasos, pases y reapertura (LC-GOB-06, VIG-150)."""
     occlusions: OcclusionService | None = None
     """Prueba de oclusión y su reevaluación perezosa (LC-GOB-07, VIG-154)."""
+    records: CloseRecordService | None = None
+    """Cierre del acta y su lectura estructurada (LC-GOB-08, VIG-158)."""
+    exposures: ExposureService | None = None
+    """Muestras de exposición del acta (tramo 3a; LC-GOB-08, VIG-158)."""
+    regression_reruns: RegressionRerunService | None = None
+    """Reejecución por regresión (LC-GOB-09, VIG-158)."""
 
 
 def installed[T](service: T | None) -> T:

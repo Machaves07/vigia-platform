@@ -1,7 +1,16 @@
-"""PR-GOB-14, parte de marca (TASK-209; BR-GOB-51 a 56; LC-GOB-09).
+"""PR-GOB-14 (TASK-209 y TASK-216; BR-GOB-51 a 56; LC-GOB-09).
 
-«Un cambio en una fila afectada implica regresión ``pending``» (business-logic-model §6). La
-mitad del cierre (``regression_rerun`` que devuelve a ``current``) es de TASK-216.
+«Un cambio en una fila afectada implica regresión ``pending``; el cierre de un
+``regression_rerun`` que cubre las filas afectadas la devuelve a ``current``»
+(business-logic-model §6).
+
+- **Cierre de la reejecución** (``RegressionRerun``, TASK-216): la máquina de marca de abajo más
+  las reglas «abrir reejecución», «registrar pases» y «cerrar», con los servicios reales
+  (``RegressionRerunService`` y ``CloseRecordService``; lo que el cierre exige de otras tareas, por
+  SQL). Invariantes: el cierre de una reejecución que cubre las filas afectadas deja ``current``
+  (un ``walk_test_regression_cleared`` por cierre así); una marca nueva durante la reejecución
+  deja ``pending``; la reejecución abre exactamente las filas pendientes (o la matriz completa);
+  la zona sigue ``productive`` en todo momento.
 
 - **Máquina de estados sobre la base** (``RegressionMarking``, perfil ``ci`` con su semilla fija y
   la de la sesión, ``_seeds_for_profile``): una zona ``productive`` con su versión 1 de
@@ -22,10 +31,13 @@ Solo datos generados (NFR-CTR-43).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any, ClassVar, Final
 
 import pytest
@@ -36,11 +48,17 @@ from hypothesis.stateful import (
     RuleBasedStateMachine,
     initialize,
     invariant,
+    precondition,
     rule,
     run_state_machine_as_test,
 )
 
-from tests.catalog_routes_support import CatalogRoutes, catalog_routes_world
+from tests.catalog_routes_support import (
+    TEST_SIGN_TIMEOUT_SECONDS,
+    CatalogRoutes,
+    catalog_routes_world,
+)
+from tests.close_record_support import ClipStore
 from tests.conftest import _seeds_for_profile
 from tests.integration.conftest import PostgresEndpoint
 from tests.properties.gob.strategies.catalog import (
@@ -59,9 +77,31 @@ from tests.properties.gob.strategies.walk_test import (
     state_of,
     walk_test_matrices,
 )
+from vigia_platform.catalog.adapters.postgres.agreement_repository import (
+    PostgresAgreementRepository,
+)
+from vigia_platform.catalog.adapters.postgres.commissioning_record_repository import (
+    PostgresCommissioningRecordRepository,
+)
+from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.occlusion_repository import (
+    PostgresOcclusionRepository,
+)
+from vigia_platform.catalog.adapters.postgres.regression_repository import (
+    PostgresRegressionRepository,
+)
+from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
+    PostgresWalkTestRepository,
+)
 from vigia_platform.catalog.application.admission import CatalogRejected
+from vigia_platform.catalog.application.close_record import CloseRecordService, CloseRequest
+from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.publication import CatalogRequestInvalid
 from vigia_platform.catalog.application.regression import requires_model_regression
+from vigia_platform.catalog.application.regression_rerun import RegressionRerunService
+from vigia_platform.catalog.application.walk_test import WalkTestConflict, WalkTestService
+from vigia_platform.catalog.detail_codes import CatalogDetailCode
 from vigia_platform.catalog.domain.catalog_version import (
     AGGREGATION_WINDOW_MAX,
     AGGREGATION_WINDOW_MIN,
@@ -80,7 +120,8 @@ from vigia_platform.catalog.domain.catalog_version import (
     ZoneCatalogVersion,
     plan_publication,
 )
-from vigia_platform.catalog.domain.enums import CatalogChangedField, RegressionCause
+from vigia_platform.catalog.domain.commissioning_record import CommissioningRecord
+from vigia_platform.catalog.domain.enums import CatalogChangedField, RegressionCause, WalkTestKind
 from vigia_platform.catalog.domain.matrix import POSTURES, derive_matrix
 from vigia_platform.catalog.domain.regression import (
     ALL_ROWS,
@@ -90,6 +131,15 @@ from vigia_platform.catalog.domain.regression import (
     merged,
     publication_rows,
 )
+from vigia_platform.catalog.domain.walk_test import WalkTestSession
+from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
+from vigia_platform.fleet.adapters.postgres.commissioning_queries import (
+    PostgresCommissioningQueries,
+)
+from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
+from vigia_platform.identity.application.common import IdentityDependencies
+from vigia_platform.identity.application.hierarchy import HierarchyService
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.shared.context import ScopeContext
 
 Key = tuple[str, str]
@@ -312,6 +362,342 @@ def test_pr_gob_14_marking_follows_the_changes_and_never_stops_the_zone(
     for value in _seeds_for_profile():
         seeded = hypothesis_seed(value)(RegressionMarking)
         run_state_machine_as_test(seeded, settings=settings(stateful_step_count=STEPS))
+
+
+# --- Cierre de la reejecución (TASK-216) ---------------------------------------------------------
+
+
+RERUN_TYPES: Final = tuple(
+    d
+    for d in CATALOG_RECORD_TYPES
+    if d.record_type
+    in ("walk_test_result", "walk_test_regression_cleared", "occlusion_test_result")
+)
+RERUN_STEPS: Final = 16
+"""Más pasos que la marca: abrir, registrar y cerrar caben con marcas antes y entre medias."""
+MIN_REPETITIONS: Final = 100
+
+
+@dataclass
+class Rerunning:
+    """Los servicios reales de la reejecución y del cierre sobre ``CatalogRoutes``."""
+
+    store: ClipStore
+    reruns: RegressionRerunService
+    closing: CloseRecordService
+
+
+def rerun_services(routes: CatalogRoutes) -> Rerunning:
+    sessions = routes.authz.sessions
+    database, clock = routes.database, sessions.clock
+    catalog = routes.catalog_repository
+    gates = GateService(
+        repository=PostgresGateRepository(database),
+        catalog=catalog,
+        agreements=PostgresAgreementRepository(),
+        database=database,
+        writer=routes.writer,
+        authorizer=routes.authz.authorizer,
+        audit=sessions.audit,
+        free_text=routes.free_text,
+        signer=routes.signer,
+        clock=clock,
+        sign_timeout_seconds=TEST_SIGN_TIMEOUT_SECONDS,
+    )
+    hierarchy = HierarchyService(
+        IdentityDependencies(
+            database=database,
+            writer=routes.writer,
+            audit=sessions.audit,
+            outbox=sessions.outbox,
+            authorizer=routes.authz.authorizer,
+            free_text=routes.free_text,
+            clock=clock,
+            provider_organization_id=routes.authz.provider_organization_id,
+        )
+    )
+    occlusions = OcclusionService(
+        repository=PostgresOcclusionRepository(),
+        sessions=PostgresWalkTestRepository(),
+        catalog=catalog,
+        gates=gates,
+        reader=LectorExpediente(database=database, audit=sessions.audit),
+        database=database,
+        writer=routes.writer,
+        free_text=routes.free_text,
+        clock=clock,
+    )
+    walk_tests = WalkTestService(
+        repository=PostgresWalkTestRepository(),
+        catalog=catalog,
+        gates=gates,
+        nodes=hierarchy,
+        identity=hierarchy,
+        database=database,
+        writer=routes.writer,
+        audit=sessions.audit,
+        free_text=routes.free_text,
+        clock=clock,
+        occlusions=occlusions,
+    )
+    store = ClipStore()
+    closing = CloseRecordService(
+        repository=PostgresCommissioningRecordRepository(),
+        sessions=PostgresWalkTestRepository(),
+        occlusion_tests=PostgresOcclusionRepository(),
+        occlusions=occlusions,
+        regressions=PostgresRegressionRepository(database),
+        catalog=catalog,
+        fleet=PostgresCommissioningQueries(),
+        clips=ClipObjectStore(store),  # type: ignore[arg-type]
+        gates=gates,
+        identity=hierarchy,
+        database=database,
+        writer=routes.writer,
+        audit=sessions.audit,
+        free_text=routes.free_text,
+        clock=clock,
+    )
+    reruns = RegressionRerunService(
+        walk_tests=walk_tests, regressions=PostgresRegressionRepository(database), database=database
+    )
+    return Rerunning(store, reruns, closing)
+
+
+class RegressionRerun(RegressionMarking):
+    """La máquina de marca de TASK-209 con la reejecución y su cierre (TASK-216)."""
+
+    world: ClassVar[CatalogRoutes]
+    services: ClassVar[Rerunning]
+    seen: ClassVar[Counter[str]] = Counter()
+    """Cierres por desenlace en toda la corrida: la prueba exige haber visto los dos."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        world = self.world
+        ((plant, _),) = self.site.zones()
+        self.plant = plant
+        self.node = uuid.uuid4()
+        before = world.authz.now() - timedelta(hours=1)
+        world.authz.execute(
+            "INSERT INTO identity.node_identity (node_id, organization_id, plant_id, code, status,"
+            " created_at) VALUES ($1, $2, $3, $4, 'enrolled', $5)",
+            self.node,
+            self.site.organization_id,
+            plant,
+            f"ND-{self.node.hex[:6].upper()}",
+            before,
+        )
+        world.authz.execute(
+            "INSERT INTO identity.zone_node_assignment (assignment_id, organization_id, plant_id,"
+            " zone_id, node_id, assigned_at, assigned_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            uuid.uuid4(),
+            self.site.organization_id,
+            plant,
+            self.zone,
+            self.node,
+            before,
+            world.authz.operator_id,
+        )
+        # Las dos compuertas aprobadas con su instante, su respaldo y su autor: la apertura de la
+        # reejecución lee el montaje con las guardas de VIG-150.
+        decided = {
+            "status": "approved",
+            "decided_at": before.isoformat(),
+            "record_id": str(uuid.uuid4()),
+            "decided_by": str(world.authz.operator_id),
+        }
+        world.authz.execute(
+            "UPDATE catalog.zone_gate_state SET mounting = $2, usage = $2 WHERE zone_id = $1",
+            self.zone,
+            json.dumps(decided),
+        )
+        # La RLS de la concesión compara su vigencia con la hora de la base (nuc_0009), y el reloj
+        # simulado avanza con cada paso de cada ejemplo: la concesión nace con la hora de la base.
+        ((database_now,),) = (tuple(row) for row in world.fetch("SELECT now() AS now"))
+        installer = world.authz.add_provider_user()
+        concession = world.authz.add_concession(
+            self.site.organization_id, installer, granted_at=database_now - timedelta(hours=1)
+        )
+        cookie = world.authz.open_session(world.authz.provider_organization_id, installer)
+        scope = world.run(
+            world.authz.contexts.context_from_session(cookie, concession_id=concession)
+        )
+        self.installer: ScopeContext = scope.context
+        self.signer = uuid.UUID(str(self.admin.actor.id))
+        self.session: WalkTestSession | None = None
+        self.recorded = False
+        self.marks_at_open = 0
+        self.clears = 0
+
+    def _all_keys(self) -> frozenset[Key]:
+        assert self.state is not None
+        return frozenset(
+            (str(row.standard_id), row.posture.value) for row in derive_matrix(self.state.catalog)
+        )
+
+    @precondition(lambda self: self.state is not None)
+    @rule(passes=st.integers(3, 4))
+    def open_a_rerun(self, passes: int) -> None:
+        if self.state is None:
+            return
+        self.world.tick()
+        try:
+            session: WalkTestSession = self.world.run(
+                self.services.reruns.open(self.installer, self.zone, passes)
+            )
+        except CatalogRejected as rejected:
+            # Las guardas de apertura de VIG-150: una sesión ya abierta en la zona.
+            assert self.session is not None, rejected
+            assert rejected.detail_code is CatalogDetailCode.WALK_TEST_IN_PROGRESS
+            return
+        except WalkTestConflict:
+            assert self.session is None and self.model.keys is None
+            return
+        assert self.session is None and self.model.keys is not None
+        opened = frozenset((str(r.standard_id), r.posture.value) for r in session.matrix_rows)
+        expected = self._all_keys() if self.model.keys == ALL_ROWS else self.model.keys
+        assert opened == expected  # solo las filas afectadas, o la matriz completa
+        assert session.kind is WalkTestKind.REGRESSION_RERUN
+        self.session, self.recorded, self.marks_at_open = session, False, self.model.marks
+
+    @precondition(lambda self: self.session is not None and not self.recorded)
+    @rule()
+    def record_the_passes(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        rows = [row.row_id for row in session.matrix_rows]
+        per_row = max(session.passes_per_cell, -(-MIN_REPETITIONS // len(rows)))
+        self.world.authz.execute(
+            "INSERT INTO catalog.walk_test_pass (pass_id, organization_id, plant_id, session_id,"
+            " row_id, result, recorded_by, recorded_at)"
+            " SELECT gen_random_uuid(), $1, $2, $3, r.row_id, 'detected', $4,"
+            " $5::timestamptz + g * interval '1 millisecond'"
+            " FROM unnest($6::uuid[]) AS r(row_id), generate_series(1, $7) AS g",
+            session.organization_id,
+            session.plant_id,
+            session.session_id,
+            uuid.UUID(str(self.installer.actor.id)),
+            session.started_at,
+            rows,
+            per_row,
+        )
+        self.recorded = True
+
+    def _ready_to_close(self, session: WalkTestSession) -> None:
+        """Lo que el cierre exige de otras tareas: oclusiones resueltas y un clip verificable."""
+        world = self.world
+        version = world.run(
+            world.catalog_repository.version(self.installer, self.zone, session.catalog_version)
+        )
+        for camera in version.payload["cameras"]:
+            world.authz.execute(
+                "INSERT INTO catalog.occlusion_test (test_id, organization_id, plant_id,"
+                " session_id, camera_id, started_at, ended_at, deadline, verification,"
+                " declared_reason_es, recorded_by, ledger_record_id)"
+                " VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $5,"
+                " $5::timestamptz + interval '5 minutes', 'declared', $6, $7, gen_random_uuid())",
+                session.organization_id,
+                session.plant_id,
+                session.session_id,
+                uuid.UUID(camera["camera_id"]),
+                session.started_at,
+                "El nodo no envió eventos mientras se tapaba la cámara",
+                uuid.UUID(str(self.installer.actor.id)),
+            )
+        clip_id, data = uuid.uuid4(), b"clip de verificacion sintetico"
+        key = (
+            f"org/{session.organization_id}/plant/{session.plant_id}/zone/{self.zone}"
+            f"/node/{self.node}/{clip_id}.mp4"
+        )
+        received = session.started_at + timedelta(milliseconds=1)
+        world.authz.execute(
+            "INSERT INTO fleet.clip_upload_grant (clip_id, organization_id, plant_id, zone_id,"
+            " node_id, purpose, storage_key, content_type, max_size_bytes, required_headers,"
+            " issued_at, expires_at, status, used_at) VALUES ($1, $2, $3, $4, $5, 'verification',"
+            " $6, 'video/mp4', $7, $8, $9, $9::timestamptz + interval '15 minutes', 'used', $9)",
+            clip_id,
+            session.organization_id,
+            session.plant_id,
+            self.zone,
+            self.node,
+            key,
+            len(data),
+            json.dumps({"x-amz-checksum-sha256": "x", "x-amz-meta-vigia-anonymized": "1"}),
+            received,
+        )
+        world.authz.execute(
+            "INSERT INTO fleet.verification_clip (clip_id, organization_id, plant_id, zone_id,"
+            " node_id, received_at, sha256) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            clip_id,
+            session.organization_id,
+            session.plant_id,
+            self.zone,
+            self.node,
+            received,
+            hashlib.sha256(data).hexdigest(),
+        )
+        self.services.store.put(key, data)
+
+    @precondition(lambda self: self.session is not None)
+    @rule()
+    def close_the_rerun(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        if self.recorded:
+            self._ready_to_close(session)
+        self.world.tick()
+        request = CloseRequest(signatures=[self.signer], beacon_latency_ms_p95=150)
+        try:
+            record: CommissioningRecord = self.world.run(
+                self.services.closing.close(self.installer, session.session_id, request)
+            )
+        except CatalogRejected as rejected:
+            assert not self.recorded, rejected
+            assert rejected.detail_code is CatalogDetailCode.MATRIX_INCOMPLETE
+            RegressionRerun.seen["matrix_incomplete"] += 1
+            return
+        assert self.recorded
+        covering = self.model.marks == self.marks_at_open
+        # La reejecución cubre sus filas: vuelve a current salvo que otra marca llegara después.
+        assert record.regression_cleared == covering
+        RegressionRerun.seen["current" if covering else "still_pending"] += 1
+        if covering:
+            # La fila vuelve a current sin causa ni versiones: la próxima marca abre otro periodo.
+            self.model.keys = None
+            self.model.model_version = None
+            self.clears += 1
+        self.session = None
+
+    @invariant()
+    def one_clearance_per_covering_close(self) -> None:
+        cleared = self.world.records(self.zone, "walk_test_regression_cleared")
+        assert len(cleared) == self.clears
+        events = self.world.events(self.zone, "regression_cleared")
+        assert len(events) == self.clears
+
+
+@pytest.fixture(scope="module")
+def rerun_world(postgres_endpoint: PostgresEndpoint) -> Iterator[CatalogRoutes]:
+    with catalog_routes_world(postgres_endpoint, "regression_rerun", RERUN_TYPES) as world:
+        yield world
+
+
+@pytest.mark.integration
+def test_pr_gob_14_a_covering_rerun_returns_current_and_a_later_mark_keeps_pending(
+    rerun_world: CatalogRoutes,
+) -> None:
+    RegressionRerun.world = rerun_world
+    RegressionRerun.services = rerun_services(rerun_world)
+    for value in _seeds_for_profile():
+        seeded = hypothesis_seed(value)(RegressionRerun)
+        run_state_machine_as_test(seeded, settings=settings(stateful_step_count=RERUN_STEPS))
+    assert RegressionRerun.services.store.gets == 0
+    # La corrida vio los dos desenlaces del cierre: no es una propiedad vacía.
+    seen = RegressionRerun.seen
+    assert seen["current"] > 0 and seen["still_pending"] > 0, seen
 
 
 # --- Propiedades puras sobre la matriz -----------------------------------------------------------

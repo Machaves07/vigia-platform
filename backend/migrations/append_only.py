@@ -49,6 +49,8 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "catalog.walk_test_pass",
         "catalog.occlusion_test",
         "catalog.commissioning_record",
+        # catalog (TASK-216, gob_0027): muestras de exposición del acta
+        "catalog.exposure_sample",
         # fleet (TASK-203, gob_0018); las tres primeras, particionadas por mes
         "fleet.enrollment_attempt",
         "fleet.heartbeat_history",

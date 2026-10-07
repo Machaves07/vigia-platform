@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -59,7 +59,7 @@ from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
-from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.ledger.registry import RecordType, RecordTypeRegistry
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
@@ -422,8 +422,13 @@ class CatalogRoutes:
 
 
 @contextmanager
-def catalog_routes_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[CatalogRoutes]:
-    """El entorno de ``CatalogRoutes`` sobre una base migrada propia."""
+def catalog_routes_world(
+    endpoint: PostgresEndpoint, prefix: str, extra_types: Sequence[RecordType] = ()
+) -> Iterator[CatalogRoutes]:
+    """El entorno de ``CatalogRoutes`` sobre una base migrada propia.
+
+    ``extra_types`` añade tipos de registro a los del catálogo (p. ej. los del cierre del acta y
+    la reejecución de PR-GOB-14, TASK-216)."""
     signing = asyncio.run(bootstrapped_world())
     with authz_environment(endpoint, prefix) as authz:
         sessions = authz.sessions
@@ -433,6 +438,7 @@ def catalog_routes_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[Ca
         for definition in (
             *U02_RECORD_TYPES,
             *(d for d in CATALOG_RECORD_TYPES if d.record_type in CATALOG_TYPES),
+            *extra_types,
         ):
             registry.register(definition)
         outbox_catalog = OutboxCatalog()

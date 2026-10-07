@@ -2507,6 +2507,132 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/zones/{zone_id}/walk-tests/regression-rerun":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Abre la reejecución por regresión con solo las filas afectadas"
+      "operationId": "open_regression_rerun_zones__zone_id__walk_tests_regression_rerun_post"
+      "parameters":
+        - "name": "zone_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RerunBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/WalkTestSessionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/close":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Cierra el acta de comisionamiento con sus siete guardas"
+      "operationId": "close_walk_test_walk_tests__session_id__close_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CloseBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommissioningRecordOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/exposure-samples":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Registra la muestra de exposición de un pase mostrado (reloj del navegador)"
+      "operationId": "record_exposure_sample_walk_tests__session_id__exposure_samples_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ExposureSampleBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExposureSampleOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/commissioning-records/{record_id}":
+    "get":
+      "tags":
+        - "comisionamiento"
+      "summary": "Acta de comisionamiento estructurada (sin responsable)"
+      "operationId": "commissioning_record_commissioning_records__record_id__get"
+      "parameters":
+        - "name": "record_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Record Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommissioningRecordOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/plants/{plant_id}/nodes":
     "post":
       "tags":
@@ -4331,6 +4457,47 @@
         - "items"
         - "next_cursor"
       "title": "AuditEntryPage"
+    "BaselineBody":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "captured_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Captured At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "zone_id"
+        - "captured_at"
+      "title": "BaselineBody"
+    "BaselineOut":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "captured_at":
+          "type": "string"
+          "title": "Captured At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "zone_id"
+        - "captured_at"
+      "title": "BaselineOut"
     "BeginActivation":
       "properties":
         "step":
@@ -4404,6 +4571,29 @@
         - "framing_description_es"
         - "reference_marker"
       "title": "CameraFramingBody"
+    "CameraMeasuredOut":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "measured_fps":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Measured Fps"
+        "declared_min_fps":
+          "anyOf":
+            - "type": "number"
+            - "type": "null"
+          "title": "Declared Min Fps"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "measured_fps"
+        - "declared_min_fps"
+      "title": "CameraMeasuredOut"
     "CameraRoleInZone":
       "type": "string"
       "enum":
@@ -4925,6 +5115,27 @@
         - "synchronized"
         - "offset_ms"
       "title": "ClockView"
+    "CloseBody":
+      "properties":
+        "signatures":
+          "items":
+            "$ref": "#/components/schemas/SignatureBody"
+          "type": "array"
+          "maxItems": 32
+          "minItems": 1
+          "title": "Signatures"
+        "false_alarm_acceptance":
+          "anyOf":
+            - "$ref": "#/components/schemas/FalseAlarmAcceptanceBody"
+            - "type": "null"
+        "installer_measurements":
+          "$ref": "#/components/schemas/InstallerMeasurementsBody"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signatures"
+        - "installer_measurements"
+      "title": "CloseBody"
     "CloseStepBody":
       "properties":
         "correction":
@@ -5018,6 +5229,100 @@
         - "clips"
         - "next_after"
       "title": "CommissioningClipsOut"
+    "CommissioningRecordOut":
+      "properties":
+        "commissioning_record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Commissioning Record Id"
+        "session_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Session Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "catalog_version":
+          "type": "integer"
+          "title": "Catalog Version"
+        "kind":
+          "$ref": "#/components/schemas/WalkTestKind"
+        "passes_per_cell":
+          "type": "integer"
+          "title": "Passes Per Cell"
+        "matrix_results":
+          "items":
+            "$ref": "#/components/schemas/MatrixResultOut"
+          "type": "array"
+          "title": "Matrix Results"
+        "false_negatives_total":
+          "type": "integer"
+          "title": "False Negatives Total"
+        "false_alarm_rate_observed":
+          "type": "number"
+          "title": "False Alarm Rate Observed"
+        "false_alarm_threshold":
+          "type": "number"
+          "title": "False Alarm Threshold"
+        "false_alarm_acceptance":
+          "anyOf":
+            - "$ref": "#/components/schemas/FalseAlarmAcceptanceOut"
+            - "type": "null"
+        "latency":
+          "$ref": "#/components/schemas/LatencyOut"
+        "cameras_measured":
+          "items":
+            "$ref": "#/components/schemas/CameraMeasuredOut"
+          "type": "array"
+          "title": "Cameras Measured"
+        "occlusion_summary":
+          "items":
+            "$ref": "#/components/schemas/OcclusionSummaryOut"
+          "type": "array"
+          "title": "Occlusion Summary"
+        "total_duration_ms":
+          "type": "integer"
+          "title": "Total Duration Ms"
+        "steps_summary":
+          "items":
+            "$ref": "#/components/schemas/StepKindDurationOut"
+          "type": "array"
+          "title": "Steps Summary"
+        "installer_measurements":
+          "$ref": "#/components/schemas/InstallerMeasurementsOut"
+        "signatures":
+          "items":
+            "$ref": "#/components/schemas/SignatureOut"
+          "type": "array"
+          "title": "Signatures"
+        "closed_at":
+          "type": "string"
+          "title": "Closed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commissioning_record_id"
+        - "session_id"
+        - "zone_id"
+        - "catalog_version"
+        - "kind"
+        - "passes_per_cell"
+        - "matrix_results"
+        - "false_negatives_total"
+        - "false_alarm_rate_observed"
+        - "false_alarm_threshold"
+        - "false_alarm_acceptance"
+        - "latency"
+        - "cameras_measured"
+        - "occlusion_summary"
+        - "total_duration_ms"
+        - "steps_summary"
+        - "installer_measurements"
+        - "signatures"
+        - "closed_at"
+      "title": "CommissioningRecordOut"
+      "description": "``CommissioningRecord`` (DE §2.15 con sus notas): el acta estructurada, sin responsable."
     "CommunicationState":
       "type": "string"
       "enum":
@@ -6014,6 +6319,89 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "ExposureSampleBody":
+      "properties":
+        "pass_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Pass Id"
+        "fetched_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Fetched At"
+        "displayed_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Displayed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "pass_id"
+        - "fetched_at"
+        - "displayed_at"
+      "title": "ExposureSampleBody"
+    "ExposureSampleOut":
+      "properties":
+        "sample_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Id"
+        "session_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Session Id"
+        "pass_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Pass Id"
+        "fetched_at":
+          "type": "string"
+          "title": "Fetched At"
+        "displayed_at":
+          "type": "string"
+          "title": "Displayed At"
+        "recorded_at":
+          "type": "string"
+          "title": "Recorded At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sample_id"
+        - "session_id"
+        - "pass_id"
+        - "fetched_at"
+        - "displayed_at"
+        - "recorded_at"
+      "title": "ExposureSampleOut"
+    "FalseAlarmAcceptanceBody":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+      "title": "FalseAlarmAcceptanceBody"
+    "FalseAlarmAcceptanceOut":
+      "properties":
+        "reason_es":
+          "type": "string"
+          "title": "Reason Es"
+        "accepted_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Accepted By"
+        "accepted_at":
+          "type": "string"
+          "title": "Accepted At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "reason_es"
+        - "accepted_by"
+        - "accepted_at"
+      "title": "FalseAlarmAcceptanceOut"
     "FleetAlarmKind":
       "type": "string"
       "enum":
@@ -6454,6 +6842,41 @@
         - "plants"
         - "nodes"
       "title": "HierarchyView"
+    "InstallerMeasurementsBody":
+      "properties":
+        "beacon_latency_ms_p95":
+          "type": "integer"
+          "title": "Beacon Latency Ms P95"
+        "baselines":
+          "items":
+            "$ref": "#/components/schemas/BaselineBody"
+          "type": "array"
+          "maxItems": 8
+          "title": "Baselines"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "beacon_latency_ms_p95"
+      "title": "InstallerMeasurementsBody"
+    "InstallerMeasurementsOut":
+      "properties":
+        "beacon_latency_ms_p95":
+          "type": "integer"
+          "title": "Beacon Latency Ms P95"
+        "measured_by":
+          "type": "string"
+          "title": "Measured By"
+          "default": "installer"
+        "baselines":
+          "items":
+            "$ref": "#/components/schemas/BaselineOut"
+          "type": "array"
+          "title": "Baselines"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "beacon_latency_ms_p95"
+      "title": "InstallerMeasurementsOut"
     "IntegrityResultsOut":
       "properties":
         "results":
@@ -6743,6 +7166,52 @@
         - "items"
         - "next_cursor"
       "title": "LabelPageOut"
+    "LatencyOut":
+      "properties":
+        "node_tranche":
+          "anyOf":
+            - "$ref": "#/components/schemas/TrancheOut"
+            - "type": "null"
+        "platform_tranche":
+          "anyOf":
+            - "$ref": "#/components/schemas/TrancheOut"
+            - "type": "null"
+        "exposure_tranche":
+          "anyOf":
+            - "$ref": "#/components/schemas/TrancheOut"
+            - "type": "null"
+        "served_tranche":
+          "anyOf":
+            - "$ref": "#/components/schemas/TrancheOut"
+            - "type": "null"
+        "not_measured":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Not Measured"
+        "indicative_sum_median_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Indicative Sum Median Ms"
+        "indicative_sum_p95_ms":
+          "type": "integer"
+          "title": "Indicative Sum P95 Ms"
+        "indicative":
+          "type": "boolean"
+          "title": "Indicative"
+          "default": true
+        "repetitions_counted":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Repetitions Counted"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "indicative_sum_p95_ms"
+      "title": "LatencyOut"
+      "description": "Los cuatro tramos por separado, cada uno con su reloj; nulo es «no medido»."
     "LedgerRecordOut":
       "properties":
         "record_id":
@@ -7015,6 +7484,35 @@
         - "second_factor_enrolled"
         - "assignments"
       "title": "ManagedUserView"
+    "MatrixResultOut":
+      "properties":
+        "row_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Row Id"
+        "detected":
+          "type": "integer"
+          "title": "Detected"
+        "missed":
+          "type": "integer"
+          "title": "Missed"
+        "false_alarms":
+          "type": "integer"
+          "title": "False Alarms"
+        "unverifiable_evidence_refs":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Unverifiable Evidence Refs"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "row_id"
+        - "detected"
+        - "missed"
+        - "false_alarms"
+      "title": "MatrixResultOut"
     "MatrixRowOut":
       "properties":
         "row_id":
@@ -7717,6 +8215,26 @@
         - "text"
         - "pending_legal_text"
       "title": "NoticeView"
+    "OcclusionSummaryOut":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "verification":
+          "$ref": "#/components/schemas/OcclusionVerification"
+        "test_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Test Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "verification"
+      "title": "OcclusionSummaryOut"
     "OcclusionTestBody":
       "properties":
         "camera_id":
@@ -8561,6 +9079,16 @@
         - "x-amz-meta-vigia-anonymized"
       "title": "RequiredHeaders"
       "description": "Mapa de cabeceras del `PUT`, a lo sumo 8 entradas. Siempre incluye `x-amz-checksum-sha256` (el SHA-256 declarado en la solicitud, en base64) y `x-amz-meta-vigia-anonymized` con valor `1`, la marca de anonimización del objeto almacenado (BR-CTR-14); la plataforma responde `clip_not_anonymized` si falta. Solo admite las cabeceras declaradas aquí; una nueva entra como propiedad opcional (BR-CTR-23)."
+    "RerunBody":
+      "properties":
+        "passes_per_cell":
+          "type": "integer"
+          "title": "Passes Per Cell"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "passes_per_cell"
+      "title": "RerunBody"
     "ResultOut":
       "properties":
         "chain":
@@ -9082,6 +9610,36 @@
         - "configured"
       "title": "SignatoryPolicyOut"
       "description": "``PlantSignatoryPolicy`` (DE §2.7); ``configured = false`` en una planta sin ella."
+    "SignatureBody":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+      "title": "SignatureBody"
+    "SignatureOut":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "role_in_use":
+          "type": "string"
+          "title": "Role In Use"
+        "signed_at":
+          "type": "string"
+          "title": "Signed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "role_in_use"
+        - "signed_at"
+      "title": "SignatureOut"
     "SignedGateState":
       "$ref": "#/components/schemas/vigia_contracts__models__gate_state__SignedEnvelope"
       "title": "SignedGateState"
@@ -9549,6 +10107,35 @@
       "minLength": 24
       "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
       "title": "Timestamp"
+    "TrancheOut":
+      "properties":
+        "median_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Median Ms"
+        "p95_ms":
+          "type": "integer"
+          "title": "P95 Ms"
+        "max_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Max Ms"
+        "repetitions":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Repetitions"
+        "measured_by":
+          "type": "string"
+          "title": "Measured By"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "p95_ms"
+        - "measured_by"
+      "title": "TrancheOut"
     "TransparencyOut":
       "properties":
         "zone_id":

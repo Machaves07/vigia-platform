@@ -2,7 +2,8 @@
 
 Trece de los veintiséis tipos de U-03; los otros trece (ingesta, alta, credenciales y versiones
 de flota) están en ``fleet.record_types``. Todos los escribe U-03, en la cadena de **planta** y en
-su versión 1, con un modelo de contenido estricto (``ContentModel``). Retirar un tipo o una
+su versión 1 (``walk_test_result`` también en la 2, TASK-216), con un modelo de contenido
+estricto (``ContentModel``). Retirar un tipo o una
 versión está prohibido (BR-NUC-52): una versión nueva solo amplía.
 
 - **Texto libre** (A-45): solo en las rutas declaradas de ``free_text_paths``; pasa la política
@@ -37,6 +38,7 @@ from vigia_platform.catalog.domain.enums import (
     OcclusionVerification,
     RegressionCause,
     StepKind,
+    WalkTestKind,
 )
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.shared.context import ActorUnit, Role
@@ -490,6 +492,105 @@ class WalkTestResult(ContentModel):
         return self
 
 
+# --- acta, versión 2 (TASK-216) -----------------------------------------------------------------
+#
+# Amplía la versión 1 sin quitar nada (BR-NUC-52, ``compatibility_problems``): un tramo sin medir
+# queda nulo y nombrado en ``not_measured`` (antes los tramos 2 y 3b eran obligatorios), el tramo
+# del instalador no trae repeticiones, ``measured_fps`` es nulo sin latido (BR-GOB-49) y el acta
+# guarda los ``evidence_ref`` sin clip verificable, la última prueba de oclusión de cada cámara,
+# la clase de la sesión, sus pases por celda y si devolvió la regresión a ``current``.
+
+
+class MatrixResultV2(MatrixResult):
+    unverifiable_evidence_refs: Annotated[
+        tuple[UUID, ...], Field(min_length=0, max_length=MAX_COUNT)
+    ] = ()
+    """``evidence_ref`` de los pases de la fila que no resuelven a un ``VerificationClip`` de la
+    zona: «sin clip verificable», sin bloquear el cierre."""
+
+
+class LatencyTrancheV2(ContentModel):
+    """Un tramo con su propio reloj; el del instalador solo trae el p95 (sin repeticiones)."""
+
+    median_ms: LatencyMs | None = None
+    p95_ms: LatencyMs
+    max_ms: LatencyMs | None = None
+    repetitions: Repetitions | None = None
+    measured_by: LatencyMeasuredBy
+
+
+TrancheField = Literal["node_tranche", "platform_tranche", "exposure_tranche", "served_tranche"]
+_TRANCHES: Final[tuple[TrancheField, ...]] = (
+    "node_tranche",
+    "platform_tranche",
+    "exposure_tranche",
+    "served_tranche",
+)
+IndicativeSum = Annotated[StrictInt, Field(ge=0, le=4 * MAX_LATENCY_MS)]
+
+
+class LatencyV2(ContentModel):
+    """Los cuatro tramos por separado: un tramo sin muestras es nulo y figura en
+    ``not_measured`` («no medido»; nunca una cifra inventada). Las sumas son **orientativas**
+    (``indicative``) y nunca se prometen como cifra única (P6)."""
+
+    node_tranche: LatencyTrancheV2 | None = None
+    platform_tranche: LatencyTrancheV2 | None = None
+    exposure_tranche: LatencyTrancheV2 | None = None
+    served_tranche: LatencyTrancheV2 | None = None
+    not_measured: Annotated[tuple[TrancheField, ...], Field(max_length=4)] = ()
+    indicative_sum_median_ms: IndicativeSum | None = None
+    indicative_sum_p95_ms: IndicativeSum
+    indicative: Literal[True] = True
+    repetitions_counted: Repetitions | None = None
+    """Pases más clips de verificación de la ventana (las 100 repeticiones de BR-GOB-48, D-2)."""
+
+    @model_validator(mode="after")
+    def _coherent(self) -> Self:
+        # Una acta de la versión 1 no lleva ``not_measured``; si lo lleva, es exacto.
+        missing = [name for name in _TRANCHES if getattr(self, name) is None]
+        if self.not_measured and list(self.not_measured) != missing:
+            raise ValueError("not_measured nombra, en orden, los tramos sin medir")
+        return self
+
+
+class CameraMeasuredV2(ContentModel):
+    """Tasa medida y declarada; sin latido, ``measured_fps`` nulo y nunca otro valor."""
+
+    camera_id: UUID
+    measured_fps: Fps | None
+    declared_min_fps: Fps | None
+
+
+class OcclusionSummaryV2(OcclusionSummary):
+    test_id: UUID | None = None
+    """La última prueba de la cámara; las anteriores siguen en el expediente."""
+
+
+class InstallerMeasurementsV2(InstallerMeasurements):
+    measured_by: Literal["installer"] | None = None
+
+
+class WalkTestResultV2(WalkTestResult):
+    """Acta digital, versión 2 (TASK-216): la de la versión 1 ampliada."""
+
+    kind: WalkTestKind | None = None
+    passes_per_cell: Annotated[StrictInt, Field(ge=3, le=1000)] | None = None
+    regression_cleared: StrictBool | None = None
+    """Si el cierre de una reejecución devolvió la regresión a ``current`` (BR-GOB-55)."""
+    matrix_results: Annotated[
+        tuple[MatrixResultV2, ...], Field(min_length=1, max_length=MAX_MATRIX_ROWS)
+    ]
+    latency: LatencyV2  # type: ignore[assignment]
+    cameras_measured: Annotated[  # type: ignore[assignment]
+        tuple[CameraMeasuredV2, ...], Field(min_length=1, max_length=MAX_CAMERAS)
+    ]
+    occlusion_summary: Annotated[
+        tuple[OcclusionSummaryV2, ...], Field(min_length=1, max_length=MAX_CAMERAS)
+    ]
+    installer_measurements: InstallerMeasurementsV2 | None = None
+
+
 class OcclusionTestResult(ContentModel):
     """Prueba de redundancia por oclusión (D-6), con ``pending`` y ``deadline`` (nota de §2.14)."""
 
@@ -577,12 +678,13 @@ def _catalog(
     source_key_path: str | None = None,
     free_text_paths: tuple[str, ...] = (),
     outbox_events: tuple[str, ...] = (),
+    schema_version: int = 1,
 ) -> RecordType:
     return RecordType(
         record_type=record_type,
         writer_unit=ActorUnit.U03,
         chain_level=ChainLevel.PLANT,
-        schema_version=1,
+        schema_version=schema_version,
         content_model=model,
         source_key_path=source_key_path,
         free_text_paths=free_text_paths,
@@ -649,6 +751,14 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         outbox_events=("regression_cleared",),
     ),
     _catalog(
+        "walk_test_result",
+        WalkTestResultV2,
+        source_key_path="/commissioning_record_id",
+        free_text_paths=("/false_alarm_acceptance/reason_es",),
+        outbox_events=("regression_cleared",),
+        schema_version=2,
+    ),
+    _catalog(
         "plant_policy_signed",
         PlantPolicySigned,
         source_key_path="/policy_id",
@@ -690,7 +800,8 @@ CATALOG_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         outbox_events=("catalog_updated",),
     ),
 )
-"""Los trece tipos del catálogo, en versión 1 (domain-entities §5)."""
+"""Los trece tipos del catálogo, en versión 1 (domain-entities §5), y la versión 2 de
+``walk_test_result`` (TASK-216), justo después de la 1: las versiones se registran en orden."""
 
 
 def register_catalog_record_types(registry: RecordTypeRegistry) -> None:
