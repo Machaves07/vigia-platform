@@ -15,6 +15,9 @@
 #   tests/examples que no necesitan contenedores) con cobertura.
 # - backend (pruebas de integración): pytest perfil ci con integration (PostgreSQL y LocalStack con
 #   el Docker del runner) con cobertura.
+# - backend (carga ci): el perfil ci de tests/load (TASK-231, NFR-GOB-06) en su propio trabajo, en
+#   paralelo; la integración lo ignora para no pasar su tope de 75 min (decisión del dueño del
+#   2026-10-07; VIG-171 completa la canalización de carga). Sin cobertura: la carga no la cuenta.
 # - cobertura: combina las dos y exige ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 %
 #   global (tools/check_coverage.py).
 # - dependencias (licencias y pip-audit): lista permitida con LICENSE-EXCEPTIONS.md y avisos de
@@ -156,7 +159,7 @@ jobs:
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
       - name: pruebas perfil ci con integration (Docker del runner, con cobertura)
-        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration
+        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration --ignore=tests/load
       - name: datos de cobertura
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -165,6 +168,43 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
+
+  backend-carga:
+    name: backend (carga ci)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: perfil ci de tests/load (10 nodos, speed_factor 60, 5 min; Docker del runner)
+        run: |
+          if [ -d tests/load ]; then
+            uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration tests/load/
+          else
+            echo "tests/load aún no existe en este árbol (TASK-231)"
+          fi
 
   # NFR-NUC-45: ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 % global, sobre la suite
   # completa (los dos trabajos «backend»). Solo necesita coverage.py y el código fuente.
