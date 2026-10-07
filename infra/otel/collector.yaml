@@ -11,7 +11,8 @@
 # - Procesadores: límite de memoria, detección de recursos de ECS, filtro de atributos
 #   (NFR-NUC-41), dimensiones fijas y lote de 5 s y 512 elementos.
 # - Exportadores: `awsemf` (métricas al espacio Vigia/Platform con las dimensiones service,
-#   environment, route y component; sin dimensiones de alta cardinalidad) y `awsxray` (trazas,
+#   environment, route y component; sin dimensiones de alta cardinalidad: node_id solo en las
+#   ocho series por nodo de NFR-GOB-55, acotadas por la flota) y `awsxray` (trazas,
 #   muestreo del 100 % en el piloto: el colector no muestrea). Los registros propios del
 #   colector salen por la salida estándar hacia /vigia/<despliegue>/otel.
 # - Fallo: la memoria del colector está acotada por memory_limiter (rechaza al receptor por
@@ -115,6 +116,19 @@ exporters:
           - [service, environment, pool_class]
         metric_name_selectors:
           - "^(db_pool|bulkhead)_(in_use|size)$"
+          - "^bulkhead_(wait_ms|rejected_total)$"
+      # Rutas del contrato (NFR-GOB-54): aceptados y rechazados por tipo de registro (la ruta).
+      - dimensions:
+          - [service, environment, result, route]
+        metric_name_selectors:
+          - "^node_requests_total$"
+      # Series por nodo de NFR-GOB-55: solo estos contadores y medidores, nunca un histograma
+      # (NFR-GOB-13: a lo sumo 8 por nodo). FLEET_PER_NODE_METRICS de stacks/observability.py.
+      - dimensions:
+          - [service, environment, node_id]
+        metric_name_selectors:
+          - "^fleet_(heartbeats_total|heartbeat_gap_seconds|node_reachable|node_queue_pending|node_clock_offset_ms)$"
+          - "^clip_grants_(issued|used|orphaned)_total$"
       - dimensions:
           - [service, environment, alert_type]
         metric_name_selectors:

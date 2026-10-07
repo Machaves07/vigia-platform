@@ -36,9 +36,10 @@ La disponibilidad de NFR-NUC-10 es un **sondeo interno**: la salud de ``tg-api``
 ``availability-internal-probe``.
 
 Tablero ``vigia-<despliegue>`` (``vigia-pilot``, §9.3) con los paneles de NFR-NUC-44, el de la
-aplicación (nº 12), los de flota de U-03 (nº 18) y los cinco de U-04 (nº 23). Las métricas que
-U-03 y U-04 aún no publican se listan en ``PENDING_UNIT_METRICS``: su alarma queda en
-``INSUFFICIENT_DATA`` hasta que la unidad las emita con ese nombre.
+aplicación (nº 12), los de flota de U-03 (nº 18, ``FLEET_PANELS`` sobre métricas publicadas) y los
+cinco de U-04 (nº 23). Una métrica que una alarma vigila y su unidad aún no publica va en
+``PENDING_UNIT_METRICS``: la alarma queda en ``INSUFFICIENT_DATA`` hasta que la unidad la emita
+con ese nombre. U-03 ya publica todas las suyas (VIG-167).
 """
 
 from __future__ import annotations
@@ -129,13 +130,27 @@ RESTORE_DRILL_OVERDUE_DAYS: Final = 100
 
 NODE_ROUTE_P95_TARGETS_MS: Final = {
     "/api/nodes/findings": 500,
+    "/api/nodes/detection-reviews": 500,
     "/api/nodes/observability-events": 200,
     "/api/nodes/heartbeats": 150,
     "/api/nodes/clip-uploads": 100,
     "/api/nodes/zones/{zone_id}/catalog": 100,
     "/api/nodes/enrollment": 2_000,
+    # [objetivo propio], provisionales (A-55): NFR-GOB-01 no fija cifra para estas tres.
+    "/api/nodes/credential-rotations": 2_000,
+    "/api/nodes/clip-uploads/{clip_id}/confirmation": 300,
+    "/api/nodes/update-results": 200,
 }
-"""NFR-GOB-01 por ruta del contrato (seis alarmas ``latency-node-*``, adenda nº 18)."""
+"""p95 por ruta obligatoria del contrato: una alarma ``latency-node-*`` por cada una de las diez
+(nota T-04 del 2026-09-23 de U-03 §8.1, que completa las seis de A-24). La prueba cruzada del
+backend la compara con ``NodeRoute``."""
+
+PROVISIONAL_NODE_ROUTE_TARGETS: Final = (
+    "/api/nodes/credential-rotations",
+    "/api/nodes/clip-uploads/{clip_id}/confirmation",
+    "/api/nodes/update-results",
+)
+"""Objetivos ``[objetivo propio]`` provisionales de A-55: la descripción de su alarma lo dice."""
 
 CERTIFICATE_NODE_ROUTES: Final = (
     "/api/nodes/findings",
@@ -169,11 +184,40 @@ FLEET_PERIODIC_TASKS: Final = (
     "detect_mute_nodes",
     "evaluate_fleet_alarms",
     "expire_enrollment_codes",
+    "regenerate_revocation_list",
     "mark_orphan_clips",
     "expire_walk_test_sessions",
     "alert_expiring_certificates",
 )
-"""Las tareas por organización de U-03 del panel de edad del último éxito (LC-GOB-18)."""
+"""Las siete tareas de U-03 (LC-GOB-18, ``U03_TASKS`` del worker), estén o no pendientes: el panel
+de duración, resultado y edad del último éxito las recorre todas (nota de VIG-155)."""
+
+FLEET_PER_NODE_METRICS: Final = (
+    "fleet_heartbeats_total",
+    "fleet_heartbeat_gap_seconds",
+    "fleet_node_reachable",
+    "fleet_node_queue_pending",
+    "fleet_node_clock_offset_ms",
+    "clip_grants_issued_total",
+    "clip_grants_used_total",
+    "clip_grants_orphaned_total",
+)
+"""Las ocho series por nodo de NFR-GOB-55 (contadores y medidores; NFR-GOB-13: a lo sumo 8 por
+nodo y ningún histograma). Son las únicas que el colector publica con ``node_id``."""
+
+FLEET_PANELS: Final = (
+    "Inventario por estado de comunicacion",
+    "Nodos mudos",
+    "Colas por encima de umbral",
+    "Latencias y codigos por ruta del contrato",
+    "Aceptados y rechazados por tipo de registro",
+    "Lista de revocacion: estado y vigencia",
+    "Huerfanos por nodo",
+    "Tareas periodicas de U-03: duracion y resultado",
+    "Semaforos y pools por clase",
+)
+"""Paneles de U-03 §8.2 (NFR-GOB-58) con métricas que el código publica. «Alarmas abiertas por
+clase» y «certificados por vencer» no tienen métrica en el código todavía: no se dibujan."""
 
 APPLICATION_ALARM_METRICS: Final = {
     # NFR-NUC-38 y §9.4.
@@ -225,7 +269,7 @@ APPLICATION_ALARM_METRICS: Final = {
         ("rate_limited_total", ("route",)),
         ("http_server_requests_total", ("route",)),
     ),
-    "revocation-list-publish-failed": (("periodic_task_duration_ms", ("result", "task")),),
+    "revocation-list-publish-failed": (("revocation_list_publish_failed", ()),),
     "revocation-list-expiring": (("revocation_list_seconds_to_expiry", ()),),
     "periodic-task-stale-detect-mute-nodes": (
         ("periodic_task_last_success_age_seconds", ("task",)),
@@ -249,11 +293,15 @@ APPLICATION_ALARM_METRICS: Final = {
         ("periodic_task_last_success_age_seconds", ("task",)),
     ),
     "latency-node-findings": (("http_server_duration_ms", ("route",)),),
+    "latency-node-detection-reviews": (("http_server_duration_ms", ("route",)),),
     "latency-node-observability-events": (("http_server_duration_ms", ("route",)),),
     "latency-node-heartbeats": (("http_server_duration_ms", ("route",)),),
     "latency-node-clip-uploads": (("http_server_duration_ms", ("route",)),),
     "latency-node-catalog": (("http_server_duration_ms", ("route",)),),
     "latency-node-enrollment": (("http_server_duration_ms", ("route",)),),
+    "latency-node-credential-rotations": (("http_server_duration_ms", ("route",)),),
+    "latency-node-confirmation": (("http_server_duration_ms", ("route",)),),
+    "latency-node-update-results": (("http_server_duration_ms", ("route",)),),
     "bulkhead-person-saturated": (
         ("bulkhead_in_use", ("pool_class",)),
         ("bulkhead_size", ("pool_class",)),
@@ -801,17 +849,12 @@ class ObservabilityStack(VigiaStack):
                 "(NFR-GOB-46)",
             )
         )
-        failed = self._app_metric(
-            "periodic_task_duration_ms",
-            worker,
-            "SampleCount",
-            FIVE_MINUTES,
-            {"task": "regenerate_revocation_list", "result": "failed"},
-        )
+        # El contador del ciclo (TASK-220): suma también un ciclo cortado a mitad, que el
+        # planificador no siempre registra como ``failed``.
         self._alarm(
             AlarmSpec(
                 "revocation-list-publish-failed",
-                failed,
+                self._app_metric("revocation_list_publish_failed", worker, "Sum", FIVE_MINUTES),
                 1,
                 _GE,
                 "Fallo de publicacion de la lista de revocacion en 5 min (NFR-GOB-46, 48)",
@@ -830,6 +873,11 @@ class ObservabilityStack(VigiaStack):
             )
         )
         for route, target in NODE_ROUTE_P95_TARGETS_MS.items():
+            source = (
+                "objetivo propio provisional, A-55"
+                if route in PROVISIONAL_NODE_ROUTE_TARGETS
+                else "NFR-GOB-01"
+            )
             self._alarm(
                 AlarmSpec(
                     f"latency-node-{_key_suffix(route)}",
@@ -838,7 +886,8 @@ class ObservabilityStack(VigiaStack):
                     ),
                     2 * target,
                     _GT,
-                    f"p95 de {route} por encima de {2 * target} ms (2 x NFR-GOB-01) durante 15 min",
+                    f"p95 de {route} por encima de {2 * target} ms (2 x {target} ms, {source}) "
+                    "durante 15 min",
                     evaluation_periods=3,
                 )
             )
@@ -1535,59 +1584,133 @@ class ObservabilityStack(VigiaStack):
             *self._loop_panels(),
         ]
 
+    def _search(
+        self, name: str, service: str, statistic: str, period: Duration, *dimensions: str
+    ) -> str:
+        """``SEARCH`` de una métrica del despliegue: una serie por valor de ``dimensions``."""
+        schema = ",".join((METRICS_NAMESPACE, "service", "environment", *dimensions))
+        return (
+            f'SEARCH(\'{{{schema}}} MetricName="{name}" service="{service}" '
+            f"environment=\"{self.config.deployment}\"', '{statistic}', "
+            f"{int(period.to_seconds())})"
+        )
+
+    def _expression(self, expression: str, period: Duration, label: str = "") -> cloudwatch.IMetric:
+        return cloudwatch.MathExpression(expression=expression, label=label, period=period)
+
     def _fleet_panels(self) -> list[tuple[str, list[cloudwatch.IWidget]]]:
-        """Paneles de flota de U-03 (nº 18, U-03 §8.2) con las métricas que ya existen."""
+        """Paneles de flota de U-03 (nº 18, U-03 §8.2 y NFR-GOB-58) sobre las métricas que el
+        código publica. Las series por nodo son solo las de ``FLEET_PER_NODE_METRICS`` (contadores
+        y medidores); los histogramas se separan por ruta, clase o tarea, nunca por nodo
+        (NFR-GOB-13)."""
         api, worker = API_SERVICE, WORKER_SERVICE
         m5 = FIVE_MINUTES
+        (inventory, mute, queues, routes, records, revocation, orphans, tasks, pools) = FLEET_PANELS
+        by_node = "node_id"
+        reachable = self._search("fleet_node_reachable", api, "Maximum", m5, by_node)
+        heartbeats = self._search("fleet_heartbeats_total", api, "Sum", m5, by_node)
+        latency = [
+            self._app_metric("http_server_duration_ms", api, "p95", m5, {"route": route})
+            for route in NODE_ROUTE_P95_TARGETS_MS
+        ]
+        codes = [
+            self._app_metric(
+                "http_server_errors_total", api, "Sum", m5, {"route": route, "status_class": code}
+            )
+            for route in NODE_ROUTE_P95_TARGETS_MS
+            for code in ("4xx", "5xx")
+        ]
+        task_duration = [
+            self._app_metric(
+                "periodic_task_duration_ms",
+                worker,
+                "p95",
+                m5,
+                {"task": task, "result": "succeeded"},
+            )
+            for task in FLEET_PERIODIC_TASKS
+        ]
+        task_failures = [
+            self._app_metric(
+                "periodic_task_duration_ms",
+                worker,
+                "SampleCount",
+                m5,
+                {"task": task, "result": "failed"},
+            )
+            for task in FLEET_PERIODIC_TASKS
+        ]
+        classes = ("node", "person")
         return [
             (
                 "Flota (U-03, n 18)",
                 [
                     self._graph(
-                        "p95 por ruta del contrato (ms)",
+                        inventory,
+                        [self._expression(f"SUM({reachable})", m5, "nodos alcanzables")],
+                    ),
+                    self._graph(
+                        mute,
                         [
-                            self._app_metric(
-                                "http_server_duration_ms", api, "p95", m5, {"route": route}
+                            self._expression(f"FILL({heartbeats}, 0)", m5),
+                            self._expression(
+                                self._search(
+                                    "fleet_heartbeat_gap_seconds", api, "Maximum", m5, by_node
+                                ),
+                                m5,
+                            ),
+                        ],
+                    ),
+                    self._graph(
+                        queues,
+                        [
+                            self._expression(
+                                self._search(
+                                    "fleet_node_queue_pending", api, "Maximum", m5, by_node
+                                ),
+                                m5,
                             )
-                            for route in NODE_ROUTE_P95_TARGETS_MS
                         ],
-                        width=12,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title=routes, left=latency, right=codes, width=24, height=6
                     ),
                     self._graph(
-                        "rate_limited de nodos y errores de la ingesta",
+                        records,
                         [
-                            self._app_metric(
-                                "rate_limited_total", api, "Sum", m5, {"rate_limit": "node"}
-                            ),
-                            *(
-                                self._app_metric(
-                                    "http_server_errors_total",
-                                    api,
-                                    "Sum",
-                                    m5,
-                                    {"route": route, "status_class": "4xx"},
-                                )
-                                for route in INGEST_ROUTES
-                            ),
+                            self._expression(
+                                self._search(
+                                    "node_requests_total", api, "Sum", m5, "result", "route"
+                                ),
+                                m5,
+                            )
                         ],
                         width=12,
                     ),
                     self._graph(
-                        "Lista de revocacion: vigencia (s) y entradas",
+                        revocation,
                         [
                             self._app_metric(
                                 "revocation_list_seconds_to_expiry", worker, "Minimum", m5
                             ),
                             self._app_metric("revocation_list_entries", worker, "Maximum", m5),
+                            self._app_metric("revocation_list_publish_failed", worker, "Sum", m5),
                         ],
+                        width=12,
                     ),
                     self._graph(
-                        "Pools y semaforos por clase",
+                        orphans,
                         [
-                            self._app_metric(name, api, "Maximum", m5, {"pool_class": klass})
-                            for name in ("bulkhead_in_use", "db_pool_in_use")
-                            for klass in ("node", "person")
+                            self._expression(
+                                self._search(
+                                    "clip_grants_orphaned_total", worker, "Sum", ONE_HOUR, by_node
+                                ),
+                                ONE_HOUR,
+                            )
                         ],
+                    ),
+                    cloudwatch.GraphWidget(
+                        title=tasks, left=task_duration, right=task_failures, width=8, height=6
                     ),
                     self._graph(
                         "Tareas periodicas de U-03: edad del ultimo exito (s)",
@@ -1602,6 +1725,30 @@ class ObservabilityStack(VigiaStack):
                             for task in FLEET_PERIODIC_TASKS
                         ],
                     ),
+                    cloudwatch.GraphWidget(
+                        title=pools,
+                        left=[
+                            self._app_metric(name, api, "Maximum", m5, {"pool_class": klass})
+                            for name in ("bulkhead_in_use", "bulkhead_size", "db_pool_in_use")
+                            for klass in classes
+                        ],
+                        right=[
+                            *(
+                                self._app_metric(
+                                    "bulkhead_rejected_total", api, "Sum", m5, {"pool_class": k}
+                                )
+                                for k in classes
+                            ),
+                            *(
+                                self._app_metric(
+                                    "bulkhead_wait_ms", api, "p95", m5, {"pool_class": k}
+                                )
+                                for k in classes
+                            ),
+                        ],
+                        width=16,
+                        height=6,
+                    ),
                     self._alarm_status(
                         "Alarmas de flota",
                         [
@@ -1609,17 +1756,12 @@ class ObservabilityStack(VigiaStack):
                             for key in self.alarms
                             if key.startswith(("node-", "revocation-", "latency-node-"))
                             or key in ("bulkhead-person-saturated", "api-memory-high")
+                            or (
+                                key.startswith("periodic-task-stale-")
+                                and key.removeprefix("periodic-task-stale-").replace("-", "_")
+                                in FLEET_PERIODIC_TASKS
+                            )
                         ],
-                    ),
-                    cloudwatch.TextWidget(
-                        markdown=(
-                            "Pendientes de las metricas de U-03 (fleet): inventario por estado de "
-                            "comunicacion, nodos mudos, colas por encima de umbral, alarmas "
-                            "abiertas por clase, aceptados y rechazados por tipo de registro, "
-                            "certificados por vencer y huerfanos por nodo."
-                        ),
-                        width=24,
-                        height=2,
                     ),
                 ],
             )

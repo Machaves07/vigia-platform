@@ -13,7 +13,11 @@ backend no instala CDK) y se contrastan con el catálogo:
 - cada condición de ``ALARM_CONDITIONS`` tiene alarmas, y cada una vigila la métrica de la
   condición (y su denominador) con los valores de su selector;
 - los umbrales copiados en la pila son los del núcleo: objetivos p95 de NFR-NUC-01, 26 h de las
-  tareas de la condición y ``RESTORE_DRILL_OVERDUE_DAYS``.
+  tareas de la condición y ``RESTORE_DRILL_OVERDUE_DAYS``;
+- U-03 (VIG-167): una alarma ``latency-node-*`` por cada ruta de ``NodeRoute`` que ``vigia-api``
+  publica; las siete tareas de ``U03_TASKS`` con su alarma ``periodic-task-stale-*`` a tres
+  cadencias; las métricas de U-03 fuera de ``PENDING_UNIT_METRICS``, y ``node_id`` solo en los
+  contadores y medidores por nodo del catálogo (NFR-GOB-13).
 
 Las propiedades del final comprueban que el contraste detecta una tabla alterada.
 """
@@ -28,13 +32,19 @@ from typing import Any
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vigia_platform.fleet.registration import U03_TASKS
+from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.archive.restore_drill import RESTORE_DRILL_OVERDUE_DAYS
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.metrics import (
     ALARM_CONDITIONS,
     CATALOG,
     OPERATION_P95_TARGET_MS,
+    MetricKind,
+    MetricName,
 )
+from vigia_platform.shared.outbox.registries import Schedule, ScheduleKind
+from vigia_platform.shared.runtime.units import PUBLISHED_NODE_ROUTES
 
 STACK = Path(__file__).resolve().parents[3] / "infra" / "stacks" / "observability.py"
 TABLES = (
@@ -45,6 +55,12 @@ TABLES = (
     "RESTORE_DRILL_OVERDUE_DAYS",
     "PENDING_UNIT_METRICS",
     "PENDING_UNIT_TASKS",
+    "NODE_ROUTE_P95_TARGETS_MS",
+    "PROVISIONAL_NODE_ROUTE_TARGETS",
+    "CERTIFICATE_NODE_ROUTES",
+    "INGEST_ROUTES",
+    "FLEET_PERIODIC_TASKS",
+    "FLEET_PER_NODE_METRICS",
 )
 TWENTY_SIX_HOURS = 26 * 3600
 
@@ -166,6 +182,122 @@ def test_stale_task_names_are_in_the_closed_list_or_pending() -> None:
 def test_restore_drill_threshold_is_the_core_one() -> None:
     assert TABLE["RESTORE_DRILL_OVERDUE_DAYS"] == RESTORE_DRILL_OVERDUE_DAYS
     assert ALARMS["restore-drill-overdue"] == (("restore_drill_age_days", ()),)
+
+
+# --- U-03 (VIG-167) ------------------------------------------------------------------------
+
+DAY = 24 * 3600
+
+
+def route_problems(targets: Mapping[str, int], alarms: AlarmTable) -> list[str]:
+    """Rutas con objetivo que no son del contrato o rutas del contrato sin alarma ``latency-node``.
+
+    Cada ruta de ``NodeRoute`` publicada en ``vigia-api`` necesita un objetivo y una alarma; las
+    alarmas ``latency-node-*`` son tantas como rutas (diez, nota T-04 de U-03 §8.1)."""
+    contract = {route.path for route in PUBLISHED_NODE_ROUTES}
+    problems = [f"ruta sin objetivo: {path}" for path in sorted(contract - set(targets))]
+    problems += [f"objetivo fuera del contrato: {path}" for path in sorted(set(targets) - contract)]
+    latency = [key for key in alarms if key.startswith("latency-node-")]
+    if len(latency) != len(targets):
+        problems.append(f"{len(latency)} alarmas latency-node para {len(targets)} rutas")
+    return problems
+
+
+def cadence_seconds(schedule: Schedule) -> int:
+    """Separación entre dos ejecuciones: el intervalo de ``every`` o un día de ``daily``."""
+    if schedule.kind is ScheduleKind.EVERY:
+        return schedule.offset_seconds
+    assert schedule.kind is ScheduleKind.DAILY, schedule
+    return DAY
+
+
+def task_problems(ages: Mapping[str, int], pending: Mapping[str, str]) -> list[str]:
+    """Tareas de ``U03_TASKS`` sin alarma, pendientes, o con un umbral distinto de tres
+    cadencias (180 s, 3 h y 72 h de LC-GOB-18 y U-03 §8.1)."""
+    problems = []
+    for name, (schedule, _) in sorted(U03_TASKS.items()):
+        if name in pending:
+            problems.append(f"{name}: sigue en PENDING_UNIT_TASKS")
+        if ages.get(name) != 3 * cadence_seconds(schedule):
+            problems.append(f"{name}: umbral {ages.get(name)} != 3 x {schedule.text}")
+        if f"periodic-task-stale-{name.replace('_', '-')}" not in ALARMS:
+            problems.append(f"{name}: sin alarma periodic-task-stale")
+    return problems
+
+
+def test_one_latency_alarm_per_contract_route() -> None:
+    targets: Mapping[str, int] = TABLE["NODE_ROUTE_P95_TARGETS_MS"]
+    assert len(NodeRoute) == len(PUBLISHED_NODE_ROUTES) == 10
+    assert route_problems(targets, ALARMS) == []
+    # NFR-GOB-01 y, para las tres sin cifra, A-55 (provisionales, marcadas como tales).
+    provisional = {
+        NodeRoute.CREDENTIAL_ROTATION.path: 2_000,
+        NodeRoute.CLIP_CONFIRMATION.path: 300,
+        NodeRoute.UPDATE_RESULT.path: 200,
+    }
+    assert set(TABLE["PROVISIONAL_NODE_ROUTE_TARGETS"]) == set(provisional)
+    assert {path: targets[path] for path in provisional} == provisional
+    assert targets[NodeRoute.DETECTION_REVIEW.path] == 500
+
+
+def test_certificate_and_ingest_routes_are_contract_routes() -> None:
+    """Denominadores de ``node-rate-limited-high`` (con certificado) y de la ingesta."""
+    assert set(TABLE["CERTIFICATE_NODE_ROUTES"]) == {
+        route.path for route in NodeRoute if route.mutual_tls
+    }
+    assert set(TABLE["INGEST_ROUTES"]) == {
+        NodeRoute.FINDING.path,
+        NodeRoute.OBSERVABILITY_EVENT.path,
+    }
+
+
+def test_the_seven_u03_tasks_have_their_stale_alarm_at_three_cadences() -> None:
+    """Prueba cruzada contra el catálogo real del worker (``U03_TASKS``, VIG-163)."""
+    ages: Mapping[str, int] = TABLE["PERIODIC_TASK_MAX_AGE_SECONDS"]
+    pending: Mapping[str, str] = TABLE["PENDING_UNIT_TASKS"]
+    assert len(U03_TASKS) == 7
+    assert task_problems(ages, pending) == []
+    assert set(TABLE["FLEET_PERIODIC_TASKS"]) == set(U03_TASKS)
+    assert not set(pending) & set(U03_TASKS)
+    assert {ages[name] for name in U03_TASKS} == {180, 3 * 3600, 72 * 3600}
+
+
+def test_u03_metrics_are_published_and_not_pending() -> None:
+    published = {
+        MetricName.REVOCATION_LIST_SECONDS_TO_EXPIRY,
+        MetricName.REVOCATION_LIST_ENTRIES,
+        MetricName.REVOCATION_LIST_PUBLISH_FAILED,
+        MetricName.BULKHEAD_IN_USE,
+        MetricName.BULKHEAD_SIZE,
+    }
+    used = {name for metrics in ALARMS.values() for name, _ in metrics}
+    for name in published:
+        assert name.value in SPECS and name.value in used, name
+        assert name.value not in PENDING, name
+    assert ALARMS["revocation-list-publish-failed"] == (("revocation_list_publish_failed", ()),)
+
+
+def test_only_per_node_counters_and_gauges_carry_node_id() -> None:
+    """NFR-GOB-13: ``FLEET_PER_NODE_METRICS`` (las únicas con ``node_id`` en el colector) son
+    exactamente las del catálogo que admiten ``node_id``, ninguna es histograma y no pasan de 8."""
+    per_node = set(TABLE["FLEET_PER_NODE_METRICS"])
+    assert per_node == {spec.name.value for spec in CATALOG if "node_id" in spec.attributes}
+    assert len(per_node) <= 8
+    assert all(SPECS[name].kind is not MetricKind.HISTOGRAM for name in per_node)
+
+
+@given(st.sampled_from(sorted(PUBLISHED_NODE_ROUTES, key=lambda route: route.path)))
+def test_a_contract_route_without_target_is_reported(route: NodeRoute) -> None:
+    targets = {k: v for k, v in TABLE["NODE_ROUTE_P95_TARGETS_MS"].items() if k != route.path}
+    assert any(route.path in problem for problem in route_problems(targets, ALARMS))
+
+
+@given(st.sampled_from(sorted(U03_TASKS)), st.integers(min_value=1, max_value=10 * DAY))
+def test_a_wrong_or_pending_task_threshold_is_reported(task: str, age: int) -> None:
+    ages = dict(TABLE["PERIODIC_TASK_MAX_AGE_SECONDS"])
+    if age != ages[task]:
+        assert any(task in p for p in task_problems({**ages, task: age}, {}))
+    assert any(task in p for p in task_problems(ages, {task: "U-03"}))
 
 
 # --- El contraste detecta una tabla alterada ----------------------------------------------
