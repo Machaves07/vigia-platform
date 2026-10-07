@@ -803,25 +803,40 @@ class Onboarding:
 
     # --- Catálogo y nodo --------------------------------------------------------------------
 
-    def zone(self, *, cameras: int = 2, enrolled: bool = True) -> GobZone:
-        """Organización nueva con una zona: familia admitida, catálogo 1 publicado, nodo declarado
-        por el instalador y, con ``enrolled``, dado de alta con su código y una CSR."""
+    def zone(
+        self, *, cameras: int = 2, enrolled: bool = True, within: GobZone | None = None
+    ) -> GobZone:
+        """Una zona con su nodo: familia admitida, catálogo 1 publicado, nodo declarado por el
+        instalador y, con ``enrolled``, dado de alta con su código y una CSR.
+
+        Sin ``within``, en una organización nueva; con ``within``, otra zona de la misma planta
+        (mismas personas y concesión; la familia ya está admitida en la planta, BR-GOB-14). Al
+        terminar, el reloj avanza ``APPROVAL_MARGIN_SECONDS``: los hechos por defecto (5 minutos
+        antes de la hora) caen después de la asignación del nodo a la zona."""
         gob = self.gob
-        site = gob.site(plants=1, zones_per_plant=1)
-        plant_id = next(iter(site.plants))
-        zone_id = site.plants[plant_id][0]
-        admin_id, admin = gob.person(site.organization_id, Role.ADMINISTRATOR)
-        installer_id, installer, concession = gob.installer(site)
-        admitted = gob.call(
-            "POST",
-            f"/plants/{plant_id}/admissions",
-            cookie=admin,
-            json_body={
-                "family": "coexistence",
-                "answers": {"standard": True, "remedy": True, "subject": True},
-            },
-        )
-        ok(admitted, 201)
+        if within is None:
+            site = gob.site(plants=1, zones_per_plant=1)
+            plant_id = next(iter(site.plants))
+            zone_id = site.plants[plant_id][0]
+            admin_id, admin = gob.person(site.organization_id, Role.ADMINISTRATOR)
+            installer_id, installer, concession = gob.installer(site)
+            admitted = gob.call(
+                "POST",
+                f"/plants/{plant_id}/admissions",
+                cookie=admin,
+                json_body={
+                    "family": "coexistence",
+                    "answers": {"standard": True, "remedy": True, "subject": True},
+                },
+            )
+            ok(admitted, 201)
+        else:
+            site, plant_id = within.site, within.plant_id
+            admin_id, admin = within.admin_id, within.admin
+            installer_id, installer = within.installer_id, within.installer
+            concession = within.concession
+            zone_id = uuid.uuid4()
+            gob.authz.add_zone(site.organization_id, plant_id, zone_id)
         camera_ids = tuple(uuid.uuid4() for _ in range(cameras))
         signal_id = uuid.uuid4()
         ok(
@@ -869,6 +884,7 @@ class Onboarding:
         zone.node_id = uuid.UUID(declared["node_id"])
         if enrolled:
             zone.certificate = self.enroll(zone)
+        gob.advance(APPROVAL_MARGIN_SECONDS)
         return zone
 
     def as_installer(
@@ -1211,6 +1227,20 @@ class Onboarding:
         }
         api.parse_finding_submission(json.dumps(document).encode())
         return document
+
+    def detection(self, zone: GobZone, started: datetime | None = None) -> dict[str, Any]:
+        """Un ``DetectionForReviewSubmission`` válido (banda de revisión del catálogo)."""
+        document = self.finding(zone, started)
+        document["detection_id"] = document.pop("finding_id")
+        for key in ("tier", "automatic_classification"):
+            document.pop(key)
+        document |= {"max_confidence": 0.5, "review_threshold": 0.4, "publication_threshold": 0.8}
+        api.parse_detection_for_review_submission(json.dumps(document).encode())
+        return document
+
+    def post_detection(self, zone: GobZone, document: Mapping[str, Any]) -> Any:
+        self.gob.advance(0.001)
+        return self.gob.run(self.submit(zone, NodeRoute.DETECTION_REVIEW, document, "detection_id"))
 
     def event(
         self, zone: GobZone, started: datetime | None = None, *, camera: int = 0
