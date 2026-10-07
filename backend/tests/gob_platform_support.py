@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import httpx
+import pytest
 from cryptography import x509
 from vigia_contracts.models import api
 
@@ -110,7 +111,11 @@ from vigia_platform.node_api.routes.credential_rotations import credential_rotat
 from vigia_platform.node_api.routes.enrollment import enrollment_operation
 from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import PlatformHttp
-from vigia_platform.shared.api.declarations import NODE_GATE_STATE_KEY, NodeRoute
+from vigia_platform.shared.api.declarations import (
+    NODE_GATE_STATE_KEY,
+    NodeRoute,
+    iter_declared_routes,
+)
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
@@ -1187,6 +1192,38 @@ class Onboarding:
             "storage_key": grant["storage_key"],
         }
 
+    def verification_clip(self, zone: GobZone, camera: int = 0) -> str:
+        """El clip de verificación del comisionamiento (nota T-02, pendiente nº 32): concesión con
+        ``purpose = verification``, ``PUT`` real con la marca de anonimización y confirmación por
+        ``POST clip-uploads/{clip_id}/confirmation``."""
+        data = secrets.token_bytes(512)
+        request = {
+            "clip_id": str(uuid7()),
+            "camera_id": str(zone.cameras[camera]),
+            "zone_id": str(zone.zone_id),
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "duration_ms": 10_000,
+            "purpose": "verification",
+        }
+        grant = ok(
+            self.gob.node_call(
+                "POST", NodeRoute.CLIP_UPLOAD.path, certificate=zone.cert, body=request
+            )
+        )
+        self.put(grant, data)
+        ok(
+            self.gob.node_call(
+                "POST",
+                NodeRoute.CLIP_CONFIRMATION.path.format(clip_id=request["clip_id"]),
+                certificate=zone.cert,
+            )
+        )
+        clip_id: str = request["clip_id"]
+        return clip_id
+
     @staticmethod
     def put(grant: Mapping[str, Any], data: bytes) -> httpx.Response:
         upload = grant.get("upload", grant)
@@ -1359,6 +1396,35 @@ class Onboarding:
         )
 
 
-def contract_routes() -> Sequence[NodeRoute]:
-    """Las rutas del contrato que publica la aplicación (las diez de A-51)."""
-    return tuple(NodeRoute)
+CLOSE_ROUTE: Final = "/walk-tests/{session_id}/close"
+
+
+def require_close_route(gob: GobPlatform) -> None:
+    """El cierre del acta por la ruta es de TASK-216 (VIG-158): sin ella en la aplicación, la
+    prueba que lo ejercita se omite y lo dice (nunca se da por cumplida)."""
+    paths = {route.path for route in iter_declared_routes(gob.app.routes)}
+    if CLOSE_ROUTE not in paths:
+        pytest.skip("POST /walk-tests/{session_id}/close (TASK-216, VIG-158) no está en main")
+
+
+def close_body(gob: GobPlatform, zone: GobZone, acceptance: str | None = None) -> dict[str, Any]:
+    """Cuerpo de cierre válido: la firma de una coordinación de la organización, las medidas del
+    instalador con la línea base de cada cámara y, si se da, la aceptación de falsas alarmas."""
+    signer, _ = gob.person(zone.organization_id, Role.COORDINATOR_SST)
+    body: dict[str, Any] = {
+        "signatures": [{"user_id": str(signer)}],
+        "installer_measurements": {
+            "beacon_latency_ms_p95": 180,
+            "baselines": [
+                {
+                    "camera_id": str(camera),
+                    "zone_id": str(zone.zone_id),
+                    "captured_at": "2026-10-01T08:00:00.000Z",
+                }
+                for camera in zone.cameras
+            ],
+        },
+    }
+    if acceptance is not None:
+        body["false_alarm_acceptance"] = {"reason_es": acceptance}
+    return body

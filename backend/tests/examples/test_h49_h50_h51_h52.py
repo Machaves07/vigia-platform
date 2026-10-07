@@ -32,7 +32,16 @@ from typing import Any
 import pytest
 from vigia_contracts.signing import KeySet, verify
 
-from tests.gob_platform_support import GobPlatform, GobZone, Onboarding, detail_of, ok, stamp
+from tests.gob_platform_support import (
+    GobPlatform,
+    GobZone,
+    Onboarding,
+    close_body,
+    detail_of,
+    ok,
+    require_close_route,
+    stamp,
+)
 from vigia_platform.shared.signing import NODE_PURPOSES
 
 pytestmark = pytest.mark.integration
@@ -134,6 +143,92 @@ def test_h50_three_signatures_with_copasst_open_use_and_findings_persist_from_th
     assert before["node_time"]["started_at"] < approved_at
     late = flow.post_finding(zone, before)
     assert (late.status_code, late.json()["code"]) == (403, "zone_gate_not_approved")
+
+
+# --- H-51 ----------------------------------------------------------------------------------------
+
+PASSES_PER_CELL = 25
+"""Con las cuatro posturas del estándar, 100 pases: las repeticiones de la latencia (BR-GOB-48)."""
+ACCEPTANCE = "Las falsas alarmas vienen del reflejo del portón; se revisa la máscara de la cámara."
+
+
+def _open_session(flow: Onboarding, zone: GobZone) -> tuple[str, list[dict[str, Any]]]:
+    session = ok(
+        flow.as_installer(
+            zone,
+            "POST",
+            f"/zones/{zone.zone_id}/walk-tests",
+            {"passes_per_cell": PASSES_PER_CELL},
+        ),
+        201,
+    )
+    current = ok(flow.as_installer(zone, "GET", f"/zones/{zone.zone_id}/walk-tests/current"))
+    rows: list[dict[str, Any]] = current["session"]["rows"]
+    assert len(rows) * PASSES_PER_CELL >= 100
+    return session["session_id"], rows
+
+
+def _passes(
+    flow: Onboarding, zone: GobZone, session_id: str, rows: list[dict[str, Any]], **extra: str
+) -> None:
+    """Las celdas completas en ``detected`` y, además, un pase ``extra[f"row{n}"]`` en la fila n."""
+    planned = [(row["row_id"], "detected") for row in rows for _ in range(PASSES_PER_CELL)] + [
+        (rows[int(key[3:])]["row_id"], result) for key, result in extra.items()
+    ]
+    for row_id, result in planned:
+        ok(
+            flow.as_installer(
+                zone,
+                "POST",
+                f"/walk-tests/{session_id}/passes",
+                {"row_id": row_id, "result": result},
+            ),
+            201,
+        )
+
+
+def _declared_occlusions(flow: Onboarding, zone: GobZone, session_id: str) -> None:
+    """Una prueba de oclusión por cámara, declarada con motivo (BR-GOB-42 y 43)."""
+    for camera in range(len(zone.cameras)):
+        ended = flow.gob.now() - dt.timedelta(seconds=2)
+        ok(_occlusion(flow, zone, session_id, camera, ended), 201)
+        declared = ok(_occlusion(flow, zone, session_id, camera, ended, reason=REASON), 201)
+        assert declared["verification"] == "declared"
+
+
+def test_h51_a_false_negative_blocks_the_close_and_the_false_alarm_rate_is_recorded(
+    gob: GobPlatform,
+) -> None:
+    require_close_route(gob)
+    flow = Onboarding(gob)
+
+    # Una detección perdida en la matriz: el acta no se cierra (BR-GOB-39).
+    blocked = flow.zone()
+    flow.mount(blocked)
+    session_id, rows = _open_session(flow, blocked)
+    _passes(flow, blocked, session_id, rows, row0="missed")
+    refused = flow.as_installer(
+        blocked, "POST", f"/walk-tests/{session_id}/close", close_body(gob, blocked)
+    )
+    assert detail_of(refused) == (409, "conflict", "catalog_false_negative_present")
+
+    # Sin falsos negativos y con falsas alarmas: el cierre exige aceptarlas y las registra.
+    zone = flow.zone()
+    flow.mount(zone)
+    session_id, rows = _open_session(flow, zone)
+    _passes(flow, zone, session_id, rows, row1="false_alarm")
+    _declared_occlusions(flow, zone, session_id)
+    flow.verification_clip(zone)
+    path = f"/walk-tests/{session_id}/close"
+    unaccepted = flow.as_installer(zone, "POST", path, close_body(gob, zone))
+    assert detail_of(unaccepted)[2] == "catalog_false_alarm_rate_above_threshold"
+    record = ok(flow.as_installer(zone, "POST", path, close_body(gob, zone, ACCEPTANCE)))
+    assert record["false_negatives_total"] == 0
+    total = len(rows) * PASSES_PER_CELL + 1
+    assert record["false_alarm_rate_observed"] == pytest.approx(1 / total)
+    assert record["false_alarm_acceptance"]["reason_es"] == ACCEPTANCE
+    (written,) = gob.contents(zone.organization_id, "walk_test_result")
+    assert written["false_alarm_rate_observed"] == record["false_alarm_rate_observed"]
 
 
 # --- H-52 ----------------------------------------------------------------------------------------

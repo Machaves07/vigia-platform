@@ -24,7 +24,15 @@ from typing import Any
 import asyncpg
 import pytest
 
-from tests.gob_platform_support import GobPlatform, GobZone, Onboarding, ok
+from tests.gob_platform_support import (
+    GobPlatform,
+    GobZone,
+    Onboarding,
+    close_body,
+    detail_of,
+    ok,
+    require_close_route,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -102,3 +110,54 @@ def test_g07_a_missed_pass_can_be_neither_edited_nor_deleted_nor_covered(
         "SELECT result FROM catalog.walk_test_pass WHERE pass_id = $1", missed["pass_id"]
     )
     assert row["result"] == "missed"
+
+
+def _complete_matrix(
+    flow: Onboarding, zone: GobZone, session_id: str, *, missed: bool
+) -> list[dict[str, Any]]:
+    """Tres pases ``detected`` por celda (``passes_per_cell``) y, con ``missed``, además una
+    detección perdida en la primera fila."""
+    rows = _rows(flow, zone)
+    for row in rows:
+        for _ in range(3):
+            _pass(flow, zone, session_id, row["row_id"], "detected")
+    if missed:
+        _pass(flow, zone, session_id, rows[0]["row_id"], "missed")
+    return rows
+
+
+def _close(flow: Onboarding, zone: GobZone, session_id: str, body: dict[str, Any]) -> Any:
+    return flow.as_installer(zone, "POST", f"/walk-tests/{session_id}/close", body)
+
+
+def test_g07_a_false_negative_in_the_matrix_never_closes_the_record(gob: GobPlatform) -> None:
+    require_close_route(gob)
+    flow = Onboarding(gob)
+    zone = flow.zone()
+    flow.mount(zone)
+    session_id = _open(flow, zone)["session_id"]
+    rows = _complete_matrix(flow, zone, session_id, missed=True)
+    body = close_body(gob, zone)
+    refused = _close(flow, zone, session_id, body)
+    assert detail_of(refused) == (409, "conflict", "catalog_false_negative_present"), refused.text
+    # Taparlo con más detecciones de la misma celda no cambia nada: cero por zona.
+    for _ in range(3):
+        _pass(flow, zone, session_id, rows[0]["row_id"], "detected")
+    again = _close(flow, zone, session_id, body)
+    assert detail_of(again) == detail_of(refused)
+    assert gob.records(zone.organization_id, "walk_test_result") == []
+    assert flow.mode(zone) == "commissioning"
+
+
+def test_g07_without_an_occlusion_test_per_camera_the_record_never_closes(
+    gob: GobPlatform,
+) -> None:
+    require_close_route(gob)
+    flow = Onboarding(gob)
+    zone = flow.zone()
+    flow.mount(zone)
+    session_id = _open(flow, zone)["session_id"]
+    _complete_matrix(flow, zone, session_id, missed=False)
+    refused = _close(flow, zone, session_id, close_body(gob, zone))
+    assert detail_of(refused) == (409, "conflict", "catalog_redundancy_not_verified"), refused.text
+    assert gob.records(zone.organization_id, "walk_test_result") == []
