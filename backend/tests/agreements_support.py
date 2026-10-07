@@ -2,8 +2,8 @@
 
 Sobre ``gates_world`` (servicios reales de ``catalog.gates`` como ``vigia_app``) añade los de
 ``catalog.agreements``: ``SignatoryPolicyService``, ``AgreementService`` (con
-``HierarchyService.users_by_role_and_scope`` real) y ``TransparencyService``, y la aplicación real
-(``World().app`` con la cadena fija de middleware y ``ContextAuthorizer``) con esas rutas y las de
+``HierarchyService.signatory_candidates`` real, A-58) y ``TransparencyService``, y la aplicación
+real (``World().app`` con la cadena fija de middleware y ``ContextAuthorizer``) con esas rutas y las de
 compuertas instaladas en ``app.state``.
 
 ``Ready`` deja una zona a un paso de la aprobación: montaje aprobado por un acta de alcance real,
@@ -336,11 +336,17 @@ class AgreementsWorld:
         confirm: Sequence[Role] = SIGNER_ROLES,
         site: Site | None = None,
         catalog: Mapping[str, Any] | None = None,
+        concession: ScopeLevel = ScopeLevel.ORGANIZATION,
     ) -> Ready:
         g = self.g
         site = site or g.site()
         ((plant, zone), *_) = site.zones()
-        installer = g.installer(site)
+        # Concesión de organización o de la planta de la zona (VIG-179).
+        installer = (
+            g.installer(site, ScopeLevel.PLANT, plant)
+            if concession is ScopeLevel.PLANT
+            else g.installer(site)
+        )
         if mounted:
             self.mount(site, plant, zone, installer, catalog)
         else:

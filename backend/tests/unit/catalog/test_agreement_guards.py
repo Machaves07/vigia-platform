@@ -23,6 +23,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vigia_platform.catalog.domain.agreements import (
+    DISPLAY_NAME_MAX,
     MAX_SIGNATORIES,
     AgreementConfirmation,
     AgreementRuleViolated,
@@ -320,6 +321,19 @@ def test_expected_finds_the_signer_and_nobody_else() -> None:
     agreement = _agreement(signers)
     assert agreement.expected(signers[2].user_id) == signers[2]
     assert agreement.expected(uuid.uuid4()) is None
+
+
+@pytest.mark.parametrize(
+    ("length", "kept"), [(1, 1), (119, 119), (120, 120), (121, 120), (500, 120)]
+)
+def test_the_projection_keeps_at_most_120_characters_of_the_name(length: int, kept: int) -> None:
+    # DE §2.8 (VIG-179, menor de la revisión de VIG-149): signatories[].display_name ≤ 120.
+    name = "ñ" * length
+    signatory = Signatory(Role.COPASST, uuid.uuid4(), name)
+    assert signatory.display_name == name[:kept]
+    assert DISPLAY_NAME_MAX == 120
+    assert signatory.as_json()["display_name"] == name[:kept]
+    assert Signatory(Role.COPASST, uuid.uuid4()).display_name is None
 
 
 # --- Registro use_agreement_signed ----------------------------------------------------------------

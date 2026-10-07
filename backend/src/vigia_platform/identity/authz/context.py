@@ -915,6 +915,20 @@ class ScopeContexts:
         """La organización antes de conocer a la persona: actor del sistema, sin asignaciones."""
         return self._system(organization_id, ContextOrigin.OUTBOX_EVENT, ActorUnit.U02)
 
+    def identity_lookup(self, context: ScopeContext) -> ScopeContext:
+        """La organización de ``context`` con el actor del sistema y su misma correlación, para
+        la consulta acotada de firmantes de ``IdentityQueryPort.signatory_candidates`` (A-58).
+
+        Solo la usa esa consulta, después de comprobar con ``context`` que la zona está en su
+        alcance: bajo concesión de planta, la RLS de A-46 oculta ``identity.user_account``.
+        """
+        return self._system(
+            context.organization_id,
+            ContextOrigin.OUTBOX_EVENT,
+            ActorUnit.U02,
+            context.correlation_id,
+        )
+
     def for_user(
         self,
         organization_id: uuid.UUID,

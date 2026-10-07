@@ -117,7 +117,7 @@ from vigia_platform.fleet.adapters.postgres.commissioning_queries import (
     PostgresCommissioningQueries,
 )
 from vigia_platform.fleet.domain.verification_clip import ObjectFacts
-from vigia_platform.identity.application.hierarchy import Recipient
+from vigia_platform.identity.application.hierarchy import SignatoryCandidate
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -131,7 +131,7 @@ from vigia_platform.ledger.application.writer import (
 )
 from vigia_platform.ledger.free_text import FreeTextField, FreeTextPolicyRegistry, FreeTextRejected
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent
@@ -188,15 +188,15 @@ class OcclusionReevaluation(Protocol):
 
 
 class SignerLookup(Protocol):
-    """``IdentityQueryPort.users_by_role_and_scope`` de U-02 (LC-NUC-05)."""
+    """``IdentityQueryPort.signatory_candidates`` de U-02 (LC-NUC-05, A-58)."""
 
-    async def users_by_role_and_scope(
+    async def signatory_candidates(
         self,
         context: ScopeContext,
+        zone_id: uuid.UUID,
         roles: Iterable[Role],
-        scope_level: ScopeLevel,
-        scope_id: uuid.UUID,
-    ) -> tuple[Recipient, ...]: ...
+        user_ids: Iterable[uuid.UUID],
+    ) -> tuple[SignatoryCandidate, ...]: ...
 
 
 # --- Petición ------------------------------------------------------------------------------------
@@ -355,9 +355,10 @@ class CloseRecordService:
         self, authorized: ScopeContext, zone: ZoneRef, signers: tuple[uuid.UUID, ...]
     ) -> dict[uuid.UUID, Role]:
         """El rol con el que firma cada usuario: de la organización y con un rol vigente sobre la
-        zona (el primero de la lista cerrada); si alguno no lo tiene, ``invalid_request``."""
-        holders = await self._identity.users_by_role_and_scope(
-            authorized, tuple(Role), ScopeLevel.ZONE, zone.zone_id
+        zona (el primero de la lista cerrada); si alguno no lo tiene, ``invalid_request``. Solo
+        se consultan los firmantes pedidos, también bajo concesión de planta (A-58)."""
+        holders = await self._identity.signatory_candidates(
+            authorized, zone.zone_id, tuple(Role), signers
         )
         roles: dict[uuid.UUID, list[Role]] = {}
         for holder in holders:

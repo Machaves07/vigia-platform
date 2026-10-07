@@ -14,9 +14,12 @@
   si la firma no responde, ``GateUnavailable`` (``temporarily_unavailable``) y nada escrito.
 
 **``IdentityQueryPort``** (U-03, U-04): ``hierarchy``, ``users_by_role_and_scope`` (destinatarios
-de notificaciones), ``node_identity`` y ``assigned_node``. Con un contexto de sesión devuelven
-solo lo que cubren sus asignaciones (una zona se ve con el nombre de su planta); con un contexto
-de evento, de iteración o de orden administrativa, toda la organización.
+de notificaciones), ``signatory_candidates`` (firmantes pedidos sobre una zona, A-58),
+``node_identity`` y ``assigned_node``. Con un contexto de sesión devuelven solo lo que cubren sus
+asignaciones (una zona se ve con el nombre de su planta); con un contexto de evento, de iteración o
+de orden administrativa, toda la organización. ``signatory_candidates`` comprueba la zona con el
+contexto del llamador y los usuarios pedidos con el del sistema (``lookups``), porque bajo
+concesión de planta la RLS de A-46 oculta ``identity.user_account``.
 
 **``IdentityCommandPort``** (U-03): ``declare_node`` (``node_declared`` en la cadena de la planta),
 ``update_node`` (``status``, también ``re_enrollment_pending``, y ``live_view_local_url``, que puede
@@ -81,6 +84,7 @@ from vigia_platform.identity.application.invitations import (
     issue_invitation,
 )
 from vigia_platform.identity.application.users import (
+    DISPLAY_NAME_MAX,
     PlannedAssignment,
     checked_display_name,
     checked_email,
@@ -109,12 +113,14 @@ from vigia_platform.shared.signing.keys import format_timestamp
 __all__ = [
     "PROVIDER_CONCESSION_DEFAULT_DAYS",
     "PROVIDER_CONCESSION_MAX_DAYS",
+    "SIGNATORY_CANDIDATES_MAX",
     "FirstOperator",
     "GenesisRequest",
     "GenesisResult",
     "HierarchyService",
     "HierarchyView",
     "IdentityCommandPort",
+    "IdentityLookupContexts",
     "IdentityQueryPort",
     "NodeStatus",
     "NodeView",
@@ -126,6 +132,7 @@ __all__ = [
     "ProviderGenesisRequest",
     "ProviderGenesisResult",
     "Recipient",
+    "SignatoryCandidate",
     "ZoneGateGenesis",
     "ZoneSpec",
     "ZoneView",
@@ -145,6 +152,9 @@ NodeStatus = Literal["declared", "enrolled", "revoked", "re_enrollment_pending"]
 _NODE_STATUSES: Final = frozenset({"declared", "enrolled", "revoked", "re_enrollment_pending"})
 _PERSON_ACTORS: Final = frozenset({ActorKind.USER, ActorKind.PROVIDER_USER, ActorKind.OPERATOR})
 """Quien asigna un nodo a una zona queda en ``assigned_by`` (una cuenta, nunca el sistema)."""
+SIGNATORY_CANDIDATES_MAX: Final = 32
+"""Usuarios por consulta de ``signatory_candidates``: el tope de firmantes de un acuerdo y de un
+acta (``catalog.record_types.MAX_SIGNATORIES``)."""
 UNASSIGNMENT_REASON: Final = FreeTextField("node_zone_unassigned", "/reason_es", 10, 500)
 """``reason_es`` de ``node_zone_unassigned`` v2: los límites de su esquema."""
 
@@ -224,6 +234,22 @@ class Recipient:
     email: str = field(repr=False)
 
 
+@dataclass(frozen=True, slots=True)
+class SignatoryCandidate:
+    """Un usuario pedido que tiene ``role`` vigente sobre la zona: solo lo que el acuerdo de uso
+    y el acta guardan de él (A-58; ``display_name`` ≤ 120, DE §2.8)."""
+
+    user_id: uuid.UUID
+    role: Role
+    display_name: str = field(repr=False)
+
+
+class IdentityLookupContexts(Protocol):
+    """El contexto del sistema de la consulta acotada de firmantes (``ScopeContexts``, A-58)."""
+
+    def identity_lookup(self, context: ScopeContext) -> ScopeContext: ...
+
+
 class ZoneGateGenesis(Protocol):
     """El sobre inicial de compuertas de una zona nueva (A-60): lo implementa ``catalog.gates``
     (``GateService``) y lo inyecta la raíz de composición; U-02 no importa U-03."""
@@ -251,6 +277,14 @@ class IdentityQueryPort(Protocol):
         scope_level: ScopeLevel,
         scope_id: uuid.UUID,
     ) -> tuple[Recipient, ...]: ...
+
+    async def signatory_candidates(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        roles: Iterable[Role],
+        user_ids: Iterable[uuid.UUID],
+    ) -> tuple[SignatoryCandidate, ...]: ...
 
     async def node_identity(self, context: ScopeContext, node_id: uuid.UUID) -> NodeView | None: ...
 
@@ -452,6 +486,20 @@ _RECIPIENTS: Final = text(
     " WHERE r.removed_at IS NULL AND u.status = 'active' AND r.role = ANY(:roles)"
     " ORDER BY u.user_id, r.assignment_id"
 )
+_SIGNATORY_CANDIDATES: Final = text(
+    # Solo los usuarios y roles pedidos, con el rol vigente sobre la organización, la planta de la
+    # zona o la propia zona (A-58): nunca un listado abierto ni otros campos.
+    "SELECT DISTINCT u.user_id, r.role, u.display_name"
+    " FROM identity.role_assignment AS r"
+    " JOIN identity.user_account AS u ON u.user_id = r.user_id"
+    " WHERE r.organization_id = :organization_id AND u.organization_id = :organization_id"
+    " AND r.removed_at IS NULL AND u.status = 'active'"
+    " AND r.user_id = ANY(:user_ids) AND r.role = ANY(:roles)"
+    " AND (r.scope_level = 'organization'"
+    " OR (r.scope_level = 'plant' AND r.scope_id = :plant_id)"
+    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))"
+    " ORDER BY u.user_id, r.role"
+)
 
 
 def _node_view(row: Any) -> NodeView:
@@ -621,10 +669,15 @@ class HierarchyService:
     """Plantas y zonas (interfaz), ``IdentityQueryPort`` e ``IdentityCommandPort``."""
 
     def __init__(
-        self, deps: IdentityDependencies, *, zone_gates: ZoneGateGenesis | None = None
+        self,
+        deps: IdentityDependencies,
+        *,
+        zone_gates: ZoneGateGenesis | None = None,
+        lookups: IdentityLookupContexts | None = None,
     ) -> None:
         self._deps = deps
         self._zone_gates = zone_gates
+        self._lookups = lookups
 
     def __repr__(self) -> str:
         return "HierarchyService()"
@@ -774,6 +827,60 @@ class HierarchyService:
             seen.add(key)
             result.append(Recipient(key[0], key[1], row.display_name, row.email))
         return tuple(result)
+
+    async def signatory_candidates(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        roles: Iterable[Role],
+        user_ids: Iterable[uuid.UUID],
+    ) -> tuple[SignatoryCandidate, ...]:
+        """Los pares ``(user_id, role)`` pedidos que tienen ``role`` vigente sobre ``zone_id``
+        (firmantes del acuerdo de uso y del acta, responsable de un paso; A-58).
+
+        La zona se resuelve con ``context``: inexistente, de otra organización o fuera de su
+        alcance (bajo concesión, fuera de la planta concedida o con la concesión ya no vigente,
+        también por la RLS) responde ``ResourceNotFound``. Solo después, con el contexto del
+        sistema de la organización (``lookups.identity_lookup``), se comprueban los usuarios
+        pedidos: bajo concesión de planta la RLS de A-46 oculta ``identity.user_account`` y no se
+        amplía. Devuelve solo ``user_id``, ``role`` y ``display_name`` (≤ 120) de esos usuarios,
+        nunca un listado; un usuario de otra planta, de otra organización o inexistente
+        simplemente no aparece. Sin ``lookups`` la consulta usa ``context`` (fallo cerrado: bajo
+        concesión de planta no devuelve a nadie). El rastro ``provider_query`` de la petición bajo
+        concesión lo escribe la cadena de autorización (BR-NUC-38, A-48).
+        """
+        deps = self._deps
+        wanted_roles = sorted({Role(role).value for role in roles})
+        wanted_users = sorted(set(user_ids))
+        if any(type(user_id) is not uuid.UUID for user_id in wanted_users):
+            raise TypeError("user_ids debe contener uuid.UUID")
+        if len(wanted_users) > SIGNATORY_CANDIDATES_MAX:
+            raise ValueError("demasiados usuarios en la consulta de firmantes")
+        target = await resolve_scope(deps, context, ScopeLevel.ZONE, zone_id)
+        if not _whole_organization(context) and not context.covers(
+            target.plant_id, target.scope_id
+        ):
+            raise ResourceNotFound()
+        if not wanted_roles or not wanted_users:
+            return ()
+        lookup = context if self._lookups is None else self._lookups.identity_lookup(context)
+        rows = await deps.database.read(
+            lookup,
+            _SIGNATORY_CANDIDATES,
+            {
+                "organization_id": context.organization_id,
+                "plant_id": target.plant_id,
+                "zone_id": target.scope_id,
+                "user_ids": wanted_users,
+                "roles": wanted_roles,
+            },
+        )
+        return tuple(
+            SignatoryCandidate(
+                as_uuid(row.user_id), Role(row.role), str(row.display_name)[:DISPLAY_NAME_MAX]
+            )
+            for row in rows
+        )
 
     async def node_identity(self, context: ScopeContext, node_id: uuid.UUID) -> NodeView | None:
         """La identidad del nodo, o ``None`` si no existe o está fuera de alcance."""
