@@ -47,6 +47,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from cryptography import x509
 
 from tests.api_support import World
 from tests.factories import uuid7
@@ -213,24 +214,41 @@ def _clip_upload(world: NodeWorld, node: GobNode, ids: Ids) -> NodeCall:
     )
 
 
-def _enrollment(world: NodeWorld, node: GobNode, ids: Ids) -> NodeCall:
-    # Sin certificado: el nombre común de las dos CSR es el node_id de B y el código, el de A.
-    name = str(ids.node)
-    return NodeCall(
-        "POST",
-        NodeRoute.ENROLLMENT.path,
-        {
-            "enrollment_code": world.a_code,
-            "key_algorithm": "ecdsa_p256",
-            "certificate_signing_request": csr_pem(name),
-            "server_certificate_signing_request": csr_pem(name, names=[local_ip()]),
-            "software_version": "1.4.0",
-            "contract_version": VERSION,
-            "hardware_fingerprint": "ab" * 32,
-            "requested_at": "2026-10-05T12:00:00.000Z",
-        },
-        certificate=False,
-    )
+SERVER_NAMES: Final[dict[str, tuple[x509.GeneralName, ...]]] = {
+    "un SAN local": (local_ip(),),
+    "sin SAN": (),
+    "dos SAN locales": (local_ip(), local_ip("192.168.10.21")),
+    "SAN público": (local_ip("8.8.8.8"),),
+}
+"""Las CSR de servidor del alta: la válida y las que la plataforma rechaza por su nombre
+alternativo (``announced_host``). Sin el código, ninguna puede responder distinto según exista el
+nodo (revisión de VIG-165)."""
+
+
+def _enrollment_with(names: tuple[x509.GeneralName, ...]) -> Builder:
+    def call(world: NodeWorld, node: GobNode, ids: Ids) -> NodeCall:
+        # Sin certificado: el nombre común de las dos CSR es el node_id de B y el código, el de A.
+        name = str(ids.node)
+        return NodeCall(
+            "POST",
+            NodeRoute.ENROLLMENT.path,
+            {
+                "enrollment_code": world.a_code,
+                "key_algorithm": "ecdsa_p256",
+                "certificate_signing_request": csr_pem(name),
+                "server_certificate_signing_request": csr_pem(name, names=list(names)),
+                "software_version": "1.4.0",
+                "contract_version": VERSION,
+                "hardware_fingerprint": "ab" * 32,
+                "requested_at": "2026-10-05T12:00:00.000Z",
+            },
+            certificate=False,
+        )
+
+    return call
+
+
+_enrollment: Final = _enrollment_with(SERVER_NAMES["un SAN local"])
 
 
 def _rotation(world: NodeWorld, node: GobNode, ids: Ids) -> NodeCall:
@@ -264,7 +282,10 @@ NODE_CASES: Final[dict[NodeRoute, NodeCase]] = {
     NodeRoute.FINDING: NodeCase(MISMATCH, _ingest(NodeRoute.FINDING.path)),
     NodeRoute.DETECTION_REVIEW: NodeCase(MISMATCH, _ingest(NodeRoute.DETECTION_REVIEW.path)),
     NodeRoute.OBSERVABILITY_EVENT: NodeCase(MISMATCH, _ingest(NodeRoute.OBSERVABILITY_EVENT.path)),
-    NodeRoute.ENROLLMENT: NodeCase("enrollment_code_invalid", {"node_id": _enrollment}),
+    NodeRoute.ENROLLMENT: NodeCase(
+        "enrollment_code_invalid",
+        {f"node_id, {label}": _enrollment_with(names) for label, names in SERVER_NAMES.items()},
+    ),
     NodeRoute.CREDENTIAL_ROTATION: NodeCase("schema_invalid", {"node_id": _rotation}),
     NodeRoute.UPDATE_RESULT: NodeCase(MISMATCH, _heartbeat_like(NodeRoute.UPDATE_RESULT.path)),
 }
@@ -513,6 +534,31 @@ def test_pr_gob_12_a_foreign_resource_answers_exactly_like_a_missing_one(world: 
                     route is NodeRoute.ENROLLMENT and set(changed) <= ATTEMPT_TRAIL
                 ):
                     failures.append(f"{label}: cambió filas de B en {changed}")
+    assert not failures, "\n".join(failures)
+
+
+@pytest.mark.integration
+def test_the_enrollment_never_reveals_whether_a_node_exists(world: NodeWorld) -> None:
+    # Revisión de VIG-165: sin el código, ni la CSR de servidor (sin SAN, con dos o con una IP
+    # pública) distingue un node_id inexistente de uno declarado o dado de alta de B, ni de un
+    # nodo de A cuyo código no es el presentado.
+    node = world.a.node(0, 0)
+    foreign = world.foreign()
+    candidates = {
+        "declarado de B": replace_node(foreign, world.b_declared),
+        "dado de alta de B": foreign,
+        "dado de alta de A": replace_node(foreign, world.a.node(1, 0).node_id),
+    }
+    failures: list[str] = []
+    for label, names in SERVER_NAMES.items():
+        build = _enrollment_with(names)
+        absent = _comparable(world.send(build(world, node, Ids.missing()), node))
+        if absent[:1] != (401,) or absent[1].get("code") != "enrollment_code_invalid":
+            failures.append(f"{label}, inexistente: {absent}")
+        for name, target in candidates.items():
+            seen = _comparable(world.send(build(world, node, target), node))
+            if seen != absent:
+                failures.append(f"{label}, {name}: {seen} != {absent}")
     assert not failures, "\n".join(failures)
 
 

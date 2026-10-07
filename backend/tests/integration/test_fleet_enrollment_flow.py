@@ -216,7 +216,8 @@ def test_an_invalid_csr_is_schema_invalid_before_the_code(
         "schema_invalid",
         field,
     )
-    # Antes que el código: ni se consume ni deja intento.
+    # Antes de consumir el código: ni se consume ni deja intento (la CSR de servidor se mira tras
+    # verificar el código, VIG-165; las de cliente, antes).
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.attempts(setup.node_id) == []
 
