@@ -14,3 +14,9 @@ c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_crede
 31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:132
 31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:152
 31fc5c3162085e57242d019128cdf498e65c104e:backend/tests/unit/fleet/test_revocation_list.py:generic-api-key:361
+#
+# VIG-167: sondas sintéticas del detector de credenciales en las variables de las tareas
+# ("0123456789abcdef" repetido y un JWT de ejemplo sin firma real). No son secretos; el commit
+# siguiente las arma por partes en tiempo de ejecución.
+1a0036e5b5064b551610e93cc582d03d6512efb3:infra/tests/test_compute.py:generic-api-key:358
+1a0036e5b5064b551610e93cc582d03d6512efb3:infra/tests/test_compute.py:jwt:365

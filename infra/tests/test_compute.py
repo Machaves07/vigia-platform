@@ -9,6 +9,7 @@ U02-H-04 forma de ``PutObject``, U02-H-10 volumen efímero), las notas nº 16 y 
 
 from __future__ import annotations
 
+import ast
 import re
 from collections import Counter
 from collections.abc import Iterator, Mapping
@@ -304,12 +305,100 @@ def _secret_logical_ids(deployment: Synthesized) -> set[str]:
     }
 
 
+SECRET_NAME = re.compile(
+    r"(?i)(PASSWORD|PASSWD|PASSPHRASE|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL)"
+)
+"""Nombre de variable que solo puede llevar un secreto: prohibido en las definiciones de tarea."""
+SECRET_REFERENCE_NAME = re.compile(r"(?i)SECRET")
+"""Nombre que nombra un secreto (``VIGIA_DB_APP_SECRET``…): su valor solo puede ser el nombre o el
+ARN del secreto en Secrets Manager, nunca el secreto."""
+SECRET_REFERENCE_VALUE = re.compile(
+    r"vigia/[a-z0-9-]+(/[A-Za-z0-9_.-]+)+/?|arn:aws:secretsmanager:[a-z0-9-]+:[0-9<>A-Za-z]+:"
+    r"secret:[A-Za-z0-9/_+=.@!<>-]+"
+)
+CREDENTIAL_SHAPES = (
+    re.compile(r"-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----"),
+    re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"),  # usuario:contraseña en una URL
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."),  # JWT
+    # Ficha de alta entropía: 32 o más caracteres con mayúsculas, minúsculas y cifras.
+    re.compile(r"(?=[A-Za-z0-9+/=_-]*[A-Z])(?=[A-Za-z0-9+/=_-]*[a-z])(?=[A-Za-z0-9+/=_-]*[0-9])"
+               r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])"),
+)  # fmt: skip
+
+
+def secret_environment_problems(name: str, value: str) -> list[str]:
+    """Problemas de una variable de entorno de una definición de tarea (nota de la revisión de
+    VIG-137): ningún nombre de secreto, ningún valor con forma de credencial y, si el nombre
+    nombra un secreto, el valor es su nombre o ARN. Los secretos solo entran por ``secrets``, que
+    además ninguna tarea usa: la aplicación los lee con su rol (§5.3)."""
+    problems = []
+    if SECRET_NAME.search(name):
+        problems.append(f"{name}: nombre de secreto en una variable")
+    # Un valor que es una sola referencia de la plantilla (``<…>``) es un ARN de otra pila.
+    reference = SECRET_REFERENCE_VALUE.fullmatch(value) or re.fullmatch(r"<[^<>\s]+>", value)
+    if SECRET_REFERENCE_NAME.search(name) and not reference:
+        problems.append(f"{name}: no es el nombre ni el ARN de un secreto")
+    *exact, entropy = CREDENTIAL_SHAPES
+    # La ficha de alta entropía solo en valores de una línea: la configuración del colector
+    # (``AOT_CONFIG_CONTENT``) es un documento, no una credencial.
+    shapes = [*exact, entropy] if "\n" not in value else exact
+    for shape in shapes:
+        if shape.search(value):
+            problems.append(f"{name}: valor con forma de credencial ({shape.pattern[:24]}…)")
+    return problems
+
+
+# Las credenciales de las sondas se arman por partes: ningún literal con forma de credencial
+# queda en el árbol de fuentes (el escaneo de secretos es bloqueante).
+_PEM = "-----BEGIN EC " + "PRIVATE KEY-----\nMHcCAQEE\n-----END EC " + "PRIVATE KEY-----"
+_ACCESS_KEY = "AK" + "IA" + "Q" * 16
+_JWT = ".".join(("ey" + "J" + "a" * 12, "ey" + "J" + "b" * 12, "c" * 12))
+_URL = "postgresql://vigia_app" + ":" + "hunter2" + "@db:5432/vigia"
+_ENTROPY = "".join(f"Ab{n}" for n in range(11))
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("VIGIA_DB_APP_PASSWORD", "hunter2"),
+        ("VIGIA_API_TOKEN", "abc"),
+        ("VIGIA_DB_APP_SECRET", "s3cr3t-literal"),
+        ("VIGIA_ENROLLMENT_SOURCE_KEY_SECRET", "0" * 32),
+        ("VIGIA_DATABASE_URL", _URL),
+        ("VIGIA_ROOT_KEY", _PEM),
+        ("VIGIA_UPSTREAM", _ACCESS_KEY),
+        ("VIGIA_SESSION", _JWT),
+        ("VIGIA_HMAC", _ENTROPY),
+    ],
+)
+def test_a_literal_credential_in_a_variable_is_detected(name: str, value: str) -> None:
+    assert secret_environment_problems(name, value), (name, value)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("VIGIA_DB_APP_SECRET", "vigia/pilot/db/app"),
+        ("VIGIA_SIGNING_SECRET_PREFIX", "vigia/staging-7/signing/"),
+        ("VIGIA_SECRETS_KEY_ARN", "<Fn::GetStackOutput.vigia-foundation.Keysecrets>"),
+        ("VIGIA_NODES_BASE_URL", "https://nodes.<vigia-domain>/api/nodes"),
+        ("VIGIA_DB_POOL_NODE", "10"),
+    ],
+)
+def test_names_and_arns_of_secrets_are_not_credentials(name: str, value: str) -> None:
+    assert secret_environment_problems(name, value) == []
+
+
 def test_task_definitions_reference_no_secret_values(deployment: Synthesized) -> None:
     secrets = _secret_logical_ids(deployment)
-    for _, task_definition in _of_type(_compute(deployment), TASK_DEFINITION):
+    template = _compute(deployment)
+    for _, task_definition in _of_type(template, TASK_DEFINITION):
         for container in properties(task_definition)["ContainerDefinitions"]:
             assert "Secrets" not in container, container["Name"]
             for name, value in _environment(container).items():
+                rendered = render(value, template)
+                assert secret_environment_problems(name, rendered) == [], container["Name"]
                 text = str(value)
                 assert "{{resolve:secretsmanager" not in text, name
                 assert "assistant/api-key" not in text, name
@@ -784,6 +873,114 @@ def test_api_carries_the_sizes_of_pendiente_17(pilot: Synthesized) -> None:
         "VIGIA_DOCUMENTS_PREFIX": "documents/",
         "VIGIA_DOCUMENTS_MAX_BYTES": "20971520",
     }
+
+
+RUNTIME_CONFIG = Path(__file__).resolve().parents[2] / (
+    "backend/src/vigia_platform/shared/runtime/config.py"
+)
+
+
+def runtime_variables() -> tuple[str, ...]:
+    """Las variables que lee ``RuntimeConfig.from_environ`` (``VARIABLES`` de la raíz de
+    composición de VIG-137), leídas con ``ast``: la infraestructura no instala el backend."""
+    tree = ast.parse(RUNTIME_CONFIG.read_text(encoding="utf-8"))
+    (table,) = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "VARIABLES"
+    ]
+    assert isinstance(table, ast.Tuple)
+    names = []
+    for call in table.elts:
+        assert isinstance(call, ast.Call)
+        name = call.args[1]
+        assert isinstance(name, ast.Constant) and isinstance(name.value, str)
+        names.append(name.value)
+    return tuple(names)
+
+
+U03_VARIABLES = {
+    # U-03 §6 (pendiente nº 17) y TASK-219: lo que lee la raíz para vigia-api.
+    "api": (
+        "VIGIA_UVICORN_WORKERS",
+        "VIGIA_BULKHEAD_NODE",
+        "VIGIA_BULKHEAD_PERSON",
+        "VIGIA_DB_POOL_NODE",
+        "VIGIA_DB_POOL_PERSON",
+        "VIGIA_DB_MAX_OVERFLOW",
+        "VIGIA_DB_POOL_TIMEOUT_SECONDS",
+        "VIGIA_THREADPOOL_SIZE",
+        "VIGIA_DOCUMENTS_PREFIX",
+        "VIGIA_DOCUMENTS_MAX_BYTES",
+        "VIGIA_NODES_BASE_URL",
+        "VIGIA_EDGE_BUCKET",
+    ),
+    # Publicación de la lista de revocación (§5.3).
+    "worker": ("VIGIA_NODE_TRUST_STORE_ARN", "VIGIA_EDGE_BUCKET", "VIGIA_CRL_KEY"),
+}
+"""Variables de U-03 por definición de tarea."""
+
+RUNTIME_VARIABLES_OUTSIDE_TASKS = {
+    "VIGIA_AWS_ENDPOINT_URL": "solo local y test (LocalStack)",
+    "PGSSLMODE": "por defecto verify-full",
+    "PGSSLROOTCERT": "por defecto el paquete de la imagen",
+    "VIGIA_BREACH_LIST_PATH": "por defecto el respaldo de la imagen",
+    "VIGIA_PROVIDER_ORGANIZATION_ID": "solo con el contexto provider_organization_id",
+    "VIGIA_ENROLLMENT_SOURCE_KEY_SECRET": "su secreto aun no existe: VIG-174 (sin el, el alta "
+    "falla cerrada)",
+}
+"""Variables de ``RuntimeConfig`` que ninguna definición de tarea de ``pilot`` lleva, con el
+motivo. Cualquier otra que la raíz lea tiene que estar en una de las dos."""
+
+
+def test_u03_variables_are_the_ones_the_composition_root_reads(pilot: Synthesized) -> None:
+    """Ninguna variable de U-03 que lee la raíz falta en su definición de tarea, ninguna sobra, y
+    ninguna lleva un secreto (§6: solo nombres, ARN y tamaños)."""
+    read = set(runtime_variables())
+    environments = {
+        family: _environment(_container(_task_definition(pilot, family), family))
+        for family in ("api", "worker")
+    }
+    for family, names in U03_VARIABLES.items():
+        assert set(names) <= read, set(names) - read
+        assert set(names) <= set(environments[family]), set(names) - set(environments[family])
+    assert "VIGIA_ENROLLMENT_PUBLIC_URL" not in environments["api"]  # ningún proceso la lee
+    missing = read - set(environments["api"]) - set(environments["worker"])
+    assert missing == set(RUNTIME_VARIABLES_OUTSIDE_TASKS), missing
+    assert not set(RUNTIME_VARIABLES_OUTSIDE_TASKS) & set(U03_VARIABLES["api"])
+    template = _compute(pilot)
+    for family in ("api", "worker"):
+        container = _container(_task_definition(pilot, family), family)
+        assert "Secrets" not in container, family
+        for name in (*U03_VARIABLES[family], *API_TUNING):
+            if name not in environments[family]:
+                continue
+            value = render(environments[family][name], template)
+            assert "secretsmanager" not in value and "resolve:" not in value, name
+            assert not re.search(r"(?i)password|secret", name), name
+    assert environments["worker"]["VIGIA_CRL_KEY"] == "ca/crl.pem"
+    edge = _bucket(pilot, "edge")
+    for family in ("api", "worker"):
+        assert render(environments[family]["VIGIA_EDGE_BUCKET"], template) == edge, family
+    trust_store = environments["worker"]["VIGIA_NODE_TRUST_STORE_ARN"]
+    assert "Fn::GetStackOutput" in trust_store
+
+
+def test_api_reads_only_the_published_root_of_vigia_edge(pilot: Synthesized) -> None:
+    """El alta y la emisión de códigos leen ``ca/root.pem``; vigia-api no escribe en vigia-edge."""
+    template = _compute(pilot)
+    statements = _role_statements(pilot, pilot.config.resource_name("api-task"))
+    edge = _bucket(pilot, "edge")
+    reads = [
+        text
+        for s in _granting(statements, "s3:GetObject")
+        for text in _rendered(s["Resource"], template)
+        if edge in text
+    ]
+    assert reads == [f"arn:aws:s3:::{edge}/ca/root.pem"]
+    assert not _writes_edge(statements, template, edge)
 
 
 @pytest.mark.parametrize(
