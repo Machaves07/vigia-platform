@@ -3,8 +3,8 @@
 Sobre ``gates_world`` (servicios reales de ``catalog.gates`` como ``vigia_app``) añade los de
 ``catalog.agreements``: ``SignatoryPolicyService``, ``AgreementService`` (con
 ``HierarchyService.signatory_candidates`` real, A-58) y ``TransparencyService``, y la aplicación
-real (``World().app`` con la cadena fija de middleware y ``ContextAuthorizer``) con esas rutas y las de
-compuertas instaladas en ``app.state``.
+real (``World().app`` con la cadena fija de middleware y ``ContextAuthorizer``) con esas rutas y
+las de compuertas instaladas en ``app.state``.
 
 ``Ready`` deja una zona a un paso de la aprobación: montaje aprobado por un acta de alcance real,
 política de firmantes, política de planta y acta de comisionamiento cerrada (insertadas por
