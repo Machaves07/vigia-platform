@@ -5,7 +5,8 @@ la organización del contexto y estar en su alcance: si no, la sentencia no devu
 llamador responde ``not_found``):
 
 - ``nodes_by_zone``: los nodos con asignación vigente en la zona, con su estado de comunicación
-  (último ``node_communication_state_changed`` del expediente) y las cámaras de su último latido;
+  (último ``node_communication_state_changed`` del expediente) y las cámaras de su último latido
+  (con alcance de zona, solo las que declara el catálogo vigente de una zona visible);
 - ``assignment_at``: la asignación de ``identity.zone_node_assignment`` cuyo ``[assigned_at,
   unassigned_at)`` contiene el instante, o el hueco en que la zona no tenía nodo;
 - ``assignment_history``: las asignaciones que se solapan con ``[from, to]`` (``assigned_at <= to``
@@ -43,15 +44,22 @@ _NODES_BY_ZONE: Final = text(
     " 'connected', ci.connected, 'measured_fps', ci.measured_fps,"
     " 'observability_state', ci.observability_state) ORDER BY ci.camera_id), '[]'::json)::text"
     " FROM fleet.camera_inventory AS ci"
-    " LEFT JOIN LATERAL (SELECT e ->> 'code' AS code FROM identity.zone_node_assignment AS ca"
+    # Con alcance de zona, solo las cámaras que declara el catálogo vigente de una zona visible del
+    # nodo, con el ``code`` de esa zona (seguimiento de VIG-159): nada de las zonas hermanas.
+    " LEFT JOIN LATERAL (SELECT e ->> 'code' AS code, true AS declared"
+    " FROM identity.zone_node_assignment AS ca"
     " JOIN catalog.zone_catalog_version AS zc ON zc.organization_id = ca.organization_id"
     " AND zc.zone_id = ca.zone_id AND zc.superseded_at IS NULL"
     " CROSS JOIN LATERAL jsonb_array_elements(zc.payload -> 'cameras') AS e"
     " WHERE ca.organization_id = :organization_id AND ca.node_id = n.node_id"
     " AND ca.unassigned_at IS NULL AND e ->> 'camera_id' = ci.camera_id::text"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR n.plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR ca.zone_id = ANY(CAST(:scope_zones AS uuid[])))"
     " ORDER BY ca.zone_id LIMIT 1) AS cc ON true"
     " WHERE ci.organization_id = :organization_id AND ci.node_id = n.node_id"
-    " AND ci.updated_at = v.updated_at) AS cameras"
+    " AND ci.updated_at = v.updated_at AND (CAST(:whole_organization AS boolean)"
+    " OR n.plant_id = ANY(CAST(:scope_plants AS uuid[])) OR cc.declared)) AS cameras"
     " FROM identity.zone AS z"
     " LEFT JOIN identity.zone_node_assignment AS a ON a.organization_id = z.organization_id"
     " AND a.zone_id = z.zone_id AND a.unassigned_at IS NULL"

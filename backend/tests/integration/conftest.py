@@ -159,9 +159,10 @@ def versioned_bucket(s3: Any, prefix: str) -> Iterator[str]:
     finally:
         for upload in s3.list_multipart_uploads(Bucket=name).get("Uploads", []):
             s3.abort_multipart_upload(Bucket=name, Key=upload["Key"], UploadId=upload["UploadId"])
-        listing = s3.list_object_versions(Bucket=name)
-        for item in listing.get("Versions", []) + listing.get("DeleteMarkers", []):
-            s3.delete_object(Bucket=name, Key=item["Key"], VersionId=item["VersionId"])
+        # Paginado: más de 1000 versiones (la conformidad ``nightly``) no caben en una página.
+        for listing in s3.get_paginator("list_object_versions").paginate(Bucket=name):
+            for item in listing.get("Versions", []) + listing.get("DeleteMarkers", []):
+                s3.delete_object(Bucket=name, Key=item["Key"], VersionId=item["VersionId"])
         s3.delete_bucket(Bucket=name)
 
 

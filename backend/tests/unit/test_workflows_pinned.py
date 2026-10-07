@@ -520,8 +520,21 @@ def test_nightly_runs_the_suites_of_lc_nuc_35_and_keeps_the_report_90_days() -> 
     ):
         assert command in everything, command
     assert "VIGIA_BENCHMARK_UPDATE_BASELINE" in str(jobs["bancos"])
-    conformance = _run_text(jobs["conformance"])
-    assert "Conformidad omitida" in conformance and "exit 1" in conformance
+    # Conformidad de U-01 contra la plataforma (TASK-230): la suite completa del kit, una sola vez
+    # (las propiedades con integración la excluyen), con su informe de 90 días.
+    conformance = jobs["conformance"]
+    assert conformance["name"] == "conformidad de U-01 contra la plataforma"
+    run = _run_text(conformance)
+    assert "--hypothesis-profile=nightly -m integration tests/conformance" in run
+    assert "Conformidad omitida" not in run and "exit 1" not in run
+    assert _position(run, "uv sync --frozen") < _position(run, "rm -f ~/.ssh/vigia_contracts")
+    assert "--ignore=tests/conformance" in _run_text(jobs["propiedades-integracion"])
+    (artifact,) = [
+        step["with"]
+        for step in conformance["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert artifact["name"] == "informe-conformidad"
     assert set(jobs["informe"]["needs"]) == set(jobs) - {"informe"}
     retention = [
         step["with"]["retention-days"]

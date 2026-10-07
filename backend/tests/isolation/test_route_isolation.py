@@ -1259,6 +1259,56 @@ def test_cases_name_only_registered_routes_and_match_their_declaration() -> None
         assert case.call is not None or case.why, key
 
 
+U03_MODULES: Final = ("vigia_platform.catalog.", "vigia_platform.fleet.")
+"""Los módulos de las rutas de personas de U-03 (``catalog`` y ``fleet``; TASK-228)."""
+U03_NAMED: Final = frozenset(
+    {
+        ("POST", "/documents"),
+        ("GET", "/zones/{zone_id}/commissioning-clips"),
+        ("GET", "/zones/{zone_id}/transparency"),
+        ("PUT", "/zones/{zone_id}/cameras"),
+        ("PUT", "/zones/{zone_id}/minimum-coverage"),
+        ("PUT", "/zones/{zone_id}/signals"),
+        ("PUT", "/zones/{zone_id}/thresholds"),
+        ("PUT", "/zones/{zone_id}/windows"),
+    }
+)
+"""Las rutas que TASK-228 nombra y que existen en ``main``. ``POST /walk-tests/{id}/exposure-
+samples`` y ``GET /commissioning-records/{id}/document`` llegan con VIG-154 y VIG-160: la
+cobertura (``uncovered``) les exigirá su caso entonces."""
+
+
+def u03_person_routes(routes: Sequence[BaseRoute]) -> set[tuple[str, str]]:
+    """``(método, plantilla)`` de cada ruta de personas de ``catalog`` y ``fleet`` registrada."""
+    found: set[tuple[str, str]] = set()
+    for route in iter_declared_routes(routes):
+        original = route.route
+        if not isinstance(original, APIRoute):
+            continue
+        if not original.endpoint.__module__.startswith(U03_MODULES):
+            continue
+        if any(declaration.node is not None for declaration in route.declarations):
+            continue
+        found.update((method, route.path) for method in route.methods)
+    return found
+
+
+def test_every_u03_person_route_is_a_resource_or_own_case() -> None:
+    # TASK-228: cada ruta de personas de U-03 (SCR-04, 05, 06, 07 y 16 más v1.5) tiene su caso
+    # con identificador (RESOURCE) o de la organización del contexto (OWN), con su llamada.
+    routes = u03_person_routes(build_openapi_app().routes)
+    assert routes >= U03_NAMED, sorted(U03_NAMED - routes)
+    assert len(routes) >= 48, len(routes)  # las de main el 2026-10-06; solo crece
+    wrong = sorted(
+        f"{method} {path}"
+        for method, path in routes
+        if (method, path) not in CASES
+        or CASES[(method, path)].kind not in (Kind.RESOURCE, Kind.OWN)
+        or CASES[(method, path)].call is None
+    )
+    assert not wrong, wrong
+
+
 # --- Entorno ------------------------------------------------------------------------------------
 
 
@@ -1281,6 +1331,21 @@ class Organization:
     """Los mismos tipos de recurso en la segunda planta (para la concesión de una planta)."""
 
 
+class SwitchableProviderQueries:
+    """``LedgerProviderQueryLedger`` que puede fallar a voluntad (A-48: fallo cerrado)."""
+
+    def __init__(self, inner: LedgerProviderQueryLedger) -> None:
+        self._inner = inner
+        self.failing = False
+
+    async def write_provider_query(
+        self, context: Any, content: Mapping[str, str], plant_id: uuid.UUID | None
+    ) -> None:
+        if self.failing:
+            raise RuntimeError("provider_query no disponible (sonda de A-48)")
+        await self._inner.write_provider_query(context, content, plant_id)
+
+
 @dataclass
 class Isolation:
     env: LiveViewEnvironment
@@ -1288,6 +1353,7 @@ class Isolation:
     app: Any
     writer: EscritorExpediente
     passwords: RejectingPasswords
+    queries: SwitchableProviderQueries
     a: Organization = field(init=False)
     b: Organization = field(init=False)
 
@@ -1853,6 +1919,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             audit=sessions.audit,
             provider_organization_id=provider,
         )
+        queries = SwitchableProviderQueries(LedgerProviderQueryLedger(writer))
         documents = DocumentService(
             database=sessions.database,
             audit=sessions.audit,
@@ -1969,7 +2036,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                 "authorizer": ContextAuthorizer(
                     audit=authz.audit,
                     provider_organization_id=provider,
-                    provider_queries=LedgerProviderQueryLedger(writer),
+                    provider_queries=queries,
                     clock=sessions.clock,
                 ),
                 "identity": identity,
@@ -2055,7 +2122,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=30.0
         )
-        world = Isolation(env, client, app, writer, passwords)
+        world = Isolation(env, client, app, writer, passwords, queries)
         world.a = world.organization()
         world.b = world.organization()
         try:
@@ -2384,6 +2451,156 @@ def test_after_revocation_no_route_answers_the_provider(isolation: Isolation) ->
         response = isolation.send(_call(case, b.ids), cookie, concession)
         assert _code(response) in ("not_found", "unauthenticated"), (method, path, response.text)
         assert not _mentions(response, b.ids), (method, path)
+
+
+# --- U-03 (TASK-228, VIG-165): alcance de planta y de zona, concesión vencida y A-48 ------------
+
+
+def _scoped(isolation: Isolation, level: ScopeLevel, scope_id: uuid.UUID) -> SessionCookie:
+    """Una persona de A con administración y coordinación SST solo en ``scope_id``."""
+    organization_id = isolation.a.site.organization_id
+    user = isolation.authz.add_user(organization_id)
+    for role in (Role.ADMINISTRATOR, Role.COORDINATOR_SST):
+        isolation.authz.assign(organization_id, user, role, level, scope_id)
+    cookie: SessionCookie = isolation.authz.open_session(organization_id, user)
+    return cookie
+
+
+def _u03_cases(isolation: Isolation, kinds: set[Kind]) -> list[tuple[tuple[str, str], Case]]:
+    u03 = u03_person_routes(isolation.app.routes)
+    return [(key, case) for key, case in _with_key(isolation, kinds) if key in u03]
+
+
+@pytest.mark.integration
+def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organization(
+    isolation: Isolation,
+) -> None:
+    a = isolation.a
+    plant = _scoped(isolation, ScopeLevel.PLANT, a.ids.plant)
+    zone = _scoped(isolation, ScopeLevel.ZONE, a.ids.zone)
+    # La zona hermana de la misma planta (sin nada más): solo cambia la zona respecto de un
+    # inexistente.
+    sibling = replace(Ids.missing(), organization=a.ids.organization, plant=a.ids.plant,
+                      zone=a.ids.spare_zone)  # fmt: skip
+    hidden: dict[str, tuple[SessionCookie, list[tuple[Ids, Ids]]]] = {
+        "planta": (plant, [(a.other_plant, Ids.missing())]),
+        "zona": (
+            zone,
+            [(a.other_plant, Ids.missing()), (sibling, replace(sibling, zone=uuid7()))],
+        ),
+    }
+    failures: list[str] = []
+    cases = _u03_cases(isolation, {Kind.RESOURCE})
+    assert len(cases) >= 40
+    for (method, path), case in cases:
+        route = f"{method} {path}"
+        for label, (cookie, pairs) in hidden.items():
+            for outside, absent in pairs:
+                seen = isolation.send(_call(case, outside), cookie)
+                missing = isolation.send(_call(case, absent), cookie)
+                if _comparable(seen) != _comparable(missing):
+                    failures.append(f"{route} ({label}): {_comparable(seen)} != "
+                                    f"{_comparable(missing)}")  # fmt: skip
+                if seen.status_code == 403 or _code(seen) == "forbidden":
+                    failures.append(f"{route} ({label}): forbidden")
+                leaked = [
+                    value
+                    for value in (outside.plant, outside.zone, outside.node, outside.agreement)
+                    if str(value) in seen.text
+                ]
+                if leaked:
+                    failures.append(f"{route} ({label}): muestra {leaked}")
+    assert not failures, "\n".join(failures)
+    # La prueba no pasa por un alcance que no ve nada: lo propio sí se lee.
+    for cookie in (plant, zone):
+        for path in (
+            f"/zones/{a.ids.zone}/gates",
+            f"/zones/{a.ids.zone}/catalog",
+            f"/zones/{a.ids.zone}/transparency",
+        ):
+            response = isolation.send(Call("GET", path), cookie)
+            assert response.status_code == 200, (path, response.text)
+    fleet_node = isolation.send(Call("GET", f"/fleet/nodes/{a.ids.node}"), plant)
+    assert fleet_node.status_code == 200, fleet_node.text
+
+
+@pytest.mark.integration
+def test_an_expired_concession_answers_like_a_missing_resource_on_every_u03_route(
+    isolation: Isolation,
+) -> None:
+    # Vencida pero todavía ``active`` (la tarea de vencimiento aún no pasó): ni la aplicación ni
+    # la base la aceptan (A-46).
+    authz, b = isolation.authz, isolation.b
+    installer, cookie = isolation.installer()
+    concession = authz.add_concession(
+        b.ids.organization,
+        installer,
+        granted_at=authz.now() - timedelta(days=10),
+        duration=timedelta(days=2),
+    )
+    before = isolation.fingerprint(b.ids.organization)
+    failures: list[str] = []
+    for (method, path), case in _u03_cases(isolation, {Kind.RESOURCE, Kind.OWN}):
+        route = f"{method} {path}"
+        own = isolation.send(_call(case, b.ids), cookie, concession)
+        missing = isolation.send(_call(case, Ids.missing()), cookie, concession)
+        if _comparable(own) != _comparable(missing):
+            failures.append(f"{route}: {_comparable(own)} != {_comparable(missing)}")
+        if _code(own) not in ("not_found", "unauthenticated"):
+            failures.append(f"{route}: {own.status_code} {own.text}")
+        if _mentions(own, b.ids) or _mentions(own, b.other_plant):
+            failures.append(f"{route}: devuelve identificadores de B")
+    assert not failures, "\n".join(failures)
+    changed = [
+        name
+        for name, digest in isolation.fingerprint(b.ids.organization).items()
+        if before[name] != digest
+    ]
+    assert changed == [], changed
+    assert isolation.provider_queries(b.ids.organization, concession) == []
+
+
+@pytest.mark.integration
+def test_a_48_the_provider_query_is_written_before_the_u03_route_runs(
+    isolation: Isolation,
+) -> None:
+    # Fallo cerrado (A-48): si el provider_query no se puede escribir, la ruta no corre. Ninguna
+    # ruta de U-03 de la columna escribe nada en B (ni su auditoría normal ni su negocio).
+    authz, b = isolation.authz, isolation.b
+    installer, cookie = isolation.installer()
+    concession = authz.add_concession(b.ids.organization, installer, granted_at=authz.now() - HOUR)
+    allowed = [
+        (key, case)
+        for key, case in _u03_cases(isolation, {Kind.RESOURCE, Kind.OWN})
+        if _permission(isolation.app.routes, key) in INSTALLER_KEYS
+        and key not in DENIED_UNDER_CONCESSION
+    ]
+    assert len(allowed) >= 35
+    before = isolation.fingerprint(b.ids.organization)
+    isolation.queries.failing = True
+    try:
+        failures = []
+        for (method, path), case in allowed:
+            response = isolation.send(_call(case, b.ids), cookie, concession)
+            if 200 <= response.status_code < 300:
+                failures.append(f"{method} {path}: corrió sin su provider_query")
+    finally:
+        isolation.queries.failing = False
+    assert not failures, "\n".join(failures)
+    changed = [
+        name
+        for name, digest in isolation.fingerprint(b.ids.organization).items()
+        if before[name] != digest
+    ]
+    assert changed == [], changed
+    # Con el registro disponible, la misma lectura sí corre y deja su provider_query y su
+    # auditoría normal (la prueba no pasa por una ruta que nunca corre).
+    seen = _observe(isolation, Call("GET", f"/fleet/nodes/{b.ids.node}"), cookie, concession)
+    assert seen.response.status_code == 200, seen.response.text
+    assert [(q["method"], q["resource"]) for q in seen.queries] == [
+        ("GET", "/fleet/nodes/{node_id}")
+    ]
+    assert seen.audit
 
 
 # --- Seguimientos de VIG-86: etiquetas de dos organizaciones y dos plantas -----------------------
