@@ -16,8 +16,10 @@ nombre alternativo que anuncia la CSR de servidor solo se **lee** (``announced_h
 la dirección de la vista en vivo, y se vuelve a escribir desde cero tras comprobar que es local.
 
 **Dirección de la vista en vivo** (``announced_host``; pendiente nº 29, nota U03-H-07): si el nodo
-ya anunció ``live_view_local_url`` (A-35), manda su anfitrión; si no, el **único** nombre
-alternativo de la CSR de servidor. En los dos casos tiene que ser una dirección privada (IPv4
+ya anunció ``live_view_local_url`` (A-35) y su anfitrión es local, manda ese anfitrión; si no
+(sin URL, o una URL que el contrato admite pero que no es local, como ``[::1]`` o un nombre de
+Internet; VIG-185), el **único** nombre alternativo de la CSR de servidor. En los dos casos tiene
+que ser una dirección privada (IPv4
 privada o IPv6 local única; una IPv4 escrita como IPv6 mapeada se decide como IPv4; nunca bucle
 local, enlace local, multidifusión ni sin especificar) o un nombre local (una etiqueta sola, o
 terminado en ``.local``, ``.lan``, ``.internal`` o ``.home.arpa``; nunca ``localhost``). Nunca una
@@ -183,13 +185,15 @@ def _host_from_url(url: str) -> LiveViewHost | None:
 def announced_host(
     server: NodeCsr, live_view_local_url: str | None, *, field: str = SERVER_CSR_FIELD
 ) -> LiveViewHost:
-    """La dirección del certificado de servidor: la de ``live_view_local_url`` si se conoce; si
-    no, el único nombre alternativo de la CSR. Local o ``CsrRejected(field)``."""
+    """La dirección del certificado de servidor: la de ``live_view_local_url`` si se conoce y es
+    local; si no, el único nombre alternativo de la CSR. Local o ``CsrRejected(field)``."""
     if live_view_local_url is not None:
         host = _host_from_url(live_view_local_url)
-        if host is None:
-            raise CsrRejected(field)
-        return host
+        if host is not None:
+            return host
+        # El latido guarda toda URL válida según el contrato (bucle local, enlace local, nombres
+        # de Internet): la que no se admitiría no bloquea la re-alta, que sigue con la CSR
+        # (VIG-185).
     if len(server.announced) != 1:
         raise CsrRejected(field)
     (name,) = server.announced
