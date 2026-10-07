@@ -19,6 +19,8 @@
   VIG-149).
 - ``walk_tests``: sesión de walk-test con matriz derivada, pasos cronometrados, pases y reapertura
   (``commissioning.run`` y ``catalog.read``; LC-GOB-06, VIG-150).
+- ``occlusion``: prueba de oclusión por cámara con fecha límite y reevaluación perezosa
+  (``commissioning.run``; LC-GOB-07, VIG-154).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``CatalogHttp`` en ``app.state``, que la
@@ -34,6 +36,7 @@ from vigia_platform.catalog.adapters.http.agreements import agreements_router
 from vigia_platform.catalog.adapters.http.catalog import catalog_router
 from vigia_platform.catalog.adapters.http.documents import documents_router
 from vigia_platform.catalog.adapters.http.gates import gates_router
+from vigia_platform.catalog.adapters.http.occlusion import occlusion_router
 from vigia_platform.catalog.adapters.http.parameters import parameters_router
 from vigia_platform.catalog.adapters.http.plant_policy import plant_policy_router
 from vigia_platform.catalog.adapters.http.regression import regression_router
@@ -59,4 +62,5 @@ def catalog_routers() -> tuple[APIRouter, ...]:
         agreements_router(),
         transparency_router(),
         walk_tests_router(),
+        occlusion_router(),
     )
