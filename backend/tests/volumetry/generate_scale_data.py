@@ -828,6 +828,8 @@ GOB_OBJECTIVES_MS: Final = {
 POINT_MS: Final = 5.0
 BATCH_MS: Final = 50.0
 PERSON_SPACING_SECONDS: Final = 0.2
+UNAVAILABLE: Final = 503
+"""``temporarily_unavailable``: el ``statement_timeout`` de la base, entre otros."""
 MONTH_DAYS: Final = 30
 PASSES_PER_CELL: Final = 3
 """El mínimo por celda; ``open_walk_test`` añade pases hasta las 100 repeticiones de la latencia."""
@@ -862,17 +864,36 @@ def _timed(
     details: dict[str, Any] | None = None,
     *,
     before: Callable[[], None] | None = None,
+    timed_out: Callable[[], bool] | None = None,
 ) -> Timing:
     """Como ``_time``, sobre cualquier bucle (``run``) y con la preparación ``before`` de cada
-    ronda fuera de la medida (el reloj simulado de la plataforma)."""
+    ronda fuera de la medida (el reloj simulado de la plataforma).
+
+    Si ``timed_out`` dice que la operación agotó el tope de la base (una ruta que respondió
+    ``temporarily_unavailable``), la medición se declara así y no se repiten las rondas que
+    quedan, como en ``_time``.
+    """
     times: list[float] = []
     for index in range(rounds + 2):
         if before is not None:
             before()
         started = time.perf_counter()  # noqa: TID251 - la volumetría mide tiempo real.
         run(operation())
+        elapsed = (time.perf_counter() - started) * 1000  # noqa: TID251
+        if timed_out is not None and timed_out():
+            _log(f"  {name}: agotó el tope ({elapsed:.0f} ms, {len(times)} rondas completas)")
+            return Timing(
+                name=name,
+                label=label,
+                rounds=len(times),
+                median_ms=None,
+                p95_ms=None,
+                objective_ms=objective,
+                objective_met=None if objective is None else False,
+                details={**(details or {}), "timed_out": True, "elapsed_ms": round(elapsed)},
+            )
         if index >= 2:
-            times.append((time.perf_counter() - started) * 1000)  # noqa: TID251
+            times.append(elapsed)
     p95 = _percentile(times, 0.95)
     timing = Timing(
         name=name,
@@ -1213,10 +1234,13 @@ def _console(gob: GobPlatform, generated: GobGenerated, rounds: int) -> list[Tim
             rounds,
             GOB_OBJECTIVES_MS[name],
             before=lambda: gob.advance(PERSON_SPACING_SECONDS),
+            timed_out=lambda statuses=statuses: UNAVAILABLE in statuses,
         )
         timing.details["statuses"] = {str(code): count for code, count in statuses.items()}
         timings.append(timing)
-        if any(code >= 300 for code in statuses):
+        # 503 es el tope de la base agotado: se declara (objetivo no cumplido). Cualquier otro
+        # estado fuera de 2xx es un fallo de la generación o de la prueba.
+        if any(code >= 300 and code != UNAVAILABLE for code in statuses):
             raise RuntimeError(f"{name} respondió {dict(statuses)}")
     return timings
 
@@ -1472,10 +1496,10 @@ def _gob_summary(section: dict[str, Any]) -> None:
             if timing["objective_ms"] is not None:
                 verdict = " cumple" if timing["objective_met"] else " NO cumple"
                 verdict = f" (objetivo p95 {timing['objective_ms']:.0f} ms:{verdict})"
-            print(
-                f"{group.upper().replace('_', '-')} {timing['name']}: mediana"
-                f" {timing['median_ms']} ms, p95 {timing['p95_ms']} ms{verdict}"
-            )
+            measured = f"mediana {timing['median_ms']} ms, p95 {timing['p95_ms']} ms"
+            if timing["details"].get("timed_out"):
+                measured = "agotó el tope de la base (temporarily_unavailable)"
+            print(f"{group.upper().replace('_', '-')} {timing['name']}: {measured}{verdict}")
     history = section["gate_history_366_days"]
     print(
         f"NFR-GOB-16 gate_history de 366 días desde hace {history['months_ago']} meses:"
