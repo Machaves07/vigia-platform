@@ -13,7 +13,9 @@ origen (5 cada 15 min y 20 al día), versión, cuerpo ≤ 16 KB y lector estrict
    15 min, ``admit_enrollment_node``);
 3. **contexto de la organización del nodo declarado** (``NodeIdentity.enrollment``, A-51): un
    ``node_id`` que no es de ningún nodo declarado no tiene organización; deja solo métrica y
-   registro estructurado del intento y responde ``schema_invalid`` en el nombre común;
+   registro estructurado del intento y responde ``enrollment_code_invalid`` (401), el mismo
+   rechazo genérico que el ``node_id`` de un nodo de otra organización con un código que no es
+   suyo: la respuesta no revela si el nodo existe (PR-GOB-12, NFR-GOB-30; VIG-165);
 4. código, huella, firma y transacción (``EnrollmentService.enroll``) y la respuesta
    ``NodeEnrollmentResponse`` validada con el modelo estricto de U-01.
 
@@ -148,9 +150,11 @@ def enrollment_operation(
         )
         try:
             if enrollment is None:
-                # Sin nodo declarado no hay organización: métrica y registro estructurado solo.
+                # Sin nodo declarado no hay organización: métrica y registro estructurado solo. El
+                # rechazo es el genérico de un código que no vale, el mismo que recibe un nodo de
+                # otra organización: la respuesta no revela si el node_id existe (NFR-GOB-30).
                 await service.unknown_node(presentation)
-                raise NodeRejection(RejectionCode.SCHEMA_INVALID, field=CLIENT_CSR_FIELD)
+                raise NodeRejection(RejectionCode.ENROLLMENT_CODE_INVALID)
             issued = await service.enroll(enrollment, presentation)
         except CsrRejected as error:
             raise NodeRejection(RejectionCode.SCHEMA_INVALID, field=error.field) from None

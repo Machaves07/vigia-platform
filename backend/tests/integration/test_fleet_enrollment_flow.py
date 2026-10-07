@@ -177,13 +177,17 @@ def test_the_enrollment_route_ignores_any_mtls_header(world: EnrollmentWorld) ->
     assert response.status_code == 200, response.text
 
 
-def test_a_common_name_that_is_no_declared_node_is_schema_invalid(world: EnrollmentWorld) -> None:
+def test_a_common_name_that_is_no_declared_node_gets_the_generic_rejection(
+    world: EnrollmentWorld,
+) -> None:
+    # VIG-165 (PR-GOB-12, NFR-GOB-30): el mismo rechazo que un nodo existente con un código que no
+    # es suyo, para no revelar si el node_id existe.
     setup = world.declared()
     code = world.code(setup)
     response = world.post(ENROLLMENT_PATH, world.body(setup, code, common_name=str(uuid.uuid4())))
     rejection = parse_rejection_response(response.content)
-    assert (response.status_code, rejection.code.value) == (422, "schema_invalid")
-    assert rejection.field == CLIENT_CSR_FIELD
+    assert (response.status_code, rejection.code.value) == (401, "enrollment_code_invalid")
+    assert rejection.field is None
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.credentials(setup.node_id) == []
 
@@ -212,7 +216,8 @@ def test_an_invalid_csr_is_schema_invalid_before_the_code(
         "schema_invalid",
         field,
     )
-    # Antes que el código: ni se consume ni deja intento.
+    # Antes de consumir el código: ni se consume ni deja intento (la CSR de servidor se mira tras
+    # verificar el código, VIG-165; las de cliente, antes).
     assert world.code_statuses(setup.node_id) == ["active"]
     assert world.attempts(setup.node_id) == []
 

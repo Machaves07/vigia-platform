@@ -25,7 +25,10 @@ evaluador de referencia con el que PR-GOB-27 los compara fila a fila.
 **Alcance.** Toda sentencia nombra la organización del contexto (además de la RLS) y filtra por
 ``allowed_scopes``: con alcance de organización, todos sus nodos; de planta, los nodos de esa
 planta; de zona, los nodos que atienden esa zona ahora, con ``zones`` y ``zone_states`` reducidas
-a las zonas visibles.
+a las zonas visibles, ``cameras`` reducidas a las que declara el catálogo vigente de una zona
+visible (con el ``code`` de esa zona) y los avisos que dependen de ellas
+(``camera_below_min_fps`` y ``simulated_adapter_in_productive``) calculados solo sobre lo visible
+(seguimiento de VIG-159; VIG-165).
 
 ``heartbeat_history``: la historia del nodo (90 días, ``payload_summary``, cursor por
 ``(received_at, heartbeat_id)`` descendente). ``thresholds`` y ``save_thresholds``: la fila de la
@@ -163,14 +166,27 @@ _INVENTORY: Final = text(
     " LEFT JOIN LATERAL (SELECT max(c.expires_at) AS expires_at FROM fleet.node_credential AS c"
     " WHERE c.organization_id = n.organization_id AND c.plant_id = n.plant_id"
     " AND c.node_id = n.node_id AND c.status IN ('active', 'overlapping')) AS cred ON true"
+    # Con alcance de zona, solo las cámaras que declara el catálogo vigente de una zona visible del
+    # nodo y solo el modo de esas zonas (seguimiento de VIG-159): nada de las zonas hermanas.
     " LEFT JOIN LATERAL (SELECT bool_or(ci.measured_fps < ci.declared_min_fps) AS below"
     " FROM fleet.camera_inventory AS ci WHERE ci.organization_id = n.organization_id"
-    " AND ci.node_id = n.node_id AND ci.updated_at = v.updated_at) AS cam ON true"
+    " AND ci.node_id = n.node_id AND ci.updated_at = v.updated_at"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR n.plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR EXISTS (SELECT 1 FROM identity.zone_node_assignment AS va"
+    " JOIN catalog.zone_catalog_version AS vc ON vc.organization_id = va.organization_id"
+    " AND vc.zone_id = va.zone_id AND vc.superseded_at IS NULL"
+    " CROSS JOIN LATERAL jsonb_array_elements(vc.payload -> 'cameras') AS ve"
+    " WHERE va.organization_id = n.organization_id AND va.node_id = n.node_id"
+    " AND va.unassigned_at IS NULL AND va.zone_id = ANY(CAST(:scope_zones AS uuid[]))"
+    " AND ve ->> 'camera_id' = ci.camera_id::text))) AS cam ON true"
     " LEFT JOIN LATERAL (SELECT bool_or(gs.resulting_mode = 'productive') AS productive"
     " FROM identity.zone_node_assignment AS a JOIN catalog.zone_gate_state AS gs"
     " ON gs.organization_id = a.organization_id AND gs.zone_id = a.zone_id"
     " WHERE a.organization_id = n.organization_id AND a.node_id = n.node_id"
-    " AND a.unassigned_at IS NULL) AS gate ON true"
+    " AND a.unassigned_at IS NULL AND (CAST(:whole_organization AS boolean)"
+    " OR n.plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR a.zone_id = ANY(CAST(:scope_zones AS uuid[])))) AS gate ON true"
     " LEFT JOIN LATERAL (SELECT"
     " count(*) FILTER (WHERE g.status = 'orphan' AND g.orphaned_at >= CAST(:clips_since AS"
     " timestamptz) AND g.orphaned_at < CAST(:now AS timestamptz)) AS orphan_clips,"
@@ -204,15 +220,21 @@ _INVENTORY: Final = text(
     " 'declared_min_fps', ci.declared_min_fps, 'observability_state', ci.observability_state)"
     " ORDER BY ci.camera_id), '[]'::json)::text"
     " FROM fleet.camera_inventory AS ci"
-    " LEFT JOIN LATERAL (SELECT e ->> 'code' AS code FROM identity.zone_node_assignment AS ca"
+    " LEFT JOIN LATERAL (SELECT e ->> 'code' AS code, true AS declared"
+    " FROM identity.zone_node_assignment AS ca"
     " JOIN catalog.zone_catalog_version AS zc ON zc.organization_id = ca.organization_id"
     " AND zc.zone_id = ca.zone_id AND zc.superseded_at IS NULL"
     " CROSS JOIN LATERAL jsonb_array_elements(zc.payload -> 'cameras') AS e"
     " WHERE ca.organization_id = :organization_id AND ca.node_id = b.node_id"
     " AND ca.unassigned_at IS NULL AND e ->> 'camera_id' = ci.camera_id::text"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR b.plant_id = ANY(CAST(:scope_plants AS uuid[]))"
+    " OR ca.zone_id = ANY(CAST(:scope_zones AS uuid[])))"
     " ORDER BY ca.zone_id LIMIT 1) AS cc ON true"
     " WHERE ci.organization_id = :organization_id AND ci.node_id = b.node_id"
-    " AND ci.updated_at = b.inventory_updated_at) AS cameras,"
+    " AND ci.updated_at = b.inventory_updated_at"
+    " AND (CAST(:whole_organization AS boolean)"
+    " OR b.plant_id = ANY(CAST(:scope_plants AS uuid[])) OR cc.declared)) AS cameras,"
     " (SELECT COALESCE(json_agg(json_build_object('zone_id', s.zone_id, 'mode', s.mode,"
     " 'observability_state', s.observability_state,"
     " 'catalog_version', s.catalog_version_in_node, 'coverage_ok', s.coverage_ok)"
