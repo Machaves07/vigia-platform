@@ -5,12 +5,14 @@ La ruta del contrato (``node_api.routes.enrollment``) ya validó versión, tama�
 CSR, sacó el ``node_id`` del nombre común y resolvió el **contexto de la organización del nodo
 declarado** (``EnrollmentScope``, A-51). ``EnrollmentService.enroll`` sigue el orden del diseño:
 
-1. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció y es
-   local, o el único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no). Una
-   URL guardada que no es local no bloquea la re-alta (VIG-185);
-2. **código** (``EnrollmentCodeService.verify`` de TASK-218, en tiempo constante sobre los códigos
+1. **código** (``EnrollmentCodeService.verify`` de TASK-218, en tiempo constante sobre los códigos
    del nodo): inválido, usado o vencido → intento registrado con su resultado y rechazo
-   permanente;
+   permanente. Va primero: sin el código, ninguna respuesta depende de que el nodo exista
+   (PR-GOB-12; VIG-165);
+2. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció y es
+   local, o el único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no, sin
+   intento y sin consumir el código). Una URL guardada que no es local no bloquea la re-alta
+   (VIG-185);
 3. **huella de hardware**: en la primera alta se fija; en la re-alta (``re_enrollment_pending``)
    tiene que ser la registrada. Con otra, ``enrollment_code_invalid`` **sin consumir** el código y
    con el intento registrado (G-2; el cambio de equipo es un reemplazo con ``node_id`` nuevo);
@@ -347,8 +349,6 @@ class EnrollmentService:
         deps = self._deps
         context = enrollment.context
         node = await deps.nodes.node(context, enrollment.node_id)
-        live_view_url = None if node is None else node.live_view_local_url
-        host = announced_host(presentation.server, live_view_url)
         codes = await self._codes()
         attempt = presentation.attempt()
         check = await codes.verify(enrollment, presentation.code)
@@ -358,6 +358,11 @@ class EnrollmentService:
             )
             await codes.register_attempt(enrollment, attempt, result)
             raise EnrollmentRejected(result)
+        # Solo con el código aceptado: nada que dependa del nodo encontrado responde antes, así
+        # que sin código un node_id existente y uno inexistente reciben el mismo rechazo
+        # (PR-GOB-12, NFR-GOB-30; VIG-165). Una CSR de servidor sin un único nombre local sigue
+        # siendo schema_invalid, sin intento y sin consumir el código.
+        host = announced_host(presentation.server, node.live_view_local_url)
         if not fingerprint_matches(node.record, presentation.hardware_fingerprint):
             # G-2: otro equipo con el código del nodo. El código no se consume.
             await codes.register_attempt(
