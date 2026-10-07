@@ -570,11 +570,24 @@ def _verifier(config: AppConfig) -> VerifierDigest:
         ) from None
 
 
+_FASTAPI_VALIDATION_REF: Final = "#/components/schemas/HTTPValidationError"
+
+
+def _is_fastapi_validation(response: object) -> bool:
+    """``True`` si ``response`` es el 422 que añade FastAPI (``HTTPValidationError``)."""
+    if not isinstance(response, dict):
+        return False
+    schema = response.get("content", {}).get("application/json", {}).get("schema", {})
+    return isinstance(schema, dict) and schema.get("$ref") == _FASTAPI_VALIDATION_REF
+
+
 def _openapi(app: FastAPI) -> dict[str, Any]:
     """Especificación con ``ApiErrorBody`` como respuesta de error de toda operación.
 
     FastAPI documenta por defecto un 422 con su propio modelo; la plataforma responde siempre un
-    ``ApiError``, así que ese modelo se sustituye por ``default``.
+    ``ApiError``, así que ese modelo se sustituye por ``default``. Solo ese: el 422 que declara
+    una ruta del contrato (``RejectionResponse`` de ``schema_invalid``, esqueleto de U-01) se
+    conserva, como lo fija ``ingest.yaml`` (NFR-GOB-66, ``test_node_api_contract_import``).
     """
     if app.openapi_schema is not None:
         return app.openapi_schema
@@ -593,7 +606,8 @@ def _openapi(app: FastAPI) -> dict[str, Any]:
     for operations in spec.get("paths", {}).values():
         for operation in operations.values():
             responses = operation.setdefault("responses", {})
-            responses.pop("422", None)
+            if _is_fastapi_validation(responses.get("422")):
+                responses.pop("422")
             responses["default"] = default
     spec["components"]["schemas"] = dict(sorted(components.items()))
     app.openapi_schema = spec
