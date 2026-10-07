@@ -851,9 +851,10 @@ class HierarchyService:
         """
         deps = self._deps
         wanted_roles = sorted({Role(role).value for role in roles})
-        wanted_users = sorted(set(user_ids))
-        if any(type(user_id) is not uuid.UUID for user_id in wanted_users):
+        users = set(user_ids)
+        if any(type(user_id) is not uuid.UUID for user_id in users):
             raise TypeError("user_ids debe contener uuid.UUID")
+        wanted_users = sorted(users)
         if len(wanted_users) > SIGNATORY_CANDIDATES_MAX:
             raise ValueError("demasiados usuarios en la consulta de firmantes")
         target = await resolve_scope(deps, context, ScopeLevel.ZONE, zone_id)
