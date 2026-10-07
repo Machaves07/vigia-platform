@@ -24,6 +24,7 @@ Por las rutas reales de la aplicación completa (``tests/gob_platform_support.py
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -33,6 +34,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 
@@ -169,6 +171,75 @@ def test_g13_an_uncited_clip_is_orphan_at_24_hours_once_and_never_deleted(
     _, admin = gob.person(zone.organization_id, Role.ADMINISTRATOR)
     detail = ok(gob.call("GET", f"/fleet/nodes/{zone.node}", cookie=admin))
     assert "orphan_clips_growing" in json.dumps(detail)
+
+
+def test_g13_an_acceptance_takes_the_cited_grants_in_clip_id_order(gob: GobPlatform) -> None:
+    """Gemela, del lado de la ingesta (``_MARK_CITED``), de
+    ``test_fleet_ingest_concurrency.py::test_the_orphan_sweep_takes_its_grants_in_clip_id_order``
+    (revisión de VIG-156): con la concesión menor retenida por otra transacción, la aceptación de
+    un hallazgo que cita las dos espera en ella **sin** haber tomado la mayor. Si bloqueara en otro
+    orden, se interbloquearía con ``mark_orphan_clips``, que las toma por ``clip_id``."""
+    flow = Onboarding(gob)
+    zone = flow.productive_zone()
+    started = gob.now() - timedelta(minutes=5)
+    ended = started + timedelta(seconds=30)
+    first, other = flow.clip(zone, started, ended), flow.clip(zone, started, ended, camera=1)
+    low, high = sorted(uuid.UUID(clip["clip_id"]) for clip in (first, other))
+    finding = flow.finding(zone, started, clip=first)
+    finding["cameras"].append(
+        {"camera_id": str(zone.cameras[1]), "originating": False, "clips": [other]}
+    )
+    migrated = gob.authz.sessions.migrated
+
+    async def scenario() -> tuple[str, Any]:
+        holder, probe, observer = (
+            await migrated.connect(),
+            await migrated.connect(),
+            await migrated.connect(),
+        )
+        try:
+            held = holder.transaction()
+            await held.start()
+            try:
+                await holder.execute(
+                    "SELECT 1 FROM fleet.clip_upload_grant WHERE clip_id = $1 FOR UPDATE", low
+                )
+                task = asyncio.create_task(
+                    flow.submit(zone, NodeRoute.FINDING, finding, "finding_id")
+                )
+
+                async def waiting() -> None:
+                    while not task.done():
+                        if await observer.fetchval(
+                            "SELECT count(*) > 0 FROM pg_stat_activity"
+                            " WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                        ):
+                            return
+                        await asyncio.sleep(0.05)
+
+                await asyncio.wait_for(waiting(), LONG_SECONDS)
+                assert not task.done()
+                try:
+                    async with probe.transaction():
+                        await probe.execute(
+                            "SELECT 1 FROM fleet.clip_upload_grant WHERE clip_id = $1"
+                            " FOR UPDATE NOWAIT",
+                            high,
+                        )
+                    outcome = "free"
+                except asyncpg.LockNotAvailableError:
+                    outcome = "held by the acceptance"
+            finally:
+                await held.rollback()
+            return outcome, await task
+        finally:
+            for connection in (holder, probe, observer):
+                await connection.close()
+
+    outcome, response = gob.run(scenario())
+    assert outcome == "free"
+    assert response.status_code == 200, response.text
+    assert {_status(gob, str(clip))["status"] for clip in (low, high)} == {"used"}
 
 
 def test_g13_verification_clips_never_become_orphan(gob: GobPlatform) -> None:

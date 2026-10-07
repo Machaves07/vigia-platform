@@ -1154,7 +1154,13 @@ class Onboarding:
         }
 
     def clip(
-        self, zone: GobZone, started: datetime, ended: datetime, data: bytes | None = None
+        self,
+        zone: GobZone,
+        started: datetime,
+        ended: datetime,
+        data: bytes | None = None,
+        *,
+        camera: int = 0,
     ) -> dict[str, Any]:
         """Un clip de evidencia **subido de verdad**: concesión por ``POST clip-uploads`` y
         ``PUT`` a LocalStack con las cabeceras exactas de la concesión."""
@@ -1162,7 +1168,7 @@ class Onboarding:
         window = timedelta(seconds=CLIP_WINDOW_SECONDS)
         request = {
             "clip_id": str(uuid7()),
-            "camera_id": str(zone.cameras[0]),
+            "camera_id": str(zone.cameras[camera]),
             "zone_id": str(zone.zone_id),
             "media_kind": "video",
             "content_type": "video/mp4",
