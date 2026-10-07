@@ -13,12 +13,14 @@ como ``vigia_app`` y LocalStack), como lo harán el nodo, el instalador y U-05:
   hallazgo es ``zone_gate_not_approved``; desde la aprobación los hallazgos persisten. El acta de
   comisionamiento cerrada que exige la aprobación (BR-GOB-29) se siembra por repositorio hasta que
   su cierre por la ruta (TASK-216, VIG-158) esté en ``main``;
+- **H-51** (BR-GOB-39, 40, 48): una detección perdida en la matriz bloquea el cierre del acta
+  (``catalog_false_negative_present``); sin ella, cualquier falsa alarma exige su aceptación con
+  motivo (``catalog_false_alarm_rate_above_threshold``) y la tasa observada queda en el acta y en
+  ``walk_test_result``. Usa la ruta de cierre de TASK-216 (VIG-158): mientras no esté en la
+  aplicación, la prueba se omite y lo dice;
 - **H-52** (BR-GOB-41 a 43, NFR-GOB-44): oclusión por turno: ``verified`` con el evento de la
   cámara en la ventana; ``failed`` solo vencida la fecha límite (5 minutos y 30 s); ``declared``
   con motivo, que nunca se presenta como ``verified``.
-
-H-51 (el falso negativo que bloquea el cierre y la tasa de falsas alarmas en el acta) necesita la
-ruta de cierre del acta de TASK-216 (VIG-158).
 
 Solo datos generados (NFR-CTR-43).
 """
