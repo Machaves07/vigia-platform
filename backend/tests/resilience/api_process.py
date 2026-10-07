@@ -2,8 +2,11 @@
 
 ``python -m tests.resilience.api_process`` sirve con uvicorn la aplicación de ``create_app``: la
 cadena fija de middleware, las rutas de ``platform_units()`` y el arranque supervisado
-(PAT-NUC-RES-02), con la composición de ``identity`` de ``tests/examples/test_auth_routes.py``
-sobre PostgreSQL de verdad como ``vigia_app`` con los ajustes de producción de ``vigia-api``:
+(PAT-NUC-RES-02), **con U-03 cargado** (``gob_support.process_units``: los tipos de registro de
+todas las unidades, los eventos y las tareas de U-03 en el catálogo y el estado de las rutas de
+catálogo, flota y ``node_api``; TASK-232), con la composición de ``identity`` de
+``tests/examples/test_auth_routes.py`` sobre PostgreSQL de verdad como ``vigia_app`` con los
+ajustes de producción de ``vigia-api``:
 sesiones, retardo de fallos, aviso de tratamiento y contextos en la base, nada en memoria salvo
 lo que NFR-NUC-06 permite (claves y cubos del límite de tasa). Dobles deterministas solo donde el
 módulo real tiene sus propias pruebas: el hash de contraseñas (``fake$``, sin Argon2id de 64 MB)
@@ -35,8 +38,9 @@ import uvicorn
 
 from tests.authz_support import SYSTEM_ACTOR_ID
 from tests.examples.test_auth_routes import ORIGIN, STATIC, Passwords
-from tests.hierarchy_support import FakeActivationPasswords, FakeActivationSecondFactor, NoStorage
+from tests.hierarchy_support import FakeActivationPasswords, FakeActivationSecondFactor
 from tests.integration.conftest import LOCALSTACK_ACCESS_KEY_ID, LOCALSTACK_SECRET_ACCESS_KEY
+from tests.resilience.gob_support import process_units
 from tests.resilience.processes import EffectHandler, resilience_catalog
 from tests.session_support import ORIGIN_KEY, FakeSecondFactor
 from tests.signing_support import (
@@ -64,11 +68,6 @@ from vigia_platform.identity.auth.sessions import SessionService
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.identity.authz.context import ScopeContexts
 from vigia_platform.ledger.application.audit_writer import AuditWriter
-from vigia_platform.ledger.application.writer import EscritorExpediente
-from vigia_platform.ledger.evidence import EvidenceVerifier
-from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
-from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
-from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.shared.api.app import AppConfig, AppRuntime, create_app
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.clock import SimulatedClock, SystemClock
@@ -153,19 +152,21 @@ def build(environ: Mapping[str, str]) -> Any:
         database=database, audit=audit, outbox=outbox, clock=_CLOCK
     )
     authorizer = Authorizer(audit=authorization_audit, provider_organization_id=provider)
-    registry = RecordTypeRegistry()
-    for definition in U02_RECORD_TYPES:
-        registry.register(definition)
-    registry.seal()  # los tipos de U-02 ya están en ``ledger.record_type`` (los sincronizó el test)
-    free_text = FreeTextPolicyRegistry()
-    writer = EscritorExpediente(
+    signing, kms = asyncio.run(_signing(environ))
+    # U-03 cargado (TASK-232): los tipos de todas las unidades (los sincroniza el arranque), los
+    # eventos y las tareas de U-03 en el catálogo y el estado de sus rutas en ``app.state``.
+    units = process_units(
         database=database,
-        registry=registry,
-        free_text=free_text,
-        evidence=EvidenceVerifier(NoStorage(), _CLOCK),
-        outbox=outbox,
         clock=_CLOCK,
+        provider_organization_id=provider,
+        contexts=contexts,
+        outbox=outbox,
+        signing=signing,
+        kms=kms,
+        storage=StubStorage(),
     )
+    writer = units.services.writer
+    free_text = units.services.free_text
     deps = IdentityDependencies(
         database=database,
         writer=writer,
@@ -208,9 +209,9 @@ def build(environ: Mapping[str, str]) -> Any:
         me=MeService(database, contexts=contexts, provider_organization_id=provider),
         provider_organization_id=provider,
     )
-    signing, kms = asyncio.run(_signing(environ))
 
     async def synchronize_catalog() -> None:
+        await units.synchronize_record_types(contexts.provider_audit_context())
         await synchronize(database, catalog, _CLOCK)
 
     config = AppConfig(
@@ -238,6 +239,7 @@ def build(environ: Mapping[str, str]) -> Any:
         sessions=contexts,
         origin_secret=ORIGIN_KEY,
         identity=identity,
+        state=units.state(),
     )
     return create_app(config, runtime=runtime)
 
