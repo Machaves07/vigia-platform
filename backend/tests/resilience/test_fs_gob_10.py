@@ -68,9 +68,11 @@ from vigia_platform.node_api.limits import MINIMUM_PER_MINUTE
 
 pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
-BURST: Final = 1_000
-"""Concesiones de la ráfaga final de un mismo nodo: muy por encima de su límite por minuto."""
-BURST_CONCURRENCY: Final = 40
+BURST: Final = 400
+"""Concesiones de la ráfaga final de un mismo nodo, en segundos: más que la ráfaga de los dos
+procesos (2 por 120) más lo que reponen mientras dura."""
+BURST_CONCURRENCY: Final = 8
+"""Por debajo del pool de nodo de cada proceso (10): la ráfaga mide el límite, no satura la base."""
 GRANT_MINIMUM: Final = MINIMUM_PER_MINUTE["clip_upload"]
 """El mínimo de NFR-CTR-02 para las concesiones: 240 por minuto y nodo."""
 
