@@ -305,12 +305,94 @@ def _secret_logical_ids(deployment: Synthesized) -> set[str]:
     }
 
 
+SECRET_NAME = re.compile(
+    r"(?i)(PASSWORD|PASSWD|PASSPHRASE|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL)"
+)
+"""Nombre de variable que solo puede llevar un secreto: prohibido en las definiciones de tarea."""
+SECRET_REFERENCE_NAME = re.compile(r"(?i)SECRET")
+"""Nombre que nombra un secreto (``VIGIA_DB_APP_SECRET``…): su valor solo puede ser el nombre o el
+ARN del secreto en Secrets Manager, nunca el secreto."""
+SECRET_REFERENCE_VALUE = re.compile(
+    r"vigia/[a-z0-9-]+(/[A-Za-z0-9_.-]+)+/?|arn:aws:secretsmanager:[a-z0-9-]+:[0-9<>A-Za-z]+:"
+    r"secret:[A-Za-z0-9/_+=.@!<>-]+"
+)
+CREDENTIAL_SHAPES = (
+    re.compile(r"-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----"),
+    re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"),  # usuario:contraseña en una URL
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."),  # JWT
+    # Ficha de alta entropía: 32 o más caracteres con mayúsculas, minúsculas y cifras.
+    re.compile(r"(?=[A-Za-z0-9+/=_-]*[A-Z])(?=[A-Za-z0-9+/=_-]*[a-z])(?=[A-Za-z0-9+/=_-]*[0-9])"
+               r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])"),
+)  # fmt: skip
+
+
+def secret_environment_problems(name: str, value: str) -> list[str]:
+    """Problemas de una variable de entorno de una definición de tarea (nota de la revisión de
+    VIG-137): ningún nombre de secreto, ningún valor con forma de credencial y, si el nombre
+    nombra un secreto, el valor es su nombre o ARN. Los secretos solo entran por ``secrets``, que
+    además ninguna tarea usa: la aplicación los lee con su rol (§5.3)."""
+    problems = []
+    if SECRET_NAME.search(name):
+        problems.append(f"{name}: nombre de secreto en una variable")
+    # Un valor que es una sola referencia de la plantilla (``<…>``) es un ARN de otra pila.
+    reference = SECRET_REFERENCE_VALUE.fullmatch(value) or re.fullmatch(r"<[^<>\s]+>", value)
+    if SECRET_REFERENCE_NAME.search(name) and not reference:
+        problems.append(f"{name}: no es el nombre ni el ARN de un secreto")
+    *exact, entropy = CREDENTIAL_SHAPES
+    # La ficha de alta entropía solo en valores de una línea: la configuración del colector
+    # (``AOT_CONFIG_CONTENT``) es un documento, no una credencial.
+    shapes = [*exact, entropy] if "\n" not in value else exact
+    for shape in shapes:
+        if shape.search(value):
+            problems.append(f"{name}: valor con forma de credencial ({shape.pattern[:24]}…)")
+    return problems
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("VIGIA_DB_APP_PASSWORD", "hunter2"),
+        ("VIGIA_API_TOKEN", "abc"),
+        ("VIGIA_DB_APP_SECRET", "s3cr3t-literal"),
+        ("VIGIA_ENROLLMENT_SOURCE_KEY_SECRET", "0123456789abcdef0123456789abcdef"),
+        ("VIGIA_DATABASE_URL", "postgresql://vigia_app:hunter2@db:5432/vigia"),
+        (
+            "VIGIA_ROOT_KEY",
+            "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEE\n-----END EC PRIVATE KEY-----",
+        ),
+        ("VIGIA_UPSTREAM", "AKIAIOSFODNN7EXAMPLE"),
+        ("VIGIA_SESSION", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.c2lnbmF0dXJl"),
+        ("VIGIA_HMAC", "Zx8Kq2Lm9Pv4Rt7Wy1Ab3Cd5Ef6Gh0Jk"),
+    ],
+)
+def test_a_literal_credential_in_a_variable_is_detected(name: str, value: str) -> None:
+    assert secret_environment_problems(name, value), (name, value)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("VIGIA_DB_APP_SECRET", "vigia/pilot/db/app"),
+        ("VIGIA_SIGNING_SECRET_PREFIX", "vigia/staging-7/signing/"),
+        ("VIGIA_SECRETS_KEY_ARN", "<Fn::GetStackOutput.vigia-foundation.Keysecrets>"),
+        ("VIGIA_NODES_BASE_URL", "https://nodes.<vigia-domain>/api/nodes"),
+        ("VIGIA_DB_POOL_NODE", "10"),
+    ],
+)
+def test_names_and_arns_of_secrets_are_not_credentials(name: str, value: str) -> None:
+    assert secret_environment_problems(name, value) == []
+
+
 def test_task_definitions_reference_no_secret_values(deployment: Synthesized) -> None:
     secrets = _secret_logical_ids(deployment)
-    for _, task_definition in _of_type(_compute(deployment), TASK_DEFINITION):
+    template = _compute(deployment)
+    for _, task_definition in _of_type(template, TASK_DEFINITION):
         for container in properties(task_definition)["ContainerDefinitions"]:
             assert "Secrets" not in container, container["Name"]
             for name, value in _environment(container).items():
+                rendered = render(value, template)
+                assert secret_environment_problems(name, rendered) == [], container["Name"]
                 text = str(value)
                 assert "{{resolve:secretsmanager" not in text, name
                 assert "assistant/api-key" not in text, name
