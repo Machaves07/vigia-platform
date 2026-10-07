@@ -39,9 +39,11 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from sqlalchemy import text
 
 from tests.close_record_support import ACCEPTANCE, CloseWorld, Zone, close_world
 from tests.integration.conftest import PostgresEndpoint
+from tests.writer_support import unit_context
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.commissioning_record_repository import (
     PostgresCommissioningRecordRepository,
@@ -61,7 +63,7 @@ from vigia_platform.catalog.application.walk_test import WalkTestConflict
 from vigia_platform.catalog.domain.commissioning_record import CommissioningRecord
 from vigia_platform.catalog.domain.latency import ExposureSample
 from vigia_platform.catalog.domain.walk_test import WalkTestSession
-from vigia_platform.shared.context import Role, ScopeLevel
+from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.db import Transaction
 
 pytestmark = pytest.mark.integration
@@ -311,13 +313,16 @@ def test_latency_needs_one_hundred_passes_and_zone_clips_in_the_window(
 
 
 @pytest.mark.parametrize(
-    "case", ["no_clip", "metadata_0", "no_metadata", "another_sha256", "no_object"]
+    "case", ["no_clip", "metadata_0", "no_metadata", "another_sha256", "no_object", "other_zone"]
 )
 def test_blur_needs_a_zone_clip_whose_head_says_anonymized(world: CloseWorld, case: str) -> None:
-    zone = world.zone(passes_per_cell=13)  # 104 pases: la latencia no depende de los clips
+    site = world.walk.a.g.site(zones=2)
+    zone = world.zone(passes_per_cell=13, site=site)  # 104 pases: la latencia sin clips
     world.passes(zone)
     world.occlusions_ok(zone)
-    if case == "metadata_0":
+    if case == "other_zone":  # aprobado, pero de otra zona de la planta: no cuenta
+        world.clips(zone, 3, zone_id=site.zones()[1][1], node=zone.node)
+    elif case == "metadata_0":
         world.clips(zone, 3, anonymized="0")
     elif case == "no_metadata":
         world.clips(zone, 3, anonymized=None)
@@ -459,55 +464,93 @@ def test_concurrent_closes_leave_one_record_one_result_and_one_clearance(
     assert row["n"] == 1
 
 
-class _HoldFirstLock:
-    """Cada operación, al obtener su **primer** candado, espera a que la otra tenga el suyo: así
-    el cierre (sesión → regresión → cadena) y la marca (regresión → cadena) se cruzan de verdad."""
+class _Crossing:
+    """Fuerza el cruce del cierre (sesión → regresión → cadena) con una marca (regresión →
+    cadena): la marca toma el candado de la regresión y no escribe hasta que el cierre se cruce con
+    ella, sea porque ya escribió su registro (tiene la cadena de la planta) o porque espera un
+    candado consultivo (el de la regresión). Con el orden correcto el cierre espera y la marca
+    confirma; con el orden invertido los dos se esperan: interbloqueo."""
 
-    def __init__(self) -> None:
-        self.barrier = _Barrier(2)
-        self.holding: set[asyncio.Task[Any]] = set()
+    def __init__(self, database: Any, organization_id: uuid.UUID) -> None:
+        self._database = database
+        self._organization_id = organization_id
+        self.mark_holds_regression = asyncio.Event()
+        self.close_wrote = asyncio.Event()
 
-    async def first(self) -> None:
-        task = asyncio.current_task()
-        assert task is not None
-        if task in self.holding:
-            return
-        self.holding.add(task)
-        await self.barrier.wait()
+    async def _close_is_waiting(self) -> bool:
+        system = unit_context(self._organization_id, ActorUnit.U03, kind=ActorKind.SYSTEM)
+        async with self._database.transaction(system) as transaction:
+            row = (await transaction.execute(_WAITING_ADVISORY)).one()
+        return int(row.waiting) > 0
+
+    async def mark_may_write(self) -> None:
+        async with asyncio.timeout(BARRIER_SECONDS):
+            while not self.close_wrote.is_set() and not await self._close_is_waiting():
+                await asyncio.sleep(0.05)  # intervalo de sondeo, nunca decide el resultado
+
+    async def close_may_lock(self) -> None:
+        async with asyncio.timeout(BARRIER_SECONDS):
+            await self.mark_holds_regression.wait()
 
 
-class _HoldingSessions(PostgresWalkTestRepository):
-    def __init__(self, hold: _HoldFirstLock) -> None:
-        self._hold = hold
+_WAITING_ADVISORY: Final = text(
+    "SELECT count(*) AS waiting FROM pg_catalog.pg_locks"
+    " WHERE locktype = 'advisory' AND NOT granted"
+)
+
+
+class _CloseAfterTheMark(PostgresWalkTestRepository):
+    def __init__(self, crossing: _Crossing) -> None:
+        self._crossing = crossing
 
     async def lock_session(
         self, transaction: Transaction, session_id: uuid.UUID
     ) -> WalkTestSession | None:
-        session = await super().lock_session(transaction, session_id)
-        await self._hold.first()
-        return session
+        await self._crossing.close_may_lock()
+        return await super().lock_session(transaction, session_id)
 
 
-class _HoldingRegressions(PostgresRegressionRepository):
-    def __init__(self, database: Any, hold: _HoldFirstLock) -> None:
+class _MarkHoldingTheRegression(PostgresRegressionRepository):
+    def __init__(self, database: Any, crossing: _Crossing) -> None:
         super().__init__(database)
-        self._hold = hold
+        self._crossing = crossing
 
     async def lock(self, transaction: Transaction, zone_id: uuid.UUID) -> None:
         await super().lock(transaction, zone_id)
-        await self._hold.first()
+        self._crossing.mark_holds_regression.set()
+
+
+class _Writer:
+    """El escritor real; la marca espera el cruce antes de escribir y el cierre avisa al escribir
+    su ``walk_test_result``."""
+
+    def __init__(self, writer: Any, crossing: _Crossing, *, marking: bool) -> None:
+        self._writer = writer
+        self._crossing = crossing
+        self._marking = marking
+
+    async def write(self, *args: Any, **kwargs: Any) -> Any:
+        if self._marking:
+            await self._crossing.mark_may_write()
+        written = await self._writer.write(*args, **kwargs)
+        if not self._marking and args[1] == "walk_test_result":
+            self._crossing.close_wrote.set()
+        return written
 
 
 def test_a_close_and_a_regression_mark_at_once_never_deadlock(world: CloseWorld) -> None:
     zone = _rerun(world)
-    hold = _HoldFirstLock()
     g = world.walk.a.g
-    closing = world.build(sessions=_HoldingSessions(hold))
+    crossing = _Crossing(g.database, zone.site.organization_id)
+    closing = world.build(
+        sessions=_CloseAfterTheMark(crossing),
+        writer=_Writer(g.writer, crossing, marking=False),
+    )
     marking = RegressionService(
-        repository=_HoldingRegressions(g.database, hold),
+        repository=_MarkHoldingTheRegression(g.database, crossing),
         catalog=PostgresCatalogRepository(g.database),
         database=g.database,
-        writer=g.writer,
+        writer=_Writer(g.writer, crossing, marking=True),  # type: ignore[arg-type]
         authorizer=g.authz.authorizer,
         audit=g.authz.sessions.audit,
         free_text=g.free_text,
@@ -528,7 +571,8 @@ def test_a_close_and_a_regression_mark_at_once_never_deadlock(world: CloseWorld)
     # Ningún interbloqueo ni transitorio: los dos confirman.
     assert isinstance(record, CommissioningRecord), record
     assert not isinstance(mark, BaseException), mark
-    # La marca llegó durante la reejecución: la regresión sigue pending.
+    # La marca llegó durante la reejecución: la regresión sigue pending y el acta lo dice.
+    assert not record.regression_cleared
     (regression,) = world.fetch(
         "SELECT state FROM catalog.walk_test_regression WHERE zone_id = $1", zone.zone_id
     )

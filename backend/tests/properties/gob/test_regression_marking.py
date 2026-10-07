@@ -512,7 +512,14 @@ class RegressionRerun(RegressionMarking):
             self.zone,
             json.dumps(decided),
         )
-        cookie, concession = world.installer(self.site)
+        # La RLS de la concesión compara su vigencia con la hora de la base (nuc_0009), y el reloj
+        # simulado avanza con cada paso de cada ejemplo: la concesión nace con la hora de la base.
+        ((database_now,),) = (tuple(row) for row in world.fetch("SELECT now() AS now"))
+        installer = world.authz.add_provider_user()
+        concession = world.authz.add_concession(
+            self.site.organization_id, installer, granted_at=database_now - timedelta(hours=1)
+        )
+        cookie = world.authz.open_session(world.authz.provider_organization_id, installer)
         scope = world.run(
             world.authz.contexts.context_from_session(cookie, concession_id=concession)
         )
@@ -658,7 +665,9 @@ class RegressionRerun(RegressionMarking):
         assert record.regression_cleared == covering
         RegressionRerun.seen["current" if covering else "still_pending"] += 1
         if covering:
+            # La fila vuelve a current sin causa ni versiones: la próxima marca abre otro periodo.
             self.model.keys = None
+            self.model.model_version = None
             self.clears += 1
         self.session = None
 
