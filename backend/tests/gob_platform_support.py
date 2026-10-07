@@ -120,7 +120,7 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
-from vigia_platform.shared.observability.metrics import get_metrics
+from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog, PeriodicTaskRegistry
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
@@ -546,8 +546,14 @@ def _node_gate(
 
 @contextlib.contextmanager
 def gob_platform(
-    postgres_endpoint: PostgresEndpoint, localstack_endpoint: LocalStackEndpoint, prefix: str
+    postgres_endpoint: PostgresEndpoint,
+    localstack_endpoint: LocalStackEndpoint,
+    prefix: str,
+    *,
+    metrics: PlatformMetrics | None = None,
 ) -> Iterator[GobPlatform]:
+    """``metrics``: las métricas de **todas** las unidades y de la cadena de middleware (p. ej.
+    sobre un ``MeterProvider`` con lector en memoria); sin ellas, las del proveedor global."""
     s3 = localstack_endpoint.aws_client("s3")
     with (
         live_view_environment(postgres_endpoint, prefix, at_database_time=True) as env,
@@ -610,7 +616,7 @@ def gob_platform(
         )
         services = UnitServices(
             clock=clock,
-            metrics=get_metrics(),
+            metrics=metrics if metrics is not None else get_metrics(),
             provider_organization_id=provider,
             database=database,
             contexts=authz.contexts,
@@ -674,6 +680,7 @@ def gob_platform(
             units=None,
             permissions=None,
             runtime={
+                "metrics": metrics,
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
                     audit=authz.audit,
