@@ -93,6 +93,9 @@ from vigia_platform.catalog.adapters.postgres.agreement_repository import (
 from vigia_platform.catalog.adapters.postgres.catalog_repository import (
     PostgresCatalogRepository,
 )
+from vigia_platform.catalog.adapters.postgres.commissioning_record_repository import (
+    PostgresCommissioningRecordRepository,
+)
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
 from vigia_platform.catalog.adapters.postgres.occlusion_repository import (
     PostgresOcclusionRepository,
@@ -112,7 +115,9 @@ from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
+from vigia_platform.catalog.application.close_record import CloseRecordService
 from vigia_platform.catalog.application.documents import DocumentService
+from vigia_platform.catalog.application.exposure import ExposureService
 from vigia_platform.catalog.application.gates import GateService
 from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import (
@@ -126,6 +131,7 @@ from vigia_platform.catalog.application.publication import (
     CatalogPublicationService,
 )
 from vigia_platform.catalog.application.regression import MARKED_RECORD_TYPE, RegressionService
+from vigia_platform.catalog.application.regression_rerun import RegressionRerunService
 from vigia_platform.catalog.application.scope_record import (
     MOUNTING_GATE_RECORD,
     ScopeRecordService,
@@ -135,7 +141,11 @@ from vigia_platform.catalog.application.transparency import TransparencyService
 from vigia_platform.catalog.application.walk_test import WalkTestService
 from vigia_platform.catalog.record_types import CATALOG_RECORD_TYPES
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp
+from vigia_platform.fleet.adapters.postgres.commissioning_queries import (
+    PostgresCommissioningQueries,
+)
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
+from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
@@ -366,6 +376,8 @@ class Ids:
     """Sesión de walk-test ``in_progress`` de la zona, con matriz vacía (VIG-150)."""
     step: uuid.UUID
     """Paso abierto de esa sesión (VIG-150)."""
+    commissioning_record: uuid.UUID
+    """Acta cerrada de otra sesión de la zona (VIG-158)."""
 
     @classmethod
     def missing(cls) -> Ids:
@@ -960,6 +972,39 @@ CASES: Final[dict[tuple[str, str], Case]] = {
             },
         ),
     ),
+    # VIG-158: acta de comisionamiento, muestras de exposición y reejecución por regresión.
+    ("POST", "/walk-tests/{session_id}/close"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/close",
+            json={
+                "signatures": [{"user_id": str(i.user)}],
+                "installer_measurements": {"beacon_latency_ms_p95": 180, "baselines": []},
+            },
+        ),
+    ),
+    ("POST", "/walk-tests/{session_id}/exposure-samples"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/exposure-samples",
+            json={
+                "pass_id": str(i.label),
+                "fetched_at": _stamp(T0),
+                "displayed_at": _stamp(T0 + timedelta(milliseconds=120)),
+            },
+        ),
+    ),
+    ("GET", "/commissioning-records/{record_id}"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/commissioning-records/{i.commissioning_record}")
+    ),
+    ("POST", "/zones/{zone_id}/walk-tests/regression-rerun"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST", f"/zones/{i.zone}/walk-tests/regression-rerun", json={"passes_per_cell": 3}
+        ),
+    ),
     # --- fleet (VIG-152) ---
     ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
@@ -1090,6 +1135,12 @@ STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     ("POST", "/walk-tests/{session_id}/reopen"): "conflict",
     # VIG-154. La cámara del caso no es del catálogo de la sesión de B: nada se escribe.
     ("POST", "/walk-tests/{session_id}/occlusion-tests"): "invalid_request",
+    # VIG-158. La sesión de B tiene un paso abierto: steps_still_open, la primera guarda.
+    ("POST", "/walk-tests/{session_id}/close"): "conflict",
+    # El pase del caso no es de la sesión de B: catalog_pass_not_found.
+    ("POST", "/walk-tests/{session_id}/exposure-samples"): "invalid_request",
+    # La zona de B no tiene regresión pending: conflict sin detail_code.
+    ("POST", "/zones/{zone_id}/walk-tests/regression-rerun"): "conflict",
 }
 """Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
 no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
@@ -1430,6 +1481,73 @@ class Isolation:
         )
         return session_id, step_id
 
+    def commissioning_record(
+        self,
+        site: Site,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        node_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> uuid.UUID:
+        """Un acta cerrada de la zona, con su sesión ``closed`` (filas sintéticas con la forma del
+        acta; el cierre real está en ``tests/integration/test_catalog_close_record.py``)."""
+        session_id, record_id = uuid7(), uuid7()
+        self.env.execute(
+            "INSERT INTO catalog.walk_test_session (session_id, organization_id, plant_id, zone_id,"
+            " node_id, catalog_version, kind, status, passes_per_cell, matrix_rows, started_at,"
+            " last_activity_at, closed_at, commissioning_record_id) VALUES ($1, $2, $3, $4, $5, 1,"
+            " 'initial', 'closed', 3, '[]', $6, $6, $6, $7)",
+            session_id,
+            site.organization_id,
+            plant_id,
+            zone_id,
+            node_id,
+            T0,
+            record_id,
+        )
+        latency = {
+            "node_tranche": {
+                "median_ms": None,
+                "p95_ms": 180,
+                "max_ms": None,
+                "repetitions": None,
+                "measured_by": "installer",
+            },
+            "platform_tranche": None,
+            "exposure_tranche": None,
+            "served_tranche": None,
+            "not_measured": ["platform_tranche", "exposure_tranche", "served_tranche"],
+            "indicative_sum_median_ms": None,
+            "indicative_sum_p95_ms": 180,
+            "indicative": True,
+            "repetitions_counted": 100,
+        }
+        signature = {
+            "user_id": str(user_id),
+            "role_in_use": "coordinator_sst",
+            "signed_at": _stamp(T0),
+        }
+        self.env.execute(
+            "INSERT INTO catalog.commissioning_record (commissioning_record_id, organization_id,"
+            " plant_id, zone_id, session_id, catalog_version, matrix_results,"
+            " false_negatives_total, false_alarm_rate_observed, false_alarm_threshold, latency,"
+            " installer_measurements, cameras_measured, occlusion_summary, total_hours,"
+            " steps_summary, signatures, closed_at, ledger_record_id)"
+            " VALUES ($1, $2, $3, $4, $5, 1, '[]', 0, 0, 0, $6, $7, '[]', '[]', 0, '[]', $8, $9,"
+            " $10)",
+            record_id,
+            site.organization_id,
+            plant_id,
+            zone_id,
+            session_id,
+            json.dumps(latency),
+            json.dumps({"beacon_latency_ms_p95": 180, "baselines": []}),
+            json.dumps([signature]),
+            T0,
+            uuid7(),
+        )
+        return record_id
+
     def resources(self, site: Site, plant_index: int) -> Ids:
         """Un recurso de cada tipo en la planta ``plant_index`` de ``site`` (filas reales)."""
         authz = self.authz
@@ -1477,6 +1595,9 @@ class Isolation:
             agreement=self.agreement(site, plant_id, zone_id, user_id),
             walk_test=walk_test_id,
             step=step_id,
+            commissioning_record=self.commissioning_record(
+                site, plant_id, zone_id, node_id, user_id
+            ),
         )
 
     def fleet_node(
@@ -1796,6 +1917,50 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             clock=sessions.clock,
             regression_marker=regression,
         )
+        walk_tests = WalkTestService(
+            repository=PostgresWalkTestRepository(),
+            catalog=catalog_repository,
+            gates=gates,
+            nodes=HierarchyService(deps),
+            identity=HierarchyService(deps),
+            database=sessions.database,
+            writer=writer,
+            audit=sessions.audit,
+            free_text=free_text,
+            clock=sessions.clock,
+            occlusions=occlusions,
+        )
+        # VIG-158: el acta, sus muestras y la reejecución; el depósito responde head_object.
+        commissioning_records = PostgresCommissioningRecordRepository()
+        records = CloseRecordService(
+            repository=commissioning_records,
+            sessions=PostgresWalkTestRepository(),
+            occlusion_tests=PostgresOcclusionRepository(),
+            occlusions=occlusions,
+            regressions=PostgresRegressionRepository(sessions.database),
+            catalog=catalog_repository,
+            fleet=PostgresCommissioningQueries(),
+            clips=ClipObjectStore(storage),  # type: ignore[arg-type]
+            gates=gates,
+            identity=HierarchyService(deps),
+            database=sessions.database,
+            writer=writer,
+            audit=sessions.audit,
+            free_text=free_text,
+            clock=sessions.clock,
+        )
+        exposures = ExposureService(
+            repository=commissioning_records,
+            sessions=PostgresWalkTestRepository(),
+            gates=gates,
+            database=sessions.database,
+            clock=sessions.clock,
+        )
+        reruns = RegressionRerunService(
+            walk_tests=walk_tests,
+            regressions=PostgresRegressionRepository(sessions.database),
+            database=sessions.database,
+        )
         app = World(clock=sessions.clock).app(
             units=None,
             permissions=None,
@@ -1863,20 +2028,11 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             database=sessions.database,
                             audit=sessions.audit,
                         ),
-                        walk_tests=WalkTestService(
-                            repository=PostgresWalkTestRepository(),
-                            catalog=catalog_repository,
-                            gates=gates,
-                            nodes=HierarchyService(deps),
-                            identity=HierarchyService(deps),
-                            database=sessions.database,
-                            writer=writer,
-                            audit=sessions.audit,
-                            free_text=free_text,
-                            clock=sessions.clock,
-                            occlusions=occlusions,
-                        ),
+                        walk_tests=walk_tests,
                         occlusions=occlusions,
+                        records=records,
+                        exposures=exposures,
+                        regression_reruns=reruns,
                     ),
                     FLEET_STATE_KEY: fleet_http(
                         FleetDependencies(
@@ -2171,6 +2327,10 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "POST /walk-tests/{session_id}/passes",
         "POST /walk-tests/{session_id}/reopen",
         "POST /walk-tests/{session_id}/occlusion-tests",
+        "POST /walk-tests/{session_id}/close",
+        "POST /walk-tests/{session_id}/exposure-samples",
+        "GET /commissioning-records/{record_id}",
+        "POST /zones/{zone_id}/walk-tests/regression-rerun",
         "GET /zones/{zone_id}/commissioning-clips",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query

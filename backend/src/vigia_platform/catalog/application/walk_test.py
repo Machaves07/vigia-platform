@@ -226,6 +226,9 @@ class SessionPlan:
 
 SessionPlanner = Callable[[Transaction, ZoneRef, Mapping[str, Any], int], Awaitable[SessionPlan]]
 """``plan(transaction, zona, catalogo_vigente, passes_per_cell)`` de ``open_planned``."""
+OpeningCheck = Callable[[ZoneRef, ScopeContext], Awaitable[None]]
+"""``before(zona, contexto_autorizado)`` de ``open_planned``: corre antes de sus guardas. Es un
+alias para que ``@repository`` no lo tome por el contexto de la operación."""
 
 
 # --- Resultados ----------------------------------------------------------------------------------
@@ -387,7 +390,7 @@ class WalkTestService:
         zone_id: uuid.UUID,
         passes_per_cell: object,
         plan: SessionPlanner | None = None,
-        before: Callable[[ZoneRef, ScopeContext], Awaitable[None]] | None = None,
+        before: OpeningCheck | None = None,
     ) -> WalkTestSession:
         """``open`` con las mismas guardas y, con ``plan``, otra clase de sesión (TASK-216).
 

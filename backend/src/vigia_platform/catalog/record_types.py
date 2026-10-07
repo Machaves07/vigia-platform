@@ -563,7 +563,7 @@ class CameraMeasuredV2(ContentModel):
 
 
 class OcclusionSummaryV2(OcclusionSummary):
-    test_id: UUIDv7 | None = None
+    test_id: UUID | None = None
     """La última prueba de la cámara; las anteriores siguen en el expediente."""
 
 

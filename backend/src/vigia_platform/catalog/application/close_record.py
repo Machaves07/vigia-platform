@@ -5,18 +5,19 @@ sesión), con ``{signatures[{user_id}], false_alarm_acceptance?: {reason_es},
 installer_measurements: {beacon_latency_ms_p95, baselines[{camera_id, zone_id, captured_at}]}}``
 (interfaces v1.5, precisión (b)):
 
-1. el cuerpo, coherente por sí mismo (si no, ``invalid_request``): de 1 a 32 firmantes distintos,
-   cada uno de la organización con un rol vigente sobre la zona (``IdentityQueryPort``; su
-   ``role_in_use`` es el primero de la lista cerrada que tiene); el p95 del instalador en
-   milisegundos enteros; una línea base por par cámara-zona de la zona y del catálogo de la
-   sesión. El motivo de la aceptación pasa la política de texto libre
+1. el cuerpo, coherente por sí mismo (si no, ``invalid_request``): de 1 a 32 firmantes distintos;
+   el p95 del instalador en milisegundos enteros; una línea base por par cámara-zona de la zona y
+   del catálogo de la sesión. El motivo de la aceptación pasa la política de texto libre
    (``catalog_free_text_rejected``);
 2. las **siete guardas** de ``commissioning_record.first_failing_guard`` en su orden; la primera
    que falla es el error (``catalog_<guarda>``) y no se escribe nada. Se descarta pronto: las tres
    primeras antes de reevaluar la oclusión (``catalog.occlusion``, PAT-GOB-REN-07), las seis
-   primeras antes de consultar el almacén. La del difuminado consulta con ``head_object`` (nunca
-   ``get_object``) los clips de verificación de la zona sin comprobar o aprobados; el almacén
-   caído es ``StorageUnavailable`` (transitorio) y nada se escribe;
+   primeras antes de consultar el almacén. Entre la sexta y la séptima, cada firmante tiene que
+   ser de la organización con un rol vigente sobre la zona (``IdentityQueryPort``; su
+   ``role_in_use`` es el primero de la lista cerrada que tiene; si no, ``invalid_request``). La
+   del difuminado consulta con ``head_object`` (nunca ``get_object``) los clips de verificación
+   de la zona sin comprobar o aprobados; el almacén caído es ``StorageUnavailable`` (transitorio)
+   y nada se escribe;
 3. una transacción bajo el **candado de la sesión** que vuelve a leer todo y vuelve a evaluar las
    guardas (con el difuminado ya comprobado), y escribe: el ``blur_check_result`` aprobado del clip
    que lo verificó (si seguía nulo), ``CommissioningRecord`` con el umbral aplicado,
@@ -469,7 +470,6 @@ class CloseRecordService:
         async with self._database.transaction(authorized) as transaction:
             catalog, _ = await self._catalogs(transaction, session)
         body = self._body(request, session, frozenset(camera_ids_of(catalog)))
-        signed = await self._signatures(authorized, zone, body.signers)
         accepted = body.reason_es is not None
 
         # Fuera del candado, para descartar pronto en el orden de las guardas.
@@ -488,6 +488,8 @@ class CloseRecordService:
         failed = first_failing_guard(seen.facts, last=CloseGuard.LATENCY_NOT_MEASURED)
         if failed is not None:
             raise _rejected(failed)
+        # Los firmantes, tras las guardas que solo miran la sesión y antes de preguntar al almacén.
+        signed = await self._signatures(authorized, zone, body.signers)
         blur = await self._blur(authorized, zone, now)
         if blur is None:
             raise _rejected(CloseGuard.BLUR_NOT_VERIFIED)
