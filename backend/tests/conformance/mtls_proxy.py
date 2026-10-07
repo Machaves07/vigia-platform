@@ -181,6 +181,9 @@ class MtlsProxy:
     _client: httpx.AsyncClient | None = None
     _turn: Iterator[int] = field(default_factory=itertools.count)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _connections: dict[asyncio.Task[None], asyncio.StreamWriter] = field(default_factory=dict)
+    """Las conexiones abiertas: al cerrar se abortan (una persistente ociosa no acaba sola, y el
+    cierre ordenado de TLS esperaría al cliente)."""
     port: int = 0
 
     @property
@@ -219,6 +222,10 @@ class MtlsProxy:
         async def shut() -> None:
             if self._server is not None:
                 self._server.close()
+                for task, writer in tuple(self._connections.items()):
+                    writer.transport.abort()
+                    task.cancel()
+                await asyncio.gather(*self._connections, return_exceptions=True)
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(self._server.wait_closed(), timeout=10)
             if self._client is not None:
@@ -238,6 +245,10 @@ class MtlsProxy:
     # --- Una conexión -------------------------------------------------------------------------
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._connections[task] = writer
+            task.add_done_callback(lambda done: self._connections.pop(done, None))
         ssl_object = writer.get_extra_info("ssl_object")
         der = ssl_object.getpeercert(binary_form=True) if ssl_object is not None else None
         certificate = x509.load_der_x509_certificate(der) if der else None
