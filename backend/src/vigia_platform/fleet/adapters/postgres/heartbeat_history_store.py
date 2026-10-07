@@ -7,7 +7,8 @@ ser un índice único entre particiones (nota de gob_0018). La detección del du
    serializa los latidos del mismo nodo en cualquier instancia;
 2. con el candado tomado, ``seen``: la búsqueda por ``(organization_id, plant_id, node_id,
    heartbeat_id)`` (índice ``heartbeat_history_dedup``) dentro de la retención de 90 días, que
-   poda las particiones por ``received_at``.
+   poda las particiones por ``received_at``. Devuelve el ``received_at`` del original: es el
+   ``server_time`` de su respuesta, y el duplicado lo repite (BR-CTR-26, BR-GOB-71; VIG-182).
 
 Sin estado en memoria: dos instancias detrás del balanceador deciden igual (NFR-GOB-15, 47). Solo
 ``INSERT`` y ``SELECT``: la tabla es de solo anexar (⛓).
@@ -29,7 +30,7 @@ from vigia_platform.shared.db import Transaction
 __all__ = ["PostgresHeartbeatHistoryStore"]
 
 _SEEN: Final = text(
-    "SELECT 1 FROM fleet.heartbeat_history"
+    "SELECT received_at FROM fleet.heartbeat_history"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id AND node_id = :node_id"
     " AND heartbeat_id = :heartbeat_id AND received_at >= :since LIMIT 1"
 )
@@ -53,8 +54,9 @@ class PostgresHeartbeatHistoryStore:
         node_id: uuid.UUID,
         heartbeat_id: uuid.UUID,
         since: datetime,
-    ) -> bool:
-        """¿Ya se aceptó ``heartbeat_id`` de este nodo desde ``since``? Con el nodo bloqueado."""
+    ) -> datetime | None:
+        """El ``received_at`` del latido ``heartbeat_id`` de este nodo aceptado desde ``since``, o
+        ``None`` si no se aceptó. Con el nodo bloqueado."""
         result = await transaction.execute(
             _SEEN,
             {
@@ -65,7 +67,11 @@ class PostgresHeartbeatHistoryStore:
                 "since": since,
             },
         )
-        return result.first() is not None
+        row = result.first()
+        if row is None:
+            return None
+        received_at: datetime = row[0]
+        return received_at
 
     async def append(
         self,
