@@ -2474,6 +2474,39 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/walk-tests/{session_id}/occlusion-tests":
+    "post":
+      "tags":
+        - "comisionamiento"
+      "summary": "Registra la prueba de oclusión de una cámara o declara la pendiente con motivo"
+      "operationId": "record_occlusion_test_walk_tests__session_id__occlusion_tests_post"
+      "parameters":
+        - "name": "session_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Session Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/OcclusionTestBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/OcclusionTestOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/plants/{plant_id}/nodes":
     "post":
       "tags":
@@ -7630,6 +7663,97 @@
         - "text"
         - "pending_legal_text"
       "title": "NoticeView"
+    "OcclusionTestBody":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "started_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Started At"
+        "ended_at":
+          "type": "string"
+          "format": "date-time"
+          "title": "Ended At"
+        "declared_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Declared Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "started_at"
+        - "ended_at"
+      "title": "OcclusionTestBody"
+    "OcclusionTestOut":
+      "properties":
+        "test_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Test Id"
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "ended_at":
+          "type": "string"
+          "title": "Ended At"
+        "deadline":
+          "type": "string"
+          "title": "Deadline"
+        "verification":
+          "$ref": "#/components/schemas/OcclusionVerification"
+        "correlated_event_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Correlated Event Ids"
+        "declared_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Declared Reason Es"
+        "failure_reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Failure Reason"
+        "recorded_by":
+          "type": "string"
+          "format": "uuid"
+          "title": "Recorded By"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "test_id"
+        - "camera_id"
+        - "started_at"
+        - "ended_at"
+        - "deadline"
+        - "verification"
+        - "correlated_event_ids"
+        - "declared_reason_es"
+        - "failure_reason"
+        - "recorded_by"
+      "title": "OcclusionTestOut"
+      "description": "``OcclusionTest`` (DE §2.14 y su nota): ``verification`` distingue los cuatro valores."
+    "OcclusionVerification":
+      "type": "string"
+      "enum":
+        - "verified"
+        - "declared"
+        - "failed"
+        - "pending"
+      "title": "OcclusionVerification"
+      "description": "Verificación de la prueba de oclusión; ``pending`` por la nota de §2.14."
     "OpenWalkTestBody":
       "properties":
         "passes_per_cell":

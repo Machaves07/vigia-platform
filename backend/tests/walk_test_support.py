@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -46,6 +46,7 @@ from vigia_platform.catalog.domain.steps import WalkTestStep
 from vigia_platform.catalog.domain.walk_test import WalkTestSession
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCookie
+from vigia_platform.ledger.registry import RecordType
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ScopeContext, ScopeLevel
 
@@ -282,9 +283,11 @@ class WalkTestWorld:
 
 
 @contextmanager
-def walk_test_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[WalkTestWorld]:
+def walk_test_world(
+    endpoint: PostgresEndpoint, prefix: str, extra_types: Sequence[RecordType] = ()
+) -> Iterator[WalkTestWorld]:
     """El entorno de ``WalkTestWorld`` sobre una base migrada propia, con su cliente HTTP."""
-    with agreements_world(endpoint, prefix) as agreements:
+    with agreements_world(endpoint, prefix, extra_types) as agreements:
         world = WalkTestWorld(agreements)
         world.install()
         try:

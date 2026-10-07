@@ -56,6 +56,9 @@ from vigia_platform.catalog.adapters.postgres.agreement_repository import (
 )
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.occlusion_repository import (
+    PostgresOcclusionRepository,
+)
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
     PostgresPlantPolicyRepository,
 )
@@ -76,6 +79,7 @@ from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
 )
 from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import PlantPolicyService
 from vigia_platform.catalog.application.publication import CatalogPublicationService
 from vigia_platform.catalog.application.regression import RegressionService
@@ -159,6 +163,7 @@ from vigia_platform.ledger.application.evidence_sample import (
     register_evidence_sample,
 )
 from vigia_platform.ledger.application.integrity_requests import register_integrity_on_demand
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.ledger.application.verify_tasks import register_verify_chains
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.chain.checkpoints import CheckpointChain, CheckpointService
@@ -590,6 +595,25 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
             provider_organization_id=services.provider_organization_id,
         )
     )
+    # LC-GOB-07 (VIG-154): prueba de oclusión, reevaluada contra los eventos del expediente cada
+    # vez que se consulta la sesión.
+    sessions = PostgresWalkTestRepository()
+    occlusions = OcclusionService(
+        repository=PostgresOcclusionRepository(),
+        sessions=sessions,
+        catalog=catalog,
+        gates=gates,
+        reader=LectorExpediente(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        database=services.database,
+        writer=services.writer,
+        free_text=services.free_text,
+        clock=services.clock,
+    )
     return {
         CATALOG_STATE_KEY: CatalogHttp(
             admissions=admissions,
@@ -644,10 +668,9 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 database=services.database,
                 audit=services.audit,
             ),
-            # LC-GOB-06 (VIG-150): sesión de walk-test; las pruebas de oclusión llegan con
-            # VIG-154 (hasta entonces, ninguna).
+            # LC-GOB-06 (VIG-150): sesión de walk-test, con las pruebas de oclusión de LC-GOB-07.
             walk_tests=WalkTestService(
-                repository=PostgresWalkTestRepository(),
+                repository=sessions,
                 catalog=catalog,
                 gates=gates,
                 nodes=hierarchy,
@@ -657,7 +680,9 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 free_text=services.free_text,
                 clock=services.clock,
+                occlusions=occlusions,
             ),
+            occlusions=occlusions,
         )
     }
 
