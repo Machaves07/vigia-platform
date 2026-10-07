@@ -9,9 +9,10 @@ declarado** (``EnrollmentScope``, A-51). ``EnrollmentService.enroll`` sigue el o
    del nodo): inválido, usado o vencido → intento registrado con su resultado y rechazo
    permanente. Va primero: sin el código, ninguna respuesta depende de que el nodo exista
    (PR-GOB-12; VIG-165);
-2. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció, o el
-   único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no, sin intento y
-   sin consumir el código);
+2. **dirección de la vista en vivo** (``csr.announced_host``): la del nodo si ya la anunció y es
+   local, o el único nombre alternativo local de la CSR de servidor (``schema_invalid`` si no, sin
+   intento y sin consumir el código). Una URL guardada que no es local no bloquea la re-alta
+   (VIG-185);
 3. **huella de hardware**: en la primera alta se fija; en la re-alta (``re_enrollment_pending``)
    tiene que ser la registrada. Con otra, ``enrollment_code_invalid`` **sin consumir** el código y
    con el intento registrado (G-2; el cambio de equipo es un reemplazo con ``node_id`` nuevo);

@@ -4,7 +4,8 @@
 P-256, con la autofirma válida y un único nombre común que es un UUID canónico. Cada otra forma es
 ``CsrRejected`` con el campo que la trajo (la ruta responde ``schema_invalid`` con ese ``field``).
 ``announced_host`` elige la dirección del certificado de servidor: la de ``live_view_local_url`` si
-se conoce, si no el único nombre alternativo local de la CSR; nunca una dirección pública.
+se conoce y es local, si no el único nombre alternativo local de la CSR (una URL guardada que no
+es local cae a la CSR, VIG-185); nunca una dirección pública.
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -235,5 +236,41 @@ def test_a_known_live_view_url_wins_over_the_csr() -> None:
     host = announced_host(server, "https://10.20.30.40:8443/")  # type: ignore[arg-type]
     assert host == ipaddress.ip_address("10.20.30.40")
     assert announced_host(server, "https://camara-norte.local:8443/") == "camara-norte.local"  # type: ignore[arg-type]
-    with pytest.raises(CsrRejected):
-        announced_host(server, "https://8.8.4.4:8443/")  # type: ignore[arg-type]
+
+
+LONGEST_CONTRACT_HOST = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 50])
+"""El anfitrión más largo que admite ``Heartbeat.live_view_local_url`` (URL de 256 caracteres)."""
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://[::1]:8443/",
+        "https://[fe80::1]:8443/",
+        "https://8.8.4.4:8443/",
+        "https://127.0.0.1:8443/",
+        "https://localhost:8443/",
+        "https://vigia.example.com:8443/",
+        f"https://{LONGEST_CONTRACT_HOST}:8443/",
+        "https://:8443/",
+        "no es una url",
+    ],
+)
+def test_a_stored_url_that_is_not_local_falls_back_to_the_csr(url: str) -> None:
+    # VIG-185: el latido guarda toda URL válida según el contrato; la que el alta no admitiría
+    # no bloquea la re-alta, que usa el nombre alternativo de la CSR como si no hubiera URL.
+    assert len(f"https://{LONGEST_CONTRACT_HOST}:8443/") == 256
+    server = _server(local_ip("192.168.10.20"))
+    assert announced_host(server, url) == ipaddress.ip_address("192.168.10.20")  # type: ignore[arg-type]
+    assert announced_host(_server(x509.DNSName("nodo1.local")), url) == "nodo1.local"  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "names", [(), (local_ip("8.8.8.8"),), (local_ip("10.0.0.1"), x509.DNSName("nodo.local"))]
+)
+def test_a_stored_url_that_is_not_local_does_not_rescue_a_bad_csr(
+    names: tuple[x509.GeneralName, ...],
+) -> None:
+    with pytest.raises(CsrRejected) as raised:
+        announced_host(_server(*names), "https://[::1]:8443/")  # type: ignore[arg-type]
+    assert raised.value.field == SERVER_CSR_FIELD
