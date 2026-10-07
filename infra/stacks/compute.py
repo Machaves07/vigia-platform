@@ -627,6 +627,13 @@ class ComputeStack(VigiaStack):
                 actions=["kms:GetPublicKey"],
                 resources=[self._key_arn(KeyName.NODE_CA)],
             ),
+            # La raíz publicada: el alta elige con ella la emisora y la entrega en ``ca_chain``, y
+            # la emisión de códigos muestra sus huellas (TASK-219, VIG-147). Solo lectura.
+            iam.PolicyStatement(
+                sid="ReadEdgeRoot",
+                actions=["s3:GetObject"],
+                resources=[self._objects(BucketUsage.EDGE, ROOT_CERTIFICATE_KEY)],
+            ),
             # A-34: una sola sentencia de escritura, con la suma obligatoria y sin condición de
             # cifrado (el depósito cifra por defecto con vigia-evidence). El proceso solo firma
             # URL: la subida la hace el nodo o el navegador con la URL.
@@ -1197,9 +1204,9 @@ class ComputeStack(VigiaStack):
             "VIGIA_CSP_STORE_ORIGINS": evidence_store_origin(
                 self._bucket(BucketUsage.EVIDENCE), self.region
             ),
-            "VIGIA_ENROLLMENT_PUBLIC_URL": Fn.join(
-                "", ["https://", app_host(config), ".", domain, "/api/nodes/enrollment"]
-            ),
+            # El alta y la emisión de códigos leen ``ca/root.pem`` (TASK-219, VIG-147); la URL
+            # pública del alta no es variable: ningún proceso la lee (VIG-167).
+            "VIGIA_EDGE_BUCKET": self._bucket(BucketUsage.EDGE),
             "VIGIA_NODES_BASE_URL": Fn.join(
                 "", ["https://", nodes_host(config), ".", domain, "/api/nodes"]
             ),
