@@ -200,10 +200,11 @@ Códigos de salida: `0` hecho, `1` configuración o error inesperado, `2` uso in
 
 Los flujos están en `.github/workflows/` (TASK-143 y TASK-151). Los trabajos que tocan AWS (federación con `vigia-deploy`, ECR, `cdk deploy`) solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true` (adenda A-47). Sin ella, `release.yml` ensaya hasta donde no hace falta AWS y lo dice en el resumen.
 
-1. **`ci.yml`**, en cada PR listo (no en borradores), con nueve checks:
+1. **`ci.yml`**, en cada PR listo (no en borradores), con once checks:
    - escaneo de secretos;
    - backend (lint, tipos y pruebas sin integración): ruff, `lint_rules`, `mypy --strict` y pytest;
-   - backend (pruebas de integración);
+   - backend (pruebas de integración) y backend (pruebas de integración, segunda mitad): la integración partida por directorio en dos trabajos paralelos (`tests/properties` en la segunda, el resto en la primera; `tests/unit/test_ci_split.py` exige que no falte ni se repita ninguno);
+   - backend (carga ci): el perfil `ci` de `tests/load`;
    - cobertura (≥ 90 % en `identity` y `ledger`, ≥ 80 % global);
    - dependencias (licencias y `pip-audit`);
    - imagen `arm64` (construcción, auditoría, arranque y escaneo, sin publicarla);
