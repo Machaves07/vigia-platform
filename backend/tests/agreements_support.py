@@ -51,6 +51,7 @@ from vigia_platform.catalog.application.transparency import TransparencyService
 from vigia_platform.catalog.domain.agreements import UseAgreement
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCookie
+from vigia_platform.ledger.registry import RecordType
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 
@@ -448,9 +449,11 @@ class AgreementsWorld:
 
 
 @contextmanager
-def agreements_world(endpoint: PostgresEndpoint, prefix: str) -> Iterator[AgreementsWorld]:
+def agreements_world(
+    endpoint: PostgresEndpoint, prefix: str, extra_types: Sequence[RecordType] = ()
+) -> Iterator[AgreementsWorld]:
     """El entorno de ``AgreementsWorld`` sobre una base migrada propia, con su cliente HTTP."""
-    with gates_world(endpoint, prefix) as g:
+    with gates_world(endpoint, prefix, extra_types) as g:
         world = AgreementsWorld(g)
         world.install()
         try:

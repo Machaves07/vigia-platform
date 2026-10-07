@@ -33,7 +33,8 @@ ya tiene otra sesión abierta, ``walk_test_in_progress``.
 **Lectura** (``current``, ``catalog.read``): la sesión abierta de la zona o la ``incomplete`` más
 reciente, con su estado efectivo, matriz, pasos, pases y su conteo por fila, horas (``total_hours``
 y ``steps_summary``, nunca por responsable) y pruebas de oclusión de un proveedor inyectable
-(TASK-215; aquí, ninguna). Tres consultas sobre la sesión, sean cuantas sean las filas.
+(``catalog.occlusion``, TASK-215), que antes reevalúa las ``pending``. Las consultas sobre la
+sesión no crecen con las filas.
 
 **Candados** (orden único): primero la fila de la sesión; después la cadena de la planta
 (``EscritorExpediente``, solo el cierre de paso) y la de auditoría de la organización (solo la
@@ -157,7 +158,13 @@ class ResponsibleLookup(Protocol):
 
 class OcclusionTestsProvider(Protocol):
     """Las pruebas de oclusión de la sesión para ``GET …/walk-tests/current`` (las entrega
-    TASK-215), en la transacción de la lectura y ya en su forma JSON."""
+    ``catalog.occlusion``, TASK-215): ``reevaluate_pending`` antes de la lectura, en sus propias
+    transacciones (PAT-GOB-REN-07), y ``occlusion_tests`` en la transacción de la lectura, ya en
+    su forma JSON."""
+
+    async def reevaluate_pending(
+        self, context: ScopeContext, session: WalkTestSession, now: datetime
+    ) -> object: ...
 
     async def occlusion_tests(
         self, transaction: Transaction, session: WalkTestSession
@@ -166,8 +173,14 @@ class OcclusionTestsProvider(Protocol):
 
 @repository
 class NoOcclusionTests:
-    """Proveedor de esta tarea: ninguna prueba de oclusión (TASK-215 entrega el real). Recibe la
-    transacción de la lectura, así que, como todo repositorio, exige su contexto (PR-NUC-02)."""
+    """Proveedor sin pruebas de oclusión (para montar la sesión sin ``catalog.occlusion``).
+    Recibe el contexto o la transacción de la lectura, así que, como todo repositorio, exige su
+    contexto (PR-NUC-02)."""
+
+    async def reevaluate_pending(
+        self, context: ScopeContext, session: WalkTestSession, now: datetime
+    ) -> object:
+        return ()
 
     async def occlusion_tests(
         self, transaction: Transaction, session: WalkTestSession
@@ -627,9 +640,15 @@ class WalkTestService:
     async def current(self, context: ScopeContext, zone_id: uuid.UUID) -> WalkTestView | None:
         """La sesión abierta de la zona o la ``incomplete`` más reciente (``None`` si no hay).
 
-        Bajo concesión, la lectura queda auditada en la misma transacción (BR-NUC-38, A-56).
+        Antes de leer, el proveedor reevalúa las pruebas de oclusión ``pending`` de la sesión
+        (PAT-GOB-REN-07, cada vez que alguien mira). Bajo concesión, la lectura queda auditada en
+        la misma transacción (BR-NUC-38, A-56).
         """
         zone, authorized = await self._gates.zone(context, zone_id, PermissionKey.CATALOG_READ)
+        async with self._database.transaction(authorized) as transaction:
+            looked = await self._repository.current_for_zone(transaction, zone.zone_id)
+        if looked is not None:
+            await self._occlusions.reevaluate_pending(authorized, looked, self._now())
         async with self._database.transaction(authorized) as transaction:
             session = await self._repository.current_for_zone(transaction, zone.zone_id)
             view: WalkTestView | None = None

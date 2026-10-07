@@ -94,6 +94,9 @@ from vigia_platform.catalog.adapters.postgres.catalog_repository import (
     PostgresCatalogRepository,
 )
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
+from vigia_platform.catalog.adapters.postgres.occlusion_repository import (
+    PostgresOcclusionRepository,
+)
 from vigia_platform.catalog.adapters.postgres.plant_policy_repository import (
     PostgresPlantPolicyRepository,
 )
@@ -111,6 +114,7 @@ from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, 
 from vigia_platform.catalog.application.agreements import AgreementService
 from vigia_platform.catalog.application.documents import DocumentService
 from vigia_platform.catalog.application.gates import GateService
+from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import (
     PLANT_POLICY_SIGNED,
     PlantPolicyService,
@@ -943,6 +947,19 @@ CASES: Final[dict[tuple[str, str], Case]] = {
         Kind.RESOURCE,
         lambda i: Call("POST", f"/walk-tests/{i.walk_test}/reopen", json={"reason_es": REASON}),
     ),
+    # VIG-154: prueba de oclusión de una cámara en la sesión de walk-test.
+    ("POST", "/walk-tests/{session_id}/occlusion-tests"): Case(
+        Kind.RESOURCE,
+        lambda i: Call(
+            "POST",
+            f"/walk-tests/{i.walk_test}/occlusion-tests",
+            json={
+                "camera_id": str(i.label),
+                "started_at": _stamp(T0),
+                "ended_at": _stamp(T0 + timedelta(seconds=20)),
+            },
+        ),
+    ),
     # --- fleet (VIG-152) ---
     ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
@@ -1071,6 +1088,8 @@ STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     ("POST", "/walk-tests/{session_id}/passes"): "invalid_request",
     # La sesión de B está en curso: solo se reabre una incomplete.
     ("POST", "/walk-tests/{session_id}/reopen"): "conflict",
+    # VIG-154. La cámara del caso no es del catálogo de la sesión de B: nada se escribe.
+    ("POST", "/walk-tests/{session_id}/occlusion-tests"): "invalid_request",
 }
 """Escrituras de la columna cuyo éxito depende del estado del recurso (VIG-146): un caso estático
 no puede repetirlas con éxito (un acta exige catálogo, nodo y documentos subidos; una revocación,
@@ -1735,6 +1754,17 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             signer=signing,
             clock=env.clock,
         )
+        occlusions = OcclusionService(
+            repository=PostgresOcclusionRepository(),
+            sessions=PostgresWalkTestRepository(),
+            catalog=catalog_repository,
+            gates=gates,
+            reader=LectorExpediente(database=sessions.database, audit=sessions.audit),
+            database=sessions.database,
+            writer=writer,
+            free_text=free_text,
+            clock=sessions.clock,
+        )
         admissions = AdmissionService(
             repository=PostgresAdmissionRepository(sessions.database),
             database=sessions.database,
@@ -1844,7 +1874,9 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             audit=sessions.audit,
                             free_text=free_text,
                             clock=sessions.clock,
+                            occlusions=occlusions,
                         ),
+                        occlusions=occlusions,
                     ),
                     FLEET_STATE_KEY: fleet_http(
                         FleetDependencies(
@@ -2138,6 +2170,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "POST /walk-tests/{session_id}/steps/{step_id}/close",
         "POST /walk-tests/{session_id}/passes",
         "POST /walk-tests/{session_id}/reopen",
+        "POST /walk-tests/{session_id}/occlusion-tests",
         "GET /zones/{zone_id}/commissioning-clips",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
