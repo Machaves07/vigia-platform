@@ -1,5 +1,5 @@
 # Backend de vigia-platform (U-02, TASK-101). Paquete `vigia_platform` en `src/`.
-# Consume `vigia-contracts` por `git+ssh` (ADR-004) por la etiqueta `v1.0.0` (TASK-153), con el
+# Consume `vigia-contracts` por `git+ssh` (ADR-004) por la etiqueta `v1.1.0` (TASK-153; v1.1.0 por A-63), con el
 # hash de su commit fijado en `uv.lock` (NFR-NUC-24; lo exige `tests/unit/test_contract_pin.py`).
 
 [build-system]
@@ -18,7 +18,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.0.0#subdirectory=generated/python",
+  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.1.0#subdirectory=generated/python",
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "pydantic>=2,<3",
@@ -58,6 +58,9 @@ dev = [
   # Solo para importar los generadores del kit de U-01 (PR-NUC-17): el paquete
   # vigia_contracts.conformance.generators importa numpy al cargarse.
   "numpy>=1.26",
+  # La orden `vigia-conformance run` del kit de U-01 contra la plataforma real (TASK-230,
+  # tests/conformance/): el extra trae av, jsonschema y regress. Solo para las pruebas.
+  "vigia-contracts[conformance]",
   "pytest-benchmark>=4",
   "coverage>=7",
   "testcontainers>=4.8",

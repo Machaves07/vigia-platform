@@ -279,7 +279,7 @@ def test_br_gob_101_102_inside_the_window_everything_is_written_with_one_event_p
     }
 
 
-@pytest.mark.parametrize("version", ["1.1.0", "2.0.0", "0.9.9", "1.1.0-rc.1"])
+@pytest.mark.parametrize("version", ["1.2.0", "2.0.0", "0.9.9", "1.2.0-rc.1"])
 def test_br_gob_101_outside_the_window_answers_its_detail_code_and_writes_nothing(
     stack: FleetStack, version: str
 ) -> None:

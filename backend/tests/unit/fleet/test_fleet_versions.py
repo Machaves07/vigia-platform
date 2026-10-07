@@ -105,13 +105,18 @@ def test_br_gob_101_a_retiring_minor_publishes_until_its_date_and_not_from_it() 
     assert _oracle("1.1.5", policy, before) and not _oracle("1.1.5", policy, retires_at)
 
 
-def test_br_gob_101_the_default_platform_policy_accepts_only_its_own_minor() -> None:
-    # La plataforma implementa la 1.0.0 del contrato: solo la serie 1.0 está en ventana.
+def test_br_gob_101_the_default_platform_policy_accepts_its_minor_and_the_previous_one() -> None:
+    # La plataforma implementa la 1.1.0 del contrato (A-63): con la ventana de dos menores, las
+    # series 1.1 y 1.0 están en ventana; una menor más nueva, otra mayor o la 0.x, no.
     policy = VersionPolicy()
-    assert str(policy.current) == "1.0.0"
+    assert str(policy.current) == "1.1.0"
+    assert within_contract_window("1.1.0", policy, NOW)
+    assert within_contract_window("1.1.12", policy, NOW)
     assert within_contract_window("1.0.0", policy, NOW)
     assert within_contract_window("1.0.12", policy, NOW)
-    assert not within_contract_window("1.1.0", policy, NOW)
+    assert not within_contract_window("1.2.0", policy, NOW)
+    assert not within_contract_window("2.0.0", policy, NOW)
+    assert not within_contract_window("0.9.0", policy, NOW)
 
 
 @pytest.mark.parametrize("version", ["", "1.0", "v1.0.0", "1.0.0.0", "01.0.0", "1.0.0-"])
