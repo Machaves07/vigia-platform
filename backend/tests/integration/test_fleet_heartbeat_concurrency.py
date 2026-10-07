@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import json
 import threading
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Final
@@ -146,10 +145,8 @@ def test_the_same_heartbeat_six_times_at_once_on_two_instances_is_accepted_once(
     assert len(rows) == 1
     assert counting.writes == 1
     assert len(stack.communication(site)) - before == 1
-    documents = [json.loads(response.content) for response in responses]
-    for document in documents:
-        document.pop("server_time")
-    assert all(document == documents[0] for document in documents)
+    # Las seis copias, atienda la que atienda, reciben los mismos bytes (BR-CTR-26, VIG-182).
+    assert {response.content for response in responses} == {responses[0].content}
 
 
 @pytest.mark.parametrize("attempt", ATTEMPTS)

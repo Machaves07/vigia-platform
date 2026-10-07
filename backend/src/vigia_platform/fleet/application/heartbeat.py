@@ -16,7 +16,7 @@ de U-01; PAT-GOB-REN-03) y el contexto de nodo de A-51. ``accept``:
    - candado de la fila del nodo en ``NodeInventory`` (``SELECT … FOR UPDATE``; el primer latido
      la inserta con ``ON CONFLICT DO NOTHING``) y, con él, la búsqueda del duplicado en
      ``HeartbeatHistory`` (BR-GOB-71, NFR-GOB-47): un ``heartbeat_id`` ya aceptado no escribe nada
-     y recibe la respuesta compuesta del estado vigente;
+     y recibe la **misma** respuesta (BR-CTR-26, VIG-182; ver «Respuesta»);
    - la ficha de flota del nodo (``FOR UPDATE``): ``revoked`` se lee aquí (BR-GOB-66);
    - ``NodeInventory`` (``last_heartbeat_at`` nunca retrocede), ``CameraInventory``,
      ``ZoneNodeState`` con ``coverage_ok`` (BR-GOB-97) y el ``INSERT`` en ``HeartbeatHistory``;
@@ -40,13 +40,23 @@ de U-01; PAT-GOB-REN-03) y el contexto de nodo de A-51. ``accept``:
    vuelto a comprobar con la exclusión de la zona, así que se firma a lo sumo una vez por zona y
    renovación aunque lleguen latidos concurrentes). Con la firma caída se sirve el sobre guardado.
 
-**Respuesta** (BR-GOB-82; ``HeartbeatResponse`` de U-01 §2.5): hora del servidor; ``gate_states``
+**Respuesta** (BR-GOB-82; ``HeartbeatResponse`` de U-01 §2.5): hora del servidor, que es el
+``received_at`` del latido guardado en ``HeartbeatHistory``; ``gate_states``
 con el texto **guardado** de cada ``SignedEnvelope<GateState>`` (insertado sin volver a
 serializarlo); ``catalog_versions_available``; ``target_software_version`` de la última
 publicación que alcanza al nodo (sin ventana, D-5); ``contract_notice`` (A-44);
 ``platform_public_keys`` de la caché; ``revoked``; ``heartbeat_interval_seconds`` de
 ``NodeConfiguration`` y ``mute_after_seconds``, cinco veces el intervalo (nº 35, A-04). Se valida
 con el modelo estricto de U-01 antes de enviarla.
+
+**Duplicado** (BR-CTR-26 y su nota del 2026-09-23; BR-GOB-71; VIG-182): la respuesta se
+reconstruye de forma determinista, sin guardarla serializada. ``server_time`` es el ``received_at``
+del original, leído de ``HeartbeatHistory`` con la fila del nodo bloqueada, así que cualquier
+instancia (NFR-GOB-15) lo repite; el resto sale de lo guardado (sobres de compuertas tal cual,
+catálogos, publicación, configuración, ficha) y de la caché de claves. Mientras nada de eso cambie,
+el duplicado recibe exactamente los bytes del original; si cambió (revocación, sobre renovado,
+catálogo nuevo), recibe el estado vigente: un nodo revocado nunca recibe ``revoked = false``
+porque repita un latido viejo.
 
 **Orden de los candados** del latido, el mismo en toda operación que comparte alguno (encaja con
 el de ``fleet.application.common``: ficha → identidad → cadena; y con el de la regresión:
@@ -255,6 +265,8 @@ class _Composed:
 @dataclass(frozen=True, slots=True)
 class _Outcome:
     composed: _Composed
+    server_time: datetime
+    """El ``received_at`` del latido aceptado (el original, si es un duplicado)."""
     duplicate: bool
     projection: HeartbeatProjection | None
     previous: PreviousInventory | None
@@ -299,14 +311,14 @@ class HeartbeatService:
         async with deps.database.transaction(node.context) as transaction:
             outcome = await self._within(transaction, node, heartbeat, notice)
             # Compuesta y validada dentro: si no se puede, la transacción se revierte entera.
-            content = self._compose(outcome.composed, notice, heartbeat, keys)
+            content = self._compose(outcome.composed, outcome.server_time, notice, heartbeat, keys)
         if heartbeat.live_view_accesses:
             await deps.live_view.incorporate(
                 node.context, node.node_id, _accesses(heartbeat.live_view_accesses)
             )
         renewed = await self._renew_expiring(node, outcome.composed)
         if renewed is not None:
-            content = self._compose(renewed, notice, heartbeat, keys)
+            content = self._compose(renewed, outcome.server_time, notice, heartbeat, keys)
         self._measure(node, heartbeat, outcome)
         return HeartbeatReply(content=content, duplicate=outcome.duplicate)
 
@@ -333,20 +345,31 @@ class HeartbeatService:
                 # Otro primer latido confirmó antes: su fila ya existe y queda bloqueada aquí.
                 previous = await deps.inventory.lock(transaction, node_id)
         # Con la fila del nodo bloqueada: ¿ya se aceptó este ``heartbeat_id``? (BR-GOB-71)
-        duplicate = not fresh and await deps.history.seen(
-            transaction,
-            plant_id=node.plant_id,
-            node_id=node_id,
-            heartbeat_id=_uuid(heartbeat.heartbeat_id),
-            since=received_at - HISTORY_RETENTION,
+        original = (
+            None
+            if fresh
+            else await deps.history.seen(
+                transaction,
+                plant_id=node.plant_id,
+                node_id=node_id,
+                heartbeat_id=_uuid(heartbeat.heartbeat_id),
+                since=received_at - HISTORY_RETENTION,
+            )
         )
-        if duplicate:
-            # Nada se escribe: la respuesta del estado vigente, sin bloquear la ficha.
+        if original is not None:
+            # Nada se escribe: la respuesta con la hora del original y lo guardado, sin bloquear la
+            # ficha (la misma respuesta mientras nada haya cambiado).
             fleet = await deps.nodes.read(transaction, node_id)
             if fleet is None:
                 raise HeartbeatUnavailable("el nodo no tiene ficha de flota")
             composed = await self._read_response(transaction, node, snapshot, _retired(fleet))
-            return _Outcome(composed, duplicate=True, projection=None, previous=previous)
+            return _Outcome(
+                composed,
+                server_time=to_millisecond(original),
+                duplicate=True,
+                projection=None,
+                previous=previous,
+            )
         # (2) La ficha de flota: ``revoked`` leído en la transacción.
         fleet = await deps.nodes.lock(transaction, node_id)
         if fleet is None:
@@ -376,7 +399,13 @@ class HeartbeatService:
             )
         if projection.reachable_transition:
             await self._write_reachable(transaction, node, projection)
-        return _Outcome(composed, duplicate=False, projection=projection, previous=previous)
+        return _Outcome(
+            composed,
+            server_time=projection.history.received_at,
+            duplicate=False,
+            projection=projection,
+            previous=previous,
+        )
 
     def _project(
         self,
@@ -477,12 +506,14 @@ class HeartbeatService:
     def _compose(
         self,
         composed: _Composed,
+        server_time: datetime,
         notice: ContractNoticeState,
         heartbeat: Heartbeat,
         keys: Any,
     ) -> bytes:
         """``HeartbeatResponse`` validada con el modelo estricto, con los sobres de compuertas
-        insertados **como se guardaron** (sin volver a serializarlos ni firmarlos)."""
+        insertados **como se guardaron** (sin volver a serializarlos ni firmarlos) y la hora del
+        latido aceptado: la del original en un duplicado (BR-CTR-26)."""
         notice_document: dict[str, Any] = {
             "result": notice.result.value,
             "message_es": notice.message_es(heartbeat.contract_version),
@@ -490,7 +521,7 @@ class HeartbeatService:
         if notice.retires_at is not None:
             notice_document["retires_at"] = notice.retires_at
         document: dict[str, Any] = {
-            "server_time": format_timestamp(self._deps.clock.now()),
+            "server_time": format_timestamp(server_time),
             "catalog_versions_available": [
                 {"zone_id": str(zone), "version": composed.catalog_versions[zone]}
                 for zone in composed.zones
