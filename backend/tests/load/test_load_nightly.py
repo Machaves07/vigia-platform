@@ -84,7 +84,10 @@ def console_client(
         target.tls.ca_file,
         fleet.console,
         ConsoleTargets(
-            tuple(node.node_id for node in fleet.nodes), fleet.zone_ids, fleet.plant_ids
+            tuple(node.node_id for node in fleet.nodes),
+            fleet.zone_ids,
+            fleet.plant_ids,
+            fleet.record_ids,
         ),
         seed,
         transport=transport,

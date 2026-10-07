@@ -86,7 +86,12 @@ def test_fs_gob_08_worker_killed_while_evaluating_the_third_organization(
         ),
     ) as run:
         flow = Onboarding(gob)
-        zones = [flow.productive_zone() for _ in range(run.random.randint(KILL_AT + 1, 6))]
+        zones = []
+        for _ in range(run.random.randint(KILL_AT + 1, 6)):
+            # Cada organización nueva, con el reloj en la hora de la base: su concesión se compara
+            # con ``now()`` de la base (nuc_0009) y cada zona adelanta el reloj 20 minutos.
+            gob.resync()
+            zones.append(flow.productive_zone())
         for zone in zones:
             heartbeat = flow.heartbeat(
                 zone, signal_reader={"available": True, "adapter": "simulated"}
