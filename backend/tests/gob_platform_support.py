@@ -142,10 +142,23 @@ from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import S3Storage
 
 __all__ = [
+    "CLOSE_ROUTE",
     "INGEST_BASE_URL",
+    "LONG_SECONDS",
     "NODE_BASE",
+    "REASON",
     "GobPlatform",
+    "GobZone",
+    "HttpsPresign",
+    "Onboarding",
+    "Signatory",
+    "close_body",
+    "detail_of",
     "gob_platform",
+    "local_url",
+    "ok",
+    "require_close_route",
+    "stamp",
 ]
 
 STATIC: Final = Path(__file__).resolve().parent / "fixtures" / "static"
