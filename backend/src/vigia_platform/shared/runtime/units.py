@@ -55,6 +55,9 @@ from vigia_platform.catalog.adapters.postgres.agreement_repository import (
     PostgresAgreementRepository,
 )
 from vigia_platform.catalog.adapters.postgres.catalog_repository import PostgresCatalogRepository
+from vigia_platform.catalog.adapters.postgres.commissioning_record_repository import (
+    PostgresCommissioningRecordRepository,
+)
 from vigia_platform.catalog.adapters.postgres.gate_repository import PostgresGateRepository
 from vigia_platform.catalog.adapters.postgres.occlusion_repository import (
     PostgresOcclusionRepository,
@@ -74,7 +77,9 @@ from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
+from vigia_platform.catalog.application.close_record import CloseRecordService
 from vigia_platform.catalog.application.documents import DocumentService
+from vigia_platform.catalog.application.exposure import ExposureService
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
 )
@@ -83,6 +88,7 @@ from vigia_platform.catalog.application.occlusion import OcclusionService
 from vigia_platform.catalog.application.plant_policy import PlantPolicyService
 from vigia_platform.catalog.application.publication import CatalogPublicationService
 from vigia_platform.catalog.application.regression import RegressionService
+from vigia_platform.catalog.application.regression_rerun import RegressionRerunService
 from vigia_platform.catalog.application.scope_record import ScopeRecordService
 from vigia_platform.catalog.application.signatory_policy import SignatoryPolicyService
 from vigia_platform.catalog.application.transparency import TransparencyService
@@ -97,6 +103,9 @@ from vigia_platform.catalog.events import register_catalog_event_types
 from vigia_platform.catalog.record_types import register_catalog_record_types
 from vigia_platform.fleet.adapters.ca.certificate_profiles import NodeCaIssuer
 from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY, FleetHttp, fleet_routers
+from vigia_platform.fleet.adapters.postgres.commissioning_queries import (
+    PostgresCommissioningQueries,
+)
 from vigia_platform.fleet.adapters.postgres.ingest_queries import PostgresIngestStore
 from vigia_platform.fleet.adapters.postgres.node_fleet_store import PostgresNodeFleetStore
 from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
@@ -614,6 +623,41 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
         free_text=services.free_text,
         clock=services.clock,
     )
+    # LC-GOB-06 (VIG-150): sesión de walk-test, con las pruebas de oclusión de LC-GOB-07.
+    walk_tests = WalkTestService(
+        repository=sessions,
+        catalog=catalog,
+        gates=gates,
+        nodes=hierarchy,
+        identity=hierarchy,
+        database=services.database,
+        writer=services.writer,
+        audit=services.audit,
+        free_text=services.free_text,
+        clock=services.clock,
+        occlusions=occlusions,
+    )
+    regressions = PostgresRegressionRepository(services.database)
+    records = PostgresCommissioningRecordRepository()
+    # LC-GOB-08 (VIG-158): el acta, con la oclusión reevaluada, los clips de verificación de la
+    # zona (head_object sobre vigia-evidence) y el inventario de cámaras del último latido.
+    closing = CloseRecordService(
+        repository=records,
+        sessions=sessions,
+        occlusion_tests=PostgresOcclusionRepository(),
+        occlusions=occlusions,
+        regressions=regressions,
+        catalog=catalog,
+        fleet=PostgresCommissioningQueries(),
+        clips=ClipObjectStore(services.require_evidence()),
+        gates=gates,
+        identity=hierarchy,
+        database=services.database,
+        writer=services.writer,
+        audit=services.audit,
+        free_text=services.free_text,
+        clock=services.clock,
+    )
     return {
         CATALOG_STATE_KEY: CatalogHttp(
             admissions=admissions,
@@ -668,21 +712,20 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
                 database=services.database,
                 audit=services.audit,
             ),
-            # LC-GOB-06 (VIG-150): sesión de walk-test, con las pruebas de oclusión de LC-GOB-07.
-            walk_tests=WalkTestService(
-                repository=sessions,
-                catalog=catalog,
-                gates=gates,
-                nodes=hierarchy,
-                identity=hierarchy,
-                database=services.database,
-                writer=services.writer,
-                audit=services.audit,
-                free_text=services.free_text,
-                clock=services.clock,
-                occlusions=occlusions,
-            ),
+            walk_tests=walk_tests,
             occlusions=occlusions,
+            records=closing,
+            exposures=ExposureService(
+                repository=records,
+                sessions=sessions,
+                gates=gates,
+                database=services.database,
+                clock=services.clock,
+            ),
+            # LC-GOB-09 (VIG-158): la reejecución con las guardas de apertura del walk-test.
+            regression_reruns=RegressionRerunService(
+                walk_tests=walk_tests, regressions=regressions, database=services.database
+            ),
         )
     }
 

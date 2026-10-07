@@ -9,7 +9,9 @@ zona), con las guardas en este orden (interfaces §3.3, BR-GOB-35): montaje ``ap
 catálogo y queda con esa versión. «Una sesión abierta por zona» la garantiza el índice único
 parcial: la apertura que pierde la carrera no escribe nada y responde ``walk_test_in_progress``.
 Una sesión abierta que ya lleva 7 días sin actividad pasa a ``incomplete`` en la misma
-transacción y deja de bloquear.
+transacción y deja de bloquear; si otra operación la dejó ``incomplete`` antes, se vuelve a leer
+y solo bloquea una sesión que siga abierta. ``open_planned`` abre con las mismas guardas la
+reejecución por regresión (``catalog.regression_rerun``, TASK-216).
 
 **Operaciones de la sesión** (pasos, cierre de paso, pases), en una transacción que toma primero
 el candado de la fila de la sesión (``lock_session``): sobre una sesión ``incomplete``
@@ -66,7 +68,7 @@ from vigia_platform.catalog.application.gates import GateService, LedgerRaceLost
 from vigia_platform.catalog.application.scope_record import AssignedNodeLookup
 from vigia_platform.catalog.detail_codes import CatalogDetailCode
 from vigia_platform.catalog.domain.catalog_version import ZoneRef
-from vigia_platform.catalog.domain.enums import PassResult, StepKind
+from vigia_platform.catalog.domain.enums import PassResult, StepKind, WalkTestKind
 from vigia_platform.catalog.domain.gates import MAX_REASON_CHARS, MIN_REASON_CHARS
 from vigia_platform.catalog.domain.steps import (
     CorrectionRequest,
@@ -82,6 +84,7 @@ from vigia_platform.catalog.domain.texts import has_content
 from vigia_platform.catalog.domain.time_windows import utc_instant
 from vigia_platform.catalog.domain.walk_test import (
     PassCounts,
+    SessionRow,
     WalkTestPass,
     WalkTestRuleViolated,
     WalkTestSession,
@@ -121,6 +124,8 @@ __all__ = [
     "NoOcclusionTests",
     "OcclusionTestsProvider",
     "ResponsibleLookup",
+    "SessionPlan",
+    "SessionPlanner",
     "WalkTestConflict",
     "WalkTestRequestInvalid",
     "WalkTestService",
@@ -208,6 +213,19 @@ class WalkTestRequestInvalid(Exception):
 
 class WalkTestUnavailable(ExternalDependencyDown):
     """Transitorio: el expediente ya tenía el registro del paso (carrera perdida)."""
+
+
+@dataclass(frozen=True, slots=True)
+class SessionPlan:
+    """Clase, filas y marca de la regresión de una sesión que se abre (``initial`` por defecto)."""
+
+    kind: WalkTestKind = WalkTestKind.INITIAL
+    rows: tuple[SessionRow, ...] | None = None
+    regression_basis_record_id: uuid.UUID | None = None
+
+
+SessionPlanner = Callable[[Transaction, ZoneRef, Mapping[str, Any], int], Awaitable[SessionPlan]]
+"""``plan(transaction, zona, catalogo_vigente, passes_per_cell)`` de ``open_planned``."""
 
 
 # --- Resultados ----------------------------------------------------------------------------------
@@ -361,7 +379,25 @@ class WalkTestService:
         ``WalkTestRequestInvalid`` o ``WalkTestConflict`` (zona sin estándares en su catálogo);
         en todos, nada queda escrito.
         """
+        return await self.open_planned(context, zone_id, passes_per_cell)
+
+    async def open_planned(
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        passes_per_cell: object,
+        plan: SessionPlanner | None = None,
+        before: Callable[[ZoneRef, ScopeContext], Awaitable[None]] | None = None,
+    ) -> WalkTestSession:
+        """``open`` con las mismas guardas y, con ``plan``, otra clase de sesión (TASK-216).
+
+        ``before`` corre tras autorizar y antes de las guardas de apertura (la reejecución exige
+        antes su regresión ``pending``); ``plan`` decide, en la transacción de la apertura y con
+        la versión vigente del catálogo, la clase, las filas y la marca de la regresión.
+        """
         zone, authorized = await self._gates.zone(context, zone_id, PermissionKey.COMMISSIONING_RUN)
+        if before is not None:
+            await before(zone, authorized)
         async with self._database.transaction(authorized) as transaction:
             state = await self._gates.state_in(transaction, zone)
         if state.mounting.status is not GateStatus.APPROVED:
@@ -379,12 +415,22 @@ class WalkTestService:
                 if expire_if_inactive(existing, now).is_open:
                     raise CatalogRejected(CatalogDetailCode.WALK_TEST_IN_PROGRESS)
                 # Vencida (7 días sin actividad): incomplete, sin borrar nada, y deja de bloquear.
-                if not await self._repository.mark_incomplete(transaction, existing):
+                # Si otra operación (``expire_walk_test_sessions``) la dejó incomplete entretanto,
+                # la escritura condicional no cambia nada: solo bloquea si sigue habiendo una
+                # sesión abierta (comentario de VIG-150 y VIG-163).
+                if not await self._repository.mark_incomplete(
+                    transaction, existing
+                ) and await self._repository.open_for_zone(transaction, zone.zone_id):
                     raise CatalogRejected(CatalogDetailCode.WALK_TEST_IN_PROGRESS)
             passes = check_passes_per_cell(passes_per_cell)
             version = await self._catalog.current(transaction, zone.zone_id)
             if version is None:
                 raise WalkTestConflict
+            planned = (
+                SessionPlan()
+                if plan is None
+                else await plan(transaction, zone, version.payload, passes)
+            )
             session = open_session(
                 session_id=session_id,
                 organization_id=zone.organization_id,
@@ -395,6 +441,9 @@ class WalkTestService:
                 catalog=version.payload,
                 passes_per_cell=passes,
                 at=now,
+                kind=planned.kind,
+                rows=planned.rows,
+                regression_basis_record_id=planned.regression_basis_record_id,
             )
             if not session.matrix_rows:  # un catálogo sin estándares no tiene nada que medir
                 raise WalkTestConflict

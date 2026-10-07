@@ -35,7 +35,14 @@ import asyncpg  # type: ignore[import-untyped]
 import pytest
 import pytest_asyncio
 
-from tests.catalog_db import CATALOG_TABLES, ROW_BUILDERS, CatalogSeed, PlantScope, seed_catalog
+from tests.catalog_db import (
+    CATALOG_TABLES,
+    ROW_BUILDERS,
+    SINGLE_ROW_TABLES,
+    CatalogSeed,
+    PlantScope,
+    seed_catalog,
+)
 from tests.identity_db import MigratedDatabase, insert_concession, seeded_identity, set_scope
 from tests.integration.conftest import PostgresEndpoint
 
@@ -230,10 +237,9 @@ async def test_provider_writes_only_in_the_conceded_plant(
     result = await _insert_as_provider(
         app, conceded.organization_id, world.concession_id, conceded, table
     )
-    # En la planta concedida la RLS deja pasar; las tablas de una fila por zona o por planta ya
-    # tienen la suya (clave duplicada, después de la política).
-    singletons = {"zone_gate_state", "walk_test_regression", "plant_signatory_policy"}
-    assert result == ("23505" if table in singletons else "ok")
+    # En la planta concedida la RLS deja pasar; las tablas de una fila por zona, por planta o por
+    # pase ya tienen la suya (clave duplicada, después de la política).
+    assert result == ("23505" if table in SINGLE_ROW_TABLES else "ok")
 
 
 @pytest.mark.asyncio

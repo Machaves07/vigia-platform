@@ -21,6 +21,8 @@
   (``commissioning.run`` y ``catalog.read``; LC-GOB-06, VIG-150).
 - ``occlusion``: prueba de oclusión por cámara con fecha límite y reevaluación perezosa
   (``commissioning.run``; LC-GOB-07, VIG-154).
+- ``commissioning_records``: cierre del acta, muestras de exposición, acta estructurada y
+  reejecución por regresión (``commissioning.run`` y ``catalog.read``; LC-GOB-08 y 09, VIG-158).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``CatalogHttp`` en ``app.state``, que la
@@ -34,6 +36,9 @@ from fastapi import APIRouter
 from vigia_platform.catalog.adapters.http.admissions import admissions_router
 from vigia_platform.catalog.adapters.http.agreements import agreements_router
 from vigia_platform.catalog.adapters.http.catalog import catalog_router
+from vigia_platform.catalog.adapters.http.commissioning_records import (
+    commissioning_records_router,
+)
 from vigia_platform.catalog.adapters.http.documents import documents_router
 from vigia_platform.catalog.adapters.http.gates import gates_router
 from vigia_platform.catalog.adapters.http.occlusion import occlusion_router
@@ -63,4 +68,5 @@ def catalog_routers() -> tuple[APIRouter, ...]:
         transparency_router(),
         walk_tests_router(),
         occlusion_router(),
+        commissioning_records_router(),
     )

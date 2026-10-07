@@ -188,6 +188,8 @@ class WalkTestSession:
     reopened_at: datetime | None = None
     reopened_by: uuid.UUID | None = None
     reopen_reason_es: str | None = None
+    regression_basis_record_id: uuid.UUID | None = None
+    """En una ``regression_rerun``, la última marca de la regresión al abrirla (gob_0027)."""
 
     @property
     def is_open(self) -> bool:
@@ -212,9 +214,24 @@ def open_session(
     catalog: Mapping[str, Any],
     passes_per_cell: int,
     at: datetime,
+    kind: WalkTestKind = WalkTestKind.INITIAL,
+    rows: tuple[SessionRow, ...] | None = None,
+    regression_basis_record_id: uuid.UUID | None = None,
 ) -> WalkTestSession:
-    """La sesión ``initial`` recién abierta, con su matriz derivada del catálogo."""
+    """La sesión recién abierta, con su matriz derivada del catálogo.
+
+    Una ``initial`` lleva la matriz completa. Una ``regression_rerun`` (TASK-216) lleva ``rows``,
+    las filas afectadas de esa misma matriz (``commissioning_record.rerun_rows``), y la última
+    marca de la regresión que la abrió.
+    """
     moment = utc_instant(at)
+    kind = WalkTestKind(kind)
+    rerun = kind is WalkTestKind.REGRESSION_RERUN
+    if rerun != (rows is not None) or rerun != (regression_basis_record_id is not None):
+        raise ValueError("solo la reejecución trae sus filas y la marca que la abrió")
+    matrix = session_rows(catalog, passes_per_cell)
+    if rows is not None and not set(rows) <= set(matrix):
+        raise ValueError("las filas de la reejecución salen de la matriz del catálogo")
     return WalkTestSession(
         session_id=session_id,
         organization_id=organization_id,
@@ -222,12 +239,13 @@ def open_session(
         zone_id=zone_id,
         node_id=node_id,
         catalog_version=catalog_version,
-        kind=WalkTestKind.INITIAL,
+        kind=kind,
         status=WalkTestStatus.IN_PROGRESS,
         passes_per_cell=passes_per_cell,
-        matrix_rows=session_rows(catalog, passes_per_cell),
+        matrix_rows=matrix if rows is None else rows,
         started_at=moment,
         last_activity_at=moment,
+        regression_basis_record_id=regression_basis_record_id,
     )
 
 
