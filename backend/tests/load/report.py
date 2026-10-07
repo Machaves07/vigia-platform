@@ -257,7 +257,8 @@ def analyse(result: Mapping[str, Any]) -> dict[str, Any]:
 def drains_of(result: Mapping[str, Any]) -> list[Drain]:
     """Un vaciado por fase ``unreachable``; su pico se mide hasta la siguiente caída."""
     unreachable = [phase for phase in result["phases"] if phase["unreachable"]]
-    limits = [_parse(phase["start"]) for phase in unreachable[1:]] + [None]
+    limits: list[dt.datetime | None] = [_parse(phase["start"]) for phase in unreachable[1:]]
+    limits += [None] if unreachable else []
     return [
         _drain(phase, result["records"], until)
         for phase, until in zip(unreachable, limits, strict=True)

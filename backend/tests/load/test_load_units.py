@@ -32,6 +32,10 @@ def _stamp(moment: dt.datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
+def _parse_stamp(stamp: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
 def _samples(route: str, elapsed: list[float], status: int = 200) -> list[Sample]:
     return [
         Sample(route, T0 + dt.timedelta(seconds=index), value, status)
@@ -225,6 +229,31 @@ def test_the_drain_rate_is_the_queue_over_the_time_since_the_platform_came_back(
     # Las 50 aceptaciones caben en una ventana de 10 s: pico de 5 por segundo, 2,5 por planta.
     assert drain.peak_writes_per_second == pytest.approx(5.0)
     assert drain.peak_plant_writes_per_second == {"p1": 2.5, "p2": 2.5}
+
+
+def test_a_profile_without_outages_has_no_drains() -> None:
+    result = _result()
+    result["phases"] = [{**result["phases"][0], "name": "steady", "unreachable": False}]
+    assert drains_of(result) == []
+    assert analyse(result)["drains"] == []
+
+
+def test_the_peak_of_each_drain_stops_at_the_next_outage() -> None:
+    result = _result()
+    first = result["phases"][0]
+    second_start = _parse_stamp(first["end"]) + dt.timedelta(seconds=2)
+    result["phases"].append(
+        {
+            "name": "outage",
+            "unreachable": True,
+            "start": _stamp(second_start),
+            "end": _stamp(second_start + dt.timedelta(seconds=30)),
+        }
+    )
+    reconnection, outage = drains_of(result)
+    # Solo las aceptaciones de los dos primeros segundos tras la vuelta cuentan para la primera.
+    assert reconnection.peak_writes_per_second == pytest.approx(2.0)
+    assert outage.queued == 0
 
 
 def test_an_unaccepted_queued_record_leaves_the_drain_without_rate() -> None:
