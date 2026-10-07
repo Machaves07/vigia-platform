@@ -72,6 +72,7 @@ from vigia_platform.fleet.adapters.http import FLEET_STATE_KEY
 from vigia_platform.fleet.application.credential_rotation import CredentialRotationService
 from vigia_platform.fleet.application.enrollment import EnrollmentService, FixedSourceKey
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.registration import catalog_tasks, fleet_tasks
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.adapters.concession_store import PostgresConcessionStore
 from vigia_platform.identity.adapters.http import IdentityHttp
@@ -116,7 +117,7 @@ from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
 from vigia_platform.shared.observability.metrics import get_metrics
 from vigia_platform.shared.outbox.publish import Outbox
-from vigia_platform.shared.outbox.registries import OutboxCatalog
+from vigia_platform.shared.outbox.registries import OutboxCatalog, PeriodicTaskRegistry
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.ratelimit import RateLimiter
@@ -348,6 +349,25 @@ class GobPlatform:
 
         responses: list[httpx.Response] = self.run(run())
         return responses
+
+    # --- Tareas periódicas -----------------------------------------------------------------
+
+    def run_task(self, name: str, organization_id: uuid.UUID) -> None:
+        """Una iteración de la tarea ``name`` de U-03 sobre una organización, como el
+        planificador de ``vigia-worker``: el manejador real que registran ``fleet_tasks`` y
+        ``catalog_tasks`` con los servicios del mundo, en una transacción con el contexto de la
+        organización."""
+        registry = PeriodicTaskRegistry()
+        fleet_tasks(registry, self.services)
+        catalog_tasks(registry, self.services)
+        (task,) = (task for task in registry.tasks() if task.task_name == name)
+        context = self.authz.contexts.context_for_organization(task, organization_id)
+
+        async def iterate() -> None:
+            async with self.services.database.transaction(context) as transaction:
+                await task.handler(transaction)
+
+        self.run(iterate())
 
     # --- Lecturas como superusuario ---------------------------------------------------------
 
