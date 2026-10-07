@@ -1403,8 +1403,8 @@ wheels = [
 
 [[package]]
 name = "vigia-contracts"
-version = "1.0.0"
-source = { git = "ssh://git@github.com/Machaves07/vigia-contracts.git?subdirectory=generated%2Fpython&rev=v1.0.0#0365139aa69b7abe788b60a2224a108fa4e97c37" }
+version = "1.1.0"
+source = { git = "ssh://git@github.com/Machaves07/vigia-contracts.git?subdirectory=generated%2Fpython&rev=v1.1.0#f4b8853a1b7863acee95f4135757afb6463ae565" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
@@ -1490,7 +1490,7 @@ requires-dist = [
     { name = "rfc8785", specifier = ">=0.1.4" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2,<2.1" },
     { name = "uvicorn", specifier = ">=0.30" },
-    { name = "vigia-contracts", git = "ssh://git@github.com/Machaves07/vigia-contracts.git?subdirectory=generated%2Fpython&rev=v1.0.0" },
+    { name = "vigia-contracts", git = "ssh://git@github.com/Machaves07/vigia-contracts.git?subdirectory=generated%2Fpython&rev=v1.1.0" },
 ]
 
 [package.metadata.requires-dev]

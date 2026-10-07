@@ -1,17 +1,18 @@
-"""``vigia-contracts`` consumido por la etiqueta ``v1.0.0`` con su commit fijado (TASK-153).
+"""``vigia-contracts`` consumido por la etiqueta ``v1.1.0`` con su commit fijado (TASK-153).
 
 NFR-NUC-24 (heredada de NFR-CTR-25) y ADR-004: el backend consume el contrato por ``git+ssh``
 con ``#subdirectory=generated/python`` y **por etiqueta** ``vX.Y.Z``, nunca por rama ni por un
 hash suelto; el ``uv.lock`` fija el hash del commit de esa etiqueta. Esta prueba corre en el
 trabajo «backend (lint, tipos y pruebas sin integración)» de ``ci.yml``, sin red:
 
-- ``pyproject.toml`` pide exactamente ``@v1.0.0`` del repositorio y subdirectorio de ADR-004;
-- ``uv.lock`` resuelve esa misma etiqueta (``rev=v1.0.0``) al commit ``TAG_COMMIT`` (40
-  hexadecimales), con la versión ``1.0.0`` del paquete, y su ``requires-dist`` coincide;
+- ``pyproject.toml`` pide exactamente ``@v1.1.0`` del repositorio y subdirectorio de ADR-004;
+- ``uv.lock`` resuelve esa misma etiqueta (``rev=v1.1.0``) al commit ``TAG_COMMIT`` (40
+  hexadecimales), con la versión ``1.1.0`` del paquete, y su ``requires-dist`` coincide;
 - el paquete instalado en el entorno es ese commit (``direct_url.json``, PEP 610).
 
 ``TAG_COMMIT`` es el commit al que apunta la etiqueta (ligera) en el remoto, leído con
-``git ls-remote https://github.com/Machaves07/vigia-contracts refs/tags/v1.0.0*`` el 2026-10-03.
+``git ls-remote https://github.com/Machaves07/vigia-contracts refs/tags/v1.1.0*``
+el 2026-10-07 (A-63).
 Si una etiqueta nueva se adopta, se cambian aquí la etiqueta y su commit a la vez.
 
 Los bordes (hash en lugar de etiqueta, rama, etiqueta móvil, ``rev`` del bloqueo distinto,
@@ -35,9 +36,9 @@ PYPROJECT: Final = BACKEND / "pyproject.toml"
 LOCK: Final = BACKEND / "uv.lock"
 
 PACKAGE: Final = "vigia-contracts"
-TAG: Final = "v1.0.0"
-TAG_COMMIT: Final = "0365139aa69b7abe788b60a2224a108fa4e97c37"
-VERSION: Final = "1.0.0"
+TAG: Final = "v1.1.0"
+TAG_COMMIT: Final = "f4b8853a1b7863acee95f4135757afb6463ae565"
+VERSION: Final = "1.1.0"
 REPOSITORY: Final = "ssh://git@github.com/Machaves07/vigia-contracts.git"
 SUBDIRECTORY: Final = "generated/python"
 
@@ -190,7 +191,7 @@ def test_requirement_rejects_other_sources(old: str, new: str) -> None:
         (f'#{TAG_COMMIT}"', f'#{TAG_COMMIT.upper()}"', "hash de commit completo"),
         (f'generated%2Fpython&rev={TAG}" }}', 'generated%2Fpython&rev=v1.0.1" }', "requires-dist"),
         (
-            'name = "vigia-contracts"\nversion = "1.0.0"',
+            f'name = "vigia-contracts"\nversion = "{VERSION}"',
             'name = "vigia-contracts"\nversion = "1.0.1"',
             "versión",
         ),
