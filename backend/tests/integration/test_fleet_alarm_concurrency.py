@@ -38,7 +38,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 import httpx
@@ -325,7 +325,7 @@ class GatedHistory(PostgresHeartbeatHistoryStore):
         self.entered = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def seen(self, transaction: Transaction, **arguments: Any) -> bool:
+    async def seen(self, transaction: Transaction, **arguments: Any) -> datetime | None:
         found = await super().seen(transaction, **arguments)
         self.entered.set()
         await asyncio.wait_for(self.release.wait(), ARRIVAL_SECONDS)
