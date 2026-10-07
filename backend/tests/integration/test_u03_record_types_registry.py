@@ -25,6 +25,7 @@ from pydantic import Field, StrictStr, create_model
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.ledger_database import MigratedDatabase, migrated_database
+from tests.properties.gob.test_pr_gob_19_record_and_event_schemas import LATEST_VERSIONS
 from tests.properties.gob.u03_records import u03_registry
 from vigia_platform.ledger.record_types import register_u02_record_types
 from vigia_platform.ledger.registry import (
@@ -166,7 +167,7 @@ def test_synchronizing_the_26_types_persists_exactly_them(empty: MigratedDatabas
         row = persisted[compiled.record_type]
         assert row.writer_unit == "U-03"
         assert row.chain_level == "plant"
-        assert row.schema_version == 1
+        assert row.schema_version == LATEST_VERSIONS.get(compiled.record_type, 1)
         assert row.chain_follows_scope is False
         assert row == compiled.to_persisted()
 
@@ -196,7 +197,7 @@ def test_retiring_a_type_prevents_startup_and_changes_nothing(
     _synchronize(empty, u03_registry())
     before = _snapshot(empty)
     registry = RecordTypeRegistry()
-    for compiled in u03_registry().latest():
+    for compiled in u03_registry().all_versions():
         if compiled.record_type != retired:
             registry.register(compiled.definition)
     with pytest.raises(RegistryStartupError) as failure:
@@ -222,7 +223,7 @@ def test_changing_a_schema_without_a_new_version_prevents_startup(empty: Migrate
         ),
     )
     registry = RecordTypeRegistry()
-    for compiled in u03_registry().latest():
+    for compiled in u03_registry().all_versions():
         definition = compiled.definition
         if compiled.record_type == "node_revoked":
             definition = replace(definition, content_model=widened)

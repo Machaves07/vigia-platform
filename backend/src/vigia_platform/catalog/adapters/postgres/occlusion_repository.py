@@ -47,7 +47,8 @@ _LATEST: Final = text(
     " deadline, verification, correlated_event_ids, declared_reason_es, recorded_by,"
     " ledger_record_id FROM catalog.occlusion_test"
     " WHERE organization_id = :organization_id AND session_id = :session_id"
-    " AND camera_id = :camera_id ORDER BY test_id DESC LIMIT 1"
+    " AND camera_id = :camera_id"
+    " ORDER BY (verification <> 'failed') DESC, test_id DESC LIMIT 1"
 )
 _LOCK: Final = text(
     "SELECT test_id, organization_id, plant_id, session_id, camera_id, started_at, ended_at,"
@@ -135,7 +136,9 @@ class PostgresOcclusionRepository:
     async def latest(
         self, transaction: Transaction, session_id: uuid.UUID, camera_id: uuid.UUID
     ) -> OcclusionTest | None:
-        """La última prueba de la cámara en la sesión, o ``None``."""
+        """La última prueba de la cámara en la sesión, o ``None``: la que no es ``failed`` si la
+        hay (a lo sumo una) y si no, una ``failed``; nunca por el orden de los UUID v7 (TASK-216,
+        ``occlusion.latest_by_camera``)."""
         result = await transaction.execute(
             _LATEST, {**_session_key(transaction, session_id), "camera_id": camera_id}
         )

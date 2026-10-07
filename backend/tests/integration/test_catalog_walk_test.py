@@ -41,6 +41,7 @@ from tests.walk_test_support import (
     WalkTestWorld,
     walk_test_world,
 )
+from tests.writer_support import unit_context
 from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
     PostgresWalkTestRepository,
 )
@@ -54,7 +55,7 @@ from vigia_platform.catalog.domain.matrix import derive_matrix
 from vigia_platform.catalog.domain.steps import WalkTestStep
 from vigia_platform.catalog.domain.walk_test import INACTIVITY_LIMIT, WalkTestSession
 from vigia_platform.identity.authz.authorize import ResourceNotFound
-from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
+from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.signing.keys import format_timestamp
 
@@ -239,6 +240,41 @@ def test_a_session_inactive_for_seven_days_stops_blocking(world: WalkTestWorld) 
     stale = world.open(mounted)
     world.age(stale.session_id, INACTIVITY_LIMIT)
     fresh = world.open(mounted)
+    assert world.session_row(stale.session_id)["status"] == "incomplete"
+    assert [r["session_id"] for r in world.open_sessions(mounted.zone)] == [fresh.session_id]
+
+
+class _ExpiredMeanwhile(PostgresWalkTestRepository):
+    """Entre la lectura de la sesión vencida y su ``mark_incomplete``, la tarea periódica
+    (``expire_walk_test_sessions``, otra conexión) la deja ``incomplete`` y confirma: la escritura
+    condicional de la apertura ya no cambia nada (comentario de VIG-150 y VIG-163, TASK-216)."""
+
+    def __init__(self, database: Database, organization_id: uuid.UUID) -> None:
+        self._database = database
+        self._organization_id = organization_id
+        self.expired: tuple[uuid.UUID, ...] = ()
+
+    async def mark_incomplete(self, transaction: Transaction, session: WalkTestSession) -> bool:
+        system = unit_context(self._organization_id, ActorUnit.U03, kind=ActorKind.SYSTEM)
+        async with self._database.transaction(system) as other:
+            self.expired = await PostgresWalkTestRepository().expire_inactive(
+                other, session.last_activity_at, limit=10
+            )
+        return await super().mark_incomplete(transaction, session)
+
+
+def test_an_expiry_that_wins_the_race_does_not_block_the_new_session(world: WalkTestWorld) -> None:
+    mounted = world.mounted()
+    stale = world.open(mounted)
+    world.age(stale.session_id, INACTIVITY_LIMIT)
+    racing = _ExpiredMeanwhile(world.a.g.database, mounted.site.organization_id)
+    world.advance()
+
+    fresh: WalkTestSession = world.run(
+        world.build(repository=racing).open(mounted.installer, mounted.zone, 3)
+    )
+
+    assert racing.expired == (stale.session_id,)  # la otra operación ganó la carrera
     assert world.session_row(stale.session_id)["status"] == "incomplete"
     assert [r["session_id"] for r in world.open_sessions(mounted.zone)] == [fresh.session_id]
 

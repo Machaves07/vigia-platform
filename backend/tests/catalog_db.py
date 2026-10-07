@@ -42,8 +42,9 @@ CATALOG_TABLES = (
     "occlusion_test",
     "commissioning_record",
     "walk_test_regression",
+    "exposure_sample",
 )
-"""Las 18 tablas de ``catalog`` (``gob_0017``)."""
+"""Las 18 tablas de ``catalog`` de ``gob_0017`` y ``exposure_sample`` de ``gob_0027``."""
 
 APPEND_ONLY_TABLES = (
     "zone_catalog_version",
@@ -58,8 +59,15 @@ APPEND_ONLY_TABLES = (
     "walk_test_pass",
     "occlusion_test",
     "commissioning_record",
+    "exposure_sample",
 )
 """Tablas ⛓ de ``catalog``."""
+
+SINGLE_ROW_TABLES = frozenset(
+    {"zone_gate_state", "walk_test_regression", "plant_signatory_policy", "exposure_sample"}
+)
+"""Tablas cuya fila nueva choca por clave con la sembrada (una por zona, por planta o por pase):
+la política decide antes que la clave."""
 
 REASON = "Motivo sintético del cambio"
 
@@ -76,6 +84,8 @@ class PlantScope:
     camera_id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4)
     session_id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4)
     agreement_id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4)
+    pass_id: uuid.UUID = dataclasses.field(default_factory=uuid.uuid4)
+    """Pase de la sesión con la muestra de exposición sembrada (una por pase, gob_0027)."""
 
 
 Builder = Callable[[PlantScope], tuple[str, list[Any]]]
@@ -372,13 +382,13 @@ def _walk_test_step(scope: PlantScope) -> tuple[str, list[Any]]:
     return walk_test_step(scope)
 
 
-def _walk_test_pass(scope: PlantScope) -> tuple[str, list[Any]]:
+def _walk_test_pass(scope: PlantScope, pass_id: uuid.UUID | None = None) -> tuple[str, list[Any]]:
     return (
         "INSERT INTO catalog.walk_test_pass (pass_id, organization_id, plant_id, session_id,"
         " row_id, result, recorded_by, recorded_at)"
         " VALUES ($1, $2, $3, $4, $5, 'detected', $6, $7)",
         [
-            uuid.uuid4(),
+            pass_id or uuid.uuid4(),
             scope.organization_id,
             scope.plant_id,
             scope.session_id,
@@ -453,6 +463,25 @@ def _commissioning_record_with_session(scope: PlantScope) -> tuple[str, list[Any
     )
 
 
+def _exposure_sample(scope: PlantScope) -> tuple[str, list[Any]]:
+    # Del pase sembrado de la sesión del PlantScope: solo escribe en exposure_sample (la segunda
+    # del mismo pase choca por clave, después de la política).
+    return (
+        "INSERT INTO catalog.exposure_sample (sample_id, organization_id, plant_id, session_id,"
+        " pass_id, fetched_at, displayed_at, recorded_by, recorded_at)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $6::timestamptz + interval '80 milliseconds', $7, $6)",
+        [
+            uuid.uuid4(),
+            scope.organization_id,
+            scope.plant_id,
+            scope.session_id,
+            scope.pass_id,
+            BASE_TIME,
+            scope.user_id,
+        ],
+    )
+
+
 def _walk_test_regression(scope: PlantScope) -> tuple[str, list[Any]]:
     return (
         "INSERT INTO catalog.walk_test_regression (zone_id, organization_id, plant_id, state,"
@@ -482,6 +511,7 @@ ROW_BUILDERS: dict[str, Builder] = {
     "occlusion_test": _occlusion_test,
     "commissioning_record": _commissioning_record,
     "walk_test_regression": _walk_test_regression,
+    "exposure_sample": _exposure_sample,
 }
 """Una fila nueva por tabla, que solo escribe en esa tabla. Las de una fila por zona o por planta
 (``zone_gate_state``, ``walk_test_regression``, ``plant_signatory_policy``) chocan por clave si
@@ -513,6 +543,7 @@ async def seed_plant(connection: Any, scope: PlantScope) -> None:
         _zone_camera(scope, scope.camera_id),
         walk_test_session(scope, scope.session_id),
         use_agreement(scope, scope.agreement_id),
+        _walk_test_pass(scope, scope.pass_id),
     ):
         await connection.execute(sql, *args)
     for table in CATALOG_TABLES:

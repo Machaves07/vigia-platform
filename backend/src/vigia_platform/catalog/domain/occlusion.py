@@ -445,12 +445,24 @@ def coverage_of_catalog(catalog: Mapping[str, Any]) -> MinimumCoverage | None:
 # --- Guarda del acta -----------------------------------------------------------------------------
 
 
+def _recency(test: OcclusionTest) -> tuple[bool, int]:
+    return test.verification is not OcclusionVerification.FAILED, test.test_id.int
+
+
 def latest_by_camera(tests: Iterable[OcclusionTest]) -> dict[uuid.UUID, OcclusionTest]:
-    """La última prueba de cada cámara (``test_id`` es UUID v7: orden de registro)."""
+    """La última prueba de cada cámara, **sin depender del orden de los UUID v7** (TASK-216).
+
+    Un UUID v7 no es monótono dentro del mismo milisegundo ni entre instancias con relojes
+    desfasados: una prueba nueva puede llevar un ``test_id`` menor que la ``failed`` anterior. Bajo
+    el candado de la sesión, una cámara admite prueba nueva solo si no tiene ninguna o todas las
+    suyas quedaron ``failed`` (``catalog.occlusion``), así que tiene **a lo sumo una** prueba que no
+    es ``failed``, y esa es la última. Solo entre ``failed`` decide el ``test_id`` (cualquiera dice
+    lo mismo: ``failed``).
+    """
     latest: dict[uuid.UUID, OcclusionTest] = {}
     for test in tests:
         current = latest.get(test.camera_id)
-        if current is None or test.test_id.int > current.test_id.int:
+        if current is None or _recency(test) > _recency(current):
             latest[test.camera_id] = test
     return latest
 
