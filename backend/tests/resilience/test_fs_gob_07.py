@@ -73,7 +73,11 @@ def platform(
 ) -> Iterator[RestartablePlatform]:
     directory = tmp_path_factory.mktemp("fs-gob-07")  # fuera del árbol, nunca versionado
     with restartable_platform(
-        postgres_endpoint, localstack_endpoint, directory, processes=PILOT_MINIMUM_PROCESSES
+        postgres_endpoint,
+        localstack_endpoint,
+        directory,
+        processes=PILOT_MINIMUM_PROCESSES,
+        restartable=False,
     ) as built:
         yield built
 

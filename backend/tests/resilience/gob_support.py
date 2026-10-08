@@ -513,12 +513,13 @@ RESTART_GRACE_SECONDS: Final = 1.0
 @dataclass
 class RestartablePlatform:
     """La plataforma de producción de los perfiles de carga (TASK-230 y 231) con sus **dos
-    procesos ``vigia-api`` de verdad** (la orden de la imagen) tras un balanceador que solo enruta
-    a los que responden ``/health/ready`` (``processes.Balancer``) y, delante, los balanceadores
-    ``app.`` (personas y alta) y ``nodes.`` (con mTLS), como los dos trabajadores de uvicorn de una
-    tarea (LC-GOB-20). ``LoadApi`` (en el proceso de la prueba) no recibe tráfico: solo presta sus
-    servicios al aprovisionamiento. Así los dos que atienden se pueden reiniciar y ninguno compite
-    por el GIL con la prueba ni con el cliente sintético de consola."""
+    procesos ``vigia-api`` de verdad** (la orden de la imagen) detrás de los balanceadores ``app.``
+    (personas y alta) y ``nodes.`` (con mTLS), como los trabajadores de uvicorn de las tareas
+    (LC-GOB-20). ``LoadApi`` (en el proceso de la prueba) no recibe tráfico: solo presta sus
+    servicios al aprovisionamiento, así que ningún proceso que atiende comparte el GIL con la
+    prueba ni con el cliente sintético de consola. Para reiniciarlos (``restart``), entre los
+    balanceadores y los procesos hay uno que solo enruta a los que responden ``/health/ready``
+    (``processes.Balancer``, ``router``)."""
 
     stack: Any
     api: Any
@@ -563,6 +564,8 @@ class RestartablePlatform:
         """Reinicio de un proceso como en un despliegue: se retira del balanceador, se para con
         ``SIGTERM`` (parada ordenada), arranca de nuevo y vuelve cuando está listo. Su cubo de
         fichas en memoria vuelve **frío** (R10)."""
+        if self.router is None:
+            raise RuntimeError("plataforma sin balanceador con salud: no admite reinicios")
         started = WALL.monotonic()
         self.router.drain(name)
         time.sleep(RESTART_GRACE_SECONDS)
@@ -587,10 +590,15 @@ def restartable_platform(
     directory: Any,
     *,
     processes: Sequence[str] = API_PROCESSES,
+    restartable: bool = True,
 ) -> Iterator[RestartablePlatform]:
     """``RestartablePlatform`` sobre los contenedores dados (``directory`` fuera del árbol) con
     los procesos ``vigia-api`` de ``processes``: por defecto, los dos de una tarea; con
-    ``PILOT_MINIMUM_PROCESSES``, los de la dotación mínima del piloto."""
+    ``PILOT_MINIMUM_PROCESSES``, los de la dotación mínima del piloto.
+
+    Con ``restartable`` (FS-GOB-10), ``app.`` y ``nodes.`` pasan por el balanceador con salud
+    (``processes.Balancer``, en hilos de este proceso) para poder retirar un proceso; sin él
+    (FS-GOB-07), reparten directamente entre los procesos y ``restart`` no está disponible."""
     # Se importan al construirla: arrastran el conjunto sintético de los perfiles de carga, que
     # los procesos del arnés que importan este módulo no necesitan.
     from tests.conformance.mtls_proxy import server_tls
@@ -631,6 +639,17 @@ def restartable_platform(
             platform.start(name)
         node_ca = directory / "vigia-node-ca.crt"
         node_ca.write_bytes(stack.node_ca_root())
+        if not restartable:
+            # Sin reinicios: los balanceadores (en sus propios procesos) reparten por petición
+            # directamente entre los procesos, sin pasar por hilos del proceso de la prueba.
+            backends = [f"http://127.0.0.1:{port}" for port in ports.values()]
+            with (
+                balancer_process("app", backends, tls, directory) as app,
+                balancer_process("nodes", backends, tls, directory, client_ca=node_ca) as nodes,
+            ):
+                platform.app, platform.nodes = app, nodes
+                yield platform
+            return
         with (
             balancer(ports) as router,
             balancer_process("app", [router.url], tls, directory) as app,
