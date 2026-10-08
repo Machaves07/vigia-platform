@@ -9,13 +9,15 @@ con ``--today``/``today``.
 
 from __future__ import annotations
 
-from datetime import date
+import importlib.metadata
+from datetime import date, timedelta
 from email.message import Message
 from pathlib import Path
 
 import pytest
 
 from tools.check_licenses import (
+    LOCK_FILE,
     CheckError,
     Dependency,
     LicenseException,
@@ -23,8 +25,11 @@ from tools.check_licenses import (
     declared_license,
     license_leaves,
     load_exceptions,
+    main,
     runtime_closure,
 )
+
+LOCK = LOCK_FILE
 
 TODAY = date(2026, 10, 2)
 
@@ -171,6 +176,108 @@ def test_the_exceptions_registry(tmp_path: Path) -> None:
 
 
 def test_the_repository_registry_is_well_formed() -> None:
-    loaded = load_exceptions(Path(__file__).resolve().parents[2] / "LICENSE-EXCEPTIONS.md")
-    assert {e.package for e in loaded} == {"qrcode", "cffi", "numpy"}
+    loaded = load_exceptions(REGISTRY)
+    assert {e.package for e in loaded} == {"qrcode", "cffi", "numpy", "pillow", "pyphen"}
     assert {e.package for e in loaded if e.ci_tool_only} == {"numpy"}
+
+
+# --- Árbol de WeasyPrint (TASK-217; A-53, R-GOB-13) ---------------------------------------------
+
+REGISTRY = Path(__file__).resolve().parents[2] / "LICENSE-EXCEPTIONS.md"
+WEASYPRINT_TREE = (
+    "weasyprint",
+    "pydyf",
+    "tinycss2",
+    "tinyhtml5",
+    "cssselect2",
+    "fonttools",
+    "brotli",
+    "zopfli",
+    "webencodings",
+    "pillow",
+    "pyphen",
+    "jinja2",
+    "markupsafe",
+    "cffi",
+)
+"""Lo que añade el documento del acta (con Jinja2) y lo que ya había (``cffi``, ``markupsafe``)."""
+
+
+def _installed(names: tuple[str, ...]) -> list[Dependency]:
+    found = []
+    for name in names:
+        distribution = importlib.metadata.distribution(name)
+        found.append(
+            Dependency(name, distribution.version, declared_license(distribution.metadata))
+        )
+    return found
+
+
+def _registry_without(tmp_path: Path, identifier: str) -> Path:
+    lines = REGISTRY.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = [line for line in lines if not line.startswith(f"| {identifier} |")]
+    assert len(kept) == len(lines) - 1
+    trimmed = tmp_path / "LICENSE-EXCEPTIONS.md"
+    trimmed.write_text("".join(kept), encoding="utf-8")
+    return trimmed
+
+
+def test_the_weasyprint_tree_reaches_the_image() -> None:
+    runtime = runtime_closure(LOCK.read_text(encoding="utf-8"))
+    assert set(WEASYPRINT_TREE) <= runtime
+
+
+def test_pillow_and_pyphen_pass_only_through_their_registry_rows() -> None:
+    tree = _installed(WEASYPRINT_TREE)
+    runtime = runtime_closure(LOCK.read_text(encoding="utf-8"))
+    # Lo que declaran sus metadatos, tal cual (lo que copian EX-04 y EX-05).
+    declared = {d.name: d.license for d in tree}
+    assert declared["pillow"] == "MIT-CMU"
+    assert declared["pyphen"] == (
+        "GNU General Public License v2 or later (GPLv2+); "
+        "GNU Lesser General Public License v2 or later (LGPLv2+); "
+        "Mozilla Public License 1.1 (MPL 1.1)"
+    )
+
+    problems, applied = check(tree, load_exceptions(REGISTRY), runtime, TODAY)
+    assert problems == []
+    assert {line.split(" ")[0] for line in applied} == {"pillow", "pyphen", "cffi"}
+    assert all(" EX-04 " in line for line in applied if line.startswith("pillow"))
+    assert all(" EX-05 " in line for line in applied if line.startswith("pyphen"))
+
+    # Sin ninguna excepción solo fallan Pillow y pyphen (y cffi, EX-02): el resto del árbol pasa
+    # por la lista permitida de NFR-CTR-26.
+    problems, _ = check(tree, [], runtime, TODAY)
+    assert sorted(line.split(" ")[0] for line in problems) == ["cffi", "pillow", "pyphen"]
+
+
+@pytest.mark.parametrize(("identifier", "package"), [("EX-04", "pillow"), ("EX-05", "pyphen")])
+def test_removing_either_row_fails_the_check(tmp_path: Path, identifier: str, package: str) -> None:
+    trimmed = _registry_without(tmp_path, identifier)
+    problems, _ = check(
+        _installed(WEASYPRINT_TREE),
+        load_exceptions(trimmed),
+        runtime_closure(LOCK.read_text(encoding="utf-8")),
+        TODAY,
+    )
+    assert [line.split(" ")[0] for line in problems] == [package]
+    assert "licencia no permitida" in problems[0]
+
+    # La orden completa también falla (código 1) con ese registro.
+    assert main(["--exceptions", str(trimmed), "--lock", str(LOCK)]) == 1
+
+
+def test_the_command_passes_with_the_repository_registry() -> None:
+    assert main(["--exceptions", str(REGISTRY), "--lock", str(LOCK)]) == 0
+
+
+@pytest.mark.parametrize("package", ["pillow", "pyphen"])
+def test_their_exceptions_are_runtime_and_expire(package: str) -> None:
+    rows = [e for e in load_exceptions(REGISTRY) if e.package == package]
+    assert rows and all(not e.ci_tool_only and e.scope == "ejecución" for e in rows)
+    review = rows[0].review
+    tree = _installed((package,))
+    runtime = runtime_closure(LOCK.read_text(encoding="utf-8"))
+    assert check(tree, rows, runtime, review)[0] == []  # el día de la revisión todavía vale
+    expired, _ = check(tree, rows, runtime, review + timedelta(days=1))
+    assert expired and all("venció" in line for line in expired)
