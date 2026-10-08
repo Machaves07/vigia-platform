@@ -47,325 +47,398 @@
       "label": "Publicación de una versión del catálogo (32 estándares, 8 cámaras), con sobre firmado (NFR-GOB-10)",
       "kind": "latency",
       "unit": "ms",
-      "median": 153.45,
-      "p95": 209.251,
+      "median": 134.956,
+      "p95": 170.545,
       "objective": 500.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_catalog_versions": {
       "label": "GET /zones/{zone_id}/catalog/versions, 32 versiones (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 37.601,
-      "p95": 44.919,
+      "median": 19.085,
+      "p95": 21.274,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_commissioning_record": {
       "label": "GET /commissioning-records/{record_id}, acta estructurada de la matriz máxima (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 31.774,
-      "p95": 39.665,
+      "median": 13.278,
+      "p95": 14.771,
       "objective": 300.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_documents": {
       "label": "POST /documents, concesión de subida de un documento firmado (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 40.765,
-      "p95": 54.077,
+      "median": 19.022,
+      "p95": 20.789,
       "objective": 300.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_fleet_node_detail": {
       "label": "GET /fleet/nodes/{node_id} con 100 latidos de historia (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 37.844,
-      "p95": 50.689,
+      "median": 22.142,
+      "p95": 26.673,
       "objective": 300.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_fleet_nodes": {
       "label": "GET /fleet/nodes, página de 100 nodos con sus cámaras (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 121.762,
-      "p95": 148.062,
+      "median": 148.202,
+      "p95": 152.932,
       "objective": 500.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_walk_test_current": {
       "label": "GET /zones/{zone_id}/walk-tests/current, matriz máxima con todos sus pases (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 72.549,
-      "p95": 94.998,
+      "median": 38.687,
+      "p95": 41.256,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_zone_catalog": {
       "label": "GET /zones/{zone_id}/catalog, 32 estándares y 8 cámaras (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 24.319,
-      "p95": 30.919,
+      "median": 9.733,
+      "p95": 10.079,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_zone_gates": {
       "label": "GET /zones/{zone_id}/gates (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 24.162,
-      "p95": 28.873,
+      "median": 9.253,
+      "p95": 10.498,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_console_zone_transparency": {
       "label": "GET /zones/{zone_id}/transparency (NFR-GOB-03)",
       "kind": "latency",
       "unit": "ms",
-      "median": 29.422,
-      "p95": 36.251,
+      "median": 12.566,
+      "p95": 15.67,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_head_object_16_parallel": {
-      "label": "HeadObject en paralelo de los 16 clips de un hallazgo (8 cámaras × 2) (NFR-GOB-09)",
+      "label": "HeadObject en paralelo de los 16 clips de un hallazgo (8 cámaras x 2) (NFR-GOB-09)",
       "kind": "latency",
       "unit": "ms",
-      "median": 33.014,
-      "p95": 40.336,
+      "median": 30.366,
+      "p95": 31.649,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_head_object_one": {
       "label": "HeadObject de un clip con suma y marca de anonimización (NFR-GOB-09)",
       "kind": "latency",
       "unit": "ms",
-      "median": 3.816,
-      "p95": 4.432,
+      "median": 3.033,
+      "p95": 3.265,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_ca_kms_sign": {
       "label": "kms:Sign de vigia-node-ca con el doble en memoria, informativo (NFR-GOB-10)",
       "kind": "latency",
       "unit": "ms",
-      "median": 0.039,
-      "p95": 0.069,
+      "median": 0.049,
+      "p95": 0.065,
       "objective": null,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "informative": true,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_clip_grant": {
       "label": "Concesión de subida de un clip (URL prefirmada) (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 34.659,
-      "p95": 50.422,
+      "median": 14.702,
+      "p95": 15.986,
       "objective": 100.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_detection": {
       "label": "Ingesta de una detección para revisión con su clip (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 71.85,
-      "p95": 83.286,
+      "median": 29.368,
+      "p95": 32.251,
       "objective": 500.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_enrollment": {
       "label": "Alta de un nodo con la firma del doble de KMS de vigia-node-ca (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 116.894,
-      "p95": 153.976,
+      "median": 55.106,
+      "p95": 60.613,
       "objective": 2000.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_finding_1_clip": {
       "label": "Ingesta de un hallazgo con su clip verificado en S3, el mínimo (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 57.333,
-      "p95": 65.957,
+      "median": 29.717,
+      "p95": 33.059,
       "objective": 500.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_finding_2_clips": {
       "label": "Ingesta de un hallazgo con 2 clips (2 cámaras) verificados en S3 (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 65.183,
-      "p95": 78.267,
+      "median": 32.509,
+      "p95": 36.364,
       "objective": 500.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_heartbeat": {
       "label": "Latido con la respuesta de compuertas firmadas y catálogos (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 55.063,
-      "p95": 63.806,
+      "median": 24.374,
+      "p95": 27.349,
       "objective": 150.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_observability_event": {
       "label": "Evento de observabilidad de una cámara (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 48.15,
-      "p95": 74.389,
+      "median": 18.8,
+      "p95": 20.181,
       "objective": 200.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_node_zone_catalog": {
       "label": "Catálogo firmado de la zona para el nodo (NFR-GOB-01)",
       "kind": "latency",
       "unit": "ms",
-      "median": 16.339,
-      "p95": 22.936,
+      "median": 7.972,
+      "p95": 10.331,
       "objective": 100.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_catalog_at": {
       "label": "Catálogo vigente en un instante del año (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.912,
-      "p95": 9.35,
+      "median": 3.092,
+      "p95": 3.329,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_catalog_history": {
       "label": "Historia del catálogo (52 versiones, una página) (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 9.109,
-      "p95": 14.984,
+      "median": 3.977,
+      "p95": 4.189,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_current_agreement": {
       "label": "Acuerdo vigente de una zona con sus firmantes (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 8.864,
-      "p95": 19.703,
+      "median": 3.355,
+      "p95": 3.575,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_current_catalog": {
       "label": "Catálogo vigente de una zona (32 estándares) (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.852,
-      "p95": 8.638,
+      "median": 3.071,
+      "p95": 3.298,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_gate_history": {
       "label": "Historia de las dos compuertas en 366 días (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 7.081,
-      "p95": 9.197,
+      "median": 3.526,
+      "p95": 3.765,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_plant_policy": {
       "label": "Política vigente de una planta (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.487,
-      "p95": 12.718,
+      "median": 2.72,
+      "p95": 2.937,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_regression_state": {
       "label": "Estado de regresión de una zona (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.959,
-      "p95": 10.794,
+      "median": 2.701,
+      "p95": 2.919,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_single_occupancy": {
       "label": "Marca unipersonal de una zona en un instante (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 8.402,
-      "p95": 15.689,
+      "median": 2.993,
+      "p95": 3.2,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_single_occupancy_many": {
       "label": "Marca unipersonal de 50 zonas en un instante (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 11.519,
-      "p95": 20.556,
+      "median": 5.506,
+      "p95": 5.864,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_standard_at": {
       "label": "Versión de un estándar vigente en un instante (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 8.606,
-      "p95": 12.04,
+      "median": 3.654,
+      "p95": 3.929,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_standard_version": {
       "label": "Versión 1 de un estándar de la zona (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 7.234,
-      "p95": 10.257,
+      "median": 3.011,
+      "p95": 3.244,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_standards_at_many": {
       "label": "200 referencias de estándar en instantes del año (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 28.477,
-      "p95": 42.042,
+      "median": 25.018,
+      "p95": 27.031,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_state": {
       "label": "Estado de compuertas de una zona (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.986,
-      "p95": 10.077,
+      "median": 2.695,
+      "p95": 2.912,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_state_at": {
       "label": "Compuerta de uso en un instante, desde la historia (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 6.579,
-      "p95": 9.286,
+      "median": 2.912,
+      "p95": 3.117,
       "objective": 5.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "gob_ports_states_by_plant": {
       "label": "Compuertas de las zonas de una planta (NFR-GOB-04)",
       "kind": "latency",
       "unit": "ms",
-      "median": 8.952,
-      "p95": 14.013,
+      "median": 3.13,
+      "p95": 3.347,
       "objective": 50.0,
-      "regression_factor": 1.2
+      "regression_factor": 1.2,
+      "measured_at": "2026-10-08",
+      "runner": "GitHub Actions 1000003521"
     },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",
