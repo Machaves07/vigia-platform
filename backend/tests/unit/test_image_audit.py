@@ -215,3 +215,68 @@ def test_not_an_image_is_an_error(tmp_path: Path) -> None:
     empty_key = tmp_path / "empty"
     empty_key.write_text("-----BEGIN-----\n")
     assert main([str(_image(tmp_path, [_CLEAN])), "--needle-file", str(empty_key)]) == 2
+
+
+# --- Fuentes del documento del acta (TASK-217, NFR-GOB-32) ---------------------------------------
+
+_FONTS = {"noto-sans/NotoSans-Regular.ttf": b"\x00\x01\x00\x00regular", "noto-sans/OFL.txt": b"OFL"}
+
+
+def _fonts_dir(tmp_path: Path) -> Path:
+    directory = tmp_path / "fonts"
+    for name, data in _FONTS.items():
+        (directory / name).parent.mkdir(parents=True, exist_ok=True)
+        (directory / name).write_bytes(data)
+    return directory
+
+
+def _with_fonts(**changes: bytes) -> dict[str, bytes]:
+    files = {f"app/resources/fonts/{name}": data for name, data in _FONTS.items()}
+    files.update(changes)
+    return files
+
+
+def test_the_packaged_fonts_of_the_repository_are_required() -> None:
+    required = image_audit.packaged_fonts()
+    assert {path.name for path in required} == {
+        "NotoSans-Regular.ttf",
+        "NotoSans-Bold.ttf",
+        "OFL.txt",
+    }
+    assert all(str(path).startswith("app/resources/fonts/noto-sans/") for path in required)
+
+
+def test_an_image_with_its_packaged_fonts_passes(tmp_path: Path) -> None:
+    fonts = image_audit.packaged_fonts(_fonts_dir(tmp_path))
+    image = _image(tmp_path, [_CLEAN, _with_fonts()])
+    assert audit_image(image, fonts=fonts) == []
+    assert main([str(image), "--fonts-dir", str(tmp_path / "fonts")]) == 0
+
+
+def test_a_missing_or_different_font_fails(tmp_path: Path) -> None:
+    fonts = image_audit.packaged_fonts(_fonts_dir(tmp_path))
+    missing = _with_fonts()
+    del missing["app/resources/fonts/noto-sans/NotoSans-Regular.ttf"]
+    findings = audit_image(_image(tmp_path, [_CLEAN, missing]), fonts=fonts)
+    assert [f.problem for f in findings] == ["falta la fuente empaquetada del documento del acta"]
+    changed = _with_fonts(**{"app/resources/fonts/noto-sans/OFL.txt": b"otra licencia"})
+    findings = audit_image(_image(tmp_path, [_CLEAN, changed]), fonts=fonts)
+    assert [f.problem for f in findings] == ["la fuente de la imagen no es la del repositorio"]
+    # Sin la carpeta del repositorio no se audita a ciegas.
+    assert main([str(_image(tmp_path, [_CLEAN])), "--fonts-dir", str(tmp_path / "nada")]) == 2
+
+
+@pytest.mark.parametrize(
+    "system_font",
+    ["usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "usr/local/share/fonts/x.otf"],
+)
+def test_a_system_font_in_any_layer_fails(tmp_path: Path, system_font: str) -> None:
+    fonts = image_audit.packaged_fonts(_fonts_dir(tmp_path))
+    image = _image(tmp_path, [_CLEAN, {system_font: b"fuente"}, _with_fonts()])
+    findings = audit_image(image, fonts=fonts)
+    assert [f.problem for f in findings] == ["fuente del sistema: solo valen las empaquetadas"]
+    assert main([str(image), "--fonts-dir", str(tmp_path / "fonts")]) == 1
+
+
+def test_by_default_the_command_requires_the_repository_fonts(tmp_path: Path) -> None:
+    assert main([str(_image(tmp_path, [_CLEAN]))]) == 1
