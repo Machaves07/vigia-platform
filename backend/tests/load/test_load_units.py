@@ -20,10 +20,17 @@ import pytest
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
 
 from tests.load import soak
-from tests.load.console_client import CONSOLE_ROUTES, MIN_SAMPLES, Sample, evaluate
+from tests.load.console_client import (
+    CONSOLE_ROUTES,
+    MIN_SAMPLES,
+    SATURATION_STATUS,
+    Sample,
+    evaluate,
+)
 from tests.load.driver import LostReplies, route_label
 from tests.load.profiles import PROFILES, nightly_profile, write_sealed_dataset
 from tests.load.report import analyse, drains_of, percentile, secret_findings
+from tests.load.test_load_ci import assert_functional, saturation_transients
 
 T0 = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.UTC)
 
@@ -92,6 +99,100 @@ def test_a_non_2xx_answer_fails_by_name_even_with_a_fast_p95() -> None:
     samples += _samples(route.name, [10.0], status=503)
     verdict = evaluate(samples)
     assert verdict.failures == (f"{route.name}: respondió 503",)
+
+
+def test_a_503_is_a_failure_of_the_p95_verdict_but_not_a_console_error() -> None:
+    # A-65: el 503 es saturación (tendencia en el banco de nightly); cualquier otro fuera de 2xx
+    # es un error de la ruta y sigue bloqueando.
+    saturated, broken = CONSOLE_ROUTES[0], CONSOLE_ROUTES[1]
+    samples = [s for s in _healthy() if s.route not in (saturated.name, broken.name)]
+    samples += _samples(saturated.name, [10.0] * MIN_SAMPLES)
+    samples += _samples(saturated.name, [10.0], status=SATURATION_STATUS)
+    samples += _samples(broken.name, [10.0] * MIN_SAMPLES)
+    samples += _samples(broken.name, [10.0], status=503)
+    samples += _samples(broken.name, [10.0], status=500)
+    verdict = evaluate(samples)
+    assert verdict.failures == (
+        f"{saturated.name}: respondió 503",
+        f"{broken.name}: respondió 500, 503",
+    )
+    assert verdict.errors == (f"{broken.name}: respondió 500",)
+    assert verdict.to_json()["errors"] == [f"{broken.name}: respondió 500"]
+    assert broken.name in verdict.errors_message()
+
+
+def test_a_slow_or_saturated_console_has_no_errors() -> None:
+    route = CONSOLE_ROUTES[0]
+    samples = [s for s in _healthy() if s.route != route.name]
+    samples += _samples(route.name, [route.p95_ms * 4] * MIN_SAMPLES)
+    samples += _samples(route.name, [10.0], status=SATURATION_STATUS)
+    verdict = evaluate(samples)
+    assert not verdict.passed
+    assert verdict.errors == ()
+
+
+def _functional(**changes: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    analysis: dict[str, Any] = {
+        "emitted": 10,
+        "accepted": 10,
+        "lost": 0,
+        "dead_letter": {},
+        "halted": {},
+        "rate_limited_below_minimum": 0,
+        "rate_limited_by_operation": {},
+        "rejection_codes": {},
+        "events": {"submit_record:success": 10},
+        **changes,
+    }
+    ledger = {
+        "missing": 0,
+        "unexpected": 0,
+        "records": 10,
+        "duplicated_source_keys": 0,
+        "chains_verified": 1,
+    }
+    return analysis, ledger
+
+
+def test_saturation_transients_are_the_temporarily_unavailable_codes_and_the_503_events() -> None:
+    analysis, _ = _functional(
+        rejection_codes={
+            "heartbeat:temporarily_unavailable": 3,
+            "submit_record:idempotency_conflict": 1,
+        },
+        events={"submit_record:success": 10, "request_grant:unavailable": 2},
+    )
+    assert saturation_transients(analysis) == {
+        "heartbeat:temporarily_unavailable": 3,
+        "request_grant:unavailable": 2,
+    }
+
+
+def test_saturation_blocks_in_ci_and_is_trend_in_the_nightly_bench() -> None:
+    analysis, ledger = _functional(
+        rejection_codes={"heartbeat:temporarily_unavailable": 1},
+        events={"submit_record:success": 10, "heartbeat:unavailable": 1},
+    )
+    with pytest.raises(AssertionError):
+        assert_functional(analysis, ledger)
+    assert_functional(analysis, ledger, saturation_blocks=False)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"accepted": 9, "lost": 1},
+        {"dead_letter": {"schema_invalid": 1}},
+        {"rate_limited_by_operation": {"submit_record": 1}},
+        {"rate_limited_below_minimum": 1},
+    ],
+)
+def test_the_functional_checks_block_even_when_saturation_is_trend(
+    changes: dict[str, Any],
+) -> None:
+    analysis, ledger = _functional(**changes)
+    with pytest.raises(AssertionError):
+        assert_functional(analysis, ledger, saturation_blocks=False)
 
 
 def test_only_samples_inside_the_windows_count() -> None:

@@ -129,8 +129,25 @@ def finish_report(
     return path
 
 
-def assert_functional(analysis: Mapping[str, Any], ledger: Mapping[str, Any]) -> None:
-    """Lo común a ``ci`` y ``nightly``: sin pérdida, sin duplicados, cadena íntegra."""
+def saturation_transients(analysis: Mapping[str, Any]) -> dict[str, int]:
+    """Los transitorios por saturación que vieron los nodos (NFR-GOB-02): cada
+    ``temporarily_unavailable`` por operación y cada ``503`` (``unavailable``) del cliente."""
+    codes = analysis["rejection_codes"]
+    events = analysis["events"]
+    return {
+        **{key: n for key, n in codes.items() if key.endswith(":temporarily_unavailable")},
+        **{key: n for key, n in events.items() if key.endswith(":unavailable")},
+    }
+
+
+def assert_functional(
+    analysis: Mapping[str, Any], ledger: Mapping[str, Any], *, saturation_blocks: bool = True
+) -> None:
+    """Lo común a ``ci`` y ``nightly``: sin pérdida, sin duplicados, cadena íntegra.
+
+    Con ``saturation_blocks`` (``ci``), ningún transitorio por saturación; sin él (el banco de
+    ``nightly``, A-65), los transitorios son tendencia: van al informe y no fallan la ejecución,
+    porque NFR-GOB-02 solo bloquea en el ``soak`` sobre ``staging``. Lo demás bloquea siempre."""
     assert analysis["emitted"] > 0
     assert analysis["accepted"] == analysis["emitted"], analysis
     assert analysis["lost"] == 0, analysis
@@ -138,9 +155,8 @@ def assert_functional(analysis: Mapping[str, Any], ledger: Mapping[str, Any]) ->
     assert analysis["halted"] == {}, analysis["halted"]
     assert analysis["rate_limited_below_minimum"] == 0, analysis["rate_limited_by_operation"]
     assert analysis["rate_limited_by_operation"] == {}, analysis["rate_limited_by_operation"]
-    codes = analysis["rejection_codes"]
-    assert not {key: n for key, n in codes.items() if key.endswith(":temporarily_unavailable")}
-    assert not {key: n for key, n in analysis["events"].items() if key.endswith(":unavailable")}
+    if saturation_blocks:
+        assert not saturation_transients(analysis)
     assert ledger["missing"] == 0 and ledger["unexpected"] == 0, ledger
     assert ledger["records"] == analysis["emitted"], ledger
     assert ledger["duplicated_source_keys"] == 0, ledger

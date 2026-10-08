@@ -8,17 +8,19 @@ sumo 3 minutos) para ensayar el arnés en local. En paralelo, el cliente sintét
 recorre las rutas de NFR-GOB-03 con una sesión real. Bloquea:
 
 - lo funcional de ``ci``: aceptados = emitidos, sin cola muerta, sin duplicados en el expediente,
-  cada cadena de planta íntegra y en orden de recepción (BR-GOB-91), cero ``rate_limited`` por
-  debajo del mínimo de NFR-CTR-02 y cero ``temporarily_unavailable`` (NFR-GOB-02);
+  cada cadena de planta íntegra y en orden de recepción (BR-GOB-91) y cero ``rate_limited`` (ni
+  por debajo del mínimo de NFR-CTR-02);
 - cada vaciado de cola completo: todo lo encolado durante la indisponibilidad se aceptó;
 - la peor proporción de rechazos permanentes en 15 minutos no pasa del 1 % (NFR-GOB-50 frente a
   la alarma de NFR-GOB-46);
-- el **cliente sintético** (NFR-GOB-19): en las ventanas de reconexión, cada ruta cumple su p95 o
-  la prueba falla nombrándola.
+- el **cliente sintético**: ninguna ruta de consola responde con error (fuera de 2xx y no
+  ``503``).
 
-Las escrituras por segundo (≥ 100 agregadas y ≥ 20 por cadena de planta, NFR-GOB-02) y las
-latencias de NFR-GOB-01 son **tendencia** aquí y van al informe (infrastructure-design §9.2): solo
-bloquean en el ``soak``.
+Son **tendencia** aquí y van al informe (infrastructure-design §9.2; A-65: solo bloquean en el
+``soak`` sobre ``staging``): las escrituras por segundo (≥ 100 agregadas y ≥ 20 por cadena de
+planta) y los transitorios por saturación (``temporarily_unavailable`` y ``503``) de NFR-GOB-02,
+las latencias de NFR-GOB-01 y el p95 de cada ruta de consola en las ventanas de reconexión
+(NFR-GOB-19), con la ruta que lo incumple nombrada en ``console.reconnection.failures``.
 
 ``test_the_console_client_fails_naming…`` (marca ``integration``, en el check de integración):
 contra una flota de dos nodos, una latencia de 250 ms inyectada en una ruta de consola hace que
@@ -48,7 +50,13 @@ from tests.load.console_client import (
 from tests.load.profiles import ABSOLUTE_TARGETS, LoadProfile, nightly_profile
 from tests.load.provision import Fleet
 from tests.load.report import Drain, drains_of
-from tests.load.test_load_ci import assert_functional, finish_report, ledger_check, run_load
+from tests.load.test_load_ci import (
+    assert_functional,
+    finish_report,
+    ledger_check,
+    run_load,
+    saturation_transients,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -124,6 +132,8 @@ def trend(analysis: dict[str, Any]) -> dict[str, Any]:
             "aggregate_target": targets["aggregate_writes_per_second"],
             "plant_chain_writes_per_second": plant,
             "plant_chain_target": targets["plant_chain_writes_per_second"],
+            "saturation_transients": saturation_transients(analysis),
+            "saturation_target": 0,
         },
         "NFR-GOB-01": analysis["node_latency"],
     }
@@ -163,7 +173,10 @@ def test_nightly_profile_mass_reconnection_and_four_hour_outage_keep_console_and
         "results": analysis,
         "ledger": ledger,
         "console": {
-            "blocking": True,
+            # A-65: el p95 de la consola (NFR-GOB-19) es tendencia en este banco; una respuesta
+            # de error (fuera de 2xx y no 503) sigue fallando la ejecución.
+            "blocking": False,
+            "errors_blocking": True,
             "windows": [[start.isoformat(), end.isoformat()] for start, end in windows],
             "reconnection": verdict.to_json(),
             "whole_run": overall.to_json(),
@@ -172,12 +185,12 @@ def test_nightly_profile_mass_reconnection_and_four_hour_outage_keep_console_and
     }
     finish_report(load_target, fleet, profile, load_reports, document, output)
 
-    assert_functional(analysis, ledger)
+    assert_functional(analysis, ledger, saturation_blocks=False)
     for drain in analysis["drains"]:
         assert drain["queued"] > 0, drain
         assert drain["accepted"] == drain["queued"], drain
     assert analysis["worst_permanent_ratio_15min"] <= PERMANENT_THRESHOLD
-    assert verdict.passed, verdict.message()
+    assert not overall.errors, overall.errors_message()
 
 
 def test_the_console_client_fails_naming_a_route_with_injected_latency(
