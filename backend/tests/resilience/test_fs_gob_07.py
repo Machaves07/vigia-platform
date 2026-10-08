@@ -1,10 +1,12 @@
 """FS-GOB-07 · Reconexión masiva de 100 nodos con una hora de cola (NFR-GOB-02, 19, 50; PR-GOB-22;
 PAT-GOB-RES-01, RES-05; LC-GOB-22).
 
-Sobre la plataforma de los perfiles de carga de TASK-231 (``tests/load``: la de producción con
-todas las unidades, ``vigia-admin bootstrap`` y la autoridad de nodos efímera de la ejecución, dos
-trabajadores de ``vigia-api`` tras los balanceadores ``app.`` y ``nodes.`` con mTLS), con el **nodo
-simulado del kit de U-01** (``tests.load.driver``: cliente real del contrato, bandeja SQLite,
+Sobre la plataforma de producción de los perfiles de carga (TASK-230 y 231: todas las unidades,
+``vigia-admin bootstrap`` y la autoridad de nodos efímera de la ejecución) con la **dotación mínima
+del piloto**: cuatro procesos ``vigia-api`` de verdad (2 tareas de 2 trabajadores) tras los
+balanceadores ``app.`` y ``nodes.`` con mTLS (``gob_support.restartable_platform``: ningún
+trabajador comparte el proceso, ni el GIL, con la prueba ni con el cliente de consola), con el
+**nodo simulado del kit de U-01** (``tests.load.driver``: cliente real del contrato, bandeja SQLite,
 reintentos y claves de idempotencia) en un proceso aparte y el **cliente sintético de consola**
 (``tests.load.console_client``) midiendo en paralelo las rutas de NFR-GOB-03 con una sesión real.
 
@@ -30,17 +32,18 @@ Solo en ``nightly`` (pesado: 100 nodos). Solo datos generados.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-# Las fixtures de sesión de los perfiles de carga (plataforma, conjunto sellado sintético y caché de
-# clips): la misma plataforma que ``tests/load``.
+from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+
+# Fixtures de sesión de los perfiles de carga: el conjunto sellado sintético y la caché de clips.
 from tests.load.conftest import (  # noqa: F401
-    LoadTarget,
     clip_cache,
     load_seed,
-    load_target,
     sealed_dataset,
 )
 from tests.load.console_client import evaluate
@@ -52,17 +55,38 @@ from tests.load.test_load_nightly import (
     Console,
     reconnection_windows,
 )
+from tests.resilience.gob_support import (
+    PILOT_MINIMUM_PROCESSES,
+    RestartablePlatform,
+    restartable_platform,
+)
 from tests.resilience.harness import scenario
 
 pytestmark = [pytest.mark.integration, pytest.mark.nightly]
 
 
+@pytest.fixture(scope="module")
+def platform(
+    postgres_endpoint: PostgresEndpoint,
+    localstack_endpoint: LocalStackEndpoint,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[RestartablePlatform]:
+    directory = tmp_path_factory.mktemp("fs-gob-07")  # fuera del árbol, nunca versionado
+    with restartable_platform(
+        postgres_endpoint, localstack_endpoint, directory, processes=PILOT_MINIMUM_PROCESSES
+    ) as built:
+        yield built
+
+
 def test_fs_gob_07_mass_reconnection_of_a_hundred_nodes_with_an_hour_of_queue(
-    load_target: LoadTarget,  # noqa: F811
+    platform: RestartablePlatform,
     sealed_dataset: Path,  # noqa: F811
     clip_cache: Path,  # noqa: F811
     tmp_path: Path,
 ) -> None:
+    # ``run_load``, la consola y ``ledger_check`` usan del objetivo de carga lo que esta plataforma
+    # también da: ``provision``, ``api``, ``app``, ``tls`` y ``stack``.
+    load_target: Any = platform
     profile = scaled("fs-gob-07")
     with scenario(
         "FS-GOB-07",

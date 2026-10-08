@@ -92,6 +92,8 @@ from vigia_platform.shared.runtime.units import (
 from vigia_platform.shared.signing.service import SigningKeyUnavailable
 
 __all__ = [
+    "API_PROCESSES",
+    "PILOT_MINIMUM_PROCESSES",
     "PRODUCTION_API_DATABASE",
     "U03_UNIT_NAMES",
     "BlockablePublisher",
@@ -500,7 +502,10 @@ def gob_stack(
 
 
 API_PROCESSES: Final = ("api-a", "api-b")
-"""Los dos procesos ``vigia-api`` de la tarea (LC-GOB-20)."""
+"""Los dos procesos ``vigia-api`` de una tarea (LC-GOB-20: 2 trabajadores de uvicorn por tarea)."""
+PILOT_MINIMUM_PROCESSES: Final = ("api-a", "api-b", "api-c", "api-d")
+"""La dotación mínima del piloto: 2 tareas de ``vigia-api`` (``API_MIN_TASKS`` de
+``infra/config/pilot.py``) de 2 trabajadores cada una."""
 RESTART_GRACE_SECONDS: Final = 1.0
 """Tras retirar un proceso del balanceador y antes de pararlo (lo que tarda el desregistro)."""
 
@@ -509,9 +514,11 @@ RESTART_GRACE_SECONDS: Final = 1.0
 class RestartablePlatform:
     """La plataforma de producción de los perfiles de carga (TASK-230 y 231) con sus **dos
     procesos ``vigia-api`` de verdad** (la orden de la imagen) tras un balanceador que solo enruta
-    a los que responden ``/health/ready`` (``processes.Balancer``) y, delante, el balanceador
-    ``nodes.`` con mTLS. ``LoadApi`` (en el proceso de la prueba) solo da de alta la flota por
-    ``app.``: los nodos nunca lo ven, así que los dos que atienden se pueden reiniciar."""
+    a los que responden ``/health/ready`` (``processes.Balancer``) y, delante, los balanceadores
+    ``app.`` (personas y alta) y ``nodes.`` (con mTLS), como los dos trabajadores de uvicorn de una
+    tarea (LC-GOB-20). ``LoadApi`` (en el proceso de la prueba) no recibe tráfico: solo presta sus
+    servicios al aprovisionamiento. Así los dos que atienden se pueden reiniciar y ninguno compite
+    por el GIL con la prueba ni con el cliente sintético de consola."""
 
     stack: Any
     api: Any
@@ -575,9 +582,15 @@ class RestartablePlatform:
 
 @contextlib.contextmanager
 def restartable_platform(
-    postgres_endpoint: PostgresEndpoint, localstack_endpoint: LocalStackEndpoint, directory: Any
+    postgres_endpoint: PostgresEndpoint,
+    localstack_endpoint: LocalStackEndpoint,
+    directory: Any,
+    *,
+    processes: Sequence[str] = API_PROCESSES,
 ) -> Iterator[RestartablePlatform]:
-    """``RestartablePlatform`` sobre los contenedores dados (``directory`` fuera del árbol)."""
+    """``RestartablePlatform`` sobre los contenedores dados (``directory`` fuera del árbol) con
+    los procesos ``vigia-api`` de ``processes``: por defecto, los dos de una tarea; con
+    ``PILOT_MINIMUM_PROCESSES``, los de la dotación mínima del piloto."""
     # Se importan al construirla: arrastran el conjunto sintético de los perfiles de carga, que
     # los procesos del arnés que importan este módulo no necesitan.
     from tests.conformance.mtls_proxy import server_tls
@@ -601,7 +614,7 @@ def restartable_platform(
         load_api(stack.environ, free_port(), log_file=directory / "api-alta.log") as api,
         process_group(directory) as group,
     ):
-        ports = {name: free_port() for name in API_PROCESSES}
+        ports = {name: free_port() for name in processes}
         platform = RestartablePlatform(
             stack=stack,
             api=api,
@@ -614,13 +627,13 @@ def restartable_platform(
             directory=directory,
             environ=stack.environ,
         )
-        for name in API_PROCESSES:
+        for name in processes:
             platform.start(name)
         node_ca = directory / "vigia-node-ca.crt"
         node_ca.write_bytes(stack.node_ca_root())
         with (
             balancer(ports) as router,
-            balancer_process("app", [api.url], tls, directory) as app,
+            balancer_process("app", [router.url], tls, directory) as app,
             balancer_process("nodes", [router.url], tls, directory, client_ca=node_ca) as nodes,
         ):
             platform.router, platform.app, platform.nodes = router, app, nodes
