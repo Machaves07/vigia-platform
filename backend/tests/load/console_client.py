@@ -51,6 +51,7 @@ from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
 __all__ = [
     "CONSOLE_ROUTES",
     "MIN_SAMPLES",
+    "SATURATION_STATUS",
     "ConsoleClient",
     "ConsoleRoute",
     "ConsoleTargets",
@@ -65,6 +66,9 @@ MIN_SAMPLES: Final = 20
 """Muestras mínimas por ruta en la ventana evaluada: con menos, el p95 no dice nada."""
 HTTP_SECONDS: Final = 60.0
 """Tope de una petición (nunca decide el veredicto: lo decide el p95)."""
+SATURATION_STATUS: Final = 503
+"""``temporarily_unavailable`` (mamparo de personas lleno, base o almacén sin respuesta): falta de
+capacidad, tendencia donde el p95 lo es (A-65); cualquier otro estado fuera de 2xx es un error."""
 CONCESSION_HEADER: Final = "X-Vigia-Concession"
 DOCUMENT_BYTES: Final = 4_096
 
@@ -232,9 +236,14 @@ class ConsoleClient:
 
 @dataclass(frozen=True)
 class ConsoleVerdict:
+    """``failures``: todo lo que incumple NFR-GOB-19 (p95, muestras, fuera de 2xx); ``errors``:
+    solo las respuestas fuera de 2xx que no son ``503``, lo que sigue bloqueando cuando el p95 es
+    tendencia (A-65: el banco de ``nightly``)."""
+
     routes: Mapping[str, Mapping[str, Any]]
     failures: tuple[str, ...]
     unpublished: tuple[str, ...]
+    errors: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -244,12 +253,16 @@ class ConsoleVerdict:
         return {
             "passed": self.passed,
             "failures": list(self.failures),
+            "errors": list(self.errors),
             "unpublished": list(self.unpublished),
             "routes": dict(self.routes),
         }
 
     def message(self) -> str:
         return "rutas de consola fuera de su objetivo (NFR-GOB-19): " + "; ".join(self.failures)
+
+    def errors_message(self) -> str:
+        return "rutas de consola con respuestas de error: " + "; ".join(self.errors)
 
 
 def _inside(moment: dt.datetime, windows: Iterable[tuple[dt.datetime, dt.datetime]]) -> bool:
@@ -265,13 +278,17 @@ def evaluate(
     min_samples: int = MIN_SAMPLES,
 ) -> ConsoleVerdict:
     """p95 por ruta de las muestras en ``windows`` (todas si es ``None``) y el veredicto: cada
-    ruta publicada que incumple su p95, responde fuera de 2xx o no reúne ``min_samples``."""
+    ruta publicada que incumple su p95, responde fuera de 2xx o no reúne ``min_samples``.
+
+    ``errors`` aparta, de esas, las rutas que respondieron fuera de 2xx con algo distinto de
+    ``503`` (``SATURATION_STATUS``): un fallo de la ruta, no de capacidad (A-65)."""
     selected: dict[str, list[Sample]] = defaultdict(list)
     for sample in samples:
         if windows is None or _inside(sample.at, windows):
             selected[sample.route].append(sample)
     summary: dict[str, dict[str, Any]] = {}
     failures: list[str] = []
+    broken: list[str] = []
     for route in routes:
         if route.name in unpublished:
             summary[route.name] = {"p95_target_ms": route.p95_ms, "status": "unpublished"}
@@ -296,7 +313,10 @@ def evaluate(
             )
         if errors:
             failures.append(f"{route.name}: respondió {', '.join(map(str, errors))}")
-    return ConsoleVerdict(summary, tuple(failures), tuple(unpublished))
+        unexpected = [status for status in errors if status != SATURATION_STATUS]
+        if unexpected:
+            broken.append(f"{route.name}: respondió {', '.join(map(str, unexpected))}")
+    return ConsoleVerdict(summary, tuple(failures), tuple(unpublished), tuple(broken))
 
 
 def delayed(
