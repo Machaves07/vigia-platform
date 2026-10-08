@@ -16,6 +16,12 @@ Servicios reales de ``catalog.agreements`` y ``catalog.gates`` sobre la base mig
 - **Revocación**: el acuerdo vigente pasa a ``revoked`` y lo escrito permanece.
 - **Guardas de alcance** (NFR-GOB-30): otra organización, otra planta, zona fuera del alcance o
   inexistente → ``ResourceNotFound``; las sentencias filtran la zona.
+- **Concesión de planta** (VIG-179, A-58): el instalador crea el acuerdo y la zona llega a
+  ``productive``; la ruta deja su ``provider_query``; un firmante de otra planta, de una zona de
+  otra planta o de otra organización es ``signatory_user_role_mismatch``, igual que uno
+  inexistente; una zona de la otra planta, ``not_found``. ``signatory_candidates`` devuelve solo
+  los usuarios y roles pedidos con tres campos, filtra planta y zona (falla sin cada filtro) y
+  responde ``ResourceNotFound`` fuera de la planta concedida o con la concesión revocada.
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -23,6 +29,7 @@ Solo datos generados (NFR-CTR-43).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import threading
 import uuid
@@ -30,6 +37,7 @@ from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any, Final
 
+import httpx
 import pytest
 from vigia_contracts.models.enumerations import GateStatus, ZoneMode
 
@@ -61,6 +69,10 @@ from vigia_platform.catalog.domain.enums import (
     ConfirmationOrigin,
     DocumentKind,
     GateKind,
+)
+from vigia_platform.identity.application.hierarchy import (
+    SIGNATORY_CANDIDATES_MAX,
+    SignatoryCandidate,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
@@ -517,6 +529,233 @@ def test_the_approval_opens_usage_in_one_transaction(world: AgreementsWorld) -> 
     projection = world.g.projection(ready.zone)
     assert projection is not None and projection["resulting_mode"] == "productive"
     assert projection["usage"]["agreement_id"] == str(agreement_id)
+
+
+def test_under_a_plant_concession_the_installer_takes_the_zone_to_productive(
+    world: AgreementsWorld,
+) -> None:
+    # VIG-179 (A-58): con concesión de planta la RLS de A-46 oculta identity.user_account; los
+    # firmantes se resuelven por la consulta acotada y la zona llega a productive.
+    site = world.g.site(plants=2)
+    ready = world.ready(site=site, concession=ScopeLevel.PLANT)
+    assert ready.installer.allowed_scopes[0].scope_level is ScopeLevel.PLANT
+    assert ready.agreement is not None
+    assert [(s.role, s.user_id) for s in ready.agreement.signatories] == [
+        (s.role, s.user_id) for s in ready.signers
+    ]
+    assert all(s.display_name for s in ready.agreement.signatories)
+
+    approval = _approved(world, ready)
+
+    assert approval.state.resulting_mode is ZoneMode.PRODUCTIVE
+    assert world.agreement_row(ready.agreement.agreement_id)["status"] == "approved"
+    projection = world.g.projection(ready.zone)
+    assert projection is not None and projection["resulting_mode"] == "productive"
+
+
+def _provider_queries(world: AgreementsWorld, concession: uuid.UUID) -> list[Any]:
+    return world.fetch(
+        "SELECT plant_id, ledger.vigia_bytes_to_jsonb(content) AS content"
+        " FROM ledger.ledger_record WHERE record_type = 'provider_query'"
+        " AND actor_concession_id = $1 ORDER BY received_at, record_id",
+        concession,
+    )
+
+
+def _body(signatories: list[tuple[Role, uuid.UUID]]) -> dict[str, Any]:
+    return {"signatories": [{"role": r.value, "user_id": str(u)} for r, u in signatories]}
+
+
+def _comparable(response: httpx.Response) -> tuple[int, dict[str, Any]]:
+    """Estado y cuerpo sin ``correlation_id``, lo único que cambia entre dos peticiones."""
+    body = {k: v for k, v in response.json().items() if k != "correlation_id"}
+    return response.status_code, body
+
+
+def test_under_a_plant_concession_the_route_creates_the_agreement_and_leaves_its_provider_query(
+    world: AgreementsWorld,
+) -> None:
+    site = world.g.site(plants=2)
+    ready = world.ready(site=site, create=False, concession=ScopeLevel.PLANT)
+    _, cookie, concession = world.installer_session(site, ScopeLevel.PLANT, ready.plant)
+    path = f"/zones/{ready.zone}/use-agreements"
+
+    response = world.request(
+        "POST", path, cookie, _body([(s.role, s.user_id) for s in ready.signers]), concession
+    )
+
+    assert response.status_code == 201, response.text
+    signatories = response.json()["signatories"]
+    assert [(s["role"], s["user_id"]) for s in signatories] == [
+        (s.role.value, str(s.user_id)) for s in ready.signers
+    ]
+    assert all(0 < len(s["display_name"]) <= 120 for s in signatories)
+    # BR-NUC-38 y A-48: el rastro de la petición bajo concesión, en la cadena de la planta.
+    (query,) = _provider_queries(world, concession)
+    content = json.loads(query["content"])
+    assert query["plant_id"] == ready.plant
+    assert (content["method"], content["resource"]) == ("POST", "/zones/{zone_id}/use-agreements")
+
+
+@pytest.mark.parametrize("case", ["other_plant", "other_plant_zone", "other_organization"])
+def test_under_a_plant_concession_a_signer_outside_the_zone_is_a_mismatch_like_a_missing_one(
+    world: AgreementsWorld, case: str
+) -> None:
+    site = world.g.site(plants=2)
+    ready = world.ready(site=site, create=False, concession=ScopeLevel.PLANT)
+    (_, (plant_b, zone_b)) = site.zones()
+    _, cookie, concession = world.installer_session(site, ScopeLevel.PLANT, ready.plant)
+    if case == "other_plant":
+        outsider = world.signer(site, Role.COORDINATOR_SST, ScopeLevel.PLANT, plant_b).user_id
+    elif case == "other_plant_zone":
+        outsider = world.signer(site, Role.COORDINATOR_SST, ScopeLevel.ZONE, zone_b).user_id
+    else:
+        outsider = world.signer(world.g.site(), Role.COORDINATOR_SST).user_id
+    signatories = [(s.role, s.user_id) for s in ready.signers]
+    before = world.written(ready.plant, ready.zone)
+
+    answers = []
+    for user in (outsider, uuid.uuid4()):  # el de fuera y uno que no existe
+        signatories[0] = (Role.COORDINATOR_SST, user)
+        with pytest.raises(CatalogRejected) as error:
+            world.create(ready, signatories=signatories)
+        assert _code(error) is CatalogDetailCode.SIGNATORY_USER_ROLE_MISMATCH
+        response = world.request(
+            "POST", f"/zones/{ready.zone}/use-agreements", cookie, _body(signatories), concession
+        )
+        answers.append(_comparable(response))
+
+    # Sin revelar si existe: la misma respuesta para el usuario de fuera y para el inexistente.
+    assert answers[0] == answers[1]
+    assert answers[0][1]["detail_code"] == "catalog_signatory_user_role_mismatch"
+    assert world.written(ready.plant, ready.zone) == before
+
+
+def test_under_a_plant_concession_a_zone_of_the_other_plant_is_not_found(
+    world: AgreementsWorld,
+) -> None:
+    site = world.g.site(plants=2)
+    ready = world.ready(site=site, create=False, concession=ScopeLevel.PLANT)
+    (_, (plant_b, zone_b)) = site.zones()
+    world.mount(site, plant_b, zone_b, world.g.installer(site))
+    world.signatory_policy(site, plant_b)
+    _, cookie, concession = world.installer_session(site, ScopeLevel.PLANT, ready.plant)
+    body = _body([(s.role, s.user_id) for s in ready.signers])
+    before = world.written(plant_b, zone_b)
+
+    with pytest.raises(ResourceNotFound):
+        world.create(Ready(site, plant_b, zone_b, ready.installer, ready.signers))
+    other, missing = (
+        world.request("POST", f"/zones/{zone}/use-agreements", cookie, body, concession)
+        for zone in (zone_b, uuid.uuid4())
+    )
+
+    assert other.status_code == 404 and other.json()["code"] == "not_found"
+    assert _comparable(other) == _comparable(missing)
+    assert world.written(plant_b, zone_b) == before
+
+
+# --- IdentityQueryPort.signatory_candidates (A-58) ------------------------------------------------
+
+
+def test_signatory_candidates_returns_only_the_requested_users_and_three_fields(
+    world: AgreementsWorld,
+) -> None:
+    site = world.g.site(plants=2)
+    ((plant, zone), _) = site.zones()
+    installer = world.g.installer(site, ScopeLevel.PLANT, plant)
+    asked = [world.signer(site, role) for role in SIGNER_ROLES]
+    # Otros usuarios con rol sobre la zona: nunca salen si no se piden (sin listados abiertos).
+    unasked = [world.signer(site, Role.COORDINATOR_SST, ScopeLevel.ZONE, zone) for _ in range(2)]
+
+    found = world.run(
+        world.g.hierarchy.signatory_candidates(
+            installer, zone, list(Role), [s.user_id for s in asked[:2]]
+        )
+    )
+
+    assert [f.name for f in dataclasses.fields(SignatoryCandidate)] == [
+        "user_id",
+        "role",
+        "display_name",
+    ]
+    assert {(c.user_id, c.role) for c in found} == {(s.user_id, s.role) for s in asked[:2]}
+    assert all(0 < len(c.display_name) <= 120 for c in found)
+    assert all(c.display_name not in repr(c) for c in found)
+    assert not {c.user_id for c in found} & {s.user_id for s in unasked}
+    # Solo los roles pedidos: el mismo usuario con otro rol no aparece.
+    only = world.run(
+        world.g.hierarchy.signatory_candidates(
+            installer, zone, [Role.COPASST], [s.user_id for s in asked]
+        )
+    )
+    assert {(c.user_id, c.role) for c in only} == {(asked[2].user_id, Role.COPASST)}
+
+
+def test_signatory_candidates_filter_the_plant_and_the_zone(world: AgreementsWorld) -> None:
+    # La guarda de alcance de la consulta acotada: falla si se quita el filtro de planta o el de
+    # zona de _SIGNATORY_CANDIDATES (mutaciones de la tabla de garantías).
+    site = world.g.site(plants=2, zones=2)
+    ((plant_a, zone_a), (_, zone_a2), (plant_b, zone_b), _) = site.zones()
+    installer = world.g.installer(site, ScopeLevel.PLANT, plant_a)
+    role = Role.COORDINATOR_SST
+    on_plant_a = world.signer(site, role, ScopeLevel.PLANT, plant_a).user_id
+    on_zone_a = world.signer(site, role, ScopeLevel.ZONE, zone_a).user_id
+    on_organization = world.signer(site, role).user_id
+    on_plant_b = world.signer(site, role, ScopeLevel.PLANT, plant_b).user_id
+    on_zone_b = world.signer(site, role, ScopeLevel.ZONE, zone_b).user_id
+    on_zone_a2 = world.signer(site, role, ScopeLevel.ZONE, zone_a2).user_id
+    foreign = world.signer(world.g.site(), role).user_id
+    inactive = world.signer(site, role, ScopeLevel.PLANT, plant_a).user_id
+    world.g.authz.set_user_status(inactive, "deactivated")
+    asked = [
+        on_plant_a,
+        on_zone_a,
+        on_organization,
+        on_plant_b,
+        on_zone_b,
+        on_zone_a2,
+        foreign,
+        inactive,
+        uuid.uuid4(),
+    ]
+
+    found = world.run(world.g.hierarchy.signatory_candidates(installer, zone_a, [role], asked))
+
+    assert {c.user_id for c in found} == {on_plant_a, on_zone_a, on_organization}
+
+
+def test_signatory_candidates_answer_not_found_outside_the_conceded_plant(
+    world: AgreementsWorld,
+) -> None:
+    site = world.g.site(plants=2)
+    ((plant_a, zone_a), (_, zone_b)) = site.zones()
+    signer = world.signer(site, Role.COPASST)
+    installer = world.g.installer(site, ScopeLevel.PLANT, plant_a)
+    candidates = world.g.hierarchy.signatory_candidates
+    for zone in (zone_b, uuid.uuid4()):  # otra planta e inexistente
+        with pytest.raises(ResourceNotFound):
+            world.run(candidates(installer, zone, [Role.COPASST], [signer.user_id]))
+    # Concesión revocada después de construir el contexto: la RLS de la zona ya no la deja ver.
+    assert installer.concession_id is not None
+    world.g.authz.revoke_concession(installer.concession_id, world.g.authz.now())
+    with pytest.raises(ResourceNotFound):
+        world.run(candidates(installer, zone_a, [Role.COPASST], [signer.user_id]))
+
+
+def test_signatory_candidates_bounds(world: AgreementsWorld) -> None:
+    site = world.g.site()
+    ((plant, zone),) = site.zones()
+    installer = world.g.installer(site, ScopeLevel.PLANT, plant)
+    candidates = world.g.hierarchy.signatory_candidates
+    assert world.run(candidates(installer, zone, [Role.COPASST], [])) == ()
+    assert world.run(candidates(installer, zone, [], [uuid.uuid4()])) == ()
+    many = [uuid.uuid4() for _ in range(SIGNATORY_CANDIDATES_MAX)]
+    assert world.run(candidates(installer, zone, [Role.COPASST], many)) == ()
+    with pytest.raises(ValueError, match="demasiados"):
+        world.run(candidates(installer, zone, [Role.COPASST], [*many, uuid.uuid4()]))
+    with pytest.raises(TypeError):
+        world.run(candidates(installer, zone, [Role.COPASST], [str(uuid.uuid4())]))  # type: ignore[list-item]
 
 
 _GUARDS: Final = ("mounted", "record", "signatures", "plant_policy")

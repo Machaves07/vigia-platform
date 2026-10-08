@@ -630,7 +630,8 @@ def gates_world(
             SignerDouble(signing),
             storage,
             documents,
-            HierarchyService(hierarchy_deps),
+            # Como la raíz de composición: firmantes por la consulta acotada de A-58.
+            HierarchyService(hierarchy_deps, lookups=authz.contexts),
             hierarchy_deps,
         )
         try:
