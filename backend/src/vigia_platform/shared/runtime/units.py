@@ -223,7 +223,7 @@ from vigia_platform.shared.archive.restore_drill import (
 )
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeContext, ScopeLevel
-from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
+from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.db import DatabaseHealth, Transaction
 from vigia_platform.shared.key_rotation import (
     key_rotation_reminder_handler,
@@ -317,11 +317,14 @@ class UnitServices:
     """El gestor de secretos con su caché (la clave estable del hash de origen del alta,
     TASK-219); ``None`` en las pruebas que no lo necesitan."""
     cpu_pool: CpuPool | None = None
-    """El pool de CPU del proceso (``VIGIA_THREADPOOL_SIZE``, PAT-NUC-REN-05); ``None``: el
-    compartido de ``get_cpu_pool()``."""
+    """El pool de CPU del proceso (``VIGIA_THREADPOOL_SIZE``, PAT-NUC-REN-05), el mismo de
+    Argon2id; ``None`` en ``vigia-worker``, ``vigia-admin`` y las pruebas que no lo usan."""
 
     def require_cpu_pool(self) -> CpuPool:
-        return self.cpu_pool if self.cpu_pool is not None else get_cpu_pool()
+        """El pool del proceso; sin él no se arranca (nunca otro pool por omisión)."""
+        if self.cpu_pool is None:
+            raise RuntimeConfigInvalid("VIGIA_THREADPOOL_SIZE", "sin pool de CPU del proceso")
+        return self.cpu_pool
 
     def require_evidence(self) -> S3Storage:
         if self.evidence is None:

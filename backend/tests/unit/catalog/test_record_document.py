@@ -44,13 +44,16 @@ from tests.record_document_support import (
 )
 from vigia_platform.catalog.adapters.rendering.record_document import (
     DOCUMENT_LABELS,
+    DOCUMENT_MAX_CONCURRENT,
     DOCUMENT_TIMEOUT_SECONDS,
     FONT_DIRECTORY,
     FONT_FILES,
+    DocumentBusy,
     DocumentRenderFailed,
     DocumentTimedOut,
     PackagedFontFetcher,
     RecordDocumentRenderer,
+    default_concurrency,
     record_html,
     render_pdf,
 )
@@ -354,6 +357,138 @@ def test_a_real_render_with_a_too_short_timeout_times_out(
     finally:
         blocker.set()
         single_busy.result(timeout=RELEASE_SECONDS)
+        single.shutdown(wait=True)
+
+
+# --- Limitador de renders (revisión de VIG-160) --------------------------------------------------
+
+
+class Held:
+    """Doble del PDF: cada render espera a que la prueba lo suelte y cuenta los simultáneos."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+        self.calls = 0
+        self.running = 0
+        self.peak = 0
+
+    def __call__(self, html: str) -> bytes:
+        with self._lock:
+            self.calls += 1
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        try:
+            self.release.wait(RELEASE_SECONDS)
+            return b"%PDF-1.7 doble %%EOF"
+        finally:
+            with self._lock:
+                self.running -= 1
+
+
+def _slot_comes_back(renderer: RecordDocumentRenderer) -> bool:
+    """Espera (sin decidir por un tope corto) a que el limitador tenga un puesto libre."""
+    slots: threading.BoundedSemaphore = renderer._slots
+    if not slots.acquire(timeout=RELEASE_SECONDS):
+        return False
+    slots.release()
+    return True
+
+
+def test_the_limiter_defaults_below_the_pool_and_is_validated(
+    pool: CpuPool, labels: PlatformLabels
+) -> None:
+    assert pool.max_workers == 4
+    assert DOCUMENT_MAX_CONCURRENT == 2
+    assert RecordDocumentRenderer(pool=pool, labels=labels).max_concurrent == 2
+    assert [default_concurrency(n) for n in (1, 2, 3, 4, 64)] == [1, 1, 2, 2, 2]
+    for bad in (0, 4, 5, True, 1.5):
+        with pytest.raises(ValueError):
+            RecordDocumentRenderer(pool=pool, labels=labels, max_concurrent=bad)  # type: ignore[arg-type]
+
+
+def test_an_orphaned_render_keeps_its_slot_and_the_next_request_is_busy_at_once(
+    pool: CpuPool, labels: PlatformLabels
+) -> None:
+    held = Held()
+    renderer = RecordDocumentRenderer(
+        pool=pool, labels=labels, timeout_seconds=REDUCED_TIMEOUT, max_concurrent=1, pdf=held
+    )
+    record = record_body(seed="huerfano")
+    try:
+        with pytest.raises(DocumentTimedOut) as first:
+            asyncio.run(renderer.render(record))
+        assert not isinstance(first.value, DocumentBusy)
+        assert held.running == 1  # el render agotado sigue en su hilo
+        # El siguiente no llega al pool: sin puesto, transitorio al instante.
+        with pytest.raises(DocumentBusy):
+            asyncio.run(renderer.render(record))
+        assert held.calls == 1
+        # El pool del proceso sigue libre para otra tarea (p. ej. un hash de contraseña).
+        assert asyncio.run(asyncio.wait_for(pool.run(sum, [1, 2, 3]), RELEASE_SECONDS)) == 6
+    finally:
+        held.release.set()
+    # Cuando el render huérfano termina de verdad, el puesto vuelve.
+    assert _slot_comes_back(renderer)
+    assert held.calls == 1
+
+
+def test_concurrent_requests_never_render_more_than_the_limit(
+    pool: CpuPool, labels: PlatformLabels
+) -> None:
+    held = Held()
+    renderer = RecordDocumentRenderer(
+        pool=pool, labels=labels, timeout_seconds=RELEASE_SECONDS, max_concurrent=2, pdf=held
+    )
+    record = record_body(seed="rafaga")
+
+    async def burst() -> list[bytes | BaseException]:
+        tasks = [asyncio.create_task(renderer.render(record)) for _ in range(8)]
+        # Fases por eventos, nunca por un tope corto: esperar a que las 8 hayan pedido puesto.
+        for _ in range(int(RELEASE_SECONDS * 100)):
+            if held.calls >= 2 and sum(task.done() for task in tasks) >= 6:
+                break
+            await asyncio.sleep(0.01)
+        held.release.set()
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        results = asyncio.run(burst())
+    finally:
+        held.release.set()
+    rendered = [r for r in results if isinstance(r, bytes)]
+    busy = [r for r in results if isinstance(r, DocumentBusy)]
+    assert (len(rendered), len(busy)) == (2, 6), results
+    assert held.peak == 2 and held.calls == 2
+    assert _slot_comes_back(renderer)
+
+
+def test_a_render_abandoned_in_the_queue_gives_its_slot_back(labels: PlatformLabels) -> None:
+    # Un pool de un hilo ocupado: el render queda en cola y la petición se cancela.
+    single = CpuPool(SystemClock(), max_workers=1)
+    blocker = threading.Event()
+    calls: list[str] = []
+
+    def pdf(html: str) -> bytes:
+        calls.append(html)
+        return b"%PDF-1.7 doble %%EOF"
+
+    renderer = RecordDocumentRenderer(
+        pool=single, labels=labels, timeout_seconds=RELEASE_SECONDS, pdf=pdf
+    )
+    record = record_body(seed="cola")
+    occupied = single._executor.submit(blocker.wait, RELEASE_SECONDS)
+    try:
+        with pytest.raises(TimeoutError):
+            asyncio.run(asyncio.wait_for(renderer.render(record), REDUCED_TIMEOUT))
+    finally:
+        blocker.set()
+        occupied.result(timeout=RELEASE_SECONDS)
+    try:
+        # El puesto volvió aunque el render nunca empezó; el abandonado no se ejecuta.
+        assert asyncio.run(renderer.render(record)).startswith(b"%PDF")
+        assert len(calls) == 1
+    finally:
         single.shutdown(wait=True)
 
 

@@ -80,6 +80,10 @@ FROM ${PYTHON_IMAGE} AS runtime
 # (>= 1.44) con `pangoft2`, HarfBuzz con su subconjunto de fuentes y fontconfig. Sin fuentes del
 # sistema: Debian las arrastra como dependencia de `fontconfig-config` y se purgan, así que el
 # documento solo puede usar las fuentes empaquetadas en `backend/resources/fonts/` (SIL OFL 1.1).
+# La purga con `--force-depends` deja `fontconfig-config` con su dependencia de fuentes sin cumplir
+# en la base de dpkg. La ejecución no la nota y la imagen no usa apt, pero una imagen derivada que
+# haga `apt-get install` fallará: tendría que reinstalar las fuentes o usar un paquete vacío que
+# las provea (equivs).
 RUN apt-get update \
     && apt-get upgrade --yes --no-install-recommends \
     && apt-get install --yes --no-install-recommends \

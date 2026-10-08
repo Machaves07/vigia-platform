@@ -23,7 +23,14 @@ cada vez que se pide y **no se almacena** (BR-GOB-50, NFR-GOB-69). Sale de la mi
 ``asyncio.wait_for`` con **10 s** (NFR-GOB-43, inyectable). Si se agota, ``DocumentTimedOut``:
 la ruta responde ``temporarily_unavailable`` y nunca un cuerpo parcial, porque el PDF solo existe
 cuando ``write_pdf`` termina entero. Como en ``asyncio.to_thread``, el hilo que ya empezó no se
-detiene: termina y su resultado se descarta.
+detiene: termina y su resultado se descarta. Por eso un limitador propio deja a lo sumo
+``DOCUMENT_MAX_CONCURRENT`` renders en el pool, contando los agotados hasta que acaban de verdad;
+sin puesto libre, ``DocumentBusy`` al instante. Así el pool compartido con Argon2id nunca se llena
+de documentos.
+
+Cada render retiene el GIL en las pausas del recolector sobre el árbol de WeasyPrint: el bucle de
+eventos sufre retrasos del orden de 150 ms por render de la matriz máxima (medido en la revisión
+de VIG-160). El limitador los acota; un pool de procesos los evitaría si algún día hiciera falta.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import asyncio
 import enum
 import functools
 import re
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,17 +59,20 @@ from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
     "DOCUMENT_LABELS",
+    "DOCUMENT_MAX_CONCURRENT",
     "DOCUMENT_RETRY_AFTER_SECONDS",
     "DOCUMENT_TIMEOUT_SECONDS",
     "ENUMERATED_FIELDS",
     "FONT_DIRECTORY",
     "FONT_FILES",
     "NULL_TEXT",
+    "DocumentBusy",
     "DocumentRenderFailed",
     "DocumentTimedOut",
     "Leaf",
     "PackagedFontFetcher",
     "RecordDocumentRenderer",
+    "default_concurrency",
     "display",
     "record_html",
     "render_pdf",
@@ -71,6 +82,9 @@ DOCUMENT_TIMEOUT_SECONDS: Final = 10.0
 """Tiempo de espera duro de la generación (NFR-GOB-43); el objetivo es 3 s p95 (NFR-GOB-05)."""
 DOCUMENT_RETRY_AFTER_SECONDS: Final = 10
 """``retry_after_seconds`` del documento que no llegó a tiempo ``[objetivo propio]``."""
+DOCUMENT_MAX_CONCURRENT: Final = 2
+"""Renders del documento a la vez por proceso ``[objetivo propio]``, siempre menos que los hilos
+del pool de CPU (4): los otros quedan para Argon2id y el expediente."""
 
 RENDERING: Final = Path(__file__).resolve().parent
 TEMPLATES: Final = RENDERING / "templates"
@@ -122,6 +136,11 @@ _log = get_logger("catalog.rendering")
 
 class DocumentTimedOut(Exception):
     """La generación no terminó dentro del tiempo de espera: no hay documento (transitorio)."""
+
+
+class DocumentBusy(DocumentTimedOut):
+    """Todos los puestos de render están ocupados (también por renders agotados que siguen en su
+    hilo): no se genera nada y se responde al instante como transitorio."""
 
 
 class DocumentRenderFailed(Exception):
@@ -266,8 +285,64 @@ def render_pdf(html: str, fetcher: PackagedFontFetcher | None = None) -> bytes:
 # --- Servicio ------------------------------------------------------------------------------------
 
 
+def default_concurrency(pool_workers: int) -> int:
+    """Puestos de render por defecto: ``DOCUMENT_MAX_CONCURRENT`` y siempre menos que el pool.
+
+    Con 4 hilos, 2; con 2 o 3, 1 o 2; con un pool de un solo hilo (solo en pruebas), 1.
+    """
+    return max(1, min(DOCUMENT_MAX_CONCURRENT, pool_workers - 1))
+
+
+class _Slot:
+    """Un puesto del limitador, que se suelta **una sola vez**.
+
+    Lo suelta el hilo cuando el render termina de verdad (también si se agotó el tope y su
+    resultado se descarta), o la corrutina si el render nunca llegó a empezar (seguía en la cola
+    del pool al agotarse el tope o al cancelarse la petición). El candado decide entre las dos.
+    """
+
+    def __init__(self, semaphore: threading.BoundedSemaphore) -> None:
+        self._semaphore = semaphore
+        self._lock = threading.Lock()
+        self._state = "queued"
+
+    def start(self) -> bool:
+        """En el hilo, antes de renderizar: ``False`` si la petición ya lo abandonó en cola."""
+        with self._lock:
+            if self._state == "abandoned":
+                return False
+            self._state = "running"
+            return True
+
+    def finish(self) -> None:
+        """En el hilo, cuando el render terminó (bien o mal): suelta el puesto."""
+        with self._lock:
+            self._state = "done"
+            self._semaphore.release()
+
+    def abandon(self) -> None:
+        """En la corrutina, al agotarse el tope o cancelarse: solo suelta si nunca empezó."""
+        with self._lock:
+            if self._state == "queued":
+                self._state = "abandoned"
+                self._semaphore.release()
+
+
 class RecordDocumentRenderer:
-    """Genera el PDF del acta en el pool de CPU con tiempo de espera; nunca lo guarda."""
+    """Genera el PDF del acta en el pool de CPU con tiempo de espera; nunca lo guarda.
+
+    **Limitador propio** (revisión de VIG-160). El pool de CPU es el del proceso: 4 hilos
+    compartidos con Argon2id (inicio de sesión, segundo factor) y la canonicalización del
+    expediente. Como en ``asyncio.to_thread``, un render agotado no suelta su hilo: sigue hasta
+    terminar. Sin límite, unas pocas actas pesadas ocuparían todos los hilos durante minutos.
+    Por eso a lo sumo ``max_concurrent`` renders ocupan el pool a la vez (por defecto 2, siempre
+    menos hilos que el pool):
+
+    - el puesto se toma **antes** de enviar al pool y **sin esperar**: si no hay, la petición
+      responde ``DocumentBusy`` (``temporarily_unavailable``) al instante;
+    - el puesto lo suelta el hilo **cuando el render termina de verdad**, no al agotarse el tope:
+      un render huérfano sigue contando hasta que acaba.
+    """
 
     def __init__(
         self,
@@ -275,31 +350,62 @@ class RecordDocumentRenderer:
         pool: CpuPool,
         labels: PlatformLabels | None = None,
         timeout_seconds: float = DOCUMENT_TIMEOUT_SECONDS,
+        max_concurrent: int | None = None,
         pdf: Callable[[str], bytes] = render_pdf,
     ) -> None:
         if isinstance(timeout_seconds, bool) or not timeout_seconds > 0:
             raise ValueError("el tiempo de espera del documento debe ser positivo")
+        slots = default_concurrency(pool.max_workers) if max_concurrent is None else max_concurrent
+        if isinstance(slots, bool) or not isinstance(slots, int):
+            raise ValueError("los puestos de render son un entero")
+        if not 1 <= slots <= max(1, pool.max_workers - 1):
+            raise ValueError("los puestos de render van de 1 a los hilos del pool menos uno")
         self._pool = pool
         self._labels = labels if labels is not None else PlatformLabels.load()
         self._timeout = float(timeout_seconds)
+        self._slots = threading.BoundedSemaphore(slots)
+        self._max_concurrent = slots
         self._pdf = pdf
+
+    @property
+    def pool(self) -> CpuPool:
+        return self._pool
 
     @property
     def timeout_seconds(self) -> float:
         return self._timeout
 
+    @property
+    def max_concurrent(self) -> int:
+        return self._max_concurrent
+
     def _document(self, record: Mapping[str, Any]) -> bytes:
         return self._pdf(record_html(record, self._labels))
+
+    def _guarded(self, slot: _Slot, record: Mapping[str, Any]) -> bytes:
+        if not slot.start():
+            raise DocumentTimedOut  # abandonado en la cola: nadie espera el resultado
+        try:
+            return self._document(record)
+        finally:
+            slot.finish()
 
     async def render(self, record: Mapping[str, Any]) -> bytes:
         """El PDF de ``record`` (la vista de ``GET /commissioning-records/{id}``).
 
-        ``DocumentTimedOut`` si no termina en ``timeout_seconds`` (espera en cola incluida).
+        ``DocumentBusy`` al instante si no queda puesto de render; ``DocumentTimedOut`` si no
+        termina en ``timeout_seconds`` (espera en cola incluida).
         """
+        if not self._slots.acquire(blocking=False):
+            _log.warning("el documento del acta no se genera: todos los puestos están ocupados")
+            raise DocumentBusy
+        slot = _Slot(self._slots)
         try:
             return await asyncio.wait_for(
-                self._pool.run(self._document, dict(record)), timeout=self._timeout
+                self._pool.run(self._guarded, slot, dict(record)), timeout=self._timeout
             )
         except TimeoutError:
             _log.warning("el documento del acta no se generó dentro del tiempo de espera")
             raise DocumentTimedOut from None
+        finally:
+            slot.abandon()

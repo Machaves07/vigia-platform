@@ -51,6 +51,7 @@ from vigia_platform.shared.api.declarations import (
     iter_declared_routes,
 )
 from vigia_platform.shared.clock import SystemClock
+from vigia_platform.shared.cpu_pool import get_cpu_pool
 from vigia_platform.shared.observability.metrics import get_metrics
 from vigia_platform.shared.runtime.units import (
     PUBLISHED_NODE_ROUTES,
@@ -96,6 +97,7 @@ def production_gate() -> NodeApiGate:
         checkpoints=unused,
         kms=unused,
         evidence=unused,
+        cpu_pool=get_cpu_pool(),
     )
     gate = api_state(registered_units(), services)[NODE_GATE_STATE_KEY]
     assert isinstance(gate, NodeApiGate)

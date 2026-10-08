@@ -238,6 +238,42 @@ def test_a_render_that_does_not_finish_answers_temporarily_unavailable_without_a
         world.run(slow.aclose())
 
 
+def test_while_an_orphaned_render_holds_the_slot_the_route_answers_at_once(
+    world: CloseWorld, pool: CpuPool, labels: PlatformLabels
+) -> None:
+    # Revisión de VIG-160: el render agotado sigue en su hilo y conserva su puesto; la petición
+    # siguiente no llega al pool y responde temporarily_unavailable sin generar nada.
+    zone, record_id = _closed(world)
+    pdf, started, release = _stuck()
+    calls: list[str] = []
+
+    def counted(html: str) -> bytes:
+        calls.append(html)
+        return pdf(html)
+
+    renderer = RecordDocumentRenderer(
+        pool=pool,
+        labels=labels,
+        timeout_seconds=REDUCED_TIMEOUT,
+        max_concurrent=1,
+        pdf=counted,
+    )
+    slow = world.client_with(record_documents=renderer)
+    try:
+        first = _document(world, slow, record_id, zone)
+        assert started.is_set()
+        second = _document(world, slow, record_id, zone)
+        for response in (first, second):
+            assert response.status_code == 503, response.text
+            assert response.json()["code"] == "temporarily_unavailable"
+            assert response.json()["retry_after_seconds"] == 10
+            assert b"%PDF" not in response.content
+        assert len(calls) == 1  # la segunda no se envió al pool
+    finally:
+        release.set()
+        world.run(slow.aclose())
+
+
 # --- Alcance ------------------------------------------------------------------------------------
 
 

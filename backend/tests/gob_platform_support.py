@@ -615,6 +615,7 @@ def gob_platform(
             signer=signing,
             clock=clock,
         )
+        pool = CpuPool(clock, max_workers=2)
         services = UnitServices(
             clock=clock,
             metrics=get_metrics(),
@@ -630,6 +631,7 @@ def gob_platform(
             checkpoints=checkpoints,
             kms=kms,  # type: ignore[arg-type]
             evidence=HttpsPresign(storage),  # type: ignore[arg-type]
+            cpu_pool=pool,
         )
         deps = IdentityDependencies(
             database=database,
@@ -641,7 +643,6 @@ def gob_platform(
             clock=clock,
             provider_organization_id=provider,
         )
-        pool = CpuPool(clock, max_workers=2)
         limiter = RateLimiter(clock)
         fleet = _fleet_state(services)[FLEET_STATE_KEY]
         # ``_node_ca_roots`` lee ``ca/root.pem`` de ``VIGIA_EDGE_BUCKET``: aquí, el mismo depósito
