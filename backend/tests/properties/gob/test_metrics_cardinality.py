@@ -259,7 +259,12 @@ class World:
 
 
 def _drive(gob: GobPlatform, plan: NodePlan) -> None:
-    """Un nodo nuevo en su organización y lo que ``plan`` le hace hacer por las rutas reales."""
+    """Un nodo nuevo en su organización y lo que ``plan`` le hace hacer por las rutas reales.
+
+    La hora simulada vuelve antes a la de la base: el nodo anterior pudo avanzarla 25 h (clips
+    huérfanos) y la concesión del instalador se compara con ``now()`` de la base (VIG-135).
+    """
+    gob.resync()
     flow, zone = catalog_zone(gob, productive=plan.productive)
     if not plan.productive:
         flow.mount(zone)
@@ -323,7 +328,6 @@ def test_nfr_gob_13_cardinality_after_a_run_with_generated_nodes(world: World) -
     @settings(max_examples=examples, deadline=None, database=None)
     @given(fleet=fleets)
     def run(fleet: list[NodePlan]) -> None:
-        world.gob.resync()
         for plan in fleet:
             _drive(world.gob, plan)
             world.nodes += 1
@@ -333,7 +337,6 @@ def test_nfr_gob_13_cardinality_after_a_run_with_generated_nodes(world: World) -
         hypothesis_seed(value)(run)()
     # La ejecución no es vacía: además de la flota generada, un nodo que lo hace todo (todas las
     # familias por nodo, también la serie ``ignored``) y su comprobación.
-    world.gob.resync()
     _drive(world.gob, NodePlan(False, 2, True, True, 0, 1, True, True, True))
     extrapolation = _check(world)
     print(json.dumps(extrapolation.__dict__, ensure_ascii=False))
