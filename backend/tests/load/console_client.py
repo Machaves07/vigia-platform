@@ -120,6 +120,9 @@ class ConsoleTargets:
     node_ids: tuple[uuid.UUID, ...]
     zone_ids: tuple[uuid.UUID, ...]
     plant_ids: tuple[uuid.UUID, ...]
+    record_ids: tuple[uuid.UUID, ...] = ()
+    """Actas de comisionamiento cerradas de la flota (``GET /commissioning-records/{id}``, ya
+    publicada por VIG-158): sin ellas, el identificador es uno cualquiera y la ruta responde 404."""
 
 
 @dataclass
@@ -170,7 +173,9 @@ class ConsoleClient:
         values = {
             "node_id": str(rng.choice(targets.node_ids)),
             "zone_id": str(rng.choice(targets.zone_ids)),
-            "record_id": str(uuid.uuid4()),
+            "record_id": str(
+                rng.choice(targets.record_ids) if targets.record_ids else uuid.uuid4()
+            ),
         }
         path = route.template.format(**values)
         if route.name == "GET /fleet/nodes":
