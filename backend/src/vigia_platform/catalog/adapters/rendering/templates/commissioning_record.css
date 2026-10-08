@@ -1,0 +1,110 @@
+/* Acta de comisionamiento legible (LC-GOB-08). Solo las fuentes empaquetadas de
+   backend/resources/fonts/noto-sans (SIL OFL 1.1): las URL relativas se resuelven contra esa
+   carpeta y PackagedFontFetcher deniega cualquier otra. Sin imágenes ni recursos externos. */
+
+@font-face {
+  font-family: "Vigia Noto Sans";
+  font-weight: normal;
+  font-style: normal;
+  src: url("NotoSans-Regular.ttf");
+}
+
+@font-face {
+  font-family: "Vigia Noto Sans";
+  font-weight: bold;
+  font-style: normal;
+  src: url("NotoSans-Bold.ttf");
+}
+
+@page {
+  size: A4;
+  margin: 18mm 14mm 20mm 14mm;
+  @bottom-left {
+    content: "Acta de comisionamiento: vista generada a demanda, no almacenada";
+    font-family: "Vigia Noto Sans";
+    font-size: 7pt;
+    color: #555;
+  }
+  @bottom-right {
+    content: "Página " counter(page) " de " counter(pages);
+    font-family: "Vigia Noto Sans";
+    font-size: 7pt;
+    color: #555;
+  }
+}
+
+html {
+  font-family: "Vigia Noto Sans";
+  font-size: 9pt;
+  line-height: 1.3;
+  color: #111;
+}
+
+h1 {
+  font-size: 16pt;
+  margin: 0 0 4pt 0;
+}
+
+h2 {
+  font-size: 12pt;
+  margin: 14pt 0 4pt 0;
+  border-bottom: 0.5pt solid #888;
+}
+
+h3 {
+  font-size: 10pt;
+  margin: 8pt 0 3pt 0;
+}
+
+p.note {
+  font-size: 8pt;
+  color: #444;
+  margin: 2pt 0 6pt 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table.facts th {
+  text-align: left;
+  font-weight: bold;
+  width: 40%;
+  padding: 1.5pt 4pt 1.5pt 0;
+  vertical-align: top;
+}
+
+table.facts td {
+  padding: 1.5pt 0;
+  vertical-align: top;
+}
+
+table.grid th,
+table.grid td {
+  border: 0.4pt solid #999;
+  padding: 1.5pt 3pt;
+  text-align: left;
+  vertical-align: top;
+}
+
+table.grid thead th {
+  background: #eee;
+}
+
+table.grid tbody th {
+  font-weight: normal;
+}
+
+table.matrix {
+  font-size: 7.5pt;
+}
+
+table.matrix tr {
+  page-break-inside: avoid;
+}
+
+td.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -112,6 +112,7 @@ from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
 from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
     PostgresWalkTestRepository,
 )
+from vigia_platform.catalog.adapters.rendering import RecordDocumentRenderer
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import ADMISSION_RECORD_TYPE, AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
@@ -999,6 +1000,11 @@ CASES: Final[dict[tuple[str, str], Case]] = {
     ("GET", "/commissioning-records/{record_id}"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/commissioning-records/{i.commissioning_record}")
     ),
+    # VIG-160: el documento legible del acta, con el mismo alcance que el acta estructurada.
+    ("GET", "/commissioning-records/{record_id}/document"): Case(
+        Kind.RESOURCE,
+        lambda i: Call("GET", f"/commissioning-records/{i.commissioning_record}/document"),
+    ),
     ("POST", "/zones/{zone_id}/walk-tests/regression-rerun"): Case(
         Kind.RESOURCE,
         lambda i: Call(
@@ -1271,11 +1277,11 @@ U03_NAMED: Final = frozenset(
         ("PUT", "/zones/{zone_id}/signals"),
         ("PUT", "/zones/{zone_id}/thresholds"),
         ("PUT", "/zones/{zone_id}/windows"),
+        ("GET", "/commissioning-records/{record_id}/document"),
     }
 )
-"""Las rutas que TASK-228 nombra y que existen en ``main``. ``POST /walk-tests/{id}/exposure-
-samples`` y ``GET /commissioning-records/{id}/document`` llegan con VIG-154 y VIG-160: la
-cobertura (``uncovered``) les exigirá su caso entonces."""
+"""Las rutas que TASK-228 nombra y que existen en ``main`` (el documento del acta, desde
+VIG-160)."""
 
 
 def u03_person_routes(routes: Sequence[BaseRoute]) -> set[tuple[str, str]]:
@@ -2100,6 +2106,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                         records=records,
                         exposures=exposures,
                         regression_reruns=reruns,
+                        record_documents=RecordDocumentRenderer(pool=pool),
                     ),
                     FLEET_STATE_KEY: fleet_http(
                         FleetDependencies(
@@ -2397,6 +2404,7 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "POST /walk-tests/{session_id}/close",
         "POST /walk-tests/{session_id}/exposure-samples",
         "GET /commissioning-records/{record_id}",
+        "GET /commissioning-records/{record_id}/document",
         "POST /zones/{zone_id}/walk-tests/regression-rerun",
         "GET /zones/{zone_id}/commissioning-clips",
     }

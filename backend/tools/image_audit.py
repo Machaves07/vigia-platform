@@ -11,6 +11,11 @@ Comprueba, sin arrancar la imagen, lo que la construcción promete:
   archivo se llama como una clave de SSH (``id_rsa``, ``id_ed25519``…) ni está en un directorio
   ``.ssh`` salvo las huellas de servidores conocidos.
 
+- **Fuentes del documento del acta** (TASK-217, NFR-GOB-32): cada archivo de
+  ``backend/resources/fonts/`` (Noto Sans y su ``OFL.txt``) está en ``/app/resources/fonts/`` con
+  el mismo SHA-256, y ningún archivo de ninguna capa vive en ``/usr/share/fonts`` ni en
+  ``/usr/local/share/fonts``: el documento solo puede usar las fuentes empaquetadas.
+
 El material de ``--needle-file`` es la propia clave de despliegue que usó la construcción: se
 buscan sus líneas de base64 (de 16 caracteres o más), no la cabecera, que también aparece como
 constante en bibliotecas de criptografía. Las líneas nunca se imprimen.
@@ -19,6 +24,7 @@ Uso::
 
     docker save <imagen> -o imagen.tar
     uv run python tools/image_audit.py imagen.tar [--needle-file CLAVE ...] [--needle-env VAR ...]
+        [--fonts-dir backend/resources/fonts]
 
 Termina en 0 si todo cumple, en 1 si hay hallazgos (los nombra, sin mostrar el secreto) y en 2 si
 el archivo no es una imagen guardada.
@@ -27,17 +33,34 @@ el archivo no es una imagen guardada.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
 import tarfile
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, Any, Final
 
-__all__ = ["AuditError", "Finding", "audit_image", "main", "needles_from_key"]
+__all__ = [
+    "PACKAGED_FONTS",
+    "AuditError",
+    "Finding",
+    "audit_image",
+    "main",
+    "needles_from_key",
+    "packaged_fonts",
+]
+
+PACKAGED_FONTS: Final = Path(__file__).resolve().parents[1] / "resources" / "fonts"
+"""``backend/resources/fonts``: lo que la imagen debe llevar en ``/app/resources/fonts``."""
+IMAGE_FONTS: Final = PurePosixPath("app/resources/fonts")
+SYSTEM_FONT_DIRECTORIES: Final = (
+    PurePosixPath("usr/share/fonts"),
+    PurePosixPath("usr/local/share/fonts"),
+)
 
 MAX_SCANNED_BYTES: Final = 256 * 1024 * 1024
 """Tope de lectura por archivo: uno mayor se lee por trozos solapados, nunca entero."""
@@ -120,9 +143,35 @@ def _ssh_name_problem(path: PurePosixPath) -> str | None:
     return None
 
 
+def packaged_fonts(directory: Path = PACKAGED_FONTS) -> dict[PurePosixPath, str]:
+    """Ruta en la imagen → SHA-256 de cada archivo de ``directory`` (``AuditError`` si no hay)."""
+    try:
+        files = sorted(path for path in directory.rglob("*") if path.is_file())
+    except OSError as error:
+        raise AuditError(f"no se pudo leer {directory} ({error.strerror})") from None
+    if not files:
+        raise AuditError(f"{directory} no tiene fuentes que exigir en la imagen")
+    return {
+        IMAGE_FONTS / path.relative_to(directory).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in files
+    }
+
+
+def _system_font(path: PurePosixPath) -> bool:
+    return any(path.is_relative_to(directory) for directory in SYSTEM_FONT_DIRECTORIES)
+
+
 def _layer_findings(
-    layer: tarfile.TarFile, label: str, needles: Sequence[bytes]
+    layer: tarfile.TarFile,
+    label: str,
+    needles: Sequence[bytes],
+    watched: Iterable[PurePosixPath] = (),
+    digests: dict[PurePosixPath, str] | None = None,
 ) -> Iterator[Finding]:
+    """Hallazgos de la capa; anota en ``digests`` el SHA-256 de los archivos de ``watched``."""
+    wanted = frozenset(watched)
     for member in layer:
         path = PurePosixPath(member.name.removeprefix("./"))
         if path.name.startswith(".wh."):
@@ -131,15 +180,32 @@ def _layer_findings(
             name_problem = _ssh_name_problem(path)
             if name_problem is not None:
                 yield Finding(f"{label}:/{path}", name_problem)
+            if _system_font(path):
+                yield Finding(f"{label}:/{path}", "fuente del sistema: solo valen las empaquetadas")
         if not member.isfile():
             continue
         handle = layer.extractfile(member)
         if handle is None:
             continue
         with handle:
-            problem = _scan_stream(handle, needles)
+            if path in wanted and digests is not None:
+                data = handle.read(MAX_SCANNED_BYTES)
+                digests[path] = hashlib.sha256(data).hexdigest()
+                problem = _scan_bytes(data, needles)
+            else:
+                problem = _scan_stream(handle, needles)
         if problem is not None:
             yield Finding(f"{label}:/{path}", problem)
+
+
+def _font_findings(
+    required: Mapping[PurePosixPath, str], found: Mapping[PurePosixPath, str]
+) -> Iterator[Finding]:
+    for path, digest in sorted(required.items()):
+        if path not in found:
+            yield Finding(f"/{path}", "falta la fuente empaquetada del documento del acta")
+        elif found[path] != digest:
+            yield Finding(f"/{path}", "la fuente de la imagen no es la del repositorio")
 
 
 def _read_json(archive: tarfile.TarFile, name: str) -> Any:
@@ -182,7 +248,11 @@ def _history_findings(config: dict[str, Any], needles: Sequence[bytes]) -> Itera
             yield Finding(f"history[{index}]", problem)
 
 
-def _audit_archive(archive: tarfile.TarFile, needles: Sequence[bytes]) -> list[Finding]:
+def _audit_archive(
+    archive: tarfile.TarFile,
+    needles: Sequence[bytes],
+    fonts: Mapping[PurePosixPath, str] | None,
+) -> list[Finding]:
     manifest = _read_json(archive, "manifest.json")
     if not isinstance(manifest, list) or len(manifest) != 1:
         raise AuditError("manifest.json debe describir exactamente una imagen")
@@ -194,6 +264,7 @@ def _audit_archive(archive: tarfile.TarFile, needles: Sequence[bytes]) -> list[F
     if not isinstance(layers, list) or not layers:
         raise AuditError("la imagen no tiene capas")
     findings = [*_user_findings(config), *_history_findings(config, needles)]
+    digests: dict[PurePosixPath, str] = {}
     for number, name in enumerate(layers, start=1):
         try:
             member = archive.getmember(str(name))
@@ -203,15 +274,24 @@ def _audit_archive(archive: tarfile.TarFile, needles: Sequence[bytes]) -> list[F
         if handle is None:
             raise AuditError(f"la capa {name} no es un archivo")
         with handle, tarfile.open(fileobj=handle, mode="r|*") as layer:
-            findings.extend(_layer_findings(layer, f"capa {number}", needles))
+            findings.extend(_layer_findings(layer, f"capa {number}", needles, fonts or {}, digests))
+    if fonts is not None:
+        findings.extend(_font_findings(fonts, digests))
     return findings
 
 
-def audit_image(path: Path, needles: Sequence[bytes] = ()) -> list[Finding]:
-    """Hallazgos de la imagen guardada en ``path`` (vacío si cumple)."""
+def audit_image(
+    path: Path,
+    needles: Sequence[bytes] = (),
+    fonts: Mapping[PurePosixPath, str] | None = None,
+) -> list[Finding]:
+    """Hallazgos de la imagen guardada en ``path`` (vacío si cumple).
+
+    Con ``fonts`` (``packaged_fonts()``), exige además esas fuentes con ese SHA-256.
+    """
     try:
         with tarfile.open(path, mode="r:*") as archive:
-            return _audit_archive(archive, needles)
+            return _audit_archive(archive, needles, fonts)
     except (OSError, tarfile.TarError) as error:
         raise AuditError(f"no se pudo leer {path}: {error}") from None
 
@@ -236,6 +316,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="VARIABLE",
         help="variable de entorno con la clave (la canalización no la escribe en disco)",
     )
+    parser.add_argument(
+        "--fonts-dir",
+        type=Path,
+        default=PACKAGED_FONTS,
+        metavar="CARPETA",
+        help="fuentes empaquetadas que la imagen debe llevar (backend/resources/fonts)",
+    )
     args = parser.parse_args(argv)
     try:
         keys = [key.read_text(encoding="ascii", errors="ignore") for key in args.needle_file]
@@ -246,7 +333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         needles = [needle for key in keys for needle in needles_from_key(key)]
         if keys and not needles:
             raise AuditError("la clave no tiene material que buscar")
-        findings = audit_image(args.image, needles)
+        fonts = packaged_fonts(args.fonts_dir)
+        findings = audit_image(args.image, needles, fonts)
     except (AuditError, OSError) as error:
         print(f"image_audit: {error}", file=sys.stderr)
         return 2
@@ -257,7 +345,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(
         f"image_audit: usuario no root; ninguna clave privada en el historial ni en las capas"
-        f" ({len(needles)} líneas de material buscadas)"
+        f" ({len(needles)} líneas de material buscadas); {len(fonts)} archivos de fuentes"
+        " empaquetadas y ninguna fuente del sistema"
     )
     return 0
 

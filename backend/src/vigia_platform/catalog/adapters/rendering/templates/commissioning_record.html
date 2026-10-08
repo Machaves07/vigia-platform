@@ -1,0 +1,173 @@
+{#- Acta de comisionamiento legible (LC-GOB-08, NFR-GOB-69). Autoescape activo: todo valor se
+    escapa. Sin JavaScript. Cada hoja de la vista va en un elemento con data-field="<ruta>": la
+    prueba campo a campo compara estos elementos con GET /commissioning-records/{id}. -#}
+{%- macro v(leaf) -%}<span data-field="{{ leaf.path }}">{{ leaf.text }}</span>{%- endmacro -%}
+{%- macro cell(leaf) -%}<td data-field="{{ leaf.path }}">{{ leaf.text }}</td>{%- endmacro -%}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Acta de comisionamiento</title>
+</head>
+<body>
+<header>
+  <h1>Acta de comisionamiento</h1>
+  <p class="note">Documento generado a demanda a partir del acta estructurada del expediente. El
+  acta del expediente es la única fuente de verdad; este documento es solo una vista y no se
+  almacena.</p>
+</header>
+
+<section>
+  <h2>Datos del acta</h2>
+  <table class="facts">
+    <tr><th>Acta</th><td>{{ v(record.commissioning_record_id) }}</td></tr>
+    <tr><th>Sesión de walk-test</th><td>{{ v(record.session_id) }}</td></tr>
+    <tr><th>Zona</th><td>{{ v(record.zone_id) }}</td></tr>
+    <tr><th>Versión del catálogo</th><td>{{ v(record.catalog_version) }}</td></tr>
+    <tr><th>Tipo de sesión</th><td>{{ v(record.kind) }}</td></tr>
+    <tr><th>Pases por celda</th><td>{{ v(record.passes_per_cell) }}</td></tr>
+    <tr><th>Cierre (UTC)</th><td>{{ v(record.closed_at) }}</td></tr>
+    <tr><th>Duración total de los pasos (ms)</th><td>{{ v(record.total_duration_ms) }}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Resultado de la matriz</h2>
+  <table class="facts">
+    <tr><th>Falsos negativos</th><td>{{ v(record.false_negatives_total) }}</td></tr>
+    <tr><th>Tasa de falsas alarmas observada</th><td>{{ v(record.false_alarm_rate_observed) }}</td></tr>
+    <tr><th>Umbral de falsas alarmas</th><td>{{ v(record.false_alarm_threshold) }}</td></tr>
+  </table>
+  <h3>Aceptación de falsas alarmas</h3>
+  {% if record.false_alarm_acceptance is mapping %}
+  <table class="facts">
+    <tr><th>Motivo</th><td class="text">{{ v(record.false_alarm_acceptance.reason_es) }}</td></tr>
+    <tr><th>Aceptada por</th><td>{{ v(record.false_alarm_acceptance.accepted_by) }}</td></tr>
+    <tr><th>Aceptada el (UTC)</th><td>{{ v(record.false_alarm_acceptance.accepted_at) }}</td></tr>
+  </table>
+  {% else %}
+  <p>Sin aceptación registrada: {{ v(record.false_alarm_acceptance) }}</p>
+  {% endif %}
+  <h3>Filas de la matriz</h3>
+  <table class="grid matrix">
+    <thead>
+      <tr><th>Fila</th><th>Detectados</th><th>No detectados</th><th>Falsas alarmas</th><th>Evidencias sin clip de verificación</th></tr>
+    </thead>
+    <tbody>
+    {% for row in record.matrix_results %}
+      <tr>
+        {{ cell(row.row_id) }}{{ cell(row.detected) }}{{ cell(row.missed) }}{{ cell(row.false_alarms) }}
+        <td>{% for ref in row.unverifiable_evidence_refs %}{{ v(ref) }}{% if not loop.last %}<br>{% endif %}{% else %}Ninguna{% endfor %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5">Sin filas</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Latencia por tramos</h2>
+  <p class="note">Cada tramo se mide con su propio reloj y no se restan entre sí. Las sumas son
+  orientativas, nunca una cifra única prometida.</p>
+  <table class="grid">
+    <thead>
+      <tr><th>Tramo</th><th>Mediana (ms)</th><th>p95 (ms)</th><th>Máximo (ms)</th><th>Repeticiones</th><th>Reloj</th></tr>
+    </thead>
+    <tbody>
+    {% for name, title in tranches %}
+      {% set tranche = record.latency[name] %}
+      <tr>
+        <th>{{ title }}</th>
+        {% if tranche is mapping %}
+        {{ cell(tranche.median_ms) }}{{ cell(tranche.p95_ms) }}{{ cell(tranche.max_ms) }}{{ cell(tranche.repetitions) }}{{ cell(tranche.measured_by) }}
+        {% else %}
+        <td colspan="5">No medido: {{ v(tranche) }}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <table class="facts">
+    <tr><th>Tramos no medidos</th><td>{% for name in record.latency.not_measured %}{{ v(name) }}{% if not loop.last %}<br>{% endif %}{% else %}Ninguno{% endfor %}</td></tr>
+    <tr><th>Suma orientativa de las medianas (ms)</th><td>{{ v(record.latency.indicative_sum_median_ms) }}</td></tr>
+    <tr><th>Suma orientativa de los p95 (ms)</th><td>{{ v(record.latency.indicative_sum_p95_ms) }}</td></tr>
+    <tr><th>Sumas orientativas</th><td>{{ v(record.latency.indicative) }}</td></tr>
+    <tr><th>Repeticiones contadas</th><td>{{ v(record.latency.repetitions_counted) }}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>Cámaras</h2>
+  <h3>Tasa de imágenes medida</h3>
+  <table class="grid">
+    <thead><tr><th>Cámara</th><th>Medida (fps)</th><th>Mínima declarada (fps)</th></tr></thead>
+    <tbody>
+    {% for camera in record.cameras_measured %}
+      <tr>{{ cell(camera.camera_id) }}{{ cell(camera.measured_fps) }}{{ cell(camera.declared_min_fps) }}</tr>
+    {% else %}
+      <tr><td colspan="3">Sin cámaras</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h3>Prueba de oclusión</h3>
+  <table class="grid">
+    <thead><tr><th>Cámara</th><th>Verificación</th><th>Prueba</th></tr></thead>
+    <tbody>
+    {% for occlusion in record.occlusion_summary %}
+      <tr>{{ cell(occlusion.camera_id) }}{{ cell(occlusion.verification) }}{{ cell(occlusion.test_id) }}</tr>
+    {% else %}
+      <tr><td colspan="3">Sin pruebas</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Pasos</h2>
+  <table class="grid">
+    <thead><tr><th>Tipo de paso</th><th>Duración (ms)</th></tr></thead>
+    <tbody>
+    {% for step in record.steps_summary %}
+      <tr>{{ cell(step.step_kind) }}{{ cell(step.duration_ms) }}</tr>
+    {% else %}
+      <tr><td colspan="2">Sin pasos</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Mediciones del instalador</h2>
+  <table class="facts">
+    <tr><th>Latencia de la baliza p95 (ms)</th><td>{{ v(record.installer_measurements.beacon_latency_ms_p95) }}</td></tr>
+    <tr><th>Medida por</th><td>{{ v(record.installer_measurements.measured_by) }}</td></tr>
+  </table>
+  <h3>Líneas base del encuadre</h3>
+  <table class="grid">
+    <thead><tr><th>Cámara</th><th>Zona</th><th>Capturada (UTC)</th></tr></thead>
+    <tbody>
+    {% for baseline in record.installer_measurements.baselines %}
+      <tr>{{ cell(baseline.camera_id) }}{{ cell(baseline.zone_id) }}{{ cell(baseline.captured_at) }}</tr>
+    {% else %}
+      <tr><td colspan="3">Sin líneas base</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Firmas</h2>
+  <table class="grid">
+    <thead><tr><th>Usuario</th><th>Rol</th><th>Firmada (UTC)</th></tr></thead>
+    <tbody>
+    {% for signature in record.signatures %}
+      <tr>{{ cell(signature.user_id) }}{{ cell(signature.role_in_use) }}{{ cell(signature.signed_at) }}</tr>
+    {% else %}
+      <tr><td colspan="3">Sin firmas</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+</body>
+</html>

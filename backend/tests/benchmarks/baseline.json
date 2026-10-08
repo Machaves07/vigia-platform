@@ -163,6 +163,15 @@
       "p95": 14.013,
       "objective": 50.0
     },
+    "gob_record_document": {
+      "label": "Documento legible del acta de la matriz máxima (NFR-GOB-05)",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 1538.134,
+      "p95": 1677.973,
+      "objective": 3000.0,
+      "regression_factor": 1.2
+    },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",
       "kind": "latency",

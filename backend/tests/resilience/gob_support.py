@@ -77,6 +77,7 @@ from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.observability.metrics import MetricName, PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import Outbox
@@ -223,9 +224,13 @@ def process_units(
     kms: Any,
     storage: Any,
     metrics: PlatformMetrics | None = None,
+    cpu_pool: CpuPool | None = None,
 ) -> ProcessUnits:
     """``UnitServices`` de un proceso del arnés sobre su base, como la raíz de composición
-    (``runtime.core.build_core``), con los dobles de firma, KMS y almacén del proceso."""
+    (``runtime.core.build_core``), con los dobles de firma, KMS y almacén del proceso.
+
+    ``cpu_pool`` es el pool del proceso: lo exigen las rutas de U-03 (el documento del acta,
+    VIG-160), así que el proceso de API lo pasa; el worker no instala rutas y puede omitirlo."""
     record_types = record_type_registry(registered_units())
     free_text = free_text_registry(registered_units())
     audit = AuditWriter(
@@ -264,6 +269,7 @@ def process_units(
         ),
         kms=kms,
         evidence=storage,
+        cpu_pool=cpu_pool,
     )
     return ProcessUnits(services=services, record_types=record_types)
 

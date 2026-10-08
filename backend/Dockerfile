@@ -75,9 +75,24 @@ FROM ${PYTHON_IMAGE} AS runtime
 # Arreglos de seguridad de Debian publicados después del digest de la base (el escaneo de `ci.yml`
 # falla con una vulnerabilidad alta que ya tenga arreglo) y sin `pip`, que la imagen no usa: el
 # entorno lo instala `uv` en la construcción.
+#
+# Bibliotecas nativas de WeasyPrint para el documento del acta (TASK-217, NFR-GOB-32): Pango
+# (>= 1.44) con `pangoft2`, HarfBuzz con su subconjunto de fuentes y fontconfig. Sin fuentes del
+# sistema: Debian las arrastra como dependencia de `fontconfig-config` y se purgan, así que el
+# documento solo puede usar las fuentes empaquetadas en `backend/resources/fonts/` (SIL OFL 1.1).
+# La purga con `--force-depends` deja `fontconfig-config` con su dependencia de fuentes sin cumplir
+# en la base de dpkg. La ejecución no la nota y la imagen no usa apt, pero una imagen derivada que
+# haga `apt-get install` fallará: tendría que reinstalar las fuentes o usar un paquete vacío que
+# las provea (equivs).
 RUN apt-get update \
     && apt-get upgrade --yes --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/* \
+    && apt-get install --yes --no-install-recommends \
+       libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 libfontconfig1 \
+    && fonts="$(dpkg-query --show --showformat='${db:Status-Abbrev} ${Package}\n' 'fonts-*' 2>/dev/null \
+       | awk '$1 == "ii" { print $2 }')" \
+    && if [ -n "$fonts" ]; then dpkg --purge --force-depends $fonts; fi \
+    && test -z "$(find /usr/share/fonts /usr/local/share/fonts -type f 2>/dev/null)" \
+    && rm -rf /var/lib/apt/lists/* /var/cache/fontconfig \
     && python -m pip uninstall --yes --quiet pip \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.12
 
@@ -90,9 +105,12 @@ RUN groupadd --system --gid 10001 vigia \
 # escribe.
 COPY --from=build --chown=root:root /app /app
 
+# La caché de fontconfig (y las fuentes temporales de WeasyPrint) van a `/tmp`: la raíz sigue
+# siendo de solo lectura.
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    XDG_CACHE_HOME=/tmp/cache
 
 WORKDIR /app
 USER 10001:10001
