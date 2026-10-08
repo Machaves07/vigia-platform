@@ -10,10 +10,12 @@ verificación confirmados (comisionamiento) y clips huérfanos (``mark_orphan_cl
 Sobre **todo** lo exportado, tras cada ejemplo:
 
 - ninguna métrica fuera del catálogo y ninguna etiqueta fuera de la lista permitida de la suya;
-- ninguna etiqueta por zona, hallazgo, acta, usuario ni otra entidad (``ENTITY_LABELS``);
+- ninguna etiqueta por zona, hallazgo, acta, usuario, petición ni otra entidad (``ENTITY_LABELS``,
+  derivada de los identificadores que deja salir la política de redacción);
 - con etiqueta de nodo, solo contadores y medidores, nunca histogramas;
 - los histogramas por ruta, solo por ruta, método y código;
-- a lo sumo **8 familias** de métricas por nodo (``MAX_NODE_FAMILIES``, ver la nota);
+- a lo sumo **8 familias** y **9 series** por nodo (``MAX_NODE_FAMILIES``, ``MAX_SERIES_PER_NODE``;
+  ver la nota);
 - la extrapolación a escala objetivo (100 nodos, 50 organizaciones) queda por debajo del techo
   de unas **20 000 series** (``SERIES_CEILING``).
 
@@ -24,8 +26,12 @@ histograma con ``node_id`` y comprueba que la metapropiedad lo nombra.
 `[estimación propia]`; NFR-GOB-55 y TASK-223 emiten 8 **familias** por nodo
 (``clip_grants_issued/used/orphaned_total``, ``fleet_heartbeats_total`` y cuatro medidores), y
 ``fleet_heartbeats_total`` se parte por ``result`` (``accepted`` o ``ignored``): un nodo que
-reenvía un latido llega a 9 series. La propiedad acota las familias (8) y publica las series por
-nodo; la extrapolación cuenta series. La lectura queda declarada en el PR de TASK-233.
+reenvía un latido llega a 9 series. La propiedad acota las familias (8) y las series (9, lo que hoy
+emite el código: una etiqueta nueva en una métrica por nodo la supera); la extrapolación cuenta
+series. La lectura queda declarada en el PR de TASK-233 para que decida el dueño.
+
+``test_catalog_declares_no_forbidden_label`` aplica las mismas reglas a lo **declarado** en
+``CATALOG`` (una métrica que la ejecución no llegó a emitir también cuenta).
 
 Solo datos generados.
 """
@@ -59,6 +65,7 @@ from tests.factories import uuid7
 from tests.gob_platform_support import GobPlatform, gob_platform, ok
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
 from vigia_platform.shared.api.declarations import NodeRoute
+from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.metrics import (
     CATALOG,
     METER_NAME,
@@ -70,16 +77,17 @@ from vigia_platform.shared.observability.metrics import (
 
 pytestmark = pytest.mark.integration
 
-ENTITY_LABELS: Final = frozenset(
+PERMITTED_IDENTIFIERS: Final = frozenset({"node_id", "organization_id"})
+"""Los únicos identificadores que una métrica puede llevar (NFR-GOB-13, NFR-GOB-55 y 56)."""
+ENTITY_LABELS: Final = (
+    redaction.IDENTIFIER_KEYS | redaction.HASH_KEYS
+) - PERMITTED_IDENTIFIERS | frozenset(
     {
-        "zone_id",
         "camera_id",
         "finding_id",
         "detection_id",
-        "event_id",
         "episode_id",
         "clip_id",
-        "record_id",
         "commissioning_record_id",
         "session_id",
         "agreement_id",
@@ -87,11 +95,21 @@ ENTITY_LABELS: Final = frozenset(
         "user_id",
     }
 )
-"""Etiquetas prohibidas en cualquier métrica: zona, hallazgo, acta, usuario y sus parientes."""
+"""Etiquetas prohibidas en cualquier métrica: por zona, hallazgo, acta, usuario o petición.
+
+Se deriva de la política de redacción: **todo** identificador o hash que ``AttributePolicy`` deja
+salir (``actor_id`` es el usuario, ``correlation_id`` la petición; también ``plant_id``,
+``zone_id``, ``record_id``, ``event_id`` y ``source_ip_tag``) salvo los dos permitidos. Un
+identificador que la política admita mañana queda prohibido por defecto. El resto son nombres
+que la política hoy descarta, por si dejara de hacerlo."""
 NODE_LABEL: Final = "node_id"
 ORGANIZATION_LABEL: Final = "organization_id"
 ROUTE_HISTOGRAM_LABELS: Final = frozenset({"route", "method", "status_class", "code"})
 MAX_NODE_FAMILIES: Final = 8
+MAX_SERIES_PER_NODE: Final = 9
+"""Las 8 familias por nodo más la partición de ``fleet_heartbeats_total`` por ``result``
+(``accepted`` e ``ignored``). Pendiente de decisión del dueño frente a las «8 series» de
+NFR-GOB-13 (ver la nota del módulo); cualquier etiqueta nueva en una métrica por nodo la supera."""
 NODES_AT_SCALE: Final = 100
 ORGANIZATIONS_AT_SCALE: Final = 50
 SERIES_CEILING: Final = 20_000
@@ -177,6 +195,9 @@ def violations(points: Sequence[Point], catalog: Sequence[MetricSpec] = CATALOG)
     for node, names in sorted(families.items()):
         if len(names) > MAX_NODE_FAMILIES:
             found.append(f"nodo {node}: {len(names)} familias > {MAX_NODE_FAMILIES}")
+        series = sum(1 for point in points if point.value_of(NODE_LABEL) == node)
+        if series > MAX_SERIES_PER_NODE:
+            found.append(f"nodo {node}: {series} series > {MAX_SERIES_PER_NODE}")
     return found
 
 
@@ -341,7 +362,20 @@ def test_nfr_gob_13_cardinality_after_a_run_with_generated_nodes(world: World) -
     extrapolation = _check(world)
     print(json.dumps(extrapolation.__dict__, ensure_ascii=False))
     assert extrapolation.max_families_per_node == MAX_NODE_FAMILIES, extrapolation
+    assert extrapolation.max_series_per_node == MAX_SERIES_PER_NODE, extrapolation
     assert world.nodes >= 2
+
+
+def test_catalog_declares_no_forbidden_label() -> None:
+    """Lo mismo sobre lo **declarado**: una serie por métrica del catálogo con todas sus
+    etiquetas (la ejecución solo ve lo que emite; una métrica sin emitir aún también cuenta)."""
+    points = [
+        Point(str(spec.name), spec.kind, tuple((key, "x") for key in sorted(spec.attributes)))
+        for spec in CATALOG
+    ]
+    assert violations(points) == []
+    per_node = {point.metric for point in points if NODE_LABEL in point.keys}
+    assert len(per_node) == MAX_NODE_FAMILIES, sorted(per_node)
 
 
 def test_probe_histogram_with_node_id_is_caught(world: World) -> None:

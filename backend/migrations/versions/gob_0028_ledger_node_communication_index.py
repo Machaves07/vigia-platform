@@ -20,6 +20,13 @@ da la última transición de cada nodo sin leer su historia. Sobre la tabla part
 cada partición y en las que se creen después. Medido en la volumetría de U-03 con un año de la
 organización mayor: 30 s por página sin él; con un índice solo por nodo, 2 s; con este, 160 ms.
 
+**Candado.** ``CREATE INDEX`` sin ``CONCURRENTLY`` toma ``SHARE`` sobre ``ledger.ledger_record`` y
+para los ``INSERT`` del expediente mientras dura. Aquí se acepta: no hay base en producción
+(A-47 difiere el primer despliegue), así que nace vacío, y el índice parcial solo recorre la
+tabla (0,9 s con 1,9 M de filas en la revisión de VIG-170). Para un índice futuro sobre una tabla
+del expediente **con datos**: ``CREATE INDEX … ON ONLY`` sobre la tabla padre, ``CREATE INDEX
+CONCURRENTLY`` en cada partición fuera de transacción y ``ALTER INDEX … ATTACH PARTITION``.
+
 La imagen anterior ordena por ``since`` convertido a ``timestamptz``: el mismo resultado, sin usar
 el orden del índice (NFR-NUC-14). ``MINIMUM_SCHEMA_VERSION`` no sube: el código de esta imagen da
 el mismo resultado sin él.

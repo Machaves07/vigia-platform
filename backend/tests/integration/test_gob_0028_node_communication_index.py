@@ -5,7 +5,8 @@ La volumetría de U-03 midió ``GET /fleet/nodes`` con un año de la organizaci�
 registros sin zona de la organización (mediana de 30 s por página). Aquí se comprueba:
 
 - el índice está en la tabla particionada y en **cada** partición, con su predicado;
-- la búsqueda del inventario, sin barridos secuenciales, se planifica sobre él **sin ordenar**
+- la búsqueda del inventario, como ``vigia_app`` con el contexto de la seguridad a nivel de fila y
+  sin barridos secuenciales, se planifica sobre él **sin ordenar**
   (el índice da la última transición), y no sobre el índice de zona, que es lo que hacía antes.
 
 Solo datos generados.
@@ -62,10 +63,20 @@ async def _check(dsn: str) -> tuple[bool, list[str], list[str], str]:
                 " AND i.indexdef LIKE '%(organization_id, scope_node_id, ((content_json ->> %'"
             )
         ]
+        # Como la planifica la aplicación: ``vigia_app`` con el contexto de ``Database.read``,
+        # así que la seguridad a nivel de fila entra en el plan.
+        organization = uuid.uuid4()
         async with connection.transaction():
+            await connection.execute("SET LOCAL ROLE vigia_app")
             await connection.execute("SET LOCAL enable_seqscan = off")
+            await connection.execute(
+                "SELECT set_config('vigia.organization_id', $1, true),"
+                " set_config('vigia.actor_kind', 'user', true),"
+                " set_config('vigia.concession_id', '', true)",
+                str(organization),
+            )
             plan = "\n".join(
-                row[0] for row in await connection.fetch(LOOKUP, uuid.uuid4(), uuid.uuid4())
+                row[0] for row in await connection.fetch(LOOKUP, organization, uuid.uuid4())
             )
     finally:
         await connection.close()
