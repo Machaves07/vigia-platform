@@ -63,6 +63,7 @@ __all__ = [
     "LoadProfile",
     "Phase",
     "nightly_profile",
+    "scaled",
     "simulation_profile",
     "write_sealed_dataset",
 ]
@@ -218,9 +219,62 @@ PROFILES: Final[Mapping[str, LoadProfile]] = {
         steady_minutes=480.0,
         console=True,
     ),
+    # Los escenarios de resiliencia de U-03 que mueven la flota con el nodo simulado (LC-GOB-22,
+    # TASK-232): el proceso de los nodos lee el perfil por su nombre.
+    "fs-gob-07": LoadProfile(
+        "fs-gob-07",
+        nodes=100,
+        zones_per_node=3,
+        nodes_per_plant=20,
+        speed_factor=60.0,
+        steady_minutes=2.0,
+        queue_hours=1.0,
+        settle_hours=0.5,
+        console=True,
+    ),
+    "fs-gob-07-smoke": LoadProfile(
+        "fs-gob-07-smoke",
+        nodes=20,
+        zones_per_node=3,
+        nodes_per_plant=20,
+        speed_factor=240.0,
+        steady_minutes=0.5,
+        queue_hours=1.0,
+        settle_hours=0.5,
+        console=True,
+    ),
+    "fs-gob-10": LoadProfile(
+        "fs-gob-10",
+        nodes=100,
+        zones_per_node=1,
+        nodes_per_plant=20,
+        speed_factor=1.0,
+        steady_minutes=6.0,
+    ),
+    "fs-gob-10-smoke": LoadProfile(
+        "fs-gob-10-smoke",
+        nodes=20,
+        zones_per_node=1,
+        nodes_per_plant=20,
+        speed_factor=1.0,
+        steady_minutes=4.0,
+    ),
 }
 """``smoke``: 2 h de régimen, 1 h de cola y 4 h de caída en 2 minutos reales (≤ 3 min).
-``soak``: 8 horas a ritmo real contra ``staging-<n>`` (``soak.py``); la flota es la del entorno."""
+``soak``: 8 horas a ritmo real contra ``staging-<n>`` (``soak.py``); la flota es la del entorno.
+``fs-gob-07``: la reconexión masiva de FS-GOB-07 (una hora de cola de 100 nodos a 60x);
+``fs-gob-10``: 100 nodos a ritmo real durante el reinicio rodante de FS-GOB-10. Sus variantes
+``-smoke`` (20 nodos) ensayan los escenarios en el PC compartido (``VIGIA_LOAD_SCALE=smoke``)."""
+
+
+def scaled(name: str) -> LoadProfile:
+    """El perfil ``name`` o su variante ``-smoke`` según ``VIGIA_LOAD_SCALE``."""
+    scale = os.environ.get(SCALE_VARIABLE, "full").strip().lower() or "full"
+    if scale == "full":
+        return PROFILES[name]
+    if scale == "smoke":
+        return PROFILES[f"{name}-smoke"]
+    raise ValueError(f"{SCALE_VARIABLE} es full o smoke, no {scale!r}")
 
 
 def nightly_profile() -> LoadProfile:

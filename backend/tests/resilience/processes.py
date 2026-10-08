@@ -2,8 +2,9 @@
 
 - ``resilience_catalog``: el catálogo de la bandeja que comparten los procesos de API y de trabajo
   del arnés (un consumidor persistido sin registrar impide arrancar): los eventos y el consumidor
-  de U-02, la tarea de prueba ``worker_probe`` (``tests.worker_support``) y el consumidor
-  ``resilience_effect``, suscrito a ``worker_probe_effect``.
+  de U-02, la tarea de prueba ``worker_probe`` (``tests.worker_support``), el consumidor
+  ``resilience_effect``, suscrito a ``worker_probe_effect``, y los eventos y las siete tareas de
+  U-03 (``gob_support.add_u03``, TASK-232).
 - ``EffectHandler``: el manejador de ``resilience_effect``. Su **efecto** es externo a la base
   (una línea por ``event_id`` en un archivo) e **idempotente por ``event_id``** (BR-NUC-76): si el
   evento ya tiene efecto, no lo repite. Anota cada entrega (con el proceso) en otro archivo.
@@ -38,12 +39,14 @@ from typing import IO, Any, Final
 
 import httpx
 
+from tests.resilience.gob_support import TaskWrapper, add_u03
 from tests.resilience.harness import BACKEND, free_port, wait_until
 from tests.worker_support import EFFECT_EVENT, ProbeTask, worker_catalog
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.publish import OutboxEvent
 from vigia_platform.shared.outbox.registries import Consumer, OutboxCatalog, Schedule
+from vigia_platform.shared.runtime.units import UnitServices
 
 __all__ = [
     "EFFECT_CONSUMER",
@@ -105,8 +108,23 @@ class EffectHandler:
 
 
 def resilience_catalog(
+    probe: ProbeTask,
+    effect: EffectHandler,
+    schedule: Schedule | None = None,
+    services: UnitServices | None = None,
+    wrap: TaskWrapper | None = None,
+) -> OutboxCatalog:
+    """El catálogo del arnés **con U-03 cargado** (``gob_support.add_u03``): sus eventos y sus
+    siete tareas, con los manejadores reales si se dan ``services`` (el worker) y, si no, solo
+    para sincronizar (la API y la prueba)."""
+    return add_u03(u02_catalog(probe, effect, schedule), services, wrap=wrap)
+
+
+def u02_catalog(
     probe: ProbeTask, effect: EffectHandler, schedule: Schedule | None = None
 ) -> OutboxCatalog:
+    """La parte de U-02 del catálogo del arnés, sin U-03: el worker la completa en el sitio con
+    ``add_u03`` cuando ya tiene los servicios (su ``Outbox`` publica con este mismo catálogo)."""
     catalog = worker_catalog(probe, schedule)
     catalog.consumers.register(
         Consumer(
@@ -234,6 +252,9 @@ class Balancer:
     listener: socket.socket = field(init=False)
     served: Counter[str] = field(default_factory=Counter)
     healthy: set[str] = field(default_factory=set)
+    drained: set[str] = field(default_factory=set)
+    """Procesos retirados a mano (``drain``), como un destino desregistrado del balanceador real:
+    no reciben conexiones nuevas aunque respondan 200."""
     _stop: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _turn: int = 0
@@ -276,9 +297,18 @@ class Balancer:
                 self.healthy = current
             self._stop.wait(HEALTH_INTERVAL_SECONDS)
 
+    def drain(self, name: str) -> None:
+        """Deja de enrutar conexiones nuevas a ``name`` (las abiertas siguen hasta cerrarse)."""
+        with self._lock:
+            self.drained.add(name)
+
+    def undrain(self, name: str) -> None:
+        with self._lock:
+            self.drained.discard(name)
+
     def _choose(self) -> str | None:
         with self._lock:
-            names = sorted(self.healthy)
+            names = sorted(self.healthy - self.drained)
             if not names:
                 return None
             name = names[self._turn % len(names)]

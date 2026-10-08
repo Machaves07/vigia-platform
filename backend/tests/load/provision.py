@@ -64,6 +64,7 @@ from tests.conformance.platform_target import (
     _ceil_ms,
     _new_standard,
     _Site,
+    _stamp,
     wait_ready,
 )
 from tests.factories import uuid7
@@ -192,6 +193,8 @@ class Fleet:
     console: ConsoleSession
     enrollment_codes: tuple[str, ...] = field(repr=False, default=())
     """Los códigos de alta usados, solo en memoria: ninguna salida los contiene (PR-GOB-31)."""
+    record_ids: tuple[uuid.UUID, ...] = ()
+    """Un acta de comisionamiento cerrada por planta, la que lee el cliente de consola."""
 
     @property
     def zone_ids(self) -> tuple[uuid.UUID, ...]:
@@ -317,9 +320,82 @@ class FleetProvisioner(Provisioner):
             _ceil_ms(since) + SUITE_LEAD,
             ConsoleSession(site.installer.value, site.concession_id),
             tuple(codes),
+            self._commissioning_records(site, nodes),
         )
 
     # --- Pasos ---------------------------------------------------------------------------------
+
+    def _commissioning_records(
+        self, site: _Site, nodes: Sequence[tuple[uuid.UUID, uuid.UUID, tuple[uuid.UUID, ...]]]
+    ) -> tuple[uuid.UUID, ...]:
+        """Un acta cerrada por planta (la primera zona de su primer nodo), por SQL con la forma
+        del acta, como ``tests/isolation/test_route_isolation.py``: lo que mide la consola es la
+        lectura del acta estructurada (``GET /commissioning-records/{id}``), no su cierre, que
+        tiene sus pruebas (``tests/integration/test_catalog_close_record.py``)."""
+        now = WALL.now()
+        latency = {
+            "node_tranche": {
+                "median_ms": None,
+                "p95_ms": 180,
+                "max_ms": None,
+                "repetitions": None,
+                "measured_by": "installer",
+            },
+            "platform_tranche": None,
+            "exposure_tranche": None,
+            "served_tranche": None,
+            "not_measured": ["platform_tranche", "exposure_tranche", "served_tranche"],
+            "indicative_sum_median_ms": None,
+            "indicative_sum_p95_ms": 180,
+            "indicative": True,
+            "repetitions_counted": 100,
+        }
+        signature = {
+            "user_id": str(uuid.uuid4()),
+            "role_in_use": "coordinator_sst",
+            "signed_at": _stamp(now),
+        }
+        firsts: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
+        for node_id, plant_id, zones in nodes:
+            firsts.setdefault(plant_id, (node_id, zones[0]))
+        records: list[uuid.UUID] = []
+        statements: list[tuple[str, Sequence[Any]]] = []
+        for plant_id, (node_id, zone_id) in firsts.items():
+            session_id, record_id = uuid7(), uuid7()
+            records.append(record_id)
+            statements += [
+                (
+                    "INSERT INTO catalog.walk_test_session (session_id, organization_id, plant_id,"
+                    " zone_id, node_id, catalog_version, kind, status, passes_per_cell,"
+                    " matrix_rows, started_at, last_activity_at, closed_at,"
+                    " commissioning_record_id) VALUES ($1, $2, $3, $4, $5, 1, 'initial', 'closed',"
+                    " 3, '[]', $6, $6, $6, $7)",
+                    (session_id, site.organization_id, plant_id, zone_id, node_id, now, record_id),
+                ),
+                (
+                    "INSERT INTO catalog.commissioning_record (commissioning_record_id,"
+                    " organization_id, plant_id, zone_id, session_id, catalog_version,"
+                    " matrix_results, false_negatives_total, false_alarm_rate_observed,"
+                    " false_alarm_threshold, latency, installer_measurements, cameras_measured,"
+                    " occlusion_summary, total_hours, steps_summary, signatures, closed_at,"
+                    " ledger_record_id) VALUES ($1, $2, $3, $4, $5, 1, '[]', 0, 0, 0, $6, $7,"
+                    " '[]', '[]', 0, '[]', $8, $9, $10)",
+                    (
+                        record_id,
+                        site.organization_id,
+                        plant_id,
+                        zone_id,
+                        session_id,
+                        json.dumps(latency),
+                        json.dumps({"beacon_latency_ms_p95": 180, "baselines": []}),
+                        json.dumps([signature]),
+                        now,
+                        uuid7(),
+                    ),
+                ),
+            ]
+        self.stack.admin(statements)
+        return tuple(records)
 
     def _hierarchy(self, site: _Site, profile: LoadProfile) -> list[uuid.UUID]:
         """Las plantas (administradora) con la familia de coexistencia admitida en cada una."""
