@@ -3,10 +3,11 @@
 **Alta** (``create``, ``POST /zones/{zone_id}/use-agreements``, ``commissioning.run`` sobre la
 zona): antes de escribir nada y en este orden, la zona dentro del alcance (si no,
 ``ResourceNotFound``), los firmantes contra la política de la planta y
-``IdentityQueryPort.users_by_role_and_scope``
-(``check_signatories``: rol en la política, usuario con ese rol sobre la zona, ``copasst`` y
-``minimum``), ``replaces_agreement_id`` (de otra zona, ``agreement_reused_from_other_zone``; de la
-zona pero no el vigente, o ninguno citado habiendo uno vigente, ``AgreementConflict``) y
+``IdentityQueryPort.signatory_candidates`` (``check_signatories``: rol en la política, usuario con
+ese rol sobre la zona, ``copasst`` y ``minimum``; la consulta acotada de A-58 los resuelve también
+bajo concesión de planta, y el nombre se guarda recortado a 120, DE §2.8),
+``replaces_agreement_id`` (de otra zona, ``agreement_reused_from_other_zone``; de la zona pero no
+el vigente, o ninguno citado habiendo uno vigente, ``AgreementConflict``) y
 ``verify_document_refs`` del documento opcional (``kind = use_agreement``, BR-GOB-28; la clave se
 exige antes, porque la verificación no autoriza). Nace en ``pending_signatures``.
 
@@ -69,6 +70,7 @@ from vigia_platform.catalog.application.gates import GateService, GateTransition
 from vigia_platform.catalog.application.signatory_policy import rejected
 from vigia_platform.catalog.detail_codes import CatalogDetailCode
 from vigia_platform.catalog.domain.agreements import (
+    MAX_SIGNATORIES,
     AgreementConfirmation,
     AgreementRuleViolated,
     AgreementViolation,
@@ -91,14 +93,14 @@ from vigia_platform.catalog.domain.enums import (
 )
 from vigia_platform.catalog.domain.gates import ZoneGateState
 from vigia_platform.catalog.domain.time_windows import utc_instant
-from vigia_platform.identity.application.hierarchy import Recipient
+from vigia_platform.identity.application.hierarchy import SignatoryCandidate
 from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
 from vigia_platform.identity.authz.context import with_scopes, with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.application.writer import EscritorExpediente, LedgerDatabase, RecordScope
 from vigia_platform.shared.api.errors import ApiErrorCode, ExternalDependencyDown
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent
@@ -122,15 +124,15 @@ ZONE_ACTIVATED: Final = "zone_activated"
 
 
 class SignatoryLookup(Protocol):
-    """``IdentityQueryPort.users_by_role_and_scope`` de U-02 (LC-NUC-05)."""
+    """``IdentityQueryPort.signatory_candidates`` de U-02 (LC-NUC-05, A-58)."""
 
-    async def users_by_role_and_scope(
+    async def signatory_candidates(
         self,
         context: ScopeContext,
+        zone_id: uuid.UUID,
         roles: Iterable[Role],
-        scope_level: ScopeLevel,
-        scope_id: uuid.UUID,
-    ) -> tuple[Recipient, ...]: ...
+        user_ids: Iterable[uuid.UUID],
+    ) -> tuple[SignatoryCandidate, ...]: ...
 
 
 class AgreementConflict(Exception):
@@ -253,10 +255,13 @@ class AgreementService:
                 else await self._repository.agreement(transaction, request.replaces_agreement_id)
             )
         names: dict[tuple[uuid.UUID, Role], str] = {}
-        if policy is not None:
-            roles = {signatory.role for signatory in signatories}
-            for holder in await self._identity.users_by_role_and_scope(
-                authorized, roles, ScopeLevel.ZONE, zone.zone_id
+        if policy is not None and len(signatories) <= MAX_SIGNATORIES:
+            # Solo los usuarios pedidos (A-58); por encima del tope, check_signatories lo rechaza.
+            for holder in await self._identity.signatory_candidates(
+                authorized,
+                zone.zone_id,
+                {signatory.role for signatory in signatories},
+                {signatory.user_id for signatory in signatories},
             ):
                 names[(holder.user_id, Role(holder.role))] = holder.display_name
         try:

@@ -23,7 +23,10 @@ fixture ``nothing_is_downloaded`` exige cero en cada prueba).
 - **Muestras de exposición**: una por pase, la repetida no cambia nada, pase ajeno
   ``catalog_pass_not_found``; alimentan el tramo 3a.
 - **Alcance**: la sesión, el acta y la zona de otra organización o de otra planta fuera de la
-  concesión responden ``not_found``.
+  concesión responden ``not_found``. Con concesión de planta (VIG-179, A-58) el instalador cierra
+  el acta con firmantes de su planta; uno de otra planta u organización es ``invalid_request``
+  igual que uno inexistente; con la concesión vencida, revocada o de la otra planta, el cierre es
+  ``not_found``.
 
 Solo datos generados (NFR-CTR-43).
 """
@@ -31,6 +34,7 @@ Solo datos generados (NFR-CTR-43).
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import uuid
 from collections.abc import Iterator
@@ -918,6 +922,74 @@ def test_a_plant_concession_does_not_reach_a_zone_of_the_other_plant(world: Clos
         404,
         "not_found",
     )
+
+
+def test_under_a_plant_concession_the_installer_closes_the_record_with_its_signers(
+    world: CloseWorld,
+) -> None:
+    # VIG-179 (A-58): bajo concesión de planta la RLS de A-46 oculta identity.user_account; los
+    # firmantes del acta se resuelven por IdentityQueryPort.signatory_candidates.
+    site = world.walk.a.g.site(plants=2)
+    zone = world.zone(site=site, plant_concession=True)
+    world.ready(zone)
+    (plant_a, _), (plant_b, _) = site.zones()
+    people = world.walk.a
+    on_plant = people.signer(site, Role.PLANT_MANAGER, ScopeLevel.PLANT, plant_a).user_id
+    elsewhere = people.signer(site, Role.PLANT_MANAGER, ScopeLevel.PLANT, plant_b).user_id
+    stranger = people.signer(people.g.site(), Role.COORDINATOR_SST).user_id
+    before = world.written(zone)
+    # Un firmante de otra planta o de otra organización, igual que uno inexistente.
+    refused = [
+        world.post_close(zone, signers=[user]) for user in (elsewhere, stranger, uuid.uuid4())
+    ]
+    for response in refused:
+        _error(response, 400, "invalid_request")
+    bodies = [{k: v for k, v in r.json().items() if k != "correlation_id"} for r in refused]
+    assert bodies[0] == bodies[1] == bodies[2]  # sin revelar si el usuario existe
+    assert world.written(zone) == before
+
+    body = _ok(world.post_close(zone, signers=[zone.signer, on_plant]))
+
+    assert {(s["user_id"], s["role_in_use"]) for s in body["signatures"]} == {
+        (str(zone.signer), "coordinator_sst"),
+        (str(on_plant), "plant_manager"),
+    }
+    assert world.written(zone)[0] == 1  # el acta, una vez
+
+
+@pytest.mark.parametrize("case", ["expired", "revoked", "other_plant"])
+def test_closing_under_an_expired_revoked_or_other_plant_concession_is_not_found(
+    world: CloseWorld, case: str
+) -> None:
+    site = world.walk.a.g.site(plants=2)
+    zone = world.zone(site=site, plant_concession=True)
+    world.ready(zone)
+    (plant_a, _), (plant_b, _) = site.zones()
+    authz = world.walk.a.g.authz
+    before = world.written(zone)
+    if case == "revoked":
+        authz.revoke_concession(zone.mounted.concession, authz.now())
+        outsider = zone.mounted
+    else:
+        installer = authz.add_provider_user()
+        expired = case == "expired"
+        concession = authz.add_concession(
+            site.organization_id,
+            installer,
+            level=ScopeLevel.PLANT,
+            scope_id=plant_a if expired else plant_b,
+            granted_at=authz.now() - (timedelta(days=10) if expired else timedelta(hours=1)),
+            duration=timedelta(days=2),
+        )
+        cookie = authz.open_session(authz.provider_organization_id, installer)
+        outsider = dataclasses.replace(zone.mounted, cookie=cookie, concession=concession)
+
+    response = world.request(
+        "POST", f"/walk-tests/{zone.session.session_id}/close", outsider, world.body(zone)
+    )
+
+    _error(response, 404, "not_found")
+    assert world.written(zone) == before
 
 
 def test_reading_the_record_under_concession_is_audited(world: CloseWorld) -> None:

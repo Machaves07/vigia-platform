@@ -69,7 +69,7 @@ from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedg
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.shared.api.middleware import ContextAuthorizer
-from vigia_platform.shared.context import Role, ScopeContext
+from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.storage import (
     ChecksumType,
     ObjectHead,
@@ -331,10 +331,20 @@ class CloseWorld:
         passes_per_cell: int = 3,
         site: Site | None = None,
         index: int = 0,
+        plant_concession: bool = False,
     ) -> Zone:
         """Zona montada (catálogo con ``standards`` estándares y dos cámaras, nodo, montaje
-        aprobado), un firmante con rol sobre ella y la sesión ``initial`` abierta."""
-        mounted = self.walk.mounted(count=standards, site=site, zone_index=index)
+        aprobado), un firmante con rol sobre ella y la sesión ``initial`` abierta. Con
+        ``plant_concession``, el instalador solo tiene concesión de la planta de la zona."""
+        site = site or self.walk.a.g.site()
+        plant = site.zones()[index][0]
+        mounted = self.walk.mounted(
+            count=standards,
+            site=site,
+            zone_index=index,
+            installer_level=ScopeLevel.PLANT if plant_concession else ScopeLevel.ORGANIZATION,
+            installer_scope=plant if plant_concession else None,
+        )
         catalog = self.catalog_of(mounted.zone)
         cameras = tuple(uuid.UUID(str(c["camera_id"])) for c in catalog["cameras"])
         signer = self.walk.a.signer(mounted.site, Role.COORDINATOR_SST)

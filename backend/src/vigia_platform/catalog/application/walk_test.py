@@ -96,7 +96,7 @@ from vigia_platform.catalog.domain.walk_test import (
     pass_counts,
     reopen,
 )
-from vigia_platform.identity.application.hierarchy import Recipient
+from vigia_platform.identity.application.hierarchy import SignatoryCandidate
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
@@ -114,7 +114,7 @@ from vigia_platform.ledger.application.writer import (
 from vigia_platform.ledger.free_text import FreeTextField, FreeTextPolicyRegistry, FreeTextRejected
 from vigia_platform.shared.api.errors import ApiErrorCode, ExternalDependencyDown
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import ActorUnit, Role, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 
@@ -150,15 +150,15 @@ _REOPEN_REASON: Final = FreeTextField(
 
 
 class ResponsibleLookup(Protocol):
-    """``IdentityQueryPort.users_by_role_and_scope`` de U-02 (LC-NUC-05)."""
+    """``IdentityQueryPort.signatory_candidates`` de U-02 (LC-NUC-05, A-58)."""
 
-    async def users_by_role_and_scope(
+    async def signatory_candidates(
         self,
         context: ScopeContext,
+        zone_id: uuid.UUID,
         roles: Iterable[Role],
-        scope_level: ScopeLevel,
-        scope_id: uuid.UUID,
-    ) -> tuple[Recipient, ...]: ...
+        user_ids: Iterable[uuid.UUID],
+    ) -> tuple[SignatoryCandidate, ...]: ...
 
 
 class OcclusionTestsProvider(Protocol):
@@ -516,8 +516,9 @@ class WalkTestService:
         async def check_responsible(zone: ZoneRef, authorized: ScopeContext) -> None:
             if responsible == uuid.UUID(str(authorized.actor.id)):
                 return  # el propio usuario: su alcance sobre la zona ya está autorizado
-            holders = await self._identity.users_by_role_and_scope(
-                authorized, tuple(Role), ScopeLevel.ZONE, zone.zone_id
+            # Solo el usuario pedido, también bajo concesión de planta (A-58).
+            holders = await self._identity.signatory_candidates(
+                authorized, zone.zone_id, tuple(Role), (responsible,)
             )
             if responsible not in {holder.user_id for holder in holders}:
                 raise WalkTestRequestInvalid("el responsable no tiene alcance sobre la zona")
