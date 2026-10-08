@@ -71,6 +71,7 @@ from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.shared.api.app import AppConfig, AppRuntime, create_app
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.clock import SimulatedClock, SystemClock
+from vigia_platform.shared.cpu_pool import get_cpu_pool
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
 from vigia_platform.shared.observability.logging import configure_logging
 from vigia_platform.shared.outbox.publish import Outbox
@@ -164,6 +165,7 @@ def build(environ: Mapping[str, str]) -> Any:
         signing=signing,
         kms=kms,
         storage=StubStorage(),
+        cpu_pool=get_cpu_pool(),  # el pool del proceso, como compose_api_runtime (VIG-160)
     )
     writer = units.services.writer
     free_text = units.services.free_text
