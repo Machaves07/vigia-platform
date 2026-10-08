@@ -250,9 +250,24 @@ class CloseWorld:
             database=g.database,
         )
 
-    def _install(self) -> httpx.AsyncClient:
+    def client_with(self, **services: Any) -> httpx.AsyncClient:
+        """Otra aplicación real con los mismos servicios más ``services`` en ``CatalogHttp``
+        (p. ej. ``record_documents``, TASK-217); quien la pide la cierra."""
+        return self._install(**services)
+
+    def _install(self, **services: Any) -> httpx.AsyncClient:
         g = self.walk.a.g
         authz = g.authz
+        catalog: dict[str, Any] = {
+            "gates": g.gates,
+            "regression": self.marker,
+            "walk_tests": self.walk.service,
+            "occlusions": self.occlusions,
+            "records": self.service,
+            "exposures": self.exposures,
+            "regression_reruns": self.reruns,
+        }
+        catalog.update(services)
         app = World(clock=authz.sessions.clock).app(
             runtime={
                 "sessions": authz.contexts,
@@ -262,17 +277,7 @@ class CloseWorld:
                     provider_queries=LedgerProviderQueryLedger(g.writer),
                     clock=authz.sessions.clock,
                 ),
-                "state": {
-                    CATALOG_STATE_KEY: CatalogHttp(
-                        gates=g.gates,
-                        regression=self.marker,
-                        walk_tests=self.walk.service,
-                        occlusions=self.occlusions,
-                        records=self.service,
-                        exposures=self.exposures,
-                        regression_reruns=self.reruns,
-                    )
-                },
+                "state": {CATALOG_STATE_KEY: CatalogHttp(**catalog)},
             },
         )
         return httpx.AsyncClient(
@@ -293,7 +298,14 @@ class CloseWorld:
     def advance(self, seconds: float = 1.0) -> None:
         self.walk.advance(seconds)
 
-    def request(self, method: str, path: str, mounted: Mounted, body: Any = None) -> httpx.Response:
+    def request(
+        self,
+        method: str,
+        path: str,
+        mounted: Mounted,
+        body: Any = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> httpx.Response:
         self.advance()
         headers = {
             **SAME_ORIGIN,
@@ -301,7 +313,7 @@ class CloseWorld:
             CONCESSION_HEADER: str(mounted.concession),
         }
         response: httpx.Response = self.run(
-            self.client.request(method, path, json=body, headers=headers)
+            (client or self.client).request(method, path, json=body, headers=headers)
         )
         return response
 

@@ -13,6 +13,7 @@ from typing import Final
 
 from fastapi import Request
 
+from vigia_platform.catalog.adapters.rendering import RecordDocumentRenderer
 from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
 from vigia_platform.catalog.application.close_record import CloseRecordService
@@ -71,6 +72,8 @@ class CatalogHttp:
     """Muestras de exposición del acta (tramo 3a; LC-GOB-08, VIG-158)."""
     regression_reruns: RegressionRerunService | None = None
     """Reejecución por regresión (LC-GOB-09, VIG-158)."""
+    record_documents: RecordDocumentRenderer | None = None
+    """Documento legible del acta en el pool de CPU (LC-GOB-08, VIG-160)."""
 
 
 def installed[T](service: T | None) -> T:

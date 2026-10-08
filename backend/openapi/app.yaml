@@ -2633,6 +2633,34 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/commissioning-records/{record_id}/document":
+    "get":
+      "tags":
+        - "comisionamiento"
+      "summary": "Documento legible del acta de comisionamiento (PDF a demanda)"
+      "operationId": "commissioning_record_document_commissioning_records__record_id__document_get"
+      "parameters":
+        - "name": "record_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Record Id"
+      "responses":
+        "200":
+          "description": "Documento legible del acta (PDF generado a demanda, no almacenado)"
+          "content":
+            "application/pdf":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/plants/{plant_id}/nodes":
     "post":
       "tags":

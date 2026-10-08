@@ -20,6 +20,12 @@
   ``catalog_pass_not_found``.
 - ``GET /commissioning-records/{record_id}`` (``catalog.read`` sobre la zona del acta): el acta
   estructurada completa, nunca un responsable (H-53).
+- ``GET /commissioning-records/{record_id}/document`` (``catalog.read`` sobre la zona del acta,
+  TASK-217): el documento legible en ``application/pdf``, generado a demanda desde **la misma
+  vista** que la ruta anterior y nunca almacenado (BR-GOB-50, NFR-GOB-69; LC-GOB-08). La lectura
+  es la de ``CloseRecordService.record`` (alcance de zona y auditoría ``catalog_read`` bajo
+  concesión, A-56). Si la generación no termina en 10 s, ``temporarily_unavailable`` con
+  ``retry_after_seconds`` y sin cuerpo parcial (PAT-GOB-REN-06).
 
 Un recurso inexistente, de otra organización o fuera del alcance responde ``not_found``. Ninguna
 ruta acepta un filtro, orden ni parámetro de consulta (``exact_query``).
@@ -44,6 +50,10 @@ from vigia_platform.catalog.adapters.http.walk_tests import (
 from vigia_platform.catalog.adapters.postgres.commissioning_record_repository import (
     StoredRecord,
 )
+from vigia_platform.catalog.adapters.rendering import (
+    DOCUMENT_RETRY_AFTER_SECONDS,
+    DocumentTimedOut,
+)
 from vigia_platform.catalog.application.admission import CatalogRejected
 from vigia_platform.catalog.application.close_record import Baseline, CloseRequest
 from vigia_platform.catalog.application.walk_test import (
@@ -62,9 +72,15 @@ from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.signing.keys import format_timestamp
 
-__all__ = ["CommissioningRecordOut", "commissioning_records_router", "record_view"]
+__all__ = [
+    "PDF_MEDIA_TYPE",
+    "CommissioningRecordOut",
+    "commissioning_records_router",
+    "record_view",
+]
 
 _READ: Final = PermissionKey.CATALOG_READ.value
+PDF_MEDIA_TYPE: Final = "application/pdf"
 _RUN: Final = PermissionKey.COMMISSIONING_RUN.value
 _RERUN_DETAIL_CODES: Final = (
     CatalogDetailCode.MOUNTING_GATE_PENDING.value,
@@ -398,5 +414,39 @@ def commissioning_records_router() -> APIRouter:
         no_store(response)
         stored = await installed(services.records).record(request_context(request), record_id)
         return record_view(_stored(stored))
+
+    @router.get(
+        "/commissioning-records/{record_id}/document",
+        dependencies=[requires(_READ), Depends(exact_query())],
+        response_class=Response,
+        responses={
+            200: {
+                "description": "Documento legible del acta (PDF generado a demanda, no almacenado)",
+                "content": {PDF_MEDIA_TYPE: {"schema": {"type": "string", "format": "binary"}}},
+            }
+        },
+        summary="Documento legible del acta de comisionamiento (PDF a demanda)",
+    )
+    async def commissioning_record_document(
+        record_id: uuid.UUID, request: Request, services: Services
+    ) -> Response:
+        renderer = installed(services.record_documents)
+        stored = await installed(services.records).record(request_context(request), record_id)
+        view = record_view(_stored(stored)).model_dump(mode="json")
+        try:
+            document = await renderer.render(view)
+        except DocumentTimedOut:
+            raise ApiError(
+                ApiErrorCode.TEMPORARILY_UNAVAILABLE,
+                retry_after_seconds=DOCUMENT_RETRY_AFTER_SECONDS,
+            ) from None
+        return Response(
+            content=document,
+            media_type=PDF_MEDIA_TYPE,
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": f'inline; filename="acta-{record_id}.pdf"',
+            },
+        )
 
     return router

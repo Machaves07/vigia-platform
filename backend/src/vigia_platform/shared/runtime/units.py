@@ -74,6 +74,7 @@ from vigia_platform.catalog.adapters.postgres.scope_record_repository import (
 from vigia_platform.catalog.adapters.postgres.walk_test_repository import (
     PostgresWalkTestRepository,
 )
+from vigia_platform.catalog.adapters.rendering import RecordDocumentRenderer
 from vigia_platform.catalog.adapters.s3.documents import DocumentObjectStore
 from vigia_platform.catalog.application.admission import AdmissionService
 from vigia_platform.catalog.application.agreements import AgreementService
@@ -222,6 +223,7 @@ from vigia_platform.shared.archive.restore_drill import (
 )
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeContext, ScopeLevel
+from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
 from vigia_platform.shared.db import DatabaseHealth, Transaction
 from vigia_platform.shared.key_rotation import (
     key_rotation_reminder_handler,
@@ -314,6 +316,12 @@ class UnitServices:
     secrets: SecretsPort | None = None
     """El gestor de secretos con su caché (la clave estable del hash de origen del alta,
     TASK-219); ``None`` en las pruebas que no lo necesitan."""
+    cpu_pool: CpuPool | None = None
+    """El pool de CPU del proceso (``VIGIA_THREADPOOL_SIZE``, PAT-NUC-REN-05); ``None``: el
+    compartido de ``get_cpu_pool()``."""
+
+    def require_cpu_pool(self) -> CpuPool:
+        return self.cpu_pool if self.cpu_pool is not None else get_cpu_pool()
 
     def require_evidence(self) -> S3Storage:
         if self.evidence is None:
@@ -728,6 +736,8 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
             regression_reruns=RegressionRerunService(
                 walk_tests=walk_tests, regressions=regressions, database=services.database
             ),
+            # LC-GOB-08 (VIG-160): el documento legible del acta en el pool de CPU, con 10 s.
+            record_documents=RecordDocumentRenderer(pool=services.require_cpu_pool()),
         )
     }
 
