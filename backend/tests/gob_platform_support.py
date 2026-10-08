@@ -273,11 +273,18 @@ class GobPlatform:
         cookie: SessionCookie = self.authz.open_session(organization_id, user_id)
         return user_id, cookie
 
-    def installer(self, site: Site) -> tuple[uuid.UUID, SessionCookie, uuid.UUID]:
-        """Instalador del proveedor con una concesión vigente sobre la organización de ``site``."""
+    def installer(
+        self, site: Site, plant_id: uuid.UUID | None = None
+    ) -> tuple[uuid.UUID, SessionCookie, uuid.UUID]:
+        """Instalador del proveedor con una concesión vigente sobre la organización de ``site``
+        o, con ``plant_id``, solo sobre esa planta (VIG-179)."""
         user_id: uuid.UUID = self.authz.add_provider_user()
         concession: uuid.UUID = self.authz.add_concession(
-            site.organization_id, user_id, granted_at=self.now() - timedelta(hours=1)
+            site.organization_id,
+            user_id,
+            level=ScopeLevel.ORGANIZATION if plant_id is None else ScopeLevel.PLANT,
+            scope_id=plant_id,
+            granted_at=self.now() - timedelta(hours=1),
         )
         cookie: SessionCookie = self.authz.open_session(self.provider, user_id)
         return user_id, cookie, concession
@@ -849,7 +856,12 @@ class Onboarding:
     # --- Catálogo y nodo --------------------------------------------------------------------
 
     def zone(
-        self, *, cameras: int = 2, enrolled: bool = True, within: GobZone | None = None
+        self,
+        *,
+        cameras: int = 2,
+        enrolled: bool = True,
+        within: GobZone | None = None,
+        plant_concession: bool = False,
     ) -> GobZone:
         """Una zona con su nodo: familia admitida, catálogo 1 publicado, nodo declarado por el
         instalador y, con ``enrolled``, dado de alta con su código y una CSR.
@@ -857,14 +869,17 @@ class Onboarding:
         Sin ``within``, en una organización nueva; con ``within``, otra zona de la misma planta
         (mismas personas y concesión; la familia ya está admitida en la planta, BR-GOB-14). Al
         terminar, el reloj avanza ``APPROVAL_MARGIN_SECONDS``: los hechos por defecto (5 minutos
-        antes de la hora) caen después de la asignación del nodo a la zona."""
+        antes de la hora) caen después de la asignación del nodo a la zona. Con
+        ``plant_concession``, la concesión del instalador es solo de la planta (VIG-179)."""
         gob = self.gob
         if within is None:
             site = gob.site(plants=1, zones_per_plant=1)
             plant_id = next(iter(site.plants))
             zone_id = site.plants[plant_id][0]
             admin_id, admin = gob.person(site.organization_id, Role.ADMINISTRATOR)
-            installer_id, installer, concession = gob.installer(site)
+            installer_id, installer, concession = gob.installer(
+                site, plant_id if plant_concession else None
+            )
             admitted = gob.call(
                 "POST",
                 f"/plants/{plant_id}/admissions",

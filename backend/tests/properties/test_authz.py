@@ -88,6 +88,7 @@ from vigia_platform.shared.context import (
     ActorKind,
     ActorUnit,
     AllowedScope,
+    ContextAbsent,
     ContextOrigin,
     Role,
     ScopeContext,
@@ -659,6 +660,14 @@ def test_system_constructors() -> None:
     user = contexts.for_user(organization, uuid.uuid4(), "Persona sintética", "a" * 64)
     assert user.origin is ContextOrigin.SESSION and user.allowed_scopes == ()
     assert contexts.provider_audit_context().organization_id == PROVIDER
+    # A-58 (VIG-179): la consulta acotada de firmantes; misma organización y correlación que la
+    # petición, actor del sistema, sin asignaciones ni concesión.
+    lookup = contexts.identity_lookup(event)
+    assert (lookup.organization_id, lookup.correlation_id) == (organization, correlation)
+    assert lookup.actor.kind is ActorKind.SYSTEM and lookup.allowed_scopes == ()
+    assert lookup.concession_id is None and lookup.actor.unit is ActorUnit.U02
+    with pytest.raises(ContextAbsent):
+        contexts.identity_lookup(organization)  # type: ignore[arg-type]
 
 
 class _RowStore:

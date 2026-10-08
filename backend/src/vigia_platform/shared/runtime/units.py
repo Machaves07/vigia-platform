@@ -602,7 +602,9 @@ def _catalog_state(services: UnitServices) -> Mapping[str, object]:
             free_text=services.free_text,
             clock=services.clock,
             provider_organization_id=services.provider_organization_id,
-        )
+        ),
+        # A-58 (VIG-179): firmantes bajo concesión de planta por la consulta acotada.
+        lookups=services.contexts,
     )
     # LC-GOB-07 (VIG-154): prueba de oclusión, reevaluada contra los eventos del expediente cada
     # vez que se consulta la sesión.

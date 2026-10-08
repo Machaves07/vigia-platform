@@ -44,6 +44,7 @@ from tests.gob_platform_support import (
     require_close_route,
     stamp,
 )
+from vigia_platform.shared.context import Role
 from vigia_platform.shared.signing import NODE_PURPOSES
 
 pytestmark = pytest.mark.integration
@@ -231,6 +232,55 @@ def test_h51_a_false_negative_blocks_the_close_and_the_false_alarm_rate_is_recor
     assert record["false_alarm_acceptance"]["reason_es"] == ACCEPTANCE
     (written,) = gob.contents(zone.organization_id, "walk_test_result")
     assert written["false_alarm_rate_observed"] == record["false_alarm_rate_observed"]
+
+
+# --- VIG-179: concesión de planta (A-58) ---------------------------------------------------------
+
+
+def test_h50_under_a_plant_concession_the_installer_commissions_the_zone_to_productive(
+    gob: GobPlatform,
+) -> None:
+    # Con la composición de producción (_catalog_state): bajo concesión de planta la RLS de A-46
+    # oculta identity.user_account; responsable, firmantes del acta y del acuerdo se resuelven
+    # por IdentityQueryPort.signatory_candidates.
+    require_close_route(gob)
+    flow = Onboarding(gob)
+    zone = flow.zone(plant_concession=True)
+    flow.mount(zone)
+    session_id, rows = _open_session(flow, zone)
+    responsible, _ = gob.person(zone.organization_id, Role.LINE_MANAGER)
+    step = ok(
+        flow.as_installer(
+            zone,
+            "POST",
+            f"/walk-tests/{session_id}/steps",
+            {"step_kind": "physical_setup", "responsible_user_id": str(responsible)},
+        ),
+        201,
+    )
+    path = f"/walk-tests/{session_id}/steps/{step['step_id']}/close"
+    ok(flow.as_installer(zone, "POST", path, {}))
+    _passes(flow, zone, session_id, rows)
+    _declared_occlusions(flow, zone, session_id)
+    flow.verification_clip(zone)
+    record = ok(
+        flow.as_installer(zone, "POST", f"/walk-tests/{session_id}/close", close_body(gob, zone))
+    )
+    assert [s["role_in_use"] for s in record["signatures"]] == ["coordinator_sst"]
+
+    flow.plant_policy(zone)
+    ok(flow.signatory_policy(zone))
+    signers = flow.signatories(zone)
+    agreement = ok(flow.agreement(zone, signers), 201)
+    assert [(s["role"], s["user_id"]) for s in agreement["signatories"]] == [
+        (s.role.value, str(s.user_id)) for s in signers
+    ]
+    for signer in signers:
+        assert flow.confirm(agreement["agreement_id"], signer).status_code == 201
+    approved = ok(flow.approve(zone, agreement["agreement_id"]))
+
+    assert approved["gates"]["resulting_mode"] == "productive"
+    assert flow.mode(zone) == "productive"
 
 
 # --- H-52 ----------------------------------------------------------------------------------------

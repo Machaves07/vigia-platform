@@ -37,6 +37,7 @@ from vigia_platform.shared.context import Role
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "DISPLAY_NAME_MAX",
     "MAX_SIGNATORIES",
     "MIN_SIGNATORIES",
     "WORKERS_ROLE",
@@ -62,6 +63,8 @@ MAX_SIGNATORIES: Final = 32
 """Tope de firmantes de un acuerdo `[estimación propia]` (``record_types.MAX_SIGNATORIES``)."""
 WORKERS_ROLE: Final = Role.COPASST
 """La representación de los trabajadores: constante, no configurable (DE §2.7)."""
+DISPLAY_NAME_MAX: Final = 120
+"""Tope de ``signatories[].display_name`` en la proyección del acuerdo (DE §2.8)."""
 
 
 class AgreementViolation(enum.StrEnum):
@@ -144,6 +147,9 @@ class Signatory:
         object.__setattr__(self, "role", Role(self.role))
         if type(self.user_id) is not uuid.UUID:
             raise TypeError("user_id debe ser uuid.UUID")
+        if self.display_name is not None:
+            # La proyección nunca guarda ni devuelve un nombre de más de 120 (DE §2.8).
+            object.__setattr__(self, "display_name", str(self.display_name)[:DISPLAY_NAME_MAX])
 
     def as_json(self) -> dict[str, Any]:
         value: dict[str, Any] = {"role": self.role.value, "user_id": str(self.user_id)}
