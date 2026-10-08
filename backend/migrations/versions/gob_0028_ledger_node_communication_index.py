@@ -11,13 +11,18 @@ con un año de la organización mayor (60 zonas, unas 83 000 transiciones): medi
 página y ``temporarily_unavailable`` por ``statement_timeout`` (objetivo p95 ≤ 500 ms,
 NFR-GOB-03).
 
-``ledger_record_node_communication`` es parcial (solo las transiciones de comunicación, sin zona)
-y lleva organización y nodo delante, como pide NFR-NUC-08; sobre la tabla particionada se crea en
-cada partición y en las que cree después ``shared.vigia_create_month_partitions``. Con él, cada
-nodo lee solo sus transiciones.
+``ledger_record_node_communication`` es parcial (solo las transiciones de comunicación, sin zona),
+lleva organización y nodo delante, como pide NFR-NUC-08, y después el orden de la búsqueda:
+``content_json ->> 'since'`` descendente y ``record_id``. ``since`` es un ``Timestamp`` del
+contrato (24 caracteres fijos, UTC con milisegundos y ``Z``, validado al escribir), así que su
+orden de texto es el cronológico; la consulta del inventario ordena por ese texto y el índice le
+da la última transición de cada nodo sin leer su historia. Sobre la tabla particionada se crea en
+cada partición y en las que se creen después. Medido en la volumetría de U-03 con un año de la
+organización mayor: 30 s por página sin él; con un índice solo por nodo, 2 s; con este, 160 ms.
 
-La imagen anterior no cambia de plan ni de resultado: lee lo mismo, más deprisa (NFR-NUC-14).
-``MINIMUM_SCHEMA_VERSION`` no sube: ningún código lo exige.
+La imagen anterior ordena por ``since`` convertido a ``timestamptz``: el mismo resultado, sin usar
+el orden del índice (NFR-NUC-14). ``MINIMUM_SCHEMA_VERSION`` no sube: el código de esta imagen da
+el mismo resultado sin él.
 """
 
 from __future__ import annotations
@@ -32,7 +37,8 @@ depends_on: None = None
 _STATEMENTS = (
     """
     CREATE INDEX ledger_record_node_communication
-        ON ledger.ledger_record (organization_id, scope_node_id, received_at)
+        ON ledger.ledger_record
+            (organization_id, scope_node_id, (content_json ->> 'since') DESC, record_id DESC)
         WHERE record_type = 'node_communication_state_changed' AND scope_zone_id IS NULL
     """,
     "COMMENT ON INDEX ledger.ledger_record_node_communication IS 'Última transición de"

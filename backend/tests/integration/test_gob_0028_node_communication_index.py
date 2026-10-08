@@ -5,8 +5,8 @@ La volumetría de U-03 midió ``GET /fleet/nodes`` con un año de la organizaci�
 registros sin zona de la organización (mediana de 30 s por página). Aquí se comprueba:
 
 - el índice está en la tabla particionada y en **cada** partición, con su predicado;
-- la sentencia de la búsqueda del inventario, sin barridos secuenciales, se planifica sobre él y
-  no sobre el índice de zona (``ledger_record_zone_received``), que es lo que hacía antes.
+- la búsqueda del inventario, sin barridos secuenciales, se planifica sobre él **sin ordenar**
+  (el índice da la última transición), y no sobre el índice de zona, que es lo que hacía antes.
 
 Solo datos generados.
 """
@@ -22,6 +22,7 @@ import pytest
 
 from tests.identity_db import migrated_database
 from tests.integration.conftest import PostgresEndpoint
+from vigia_platform.fleet.adapters.postgres.inventory_queries import _INVENTORY
 
 pytestmark = pytest.mark.integration
 
@@ -31,7 +32,7 @@ LOOKUP: Final = (
     "EXPLAIN SELECT r.content_json ->> 'state' FROM ledger.ledger_record AS r"
     " WHERE r.organization_id = $1 AND r.scope_zone_id IS NULL"
     " AND r.record_type = 'node_communication_state_changed' AND r.scope_node_id = $2"
-    " ORDER BY CAST(r.content_json ->> 'since' AS timestamptz) DESC, r.record_id DESC LIMIT 1"
+    " ORDER BY r.content_json ->> 'since' DESC, r.record_id DESC LIMIT 1"
 )
 """El lateral ``comm`` de ``fleet.adapters.postgres.inventory_queries._INVENTORY``."""
 
@@ -58,7 +59,7 @@ async def _check(dsn: str) -> tuple[bool, list[str], list[str], str]:
                 " JOIN pg_class AS c ON c.oid = h.inhrelid"
                 " JOIN pg_indexes AS i ON i.tablename = c.relname AND i.schemaname = 'ledger'"
                 " WHERE h.inhparent = 'ledger.ledger_record'::regclass"
-                " AND i.indexdef LIKE '%(organization_id, scope_node_id, received_at)%'"
+                " AND i.indexdef LIKE '%(organization_id, scope_node_id, ((content_json ->> %'"
             )
         ]
         async with connection.transaction():
@@ -77,6 +78,8 @@ def test_gob_0028_index_on_every_partition_and_used_by_the_inventory_lookup(
     with migrated_database(postgres_endpoint, "gob_0028_index") as migrated:
         parent, partitions, definitions, plan = asyncio.run(_check(migrated.as_role().dsn))
 
+    # La consulta del inventario ordena como el índice (si no, lo usaría sin su orden).
+    assert LOOKUP.split(" ORDER BY ")[1] in _INVENTORY.text
     assert parent, INDEX
     assert partitions, "ledger.ledger_record sin particiones"
     assert len(definitions) == len(partitions), (partitions, definitions)
@@ -86,4 +89,6 @@ def test_gob_0028_index_on_every_partition_and_used_by_the_inventory_lookup(
     # Las particiones nombran su copia del índice por sus columnas.
     scans = [line for line in plan.splitlines() if "Index Scan" in line or "Seq Scan" in line]
     assert scans, plan
-    assert all("organization_id_scope_node_id_receive" in line for line in scans), plan
+    assert all("organization_id_scope_node_id_expr" in line for line in scans), plan
+    # El índice da el orden: la última transición sin ordenar la historia del nodo.
+    assert "Merge Append" in plan and "Sort  (" not in plan, plan
