@@ -14,6 +14,8 @@ peticiones seguidas las atienden procesos distintos, y cada prueba comprueba que
 La suite recorre lo que U-02 expone por HTTP con estado compartido, siempre alternando procesos:
 
 - salud: los dos listos tras el balanceador;
+- U-03 cargado en los cuatro procesos (TASK-232): las siete tareas y los tipos de U-03, y las
+  rutas del contrato atendidas por su ``NodeApiGate`` en las dos API;
 - sesión abierta en un proceso y usada en el otro (``/me``, ``/auth/sessions``); cierre de sesión
   en uno, que invalida en los dos; «cerrar las demás» desde un proceso, que invalida la otra sesión
   en los dos;
@@ -55,8 +57,10 @@ from tests.resilience.processes import (
     wait_worker_started,
 )
 from tests.worker_support import EFFECT_EVENT, PROBE_TASK
+from vigia_platform.fleet.registration import U03_RECORD_TYPES, U03_TASKS
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, THROTTLE_FREE_FAILURES
 from vigia_platform.identity.domain.privacy_notice import CURRENT_PRIVACY_NOTICE_VERSION
+from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.context import Role
 
 pytestmark = pytest.mark.integration
@@ -215,6 +219,28 @@ def test_both_api_processes_are_ready_behind_the_balancer(cluster: Cluster) -> N
     _both_served(_spread(cluster, before))
     for port in cluster.worker_ports.values():
         assert httpx.get(f"http://127.0.0.1:{port}/health/live", timeout=5).status_code == 200
+
+
+def test_u03_is_loaded_in_both_api_processes_and_in_the_workers(cluster: Cluster) -> None:
+    """TASK-232: los procesos del arnés corren con U-03 cargado. Los workers registraron las siete
+    tareas de U-03 (con su unidad) y el arranque sincronizó los tipos de registro de U-03; en los
+    dos procesos de API, las rutas del contrato las atiende la ``NodeApiGate`` de U-03: un latido
+    sin certificado de cliente recibe el rechazo del contrato (nunca un 404 ni un 500)."""
+    tasks = {
+        row["task_name"]: row["unit"]
+        for row in cluster.env.authz.fetch("SELECT task_name, unit FROM shared.periodic_task")
+    }
+    record_types = {
+        row["record_type"]
+        for row in cluster.env.authz.fetch("SELECT record_type FROM ledger.record_type")
+    }
+    before = cluster.served()
+    answers = [cluster.request("POST", NodeRoute.HEARTBEAT.path, json={}) for _ in range(REQUESTS)]
+    assert {name: tasks.get(name) for name in U03_TASKS} == dict.fromkeys(U03_TASKS, "U-03")
+    assert record_types >= U03_RECORD_TYPES
+    assert {a.status_code for a in answers} < {400, 401, 403}, [a.text for a in answers]
+    assert all(a.json().get("retryable") is False for a in answers), answers[-1].text
+    _both_served(_spread(cluster, before))
 
 
 # --- Sesiones -------------------------------------------------------------------------------------

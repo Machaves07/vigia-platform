@@ -36,7 +36,7 @@ import hashlib
 import json
 import secrets
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -120,6 +120,7 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, Role, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.crypto import EnvelopeCipher
+from vigia_platform.shared.db import Database
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog, PeriodicTaskRegistry
@@ -211,6 +212,9 @@ class GobPlatform:
     """El cubo de fichas de la ``NodeApiGate`` (por proceso, R10)."""
     services: UnitServices
     addresses: set[str] = field(default_factory=set)
+    edge_bucket: str = ""
+    """``vigia-edge`` de LocalStack, con ``ca/root.pem`` de la autoridad efímera."""
+    edge: S3Storage | None = None
 
     # --- Base y reloj -----------------------------------------------------------------------
 
@@ -252,6 +256,25 @@ class GobPlatform:
         """
         (row,) = self.fetch("SELECT now() AS now")
         self.clock.set(row["now"])
+
+    @contextlib.contextmanager
+    def lifespan(self) -> Iterator[None]:
+        """El arranque supervisado de la aplicación en el bucle de la pila, hasta que termina
+        (``/health/ready`` deja de responder «arrancando»). Sus tareas corren mientras el bucle
+        atiende otra cosa (``run``), como en ``vigia-api``."""
+        stack = contextlib.AsyncExitStack()
+        self.run(stack.enter_async_context(self.app.router.lifespan_context(self.app)))
+        try:
+
+            async def started() -> None:
+                async with asyncio.timeout(LONG_SECONDS):
+                    while not self.app.state.vigia_readiness.started:
+                        await asyncio.sleep(0.1)
+
+            self.run(started())
+            yield
+        finally:
+            self.run(stack.aclose())
 
     # --- Personas ---------------------------------------------------------------------------
 
@@ -500,6 +523,7 @@ def _node_gate(
     kms: MemoryKms,
     edge: S3Storage,
     hash_key: bytes,
+    node_ca_deadline_seconds: float = LONG_SECONDS,
 ) -> NodeApiGate:
     """``_node_api_state`` de producción; el alta y la rotación firman con ``kms`` (el doble de
     ``vigia-node-ca``) y leen ``ca/root.pem`` del depósito ``vigia-edge`` de LocalStack."""
@@ -520,7 +544,7 @@ def _node_gate(
         clock=clock,
         random_bytes=secrets.token_bytes,
         metrics=services.metrics,
-        deadline_seconds=LONG_SECONDS,
+        deadline_seconds=node_ca_deadline_seconds,
     )
     deps = _fleet_dependencies(services)
     operations = {
@@ -557,10 +581,28 @@ def gob_platform(
     localstack_endpoint: LocalStackEndpoint,
     prefix: str,
     *,
+    database_changes: Mapping[str, Any] | None = None,
+    wrap_database: Callable[[Database], Any] | None = None,
+    wrap_signing: Callable[[SigningService], Any] | None = None,
+    node_ca_deadline_seconds: float = LONG_SECONDS,
     metrics: PlatformMetrics | None = None,
+    health: bool = False,
 ) -> Iterator[GobPlatform]:
-    """``metrics``: las métricas de **todas** las unidades y de la cadena de middleware (p. ej.
-    sobre un ``MeterProvider`` con lector en memoria); sin ellas, las del proveedor global."""
+    """La aplicación completa sobre los contenedores dados.
+
+    Las opciones son del arnés de resiliencia (``tests/resilience/gob_support.py``, LC-GOB-22); sin
+    ellas, la aplicación es la de ``tests/abuse`` y ``tests/examples``:
+
+    - ``database_changes``: ajustes de la base de la aplicación (p. ej. los topes de ``vigia-api``
+      en lugar de los holgados de la fixture);
+    - ``wrap_database`` y ``wrap_signing``: envolturas de la base y de ``SigningService`` que
+      reciben todos los servicios (los dobles bloqueables de los escenarios);
+    - ``node_ca_deadline_seconds``: el tope de ``vigia-node-ca`` (el de producción en FS-GOB-05);
+    - ``metrics``: las métricas de **todas** las unidades y de la cadena de middleware (p. ej.
+      sobre un ``MeterProvider`` con lector en memoria, para leerlas); sin ellas, las del
+      proveedor global;
+    - ``health``: ``/health/ready`` comprueba la base de verdad (con ``GobPlatform.lifespan``).
+    """
     s3 = localstack_endpoint.aws_client("s3")
     with (
         live_view_environment(postgres_endpoint, prefix, at_database_time=True) as env,
@@ -586,9 +628,15 @@ def gob_platform(
         env.run(synchronize())
         # Topes generosos en la base de la fixture (retro 15): ninguna prueba de aquí trata de
         # ellos, y G-5 lanza decenas de escrituras a la vez sobre la cadena de una planta.
-        database = app_database(
-            sessions.migrated, worker_pool_size=16, lock_timeout_ms=TEST_LOCK_TIMEOUT_MS
+        raw_database = app_database(
+            sessions.migrated,
+            **{
+                "worker_pool_size": 16,
+                "lock_timeout_ms": TEST_LOCK_TIMEOUT_MS,
+                **dict(database_changes or {}),
+            },
         )
+        database = raw_database if wrap_database is None else wrap_database(raw_database)
         storage = S3Storage(localstack_endpoint.storage_settings(evidence_bucket), clock)
         edge = S3Storage(localstack_endpoint.storage_settings(edge_bucket), clock)
         kms = MemoryKms()
@@ -605,7 +653,7 @@ def gob_platform(
             clock=clock,
         )
         provider = authz.provider_organization_id
-        signing = SigningService(
+        real_signing = SigningService(
             provider_organization_id=provider,
             store=env.store,
             secrets=env.secrets,
@@ -613,7 +661,8 @@ def gob_platform(
             clock=clock,
             environment=ENVIRONMENT,
         )
-        env.run(signing.start())
+        env.run(real_signing.start())
+        signing = real_signing if wrap_signing is None else wrap_signing(real_signing)
         checkpoints = CheckpointService(
             store=SqlCheckpointStore(
                 database=database, writer=writer, audit=sessions.audit, outbox=outbox
@@ -688,6 +737,7 @@ def gob_platform(
             permissions=None,
             runtime={
                 "metrics": metrics,
+                **({"database": database} if health else {}),
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
                     audit=authz.audit,
@@ -702,7 +752,12 @@ def gob_platform(
                     **_catalog_state(services),
                     FLEET_STATE_KEY: fleet,
                     NODE_GATE_STATE_KEY: _node_gate(
-                        services, limiter, kms, edge, secrets.token_bytes(32)
+                        services,
+                        limiter,
+                        kms,
+                        edge,
+                        secrets.token_bytes(32),
+                        node_ca_deadline_seconds,
                     ),
                 },
             },
@@ -721,13 +776,15 @@ def gob_platform(
             root=root,
             limiter=limiter,
             services=services,
+            edge_bucket=edge_bucket,
+            edge=edge,
         )
         world.resync()
         try:
             yield world
         finally:
             pool.shutdown()
-            env.run(database.dispose())
+            env.run(raw_database.dispose())
 
 
 # --- Una zona de punta a punta por las rutas ---------------------------------------------------

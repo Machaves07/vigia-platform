@@ -1,7 +1,9 @@
 """Arnés de inyección de fallos de la plataforma (LC-NUC-34; PAT-NUC-RES-06; TASK-141).
 
-Lo comparten los escenarios ``FS-NUC-01`` a ``FS-NUC-10`` (``test_fs_nuc_*.py``) y la suite con
-dos procesos (``test_two_processes.py``):
+Lo comparten los escenarios ``FS-NUC-01`` a ``FS-NUC-10`` (``test_fs_nuc_*.py``), los
+``FS-GOB-01`` a ``FS-GOB-10`` de U-03 (``test_fs_gob_*.py``, con lo que añade
+``tests/resilience/gob_support.py``: LC-GOB-22) y la suite con dos procesos
+(``test_two_processes.py``):
 
 - **Contenedores propios** (``dedicated_postgres``, ``dedicated_localstack``): PostgreSQL 16 y
   LocalStack con las mismas imágenes fijadas por digest que ``docker-compose.yml`` y
@@ -462,7 +464,7 @@ def scenario(
     El generador del escenario se deriva de la semilla de la sesión y del identificador, así que
     dos escenarios no comparten secuencia y cada uno se repite con la misma semilla.
     """
-    if not re.fullmatch(r"FS-NUC-\d{2}[a-z]?|NFR-NUC-\d{2}", scenario_id):
+    if not re.fullmatch(r"FS-(?:NUC|GOB)-\d{2}[a-z]?|NFR-NUC-\d{2}", scenario_id):
         raise ValueError(f"identificador de escenario no válido: {scenario_id!r}")
     seed = session_seed()
     record = ScenarioRecord(

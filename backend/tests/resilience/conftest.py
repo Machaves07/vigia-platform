@@ -15,7 +15,7 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     records = finished_scenarios()
     if not records:
         return
-    terminalreporter.section("escenarios de resiliencia (PAT-NUC-RES-06)")
+    terminalreporter.section("escenarios de resiliencia (PAT-NUC-RES-06 y PAT-GOB-RES-06)")
     for record in records:
         terminalreporter.write_line(
             f"{record.scenario_id} {record.outcome} semilla={record.seed} "
