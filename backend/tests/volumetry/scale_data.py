@@ -37,7 +37,7 @@ import json
 import random
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -94,9 +94,17 @@ class Rates:
     classifications: int = 37
     hot_zone_pairs: int = 323
     """Pares de la zona caliente: 646 eventos al día, unos 20 000 en 31 días."""
+    communication_pairs: int = 0
+    """Pares ``mute``/``reachable`` de ``node_communication_state_changed`` por nodo y día (la
+    volumetría de U-03, TASK-233: la historia que recorre ``GET /fleet/nodes``)."""
 
     def per_zone_day(self) -> int:
-        return self.findings + 2 * self.observability_pairs + self.classifications
+        return (
+            self.findings
+            + 2 * self.observability_pairs
+            + self.classifications
+            + 2 * self.communication_pairs
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -608,6 +616,33 @@ class ScaleWriter:
                             occurred_at=received,
                         )
                     )
+            for _ in range(self.rates.communication_pairs):
+                # El nodo calla (mute desde su último latido) y vuelve unos minutos después.
+                muted = day + timedelta(seconds=rng.uniform(0, seconds - 3600))
+                muted = muted.replace(microsecond=muted.microsecond // 1000 * 1000)
+                back = muted + timedelta(seconds=rng.uniform(300, 1800))
+                for at, state, extra in (
+                    (muted, "mute", {"last_heartbeat_at": stamp(muted - timedelta(minutes=5))}),
+                    (back, "reachable", {}),
+                ):
+                    rows.append(
+                        _Row(
+                            received_at=at,
+                            record_type=COMMUNICATION_TYPE,
+                            plant_id=plant.plant_id,
+                            zone_id=None,
+                            node_id=zone.node_id,
+                            content=canonicalize(
+                                {
+                                    "node_id": str(zone.node_id),
+                                    "plant_id": str(plant.plant_id),
+                                    "state": state,
+                                    "since": stamp(at),
+                                    **extra,
+                                }
+                            ),
+                        )
+                    )
         rows.sort(key=lambda row: row.received_at)
         return rows
 
@@ -742,3 +777,500 @@ def days_back(end: datetime, days: int) -> datetime:
 def chunked[T](items: Sequence[T], size: int) -> Iterable[Sequence[T]]:
     for start in range(0, len(items), size):
         yield items[start : start + size]
+
+
+# --- U-03: gobernanza y flota (TASK-233; NFR-GOB-07, 11 y 16) ------------------------------------
+#
+# Lo que la volumetría de U-03 escribe **en masa** como superusuario, con la forma que dejan las
+# rutas reales (las filas de inventario y de catálogo se copian de un nodo y una zona creados por
+# las rutas: ``generate_scale_data.py``). Las tablas grandes se llenan con ``generate_series`` en
+# el servidor, una sentencia por nodo o por zona: 13 millones de latidos no pasan por Python.
+
+
+@dataclass(frozen=True, slots=True)
+class GobRates:
+    """Volumen de U-03 por nodo y zona ``[estimación propia]`` (NFR-GOB-07 y 16)."""
+
+    heartbeat_seconds: int = 60
+    """Un latido por minuto: 144 000 al día con 100 nodos."""
+    heartbeat_days: int = 90
+    """``HeartbeatHistory`` en línea 90 días (BR-GOB-72)."""
+    grants_per_zone_day: int = 77
+    """Una concesión de subida por episodio (77 por zona y día, RNF-DES-03)."""
+    grant_days: int = 30
+    history_months: int = 24
+    """Catálogo, compuertas, intentos de alta y alarmas: 24 meses en línea (NFR-GOB-16, 39)."""
+    catalog_versions_per_month: int = 4
+    """Una versión del catálogo por semana."""
+    attempts_per_node_month: int = 2
+    """Un alta aceptada y un intento rechazado al mes por nodo (rotaciones y errores)."""
+    alarms_per_node_month: int = 4
+
+
+@dataclass(frozen=True, slots=True)
+class FleetNode:
+    """Un nodo de la flota generada con su zona y sus cámaras."""
+
+    organization_id: uuid.UUID
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    node_id: uuid.UUID
+    cameras: tuple[uuid.UUID, ...]
+
+
+async def create_fleet_partitions(connection: Any, first: datetime, last: datetime) -> None:
+    """Particiones mensuales de ``heartbeat_history``, ``enrollment_attempt`` y ``fleet_alarm``
+    de ``first`` a ``last`` con la función de gob_0018 (actor system)."""
+    async with connection.transaction():
+        await connection.execute("SELECT set_config('vigia.actor_kind', 'system', true)")
+        rows = await connection.fetch(
+            "SELECT * FROM shared.vigia_create_fleet_month_partitions($1, $2)",
+            month_floor(first).date(),
+            month_floor(last).date(),
+        )
+    blocked = [row["partition"] for row in rows if row["blocked"]]
+    if blocked:
+        raise RuntimeError(f"particiones de flota bloqueadas: {blocked}")
+
+
+async def enroll_fleet(
+    connection: Any, nodes: Sequence[FleetNode], user_id: uuid.UUID, at: datetime
+) -> None:
+    """``NodeFleetRecord`` y ``NodeCredential`` activos de ``nodes`` dados de alta en ``at``."""
+    await connection.executemany(
+        "INSERT INTO fleet.node_fleet_record (node_id, organization_id, plant_id,"
+        " hardware_fingerprint, declared_at, declared_by, enrolled_at)"
+        " VALUES ($1::uuid, $2, $3, encode(sha256($1::uuid::text::bytea), 'hex'), $4, $5, $4)",
+        [(n.node_id, n.organization_id, n.plant_id, at, user_id) for n in nodes],
+    )
+    await connection.executemany(
+        "INSERT INTO fleet.node_credential (credential_id, organization_id, plant_id, node_id,"
+        " certificate_serial, subject, issued_at, expires_at)"
+        " VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid,"
+        " replace($3::uuid::text, '-', ''),"
+        " jsonb_build_object('node_id', $3::uuid::text, 'organization_id', $1::uuid::text,"
+        " 'plant_id', $2::uuid::text), $4::timestamptz, $4::timestamptz + interval '365 days')",
+        [(n.organization_id, n.plant_id, n.node_id, at) for n in nodes],
+    )
+
+
+async def copy_inventory(
+    connection: Any, template_node: uuid.UUID, nodes: Sequence[FleetNode], at: datetime
+) -> None:
+    """``NodeInventory``, ``CameraInventory`` y ``ZoneNodeState`` de ``nodes`` con la forma que
+    dejó el latido real de ``template_node`` (último latido en ``at``)."""
+    template = await connection.fetchrow(
+        "SELECT * FROM fleet.node_inventory WHERE node_id = $1", template_node
+    )
+    camera = await connection.fetchrow(
+        "SELECT * FROM fleet.camera_inventory WHERE node_id = $1 LIMIT 1", template_node
+    )
+    zone = await connection.fetchrow(
+        "SELECT * FROM fleet.zone_node_state WHERE node_id = $1 LIMIT 1", template_node
+    )
+    if template is None or camera is None or zone is None:
+        raise RuntimeError("el nodo plantilla no tiene inventario: falta su latido")
+    await connection.executemany(
+        "INSERT INTO fleet.node_inventory (node_id, organization_id, plant_id, software_version,"
+        " contract_version, model_version, contract_notice, last_heartbeat_at,"
+        " communication_state, local_queue, clock, signal_reader, uptime_seconds, updated_at)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'reachable', $9, $10, $11, $12, $8)",
+        [
+            (n.node_id, n.organization_id, n.plant_id, template["software_version"],
+             template["contract_version"], template["model_version"],
+             template["contract_notice"], at, template["local_queue"], template["clock"],
+             template["signal_reader"], template["uptime_seconds"])
+            for n in nodes
+        ],
+    )  # fmt: skip
+    await connection.executemany(
+        "INSERT INTO fleet.camera_inventory (organization_id, plant_id, node_id, camera_id,"
+        " connected, measured_fps, declared_min_fps, observability_state, updated_at)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        [
+            (n.organization_id, n.plant_id, n.node_id, camera_id, camera["connected"],
+             camera["measured_fps"], camera["declared_min_fps"], camera["observability_state"],
+             at)
+            for n in nodes
+            for camera_id in n.cameras
+        ],
+    )  # fmt: skip
+    await connection.executemany(
+        "INSERT INTO fleet.zone_node_state (organization_id, plant_id, node_id, zone_id, mode,"
+        " observability_state, catalog_version_in_node, gate_state_valid_until, open_episodes,"
+        " coverage_ok, updated_at) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, 0, $8, $9)",
+        [
+            (n.organization_id, n.plant_id, n.node_id, n.zone_id, zone["mode"],
+             zone["observability_state"], at + timedelta(days=7), zone["coverage_ok"], at)
+            for n in nodes
+        ],
+    )  # fmt: skip
+
+
+async def heartbeat_history(
+    connection: Any,
+    node: FleetNode,
+    first: datetime,
+    last: datetime,
+    summary: Mapping[str, Any],
+    *,
+    every: int,
+) -> int:
+    """Un latido cada ``every`` segundos de ``first`` a ``last`` (exclusivo) con ``summary``."""
+    status: str = await connection.execute(
+        "INSERT INTO fleet.heartbeat_history (heartbeat_id, organization_id, plant_id, node_id,"
+        " received_at, sent_at, payload_summary)"
+        " SELECT gen_random_uuid(), $1, $2, $3, t, t - interval '150 milliseconds', $4::jsonb"
+        " FROM generate_series($5::timestamptz, $6::timestamptz - interval '1 millisecond',"
+        " make_interval(secs => $7)) AS t",
+        node.organization_id,
+        node.plant_id,
+        node.node_id,
+        json.dumps(summary),
+        first,
+        last,
+        every,
+    )
+    return int(status.rsplit(" ", 1)[-1])
+
+
+async def upload_grants(
+    connection: Any, node: FleetNode, first_day: datetime, days: int, per_day: int
+) -> int:
+    """``per_day`` concesiones de subida al día de la zona de ``node`` durante ``days`` días,
+    usadas a los 30 s (las que la ingesta cita); una de cada 50, huérfana al día siguiente."""
+    status: str = await connection.execute(
+        "INSERT INTO fleet.clip_upload_grant (clip_id, organization_id, plant_id, zone_id,"
+        " node_id, purpose, storage_key, content_type, max_size_bytes, required_headers,"
+        " issued_at, expires_at, status, used_at, orphaned_at)"
+        " SELECT g.clip_id, $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'evidence', 'org/'"
+        " || $1::uuid::text || '/plant/'"
+        " || $2::uuid::text || '/zone/' || $3::uuid::text || '/node/' || $4::uuid::text"
+        " || '/' || g.clip_id::text"
+        " || '.mp4', 'video/mp4', 52428800, jsonb_build_object('content-type', 'video/mp4',"
+        " 'x-amz-checksum-sha256', 'X5uM2q0pT7v3sQ9wZxY1bC4dE6fG8hJ0kL2mN4pR6tU=',"
+        " 'x-amz-meta-vigia-anonymized', '1'), g.issued_at, g.issued_at + interval '15 minutes',"
+        " CASE WHEN g.n % 50 = 0 THEN 'orphan' ELSE 'used' END,"
+        " g.issued_at + interval '30 seconds',"
+        " CASE WHEN g.n % 50 = 0 THEN g.issued_at + interval '25 hours' END"
+        " FROM (SELECT gen_random_uuid() AS clip_id, n,"
+        " $5::timestamptz + (n * interval '1 day') / $7::int AS issued_at"
+        " FROM generate_series(0, $6::int * $7::int - 1) AS n) AS g",
+        node.organization_id,
+        node.plant_id,
+        node.zone_id,
+        node.node_id,
+        first_day,
+        days,
+        per_day,
+    )
+    return int(status.rsplit(" ", 1)[-1])
+
+
+async def enrollment_attempts(
+    connection: Any, node: FleetNode, first: datetime, months: int, per_month: int
+) -> int:
+    """``per_month`` intentos de alta al mes durante ``months`` meses: uno aceptado y el resto
+    rechazados por código usado (forma de ``EnrollmentAttempt``, NFR-GOB-16: 24 meses)."""
+    status: str = await connection.execute(
+        "INSERT INTO fleet.enrollment_attempt (attempt_id, organization_id, plant_id, node_id,"
+        " presented_code_hash, hardware_fingerprint, software_version, contract_version, result,"
+        " attempted_at, source_ip_hash, correlation_id, ledger_record_id)"
+        " SELECT gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid,"
+        " encode(sha256(n::text::bytea), 'hex'),"
+        " encode(sha256($3::uuid::text::bytea), 'hex'), '1.4.0', '1.0.0',"
+        " CASE WHEN n % $5::int = 0 THEN 'accepted' ELSE 'enrollment_code_used' END,"
+        " $4::timestamptz + n * (interval '30 days' / $5::int),"
+        " encode(sha256(('origen' || n)::bytea), 'hex'), gen_random_uuid(),"
+        " CASE WHEN n % $5::int = 0 THEN gen_random_uuid() END"
+        " FROM generate_series(0, $6::int * $5::int - 1) AS n",
+        node.organization_id,
+        node.plant_id,
+        node.node_id,
+        first,
+        per_month,
+        months,
+    )
+    return int(status.rsplit(" ", 1)[-1])
+
+
+async def fleet_alarms(
+    connection: Any, node: FleetNode, first: datetime, months: int, per_month: int
+) -> int:
+    """``per_month`` alarmas de flota cerradas al mes durante ``months`` meses (clases de
+    NFR-GOB-46 rotando; cada una abierta 40 minutos)."""
+    status: str = await connection.execute(
+        "INSERT INTO fleet.fleet_alarm (alarm_id, organization_id, plant_id, alarm_kind,"
+        " node_id, zone_id, raised_at, cleared_at, raised_event_id, cleared_event_id)"
+        " SELECT gen_random_uuid(), $1, $2, (ARRAY['node_mute', 'queue_over_threshold',"
+        " 'clock_drift', 'camera_below_min_fps'])[1 + n % 4], $3, NULL,"
+        " $4::timestamptz + n * (interval '30 days' / $5::int),"
+        " $4::timestamptz + n * (interval '30 days' / $5::int) + interval '40 minutes',"
+        " gen_random_uuid(), gen_random_uuid()"
+        " FROM generate_series(0, $6::int * $5::int - 1) AS n",
+        node.organization_id,
+        node.plant_id,
+        node.node_id,
+        first,
+        per_month,
+        months,
+    )
+    return int(status.rsplit(" ", 1)[-1])
+
+
+def lean_findings(count: int) -> list[dict[str, Any]]:
+    """Hallazgos mínimos (sin cámaras ni clips) para la historia del expediente de U-03: lo que
+    recorren sus lecturas es el número de registros, no su contenido."""
+    return [
+        {
+            "finding_id": _SENTINEL,
+            "family": "coexistence",
+            "tier": "tier_1",
+            "max_confidence": round(0.5 + index / (2 * count), 3),
+            "cameras": [],
+        }
+        for index in range(count)
+    ]
+
+
+# --- Historia del catálogo y de las compuertas (U-03; también el banco de NFR-GOB-04) ----------
+
+CATALOG_REASON: Final = "Motivo sintético del cambio del catálogo"
+_MONTH: Final = timedelta(days=30)
+
+
+def catalog_payload(
+    zone: uuid.UUID,
+    version: int,
+    standards: Sequence[uuid.UUID],
+    cameras: Sequence[uuid.UUID],
+) -> str:
+    """Un ``ZoneCatalog`` del tamaño real: sus estándares, sus cámaras, señales y parámetros."""
+    payload = {
+        "version": version,
+        "zone_id": str(zone),
+        "cameras": [
+            {"camera_id": str(camera), "code": f"CAM-{i}"} for i, camera in enumerate(cameras)
+        ],
+        "minimum_coverage": {"required_count": 1, "required_camera_ids": []},
+        "signals": [{"signal_id": f"s{i}", "role": "energy"} for i in range(4)],
+        "thresholds": {"review": 0.5, "publication": 0.8},
+        "clip_window": {"pre_ms": 5000, "post_ms": 5000},
+        "episode": {"grouping_window_ms": 3000},
+        "standards": [
+            {
+                "standard_id": str(standard),
+                "version": 1 + version // len(standards),
+                "family": "coexistence",
+                "title_es": f"Estándar sintético {index}",
+                "declared_text": "Texto declarado sintético del estándar de la zona. " * 4,
+                "predicate": {"all_of": [{"signal": "presence"}, {"signal": "energy"}]},
+            }
+            for index, standard in enumerate(standards)
+        ],
+    }  # fmt: skip
+    return json.dumps(payload)
+
+
+@dataclass(frozen=True)
+class CatalogZone:
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    standards: tuple[uuid.UUID, ...]
+    cameras: tuple[uuid.UUID, ...]
+
+
+@dataclass
+class CatalogHistory:
+    """Las filas de ``catalog`` de una organización (ver ``catalog_history``)."""
+
+    zones: list[CatalogZone] = field(default_factory=list)
+    versions: list[tuple[Any, ...]] = field(default_factory=list)
+    standards: list[tuple[Any, ...]] = field(default_factory=list)
+    intervals: list[tuple[Any, ...]] = field(default_factory=list)
+    projections: list[tuple[Any, ...]] = field(default_factory=list)
+    regressions: list[tuple[Any, ...]] = field(default_factory=list)
+    agreements: list[tuple[Any, ...]] = field(default_factory=list)
+    confirmations: list[tuple[Any, ...]] = field(default_factory=list)
+    policies: list[tuple[Any, ...]] = field(default_factory=list)
+
+
+def catalog_history(
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    signers: Sequence[tuple[str, uuid.UUID]],
+    zones: Sequence[CatalogZone],
+    plants: Sequence[uuid.UUID],
+    *,
+    origin: datetime,
+    now: datetime,
+    rng: random.Random,
+    versions: int,
+    version_spacing: timedelta,
+    gate_intervals: int,
+    agreements: int,
+    policies: int,
+) -> CatalogHistory:
+    """La historia del catálogo y de las compuertas de ``zones`` desde ``origin``.
+
+    Por zona: ``versions`` versiones del catálogo (una cada ``version_spacing``, con su
+    ``ZoneCatalog`` y su sobre), cada versión nueva reversiona un estándar; ``gate_intervals``
+    intervalos mensuales por compuerta (aprobación y revocación alternas, el último abierto);
+    ``agreements`` acuerdos de uso mensuales con la confirmación de cada firmante (el último
+    vigente), su proyección y su regresión. Por planta, ``policies`` versiones de la política.
+    """
+    history = CatalogHistory(zones=list(zones))
+    signatories = json.dumps(
+        [{"role": r, "user_id": str(u), "display_name": f"Firmante {r}"} for r, u in signers]
+    )
+    document = json.dumps({"document_id": str(uuid.uuid4()), "storage_key": "documents/x",
+                           "sha256": "a" * 64, "content_type": "application/pdf",
+                           "size_bytes": 1024})  # fmt: skip
+    for zone in zones:
+        plant, ids = zone.plant_id, zone.standards
+        current = dict.fromkeys(ids, 1)
+        spans: dict[tuple[uuid.UUID, int], list[Any]] = {}
+        for number in range(1, versions + 1):
+            issued = origin + (number - 1) * version_spacing
+            until = None if number == versions else issued + version_spacing
+            payload = catalog_payload(zone.zone_id, number, ids, zone.cameras)
+            envelope = json.dumps({"payload": json.loads(payload), "signature": "s" * 88,
+                                   "key_id": "k1"})  # fmt: skip
+            history.versions.append(
+                (organization_id, plant, zone.zone_id, number, issued, user_id,
+                 f"{CATALOG_REASON} {number}", ["standards"], payload, envelope,
+                 number % 5 == 0, 15 + number % 400, uuid.uuid4(), until)
+            )  # fmt: skip
+            if number == 1:
+                for s in ids:
+                    spans[s, 1] = [organization_id, plant, zone.zone_id, s, 1, issued, 1, None]
+                continue
+            # Cada versión nueva del catálogo reversiona un estándar y retira la anterior.
+            standard = ids[(number - 2) % len(ids)]
+            previous = current[standard]
+            spans[standard, previous][7] = number
+            spans[standard, previous + 1] = [
+                organization_id, plant, zone.zone_id, standard, previous + 1, issued, number, None
+            ]  # fmt: skip
+            current[standard] = previous + 1
+        history.standards.extend(tuple(row) for row in spans.values())
+        for gate in ("mounting", "usage"):
+            start = origin + timedelta(hours=rng.randrange(1, 48))
+            for index in range(gate_intervals):
+                status = "approved" if index % 2 == 0 else "revoked"
+                end = None if index == gate_intervals - 1 else start + _MONTH
+                history.intervals.append(
+                    (organization_id, plant, zone.zone_id, gate, status, start, end, user_id,
+                     CATALOG_REASON if status == "revoked" else None, uuid.uuid4(),
+                     uuid.uuid4())
+                )  # fmt: skip
+                if end is not None:
+                    start = end
+        decided = json.dumps(
+            {
+                "status": "revoked",
+                "decided_at": now.isoformat(),
+                "record_id": str(uuid.uuid4()),
+                "decided_by": str(user_id),
+            }
+        )
+        history.projections.append(
+            (zone.zone_id, organization_id, plant, decided, decided, "no_capture", now)
+        )
+        history.regressions.append(
+            (
+                zone.zone_id,
+                organization_id,
+                plant,
+                now - _MONTH,
+                "catalog_change",
+                uuid.uuid4(),
+                versions,
+            )
+        )
+        previous_agreement: uuid.UUID | None = None
+        for index in range(agreements):
+            agreement = uuid.uuid4()
+            approved = origin + index * _MONTH + timedelta(days=1)
+            last = index == agreements - 1
+            superseded = None if last else approved + _MONTH
+            history.agreements.append(
+                (agreement, organization_id, plant, zone.zone_id,
+                 "approved" if last else "superseded", signatories, document,
+                 previous_agreement, user_id, approved, approved, user_id, uuid.uuid4(),
+                 superseded)
+            )  # fmt: skip
+            confirmed = approved - timedelta(hours=1)
+            history.confirmations.extend(
+                (agreement, u, organization_id, plant, r, confirmed) for r, u in signers
+            )
+            previous_agreement = agreement
+    for plant in plants:
+        for version in range(1, policies + 1):
+            history.policies.append(
+                (uuid.uuid4(), organization_id, plant, version, origin + version * _MONTH,
+                 document, user_id, uuid.uuid4())
+            )  # fmt: skip
+    return history
+
+
+async def load_catalog_history(admin: Any, history: CatalogHistory) -> None:
+    """Escribe ``history`` como superusuario y deja las estadísticas al día (``ANALYZE``)."""
+    await admin.executemany(
+        "INSERT INTO catalog.zone_catalog_version (organization_id, plant_id, zone_id,"
+        " catalog_version, issued_at, issued_by, role_in_use, reason_es, changed_fields,"
+        " payload, envelope, single_occupancy, aggregation_window_minutes, ledger_record_id,"
+        " superseded_at) VALUES ($1, $2, $3, $4, $5, $6, 'administrator', $7, $8, $9, $10,"
+        " $11, $12, $13, $14)",
+        history.versions,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.declared_standard_version (organization_id, plant_id, zone_id,"
+        " standard_id, version, family, title_es, declared_text, declared_by, effective_from,"
+        " predicate, catalog_version, retired_in_catalog_version, reason_es)"
+        " VALUES ($1, $2, $3, $4, $5, 'coexistence', 'Estándar sintético',"
+        ' \'Texto declarado sintético\', \'{"user_id": "00000000-0000-4000-8000-000000000001",'
+        ' "display_name": "Firmante", "role": "administrator"}\', $6, \'{}\', $7, $8,'
+        " 'Motivo sintético del estándar')",
+        history.standards,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id, gate,"
+        " status, effective_from, effective_until, decided_by, reason_es, ledger_record_id,"
+        " record_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        history.intervals,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.zone_gate_state (zone_id, organization_id, plant_id, mounting,"
+        " usage, resulting_mode, issued_at, envelope, valid_until)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, '{}', $7::timestamptz + interval '7 days')",
+        history.projections,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.walk_test_regression (zone_id, organization_id, plant_id, state,"
+        " marked_at, cause, catalog_version, affected_row_ids, ledger_record_id)"
+        " VALUES ($1, $2, $3, 'pending', $4, $5, $7, '\"all\"', $6)",
+        history.regressions,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.use_agreement (agreement_id, organization_id, plant_id, zone_id,"
+        " status, signatories, document_ref, replaces_agreement_id, created_by, created_at,"
+        " approved_at, approved_by, ledger_record_id, superseded_at)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+        history.agreements,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.agreement_confirmation (agreement_id, user_id, organization_id,"
+        " plant_id, role_in_use, confirmed_at, origin)"
+        " VALUES ($1, $2, $3, $4, $5, $6, 'management')",
+        history.confirmations,
+    )
+    await admin.executemany(
+        "INSERT INTO catalog.plant_policy (policy_id, organization_id, plant_id, version,"
+        " signed_at, signed_by_display_name, legal_opinion_reference, document_ref,"
+        " criteria_summary_es, loaded_by, loaded_at, ledger_record_id)"
+        " VALUES ($1, $2, $3, $4, $5, 'Firmante sintético', 'REF-SINTETICA', $6,"
+        " 'Resumen sintético de criterios', $7, $5, $8)",
+        history.policies,
+    )
+    await admin.execute("ANALYZE")

@@ -161,7 +161,11 @@ _INVENTORY: Final = text(
     " FROM ledger.ledger_record AS r"
     " WHERE r.organization_id = n.organization_id AND r.scope_zone_id IS NULL"
     " AND r.record_type = 'node_communication_state_changed' AND r.scope_node_id = n.node_id"
-    " ORDER BY CAST(r.content_json ->> 'since' AS timestamptz) DESC, r.record_id DESC LIMIT 1)"
+    # ``since`` es un ``Timestamp`` del contrato (24 caracteres fijos, UTC con milisegundos y ``Z``,
+    # validado al escribir): su orden de texto es el cronológico. Ordenar por el texto deja que el
+    # índice ``ledger_record_node_communication`` (gob_0028) dé la última transición sin leer la
+    # historia del nodo (TASK-233: con un año, la página tardaba 30 s).
+    " ORDER BY r.content_json ->> 'since' DESC, r.record_id DESC LIMIT 1)"
     " AS comm ON true"
     " LEFT JOIN LATERAL (SELECT max(c.expires_at) AS expires_at FROM fleet.node_credential AS c"
     " WHERE c.organization_id = n.organization_id AND c.plant_id = n.plant_id"
