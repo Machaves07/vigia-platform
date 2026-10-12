@@ -32,6 +32,7 @@ from typing import Any
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vigia_platform.fleet.domain.enums import FleetAlarmKind
 from vigia_platform.fleet.registration import U03_TASKS
 from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.archive.restore_drill import RESTORE_DRILL_OVERDUE_DAYS
@@ -61,6 +62,7 @@ TABLES = (
     "INGEST_ROUTES",
     "FLEET_PERIODIC_TASKS",
     "FLEET_PER_NODE_METRICS",
+    "FLEET_ALARM_KINDS",
 )
 TWENTY_SIX_HOURS = 26 * 3600
 
@@ -275,6 +277,17 @@ def test_u03_metrics_are_published_and_not_pending() -> None:
         assert name.value in SPECS and name.value in used, name
         assert name.value not in PENDING, name
     assert ALARMS["revocation-list-publish-failed"] == (("revocation_list_publish_failed", ()),)
+
+
+def test_open_alarms_metric_is_a_closed_list_gauge_by_class() -> None:
+    """VIG-187 y NFR-GOB-58: los paneles de alarmas abiertas leen ``fleet_alarms_open``, un
+    medidor por clase y organización; la clase es de lista cerrada y la pila declara las ocho."""
+    spec = SPECS[MetricName.FLEET_ALARMS_OPEN.value]
+    assert spec.kind is MetricKind.GAUGE
+    assert spec.attributes == frozenset({"organization_id", "alarm_kind"})
+    classes = {kind.value for kind in FleetAlarmKind}
+    assert redaction.DEFAULT_POLICY.values("alarm_kind") == classes
+    assert set(TABLE["FLEET_ALARM_KINDS"]) == classes
 
 
 def test_only_per_node_counters_and_gauges_carry_node_id() -> None:

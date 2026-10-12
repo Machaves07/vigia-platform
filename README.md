@@ -12,14 +12,17 @@ vigia-platform/
     src/vigia_platform/
       identity/            domain, application, adapters, auth, authz
       ledger/              domain, application, adapters, chain
-      shared/              api, outbox, signing, crypto, observability, clock
+      catalog/             catálogo, compuertas, walk-test, admisiones (U-03)
+      fleet/               flota, alta y credenciales del nodo, lista de revocación (U-03)
+      node_api/            rutas del contrato del nodo bajo /api/nodes (U-03)
+      shared/              api, outbox, signing, crypto, observability, clock, runtime
     migrations/            Alembic, una sola cadena, solo hacia adelante (TASK-106 a 108)
     openapi/               especificación generada de la aplicación (U-05 genera su cliente)
     tools/                 chequeos de lint propios y guiones de verificación
     tests/                 unit, properties, examples, abuse, isolation, integration, resilience, benchmarks
   infra/                   pilas de AWS CDK en Python (TASK-144 a 150)
   docs/                    formatos del paquete y del archivo de auditoría
-  docs/runbooks/           procedimientos de operación 6.1 a 6.6 y contingencias (TASK-152)
+  docs/runbooks/           procedimientos de operación 6.1 a 6.6 (U-02), los u03-* (U-03) y contingencias
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
   .github/scripts/         pasos de AWS de los flujos (tareas puntuales, salidas, barrido)
   local/                   configuración de los servicios locales (colector de OpenTelemetry)
@@ -66,7 +69,7 @@ Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son
 | `make migrate` | `cd backend; uv run alembic upgrade head` |
 | `make admin ARGS="--help"` | `cd backend; uv run vigia-admin --help` |
 
-`migrate` funciona contra el entorno local. Los módulos de `run`, `worker` y `admin` ya existen (TASK-133, TASK-130 y TASK-132), pero los tres procesos piden sus dependencias a un constructor, la **raíz de composición**, que nombran `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). Ningún módulo de `src/` implementa todavía ese constructor: solo existen los de las pruebas (`backend/tests/api_support.py`, `backend/tests/worker_process.py`, `backend/tests/admin_support.py`). Sin la variable, el proceso termina sin arrancar con un mensaje que lo dice. `make admin ARGS="--help"` sí funciona: la ayuda no necesita dependencias.
+`migrate` funciona contra el entorno local. Los módulos de `run`, `worker` y `admin` ya existen (TASK-133, TASK-130 y TASK-132) y los tres piden sus dependencias a un constructor, la **raíz de composición**, que nombran `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). U-03 la implementa (A-52): `vigia_platform.shared.runtime.{api,worker,admin}:build_{api,worker,admin}_runtime`, con un registro por unidad (`shared/runtime/units.py`) que suma rutas, tipos, eventos, consumidores y tareas sin tocar la raíz. En local basta exportar las tres variables con esos valores. Sin la variable, el proceso termina sin arrancar con un mensaje que lo dice. `make admin ARGS="--help"` sí funciona: la ayuda no necesita dependencias. El detalle de U-03 está en [Gobernanza y flota (U-03)](#gobernanza-y-flota-u-03).
 
 ### Variables del entorno local
 
@@ -154,6 +157,86 @@ En WSL con Docker Desktop, si testcontainers falla con «Exec format error», ex
 
 `tools/lint_rules.py` corre también dentro de la suite (`tests/unit/test_lint_rules.py`), así que `pytest` falla si el árbol tiene una violación.
 
+## Gobernanza y flota (U-03)
+
+U-03 añade tres módulos al backend y las rutas del contrato del nodo, con la misma raíz de composición de U-02 (A-52). Todo lo que entra está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
+
+### Arranque de los módulos
+
+| Módulo | Qué aporta | Dónde |
+|---|---|---|
+| `catalog` | Catálogo de zonas y versiones, compuertas, walk-test, admisiones y actas | `backend/src/vigia_platform/catalog/` |
+| `fleet` | Flota: declaración y reemplazo, alta y credenciales del nodo, lista de revocación, alarmas de flota, clips | `backend/src/vigia_platform/fleet/` |
+| `node_api` | Las rutas del contrato de U-01 bajo `/api/nodes`, montadas por `node_router(PUBLISHED_NODE_ROUTES)` | `backend/src/vigia_platform/node_api/` |
+
+Los tres procesos registran las **siete tareas periódicas** y los tipos y eventos de U-03; solo `vigia-worker` las ejecuta. El **alta** del nodo entra por `app.<dominio>` (`POST /api/nodes/enrollment`, sin certificado y con límite propio); todo lo demás va por `nodes.<dominio>` con **autenticación mutua**. Arranque local, con la raíz de composición de U-03:
+
+```text
+cd backend && VIGIA_API_RUNTIME=vigia_platform.shared.runtime.api:build_api_runtime \
+  uv run uvicorn vigia_platform.shared.api.app:create_app --factory --host 127.0.0.1 --port 8000
+cd backend && VIGIA_WORKER_RUNTIME=vigia_platform.shared.runtime.worker:build_worker_runtime \
+  uv run python -m vigia_platform.shared.worker.main
+cd backend && VIGIA_ADMIN_RUNTIME=vigia_platform.shared.runtime.admin:build_admin_runtime \
+  uv run vigia-admin --help
+```
+
+La comprobación de arranque (NFR-GOB-20, BR-NUC-52) exige los **26 tipos de registro**, los **15 eventos** y las **siete tareas** de U-03: si falta uno, o una tarea cambió de cadencia, unidad o iteración, el proceso no arranca y la salida nombra lo que falta (`RegistrationIncomplete`).
+
+### Autoridad de nodos
+
+La autoridad es `vigia-node-ca`, una clave **ECDSA P-256** en KMS (`SIGN_VERIFY`); **la clave privada nunca existe fuera de KMS**. En **local y en las pruebas** la autoridad es **efímera** (una clave P-256 en memoria o en el KMS de LocalStack, con su raíz efímera por corrida); en un **despliegue** es la clave `vigia-node-ca` de KMS, cuyo ARN llega en `VIGIA_NODE_CA_KEY_ARN`. La plataforma publica la raíz en `vigia-edge/ca/root.pem` y la lista de revocación en `vigia-edge/ca/crl.pem` (una sola, global; D-7).
+
+### Variables nuevas
+
+Las de la raíz de composición (`shared/runtime/config.py`), con su valor por defecto; todas no secretas:
+
+| Variable | Procesos | Contenido |
+|---|---|---|
+| `VIGIA_BULKHEAD_NODE`, `VIGIA_BULKHEAD_PERSON` | api | Tamaño de los semáforos por clase de ruta (35 y 15). `VIGIA_BULKHEAD_PERSON` por debajo del 30 % de la suma impide arrancar (NFR-GOB-19) |
+| `VIGIA_DB_POOL_NODE`, `VIGIA_DB_POOL_PERSON`, `VIGIA_DB_MAX_OVERFLOW`, `VIGIA_DB_POOL_TIMEOUT_SECONDS` | api | Pool `node` (10) y `person` (5), sin desbordamiento y espera de 5 s |
+| `VIGIA_DB_STATEMENT_TIMEOUT_MS` | api, worker | Tope por sentencia (10 000 en la API, 30 000 en el worker) |
+| `VIGIA_THREADPOOL_SIZE` | api | Hilos del pool de CPU (Argon2id, TOTP, firmas): 4 |
+| `VIGIA_NODE_CA_KEY_ARN` | api, worker (admin con `first_deploy`/`ca_rotation`) | Clave de la autoridad de nodos en KMS |
+| `VIGIA_EDGE_BUCKET` | api, worker, admin | Depósito `vigia-edge` (raíz y lista) |
+| `VIGIA_CRL_KEY` | worker | Clave de la lista en `vigia-edge` (`ca/crl.pem`) |
+| `VIGIA_NODE_TRUST_STORE_ARN` | worker, admin | Almacén de confianza `vigia-node-trust` |
+| `VIGIA_NODES_BASE_URL`, `VIGIA_ENROLLMENT_SOURCE_KEY_SECRET` | api | URL de ingesta que recibe el nodo y secreto de la clave estable del hash de origen del alta (sin ellas, el alta responde transitorio) |
+| `VIGIA_DOCUMENTS_PREFIX`, `VIGIA_DOCUMENTS_MAX_BYTES` | api | Prefijo y tope de los documentos firmados |
+
+### Tareas periódicas
+
+Las siete de U-03 (LC-GOB-18, NFR-GOB-12), registradas por `fleet/registration.py` y ejecutadas por el worker:
+
+| Tarea | Cadencia | Iteración |
+|---|---|---|
+| `detect_mute_nodes` | 60 s | por organización |
+| `evaluate_fleet_alarms` | 60 s | por organización |
+| `expire_enrollment_codes` | 60 s | por organización |
+| `regenerate_revocation_list` | 60 s | **global** (la única, D-7) |
+| `mark_orphan_clips` | 1 h | por organización |
+| `alert_expiring_certificates` | diaria (03:00 UTC) | por organización |
+| `expire_walk_test_sessions` | diaria (05:00 UTC) | por organización |
+
+Cada una tiene su alarma `periodic-task-stale-<tarea>` (180 s para las de 60 s, 3 h para `mark_orphan_clips`, 72 h para las diarias).
+
+### Perfiles de carga y conformidad
+
+`backend/tests/load/` tiene los tres perfiles de LC-GOB-22 (NFR-GOB-06):
+
+- **`ci`** (10 nodos, `speed_factor` 60, 5 min) corre en `ci.yml`, en el trabajo **«backend (carga ci)»**.
+- **`nightly`** (100 nodos y 300 zonas, `speed_factor` 60, 30 min más la reconexión masiva) y **`soak`** (8 h a ritmo real, contra `staging-<n>`) todavía **no** tienen trabajo en `nightly.yml`/`release.yml`: los añade [VIG-171](https://linear.app/manuch/issue/VIG-171) (TASK-234) al completar la canalización de U-03. Este README no inventa su configuración; hasta entonces, el perfil `nightly` se ensaya con `VIGIA_LOAD_SCALE=smoke`.
+
+La **conformidad** del kit de U-01 contra la plataforma corre en `nightly.yml`, en el trabajo **«conformidad de U-01 contra la plataforma»** (TASK-230, VIG-164): la suite completa del kit con `--profile nightly` contra las diez rutas de `node_api` con mTLS, comparando las métricas de la plataforma con el informe del kit (`tests/conformance/`).
+
+### Huella SHA-256 de la raíz vigente (pendiente nº 30)
+
+El instalador del nodo (U-06) verifica los servidores con el almacén de confianza público de la imagen base y fija `vigia-edge/ca/root.pem` en el equipo como **ancla de la cadena de la credencial de cliente** y como **confirmación de que el alta se hace contra la plataforma correcta**. Para esa confirmación hace falta la **huella SHA-256 de la raíz vigente**:
+
+- la respuesta de emisión del código de alta ya la entrega (`node_ca_root_sha256`, una huella o dos durante una sustitución de raíz);
+- el instalador también puede calcularla del paquete publicado: `openssl x509 -in ca/root.pem -noout -fingerprint -sha256`.
+
+**Pendiente nº 30 (aditivo)**: la consola de comisionamiento debe mostrar esa huella **junto al código de alta**. Mientras no exista, la huella vigente se publica en el `README` del repositorio de configuración de sitio del cliente, no aquí. **Sin AWS por ahora (A-47)** no hay raíz publicada todavía: la huella se fija en el primer despliegue ([VIG-174](https://linear.app/manuch/issue/VIG-174), TASK-238).
+
 ## Variables de configuración
 
 Cada proceso lee su configuración del entorno **una vez**, al arrancar, con un modelo estricto de Pydantic (`extra="forbid"`). Si falta una variable obligatoria o no es válida, el proceso no arranca. Ningún secreto, clave ni `.env` entra al repositorio. En AWS, las tareas solo reciben **nombres o ARN** de secretos y claves (`infra/stacks/compute.py`), nunca sus valores. Las del entorno local están en «Variables del entorno local».
@@ -177,7 +260,7 @@ Cada proceso lee su configuración del entorno **una vez**, al arrancar, con un 
 | `VIGIA_LOG_LEVEL` | todos | No | Nivel del registro JSON |
 | `PGSSLMODE`, `PGSSLROOTCERT` | migrate y conexiones a la base | En AWS | Modo TLS de la conexión con RDS |
 
-La definición de tareas de `infra/stacks/compute.py` fija además variables que todavía no lee ningún módulo de `src/`: `VIGIA_DB_APP_SECRET` de api y worker, `VIGIA_EVIDENCE_BUCKET`, `VIGIA_SIGNING_SECRET_PREFIX`, `VIGIA_METRICS_NAMESPACE`, `VIGIA_SERVICE` y los ajustes de la API (`VIGIA_UVICORN_WORKERS`, `VIGIA_BULKHEAD_*`, `VIGIA_DB_POOL_*`…). Las leerá la raíz de composición.
+La definición de tareas de `infra/stacks/compute.py` fija además variables que la **raíz de composición** de U-03 lee al arrancar: `VIGIA_DB_APP_SECRET` de api y worker, `VIGIA_EVIDENCE_BUCKET`, `VIGIA_SIGNING_SECRET_PREFIX`, `VIGIA_METRICS_NAMESPACE`, `VIGIA_SERVICE`, los ajustes de la API y del worker (`VIGIA_UVICORN_WORKERS`, `VIGIA_BULKHEAD_*`, `VIGIA_DB_POOL_*`, `VIGIA_THREADPOOL_SIZE`) y los de la flota (`VIGIA_NODE_CA_KEY_ARN`, `VIGIA_EDGE_BUCKET`, `VIGIA_CRL_KEY`, `VIGIA_NODE_TRUST_STORE_ARN`). El detalle está en [Gobernanza y flota (U-03)](#gobernanza-y-flota-u-03).
 
 ## Orden administrativa `vigia-admin`
 

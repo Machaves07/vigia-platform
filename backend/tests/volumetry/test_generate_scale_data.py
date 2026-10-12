@@ -1,4 +1,5 @@
-"""La volumetría en miniatura (``--scale smoke``) corre de punta a punta (TASK-142, VIG-91).
+"""La volumetría en miniatura (``--scale smoke``) corre de punta a punta (TASK-142, VIG-91; U-03 en
+TASK-233).
 
 ``generate_scale_data.py --scale target`` solo corre en ``nightly`` y a mano; esta prueba de
 integración, con la escala ``smoke`` contra el PostgreSQL de la sesión, impide que el script se
@@ -17,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.conftest import PostgresEndpoint
-from tests.volumetry.generate_scale_data import SCALES, run
+from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from tests.volumetry.generate_scale_data import GOB_SCALES, SCALES, run, run_gob
 
 pytestmark = pytest.mark.integration
 
@@ -72,3 +73,84 @@ def test_smoke_scale_generates_measures_and_reports(
     assert report["verification"]["records"] == (
         scale.largest_zones_per_plant * (normal * scale.days + 2) + 2 + scale.rounds
     )
+
+
+GOB_ROUTES = {
+    f"gob_console_{name}"
+    for name in (
+        "fleet_nodes",
+        "fleet_node_detail",
+        "walk_test_current",
+        "zone_catalog",
+        "catalog_versions",
+        "zone_gates",
+        "zone_transparency",
+        "commissioning_record",
+        "documents",
+    )
+}
+GOB_PORTS = {
+    f"gob_ports_{name}"
+    for name in (
+        "floor_select_1",
+        "current_catalog",
+        "catalog_at",
+        "standard_at",
+        "catalog_history",
+        "single_occupancy",
+        "single_occupancy_many",
+        "standards_at_many",
+        "state",
+        "states_by_plant",
+        "state_at",
+        "gate_history",
+        "plant_policy",
+        "current_agreement",
+    )
+}
+
+
+def test_smoke_scale_u03_generates_measures_and_reports(
+    postgres_endpoint: PostgresEndpoint, localstack_endpoint: LocalStackEndpoint
+) -> None:
+    """La parte de U-03 (TASK-233) en miniatura: el núcleo por las rutas reales, la historia en
+    masa, las rutas de NFR-GOB-03 y los puertos de NFR-GOB-04, ``gate_history`` de 366 días desde
+    el primer mes y las métricas de presupuesto de NFR-GOB-07."""
+    scale = SCALES["smoke"]
+    gob = GOB_SCALES["smoke"]
+    rates = gob.rates
+    section = run_gob(postgres_endpoint, localstack_endpoint, scale, seed=7, workers=2)
+
+    written = section["written"]
+    zones = gob.extra_plants * gob.zones_per_plant
+    nodes = 3 + zones + gob.other_active_nodes
+    per_node = rates.heartbeat_days * 86_400 // rates.heartbeat_seconds
+    assert written["heartbeat_history"] == nodes * per_node
+    assert written["clip_upload_grant"] == nodes * rates.grant_days * rates.grants_per_zone_day
+    assert written["enrollment_attempt"] == nodes * rates.history_months * (
+        rates.attempts_per_node_month
+    )
+    assert written["fleet_alarm"] == nodes * rates.history_months * rates.alarms_per_node_month
+    assert written["catalog_versions"] == zones * rates.history_months * (
+        rates.catalog_versions_per_month
+    )
+    # El año del expediente lleva las transiciones de comunicación de cada nodo generado.
+    assert written["node_communication_state_changed"] == zones * (
+        2 * gob.ledger_rates.communication_pairs * gob.ledger_days + 1
+    )
+    budget = section["nfr_gob_07"]
+    assert budget["fleet_heartbeat_rows_per_day"] == nodes * per_node // rates.heartbeat_days
+    assert budget["fleet_heartbeat_rows_per_day_at_100_nodes"] == 100 * 86_400 // (
+        rates.heartbeat_seconds
+    )
+    assert budget["fleet_upload_grants_per_day_at_300_zones"] == 300 * rates.grants_per_zone_day
+    assert budget["catalog_versions_per_day"] > 0
+    assert {timing["name"] for timing in section["nfr_gob_03"]} == GOB_ROUTES
+    assert {timing["name"] for timing in section["nfr_gob_04"]} == GOB_PORTS
+    for timing in section["nfr_gob_03"] + section["nfr_gob_04"]:
+        assert 0 < timing["median_ms"] <= timing["p95_ms"]
+        if timing["objective_ms"] is not None:
+            assert timing["objective_met"] is (timing["p95_ms"] <= timing["objective_ms"])
+    history = section["gate_history_366_days"]
+    assert history["complete"] is True
+    assert history["intervals"] == {"mounting": rates.history_months, "usage": rates.history_months}

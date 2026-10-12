@@ -598,7 +598,9 @@ def gob_platform(
     - ``wrap_database`` y ``wrap_signing``: envolturas de la base y de ``SigningService`` que
       reciben todos los servicios (los dobles bloqueables de los escenarios);
     - ``node_ca_deadline_seconds``: el tope de ``vigia-node-ca`` (el de producción en FS-GOB-05);
-    - ``metrics``: las métricas de los servicios (en memoria, para leerlas);
+    - ``metrics``: las métricas de **todas** las unidades y de la cadena de middleware (p. ej.
+      sobre un ``MeterProvider`` con lector en memoria, para leerlas); sin ellas, las del
+      proveedor global;
     - ``health``: ``/health/ready`` comprueba la base de verdad (con ``GobPlatform.lifespan``).
     """
     s3 = localstack_endpoint.aws_client("s3")
@@ -668,6 +670,7 @@ def gob_platform(
             signer=signing,
             clock=clock,
         )
+        pool = CpuPool(clock, max_workers=2)
         services = UnitServices(
             clock=clock,
             metrics=metrics if metrics is not None else get_metrics(),
@@ -683,6 +686,7 @@ def gob_platform(
             checkpoints=checkpoints,
             kms=kms,  # type: ignore[arg-type]
             evidence=HttpsPresign(storage),  # type: ignore[arg-type]
+            cpu_pool=pool,
         )
         deps = IdentityDependencies(
             database=database,
@@ -694,7 +698,6 @@ def gob_platform(
             clock=clock,
             provider_organization_id=provider,
         )
-        pool = CpuPool(clock, max_workers=2)
         limiter = RateLimiter(clock)
         fleet = _fleet_state(services)[FLEET_STATE_KEY]
         # ``_node_ca_roots`` lee ``ca/root.pem`` de ``VIGIA_EDGE_BUCKET``: aquí, el mismo depósito
@@ -734,6 +737,7 @@ def gob_platform(
             units=None,
             permissions=None,
             runtime={
+                "metrics": metrics,
                 **({"database": database} if health else {}),
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(

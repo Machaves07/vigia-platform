@@ -10,7 +10,8 @@ proyección y su regresión; por planta, tres versiones de la política.
 
 **10 000 llamadas consecutivas por operación** (NFR-GOB-64), recorriendo las zonas y los instantes
 del año, con el marco de ``tests/benchmarks/conftest.py`` (mediana y p95 de cada operación en el
-informe, frente a ``baseline.json``). Objetivos `[objetivo propio]` de NFR-GOB-04: p95 ≤ 5 ms en
+informe, frente a ``baseline.json`` con el factor 1,2 de U-03, NFR-GOB-64; TASK-233 lo incorpora
+a la línea base sin duplicarlo). Objetivos `[objetivo propio]` de NFR-GOB-04: p95 ≤ 5 ms en
 las operaciones puntuales y ≤ 50 ms en las de lote y rango (``single_occupancy_many`` con 50 zonas,
 ``standards_at_many`` con 200 referencias, ``gate_history`` de 366 días) y en las que devuelven una
 lista (``catalog_history``, ``states_by_plant``). El umbral (regresión frente a la base) se aplica
@@ -19,7 +20,6 @@ en ``nightly``: solo corre con ``--hypothesis-profile=nightly``. Solo datos gene
 
 from __future__ import annotations
 
-import json
 import random
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
@@ -29,10 +29,11 @@ from typing import Any, Final
 
 import pytest
 
-from tests.benchmarks.conftest import Measure
+from tests.benchmarks.conftest import GOB_REGRESSION_FACTOR, Measure
 from tests.catalog_ports_support import PortsWorld, ports_world
 from tests.identity_db import BASE_TIME
 from tests.integration.conftest import PostgresEndpoint
+from tests.volumetry.scale_data import CatalogZone, catalog_history, load_catalog_history
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.ports import StandardRef
 from vigia_platform.shared.context import ScopeContext
@@ -53,7 +54,7 @@ MONTH: Final = timedelta(days=30)
 YEAR: Final = timedelta(days=365)
 POINT_MS: Final = 5.0
 BATCH_MS: Final = 50.0
-REASON: Final = "Motivo sintético del cambio del catálogo"
+CAMERAS: Final = tuple(uuid.UUID(int=i + 1) for i in range(4))
 
 
 @dataclass(frozen=True)
@@ -77,180 +78,35 @@ class Bench:
         return self.origin + timedelta(seconds=self.rng.randrange(60, int(YEAR.total_seconds())))
 
 
-def _catalog_payload(zone: uuid.UUID, version: int, standards: tuple[uuid.UUID, ...]) -> str:
-    """Un ``ZoneCatalog`` del tamaño real: 32 estándares, 4 cámaras, señales y parámetros."""
-    payload = {
-        "version": version,
-        "zone_id": str(zone),
-        "cameras": [{"camera_id": str(uuid.UUID(int=i + 1)), "code": f"CAM-{i}"} for i in range(4)],
-        "minimum_coverage": {"required_count": 1, "required_camera_ids": []},
-        "signals": [{"signal_id": f"s{i}", "role": "energy"} for i in range(4)],
-        "thresholds": {"review": 0.5, "publication": 0.8},
-        "clip_window": {"pre_ms": 5000, "post_ms": 5000},
-        "episode": {"grouping_window_ms": 3000},
-        "standards": [
-            {
-                "standard_id": str(standard),
-                "version": 1 + version // STANDARDS,
-                "family": "coexistence",
-                "title_es": f"Estándar sintético {index}",
-                "declared_text": "Texto declarado sintético del estándar de la zona. " * 4,
-                "predicate": {"all_of": [{"signal": "presence"}, {"signal": "energy"}]},
-            }
-            for index, standard in enumerate(standards)
-        ],
-    }
-    return json.dumps(payload)
-
-
 def _seed(
     world: PortsWorld, rng: random.Random
 ) -> tuple[uuid.UUID, list[uuid.UUID], list[SeededZone]]:
+    """El año de la organización mayor con ``scale_data.catalog_history`` (la misma forma que
+    la volumetría de U-03): una versión del catálogo por semana, intervalos y acuerdos mensuales."""
     site = world.site(plants=PLANTS, zones=ZONES_PER_PLANT)
     organization = site.organization_id
-    user = world.user_id
     signers = [(role, world.authz.add_user(organization))
                for role in ("coordinator_sst", "plant_manager", "copasst")]  # fmt: skip
-    signatories = json.dumps(
-        [{"role": r, "user_id": str(u), "display_name": f"Firmante {r}"} for r, u in signers]
+    seeded = [
+        SeededZone(plant, zone, tuple(uuid.uuid4() for _ in range(STANDARDS)))
+        for plant, zone in site.zones()
+    ]
+    history = catalog_history(
+        organization,
+        world.user_id,
+        signers,
+        [CatalogZone(z.plant_id, z.zone_id, z.standards, CAMERAS) for z in seeded],
+        list(site.plants),
+        origin=BASE_TIME - YEAR,
+        now=BASE_TIME,
+        rng=rng,
+        versions=VERSIONS,
+        version_spacing=WEEK,
+        gate_intervals=GATE_INTERVALS,
+        agreements=AGREEMENTS,
+        policies=POLICIES,
     )
-    document = json.dumps({"document_id": str(uuid.uuid4()), "storage_key": "documents/x",
-                           "sha256": "a" * 64, "content_type": "application/pdf",
-                           "size_bytes": 1024})  # fmt: skip
-    origin = BASE_TIME - YEAR
-    versions: list[tuple[Any, ...]] = []
-    standards: list[tuple[Any, ...]] = []
-    intervals: list[tuple[Any, ...]] = []
-    projections: list[tuple[Any, ...]] = []
-    regressions: list[tuple[Any, ...]] = []
-    agreements: list[tuple[Any, ...]] = []
-    confirmations: list[tuple[Any, ...]] = []
-    policies: list[tuple[Any, ...]] = []
-    seeded: list[SeededZone] = []
-    for plant, zone in site.zones():
-        ids = tuple(uuid.uuid4() for _ in range(STANDARDS))
-        seeded.append(SeededZone(plant, zone, ids))
-        current = dict.fromkeys(ids, 1)
-        spans: dict[tuple[uuid.UUID, int], list[Any]] = {}
-        for number in range(1, VERSIONS + 1):
-            issued = origin + (number - 1) * WEEK
-            until = None if number == VERSIONS else issued + WEEK
-            envelope = json.dumps({"payload": json.loads(_catalog_payload(zone, number, ids)),
-                                   "signature": "s" * 88, "key_id": "k1"})  # fmt: skip
-            versions.append((organization, plant, zone, number, issued, user,
-                             f"{REASON} {number}", ["standards"],
-                             _catalog_payload(zone, number, ids), envelope,
-                             number % 5 == 0, 15 + number % 400, uuid.uuid4(), until))  # fmt: skip
-            if number == 1:
-                for s in ids:
-                    spans[s, 1] = [organization, plant, zone, s, 1, issued, 1, None]
-                continue
-            # Cada versión nueva del catálogo reversiona un estándar y retira la anterior.
-            standard = ids[(number - 2) % STANDARDS]
-            previous = current[standard]
-            spans[standard, previous][7] = number
-            spans[standard, previous + 1] = [
-                organization, plant, zone, standard, previous + 1, issued, number, None
-            ]  # fmt: skip
-            current[standard] = previous + 1
-        standards.extend(tuple(row) for row in spans.values())
-        for gate in GateKind:
-            start = origin + timedelta(hours=rng.randrange(1, 48))
-            for index in range(GATE_INTERVALS):
-                status = "approved" if index % 2 == 0 else "revoked"
-                end = None if index == GATE_INTERVALS - 1 else start + MONTH
-                intervals.append((organization, plant, zone, gate.value, status, start, end, user,
-                                  REASON if status == "revoked" else None, uuid.uuid4(),
-                                  uuid.uuid4()))  # fmt: skip
-                if end is not None:
-                    start = end
-        decided = json.dumps({"status": "revoked", "decided_at": BASE_TIME.isoformat(),
-                              "record_id": str(uuid.uuid4()), "decided_by": str(user)})  # fmt: skip
-        projections.append((zone, organization, plant, decided, decided, "no_capture", BASE_TIME))
-        regressions.append((zone, organization, plant, BASE_TIME - MONTH, "catalog_change",
-                            uuid.uuid4()))  # fmt: skip
-        previous_agreement: uuid.UUID | None = None
-        for index in range(AGREEMENTS):
-            agreement = uuid.uuid4()
-            approved = origin + index * MONTH + timedelta(days=1)
-            last = index == AGREEMENTS - 1
-            superseded = None if last else approved + MONTH
-            agreements.append((agreement, organization, plant, zone,
-                               "approved" if last else "superseded", signatories, document,
-                               previous_agreement, user, approved, approved, user, uuid.uuid4(),
-                               superseded))  # fmt: skip
-            confirmed = approved - timedelta(hours=1)
-            confirmations.extend(
-                (agreement, u, organization, plant, r, confirmed) for r, u in signers
-            )
-            previous_agreement = agreement
-    for plant in site.plants:
-        for version in range(1, POLICIES + 1):
-            policies.append((uuid.uuid4(), organization, plant, version, origin + version * MONTH,
-                             document, user, uuid.uuid4()))  # fmt: skip
-
-    async def load() -> None:
-        admin = world.authz.sessions.admin
-        await admin.executemany(
-            "INSERT INTO catalog.zone_catalog_version (organization_id, plant_id, zone_id,"
-            " catalog_version, issued_at, issued_by, role_in_use, reason_es, changed_fields,"
-            " payload, envelope, single_occupancy, aggregation_window_minutes, ledger_record_id,"
-            " superseded_at) VALUES ($1, $2, $3, $4, $5, $6, 'administrator', $7, $8, $9, $10,"
-            " $11, $12, $13, $14)",
-            versions,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.declared_standard_version (organization_id, plant_id, zone_id,"
-            " standard_id, version, family, title_es, declared_text, declared_by, effective_from,"
-            " predicate, catalog_version, retired_in_catalog_version, reason_es)"
-            " VALUES ($1, $2, $3, $4, $5, 'coexistence', 'Estándar sintético',"
-            ' \'Texto declarado sintético\', \'{"user_id": "00000000-0000-4000-8000-000000000001",'
-            ' "display_name": "Firmante", "role": "administrator"}\', $6, \'{}\', $7, $8,'
-            " 'Motivo sintético del estándar')",
-            standards,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id, gate,"
-            " status, effective_from, effective_until, decided_by, reason_es, ledger_record_id,"
-            " record_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-            intervals,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.zone_gate_state (zone_id, organization_id, plant_id, mounting,"
-            " usage, resulting_mode, issued_at, envelope, valid_until)"
-            " VALUES ($1, $2, $3, $4, $5, $6, $7, '{}', $7::timestamptz + interval '7 days')",
-            projections,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.walk_test_regression (zone_id, organization_id, plant_id, state,"
-            " marked_at, cause, catalog_version, affected_row_ids, ledger_record_id)"
-            " VALUES ($1, $2, $3, 'pending', $4, $5, 52, '\"all\"', $6)",
-            regressions,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.use_agreement (agreement_id, organization_id, plant_id, zone_id,"
-            " status, signatories, document_ref, replaces_agreement_id, created_by, created_at,"
-            " approved_at, approved_by, ledger_record_id, superseded_at)"
-            " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
-            agreements,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.agreement_confirmation (agreement_id, user_id, organization_id,"
-            " plant_id, role_in_use, confirmed_at, origin)"
-            " VALUES ($1, $2, $3, $4, $5, $6, 'management')",
-            confirmations,
-        )
-        await admin.executemany(
-            "INSERT INTO catalog.plant_policy (policy_id, organization_id, plant_id, version,"
-            " signed_at, signed_by_display_name, legal_opinion_reference, document_ref,"
-            " criteria_summary_es, loaded_by, loaded_at, ledger_record_id)"
-            " VALUES ($1, $2, $3, $4, $5, 'Firmante sintético', 'REF-SINTETICA', $6,"
-            " 'Resumen sintético de criterios', $7, $5, $8)",
-            policies,
-        )
-        await admin.execute("ANALYZE")
-
-    world.run(load())
+    world.run(load_catalog_history(world.authz.sessions.admin, history))
     return organization, list(site.plants), seeded
 
 
@@ -384,6 +240,7 @@ def test_nfr_gob_04_port_operation(bench: Bench, measure: Measure, name: str) ->
         target,
         objective_ms=objective,
         rounds=CALLS,
+        regression_factor=GOB_REGRESSION_FACTOR,
         details={
             "calls": CALLS,
             "plants": PLANTS,
