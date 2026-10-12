@@ -242,6 +242,19 @@ def _secret_name(env: Env) -> str:
     return env.world.environ()["VIGIA_BOOTSTRAP_INVITATION_SECRET"]
 
 
+def _platform_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """Registros a nivel ``INFO`` o superior de los registradores **propios** de la plataforma.
+
+    ``get_logger`` nombra los suyos ``vigia.<componente>``; los de terceros (``httpx``,
+    ``httpcore``, ``botocore``…) pueden llegar desde otro hilo del mismo proceso y no dicen nada
+    de la orden que se prueba, así que no cuentan (VIG-189)."""
+    return [
+        record
+        for record in caplog.records
+        if record.levelno >= logging.INFO and record.name.startswith("vigia.")
+    ]
+
+
 # --- Criterios 2 y 4 (bootstrap) ----------------------------------------------------------------
 
 
@@ -430,7 +443,7 @@ def test_create_organization_dry_run_writes_nothing(
     assert env.table_counts() == tables
     assert env.secret_versions() == secrets_before
     assert env.object_versions() == objects
-    assert not [r for r in caplog.records if r.levelno >= logging.INFO]
+    assert not _platform_records(caplog)
     # El mismo recuento sí ve la orden real: la comprobación no es ciega.
     code, out, err = env.world.run(*_create(operator_id), environ=environ, stdin="CLIENTE-PILOTO\n")
     assert code == 0, err
