@@ -1,8 +1,10 @@
 """Piezas puras de los perfiles de carga, sin contenedores (TASK-231).
 
 El veredicto del cliente sintético nombra la ruta que incumple su p95, responde fuera de 2xx o no
-reúne muestras; el informe y la detección de secretos (PR-GOB-31); las fases de los perfiles; el
-cálculo del vaciado, de los ``rate_limited`` por debajo del mínimo de NFR-CTR-02 y de la peor
+reúne muestras (y las que no se midieron en toda la ejecución, ``unmeasured``); los umbrales del
+``soak`` (NFR-GOB-01 por ruta, NFR-GOB-03 por la consola y NFR-GOB-02 por los transitorios por
+saturación, A-65); el informe y la detección de secretos (PR-GOB-31); las fases de los perfiles;
+el cálculo del vaciado, de los ``rate_limited`` por debajo del mínimo de NFR-CTR-02 y de la peor
 proporción de rechazos permanentes en 15 minutos; la pérdida de respuestas una sola vez por
 cuerpo y que la etiqueta de una subida nunca lleva su URL prefirmada.
 """
@@ -20,10 +22,17 @@ import pytest
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
 
 from tests.load import soak
-from tests.load.console_client import CONSOLE_ROUTES, MIN_SAMPLES, Sample, evaluate
+from tests.load.console_client import (
+    CONSOLE_ROUTES,
+    MIN_SAMPLES,
+    SATURATION_STATUS,
+    Sample,
+    evaluate,
+)
 from tests.load.driver import LostReplies, route_label
 from tests.load.profiles import PROFILES, nightly_profile, write_sealed_dataset
-from tests.load.report import analyse, drains_of, percentile, secret_findings
+from tests.load.report import analyse, drains_of, percentile, saturation_transients, secret_findings
+from tests.load.test_load_ci import assert_functional
 
 T0 = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.UTC)
 
@@ -92,6 +101,115 @@ def test_a_non_2xx_answer_fails_by_name_even_with_a_fast_p95() -> None:
     samples += _samples(route.name, [10.0], status=503)
     verdict = evaluate(samples)
     assert verdict.failures == (f"{route.name}: respondió 503",)
+
+
+def test_a_503_is_a_failure_of_the_p95_verdict_but_not_a_console_error() -> None:
+    # A-65: el 503 es saturación (tendencia en el banco de nightly); cualquier otro fuera de 2xx
+    # es un error de la ruta y sigue bloqueando.
+    saturated, broken = CONSOLE_ROUTES[0], CONSOLE_ROUTES[1]
+    samples = [s for s in _healthy() if s.route not in (saturated.name, broken.name)]
+    samples += _samples(saturated.name, [10.0] * MIN_SAMPLES)
+    samples += _samples(saturated.name, [10.0], status=SATURATION_STATUS)
+    samples += _samples(broken.name, [10.0] * MIN_SAMPLES)
+    samples += _samples(broken.name, [10.0], status=503)
+    samples += _samples(broken.name, [10.0], status=500)
+    verdict = evaluate(samples)
+    assert verdict.failures == (
+        f"{saturated.name}: respondió 503",
+        f"{broken.name}: respondió 500, 503",
+    )
+    assert verdict.errors == (f"{broken.name}: respondió 500",)
+    assert verdict.to_json()["errors"] == [f"{broken.name}: respondió 500"]
+    assert broken.name in verdict.errors_message()
+
+
+def test_a_slow_or_saturated_console_has_no_errors() -> None:
+    route = CONSOLE_ROUTES[0]
+    samples = [s for s in _healthy() if s.route != route.name]
+    samples += _samples(route.name, [route.p95_ms * 4] * MIN_SAMPLES)
+    samples += _samples(route.name, [10.0], status=SATURATION_STATUS)
+    verdict = evaluate(samples)
+    assert not verdict.passed
+    assert verdict.errors == ()
+    assert verdict.unmeasured == ()
+
+
+def test_a_route_without_enough_samples_in_the_whole_run_is_unmeasured() -> None:
+    # A-65: el p95 es tendencia, pero una ruta publicada que no reúne MIN_SAMPLES en toda la
+    # ejecución no se midió: bloquea por `unmeasured`, no por el p95.
+    route = CONSOLE_ROUTES[0]
+    samples = [s for s in _healthy() if s.route != route.name]
+    samples += _samples(route.name, [10.0] * (MIN_SAMPLES - 1))
+    verdict = evaluate(samples)
+    assert verdict.unmeasured == (route.name,)
+    assert not verdict.errors
+    assert verdict.to_json()["unmeasured"] == [route.name]
+
+
+def _functional(**changes: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    analysis: dict[str, Any] = {
+        "emitted": 10,
+        "accepted": 10,
+        "lost": 0,
+        "dead_letter": {},
+        "halted": {},
+        "rate_limited_below_minimum": 0,
+        "rate_limited_by_operation": {},
+        "rejection_codes": {},
+        "events": {"submit_record:success": 10},
+        **changes,
+    }
+    ledger = {
+        "missing": 0,
+        "unexpected": 0,
+        "records": 10,
+        "duplicated_source_keys": 0,
+        "chains_verified": 1,
+    }
+    return analysis, ledger
+
+
+def test_saturation_transients_are_the_temporarily_unavailable_codes_and_the_503_events() -> None:
+    analysis, _ = _functional(
+        rejection_codes={
+            "heartbeat:temporarily_unavailable": 3,
+            "submit_record:idempotency_conflict": 1,
+        },
+        events={"submit_record:success": 10, "request_grant:unavailable": 2},
+    )
+    assert saturation_transients(analysis) == {
+        "heartbeat:temporarily_unavailable": 3,
+        "request_grant:unavailable": 2,
+    }
+
+
+def test_saturation_blocks_in_ci_and_is_trend_in_the_nightly_bench() -> None:
+    analysis, ledger = _functional(
+        rejection_codes={"heartbeat:temporarily_unavailable": 1},
+        events={"submit_record:success": 10, "heartbeat:unavailable": 1},
+    )
+    with pytest.raises(AssertionError):
+        assert_functional(analysis, ledger)
+    assert_functional(analysis, ledger, saturation_blocks=False)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"accepted": 9, "lost": 1},
+        # `lost` por separado: con `accepted == emitted` la única aserción que cae es `lost == 0`.
+        {"lost": 1},
+        {"dead_letter": {"schema_invalid": 1}},
+        {"rate_limited_by_operation": {"submit_record": 1}},
+        {"rate_limited_below_minimum": 1},
+    ],
+)
+def test_the_functional_checks_block_even_when_saturation_is_trend(
+    changes: dict[str, Any],
+) -> None:
+    analysis, ledger = _functional(**changes)
+    with pytest.raises(AssertionError):
+        assert_functional(analysis, ledger, saturation_blocks=False)
 
 
 def test_only_samples_inside_the_windows_count() -> None:
@@ -372,15 +490,34 @@ def test_the_soak_dry_run_rejects_a_fleet_pointing_elsewhere(
 
 
 def test_soak_thresholds_name_each_route_over_its_absolute_target() -> None:
-    latency = {
-        "POST /api/nodes/findings": {"count": 10, "p95_ms": 520.0, "p99_ms": 900.0},
-        "POST /api/nodes/heartbeats": {"count": 10, "p95_ms": 150.0, "p99_ms": 400.0},
+    analysis = {
+        "node_latency": {
+            "POST /api/nodes/findings": {"count": 10, "p95_ms": 520.0, "p99_ms": 900.0},
+            "POST /api/nodes/heartbeats": {"count": 10, "p95_ms": 150.0, "p99_ms": 400.0},
+        },
+        "rejection_codes": {},
+        "events": {},
     }
     console = {"failures": ["GET /fleet/nodes: p95 600 ms > 500 ms (n=40)"]}
-    assert soak.evaluate_thresholds(latency, console) == [
+    assert soak.evaluate_thresholds(analysis, console) == [
         "NFR-GOB-01 POST /api/nodes/findings: p95_ms 520.0 > 500",
         "NFR-GOB-03 GET /fleet/nodes: p95 600 ms > 500 ms (n=40)",
     ]
+
+
+def test_soak_thresholds_block_on_a_single_saturation_transient() -> None:
+    # A-65: NFR-GOB-02 bloquea en el soak sobre staging; un solo `temporarily_unavailable` (o un
+    # 503 visto como `unavailable`) es un incumplimiento, aunque todo lo demás esté en objetivo.
+    analysis = {
+        "node_latency": {},
+        "rejection_codes": {"heartbeat:temporarily_unavailable": 1},
+        "events": {},
+    }
+    assert soak.evaluate_thresholds(analysis, {"failures": []}) == [
+        "NFR-GOB-02 transitorios por saturación: {'heartbeat:temporarily_unavailable': 1}"
+    ]
+    clean = {"node_latency": {}, "rejection_codes": {}, "events": {"submit_record:success": 10}}
+    assert soak.evaluate_thresholds(clean, {"failures": []}) == []
 
 
 # --- Nodo simulado -------------------------------------------------------------------------------
