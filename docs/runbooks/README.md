@@ -1,9 +1,11 @@
 # Runbooks de operación de `vigia-platform`
 
-**Unidad**: U-02 · **Tarea**: TASK-152 (VIG-97) · **Requisitos**: RESILIENCY-13, NFR-NUC-12 y NFR-NUC-50.
-**Diseño**: `plataforma-nucleo/infrastructure-design/deployment-architecture.md` §6 y sus notas fechadas del 2026-09-23, en `aidlc-docs/` del espacio de trabajo de Vigía, fuera de este repositorio. La adenda `docs/decisions/adenda-al-diseno.md` del plan manda donde difieran.
+**Unidades**: U-02 y U-03 · **Tareas**: TASK-152 (VIG-97) y TASK-236 (VIG-172) · **Requisitos**: RESILIENCY-13, NFR-NUC-12, NFR-NUC-50, NFR-GOB-65, NFR-GOB-21 y NFR-GOB-48.
+**Diseño**: `plataforma-nucleo/infrastructure-design/deployment-architecture.md` §6 y `plataforma-gobernanza-flota/infrastructure-design/deployment-architecture.md` §6, y sus notas fechadas del 2026-09-23, en `aidlc-docs/` del espacio de trabajo de Vigía, fuera de este repositorio. La adenda `docs/decisions/adenda-al-diseno.md` del plan manda donde difieran.
 
-Estos procedimientos se escriben antes del incidente para que el dueño los ejecute sin reconstruirlos. Cada runbook tiene tres secciones fijas: **Pasos**, **Validación posterior** y **Comunicación**. Los nombres de recursos, alarmas, métricas y órdenes son los del código de este repositorio (`infra/`, `backend/`, `.github/`), no los del diseño cuando difieren. Cada diferencia está anotada en la sección «Estado en el código» del runbook.
+Estos procedimientos se escriben antes del incidente para que el dueño los ejecute sin reconstruirlos. Cada runbook de U-02 tiene tres secciones fijas: **Pasos**, **Validación posterior** y **Comunicación**. Los de U-03 (prefijo `u03-`) añaden **Disparador**, **Vuelta atrás** y **Estado en el código**, y cada uno se cita desde la alarma que lo dispara. Los nombres de recursos, alarmas, métricas y órdenes son los del código de este repositorio (`infra/`, `backend/`, `.github/`), no los del diseño cuando difieren. Cada diferencia está anotada en la sección «Estado en el código» del runbook.
+
+Los cinco runbooks de código de NFR-GOB-65 se reparten así: **revocar un nodo** y **reemplazar un nodo averiado** con 6.1 de U-03; **regenerar y publicar la lista de revocación** con 6.2 de U-03; **reabrir una sesión de walk-test incompleta** con 6.4 de U-03; **reprocesar una alarma atascada** con [6.3 de U-02](6.3-dead-letter-replay.md), que U-03 no duplica. El conteo de clips huérfanos (6.3 de U-03) no tiene runbook de código propio: es verificación y conteo.
 
 ## Índice
 
@@ -15,6 +17,10 @@ Estos procedimientos se escriben antes del incidente para que el dueño los ejec
 | [6.4 Rotación de claves](6.4-key-rotation.md) | Claves Ed25519 de firma y raíz de `vigia-node-ca` | Anual (firma), cada 10 años o ante compromiso (raíz) |
 | [6.5 Archivado y restauración de auditoría](6.5-audit-archive-and-restore.md) | Archivado mensual y restauración para investigación | Mensual (automático) y bajo petición |
 | [6.6 Rotación de la contraseña de la base](6.6-database-password-rotation.md) | Rotación automática o sospecha de compromiso | Cada 30 días (automática) o ante sospecha |
+| [U-03 6.1 Rotación forzada de la credencial de un nodo](u03-6.1-forced-credential-rotation.md) | Revocar un nodo, reemplazar un equipo averiado o alarma de flota `certificate_expiring` (NFR-GOB-65) | Ante el evento |
+| [U-03 6.2 Regeneración y publicación de la lista de revocación](u03-6.2-revocation-list-publication.md) | Alarmas `revocation-list-publish-failed` y `revocation-list-expiring`; tras una restauración (NFR-GOB-21) | Ante la alarma o la restauración |
+| [U-03 6.3 Verificación y conteo de clips huérfanos](u03-6.3-orphan-clips.md) | Alarma de flota `orphan_clips_growing` o revisión de R5 (NFR-GOB-65) | Ante la alarma o el crecimiento sostenido |
+| [U-03 6.4 Reapertura de una sesión de walk-test incompleta](u03-6.4-walk-test-session-reopen.md) | Sesión `incomplete` por `expire_walk_test_sessions` a los 7 días (NFR-GOB-65) | Bajo petición del coordinador |
 | [Contingencia de subparticionado](subpartitioning-contingency.md) | La volumetría nocturna supera los 300 ms en la lista mayor (PAT-NUC-ESC-01) | Solo si la medición lo exige |
 | [Recuperación de una cadena rota](broken-chain-recovery.md) | Alarma `vigia-integrity-compromised` (BR-NUC-58) | Ante la alarma |
 | [Pruebas con la base en otra fecha](clock-shifted-database-tests.md) | Código sensible al reloj (retro 15 de `AGENTS.md`) | En la tarea que lo toque |

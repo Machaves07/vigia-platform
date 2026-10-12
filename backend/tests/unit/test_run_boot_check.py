@@ -11,7 +11,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.run_boot_check import BOOT_SCRIPT_MOUNT, POSTGRES_IMAGE, TMP_MOUNT, BootPlan, main
+import pytest
+
+from tools import run_boot_check
+from tools.run_boot_check import (
+    BOOT_SCRIPT_MOUNT,
+    DEFAULT_RENDER_SCRIPT,
+    POSTGRES_IMAGE,
+    RENDER_SCRIPT_MOUNT,
+    TMP_MOUNT,
+    BootPlan,
+    main,
+)
 
 
 def _plan(tmp_path: Path) -> BootPlan:
@@ -59,3 +70,58 @@ def test_passwords_are_random_and_never_shown(tmp_path: Path) -> None:
 def test_a_missing_boot_script_is_an_environment_error(tmp_path: Path) -> None:
     missing = tmp_path / "missing.py"
     assert main(["--migrate-image", "a", "--boot-image", "b", "--boot-script", str(missing)]) == 2
+
+
+# --- Render del acta dentro de la imagen, sin red (TASK-217) -------------------------------------
+
+
+def test_the_record_renders_hardened_and_without_network(tmp_path: Path) -> None:
+    script = tmp_path / "image_render.py"
+    script.write_text("")
+    plan = BootPlan(
+        migrate_image="img:n",
+        boot_image="img:n",
+        boot_script=tmp_path / "image_boot.py",
+        render_script=script,
+    )
+    command = plan.render_command()
+    assert command[:3] == ["docker", "run", "--rm"]
+    assert command[command.index("--network") + 1] == "none"
+    assert command.count("--network") == 1
+    assert "--read-only" in command
+    assert command[command.index("--cap-drop") + 1] == "ALL"
+    assert command[command.index("--tmpfs") + 1] == TMP_MOUNT
+    assert "--privileged" not in command and "--user" not in command
+    assert command[command.index("--volume") + 1] == f"{script.resolve()}:{RENDER_SCRIPT_MOUNT}:ro"
+    assert command[-3:] == ["img:n", "python", RENDER_SCRIPT_MOUNT]
+    with pytest.raises(ValueError):
+        _plan(tmp_path).render_command()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["--migrate-image", "img:n", "--boot-image", "img:n"], DEFAULT_RENDER_SCRIPT),
+        (["--migrate-image", "img:n", "--boot-image", "img:n-1"], None),
+        (["--migrate-image", "img:n", "--boot-image", "img:n", "--no-render"], None),
+    ],
+)
+def test_only_the_image_tested_against_itself_renders_by_default(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str], expected: Path | None
+) -> None:
+    seen: list[BootPlan] = []
+
+    def fake_run(plan: BootPlan, *, timeout: float) -> int:
+        seen.append(plan)
+        return 0
+
+    monkeypatch.setattr(run_boot_check, "run", fake_run)
+    assert main(arguments) == 0
+    assert seen[0].render_script == expected
+    assert DEFAULT_RENDER_SCRIPT.is_file()
+
+
+def test_a_missing_render_script_is_an_environment_error(tmp_path: Path) -> None:
+    missing = str(tmp_path / "missing.py")
+    arguments = ["--migrate-image", "a", "--boot-image", "a", "--render-script", missing]
+    assert main(arguments) == 2
