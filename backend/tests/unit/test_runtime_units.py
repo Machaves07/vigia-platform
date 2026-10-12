@@ -45,6 +45,8 @@ from tests.runtime_support import (
     with_probe_unit,
 )
 from tests.worker_support import StubKms, StubSigning, StubStorage
+from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
+from vigia_platform.catalog.adapters.rendering import DOCUMENT_TIMEOUT_SECONDS
 from vigia_platform.fleet.registration import U03_RECORD_TYPES
 from vigia_platform.identity.application.admin_cli import AdminConfig
 from vigia_platform.shared.api.app import (
@@ -57,7 +59,9 @@ from vigia_platform.shared.api.app import (
 from vigia_platform.shared.api.declarations import iter_declared_routes
 from vigia_platform.shared.api.errors import ApiStartupError
 from vigia_platform.shared.context import ActorUnit, ContextAbsent
+from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.db import DatabaseHealth, ProcessKind
+from vigia_platform.shared.runtime import api as api_runtime
 from vigia_platform.shared.runtime import units
 from vigia_platform.shared.runtime.admin import compose_admin_runtime
 from vigia_platform.shared.runtime.api import compose_api_runtime
@@ -65,6 +69,7 @@ from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInv
 from vigia_platform.shared.runtime.db_credentials import LazyDatabase
 from vigia_platform.shared.runtime.units import (
     PlatformUnit,
+    UnitServices,
     label_bindings,
     record_type_registry,
     registered_units,
@@ -365,3 +370,52 @@ def test_root_databases_have_the_pools_of_each_process(tmp_path: Path) -> None:
     assert getattr(worker.database, "process", None) is ProcessKind.WORKER
     assert worker.catalog is not None and not worker.catalog.sealed  # lo sella el arranque
     assert uuid.UUID(str(PROVIDER_ID)) == PROVIDER_ID
+
+
+# --- Documento del acta en el pool del proceso (VIG-160) -----------------------------------------
+
+
+def test_the_record_document_uses_the_bounded_pool_of_the_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # El renderer de producción usa el mismo pool acotado que Argon2id (VIGIA_THREADPOOL_SIZE),
+    # nunca uno propio ni el de get_cpu_pool(); con su tope de 10 s y menos puestos que hilos.
+    created: list[CpuPool] = []
+
+    class RecordingPool(CpuPool):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr(api_runtime, "CpuPool", RecordingPool)
+    runtime = _runtime(VIGIA_BREACH_LIST_PATH=str(breach_list(tmp_path)), VIGIA_THREADPOOL_SIZE="3")
+    api = _api(tmp_path, runtime=runtime)
+    (pool,) = created
+    renderer = cast(CatalogHttp, api.state[CATALOG_STATE_KEY]).record_documents
+    assert renderer is not None
+    assert renderer.pool is pool
+    assert pool.max_workers == 3
+    assert renderer.timeout_seconds == DOCUMENT_TIMEOUT_SECONDS
+    assert renderer.max_concurrent < pool.max_workers
+
+
+def test_without_the_pool_of_the_process_the_catalog_does_not_start() -> None:
+    unused: Any = object()
+    services = UnitServices(
+        clock=unused,
+        metrics=unused,
+        provider_organization_id=PROVIDER_ID,
+        database=unused,
+        contexts=unused,
+        authorizer=unused,
+        audit=unused,
+        outbox=unused,
+        writer=unused,
+        free_text=unused,
+        signing=unused,
+        checkpoints=unused,
+        kms=unused,
+    )
+    with pytest.raises(RuntimeConfigInvalid) as raised:
+        services.require_cpu_pool()
+    assert raised.value.variable == "VIGIA_THREADPOOL_SIZE"
