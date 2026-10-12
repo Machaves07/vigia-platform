@@ -209,15 +209,18 @@ FLEET_PANELS: Final = (
     "Inventario por estado de comunicacion",
     "Nodos mudos",
     "Colas por encima de umbral",
+    "Alarmas abiertas por clase",
     "Latencias y codigos por ruta del contrato",
     "Aceptados y rechazados por tipo de registro",
     "Lista de revocacion: estado y vigencia",
+    "Certificados por vencer",
     "Huerfanos por nodo",
     "Tareas periodicas de U-03: duracion y resultado",
     "Semaforos y pools por clase",
 )
-"""Paneles de U-03 §8.2 (NFR-GOB-58) con métricas que el código publica. «Alarmas abiertas por
-clase» y «certificados por vencer» no tienen métrica en el código todavía: no se dibujan."""
+"""Los once paneles de U-03 §8.2 (NFR-GOB-58) sobre métricas que el código publica. «Alarmas
+abiertas por clase» y «certificados por vencer» leen ``fleet_alarms_open`` (VIG-187): el segundo,
+su clase ``certificate_expiring``."""
 
 APPLICATION_ALARM_METRICS: Final = {
     # NFR-NUC-38 y §9.4.
@@ -1604,10 +1607,23 @@ class ObservabilityStack(VigiaStack):
         """Paneles de flota de U-03 (nº 18, U-03 §8.2 y NFR-GOB-58) sobre las métricas que el
         código publica. Las series por nodo son solo las de ``FLEET_PER_NODE_METRICS`` (contadores
         y medidores); los histogramas se separan por ruta, clase o tarea, nunca por nodo
-        (NFR-GOB-13)."""
+        (NFR-GOB-13). «Alarmas abiertas por clase» y «certificados por vencer» leen
+        ``fleet_alarms_open`` por ``alarm_kind`` (VIG-187)."""
         api, worker = API_SERVICE, WORKER_SERVICE
         m5 = FIVE_MINUTES
-        (inventory, mute, queues, routes, records, revocation, orphans, tasks, pools) = FLEET_PANELS
+        (
+            inventory,
+            mute,
+            queues,
+            alarms,
+            routes,
+            records,
+            revocation,
+            certificates,
+            orphans,
+            tasks,
+            pools,
+        ) = FLEET_PANELS
         by_node = "node_id"
         reachable = self._search("fleet_node_reachable", api, "Maximum", m5, by_node)
         heartbeats = self._search("fleet_heartbeats_total", api, "Sum", m5, by_node)
@@ -1674,6 +1690,17 @@ class ObservabilityStack(VigiaStack):
                             )
                         ],
                     ),
+                    self._graph(
+                        alarms,
+                        [
+                            self._expression(
+                                self._search(
+                                    "fleet_alarms_open", worker, "Maximum", m5, "alarm_kind"
+                                ),
+                                m5,
+                            )
+                        ],
+                    ),
                     cloudwatch.GraphWidget(
                         title=routes, left=latency, right=codes, width=24, height=6
                     ),
@@ -1697,6 +1724,19 @@ class ObservabilityStack(VigiaStack):
                             ),
                             self._app_metric("revocation_list_entries", worker, "Maximum", m5),
                             self._app_metric("revocation_list_publish_failed", worker, "Sum", m5),
+                        ],
+                        width=12,
+                    ),
+                    self._graph(
+                        certificates,
+                        [
+                            self._app_metric(
+                                "fleet_alarms_open",
+                                worker,
+                                "Maximum",
+                                m5,
+                                {"alarm_kind": "certificate_expiring"},
+                            )
                         ],
                         width=12,
                     ),

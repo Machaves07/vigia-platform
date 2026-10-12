@@ -36,7 +36,9 @@ from datetime import datetime, timedelta
 from typing import Any, Final
 
 import pytest
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+from tests.dispatch_support import metric_points, metrics_with_reader
 from tests.fleet_alarm_support import AlarmRows, AlarmTasks, alarm_tasks, kinds, run_in, system
 from tests.fleet_http_support import FleetStack, fleet_stack
 from tests.fleet_inventory_support import InventoryWorld, NodeState, as_superuser, counting
@@ -45,6 +47,7 @@ from vigia_platform.fleet.adapters.postgres import fleet_alarm_store
 from vigia_platform.fleet.application.fleet_alarms import AlarmReport
 from vigia_platform.fleet.domain.communication_state import MUTE_FACTOR
 from vigia_platform.shared.context import ScopeLevel
+from vigia_platform.shared.observability.metrics import MetricName
 from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 
 pytestmark = pytest.mark.integration
@@ -68,6 +71,7 @@ class Alarms:
     world: InventoryWorld
     tasks: AlarmTasks
     rows: AlarmRows
+    reader: InMemoryMetricReader
 
     def now(self) -> datetime:
         return self.world.now()
@@ -115,10 +119,15 @@ def alarms(stack: FleetStack) -> Alarms:
     # de las concesiones compara con ella; retro 14), al milisegundo como las marcas de las tareas.
     (row,) = stack.fetch("SELECT now() AS now")
     sessions.clock.set(to_millisecond(row["now"]))
+    metrics, reader = metrics_with_reader()
     tasks = alarm_tasks(
-        clock=sessions.clock, outbox=stack.outbox, writer=stack.writer, audit=sessions.audit
+        clock=sessions.clock,
+        outbox=stack.outbox,
+        writer=stack.writer,
+        audit=sessions.audit,
+        metrics=metrics,
     )
-    return Alarms(stack, InventoryWorld.build(stack), tasks, AlarmRows(stack.fetch))
+    return Alarms(stack, InventoryWorld.build(stack), tasks, AlarmRows(stack.fetch), reader)
 
 
 def _stamp(moment: datetime) -> str:
@@ -504,6 +513,51 @@ def test_certificate_expiring_at_15_days_and_cleared_after_rotation(alarms: Alar
     alarms.state(at, NodeState(certificate_in_ms=365 * 86_400_000))
     (cleared,) = alarms.evaluate().cleared
     assert cleared.alarm_id == alarm.alarm_id
+
+
+# --- Métrica de alarmas abiertas por clase --------------------------------------------------------
+
+
+def _open_alarms_gauge(alarms: Alarms) -> dict[str, int]:
+    return {
+        str(attributes["alarm_kind"]): int(value)
+        for attributes, value in metric_points(alarms.reader, MetricName.FLEET_ALARMS_OPEN)
+    }
+
+
+def test_the_open_alarms_metric_reflects_raised_not_cleared_by_class(alarms: Alarms) -> None:
+    """VIG-187 y NFR-GOB-58: ``fleet_alarms_open`` cuenta las alarmas abiertas por clase; una
+    cerrada deja de contar y las clases sin ninguna abierta salen a cero."""
+    retiring, orphan, drift, certificate, mute = (alarms.node() for _ in range(5))
+    alarms.state(retiring, NodeState(retires_at=RETIRES_AT))
+    alarms.state(orphan, NodeState(orphan_clips=51, day_clips=2_000))
+    alarms.state(drift, NodeState(offset_ms=9_000))
+    alarms.state(certificate, NodeState(certificate_in_ms=1_000))
+    alarms.state(mute, NodeState(heartbeat_age_ms=600_000))
+    alarms.evaluate()  # version_retiring y orphan_clips_growing ya; clock_drift aún no
+    alarms.cycle()
+    alarms.evaluate()  # clock_drift en la segunda evaluación
+    alarms.alert()  # certificate_expiring
+    alarms.detect()  # node_mute
+    assert _open_alarms_gauge(alarms) == {
+        "node_mute": 1,
+        "queue_over_threshold": 0,
+        "clock_drift": 1,
+        "version_retiring": 1,
+        "simulated_adapter_in_productive": 0,
+        "certificate_expiring": 1,
+        "camera_below_min_fps": 0,
+        "orphan_clips_growing": 1,
+    }
+    # Cerrada version_retiring (clase sin histéresis): sale del medidor y las demás siguen.
+    alarms.cycle()
+    alarms.state(retiring, QUIET)
+    alarms.evaluate()
+    gauge = _open_alarms_gauge(alarms)
+    assert gauge["version_retiring"] == 0
+    assert gauge["node_mute"] == 1
+    assert gauge["clock_drift"] == gauge["orphan_clips_growing"] == 1
+    assert gauge["certificate_expiring"] == 1
 
 
 # --- Eventos en la misma transacción --------------------------------------------------------------

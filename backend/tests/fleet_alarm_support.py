@@ -37,6 +37,7 @@ from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
 from vigia_platform.shared.db import Database, Transaction
+from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.outbox.publish import OutboxPort
 
 __all__ = [
@@ -69,8 +70,9 @@ def alarm_tasks(
     writer: EscritorExpediente,
     audit: AuditWriter,
     batch_size: int = BATCH_SIZE,
+    metrics: PlatformMetrics | None = None,
 ) -> AlarmTasks:
-    deps = AlarmDependencies(clock=clock, outbox=outbox)
+    deps = AlarmDependencies(clock=clock, outbox=outbox, metrics=metrics)
     return AlarmTasks(
         deps=deps,
         evaluator=FleetAlarmEvaluator(deps, audit=audit, batch_size=batch_size),

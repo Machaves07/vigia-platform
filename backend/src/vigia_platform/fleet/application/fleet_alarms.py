@@ -28,7 +28,10 @@ registro en la raíz es de TASK-227). Por lotes de ``batch_size`` nodos y con ``
 5. un nodo **revocado o dado de baja** no se evalúa: sus alarmas abiertas se cierran una vez
    (decisión del redactor de TASK-225, BR-GOB-76);
 6. cada ``simulated_adapter_in_productive`` levantada deja además su alerta
-   ``fleet_security_alert`` en la auditoría de U-02, en la misma transacción (NFR-GOB-36, G-11).
+   ``fleet_security_alert`` en la auditoría de U-02, en la misma transacción (NFR-GOB-36, G-11);
+7. al terminar la organización publica ``fleet_alarms_open`` por clase (VIG-187, NFR-GOB-58) con
+   una sola consulta ``GROUP BY`` sobre las alarmas abiertas: el panel «Alarmas abiertas por
+   clase» y, de la clase ``certificate_expiring``, «Certificados por vencer».
 
 La evaluación no se hace en la ruta del latido (nota de TASK-225, «reparto entre tareas»): el
 latido no hace trabajo de más y la histéresis cuenta ciclos de 60 s.
@@ -104,6 +107,7 @@ from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ContextAbsent, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7_at
+from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxPort
 from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRegistry, Schedule
 from vigia_platform.shared.signing.keys import to_millisecond
@@ -120,6 +124,7 @@ __all__ = [
     "FleetAlarmEvaluator",
     "FleetAlarms",
     "clear_in",
+    "publish_open_alarms",
     "raise_in",
     "register_evaluate_fleet_alarms",
 ]
@@ -145,6 +150,8 @@ class AlarmDependencies:
     outbox: OutboxPort
     store: PostgresFleetAlarmStore = field(default_factory=PostgresFleetAlarmStore)
     random_bytes: Callable[[int], bytes] = os.urandom
+    metrics: PlatformMetrics | None = None
+    """Métricas de la plataforma; ``None`` en las pruebas sin proveedor (instrumentos no-op)."""
 
 
 @dataclass(slots=True)
@@ -244,6 +251,18 @@ async def clear_in(
     )
 
 
+async def publish_open_alarms(deps: AlarmDependencies, transaction: Transaction) -> None:
+    """Publica ``fleet_alarms_open`` de la organización por clase (VIG-187, NFR-GOB-58).
+
+    Una sola consulta ``GROUP BY`` sobre las alarmas abiertas (nunca una por clase, NFR-GOB-13);
+    las clases sin ninguna abierta se publican a cero para que el tablero no las deje sin serie.
+    """
+    counts = await deps.store.open_alarm_counts(transaction)
+    metrics = deps.metrics if deps.metrics is not None else get_metrics()
+    for kind in FleetAlarmKind:
+        metrics.fleet_alarms_open.set(counts.get(kind, 0), {"alarm_kind": kind})
+
+
 @dataclass(slots=True)
 class _Decisions:
     raise_: list[NewAlarm] = field(default_factory=list)
@@ -283,6 +302,7 @@ class FleetAlarmEvaluator:
             if facts:
                 await self._batch(transaction, facts, now, report)
             if len(facts) < self._batch_size:
+                await publish_open_alarms(deps, transaction)
                 return report
             after = facts[-1].node_id
 

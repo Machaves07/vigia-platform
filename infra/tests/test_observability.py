@@ -388,6 +388,7 @@ def test_collector_declarations_only_use_closed_low_cardinality_attributes() -> 
         "pool_class",
         "alert_type",
         "app_version",
+        "alarm_kind",
     }
     for sets, selectors in _collector_declarations():
         for dimensions in sets:
@@ -857,7 +858,7 @@ def test_fleet_section_draws_each_panel_from_published_metrics(deployment: Synth
     _, widgets = _dashboard(deployment)
     section = _section(widgets, FLEET_SECTION)
     titles = [str(w["properties"].get("title")) for w in section]
-    assert len(FLEET_PANELS) == len(set(FLEET_PANELS)) == 9
+    assert len(FLEET_PANELS) == len(set(FLEET_PANELS)) == 11
     for panel in FLEET_PANELS:
         (widget,) = [w for w in section if w["properties"].get("title") == panel]
         names = {name for name, _, _ in _widget_metrics(widget)}

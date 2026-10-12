@@ -32,6 +32,7 @@ from typing import Any
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vigia_platform.fleet.domain.enums import FleetAlarmKind
 from vigia_platform.fleet.registration import U03_TASKS
 from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.archive.restore_drill import RESTORE_DRILL_OVERDUE_DAYS
@@ -275,6 +276,15 @@ def test_u03_metrics_are_published_and_not_pending() -> None:
         assert name.value in SPECS and name.value in used, name
         assert name.value not in PENDING, name
     assert ALARMS["revocation-list-publish-failed"] == (("revocation_list_publish_failed", ()),)
+
+
+def test_open_alarms_metric_is_a_closed_list_gauge_by_class() -> None:
+    """VIG-187 y NFR-GOB-58: el panel «Alarmas abiertas por clase» lee ``fleet_alarms_open``, un
+    medidor con la clase como única dimensión, de lista cerrada en la política de atributos."""
+    spec = SPECS[MetricName.FLEET_ALARMS_OPEN.value]
+    assert spec.kind is MetricKind.GAUGE
+    assert spec.attributes == frozenset({"alarm_kind"})
+    assert redaction.DEFAULT_POLICY.values("alarm_kind") == {kind.value for kind in FleetAlarmKind}
 
 
 def test_only_per_node_counters_and_gauges_carry_node_id() -> None:

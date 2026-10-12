@@ -162,6 +162,19 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     ),
     "dependency": ("secrets_manager", "kms"),
     "purpose": ("catalog", "gate", "live_view_token", "key_set", "checkpoint"),
+    # Clases de alarma de flota (U-03, VIG-187, NFR-GOB-58): la métrica ``fleet_alarms_open``
+    # separa por este atributo. Fijas aquí porque ``simulated_adapter_in_productive`` (31
+    # caracteres) tiene forma de token y ``register`` la rechazaría.
+    "alarm_kind": (
+        "node_mute",
+        "queue_over_threshold",
+        "clock_drift",
+        "version_retiring",
+        "simulated_adapter_in_productive",
+        "certificate_expiring",
+        "camera_below_min_fps",
+        "orphan_clips_growing",
+    ),
     "operation": (
         "ledger_write",
         "ledger_write_with_evidence",

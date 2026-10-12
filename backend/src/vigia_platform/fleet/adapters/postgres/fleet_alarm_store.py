@@ -15,6 +15,8 @@ sentencias por lote, nunca una por nodo.
   ciclo insertó. Así dos ciclos solapados se serializan en la fila y el segundo la ve ya evaluada
   (NFR-GOB-47);
 - ``open_alarms``: las alarmas abiertas de los nodos, por la ranura ``open_fleet_alarm``;
+- ``open_alarm_counts``: las alarmas abiertas de la organización **por clase** (una sentencia), la
+  métrica ``fleet_alarms_open`` de los paneles de flota (VIG-187, NFR-GOB-58);
 - ``lock_open`` / ``clear``: el cierre bloquea las filas abiertas (las que otro ciclo ya cerró no
   vuelven) y escribe ``cleared_at`` y ``cleared_event_id`` una sola vez;
 - ``raise_alarms``: el ``INSERT`` de las alarmas nuevas; el disparador ``open_alarm_slot`` ocupa la
@@ -237,6 +239,14 @@ _EXPIRING: Final = text(
     " AND (CAST(:after AS uuid) IS NULL OR n.node_id > CAST(:after AS uuid))"
     " ORDER BY n.node_id LIMIT :limit"
 )
+
+_OPEN_ALARM_COUNTS: Final = text(
+    "SELECT alarm_kind, count(*) AS open FROM fleet.open_fleet_alarm"
+    " WHERE organization_id = :organization_id AND alarm_id IS NOT NULL"
+    " GROUP BY alarm_kind ORDER BY alarm_kind"
+)
+"""Alarmas abiertas de la organización por clase (VIG-187, NFR-GOB-58): una sola sentencia
+``GROUP BY`` sobre la ranura ``open_fleet_alarm``, nunca una consulta por clase."""
 
 _ALARM_PAGE: Final = text(
     "SELECT a.alarm_id, a.plant_id, a.alarm_kind, a.node_id, a.zone_id, a.raised_at,"
@@ -510,6 +520,13 @@ class PostgresFleetAlarmStore:
         )
         alarms = (_alarm(organization_id, row) for row in result)
         return {(alarm.node_id, alarm.alarm_kind): alarm for alarm in alarms}
+
+    async def open_alarm_counts(self, transaction: Transaction) -> dict[FleetAlarmKind, int]:
+        """Las alarmas abiertas de la organización por clase (una sentencia, VIG-187)."""
+        result = await transaction.execute(
+            _OPEN_ALARM_COUNTS, {"organization_id": transaction.context.organization_id}
+        )
+        return {FleetAlarmKind(row.alarm_kind): int(row.open) for row in result}
 
     async def lock_open(
         self, transaction: Transaction, alarms: Sequence[FleetAlarm]
