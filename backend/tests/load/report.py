@@ -46,6 +46,7 @@ __all__ = [
     "analyse",
     "latency_summary",
     "percentile",
+    "saturation_transients",
     "secret_findings",
     "write_report",
 ]
@@ -251,6 +252,20 @@ def analyse(result: Mapping[str, Any]) -> dict[str, Any]:
         "drains": [drain.to_json() for drain in drains],
         "halted": result["halted"],
         "node_latency": result["latency"],
+    }
+
+
+def saturation_transients(analysis: Mapping[str, Any]) -> dict[str, int]:
+    """Los transitorios por saturación que vieron los nodos (NFR-GOB-02): cada
+    ``temporarily_unavailable`` por operación y cada ``503`` (``unavailable``) del cliente.
+
+    Bloquean en el ``soak`` sobre ``staging`` (A-65) y son tendencia en ``ci`` y ``nightly``; vive
+    aquí, no en un módulo de prueba, para que ``soak.py`` lo importe sin arrastrar el arnés."""
+    codes = analysis["rejection_codes"]
+    events = analysis["events"]
+    return {
+        **{key: n for key, n in codes.items() if key.endswith(":temporarily_unavailable")},
+        **{key: n for key, n in events.items() if key.endswith(":unavailable")},
     }
 
 

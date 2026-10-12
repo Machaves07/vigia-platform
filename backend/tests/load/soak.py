@@ -9,7 +9,9 @@ de ``tests.load.provision``), y el cliente sintético de consola contra ``--targ
 real (``--console-session``: ``{"cookie": …, "concession_id": …}``). Aquí los **objetivos
 absolutos** de NFR-GOB-01 a 05 son umbral **bloqueante** (infrastructure-design §9.2): el código
 de salida es 1 si uno se incumple, si se pierde o duplica un registro o si algo queda en cola
-muerta. Lo ejecuta TASK-238 (VIG-174) desde ``release.yml``.
+muerta. NFR-GOB-02 bloquea aquí por los transitorios por saturación (cero, A-65), no por el caudal
+de vaciado (a ritmo real no hay cola que vaciar). Lo ejecuta TASK-238 (VIG-174) desde
+``release.yml``.
 
 ``--dry-run`` valida los argumentos y el aprovisionamiento **sin tocar la red**: la forma de las
 URL (sin resolverlas), la flota si se da (cada credencial se lee de su archivo, es del nodo
@@ -57,7 +59,7 @@ from tests.load.profiles import (
     LoadProfile,
     write_sealed_dataset,
 )
-from tests.load.report import REPORT_DIR_VARIABLE, secret_findings
+from tests.load.report import REPORT_DIR_VARIABLE, saturation_transients, secret_findings
 from vigia_platform.shared.clock import SystemClock
 
 __all__ = ["SoakSettings", "evaluate_thresholds", "main"]
@@ -218,14 +220,14 @@ def plan_summary(settings: SoakSettings, dataset: Path, nodes: int, zones: int) 
 # --- Umbrales absolutos ---------------------------------------------------------------------------
 
 
-def evaluate_thresholds(
-    node_latency: Mapping[str, Mapping[str, Any]], console: Mapping[str, Any]
-) -> list[str]:
+def evaluate_thresholds(analysis: Mapping[str, Any], console: Mapping[str, Any]) -> list[str]:
     """Incumplimientos de los objetivos absolutos (``ABSOLUTE_TARGETS``), cada uno con su ruta:
-    NFR-GOB-01 por ruta del contrato medida y NFR-GOB-03 por el veredicto de la consola."""
+    NFR-GOB-01 por ruta del contrato medida, NFR-GOB-03 por el veredicto de la consola y
+    NFR-GOB-02 por los transitorios por saturación que vieron los nodos (A-65: a ritmo real no hay
+    vaciado de cola, pero ni un solo ``temporarily_unavailable`` es admisible aquí)."""
     failures = []
     for route, limits in ABSOLUTE_TARGETS["NFR-GOB-01"].items():
-        measured = node_latency.get(route)
+        measured = analysis.get("node_latency", {}).get(route)
         if not measured or not measured.get("count"):
             continue
         for key in ("p95_ms", "p99_ms"):
@@ -234,6 +236,9 @@ def evaluate_thresholds(
             if limit is not None and value is not None and value > limit:
                 failures.append(f"NFR-GOB-01 {route}: {key} {value} > {limit}")
     failures += [f"NFR-GOB-03 {failure}" for failure in console.get("failures", [])]
+    saturated = saturation_transients(analysis)
+    if saturated:
+        failures.append(f"NFR-GOB-02 transitorios por saturación: {saturated}")
     return failures
 
 
@@ -243,9 +248,15 @@ def thresholds_document() -> dict[str, Any]:
         "targets": ABSOLUTE_TARGETS,
         "not_measured_here": {
             "NFR-GOB-01 POST /api/nodes/enrollment": "la flota ya está dada de alta",
-            "NFR-GOB-02": "a ritmo real no hay vaciado de cola; lo mide nightly como tendencia",
+            "NFR-GOB-02 caudal de vaciado": (
+                "a ritmo real no hay cola que vaciar; el caudal lo mide nightly como tendencia. Los"
+                " transitorios por saturación sí bloquean aquí (cero, A-65)"
+            ),
             "NFR-GOB-04": "puertos en proceso: banco de VIG-170",
-            "NFR-GOB-05": "la ruta del documento del acta no está publicada en openapi/app.yaml",
+            "NFR-GOB-05": (
+                "el cliente sintético de consola no mide la ruta del documento del acta (VIG-160 la"
+                " publicó; medirla aquí sería ampliar la consola del soak)"
+            ),
         },
     }
 
@@ -294,7 +305,7 @@ def _run(settings: SoakSettings, work: Path, dataset: Path) -> tuple[dict[str, A
         console.stop()
     analysis = analyse(result)
     verdict = evaluate(console.samples, unpublished=console.unpublished).to_json()
-    failures = evaluate_thresholds(analysis["node_latency"], verdict)
+    failures = evaluate_thresholds(analysis, verdict)
     if analysis["accepted"] != analysis["emitted"] or analysis["dead_letter"]:
         failures.append("registros perdidos o en cola muerta")
     return {"results": analysis, "console": verdict}, failures
