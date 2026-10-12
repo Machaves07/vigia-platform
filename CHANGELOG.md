@@ -51,6 +51,22 @@ Mientras U-02 se cierra sin cuenta de AWS (adenda A-47), no hay ninguna etiqueta
   - `nightly.yml`, `release.yml` con `staging` efímero y aprobación del dueño, `rollback.yml`, `trust-store.yml` y `staging-sweeper.yml`, con los trabajos de AWS tras `VIGIA_AWS_ENABLED` (VIG-95).
 - **Documentación de operación**: [runbooks](docs/runbooks/README.md) 6.1 a 6.6, contingencia de subparticionado, recuperación de una cadena rota y pruebas con la base en otra fecha; `README.md` de operación; este registro; `backend/tools/check_links.py` (VIG-97, TASK-152).
 
+### Gobernanza y flota (U-03)
+
+- **Base**: raíz de composición de producción con un registro por unidad (`shared/runtime/`, A-52) (VIG-137, TASK-201); esquema `catalog` `gob_0017` con exclusión GiST (VIG-138, TASK-202) y esquema `fleet` `gob_0018` con particiones y retención (VIG-141, TASK-203); los 26 tipos de registro, los 15 eventos, las 21 enumeraciones y la política de texto libre (VIG-139, TASK-204); mamparos por clase de ruta (VIG-140, TASK-205).
+- **Contrato del nodo**: adaptador `node_api` sobre el esqueleto de U-01, identidad del nodo y límites (VIG-144, TASK-206); alta del nodo y rotación de credenciales por las rutas del contrato (VIG-151, TASK-219).
+- **Catálogo y comisionamiento**:
+  - admisión de tres preguntas por planta (VIG-142, TASK-207), catálogo por zona versionado y firmado (VIG-145, TASK-208) y rutas de SCR-04 con marca de regresión (VIG-148, TASK-209);
+  - documentos firmados por URL prefirmada (VIG-143, TASK-210), compuertas por zona, acta de alcance y política de planta (VIG-146, TASK-211), acuerdos de uso, firmantes y transparencia (VIG-149, TASK-212);
+  - puertos de lectura del catálogo y las compuertas (VIG-153, TASK-213), sesión de walk-test con matriz, pasos y pases (VIG-150, TASK-214), prueba de oclusión (VIG-154, TASK-215), cierre del acta con sus guardas (VIG-158, TASK-216) y documento legible del acta con WeasyPrint (VIG-160, TASK-217).
+- **Flota**:
+  - declaración, asignación y reemplazo por `replaces_node_id` (VIG-147, TASK-218), lista de revocación global de `vigia-node-ca` (`regenerate_revocation_list`) (VIG-155, TASK-220);
+  - ingesta de hallazgos, detecciones para revisión y eventos (VIG-156, TASK-221), concesiones de clip de un solo `PUT` y clip de verificación (VIG-152, TASK-222), latido y catálogo firmado para el nodo (VIG-157, TASK-223);
+  - inventario y umbrales (VIG-159, TASK-224), alarmas de flota por transición y nodos mudos (VIG-161, TASK-225), versión objetivo y resultado de actualización (VIG-162, TASK-226), registro de las siete tareas periódicas y salud profunda (VIG-163, TASK-227).
+- **Pruebas**: aislamiento de U-03 por ruta (VIG-165, TASK-228); escenarios de abuso y ejemplos G-1 a G-15 (VIG-168, TASK-229); suite de conformidad de U-01 contra las rutas reales de `node_api` (VIG-164, TASK-230); perfiles de carga `ci`, `nightly` y `soak` con el nodo simulado de U-01 (VIG-166, TASK-231); escenarios de resiliencia FS-GOB-01 a 10 (VIG-169, TASK-232); bancos, volumetría y cardinalidad de métricas (VIG-170, TASK-233).
+- **Infraestructura**: pendientes aditivos nº 14 a 18 sobre las pilas de U-02, con las alarmas y el tablero de flota (VIG-167, TASK-235).
+- **Documentación de operación**: runbooks [U-03 6.1 a 6.4](docs/runbooks/README.md) (rotación forzada de la credencial de un nodo, regeneración y publicación de la lista de revocación, clips huérfanos y reapertura de walk-test) y sección de U-03 del `README.md` (VIG-172, TASK-236).
+
 ### Corregido
 
 - Cancelación en cola determinista del pool de CPU (VIG-130) y prueba del servidor colgado en tiempo virtual (VIG-134).

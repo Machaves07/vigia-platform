@@ -857,7 +857,8 @@ class ObservabilityStack(VigiaStack):
                 self._app_metric("revocation_list_publish_failed", worker, "Sum", FIVE_MINUTES),
                 1,
                 _GE,
-                "Fallo de publicacion de la lista de revocacion en 5 min (NFR-GOB-46, 48)",
+                "Fallo de publicacion de la lista de revocacion en 5 min (NFR-GOB-46, 48). "
+                "Runbook de la lista de revocacion (U-03 6.2).",
             )
         )
         self._alarm(
@@ -868,7 +869,8 @@ class ObservabilityStack(VigiaStack):
                 ),
                 REVOCATION_LIST_MIN_SECONDS,
                 _LT,
-                "Lista de revocacion a menos de 24 h de vencer (NFR-GOB-48)",
+                "Lista de revocacion a menos de 24 h de vencer (NFR-GOB-48). "
+                "Runbook de la lista de revocacion (U-03 6.2).",
                 missing=_MISSING,
             )
         )
