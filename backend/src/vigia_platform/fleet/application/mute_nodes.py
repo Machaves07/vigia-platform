@@ -43,6 +43,7 @@ from vigia_platform.fleet.application.fleet_alarms import (
     AlarmDependencies,
     AlarmReport,
     now_of,
+    publish_open_alarms,
     raise_in,
 )
 from vigia_platform.fleet.application.node_declaration import COMMUNICATION_RECORD_TYPE
@@ -97,6 +98,7 @@ class MuteDetector:
         report = AlarmReport()
         candidates = await self._lock_all(transaction, now)
         if not candidates:
+            await publish_open_alarms(deps, transaction)
             return report
         transitioning = [node for node in candidates if node.transitions]
         await deps.store.mark_mute(transaction, [node.node_id for node in transitioning])
@@ -128,6 +130,7 @@ class MuteDetector:
             ],
             now,
         )
+        await publish_open_alarms(deps, transaction)
         return report
 
     async def _lock_all(self, transaction: Transaction, now: datetime) -> list[MuteCandidate]:
