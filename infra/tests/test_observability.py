@@ -26,6 +26,7 @@ from stacks.compute import COLLECTOR_CONFIG, cluster_name
 from stacks.data import db_identifier
 from stacks.observability import (
     APPLICATION_ALARM_METRICS,
+    FLEET_ALARM_KINDS,
     FLEET_PANELS,
     FLEET_PER_NODE_METRICS,
     FLEET_PERIODIC_TASKS,
@@ -389,6 +390,7 @@ def test_collector_declarations_only_use_closed_low_cardinality_attributes() -> 
         "alert_type",
         "app_version",
         "alarm_kind",
+        "organization_id",
     }
     for sets, selectors in _collector_declarations():
         for dimensions in sets:
@@ -852,6 +854,15 @@ def _widget_metrics(widget: JsonObject) -> Iterator[tuple[str, frozenset[str], s
             yield match.group(2), frozenset(dimensions), "search"
 
 
+def _search_expressions(widget: JsonObject) -> list[str]:
+    """Las expresiones de ``MathExpression`` del widget (cada ``SEARCH`` va dentro)."""
+    return [
+        str(entry[0].get("expression", ""))
+        for entry in widget["properties"].get("metrics", [])
+        if not isinstance(entry[0], str)
+    ]
+
+
 def test_fleet_section_draws_each_panel_from_published_metrics(deployment: Synthesized) -> None:
     """NFR-GOB-58 y U-03 §8.2: cada panel con métricas del catálogo del backend y ningún texto de
     pendientes de U-03 en todo el tablero."""
@@ -921,6 +932,26 @@ def test_fleet_panels_cover_every_route_task_and_class(pilot: Synthesized) -> No
     }
 
 
+def test_the_fleet_alarm_panels_filter_and_sum_the_published_metric(pilot: Synthesized) -> None:
+    """VIG-187: «Alarmas abiertas por clase» dibuja una serie por clase sumando organizaciones y
+    «Certificados por vencer» la clase ``certificate_expiring``, también sumando organizaciones."""
+    _, widgets = _dashboard(pilot)
+    section = {str(w["properties"].get("title")): w for w in _section(widgets, FLEET_SECTION)}
+    by_class = _search_expressions(section["Alarmas abiertas por clase"])
+    assert len(FLEET_ALARM_KINDS) == 8
+    assert len(by_class) == len(FLEET_ALARM_KINDS)
+    for kind in FLEET_ALARM_KINDS:
+        assert any("SUM(SEARCH(" in e and f'alarm_kind="{kind}"' in e for e in by_class), kind
+    certificates = _search_expressions(section["Certificados por vencer"])
+    assert certificates
+    assert all(
+        "SUM(SEARCH(" in e and 'alarm_kind="certificate_expiring"' in e for e in certificates
+    )
+    # El medidor lleva organization_id: la serie por clase suma las organizaciones.
+    for expression in [*by_class, *certificates]:
+        assert "organization_id" in expression, expression
+
+
 def test_pilot_dashboard_is_vigia_pilot(pilot: Synthesized) -> None:
     assert _dashboard(pilot)[0] == "vigia-pilot"
 
@@ -982,6 +1013,7 @@ def test_alarm_tables_are_literals_the_backend_can_read() -> None:
         "CERTIFICATE_NODE_ROUTES",
         "FLEET_PERIODIC_TASKS",
         "FLEET_PER_NODE_METRICS",
+        "FLEET_ALARM_KINDS",
     ):
         ast.literal_eval(literals[name])
 

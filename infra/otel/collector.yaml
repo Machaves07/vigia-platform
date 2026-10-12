@@ -130,7 +130,7 @@ exporters:
           - "^fleet_(heartbeats_total|heartbeat_gap_seconds|node_reachable|node_queue_pending|node_clock_offset_ms)$"
           - "^clip_grants_(issued|used|orphaned)_total$"
       - dimensions:
-          - [service, environment, alarm_kind]
+          - [service, environment, organization_id, alarm_kind]
         metric_name_selectors:
           - "^fleet_alarms_open$"
       - dimensions:

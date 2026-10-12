@@ -256,11 +256,18 @@ async def publish_open_alarms(deps: AlarmDependencies, transaction: Transaction)
 
     Una sola consulta ``GROUP BY`` sobre las alarmas abiertas (nunca una por clase, NFR-GOB-13);
     las clases sin ninguna abierta se publican a cero para que el tablero no las deje sin serie.
+    El medidor lleva ``organization_id`` además de la clase: la transacción es de **una**
+    organización, y sin ese identificador la última evaluada pisaría a las demás. La marca va
+    dentro de la transacción (si el ciclo se deshace, la cifra publicada sigue siendo la de la
+    base en el ciclo siguiente, cuando la transacción confirma).
     """
     counts = await deps.store.open_alarm_counts(transaction)
     metrics = deps.metrics if deps.metrics is not None else get_metrics()
+    organization_id = transaction.context.organization_id
     for kind in FleetAlarmKind:
-        metrics.fleet_alarms_open.set(counts.get(kind, 0), {"alarm_kind": kind})
+        metrics.fleet_alarms_open.set(
+            counts.get(kind, 0), {"organization_id": organization_id, "alarm_kind": kind}
+        )
 
 
 @dataclass(slots=True)

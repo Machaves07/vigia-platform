@@ -315,12 +315,13 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.FLEET_NODE_CLOCK_OFFSET_MS, _G, "ms",
           "Desviación del reloj del nodo respecto de su fuente de tiempo.", "NFR-GOB-55",
           "node_id"),
-    # Alarmas abiertas por clase (VIG-187, NFR-GOB-58): un medidor por clase del tablero de
-    # flota, sin nodo (NFR-GOB-13). El panel «Certificados por vencer» sale de la clase
-    # ``certificate_expiring``.
+    # Alarmas abiertas por clase (VIG-187, NFR-GOB-58): un medidor por clase y organización del
+    # tablero de flota, sin nodo (NFR-GOB-13). ``organization_id`` evita que una organización pise
+    # a otra (las tareas recorren una transacción por organización); el panel «Certificados por
+    # vencer» sale de la clase ``certificate_expiring``.
     _spec(_N.FLEET_ALARMS_OPEN, _G, "{alarm}",
-          "Alarmas de flota abiertas (levantadas y no cerradas) por clase.", "NFR-GOB-58",
-          "alarm_kind"),
+          "Alarmas de flota abiertas (levantadas y no cerradas) por clase y organización.",
+          "NFR-GOB-58", "organization_id", "alarm_kind"),
     # Sesiones de walk-test (TASK-227, NFR-GOB-56): las publica expire_walk_test_sessions al
     # terminar cada organización; solo organization_id (ni zona ni sesión: NFR-GOB-13).
     _spec(_N.WALK_TEST_SESSIONS_OPEN, _G, "{session}",

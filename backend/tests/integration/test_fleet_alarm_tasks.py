@@ -518,46 +518,103 @@ def test_certificate_expiring_at_15_days_and_cleared_after_rotation(alarms: Alar
 # --- Métrica de alarmas abiertas por clase --------------------------------------------------------
 
 
-def _open_alarms_gauge(alarms: Alarms) -> dict[str, int]:
+def _open_alarms_gauge(alarms: Alarms, world: InventoryWorld | None = None) -> dict[str, int]:
+    """El valor del medidor de la organización (``world`` o la principal) por clase."""
+    organization = str((world or alarms.world).organization)
     return {
         str(attributes["alarm_kind"]): int(value)
         for attributes, value in metric_points(alarms.reader, MetricName.FLEET_ALARMS_OPEN)
+        if str(attributes.get("organization_id")) == organization
     }
 
 
 def test_the_open_alarms_metric_reflects_raised_not_cleared_by_class(alarms: Alarms) -> None:
     """VIG-187 y NFR-GOB-58: ``fleet_alarms_open`` cuenta las alarmas abiertas por clase; una
-    cerrada deja de contar y las clases sin ninguna abierta salen a cero."""
-    retiring, orphan, drift, certificate, mute = (alarms.node() for _ in range(5))
+    cerrada deja de contar, las clases sin ninguna abierta salen a cero y una clase con dos nodos
+    cuenta dos (no una)."""
+    retiring, retiring_second, orphan, drift, certificate, mute = (alarms.node() for _ in range(6))
     alarms.state(retiring, NodeState(retires_at=RETIRES_AT))
+    alarms.state(retiring_second, NodeState(retires_at=RETIRES_AT))
     alarms.state(orphan, NodeState(orphan_clips=51, day_clips=2_000))
     alarms.state(drift, NodeState(offset_ms=9_000))
     alarms.state(certificate, NodeState(certificate_in_ms=1_000))
     alarms.state(mute, NodeState(heartbeat_age_ms=600_000))
-    alarms.evaluate()  # version_retiring y orphan_clips_growing ya; clock_drift aún no
+    alarms.evaluate()  # dos version_retiring y un orphan ya; clock_drift aún no
     alarms.cycle()
     alarms.evaluate()  # clock_drift en la segunda evaluación
-    alarms.alert()  # certificate_expiring
+    alarms.alert()  # certificate_expiring; publica por sí sola
+    after_alert = _open_alarms_gauge(alarms)
+    assert after_alert["certificate_expiring"] == 1
+    assert after_alert["version_retiring"] == 2
+    assert after_alert["node_mute"] == 0  # detect() todavía no corrió
     alarms.detect()  # node_mute
     assert _open_alarms_gauge(alarms) == {
         "node_mute": 1,
         "queue_over_threshold": 0,
         "clock_drift": 1,
-        "version_retiring": 1,
+        "version_retiring": 2,
         "simulated_adapter_in_productive": 0,
         "certificate_expiring": 1,
         "camera_below_min_fps": 0,
         "orphan_clips_growing": 1,
     }
-    # Cerrada version_retiring (clase sin histéresis): sale del medidor y las demás siguen.
+    # Cerrada una de las dos version_retiring (clase sin histéresis): queda una.
     alarms.cycle()
-    alarms.state(retiring, QUIET)
+    alarms.state(retiring_second, QUIET)
     alarms.evaluate()
     gauge = _open_alarms_gauge(alarms)
-    assert gauge["version_retiring"] == 0
+    assert gauge["version_retiring"] == 1
     assert gauge["node_mute"] == 1
     assert gauge["clock_drift"] == gauge["orphan_clips_growing"] == 1
     assert gauge["certificate_expiring"] == 1
+
+
+def test_the_open_alarms_metric_is_per_organization(alarms: Alarms) -> None:
+    """VIG-187: el medidor lleva ``organization_id``; con dos organizaciones cada una conserva su
+    recuento y ninguna pisa a la otra (las tareas recorren una transacción por organización)."""
+    other = alarms.other()
+    _everything_bad(alarms, alarms.world)
+    _everything_bad(alarms, other)
+    _everything_bad(alarms, other, zone_index=1)
+    for _ in range(2):
+        alarms.evaluate()
+        alarms.evaluate(other)
+        alarms.detect()
+        alarms.detect(other)
+        alarms.alert()
+        alarms.alert(other)
+        alarms.cycle()
+    mine = _open_alarms_gauge(alarms)
+    theirs = _open_alarms_gauge(alarms, other)
+    assert mine["version_retiring"] == 1
+    assert theirs["version_retiring"] == 2  # dos nodos con la misma clase en la otra organización
+    assert set(mine) == set(theirs)
+    organizations = {
+        str(attributes["organization_id"])
+        for attributes, _ in metric_points(alarms.reader, MetricName.FLEET_ALARMS_OPEN)
+    }
+    assert {str(alarms.world.organization), str(other.organization)} <= organizations
+
+
+def test_the_open_alarm_counts_query_filters_by_organization_without_rls(alarms: Alarms) -> None:
+    """VIG-187: la sentencia del medidor filtra por organización; como superusuario (sin RLS) los
+    parámetros de una organización no cuentan las alarmas de la otra."""
+    other = alarms.other()
+    _everything_bad(alarms, alarms.world)
+    _everything_bad(alarms, other)
+    _everything_bad(alarms, other, zone_index=1)
+    alarms.evaluate()
+    alarms.evaluate(other)
+    counts: dict[uuid.UUID, dict[str, int]] = {}
+    for world in (alarms.world, other):
+        rows = as_superuser(
+            alarms.stack,
+            fleet_alarm_store._OPEN_ALARM_COUNTS,
+            {"organization_id": world.organization},
+        )
+        counts[world.organization] = {str(row["alarm_kind"]): int(row["open"]) for row in rows}
+    assert counts[alarms.world.organization]["version_retiring"] == 1
+    assert counts[other.organization]["version_retiring"] == 2
 
 
 # --- Eventos en la misma transacción --------------------------------------------------------------

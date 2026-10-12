@@ -62,6 +62,7 @@ TABLES = (
     "INGEST_ROUTES",
     "FLEET_PERIODIC_TASKS",
     "FLEET_PER_NODE_METRICS",
+    "FLEET_ALARM_KINDS",
 )
 TWENTY_SIX_HOURS = 26 * 3600
 
@@ -279,12 +280,14 @@ def test_u03_metrics_are_published_and_not_pending() -> None:
 
 
 def test_open_alarms_metric_is_a_closed_list_gauge_by_class() -> None:
-    """VIG-187 y NFR-GOB-58: el panel «Alarmas abiertas por clase» lee ``fleet_alarms_open``, un
-    medidor con la clase como única dimensión, de lista cerrada en la política de atributos."""
+    """VIG-187 y NFR-GOB-58: los paneles de alarmas abiertas leen ``fleet_alarms_open``, un
+    medidor por clase y organización; la clase es de lista cerrada y la pila declara las ocho."""
     spec = SPECS[MetricName.FLEET_ALARMS_OPEN.value]
     assert spec.kind is MetricKind.GAUGE
-    assert spec.attributes == frozenset({"alarm_kind"})
-    assert redaction.DEFAULT_POLICY.values("alarm_kind") == {kind.value for kind in FleetAlarmKind}
+    assert spec.attributes == frozenset({"organization_id", "alarm_kind"})
+    classes = {kind.value for kind in FleetAlarmKind}
+    assert redaction.DEFAULT_POLICY.values("alarm_kind") == classes
+    assert set(TABLE["FLEET_ALARM_KINDS"]) == classes
 
 
 def test_only_per_node_counters_and_gauges_carry_node_id() -> None:
