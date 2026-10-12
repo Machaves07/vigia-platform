@@ -32,7 +32,13 @@ import pytest
 from tests.load.conftest import LoadTarget, load_seed, run_profile
 from tests.load.profiles import PROFILES, LoadProfile
 from tests.load.provision import Fleet
-from tests.load.report import BulkheadSampler, analyse, secret_findings, write_report
+from tests.load.report import (
+    BulkheadSampler,
+    analyse,
+    saturation_transients,
+    secret_findings,
+    write_report,
+)
 from tests.writer_support import verify_ledger_chains
 
 pytestmark = pytest.mark.integration
@@ -127,17 +133,6 @@ def finish_report(
     texts.update(target.logs())
     assert not secret_findings(texts, fleet.enrollment_codes)
     return path
-
-
-def saturation_transients(analysis: Mapping[str, Any]) -> dict[str, int]:
-    """Los transitorios por saturación que vieron los nodos (NFR-GOB-02): cada
-    ``temporarily_unavailable`` por operación y cada ``503`` (``unavailable``) del cliente."""
-    codes = analysis["rejection_codes"]
-    events = analysis["events"]
-    return {
-        **{key: n for key, n in codes.items() if key.endswith(":temporarily_unavailable")},
-        **{key: n for key, n in events.items() if key.endswith(":unavailable")},
-    }
 
 
 def assert_functional(

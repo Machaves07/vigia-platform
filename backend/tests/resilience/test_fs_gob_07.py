@@ -23,7 +23,8 @@ nodos (para ensayar el escenario en un PC compartido; ``nightly`` corre la escal
   acepta en el vaciado;
 - **sin alarma de rechazos** (NFR-GOB-46): la peor proporción de rechazos permanentes en 15
   minutos no pasa del 1 %;
-- ninguna ruta de consola responde con error (fuera de 2xx y no ``503``);
+- ninguna ruta de consola responde con error (fuera de 2xx y no ``503``) ni queda sin medir
+  (``unmeasured``);
 - **cadena íntegra** al final: la verificación completa de cada cadena de planta.
 
 **Tendencia** (A-65; infrastructure-design §9.2): en este banco (un runner de 4 vCPU con la
@@ -32,7 +33,7 @@ registran en el informe y bloquean en el ``soak`` sobre ``staging`` (VIG-174), c
 real del piloto:
 
 - los transitorios por saturación de NFR-GOB-02 (``temporarily_unavailable`` y ``503``), en
-  ``saturation_transients``;
+  ``saturation_transients`` (cero en el ``soak``);
 - el p95 de cada ruta de personas durante la reconexión (NFR-GOB-19), en ``console``, con la ruta
   que lo incumple nombrada en ``failures``.
 
@@ -57,12 +58,11 @@ from tests.load.conftest import (  # noqa: F401
 )
 from tests.load.console_client import evaluate
 from tests.load.profiles import scaled
-from tests.load.report import drains_of
+from tests.load.report import drains_of, saturation_transients
 from tests.load.test_load_ci import (
     assert_functional,
     ledger_check,
     run_load,
-    saturation_transients,
 )
 from tests.load.test_load_nightly import (
     PERMANENT_THRESHOLD,
@@ -160,3 +160,5 @@ def test_fs_gob_07_mass_reconnection_of_a_hundred_nodes_with_an_hour_of_queue(
             assert drain["accepted"] == drain["queued"], drain
         assert analysis["worst_permanent_ratio_15min"] <= PERMANENT_THRESHOLD
         assert not overall.errors, overall.errors_message()
+        # A-65: el p95 es tendencia, pero una ruta publicada que no se midió sigue bloqueando.
+        assert not overall.unmeasured, f"rutas de consola sin medir: {overall.unmeasured}"

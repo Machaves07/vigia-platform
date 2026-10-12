@@ -238,12 +238,15 @@ class ConsoleClient:
 class ConsoleVerdict:
     """``failures``: todo lo que incumple NFR-GOB-19 (p95, muestras, fuera de 2xx); ``errors``:
     solo las respuestas fuera de 2xx que no son ``503``, lo que sigue bloqueando cuando el p95 es
-    tendencia (A-65: el banco de ``nightly``)."""
+    tendencia (A-65: el banco de ``nightly``). ``unmeasured``: las rutas publicadas que no
+    reunieron ``min_samples`` muestras en la ventana evaluada; también bloquean aunque el p95 sea
+    tendencia, porque una ruta que no se midió no pasó (A-65)."""
 
     routes: Mapping[str, Mapping[str, Any]]
     failures: tuple[str, ...]
     unpublished: tuple[str, ...]
     errors: tuple[str, ...] = ()
+    unmeasured: tuple[str, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -254,6 +257,7 @@ class ConsoleVerdict:
             "passed": self.passed,
             "failures": list(self.failures),
             "errors": list(self.errors),
+            "unmeasured": list(self.unmeasured),
             "unpublished": list(self.unpublished),
             "routes": dict(self.routes),
         }
@@ -281,7 +285,8 @@ def evaluate(
     ruta publicada que incumple su p95, responde fuera de 2xx o no reúne ``min_samples``.
 
     ``errors`` aparta, de esas, las rutas que respondieron fuera de 2xx con algo distinto de
-    ``503`` (``SATURATION_STATUS``): un fallo de la ruta, no de capacidad (A-65)."""
+    ``503`` (``SATURATION_STATUS``): un fallo de la ruta, no de capacidad (A-65). ``unmeasured``
+    aparta las que no reunieron ``min_samples``: siguen bloqueando aunque el p95 sea tendencia."""
     selected: dict[str, list[Sample]] = defaultdict(list)
     for sample in samples:
         if windows is None or _inside(sample.at, windows):
@@ -289,6 +294,7 @@ def evaluate(
     summary: dict[str, dict[str, Any]] = {}
     failures: list[str] = []
     broken: list[str] = []
+    unmeasured: list[str] = []
     for route in routes:
         if route.name in unpublished:
             summary[route.name] = {"p95_target_ms": route.p95_ms, "status": "unpublished"}
@@ -307,6 +313,7 @@ def evaluate(
         }
         if len(values) < min_samples:
             failures.append(f"{route.name}: {len(values)} muestras (mínimo {min_samples})")
+            unmeasured.append(route.name)
         elif p95 is not None and p95 > route.p95_ms:
             failures.append(
                 f"{route.name}: p95 {p95:.0f} ms > {route.p95_ms:.0f} ms (n={len(values)})"
@@ -316,7 +323,9 @@ def evaluate(
         unexpected = [status for status in errors if status != SATURATION_STATUS]
         if unexpected:
             broken.append(f"{route.name}: respondió {', '.join(map(str, unexpected))}")
-    return ConsoleVerdict(summary, tuple(failures), tuple(unpublished), tuple(broken))
+    return ConsoleVerdict(
+        summary, tuple(failures), tuple(unpublished), tuple(broken), tuple(unmeasured)
+    )
 
 
 def delayed(

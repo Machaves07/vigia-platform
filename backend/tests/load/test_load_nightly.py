@@ -14,13 +14,15 @@ recorre las rutas de NFR-GOB-03 con una sesión real. Bloquea:
 - la peor proporción de rechazos permanentes en 15 minutos no pasa del 1 % (NFR-GOB-50 frente a
   la alarma de NFR-GOB-46);
 - el **cliente sintético**: ninguna ruta de consola responde con error (fuera de 2xx y no
-  ``503``).
+  ``503``) ni queda sin medir (``unmeasured``: menos de ``MIN_SAMPLES`` muestras en toda la
+  ejecución).
 
 Son **tendencia** aquí y van al informe (infrastructure-design §9.2; A-65: solo bloquean en el
 ``soak`` sobre ``staging``): las escrituras por segundo (≥ 100 agregadas y ≥ 20 por cadena de
-planta) y los transitorios por saturación (``temporarily_unavailable`` y ``503``) de NFR-GOB-02,
-las latencias de NFR-GOB-01 y el p95 de cada ruta de consola en las ventanas de reconexión
-(NFR-GOB-19), con la ruta que lo incumple nombrada en ``console.reconnection.failures``.
+planta) y los transitorios por saturación (``temporarily_unavailable`` y ``503``) de NFR-GOB-02
+(cero en el ``soak``), las latencias de NFR-GOB-01 y el p95 de cada ruta de consola en las
+ventanas de reconexión (NFR-GOB-19), con la ruta que lo incumple nombrada en
+``console.reconnection.failures``.
 
 ``test_the_console_client_fails_naming…`` (marca ``integration``, en el check de integración):
 contra una flota de dos nodos, una latencia de 250 ms inyectada en una ruta de consola hace que
@@ -49,13 +51,12 @@ from tests.load.console_client import (
 )
 from tests.load.profiles import ABSOLUTE_TARGETS, LoadProfile, nightly_profile
 from tests.load.provision import Fleet
-from tests.load.report import Drain, drains_of
+from tests.load.report import Drain, drains_of, saturation_transients
 from tests.load.test_load_ci import (
     assert_functional,
     finish_report,
     ledger_check,
     run_load,
-    saturation_transients,
 )
 
 pytestmark = pytest.mark.integration
@@ -191,6 +192,9 @@ def test_nightly_profile_mass_reconnection_and_four_hour_outage_keep_console_and
         assert drain["accepted"] == drain["queued"], drain
     assert analysis["worst_permanent_ratio_15min"] <= PERMANENT_THRESHOLD
     assert not overall.errors, overall.errors_message()
+    # A-65: el p95 es tendencia, pero una ruta publicada que no se midió (ni MIN_SAMPLES en toda
+    # la ejecución) no pasó: `unmeasured` sigue bloqueando.
+    assert not overall.unmeasured, f"rutas de consola sin medir: {overall.unmeasured}"
 
 
 def test_the_console_client_fails_naming_a_route_with_injected_latency(
