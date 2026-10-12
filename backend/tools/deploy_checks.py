@@ -9,9 +9,9 @@ Lista de §3.2 leída como fija la revisión de coherencia (nota T-07, U02-H-07)
 1. ``GET /health/live`` por ``app.`` responde ``200``; por ``nodes.`` solo la conexión TCP.
 2. ``HealthyHostCount`` de ``tg-api`` igual a las tareas deseadas de ``vigia-api`` (sondeo
    interno: una petición externa a ``/health/ready`` por ``app.`` recibe ``404``).
-3. ``nodes.`` sin certificado: rechazo TLS. Con un certificado de prueba de la raíz del entorno:
-   ``401`` de la aplicación. La segunda mitad necesita el alta de U-03 para emitir el certificado.
-4. Suite de conformidad de U-01 contra ``nodes.``: necesita las rutas del contrato (U-03).
+3. ``nodes.`` sin certificado: rechazo TLS. Con un certificado de prueba de la raíz del entorno
+   (alta de U-03): ``401`` de la aplicación.
+4. Suite de conformidad de U-01 contra ``nodes.`` con el runner del kit (TASK-230).
 5. ``staging``: activación de la invitación del arranque, inicio de sesión con segundo factor y
    ``GET /me``. ``pilot``: ``GET /me`` con una sesión del dueño, que hace el dueño (``manual``).
 6. ``/.well-known/vigia-checkpoint-keys`` y ``/.well-known/vigia-verifier`` responden y el hash del
@@ -20,6 +20,14 @@ Lista de §3.2 leída como fija la revisión de coherencia (nota T-07, U02-H-07)
 8. ``staging``: recorrido de Playwright (U-05). 9. ``pilot``: ``GET /`` y ``version.json`` (U-05).
 10 a 13. U-03: certificado revocado en dos capas, catálogo firmado, alta por ``app.`` y rechazo
    por ``nodes.``, origen cruzado y ``PUT`` sin suma.
+
+**Material de las comprobaciones de U-03** (TASK-234). Las nº 3 (segunda mitad), 10 y 11 necesitan
+un **certificado de prueba** de la autoridad del entorno (uno vigente y uno revocado) y, la nº 11,
+la zona sintética. El entorno los publica en el secreto ``vigia/<entorno>/deploy-checks`` de
+Secrets Manager; si faltan, la comprobación sale ``skipped`` con el motivo (nunca en silencio).
+La nº 4 corre el runner del kit (``vigia-conformance``) contra ``https://nodes.<dominio>``; si el
+kit no está instalado, sale ``skipped``. La nº 13 pide la URL prefirmada a ``POST /documents``
+(reutiliza la sesión de la nº 5) y comprueba el origen cruzado y la suma del ``PUT``.
 
 **Omisión con motivo** (TASK-151: «las que dependen de rutas de U-03 se omiten con motivo hasta
 que existan»): una comprobación cuyo requisito todavía no está en el repositorio (la ruta en
@@ -41,11 +49,13 @@ import http.cookiejar
 import json
 import re
 import secrets
+import shutil
 import socket
 import ssl
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -108,6 +118,50 @@ class Network(Protocol):
     def tcp_connects(self, host: str, port: int) -> bool: ...
 
     def tls_without_certificate_rejected(self, host: str, port: int) -> bool: ...
+
+    def request_with_certificate(
+        self,
+        host: str,
+        port: int,
+        method: str,
+        path: str,
+        certificate: Certificate,
+    ) -> Response | None: ...
+
+    def tls_with_certificate_rejected(
+        self, host: str, port: int, certificate: Certificate
+    ) -> bool: ...
+
+
+@dataclass(frozen=True)
+class Certificate:
+    """Material de cliente (PEM) de un certificado de prueba de la autoridad del entorno."""
+
+    certificate_pem: str
+    key_pem: str
+
+
+@dataclass(frozen=True)
+class Fixtures:
+    """Lo que el entorno publica para las comprobaciones de U-03 (nº 3, 10 y 11)."""
+
+    valid_certificate: Certificate | None = None
+    revoked_certificate: Certificate | None = None
+    synthetic_zone_id: str | None = None
+
+
+class FixtureSource(Protocol):
+    def load(self, environment: str) -> Fixtures: ...
+
+
+@dataclass(frozen=True)
+class ConformanceVerdict:
+    passed: bool
+    detail: str
+
+
+class Conformance(Protocol):
+    def run(self, target_url: str) -> ConformanceVerdict: ...
 
 
 # --- Adaptadores reales -----------------------------------------------------------------------
@@ -178,6 +232,134 @@ class SocketNetwork:
             return True
         except OSError:
             return False
+
+    def _client_context(self, certificate: Certificate) -> ssl.SSLContext:
+        """Contexto con el certificado de cliente y sin verificar la cadena (autoridad propia)."""
+        with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as chain:
+            chain.write(certificate.certificate_pem)
+            chain_path = chain.name
+        with tempfile.NamedTemporaryFile("w", suffix=".key", delete=False) as key:
+            key.write(certificate.key_pem)
+            key_path = key.name
+        try:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            context.load_cert_chain(chain_path, key_path)
+            return context
+        finally:
+            Path(chain_path).unlink(missing_ok=True)
+            Path(key_path).unlink(missing_ok=True)
+
+    def request_with_certificate(
+        self,
+        host: str,
+        port: int,
+        method: str,
+        path: str,
+        certificate: Certificate,
+    ) -> Response | None:
+        """Petición HTTP con el certificado de prueba; ``None`` si el saludo se rechaza."""
+        context = self._client_context(certificate)
+        try:
+            with (
+                socket.create_connection((host, port), timeout=TIMEOUT_SECONDS) as raw,
+                context.wrap_socket(raw, server_hostname=host) as tls,
+            ):
+                tls.sendall(
+                    (
+                        f"{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+                    ).encode()
+                )
+                data = b""
+                while True:
+                    chunk = tls.recv(65536)
+                    if not chunk:
+                        break
+                    data += chunk
+        except (ssl.SSLError, ConnectionResetError, BrokenPipeError):
+            return None
+        except OSError:
+            return None
+        head, _, body = data.partition(b"\r\n\r\n")
+        status_line = head.split(b"\r\n", 1)[0].decode("latin-1")
+        parts = status_line.split(" ", 2)
+        if len(parts) < 2 or not parts[1].isdigit():
+            return None
+        return Response(int(parts[1]), body)
+
+    def tls_with_certificate_rejected(self, host: str, port: int, certificate: Certificate) -> bool:
+        """Tras el barrido, el balanceador rechaza la conexión con el certificado revocado."""
+        context = self._client_context(certificate)
+        try:
+            with (
+                socket.create_connection((host, port), timeout=TIMEOUT_SECONDS) as raw,
+                context.wrap_socket(raw, server_hostname=host) as tls,
+            ):
+                tls.sendall(f"GET / HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode())
+                return tls.recv(1) == b""
+        except (ssl.SSLError, ConnectionResetError, BrokenPipeError):
+            return True
+        except OSError:
+            return False
+
+
+class SecretsFixtures:
+    """Certificados de prueba y zona sintética que el entorno publica en Secrets Manager."""
+
+    def __init__(self, aws: Aws) -> None:
+        self._aws = aws
+
+    def load(self, environment: str) -> Fixtures:
+        try:
+            secret = self._aws(
+                "secretsmanager",
+                "get-secret-value",
+                "--secret-id",
+                f"vigia/{environment}/deploy-checks",
+            )
+        except subprocess.CalledProcessError:
+            return Fixtures()
+        try:
+            data = json.loads(secret.get("SecretString") or "{}")
+        except json.JSONDecodeError:
+            return Fixtures()
+        return Fixtures(
+            valid_certificate=_certificate(data.get("valid")),
+            revoked_certificate=_certificate(data.get("revoked")),
+            synthetic_zone_id=data.get("synthetic_zone_id") or None,
+        )
+
+
+def _certificate(entry: object) -> Certificate | None:
+    if not isinstance(entry, dict):
+        return None
+    chain = entry.get("certificate_pem")
+    key = entry.get("key_pem")
+    if not isinstance(chain, str) or not isinstance(key, str) or not chain or not key:
+        return None
+    return Certificate(certificate_pem=chain, key_pem=key)
+
+
+class KitConformance:
+    """Runner del kit de conformidad de U-01 (``vigia-conformance``, TASK-230)."""
+
+    def run(self, target_url: str) -> ConformanceVerdict:
+        executable = shutil.which("vigia-conformance")
+        if executable is None:
+            return ConformanceVerdict(
+                passed=False,
+                detail="el kit vigia-conformance no está instalado en el runner (TASK-230)",
+            )
+        completed = subprocess.run(
+            [executable, "run", "--target", target_url, "--profile", "ci"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        detail = (completed.stdout + completed.stderr).strip().splitlines()
+        summary = detail[-1] if detail else ""
+        return ConformanceVerdict(passed=completed.returncode == 0, detail=summary)
 
 
 # --- Contexto -------------------------------------------------------------------------------
@@ -292,28 +474,50 @@ def check_healthy_hosts(target: Target, aws: Aws) -> Result:
     return Result(2, name, "ok", f"{healthy} de {desired} tareas sanas")
 
 
-def check_mutual_tls(target: Target, network: Network) -> Result:
+def check_mutual_tls(target: Target, network: Network, fixtures: Fixtures) -> Result:
     name = "autenticación mutua en nodes."
     if not network.tls_without_certificate_rejected(target.nodes_host, 443):
         return Result(3, name, "failed", "nodes. aceptó una conexión TLS sin certificado")
-    if target.has_enrollment():
-        return _pending(3, name, True, "")
+    if not target.has_enrollment():
+        return Result(
+            3,
+            name,
+            "skipped",
+            "sin certificado: rechazo TLS comprobado. Con certificado de prueba: omitida hasta"
+            " el alta de U-03 (/api/nodes/enrollment), que emite certificados de la raíz",
+        )
+    if fixtures.valid_certificate is None:
+        return Result(
+            3,
+            name,
+            "skipped",
+            "sin certificado de prueba del entorno (secreto vigia/<entorno>/deploy-checks)",
+        )
+    answer = network.request_with_certificate(
+        target.nodes_host, 443, "GET", "/api/nodes/heartbeats", fixtures.valid_certificate
+    )
+    if answer is None:
+        return Result(3, name, "failed", "nodes. rechazó el certificado de prueba en el saludo TLS")
+    if answer.status == 401:
+        return Result(3, name, "ok", "con certificado de prueba: 401 de la aplicación")
     return Result(
-        3,
-        name,
-        "skipped",
-        "sin certificado: rechazo TLS comprobado. Con certificado de prueba: omitida hasta el alta "
-        "de U-03 (/api/nodes/enrollment), que es quien emite certificados de la raíz",
+        3, name, "failed", f"con el certificado de prueba la aplicación respondió {answer.status}"
     )
 
 
-def check_conformance(target: Target) -> Result:
-    return _pending(
-        4,
-        "conformidad de U-01 contra nodes.",
-        target.has_contract_routes(),
-        "omitida: la plataforma todavía no expone las rutas del contrato (llegan con U-03)",
-    )
+def check_conformance(target: Target, conformance: Conformance) -> Result:
+    name = "conformidad de U-01 contra nodes."
+    if not target.has_contract_routes():
+        return Result(
+            4,
+            name,
+            "skipped",
+            "omitida: la plataforma todavía no expone las rutas del contrato (llegan con U-03)",
+        )
+    verdict = conformance.run(f"https://{target.nodes_host}")
+    if verdict.passed:
+        return Result(4, name, "ok", verdict.detail or "la suite del kit pasa contra nodes.")
+    return Result(4, name, "failed", verdict.detail or "la suite del kit falla contra nodes.")
 
 
 def _totp(provisioning_uri: str, now: datetime) -> str:
@@ -437,20 +641,207 @@ def check_frontend(target: Target) -> list[Result]:
     ]
 
 
-def check_fleet(target: Target) -> list[Result]:
-    available = target.has_enrollment()
+def _rejection_code(answer: Response) -> str:
+    try:
+        body = answer.json()
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    return str(body.get("code") or "") if isinstance(body, dict) else ""
+
+
+def _trust_store_arn(target: Target, aws: Aws) -> str | None:
+    answer = aws("elbv2", "describe-trust-stores", "--names", f"vigia-node-trust{target.suffix}")
+    stores = answer.get("TrustStores") or []
+    if not stores:
+        return None
+    return str(stores[0].get("TrustStoreArn") or "") or None
+
+
+def _revoked_entries(target: Target, aws: Aws) -> int | None:
+    """El conteo global de la lista (métrica ``revocation_list_entries`` de ``Vigia/Platform``)."""
+    answer = aws(
+        "cloudwatch", "get-metric-statistics",
+        "--namespace", "Vigia/Platform", "--metric-name", "revocation_list_entries",
+        "--start-time", (target.now - METRIC_WINDOW).isoformat(),
+        "--end-time", target.now.isoformat(),
+        "--period", "60", "--statistics", "Maximum",
+    )  # fmt: skip
+    points = sorted(answer.get("Datapoints") or [], key=lambda point: str(point["Timestamp"]))
+    if not points:
+        return None
+    return int(points[-1]["Maximum"])
+
+
+def check_revoked_certificate(
+    target: Target, network: Network, aws: Aws, fixtures: Fixtures, sleep: Callable[[float], None]
+) -> Result:
+    name = "certificado revocado rechazado en dos capas"
     reason = "omitida: la ruta de alta de U-03 (/api/nodes/enrollment) todavía no existe"
-    results = [
-        _pending(10, "certificado revocado rechazado en dos capas", available, reason),
-        _pending(11, "catálogo firmado con certificado vigente", available, reason),
-        _pending(12, "alta por app. y rechazo sin certificado por nodes.", available, reason),
-    ]
-    origin = "origen cruzado y PUT sin suma rechazado"
-    if target.staging:
-        results.append(_pending(13, origin, available, reason))
+    if not target.has_enrollment():
+        return Result(10, name, "skipped", reason)
+    if fixtures.revoked_certificate is None:
+        return Result(
+            10,
+            name,
+            "skipped",
+            "sin certificado revocado de prueba del entorno (secreto"
+            " vigia/<entorno>/deploy-checks)",
+        )
+    answer = network.request_with_certificate(
+        target.nodes_host, 443, "GET", "/api/nodes/heartbeats", fixtures.revoked_certificate
+    )
+    if answer is None:
+        return Result(
+            10,
+            name,
+            "failed",
+            "nodes. rechazó el certificado revocado en el saludo TLS antes de la aplicación",
+        )
+    if answer.status != 403:
+        return Result(
+            10, name, "failed", f"la aplicación respondió {answer.status} al certificado revocado"
+        )
+    code = _rejection_code(answer)
+    if code != "node_revoked":
+        return Result(10, name, "failed", f"la aplicación respondió {code!r}, no node_revoked")
+    arn = _trust_store_arn(target, aws)
+    if arn is None:
+        return Result(
+            10, name, "failed", f"sin almacén de confianza vigia-node-trust{target.suffix}"
+        )
+    expected = _revoked_entries(target, aws)
+    entries: int | None = None
+    for poll in range(2):
+        if poll:
+            sleep(ALARM_POLL_SECONDS)
+        answer_store = aws("elbv2", "describe-trust-store-revocations", "--trust-store-arn", arn)
+        revocations = answer_store.get("TrustStoreRevocations") or []
+        entries = sum(int(item.get("NumberOfRevokedEntries") or 0) for item in revocations) or None
+        if entries is not None and (expected is None or entries == expected):
+            break
     else:
-        results.append(Result(13, origin, "skipped", "solo en staging"))
-    return results
+        return Result(
+            10,
+            name,
+            "failed",
+            f"el almacén de confianza tiene {entries} revocadas; la base, {expected}",
+        )
+    if not network.tls_with_certificate_rejected(
+        target.nodes_host, 443, fixtures.revoked_certificate
+    ):
+        return Result(
+            10, name, "failed", "el balanceador aceptó el certificado revocado tras el barrido"
+        )
+    return Result(
+        10,
+        name,
+        "ok",
+        f"node_revoked de la aplicación y {entries} revocadas en el almacén de confianza",
+    )
+
+
+def check_signed_catalog(
+    target: Target, http: Http, network: Network, fixtures: Fixtures
+) -> Result:
+    name = "catálogo firmado con certificado vigente"
+    reason = "omitida: la ruta de alta de U-03 (/api/nodes/enrollment) todavía no existe"
+    if not target.has_enrollment():
+        return Result(11, name, "skipped", reason)
+    if fixtures.valid_certificate is None or fixtures.synthetic_zone_id is None:
+        return Result(
+            11,
+            name,
+            "skipped",
+            "sin certificado vigente o zona sintética del entorno (secreto"
+            " vigia/<entorno>/deploy-checks)",
+        )
+    path = f"/api/nodes/zones/{fixtures.synthetic_zone_id}/catalog"
+    answer = network.request_with_certificate(
+        target.nodes_host, 443, "GET", path, fixtures.valid_certificate
+    )
+    if answer is None or answer.status != 200:
+        status = "saludo TLS rechazado" if answer is None else f"HTTP {answer.status}"
+        return Result(11, name, "failed", f"el catálogo de la zona sintética respondió {status}")
+    envelope = answer.json()
+    keys = http.request("GET", f"{target.app_url}/.well-known/vigia-checkpoint-keys")
+    if keys.status != 200:
+        return Result(11, name, "failed", f"vigia-checkpoint-keys respondió {keys.status}")
+    published = {str(key.get("key_id")) for key in keys.json().get("keys", [])}
+    key_id = str(envelope.get("key_id") or "")
+    if not key_id or key_id not in published:
+        return Result(
+            11, name, "failed", f"el sobre cita la clave {key_id!r}, ausente del conjunto publicado"
+        )
+    return Result(11, name, "ok", f"sobre del catálogo firmado con la clave {key_id}")
+
+
+def check_enrollment_reachable(target: Target, http: Http, network: Network) -> Result:
+    name = "alta por app. y rechazo sin certificado por nodes."
+    reason = "omitida: la ruta de alta de U-03 (/api/nodes/enrollment) todavía no existe"
+    if not target.has_enrollment():
+        return Result(12, name, "skipped", reason)
+    answer = http.request("POST", f"{target.app_url}/api/nodes/enrollment")
+    if not 400 <= answer.status < 500:
+        return Result(
+            12,
+            name,
+            "failed",
+            f"POST /api/nodes/enrollment sin cuerpo por app. respondió {answer.status}"
+            " (se espera 4xx)",
+        )
+    if not network.tls_without_certificate_rejected(target.nodes_host, 443):
+        return Result(12, name, "failed", "nodes. aceptó la conexión TLS sin certificado")
+    return Result(12, name, "ok", f"app. {answer.status} y nodes. rechaza sin certificado")
+
+
+def check_cross_origin_and_checksum(target: Target, http: Http) -> Result:
+    name = "origen cruzado y PUT sin suma rechazado"
+    if not target.staging:
+        return Result(13, name, "skipped", "solo en staging")
+    if not target.has_enrollment():
+        return Result(
+            13,
+            name,
+            "skipped",
+            "omitida: la ruta de alta de U-03 (/api/nodes/enrollment) todavía no existe",
+        )
+    grant = http.request(
+        "POST",
+        f"{target.app_url}/documents",
+        {"document_kind": "scope_minutes", "content_type": "application/pdf", "size_bytes": 1},
+    )
+    if grant.status != 200:
+        return Result(13, name, "failed", f"POST /documents respondió {grant.status}")
+    upload_url = str(grant.json().get("upload_url") or "")
+    if not upload_url.startswith("https://"):
+        return Result(13, name, "failed", "POST /documents no devolvió una URL de subida")
+    preflight = http.request(
+        "OPTIONS",
+        upload_url,
+        headers={
+            "Origin": target.app_url,
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "x-amz-checksum-sha256",
+        },
+    )
+    allowed = preflight.headers.get("Access-Control-Allow-Headers", "")
+    methods = preflight.headers.get("Access-Control-Allow-Methods", "")
+    if "PUT" not in methods.upper() or "x-amz-checksum-sha256" not in allowed.lower():
+        return Result(
+            13,
+            name,
+            "failed",
+            f"el preflight no autoriza PUT con x-amz-checksum-sha256 ({methods!r}; {allowed!r})",
+        )
+    put = http.request("PUT", upload_url, b"vigia", headers={"Origin": target.app_url})
+    if put.status < 400:
+        return Result(
+            13,
+            name,
+            "failed",
+            f"el depósito aceptó un PUT sin x-amz-checksum-sha256 ({put.status})",
+        )
+    return Result(13, name, "ok", f"preflight con CORS y PUT sin suma rechazado ({put.status})")
 
 
 def run_checks(
@@ -459,12 +850,16 @@ def run_checks(
     http: Http,
     aws: Aws,
     network: Network,
+    fixtures: Fixtures | None = None,
+    conformance: Conformance | None = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] | None = None,
 ) -> list[Result]:
     """Las trece comprobaciones; la nº 7 al final por sus 15 minutos. Un error inesperado de una
     comprobación la deja ``failed`` con el error, sin impedir las demás."""
     clock = now or (lambda: target.now)
+    material = fixtures or Fixtures()
+    kit = conformance or KitConformance()
 
     def guarded(
         number: int, name: str, check: Callable[[], Result | list[Result]]
@@ -479,12 +874,15 @@ def run_checks(
     steps: list[tuple[int, str, Callable[[], Result | list[Result]]]] = [
         (1, "health/live", lambda: check_live(target, http, network)),
         (2, "HealthyHostCount", lambda: check_healthy_hosts(target, aws)),
-        (3, "autenticación mutua", lambda: check_mutual_tls(target, network)),
-        (4, "conformidad", lambda: check_conformance(target)),
+        (3, "autenticación mutua", lambda: check_mutual_tls(target, network, material)),
+        (4, "conformidad", lambda: check_conformance(target, kit)),
         (5, "inicio de sesión", lambda: check_session(target, http, aws, clock)),
         (6, "well-known", lambda: check_well_known(target, http)),
         (8, "frontend", lambda: check_frontend(target)),
-        (10, "U-03", lambda: check_fleet(target)),
+        (10, "U-03", lambda: check_revoked_certificate(target, network, aws, material, sleep)),
+        (11, "U-03", lambda: check_signed_catalog(target, http, network, material)),
+        (12, "U-03", lambda: check_enrollment_reachable(target, http, network)),
+        (13, "U-03", lambda: check_cross_origin_and_checksum(target, http)),
         (7, "alarmas", lambda: check_alarms(target, aws, sleep)),
     ]
     results = [result for number, name, check in steps for result in guarded(number, name, check)]
@@ -539,6 +937,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         http=UrllibHttp(),
         aws=aws_cli,
         network=SocketNetwork(),
+        fixtures=SecretsFixtures(aws_cli).load(args.environment),
+        conformance=KitConformance(),
         now=lambda: datetime.now(UTC),  # noqa: TID251
     )
     if args.report:
