@@ -129,6 +129,9 @@ class MetricName(enum.StrEnum):
     FLEET_NODE_REACHABLE = "fleet_node_reachable"
     FLEET_NODE_QUEUE_PENDING = "fleet_node_queue_pending"
     FLEET_NODE_CLOCK_OFFSET_MS = "fleet_node_clock_offset_ms"
+    # Alarmas abiertas por clase (U-03, VIG-187, NFR-GOB-58): alimenta los paneles «Alarmas
+    # abiertas por clase» y «Certificados por vencer» del tablero de flota.
+    FLEET_ALARMS_OPEN = "fleet_alarms_open"
     # Walk-test por organización (U-03, TASK-227, NFR-GOB-56)
     WALK_TEST_SESSIONS_OPEN = "walk_test_sessions_open"
     WALK_TEST_SESSIONS_INCOMPLETE = "walk_test_sessions_incomplete"
@@ -312,6 +315,13 @@ CATALOG: Final[tuple[MetricSpec, ...]] = (
     _spec(_N.FLEET_NODE_CLOCK_OFFSET_MS, _G, "ms",
           "Desviación del reloj del nodo respecto de su fuente de tiempo.", "NFR-GOB-55",
           "node_id"),
+    # Alarmas abiertas por clase (VIG-187, NFR-GOB-58): un medidor por clase y organización del
+    # tablero de flota, sin nodo (NFR-GOB-13). ``organization_id`` evita que una organización pise
+    # a otra (las tareas recorren una transacción por organización); el panel «Certificados por
+    # vencer» sale de la clase ``certificate_expiring``.
+    _spec(_N.FLEET_ALARMS_OPEN, _G, "{alarm}",
+          "Alarmas de flota abiertas (levantadas y no cerradas) por clase y organización.",
+          "NFR-GOB-58", "organization_id", "alarm_kind"),
     # Sesiones de walk-test (TASK-227, NFR-GOB-56): las publica expire_walk_test_sessions al
     # terminar cada organización; solo organization_id (ni zona ni sesión: NFR-GOB-13).
     _spec(_N.WALK_TEST_SESSIONS_OPEN, _G, "{session}",
@@ -523,6 +533,7 @@ class PlatformMetrics:
         self.fleet_node_reachable = gauge(_N.FLEET_NODE_REACHABLE)
         self.fleet_node_queue_pending = gauge(_N.FLEET_NODE_QUEUE_PENDING)
         self.fleet_node_clock_offset_ms = gauge(_N.FLEET_NODE_CLOCK_OFFSET_MS)
+        self.fleet_alarms_open = gauge(_N.FLEET_ALARMS_OPEN)
         self.walk_test_sessions_open = gauge(_N.WALK_TEST_SESSIONS_OPEN)
         self.walk_test_sessions_incomplete = gauge(_N.WALK_TEST_SESSIONS_INCOMPLETE)
         self.signing_key_days_to_expiry = gauge(_N.SIGNING_KEY_DAYS_TO_EXPIRY)

@@ -29,6 +29,7 @@ from vigia_platform.fleet.application.fleet_alarms import (
     AlarmDependencies,
     AlarmReport,
     now_of,
+    publish_open_alarms,
     raise_in,
 )
 from vigia_platform.fleet.domain.enums import FleetAlarmKind
@@ -91,6 +92,7 @@ class ExpiringCertificateAlerter:
                 now,
             )
             if len(expiring) < self._batch_size:
+                await publish_open_alarms(deps, transaction)
                 return report
             after = expiring[-1].node_id
 

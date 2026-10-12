@@ -205,19 +205,36 @@ FLEET_PER_NODE_METRICS: Final = (
 """Las ocho series por nodo de NFR-GOB-55 (contadores y medidores; NFR-GOB-13: a lo sumo 8 por
 nodo y ningún histograma). Son las únicas que el colector publica con ``node_id``."""
 
+FLEET_ALARM_KINDS: Final = (
+    "node_mute",
+    "queue_over_threshold",
+    "clock_drift",
+    "version_retiring",
+    "simulated_adapter_in_productive",
+    "certificate_expiring",
+    "camera_below_min_fps",
+    "orphan_clips_growing",
+)
+"""Las ocho clases de alarma de flota (``FleetAlarmKind``). El panel «Alarmas abiertas por clase»
+dibuja una serie por clase (VIG-187, NFR-GOB-58) y «Certificados por vencer» la de
+``certificate_expiring``."""
+
 FLEET_PANELS: Final = (
     "Inventario por estado de comunicacion",
     "Nodos mudos",
     "Colas por encima de umbral",
+    "Alarmas abiertas por clase",
     "Latencias y codigos por ruta del contrato",
     "Aceptados y rechazados por tipo de registro",
     "Lista de revocacion: estado y vigencia",
+    "Certificados por vencer",
     "Huerfanos por nodo",
     "Tareas periodicas de U-03: duracion y resultado",
     "Semaforos y pools por clase",
 )
-"""Paneles de U-03 §8.2 (NFR-GOB-58) con métricas que el código publica. «Alarmas abiertas por
-clase» y «certificados por vencer» no tienen métrica en el código todavía: no se dibujan."""
+"""Los once paneles de U-03 §8.2 (NFR-GOB-58) sobre métricas que el código publica. «Alarmas
+abiertas por clase» y «certificados por vencer» leen ``fleet_alarms_open`` (VIG-187): el segundo,
+su clase ``certificate_expiring``."""
 
 APPLICATION_ALARM_METRICS: Final = {
     # NFR-NUC-38 y §9.4.
@@ -1587,27 +1604,70 @@ class ObservabilityStack(VigiaStack):
         ]
 
     def _search(
-        self, name: str, service: str, statistic: str, period: Duration, *dimensions: str
+        self,
+        name: str,
+        service: str,
+        statistic: str,
+        period: Duration,
+        *dimensions: str,
+        filters: Mapping[str, str] | None = None,
     ) -> str:
-        """``SEARCH`` de una métrica del despliegue: una serie por valor de ``dimensions``."""
+        """``SEARCH`` de una métrica del despliegue: una serie por valor de ``dimensions``.
+
+        ``filters`` añade pares ``dimension="valor"`` a la consulta (por ejemplo
+        ``alarm_kind="certificate_expiring"``): el resultado son las series del despliegue que
+        cumplen ese valor.
+        """
         schema = ",".join((METRICS_NAMESPACE, "service", "environment", *dimensions))
+        extra = "".join(f' {key}="{value}"' for key, value in (filters or {}).items())
         return (
             f'SEARCH(\'{{{schema}}} MetricName="{name}" service="{service}" '
-            f"environment=\"{self.config.deployment}\"', '{statistic}', "
+            f"environment=\"{self.config.deployment}\"{extra}', '{statistic}', "
             f"{int(period.to_seconds())})"
         )
 
     def _expression(self, expression: str, period: Duration, label: str = "") -> cloudwatch.IMetric:
         return cloudwatch.MathExpression(expression=expression, label=label, period=period)
 
+    def _open_alarms_by_class(self, kind: str, period: Duration) -> cloudwatch.IMetric:
+        """``SUM(SEARCH(...))`` de ``fleet_alarms_open`` de una clase, sumando organizaciones.
+
+        El medidor lleva ``organization_id`` (cada tarea publica su organización); el ``SEARCH``
+        devuelve una serie por organización y el ``SUM`` las suma, de modo que una organización no
+        pisa a otra (VIG-187).
+        """
+        search = self._search(
+            "fleet_alarms_open",
+            WORKER_SERVICE,
+            "Maximum",
+            period,
+            "organization_id",
+            "alarm_kind",
+            filters={"alarm_kind": kind},
+        )
+        return self._expression(f"SUM({search})", period, kind)
+
     def _fleet_panels(self) -> list[tuple[str, list[cloudwatch.IWidget]]]:
         """Paneles de flota de U-03 (nº 18, U-03 §8.2 y NFR-GOB-58) sobre las métricas que el
         código publica. Las series por nodo son solo las de ``FLEET_PER_NODE_METRICS`` (contadores
         y medidores); los histogramas se separan por ruta, clase o tarea, nunca por nodo
-        (NFR-GOB-13)."""
+        (NFR-GOB-13). «Alarmas abiertas por clase» y «certificados por vencer» leen
+        ``fleet_alarms_open`` por ``alarm_kind`` sumando organizaciones (VIG-187)."""
         api, worker = API_SERVICE, WORKER_SERVICE
         m5 = FIVE_MINUTES
-        (inventory, mute, queues, routes, records, revocation, orphans, tasks, pools) = FLEET_PANELS
+        (
+            inventory,
+            mute,
+            queues,
+            alarms,
+            routes,
+            records,
+            revocation,
+            certificates,
+            orphans,
+            tasks,
+            pools,
+        ) = FLEET_PANELS
         by_node = "node_id"
         reachable = self._search("fleet_node_reachable", api, "Maximum", m5, by_node)
         heartbeats = self._search("fleet_heartbeats_total", api, "Sum", m5, by_node)
@@ -1674,6 +1734,10 @@ class ObservabilityStack(VigiaStack):
                             )
                         ],
                     ),
+                    self._graph(
+                        alarms,
+                        [self._open_alarms_by_class(kind, m5) for kind in FLEET_ALARM_KINDS],
+                    ),
                     cloudwatch.GraphWidget(
                         title=routes, left=latency, right=codes, width=24, height=6
                     ),
@@ -1698,6 +1762,11 @@ class ObservabilityStack(VigiaStack):
                             self._app_metric("revocation_list_entries", worker, "Maximum", m5),
                             self._app_metric("revocation_list_publish_failed", worker, "Sum", m5),
                         ],
+                        width=12,
+                    ),
+                    self._graph(
+                        certificates,
+                        [self._open_alarms_by_class("certificate_expiring", m5)],
                         width=12,
                     ),
                     self._graph(

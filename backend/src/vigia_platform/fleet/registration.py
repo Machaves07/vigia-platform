@@ -215,7 +215,9 @@ def catalog_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> Non
 
 def fleet_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
     """Las seis tareas de ``fleet`` con sus manejadores (VIG-152, VIG-155, VIG-161 y TASK-227)."""
-    alarms = AlarmDependencies(clock=services.clock, outbox=services.outbox)
+    alarms = AlarmDependencies(
+        clock=services.clock, outbox=services.outbox, metrics=services.metrics
+    )
     register_detect_mute_nodes(registry, MuteDetector(alarms, writer=services.writer))
     register_evaluate_fleet_alarms(registry, FleetAlarmEvaluator(alarms, audit=services.audit))
     register_alert_expiring_certificates(registry, ExpiringCertificateAlerter(alarms))
