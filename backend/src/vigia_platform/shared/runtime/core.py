@@ -300,6 +300,7 @@ def build_core(
         verifier_path=verifier_path,
         config=config,
         secrets=secrets,
+        cpu_pool=cpu_pool,
     )
     outbox_catalog(units, services, into=catalog)
     # NFR-GOB-20, BR-NUC-52: sin un tipo, un evento o una tarea que una unidad exige, el proceso
