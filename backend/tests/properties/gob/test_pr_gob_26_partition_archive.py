@@ -75,8 +75,11 @@ from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
 BACKEND = Path(__file__).resolve().parents[3]
 VERSIONS = BACKEND / "migrations" / "versions"
 EXPORTED_AT = datetime(2031, 7, 2, 3, 0, tzinfo=UTC)
-FIRST_MONTH = date(1901, 1, 1)
-"""Las particiones de los ejemplos empiezan aquí: meses que ninguna otra prueba crea."""
+FIRST_MONTH = date(1600, 1, 1)
+"""Las particiones de los ejemplos empiezan aquí: meses pasados que ninguna otra prueba ni las
+particiones por defecto de la migración (el mes corriente, 2026) crean. Con el perfil ``nightly``
+(2 000 ejemplos) el contador avanza 2 000 meses; desde 1901 llegaba a 2026 y chocaba con la
+partición por defecto (``DuplicateTableError`` en ``heartbeat_history_2026_10``)."""
 ALARM_KINDS = (
     "node_mute",
     "queue_over_threshold",
