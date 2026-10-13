@@ -7,7 +7,11 @@ local con hallazgos de los **generadores del kit de U-01** (``finding`` sobre un
 ``zone_catalog``), los envía por ``EscritorExpediente`` sobre una base con los ajustes de
 producción de ``vigia-api`` (pool ``node`` de 10 conexiones) y reencola lo transitorio
 (``temporarily_unavailable``, también con resultado desconocido tras el ``COMMIT``, o
-``chain_locked_timeout``). El momento del reinicio sale de la semilla.
+``chain_locked_timeout``). El momento del reinicio sale de la semilla: al llegar a ese número de
+aceptados, los envíos nuevos se retienen hasta que la base está parada (los que están en curso
+siguen y la parada los corta), de modo que la parada siempre encuentra colas activas por rápido
+que sea el runner; con la base parada se sueltan, chocan con ella y se reencolan antes del
+arranque.
 
 **Resultado esperado**: al drenar las colas, **cero pérdidas** (cada hallazgo está una vez en el
 expediente y su recibo final apunta a ese registro) y **cero duplicados** (ninguna
@@ -23,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import Counter, deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import pytest
@@ -39,7 +43,8 @@ from tests.writer_support import (
     unit_context,
     verify_ledger_chains,
 )
-from vigia_platform.shared.context import ActorKind, ActorUnit
+from vigia_platform.ledger.application.writer import LedgerRejection, Receipt
+from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
 from vigia_platform.shared.db import RouteClass, route_class_scope
 
 pytestmark = [pytest.mark.integration, pytest.mark.nightly]
@@ -48,6 +53,7 @@ NODES = 20
 FINDINGS_PER_NODE = 8
 PLANTS = 4
 DRAIN_TIMEOUT_SECONDS = 300.0
+RETRY_WHILE_DOWN_TIMEOUT_SECONDS = 60.0
 
 
 @pytest.fixture(scope="module")
@@ -85,6 +91,27 @@ def test_fs_nuc_02_database_failover_with_the_node_queues_active(stack: LedgerSt
         plants = [Place.new(organizations[index % 2]) for index in range(PLANTS)]
         database = stack.database(node_pool_size=10)
         writer = stack.writer(database)
+        # Retención: al llegar a ``restart_after`` aceptados, los envíos nuevos esperan en la
+        # puerta hasta que la base está parada (los que están en curso siguen). Así la parada
+        # siempre encuentra colas activas, por rápido que sea el runner.
+        gate = asyncio.Event()
+        gate.set()
+        reached = asyncio.Event()
+        accepted_through_gate = 0
+
+        async def write(
+            context: ScopeContext, record_type: str, document: Mapping[str, Any]
+        ) -> Receipt | LedgerRejection:
+            nonlocal accepted_through_gate
+            await gate.wait()
+            outcome = await writer.write(context, record_type, document)
+            if isinstance(outcome, Receipt) and not reached.is_set():
+                accepted_through_gate += 1
+                if accepted_through_gate >= restart_after:
+                    gate.clear()
+                    reached.set()
+            return outcome
+
         nodes: list[SimulatedNode] = []
         for index in range(NODES):
             plant = plants[index % PLANTS]
@@ -98,7 +125,7 @@ def test_fs_nuc_02_database_failover_with_the_node_queues_active(stack: LedgerSt
                     name=f"nodo-{index:02d}",
                     context=context,
                     queue=deque(documents),
-                    write=writer.write,
+                    write=write,
                     rng=run.child(),
                 )
             )
@@ -113,21 +140,40 @@ def test_fs_nuc_02_database_failover_with_the_node_queues_active(stack: LedgerSt
                 def accepted() -> int:
                     return sum(len(node.report.accepted) for node in nodes)
 
-                while accepted() < restart_after:
-                    await asyncio.sleep(0.02)
-                before_restart = accepted()
+                def retried() -> int:
+                    return sum(sum(node.report.retries.values()) for node in nodes)
+
+                async with asyncio.timeout(DRAIN_TIMEOUT_SECONDS):
+                    await reached.wait()
+                before_stop = accepted()
                 started = WALL.monotonic()
-                await asyncio.to_thread(stack.container.restart)
-                restart_seconds = WALL.monotonic() - started
+                # Conmutación: parada rápida (corta los envíos en curso) y arranque, en dos pasos
+                # para medir y soltar la retención con la base parada.
+                await asyncio.to_thread(stack.container.stop)
+                stop_seconds = WALL.monotonic() - started
+                # Con la base parada y la puerta cerrada nadie más puede ser aceptado: esta es la
+                # medida de la precondición, no la de después de volver.
+                when_stopped = accepted()
+                retries_when_stopped = retried()
+                gate.set()
+                # Los envíos retenidos chocan con la base parada y se reencolan antes del arranque.
+                deadline = WALL.monotonic() + RETRY_WHILE_DOWN_TIMEOUT_SECONDS
+                while retried() == retries_when_stopped:
+                    assert WALL.monotonic() < deadline, "ningún envío chocó con la base parada"
+                    await asyncio.sleep(0.02)
+                await asyncio.to_thread(stack.container.start)
+                down_seconds = WALL.monotonic() - started
                 # Los nodos reintentan solos; la prueba solo espera a la base para leer después.
                 await asyncio.to_thread(stack.container.wait_ready)
-                after_restart_mark = accepted()
                 async with asyncio.timeout(DRAIN_TIMEOUT_SECONDS):
                     await asyncio.gather(*tasks)
                 return {
-                    "accepted_before_restart": before_restart,
-                    "accepted_when_restarted": after_restart_mark,
-                    "restart_seconds": round(restart_seconds, 2),
+                    "accepted_before_stop": before_stop,
+                    "accepted_when_stopped": when_stopped,
+                    "pending_when_stopped": total - when_stopped,
+                    "retries_when_stopped": retries_when_stopped,
+                    "stop_seconds": round(stop_seconds, 2),
+                    "down_seconds": round(down_seconds, 2),
                     "drained_seconds": round(WALL.monotonic() - started, 2),
                 }
 
@@ -167,9 +213,9 @@ def test_fs_nuc_02_database_failover_with_the_node_queues_active(stack: LedgerSt
         assert set(stored) == set(receipts), "cero pérdidas: cada hallazgo está en el expediente"
         assert max(stored.values()) == 1, "cero duplicados: ninguna source_key repetida"
         assert sum(retries.values()) > 0, "el reinicio cortó envíos en curso"
-        assert timings["accepted_when_restarted"] < total, "el reinicio llegó con colas activas"
+        assert timings["accepted_when_stopped"] < total, "el reinicio llegó con colas activas"
         # El pool se reconectó solo: la misma ``Database`` escribió el resto tras el reinicio.
-        assert sum(stored.values()) - timings["accepted_when_restarted"] > 0
+        assert sum(stored.values()) - timings["accepted_when_stopped"] > 0
         # Cada recibo final apunta al registro que quedó (también los accepted_duplicate).
         for key, receipt in run.random.sample(sorted(receipts.items()), k=20):
             row = stack.run(fetch_record(stack.migrated, receipt.record_id))
