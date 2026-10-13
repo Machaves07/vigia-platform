@@ -46,8 +46,16 @@ from tests.load.driver import (
     run_node,
 )
 from tests.load.profiles import PROFILES, nightly_profile, write_sealed_dataset
-from tests.load.report import analyse, drains_of, percentile, saturation_transients, secret_findings
+from tests.load.report import (
+    analyse,
+    drains_of,
+    percentile,
+    rate_limited_trend,
+    saturation_transients,
+    secret_findings,
+)
 from tests.load.test_load_ci import assert_functional
+from tests.load.test_load_nightly import trend
 from tests.virtual_time import run_virtual
 from vigia_platform.node_api.limits import NODE_BUDGETS
 from vigia_platform.shared.api.declarations import NodeRoute
@@ -176,6 +184,8 @@ def _functional(**changes: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         "rate_limited_by_operation": {},
         "rejection_codes": {},
         "events": {"submit_record:success": 10},
+        "drains": [],
+        "node_latency": {},
         **changes,
     }
     ledger = {
@@ -219,8 +229,11 @@ def test_saturation_blocks_in_ci_and_is_trend_in_the_nightly_bench() -> None:
         # `lost` por separado: con `accepted == emitted` la única aserción que cae es `lost == 0`.
         {"lost": 1},
         {"dead_letter": {"schema_invalid": 1}},
-        {"rate_limited_by_operation": {"submit_record": 1}},
-        {"rate_limited_below_minimum": 1},
+        # A-67: por debajo del mínimo de NFR-CTR-02 y en el latido, un `429` bloquea siempre.
+        {"rate_limited_below_minimum": 1, "rate_limited_by_operation": {"request_grant": 1}},
+        {"rate_limited_below_minimum": 1, "rate_limited_by_operation": {"submit_record": 1}},
+        {"rate_limited_by_operation": {"heartbeat": 1}},
+        {"rate_limited_by_operation": {"request_grant": 1, "heartbeat": 1}},
     ],
 )
 def test_the_functional_checks_block_even_when_saturation_is_trend(
@@ -229,6 +242,31 @@ def test_the_functional_checks_block_even_when_saturation_is_trend(
     analysis, ledger = _functional(**changes)
     with pytest.raises(AssertionError):
         assert_functional(analysis, ledger, saturation_blocks=False)
+
+
+@pytest.mark.parametrize(
+    "limited",
+    [{"request_grant": 1}, {"submit_record": 2}, {"request_grant": 1, "submit_record": 1}],
+)
+def test_a_429_above_the_minimum_is_trend_in_nightly_and_blocks_in_ci(
+    limited: dict[str, int],
+) -> None:
+    # A-67: con `rate_limited_below_minimum == 0`, el `429` de concesiones o registros quedó por
+    # encima del mínimo garantizado: en `nightly` va al informe como tendencia; en `ci` falla.
+    analysis, ledger = _functional(rate_limited_by_operation=limited)
+    assert_functional(analysis, ledger, saturation_blocks=False)
+    assert rate_limited_trend(analysis) == limited
+    assert trend(analysis)["rate_limited_above_minimum"] == limited
+    with pytest.raises(AssertionError):
+        assert_functional(analysis, ledger)
+
+
+def test_the_rate_limited_trend_never_includes_the_heartbeat() -> None:
+    analysis, _ = _functional(rate_limited_by_operation={"heartbeat": 1, "request_grant": 3})
+    assert rate_limited_trend(analysis) == {"request_grant": 3}
+    clean, _ = _functional()
+    assert rate_limited_trend(clean) == {}
+    assert trend(clean)["rate_limited_above_minimum"] == {}
 
 
 def test_only_samples_inside_the_windows_count() -> None:

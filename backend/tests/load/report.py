@@ -46,6 +46,7 @@ __all__ = [
     "analyse",
     "latency_summary",
     "percentile",
+    "rate_limited_trend",
     "saturation_transients",
     "secret_findings",
     "write_report",
@@ -268,6 +269,17 @@ def saturation_transients(analysis: Mapping[str, Any]) -> dict[str, int]:
         **{key: n for key, n in codes.items() if key.endswith(":temporarily_unavailable")},
         **{key: n for key, n in events.items() if key.endswith(":unavailable")},
     }
+
+
+def rate_limited_trend(analysis: Mapping[str, Any]) -> dict[str, int]:
+    """Los ``rate_limited`` de registros y concesiones, las operaciones con mínimo garantizado de
+    NFR-CTR-02 (A-67).
+
+    Con ``rate_limited_below_minimum == 0`` todos quedaron por encima del mínimo: tendencia en el
+    banco de ``nightly``. Nunca incluye el latido ni otra operación sin mínimo: esos bloquean
+    siempre."""
+    limited: Mapping[str, int] = analysis["rate_limited_by_operation"]
+    return {op: n for op, n in limited.items() if op in MINIMUM_PER_MINUTE}
 
 
 def drains_of(result: Mapping[str, Any]) -> list[Drain]:
