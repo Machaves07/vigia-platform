@@ -110,6 +110,10 @@ HEALTH_TIMEOUT = Duration.seconds(5)
 HEALTHY_THRESHOLD = 2
 UNHEALTHY_THRESHOLD = 2
 DEREGISTRATION_DELAY = Duration.seconds(30)
+# Inactividad de los balanceadores de aplicación (el valor de AWS por defecto, ahora explícito):
+# menor que ``KEEP_ALIVE_SECONDS`` de ``vigia-api`` (``vigia_platform.shared.api.main``), para que
+# la tarea nunca cierre antes una conexión que el balanceador va a reutilizar (502; VIG-196).
+IDLE_TIMEOUT = Duration.seconds(60)
 APP_LOG_PREFIX, NODES_LOG_PREFIX = LOAD_BALANCER_LOG_PREFIXES
 ROOT_CERTIFICATE_KEY = "ca/root.pem"
 
@@ -332,6 +336,7 @@ class EdgeStack(VigiaStack):
             # ``staging-<n>`` se destruye entero (D-8).
             deletion_protection=not self.config.ephemeral,
             drop_invalid_header_fields=True,
+            idle_timeout=IDLE_TIMEOUT,
         )
         load_balancer.log_access_logs(self.access_logs_bucket, prefix=log_prefix)
         return load_balancer

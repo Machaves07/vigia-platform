@@ -10,6 +10,8 @@
   arranque pide la salida con ``STARTUP_FAILURE_EXIT_CODE``.
 - ``X-Forwarded-For`` solo cambia la dirección del cliente si la conexión llega de una red
   declarada; ``FORWARDED_ALLOW_IPS`` del proceso no cuenta.
+- Una conexión persistente ociosa sigue abierta más que la inactividad del balanceador
+  (``KEEP_ALIVE_SECONDS``; VIG-196): el proceso nunca la cierra antes que él.
 
 La base es un doble; firma, KMS y almacén son los de ``tests.worker_support``. Solo datos generados.
 """
@@ -22,6 +24,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -37,6 +40,8 @@ from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE, AppConfig, 
 from vigia_platform.shared.api.main import (
     API_PORT,
     FORWARDED_VARIABLE,
+    KEEP_ALIVE_SECONDS,
+    LOAD_BALANCER_IDLE_SECONDS,
     RUNTIME_VARIABLE,
     ApiServerConfig,
     build_server,
@@ -387,3 +392,64 @@ def test_forwarded_headers_only_count_from_the_declared_networks(
     monkeypatch.setenv("FORWARDED_ALLOW_IPS", "*")
     server = ApiServerConfig(forwarded_allow_ips=networks)
     assert loop.run_until_complete(_seen_from(server, peer)) == expected
+
+
+# --- Conexiones persistentes (VIG-196) ----------------------------------------------------------
+
+UVICORN_DEFAULT_KEEP_ALIVE_SECONDS = 5
+IDLE_PROBE_SECONDS = UVICORN_DEFAULT_KEEP_ALIVE_SECONDS + 3
+"""Ociosa más que los 5 s de uvicorn por defecto, con margen para que, sin el ajuste, el cierre
+del proceso ya haya ocurrido aunque el bucle vaya cargado."""
+_REQUEST = b"GET /client HTTP/1.1\r\nHost: api\r\n\r\n"
+
+
+def _answer(connection: socket.socket) -> bytes:
+    """Una respuesta completa (cabeceras y ``Content-Length``), o ``b""`` si el proceso cerró."""
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = connection.recv(65_536)
+        if not chunk:
+            return b""
+        data += chunk
+    head, _, body = data.partition(b"\r\n\r\n")
+    length = next(
+        int(line.split(b":", 1)[1])
+        for line in head.split(b"\r\n")
+        if line.lower().startswith(b"content-length:")
+    )
+    while len(body) < length:
+        chunk = connection.recv(65_536)
+        if not chunk:
+            return b""
+        body += chunk
+    return head
+
+
+def test_the_api_keeps_an_idle_connection_longer_than_the_balancer() -> None:
+    config = build_server(_echo_app(), ApiServerConfig()).config
+    assert config.timeout_keep_alive == KEEP_ALIVE_SECONDS
+    assert KEEP_ALIVE_SECONDS > LOAD_BALANCER_IDLE_SECONDS
+
+
+def test_an_idle_kept_connection_still_answers_after_uvicorns_default() -> None:
+    """Lo que vio el balanceador en VIG-196: la conexión que reutiliza tras unos segundos sin uso
+    sigue abierta (con los 5 s por defecto, el proceso la cerraba y esa petición daba 502)."""
+    port = _free_port()
+    uvicorn_server = build_server(_echo_app(), ApiServerConfig(host="127.0.0.1", port=port))
+    thread = threading.Thread(target=uvicorn_server.run, daemon=True)
+    thread.start()
+    try:
+        for _ in range(300):
+            if uvicorn_server.started:
+                break
+            time.sleep(0.1)
+        assert uvicorn_server.started
+        with socket.create_connection(("127.0.0.1", port), timeout=60) as connection:
+            connection.sendall(_REQUEST)
+            assert _answer(connection).startswith(b"HTTP/1.1 200")
+            time.sleep(IDLE_PROBE_SECONDS)
+            connection.sendall(_REQUEST)
+            assert _answer(connection).startswith(b"HTTP/1.1 200")
+    finally:
+        uvicorn_server.should_exit = True
+        thread.join(timeout=60)

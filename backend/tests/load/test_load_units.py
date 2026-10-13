@@ -157,6 +157,26 @@ def test_a_503_is_a_failure_of_the_p95_verdict_but_not_a_console_error() -> None
     assert broken.name in verdict.errors_message()
 
 
+def test_a_balancer_502_names_its_transport_error_and_its_instant() -> None:
+    # VIG-196: el informe dice qué error de transporte tuvo el balanceador y cuándo, para situarlo
+    # frente a las ventanas de caída y de reconexión.
+    route = CONSOLE_ROUTES[1]
+    samples = [s for s in _healthy() if s.route != route.name]
+    samples += _samples(route.name, [10.0] * MIN_SAMPLES)
+    failed = Sample(route.name, T0, 12.5, 502, "RemoteProtocolError")
+    verdict = evaluate([*samples, failed])
+    assert verdict.errors == (f"{route.name}: respondió 502 (balanceador: RemoteProtocolError)",)
+    assert verdict.routes[route.name]["non_2xx_samples"] == [
+        {
+            "at": T0.isoformat(),
+            "status": 502,
+            "elapsed_ms": 12.5,
+            "balancer_error": "RemoteProtocolError",
+        }
+    ]
+    json.dumps(verdict.to_json())  # cabe en el informe
+
+
 def test_a_slow_or_saturated_console_has_no_errors() -> None:
     route = CONSOLE_ROUTES[0]
     samples = [s for s in _healthy() if s.route != route.name]

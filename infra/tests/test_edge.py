@@ -16,6 +16,7 @@ from collections import Counter
 from collections.abc import Iterator, Mapping
 from fnmatch import fnmatchcase
 from functools import cache
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -46,6 +47,16 @@ TRUST_STORE = "AWS::ElasticLoadBalancingV2::TrustStore"
 # en U-03).
 WAF_RATE_WINDOWS = {60, 120, 300, 600}
 WAF_RATE_MIN_LIMIT = 10
+API_MAIN = (
+    Path(__file__).resolve().parents[2]
+    / "backend"
+    / "src"
+    / "vigia_platform"
+    / "shared"
+    / "api"
+    / "main.py"
+)
+KEEP_ALIVE = re.compile(r"^KEEP_ALIVE_SECONDS: Final = (\d+)$", re.MULTILINE)
 
 
 def expected_edge_resources(config: EnvironmentConfig) -> Counter[str]:
@@ -215,6 +226,27 @@ def test_every_load_balancer_logs_access_to_vigia_logs(deployment: Synthesized) 
         assert bucket == config.bucket_name("logs", ACCOUNT), name
         assert LOGS_BUCKET.match(bucket), name
         assert attributes["access_logs.s3.prefix"] == prefixes[name], name
+
+
+def test_application_load_balancers_go_idle_before_the_api_drops_a_kept_connection(
+    deployment: Synthesized,
+) -> None:
+    """VIG-196: la inactividad de cada balanceador de aplicación es menor que la conexión
+    persistente de ``vigia-api`` (``KEEP_ALIVE_SECONDS``); si no, la tarea cierra la conexión que
+    el balanceador reutiliza y esa petición recibe un 502."""
+    match = KEEP_ALIVE.search(API_MAIN.read_text(encoding="utf-8"))
+    assert match is not None, "vigia-api no declara KEEP_ALIVE_SECONDS"
+    keep_alive = int(match.group(1))
+    template = _edge(deployment)
+    found = [
+        (name, lb)
+        for name, (_, lb) in _named(template, LOAD_BALANCER).items()
+        if properties(lb)["Type"] == "application"
+    ]
+    assert found
+    for name, load_balancer in found:
+        attributes = _attributes(load_balancer, "LoadBalancerAttributes")
+        assert int(attributes["idle_timeout.timeout_seconds"]) < keep_alive, name
 
 
 def test_no_listener_on_port_80_and_only_443_is_public(deployment: Synthesized) -> None:
