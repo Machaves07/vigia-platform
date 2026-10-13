@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
@@ -51,6 +52,18 @@ NODE_RECORD_TYPES: Final = (
 """Los tres registros del contrato en el expediente (``fleet.record_types``)."""
 DRIVER_MARGIN_SECONDS: Final = 1_800.0
 """Holgura del tope del proceso de los nodos sobre las fases y el vaciado (nunca decide nada)."""
+CI_PROFILE_VARIABLE: Final = "VIGIA_LOAD_CI_PROFILE"
+CI_PROFILES: Final = ("ci", "ci-real-time")
+"""``ci`` por defecto; ``ci-real-time`` (``speed_factor`` 1, 30 min) solo a mano, para el hito
+«U-03 terminada» (TASK-237): mismas aserciones, al ritmo real del piloto."""
+
+
+def ci_profile() -> LoadProfile:
+    """El perfil de ``VIGIA_LOAD_CI_PROFILE`` (``ci`` si no está)."""
+    name = os.environ.get(CI_PROFILE_VARIABLE, "ci").strip() or "ci"
+    if name not in CI_PROFILES:
+        raise ValueError(f"{CI_PROFILE_VARIABLE} es uno de {CI_PROFILES}, no {name!r}")
+    return PROFILES[name]
 
 
 def ledger_check(target: LoadTarget, fleet: Fleet, emitted: set[str]) -> dict[str, Any]:
@@ -165,7 +178,7 @@ def test_ci_profile_ten_nodes_lose_nothing_duplicate_nothing_and_keep_the_chain(
     load_reports: Path,
     tmp_path: Path,
 ) -> None:
-    profile = PROFILES["ci"]
+    profile = ci_profile()
     fleet, result, analysis, output = run_load(
         load_target, profile, dataset=sealed_dataset, cache=clip_cache, work=tmp_path
     )

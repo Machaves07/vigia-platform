@@ -184,6 +184,17 @@ PROFILES: Final[Mapping[str, LoadProfile]] = {
         steady_minutes=5.0,
         lost_reply_fraction=0.1,
     ),
+    # Hito «U-03 terminada» (TASK-237): el ``ci`` a ritmo real, en local y a mano
+    # (``VIGIA_LOAD_CI_PROFILE=ci-real-time``); el ritmo real de 8 h es el ``soak``.
+    "ci-real-time": LoadProfile(
+        "ci-real-time",
+        nodes=10,
+        zones_per_node=1,
+        nodes_per_plant=10,
+        speed_factor=1.0,
+        steady_minutes=30.0,
+        lost_reply_fraction=0.1,
+    ),
     "nightly": LoadProfile(
         "nightly",
         nodes=100,
