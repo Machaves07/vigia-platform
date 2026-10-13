@@ -276,6 +276,7 @@ jobs:
         working-directory: infra
         run: uv sync --frozen
       - name: clave de despliegue de vigia-contracts (solo lectura, para instalar el backend del soak)
+        if: inputs.soak
         env:
           CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
         run: |
@@ -285,6 +286,7 @@ jobs:
           echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
       - name: instalación congelada del backend (para el soak)
+        if: inputs.soak
         working-directory: backend
         run: uv sync --frozen
       - name: borrar la clave (antes de federar con AWS)
@@ -327,40 +329,48 @@ jobs:
       - name: flota y sesión de consola del soak (secreto del entorno; TASK-238)
         if: inputs.soak
         env:
-          SOAK_DIR: ${{ runner.temp }}/soak
+          SECRETOS: ${{ runner.temp }}/soak-secretos
         run: |
-          mkdir -p "$SOAK_DIR/files"
+          install -m 700 -d "$SECRETOS/files"
           SECRETO=$(aws secretsmanager get-secret-value --secret-id "vigia/$STAGING/deploy-checks" --query SecretString --output text)
           if ! printf '%s' "$SECRETO" | jq -e '.soak.fleet and .soak.console_session' > /dev/null; then
             echo "El entorno no publica la flota ni la sesión de consola del soak (clave soak de vigia/$STAGING/deploy-checks): las prepara el runbook de TASK-238 (VIG-174)." >&2
             exit 1
           fi
-          printf '%s' "$SECRETO" | jq -r '.soak.files // {} | to_entries[] | "\(.key)\t\(.value)"' |
+          # La cookie de la sesión de consola nunca aparece en un registro.
+          printf '%s' "$SECRETO" | jq -r '.soak.console_session.cookie // empty' | sed 's/^/::add-mask::/'
+          # Los nombres del secreto no pueden escapar del directorio (sin '..' ni ruta absoluta).
+          printf '%s' "$SECRETO" | jq -r '.soak.files // {} | to_entries[] | select((.key | contains("..") | not) and (.key | startswith("/") | not)) | "\(.key)\t\(.value)"' |
             while IFS=$'\t' read -r name content; do
-              mkdir -p "$SOAK_DIR/files/$(dirname "$name")"
-              printf '%s' "$content" | base64 -d > "$SOAK_DIR/files/$name"
+              mkdir -p "$SECRETOS/files/$(dirname "$name")"
+              printf '%s' "$content" | base64 -d > "$SECRETOS/files/$name"
             done
-          printf '%s' "$SECRETO" | jq --arg dir "$SOAK_DIR/files" '
+          printf '%s' "$SECRETO" | jq --arg dir "$SECRETOS/files" '
             .soak.fleet
             | .verify = ($dir + "/" + .verify)
             | .nodes = [.nodes[] | .credential = ($dir + "/" + .credential) | .configuration = ($dir + "/" + .configuration)]
-          ' > "$SOAK_DIR/fleet.json"
-          printf '%s' "$SECRETO" | jq '.soak.console_session' > "$SOAK_DIR/console-session.json"
+          ' > "$SECRETOS/fleet.json"
+          printf '%s' "$SECRETO" | jq '.soak.console_session' > "$SECRETOS/console-session.json"
       - name: soak de 8 h (nº 19)
         if: inputs.soak
         working-directory: backend
         env:
           VIGIA_LOAD_REPORT_DIR: ${{ runner.temp }}/soak
+          SOAK_SECRETOS: ${{ runner.temp }}/soak-secretos
         run: |
+          mkdir -p "$VIGIA_LOAD_REPORT_DIR"
           # Tope de un runner de GitHub: 6 h, menor que las 8 h del soak. Para el soak real,
           # VIGIA_RUNS_ON debe apuntar a un runner propio sin ese tope (A-39); con un runner
           # hospedado el paso se corta por tiempo antes de terminar.
           echo "El soak de 8 h necesita VIGIA_RUNS_ON con un runner propio (tope de 6 h de GitHub)." >> "$GITHUB_STEP_SUMMARY"
           uv run --frozen python tests/load/soak.py \
             --target "https://$STAGING.$DOMAIN" \
-            --fleet "$RUNNER_TEMP/soak/fleet.json" \
-            --console-session "$RUNNER_TEMP/soak/console-session.json" \
-            --hours 8 --report "$RUNNER_TEMP/soak"
+            --fleet "$SOAK_SECRETOS/fleet.json" \
+            --console-session "$SOAK_SECRETOS/console-session.json" \
+            --hours 8 --report "$VIGIA_LOAD_REPORT_DIR"
+      - name: borrar los secretos del soak (nunca van al artefacto; PR-GOB-31)
+        if: always() && inputs.soak
+        run: rm -rf "${{ runner.temp }}/soak-secretos"
       - name: informe del soak
         if: always() && inputs.soak
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
