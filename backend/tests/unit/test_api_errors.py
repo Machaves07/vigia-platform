@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import uuid
 from pathlib import Path
@@ -26,7 +27,7 @@ from typing import Any, cast
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from sqlalchemy import text
 from sqlalchemy.engine import Result
@@ -275,17 +276,35 @@ EXCEPTIONS = st.sampled_from(
 )
 
 
+GENERIC_INTERNAL_ERROR = LABELS.label("api_error_code", ApiErrorCode.INTERNAL_ERROR.value)
+CORRELATION = "<correlation_id>"
+
+
+@functools.cache
+def _internal_error_reference() -> tuple[str, dict[str, str]]:
+    """Cuerpo y cabeceras de un ``internal_error`` sin mensaje, con el ``correlation_id`` tapado."""
+    response = _call(_raising(RuntimeError()))
+    correlation = str(_body(response).correlation_id)
+    return response.text.replace(correlation, CORRELATION), dict(response.headers)
+
+
 @given(kind=EXCEPTIONS, message=st.text(min_size=1, max_size=200))
+@example(kind=RuntimeError, message="info")  # subcadena de «informa» (nightly de VIG-193)
+@example(kind=ValueError, message="identificador de la petición")
+@example(kind=KeyError, message=GENERIC_INTERNAL_ERROR)
 def test_metaproperty_any_exception_yields_a_strict_generic_body(
     kind: type[Exception], message: str
 ) -> None:
+    # Igualdad exacta, no «el mensaje no es subcadena»: el texto fijo puede contener el mensaje
+    # por casualidad. La respuesta, salvo el correlation_id, es byte a byte la de una excepción
+    # sin mensaje, así que el mensaje no puede viajar en el cuerpo ni en una cabecera.
     response = _call(_raising(kind(message)))
     body = _body(response)
     assert body.code is ApiErrorCode.INTERNAL_ERROR
+    assert body.message_es == GENERIC_INTERNAL_ERROR
     assert json.loads(response.text) == body.model_dump(mode="json", exclude_none=True)
-    if len(message.strip()) > 3:
-        assert message not in body.message_es
-    assert "Traceback" not in response.text
+    masked = response.text.replace(str(body.correlation_id), CORRELATION)
+    assert (masked, dict(response.headers)) == _internal_error_reference()
 
 
 # --- Reversión y liberación ----------------------------------------------------------------------
