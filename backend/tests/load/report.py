@@ -247,6 +247,7 @@ def analyse(result: Mapping[str, Any]) -> dict[str, Any]:
         "rate_limited_by_operation": dict(
             Counter(event["operation"] for event in result["rate_limited"])
         ),
+        "heartbeats_skipped": result.get("heartbeats_skipped", 0),
         "worst_permanent_ratio_15min": round(_worst_permanent_ratio(result), 4),
         "steady_writes_per_second": _round(_steady_rate(result)),
         "drains": [drain.to_json() for drain in drains],

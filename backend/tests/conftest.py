@@ -18,11 +18,15 @@ las propiedades de ``tests/properties/`` que usan la base compartan un solo cont
 
 from __future__ import annotations
 
+import functools
+import inspect
+import logging
 import secrets
 from collections.abc import Hashable, Iterator
 from typing import Any
 
 import pytest
+from _pytest.logging import LogCaptureHandler
 from hypothesis import is_hypothesis_test, seed, settings
 
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
@@ -115,6 +119,54 @@ def _hypothesis_seed(request: pytest.FixtureRequest) -> Iterator[None]:
                 delattr(test, name)
             else:
                 setattr(test, name, previous)
+
+
+@pytest.fixture(autouse=True)
+def _release_captured_logs_between_examples(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Suelta los registros que capturó pytest al terminar cada ejemplo de una propiedad.
+
+    Los manejadores de captura de pytest guardan cada ``LogRecord`` hasta el final de la prueba, y
+    un registro con ``exc_info`` retiene su traza: los marcos, la aplicación y el cliente de ese
+    ejemplo. Con 2 000 ejemplos (perfil ``nightly``), una propiedad que hace fallar una ruta por
+    ejemplo acumulaba ~8,5 MB por ejemplo hasta agotar la memoria del runner (VIG-190). Se vacía
+    solo la lista de registros: el texto capturado se conserva para el informe de un fallo, y el
+    ejemplo mínimo que reproduce Hypothesis al final conserva también los suyos."""
+    test: Any = getattr(request.function, "__func__", request.function)
+    if not is_hypothesis_test(test):
+        yield
+        return
+    handle = test.hypothesis
+    inner = handle.inner_test
+    if inspect.iscoroutinefunction(inner):
+
+        @functools.wraps(inner)
+        async def released_async(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await inner(*args, **kwargs)
+            finally:
+                _drop_captured_records()
+
+        handle.inner_test = released_async
+    else:
+
+        @functools.wraps(inner)
+        def released(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return inner(*args, **kwargs)
+            finally:
+                _drop_captured_records()
+
+        handle.inner_test = released
+    try:
+        yield
+    finally:
+        handle.inner_test = inner
+
+
+def _drop_captured_records() -> None:
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, LogCaptureHandler):
+            handler.records.clear()
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

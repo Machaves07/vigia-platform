@@ -1106,22 +1106,30 @@ def test_the_statements_filter_the_zone_and_the_organization(catalogs: Catalogs)
     assert {v.zone_id for v in history} == {zone_a}
 
 
+@pytest.mark.parametrize("clock_ahead_hours", [0, 3], ids=["aligned", "clock_3h_ahead"])
 def test_under_concession_the_installer_reads_audited_and_never_publishes(
-    catalogs: Catalogs,
+    catalogs: Catalogs, clock_ahead_hours: int
 ) -> None:
     authz = catalogs.authz
+    # VIG-191: lo que deja PR-GOB-05 con 2 000 ejemplos (unos 10 000 ``publish`` de 1 s).
+    authz.sessions.clock.advance(clock_ahead_hours * 3600)
     site = catalogs.site(plants=2, zones=1)
     (plant_a, zone_a), (_, zone_b) = site.zones()
     admin = catalogs.member(site)
     first = catalogs.publish(admin, zone_a, _first())
     catalogs.publish(admin, zone_b, _first())
     installer = authz.add_provider_user()
+    # VIG-191: la vigencia de la concesión la comparan dos relojes, el inyectado
+    # (``context_from_session``) y ``pg_catalog.now()`` (la RLS de ``identity``). Cada
+    # ``publish`` adelanta el inyectado 1 s, y con el perfil nightly PR-GOB-05 lo deja horas por
+    # delante de la base: concedida «hace una hora» según él, la RLS la veía aún sin empezar.
+    (database_now,) = authz.fetch("SELECT now() AS now")
     concession = authz.add_concession(
         site.organization_id,
         installer,
         level=ScopeLevel.PLANT,
         scope_id=plant_a,
-        granted_at=authz.now() - timedelta(hours=1),
+        granted_at=min(authz.now(), database_now["now"]) - timedelta(hours=1),
     )
     cookie = authz.open_session(authz.provider_organization_id, installer)
     scope = catalogs.run(authz.contexts.context_from_session(cookie, concession_id=concession))
