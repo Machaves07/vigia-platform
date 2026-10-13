@@ -8,8 +8,8 @@ sumo 3 minutos) para ensayar el arnés en local. En paralelo, el cliente sintét
 recorre las rutas de NFR-GOB-03 con una sesión real. Bloquea:
 
 - lo funcional de ``ci``: aceptados = emitidos, sin cola muerta, sin duplicados en el expediente,
-  cada cadena de planta íntegra y en orden de recepción (BR-GOB-91) y cero ``rate_limited`` (ni
-  por debajo del mínimo de NFR-CTR-02);
+  cada cadena de planta íntegra y en orden de recepción (BR-GOB-91), cero ``rate_limited`` por
+  debajo del mínimo de NFR-CTR-02 y cero en el latido (A-67);
 - cada vaciado de cola completo: todo lo encolado durante la indisponibilidad se aceptó;
 - la peor proporción de rechazos permanentes en 15 minutos no pasa del 1 % (NFR-GOB-50 frente a
   la alarma de NFR-GOB-46);
@@ -20,9 +20,10 @@ recorre las rutas de NFR-GOB-03 con una sesión real. Bloquea:
 Son **tendencia** aquí y van al informe (infrastructure-design §9.2; A-65: solo bloquean en el
 ``soak`` sobre ``staging``): las escrituras por segundo (≥ 100 agregadas y ≥ 20 por cadena de
 planta) y los transitorios por saturación (``temporarily_unavailable`` y ``503``) de NFR-GOB-02
-(cero en el ``soak``), las latencias de NFR-GOB-01 y el p95 de cada ruta de consola en las
-ventanas de reconexión (NFR-GOB-19), con la ruta que lo incumple nombrada en
-``console.reconnection.failures``.
+(cero en el ``soak``), los ``rate_limited`` de registros y concesiones por encima del mínimo de
+NFR-CTR-02 (A-67, ``trend.rate_limited_above_minimum``), las latencias de NFR-GOB-01 y el p95 de
+cada ruta de consola en las ventanas de reconexión (NFR-GOB-19), con la ruta que lo incumple
+nombrada en ``console.reconnection.failures``.
 
 ``test_the_console_client_fails_naming…`` (marca ``integration``, en el check de integración):
 contra una flota de dos nodos, una latencia de 250 ms inyectada en una ruta de consola hace que
@@ -51,7 +52,7 @@ from tests.load.console_client import (
 )
 from tests.load.profiles import ABSOLUTE_TARGETS, LoadProfile, nightly_profile
 from tests.load.provision import Fleet
-from tests.load.report import Drain, drains_of, saturation_transients
+from tests.load.report import Drain, drains_of, rate_limited_trend, saturation_transients
 from tests.load.test_load_ci import (
     assert_functional,
     finish_report,
@@ -136,6 +137,8 @@ def trend(analysis: dict[str, Any]) -> dict[str, Any]:
             "saturation_transients": saturation_transients(analysis),
             "saturation_target": 0,
         },
+        # A-67: los `429` de registros y concesiones por encima del mínimo de NFR-CTR-02.
+        "rate_limited_above_minimum": rate_limited_trend(analysis),
         "NFR-GOB-01": analysis["node_latency"],
     }
 
