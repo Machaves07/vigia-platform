@@ -22,7 +22,10 @@ Lo que este proceso añade al nodo simulado, sin tocar su cliente:
   responde ``accepted_duplicate``. Cada cuerpo se descarta como mucho una vez.
 - **Latido** cada ``max(intervalo / speed_factor, 15 s)`` reales: acelerado como el resto, pero
   sin pasar de los 4 latidos por minuto y nodo de la plataforma (``node_api.limits``), así que un
-  ``rate_limited`` en el latido también es un defecto.
+  ``rate_limited`` en el latido también es un defecto. Como el nodo real, un latido vencido no se
+  recupera: si el nodo estuvo ocupado (un vaciado largo tras la reconexión) o su cliente ya latió
+  por su cuenta, el latido del calendario que saldría a menos de un intervalo del anterior se omite
+  (``heartbeats_skipped``) en lugar de salir en ráfaga.
 - **Mediciones**: latencia por ruta del contrato (sin la URL de las subidas, que es prefirmada),
   eventos del cliente por operación, resultado y ``rejection_code``, instante de emisión y de
   aceptación de cada registro, recibos ``accepted_duplicate`` de la bandeja.
@@ -81,15 +84,28 @@ from vigia_contracts.outbox import Outbox, OutboxState
 from tests.load.profiles import PROFILES, LoadProfile, simulation_profile
 from tests.load.report import latency_summary
 
-__all__ = ["HEARTBEAT_FLOOR_SECONDS", "RECORD_ROUTES", "drive", "main", "plan_items", "route_label"]
+__all__ = [
+    "HEARTBEAT_FLOOR_SECONDS",
+    "HEARTBEAT_SLACK_SECONDS",
+    "RECORD_ROUTES",
+    "drive",
+    "main",
+    "plan_items",
+    "route_label",
+]
 
 HEARTBEAT_FLOOR_SECONDS: Final = 15.0
 """Intervalo real mínimo entre latidos: 4 por minuto y nodo (``node_api.limits``)."""
+HEARTBEAT_SLACK_SECONDS: Final = 1.0
+"""Retraso del latido anterior que se tolera sin omitir el siguiente del calendario: el bucle de
+eventos lo saca unos milisegundos tarde; más de esto es un nodo ocupado y el siguiente se omite."""
 RECORD_ROUTES: Final = (
     "/api/nodes/findings",
     "/api/nodes/detection-reviews",
     "/api/nodes/observability-events",
 )
+HEARTBEAT_PATH: Final = "/heartbeats"
+"""Final de la ruta del latido (``/api/nodes/heartbeats``)."""
 LIVE_VIEW_HOST: Final = "10.0.0.5"
 SOFTWARE_VERSION: Final = "1.0.0"
 UPLOAD_LABEL: Final = "PUT almacén (URL prefirmada)"
@@ -162,6 +178,8 @@ class Stats:
     """Por nodo: ``(operación, instante)`` de cada registro o concesión enviados."""
     receipts: Counter[str] = field(default_factory=Counter)
     halted: dict[int, str] = field(default_factory=dict)
+    heartbeats_skipped: int = 0
+    """Latidos del calendario omitidos porque el anterior salió hace menos de un intervalo."""
 
 
 class LoadTransport(httpx.AsyncBaseTransport):
@@ -181,12 +199,17 @@ class LoadTransport(httpx.AsyncBaseTransport):
         self._stats = stats
         self._upload = upload
         self._lost = lost
+        self.heartbeat_sent_at: float | None = None
+        """Instante monótono en que salió el último latido (del calendario o del cliente); uno que
+        no llega a salir (indisponibilidad simulada) no gasta ficha en la plataforma y no cuenta."""
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if self._reachability.down():
             raise httpx.ConnectError("plataforma inalcanzable (indisponibilidad simulada)")
         clock = self._reachability.clock
         started = clock.monotonic()
+        if request.method == "POST" and request.url.path.endswith(HEARTBEAT_PATH):
+            self.heartbeat_sent_at = started
         response = await self._inner.handle_async_request(request)
         try:
             # Los bytes tal cual (sin descomprimir): el cliente los decodifica como siempre.
@@ -255,11 +278,23 @@ class NodeRun:
     plant_id: str
     timeline: list[tuple[int, int, PlannedItem | None]]
     builder: RecordBuilder
+    transport: LoadTransport
 
 
 async def _sleep_until(clock: SystemClock, when: datetime) -> None:
     remaining = (when - clock.now()).total_seconds()
     await asyncio.sleep(max(0.0, remaining))
+
+
+async def _beat(run: NodeRun, stats: Stats, clock: SystemClock, heartbeat_seconds: float) -> None:
+    """El latido del calendario, salvo si el anterior salió hace menos de un intervalo (con
+    ``HEARTBEAT_SLACK_SECONDS`` de holgura): tras un vaciado largo los latidos vencidos no salen en
+    ráfaga contra el cubo de 4 por minuto de la plataforma; se omiten, como en el nodo real."""
+    sent = run.transport.heartbeat_sent_at
+    if sent is not None and clock.monotonic() - sent < heartbeat_seconds - HEARTBEAT_SLACK_SECONDS:
+        stats.heartbeats_skipped += 1
+        return
+    await run.node.client.heartbeat_now()
 
 
 async def _drain(client: AsyncClient) -> Wait | None:
@@ -290,7 +325,7 @@ async def run_node(
     flush_seconds: float,
 ) -> None:
     node, client = run.node, run.node.client
-    await client.heartbeat_now()
+    await _beat(run, stats, clock, heartbeat_seconds)
     wait: Wait | None = None
     for offset, _, item in run.timeline:
         due = start + timedelta(milliseconds=offset / speed_factor)
@@ -299,7 +334,7 @@ async def run_node(
             wait = await _drain(client)
         await _sleep_until(clock, due)
         if item is None:
-            await client.heartbeat_now()
+            await _beat(run, stats, clock, heartbeat_seconds)
         else:
             now = clock.now()
             built = (
@@ -324,7 +359,7 @@ async def run_node(
     beat = clock.now() + timedelta(seconds=heartbeat_seconds)
     while _unsent(node.outbox) and clock.now() < deadline:
         if clock.now() >= beat:
-            await client.heartbeat_now()
+            await _beat(run, stats, clock, heartbeat_seconds)
             beat = clock.now() + timedelta(seconds=heartbeat_seconds)
         wait = await _drain(client)
         until = min(deadline, beat) if wait is None else min(wait.until, deadline, beat)
@@ -485,7 +520,7 @@ async def drive(plan: dict[str, Any]) -> dict[str, Any]:
                 items, profile.span_ms, round(heartbeat_seconds * 1000 * profile.speed_factor)
             )
             builder = RecordBuilder(ids, catalogs, software_version=SOFTWARE_VERSION)
-            runs.append(NodeRun(node, ids.plant_id, timeline, builder))
+            runs.append(NodeRun(node, ids.plant_id, timeline, builder, transport))
         start = clock.now() + timedelta(seconds=2)
         phases = []
         for phase in profile.phases():
@@ -545,6 +580,7 @@ async def drive(plan: dict[str, Any]) -> dict[str, Any]:
             for record, (emitted, index) in stats.emitted_at.items()
         },
         "rate_limited": stats.rate_limited,
+        "heartbeats_skipped": stats.heartbeats_skipped,
         "sends": {str(index): sends for index, sends in stats.sends.items()},
         "latency": {
             label: latency_summary(values, stats.statuses[label])
