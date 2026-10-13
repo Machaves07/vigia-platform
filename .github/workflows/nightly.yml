@@ -1,13 +1,16 @@
 # Nocturno de vigia-platform (U-02; LC-NUC-35; TASK-151). Bloquea la etiqueta: release.yml exige
 # un nightly verde sobre el mismo commit.
 #
-# Qué corre (fila nightly de LC-NUC-35):
+# Qué corre (fila nightly de LC-NUC-35, con los trabajos de U-03 de LC-GOB-22):
 # - propiedades perfil nightly (2 000 ejemplos por propiedad), sin y con integración;
-# - bancos de NFR-NUC-01 y 02 con regresión bloqueante del 50 % frente a tests/benchmarks/baseline.json
-#   (con update_baseline=true en un lanzamiento manual, reescribe la base con lo medido en este runner y
-#   la publica como artefacto para llevarla a un PR; seguimiento de VIG-91, punto 1);
-# - volumetría a escala objetivo (NFR-NUC-05) con su informe;
-# - FS-NUC-01 a 10 en el arnés de resiliencia; FS-NUC-10 es el ensayo de restauración;
+# - carga de U-03 (TASK-231): perfil nightly de tests/load (100 nodos, 300 zonas y reconexión
+#   masiva) con el cliente sintético de consola, en su propio trabajo;
+# - bancos de NFR-NUC-01 y 02 (regresión del 50 %) y de NFR-GOB-01, 03, 04, 05, 09 y 10
+#   (regresión del 20 %) frente a tests/benchmarks/baseline.json;
+# - volumetría a escala objetivo (NFR-NUC-05 y NFR-GOB-11 y 16) con un año de datos de la
+#   organización mayor y las métricas de presupuesto de NFR-GOB-07;
+# - FS-NUC-01 a 10 y FS-GOB-01 a 10 en el arnés de resiliencia; FS-NUC-10 es el ensayo de
+#   restauración;
 # - conformidad de U-01 contra la plataforma (TASK-230): la suite completa del kit (perfil nightly)
 #   contra las rutas del contrato, con dos procesos tras el balanceador local y la comparación de
 #   métricas (NFR-GOB-54);
@@ -35,8 +38,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Las propiedades con el perfil nightly (2 000 ejemplos) se reparten en dos trabajos desde el
+  # 2026-10-12: con las propiedades de U-03 la suite completa no cabía en el tope de 180 min
+  # (run 38253915106 se canceló al 24 %). Este trabajo corre lo que no son propiedades (unidad,
+  # ejemplos, abuso, aislamiento, conformidad); `propiedades-propiedades` corre `tests/properties`.
   propiedades:
-    name: propiedades nightly (sin integración)
+    name: propiedades nightly (sin integración, sin tests/properties)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     defaults:
@@ -63,8 +70,41 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: pruebas perfil nightly sin integration
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks
+      - name: pruebas perfil nightly sin integration (sin las propiedades)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks --ignore=tests/properties --durations=15
+
+  # Las propiedades de U-02 y U-03 con el perfil nightly (PR-GOB-01 a 32 y las de U-02): el
+  # conjunto más lento de la suite. En su propio trabajo, con el tope del runner alojado.
+  propiedades-suite:
+    name: propiedades nightly (tests/properties)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: propiedades de U-02 y U-03 con el perfil nightly
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --durations=15 tests/properties
 
   propiedades-integracion:
     name: propiedades nightly (integración)
@@ -94,11 +134,11 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: pruebas perfil nightly con integration (sin bancos, volumetría, resiliencia ni conformidad)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance
+      - name: pruebas perfil nightly con integration (sin carga, bancos, volumetría, resiliencia ni conformidad)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/load --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance --durations=15
 
   bancos:
-    name: bancos (regresión del 50 %)
+    name: bancos (regresión del 20 % en U-03 y del 50 % en U-02)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
@@ -125,7 +165,7 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: bancos de NFR-NUC-01 y 02
+      - name: bancos de NFR-NUC-01 y 02 (50 %) y de NFR-GOB-01, 03, 04, 05, 09 y 10 (20 %)
         env:
           VIGIA_BENCHMARK_REPORT: ${{ runner.temp }}/informes/vigia-benchmarks.json
           VIGIA_BENCHMARK_UPDATE_BASELINE: ${{ inputs.update_baseline && '1' || '' }}
@@ -145,7 +185,7 @@ jobs:
           retention-days: 90
 
   volumetria:
-    name: volumetría a escala objetivo
+    name: volumetría a escala objetivo (U-02 y U-03)
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     defaults:
@@ -172,10 +212,10 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: generación y medición (NFR-NUC-05 y NFR-NUC-01 sobre un año)
+      - name: generación y medición (NFR-NUC-05 y NFR-GOB-11 y 16 sobre un año; presupuesto de NFR-GOB-07)
         run: |
           mkdir -p "$RUNNER_TEMP/informes"
-          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --out "$RUNNER_TEMP/informes/volumetry-target.json"
+          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --part all --out "$RUNNER_TEMP/informes/volumetry-target.json"
       - name: informe de volumetría
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -186,7 +226,7 @@ jobs:
           retention-days: 90
 
   resiliencia:
-    name: resiliencia FS-NUC-01 a 10 (con el ensayo de restauración)
+    name: resiliencia FS-NUC-01 a 10 y FS-GOB-01 a 10 (con el ensayo de restauración)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     defaults:
@@ -276,9 +316,59 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # Carga de U-03 (TASK-231; LC-GOB-22; NFR-GOB-06, 02, 18, 19 y 50): el perfil nightly de
+  # tests/load (100 nodos y 300 zonas a speed_factor 60, la reconexión masiva de una hora y cuatro
+  # horas de indisponibilidad) con el cliente sintético de consola, en su propio trabajo para que
+  # las propiedades no carguen con él. El informe va como artefacto de 90 días. Aquí solo corre la
+  # prueba marcada `nightly`; `test_load_ci` y `test_the_console_client_fails_naming…` (marcadas
+  # `integration` sin `nightly`) ya corren en el trabajo «backend (carga ci)» de ci.yml, así que la
+  # integración de este flujo las ignora con `--ignore=tests/load` sin perder cobertura.
+  carga:
+    name: carga nightly (100 nodos, reconexión masiva y consola)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: perfil nightly de tests/load (100 nodos, 300 zonas y reconexión masiva)
+        env:
+          VIGIA_LOAD_REPORT_DIR: ${{ runner.temp }}/informes
+        run: |
+          mkdir -p "$RUNNER_TEMP/informes"
+          uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "integration and nightly" tests/load
+      - name: informe de la carga
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-carga
+          path: ${{ runner.temp }}/informes/
+          if-no-files-found: warn
+          retention-days: 90
+
   informe:
     name: informe nocturno
-    needs: [propiedades, propiedades-integracion, bancos, volumetria, resiliencia, conformance]
+    needs: [propiedades, propiedades-suite, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -1,10 +1,11 @@
-"""``tools/check_coverage.py``: los umbrales de NFR-NUC-45 fallan la canalización (TASK-143).
+"""``tools/check_coverage.py``: los umbrales de NFR-NUC-45 y NFR-GOB-59 fallan la canalización.
 
-Criterio de aceptación: la cobertura por debajo del umbral en ``identity`` o ``ledger`` falla la
-canalización. El trabajo «cobertura» de ``ci.yml`` ejecuta esta herramienta sobre el informe
-combinado (``tests/unit/test_workflows_pinned.py`` lo comprueba); aquí se fijan sus bordes con
-informes sintéticos: justo en el umbral cumple, una línea por debajo falla, los adaptadores no
-cuentan en el área, un área sin medir falla y un informe mal formado es un error.
+Criterio de aceptación: la cobertura por debajo del umbral en ``identity``, ``ledger``,
+``catalog`` o ``fleet`` falla la canalización. El trabajo «cobertura» de ``ci.yml`` ejecuta esta
+herramienta sobre el informe combinado (``tests/unit/test_workflows_pinned.py`` lo comprueba);
+aquí se fijan sus bordes con informes sintéticos: justo en el umbral cumple, una línea por debajo
+falla, los adaptadores no cuentan en el área, un área sin medir falla, ``node_api`` cuenta en el
+total del paquete y un informe mal formado es un error.
 """
 
 from __future__ import annotations
@@ -37,6 +38,13 @@ def _healthy(**overrides: tuple[int, int]) -> dict[str, tuple[int, int]]:
         "src/vigia_platform/ledger/application/writer.py": (450, 500),
         "src/vigia_platform/ledger/chain/verify.py": (450, 500),
         "src/vigia_platform/ledger/adapters/http/routes.py": (0, 100),
+        "src/vigia_platform/catalog/domain/gates.py": (450, 500),
+        "src/vigia_platform/catalog/application/versions.py": (450, 500),
+        "src/vigia_platform/catalog/adapters/postgres/store.py": (0, 500),
+        "src/vigia_platform/fleet/domain/nodes.py": (450, 500),
+        "src/vigia_platform/fleet/application/enrollment.py": (450, 500),
+        "src/vigia_platform/fleet/adapters/postgres/store.py": (0, 500),
+        "src/vigia_platform/node_api/routes/enrollment.py": (950, 1000),
         "src/vigia_platform/shared/db.py": (4000, 4000),
     }
     files.update(overrides)
@@ -49,10 +57,12 @@ def _run(tmp_path: Path, files: dict[str, tuple[int, int]]) -> int:
     return main([str(path)])
 
 
-def test_the_areas_are_identity_and_ledger_at_ninety_and_the_package_at_eighty() -> None:
+def test_the_areas_are_the_four_modules_at_ninety_and_the_package_at_eighty() -> None:
     assert [(a.name.split()[0], a.minimum) for a in AREAS] == [
         ("identity", Decimal(90)),
         ("ledger", Decimal(90)),
+        ("catalog", Decimal(90)),
+        ("fleet", Decimal(90)),
     ]
     assert GLOBAL_MINIMUM.minimum == Decimal(80)
     assert all(area.exclude for area in AREAS)  # los adaptadores quedan fuera
@@ -60,7 +70,7 @@ def test_the_areas_are_identity_and_ledger_at_ninety_and_the_package_at_eighty()
 
 def test_exactly_at_the_thresholds_passes(tmp_path: Path) -> None:
     results = evaluate(_report(_healthy()))
-    assert [str(r.percent) for r in results[:2]] == ["90.00", "90.00"]
+    assert [str(r.percent) for r in results[:4]] == ["90.00", "90.00", "90.00", "90.00"]
     assert all(r.passed for r in results)
     assert _run(tmp_path, _healthy()) == 0
 
@@ -72,13 +82,38 @@ def test_exactly_at_the_thresholds_passes(tmp_path: Path) -> None:
         {"src/vigia_platform/identity/auth/sessions.py": (899, 1000)},
         {"src/vigia_platform/ledger/application/writer.py": (449, 500)},
         {"src/vigia_platform/ledger/chain/verify.py": (449, 500)},
+        {"src/vigia_platform/catalog/domain/gates.py": (449, 500)},
+        {"src/vigia_platform/catalog/application/versions.py": (449, 500)},
+        {"src/vigia_platform/fleet/domain/nodes.py": (449, 500)},
+        {"src/vigia_platform/fleet/application/enrollment.py": (449, 500)},
     ],
 )
-def test_one_line_below_ninety_in_identity_or_ledger_fails(
+def test_one_line_below_ninety_in_any_area_fails(
     tmp_path: Path, override: dict[str, tuple[int, int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert _run(tmp_path, _healthy(**override)) == 1
     assert "NO CUMPLE" in capsys.readouterr().out
+
+
+def test_catalog_below_ninety_fails_even_with_healthy_identity_and_ledger(tmp_path: Path) -> None:
+    files = _healthy(**{"src/vigia_platform/catalog/domain/gates.py": (0, 500)})
+    assert all(r.passed for r in evaluate(_report(files))[:2])
+    assert _run(tmp_path, files) == 1
+
+
+def test_fleet_below_ninety_fails_even_with_healthy_identity_and_ledger(tmp_path: Path) -> None:
+    files = _healthy(**{"src/vigia_platform/fleet/domain/nodes.py": (0, 500)})
+    assert all(r.passed for r in evaluate(_report(files))[:2])
+    assert _run(tmp_path, files) == 1
+
+
+def test_node_api_counts_in_the_global_package_not_as_an_area(tmp_path: Path) -> None:
+    # ``node_api`` no tiene área propia; una línea suya por debajo del 80 % global sí falla.
+    results = evaluate(_report(_healthy()))
+    assert len(results) == 5  # cuatro áreas y el total
+    files = _healthy(**{"src/vigia_platform/node_api/routes/enrollment.py": (0, 1000)})
+    assert all(r.passed for r in evaluate(_report(files))[:4])
+    assert _run(tmp_path, files) == 1
 
 
 def test_the_percentage_is_truncated_not_rounded_up(tmp_path: Path) -> None:

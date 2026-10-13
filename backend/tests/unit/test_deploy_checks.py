@@ -1,8 +1,9 @@
-"""Comprobaciones de despliegue de ``tools/deploy_checks.py`` (TASK-151; §3.2 y A-27).
+"""Comprobaciones de despliegue de ``tools/deploy_checks.py`` (TASK-151 y TASK-234; §3.2 y A-27).
 
-Sin AWS ni red: HTTP, la CLI ``aws`` y los sockets son dobles que registran lo que se les pide.
-Cada comprobación se prueba en verde y en cada forma de fallo, y la regla de omisión en sus dos
-lados: omitida mientras falte su requisito, fallida si el requisito ya existe en el repositorio.
+Sin AWS ni red: HTTP, la CLI ``aws``, los sockets, el runner de conformidad y el material de
+certificados son dobles que registran lo que se les pide. Cada comprobación se prueba en verde y
+en cada forma de fallo, y la regla de omisión en sus dos lados: omitida mientras falte su
+requisito, fallida si el requisito ya existe y la comprobación no está escrita.
 """
 
 from __future__ import annotations
@@ -17,7 +18,15 @@ from typing import Any
 import pytest
 
 from tools import deploy_checks
-from tools.deploy_checks import Response, Result, Target, run_checks
+from tools.deploy_checks import (
+    Certificate,
+    ConformanceVerdict,
+    Fixtures,
+    Response,
+    Result,
+    Target,
+    run_checks,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -25,6 +34,10 @@ VERIFIER = "b" * 64
 TOTP_URI = "otpauth://totp/Vigia:op?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Vigia"
 TG_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:targetgroup/tg-api-staging-7/abc"
 LB_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:loadbalancer/app/vigia-alb-app/def"
+STORE_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:truststore/vigia-node-trust-staging-7/xyz"
+ZONE = "01900000-0000-7000-8000-000000000003"
+VALID = Certificate("-----BEGIN CERTIFICATE-----\nvalid\n", "-----BEGIN KEY-----\nvalid\n")
+REVOKED = Certificate("-----BEGIN CERTIFICATE-----\nrevoked\n", "-----BEGIN KEY-----\nrevoked\n")
 
 
 def _target(**changes: Any) -> Target:
@@ -37,6 +50,11 @@ def _target(**changes: Any) -> Target:
         watch_minutes=2,
         operator_email="operadora@staging-7.vigia.example",
     )
+    return replace(base, **changes)
+
+
+def _fixtures(**changes: Any) -> Fixtures:
+    base = Fixtures(valid_certificate=VALID, revoked_certificate=REVOKED, synthetic_zone_id=ZONE)
     return replace(base, **changes)
 
 
@@ -68,7 +86,9 @@ class FakeHttp:
 def _healthy_http() -> FakeHttp:
     http = FakeHttp()
     http.routes[("GET", "/health/live")] = lambda _: _json(200, {"status": "live"})
-    http.routes[("GET", "/.well-known/vigia-checkpoint-keys")] = lambda _: _json(200, {"keys": []})
+    http.routes[("GET", "/.well-known/vigia-checkpoint-keys")] = lambda _: _json(
+        200, {"keys": [{"key_id": "vigia-catalog-2026"}]}
+    )
     http.routes[("GET", "/.well-known/vigia-verifier")] = lambda _: _json(
         200, {"name": "vigia_verify.py", "sha256": VERIFIER, "size_bytes": 1, "format_version": 1}
     )
@@ -88,6 +108,9 @@ def _healthy_http() -> FakeHttp:
     )
     http.routes[("POST", "/auth/second-factor")] = lambda _: _json(200, {"status": "authenticated"})
     http.routes[("GET", "/me")] = lambda _: _json(200, {"user_id": "x"})
+    http.routes[("POST", "/api/nodes/enrollment")] = lambda _: _json(
+        422, {"code": "schema_invalid"}
+    )
     return http
 
 
@@ -96,6 +119,8 @@ class FakeAws:
     desired: int = 2
     healthy: list[int] = field(default_factory=lambda: [1, 2])
     alarms: list[list[str]] = field(default_factory=list)
+    revoked_entries: int = 1
+    revocation_polls: list[list[dict[str, int]]] = field(default_factory=list)
     calls: list[tuple[str, ...]] = field(default_factory=list)
 
     def __call__(self, *arguments: str) -> Any:
@@ -105,7 +130,22 @@ class FakeAws:
             return {"services": [{"desiredCount": self.desired}]}
         if (service, operation) == ("elbv2", "describe-target-groups"):
             return {"TargetGroups": [{"TargetGroupArn": TG_ARN, "LoadBalancerArns": [LB_ARN]}]}
+        if (service, operation) == ("elbv2", "describe-trust-stores"):
+            return {"TrustStores": [{"TrustStoreArn": STORE_ARN}]}
+        if (service, operation) == ("elbv2", "describe-trust-store-revocations"):
+            if self.revocation_polls:
+                return {"TrustStoreRevocations": self.revocation_polls.pop(0)}
+            return {"TrustStoreRevocations": [{"NumberOfRevokedEntries": self.revoked_entries}]}
         if (service, operation) == ("cloudwatch", "get-metric-statistics"):
+            if "revocation_list_entries" in arguments:
+                return {
+                    "Datapoints": [
+                        {
+                            "Timestamp": "2026-10-03T11:59:00Z",
+                            "Maximum": float(self.revoked_entries),
+                        }
+                    ]
+                }
             points = [
                 {"Timestamp": f"2026-10-03T11:5{index}:00Z", "Minimum": float(value)}
                 for index, value in enumerate(self.healthy)
@@ -124,6 +164,9 @@ class FakeAws:
 class FakeNetwork:
     tcp: bool = True
     rejected: bool = True
+    revoked_rejected: bool = True
+    certificate_responses: dict[tuple[str, str, str], Response] = field(default_factory=dict)
+    certificate_calls: list[tuple[str, str, str]] = field(default_factory=list)
 
     def tcp_connects(self, host: str, port: int) -> bool:
         return self.tcp
@@ -131,20 +174,74 @@ class FakeNetwork:
     def tls_without_certificate_rejected(self, host: str, port: int) -> bool:
         return self.rejected
 
+    def request_with_certificate(
+        self, host: str, port: int, method: str, path: str, certificate: Certificate
+    ) -> Response | None:
+        self.certificate_calls.append((certificate.certificate_pem, method, path))
+        return self.certificate_responses.get((certificate.certificate_pem, method, path))
+
+    def tls_with_certificate_rejected(self, host: str, port: int, certificate: Certificate) -> bool:
+        return self.revoked_rejected
+
+
+@dataclass
+class FakeConformance:
+    passed: bool = True
+    detail: str = "la suite del kit pasa contra nodes."
+    calls: list[str] = field(default_factory=list)
+
+    def run(self, target_url: str) -> ConformanceVerdict:
+        self.calls.append(target_url)
+        return ConformanceVerdict(self.passed, self.detail)
+
+
+def _healthy_network() -> FakeNetwork:
+    network = FakeNetwork()
+    network.certificate_responses[(VALID.certificate_pem, "GET", "/api/nodes/heartbeats")] = _json(
+        401, {"code": "node_not_enrolled"}
+    )
+    network.certificate_responses[
+        (VALID.certificate_pem, "GET", f"/api/nodes/zones/{ZONE}/catalog")
+    ] = _json(200, {"key_id": "vigia-catalog-2026", "payload": {}, "signature": "x"})
+    network.certificate_responses[(REVOKED.certificate_pem, "GET", "/api/nodes/heartbeats")] = (
+        _json(403, {"code": "node_revoked"})
+    )
+    return network
+
+
+def _healthy_checksum_http() -> FakeHttp:
+    http = _healthy_http()
+    upload = "https://vigia-evidence.s3.amazonaws.com/documents/scope.pdf"
+    http.routes[("POST", "/documents")] = lambda _: _json(200, {"upload_url": upload})
+    http.routes[("OPTIONS", "/documents/scope.pdf")] = lambda _: Response(
+        200,
+        b"",
+        {
+            "Access-Control-Allow-Methods": "PUT",
+            "Access-Control-Allow-Headers": "x-amz-checksum-sha256, content-type",
+        },
+    )
+    http.routes[("PUT", "/documents/scope.pdf")] = lambda _: _json(403, {"code": "AccessDenied"})
+    return http
+
 
 def _run(
     target: Target | None = None,
     http: FakeHttp | None = None,
     aws: FakeAws | None = None,
     network: FakeNetwork | None = None,
+    fixtures: Fixtures | None = None,
+    conformance: FakeConformance | None = None,
     sleeps: list[float] | None = None,
 ) -> dict[int, Result]:
     pauses = sleeps if sleeps is not None else []
     results = run_checks(
         target or _target(),
-        http=http or _healthy_http(),
+        http=http or _healthy_checksum_http(),
         aws=aws or FakeAws(),
-        network=network or FakeNetwork(),
+        network=network or _healthy_network(),
+        fixtures=_fixtures() if fixtures is None else fixtures,
+        conformance=conformance or FakeConformance(),
         sleep=pauses.append,
     )
     numbers = [r.number for r in results]
@@ -155,9 +252,27 @@ def _run(
 # --- Conjunto ---------------------------------------------------------------------------
 
 
-def test_a_healthy_staging_has_no_failures_and_says_why_it_skips(tmp_path: Path) -> None:
-    # Un repositorio sin rutas del contrato ni interfaz (el de antes de VIG-152 y TASK-223:
-    # desde entonces la nº 4 se exige, ver test_conformance_fails_once_any_contract_route_exists).
+def test_a_healthy_staging_has_no_failures() -> None:
+    results = _run()
+    assert {n for n, r in results.items() if r.status == "ok"} == {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        10,
+        11,
+        12,
+        13,
+    }
+    assert results[8].status == "skipped" and results[9].detail == "solo en pilot"
+    assert {n for n, r in results.items() if r.status == "failed"} == set()
+
+
+def test_a_repository_without_u03_routes_skips_the_u03_checks_with_a_reason(tmp_path: Path) -> None:
+    # Un repositorio sin rutas del contrato ni interfaz (el de antes de VIG-152 y TASK-223).
     results = _run(_target(repository=_repository(tmp_path)))
     assert {n for n, r in results.items() if r.status == "ok"} == {1, 2, 5, 6, 7}
     assert {n for n, r in results.items() if r.status == "failed"} == set()
@@ -165,6 +280,15 @@ def test_a_healthy_staging_has_no_failures_and_says_why_it_skips(tmp_path: Path)
         assert results[number].status == "skipped" and results[number].detail
     assert "U-03" in results[4].detail and "U-05" in results[8].detail
     assert results[9].detail == "solo en pilot"
+
+
+def test_without_environment_fixtures_the_u03_checks_skip_with_a_reason() -> None:
+    results = _run(fixtures=Fixtures())
+    assert results[3].status == "skipped" and "certificado de prueba" in results[3].detail
+    assert results[10].status == "skipped" and "certificado revocado" in results[10].detail
+    assert results[11].status == "skipped" and "zona sintética" in results[11].detail
+    assert results[12].status == "ok"  # la ruta ya existe: se comprueba sin certificado
+    assert results[13].status == "ok"
 
 
 def test_pilot_uses_its_own_hosts_and_leaves_the_owner_session_manual() -> None:
@@ -211,8 +335,24 @@ def test_live_fails_on_a_non_200_or_without_tcp_to_nodes() -> None:
 
 
 def test_nodes_accepting_tls_without_a_certificate_fails() -> None:
-    result = _run(network=FakeNetwork(rejected=False))[3]
+    result = _run(network=replace(_healthy_network(), rejected=False))[3]
     assert result.status == "failed" and "sin certificado" in result.detail
+
+
+def test_mutual_tls_accepts_a_test_certificate_that_returns_401() -> None:
+    assert _run()[3].status == "ok"
+    assert _run(network=_healthy_network())[3].detail.startswith("con certificado de prueba")
+
+
+def test_mutual_tls_fails_when_the_certificate_is_not_accepted_or_answers_another_status() -> None:
+    rejected = _healthy_network()
+    rejected.certificate_responses.pop((VALID.certificate_pem, "GET", "/api/nodes/heartbeats"))
+    assert _run(network=rejected)[3].status == "failed"
+    wrong = _healthy_network()
+    wrong.certificate_responses[(VALID.certificate_pem, "GET", "/api/nodes/heartbeats")] = _json(
+        200, {}
+    )
+    assert _run(network=wrong)[3].status == "failed"
 
 
 # --- 2: HealthyHostCount --------------------------------------------------------------------
@@ -221,7 +361,11 @@ def test_nodes_accepting_tls_without_a_certificate_fails() -> None:
 def test_healthy_hosts_compares_the_latest_point_with_the_desired_tasks() -> None:
     aws = FakeAws(desired=2, healthy=[2, 2, 1])
     assert _run(aws=aws)[2].status == "failed"
-    metric = next(c for c in aws.calls if c[:2] == ("cloudwatch", "get-metric-statistics"))
+    metric = next(
+        c
+        for c in aws.calls
+        if c[:2] == ("cloudwatch", "get-metric-statistics") and "HealthyHostCount" in c
+    )
     assert "Name=TargetGroup,Value=targetgroup/tg-api-staging-7/abc" in metric
     assert "Name=LoadBalancer,Value=app/vigia-alb-app/def" in metric
     assert "2026-10-03T11:55:00+00:00" in metric and "2026-10-03T12:00:00+00:00" in metric
@@ -234,6 +378,24 @@ def test_healthy_hosts_fails_without_tasks_data_or_enough_hosts(
     assert _run(aws=FakeAws(desired=desired, healthy=healthy))[2].status == "failed"
 
 
+# --- 4: conformidad --------------------------------------------------------------------------
+
+
+def test_conformance_runs_the_kit_against_the_nodes_host() -> None:
+    conformance = FakeConformance()
+    assert _run(conformance=conformance)[4].status == "ok"
+    assert conformance.calls == ["https://staging-7-nodes.vigia.example"]
+
+
+def test_conformance_fails_when_the_kit_fails() -> None:
+    result = _run(conformance=FakeConformance(passed=False, detail="una comprobación falló"))[4]
+    assert result.status == "failed" and "una comprobación falló" in result.detail
+
+
+def test_conformance_skips_without_contract_routes(tmp_path: Path) -> None:
+    assert _run(_target(repository=_repository(tmp_path)))[4].status == "skipped"
+
+
 # --- 5: inicio de sesión ---------------------------------------------------------------------
 
 
@@ -244,7 +406,11 @@ def test_totp_matches_the_rfc_6238_vector() -> None:
 def test_session_activates_logs_in_with_the_second_factor_and_reads_me() -> None:
     http = _healthy_http()
     assert _run(http=http)[5].status == "ok"
-    posts = [c for c in http.calls if c[0] == "POST"]
+    posts = [
+        c
+        for c in http.calls
+        if c[0] == "POST" and (c[1].startswith("/invitations") or c[1].startswith("/auth"))
+    ]
     assert [c[1] for c in posts] == [
         "/invitations/tok_123/accept",
         "/invitations/tok_123/accept",
@@ -323,6 +489,109 @@ def test_alarms_of_other_deployments_are_ignored() -> None:
     assert _run(_target(environment="pilot"), aws=pilot_own)[7].status == "failed"
 
 
+# --- 10: certificado revocado en dos capas ----------------------------------------------------
+
+
+def test_revoked_certificate_checks_the_app_the_store_and_the_load_balancer() -> None:
+    aws = FakeAws(revoked_entries=3)
+    assert _run(aws=aws)[10].status == "ok"
+    assert ("elbv2", "describe-trust-stores", "--names", "vigia-node-trust-staging-7") in aws.calls
+    metric = next(
+        c
+        for c in aws.calls
+        if c[:2] == ("cloudwatch", "get-metric-statistics") and "revocation_list_entries" in c
+    )
+    assert "Vigia/Platform" in metric
+
+
+def test_revoked_certificate_polls_the_store_until_it_matches() -> None:
+    sleeps: list[float] = []
+    aws = FakeAws(revoked_entries=3, revocation_polls=[[], [{"NumberOfRevokedEntries": 3}]])
+    assert _run(_target(watch_minutes=0), aws=aws, sleeps=sleeps)[10].status == "ok"
+    assert sleeps == [60]
+
+
+def test_revoked_certificate_fails_on_the_first_layer() -> None:
+    network = _healthy_network()
+    network.certificate_responses[(REVOKED.certificate_pem, "GET", "/api/nodes/heartbeats")] = (
+        _json(200, {})
+    )
+    assert _run(network=network)[10].status == "failed"
+    other_code = _healthy_network()
+    other_code.certificate_responses[(REVOKED.certificate_pem, "GET", "/api/nodes/heartbeats")] = (
+        _json(403, {"code": "node_not_enrolled"})
+    )
+    assert _run(network=other_code)[10].status == "failed"
+
+
+def test_revoked_certificate_fails_when_the_store_does_not_match() -> None:
+    aws = FakeAws(revoked_entries=9, revocation_polls=[[{"NumberOfRevokedEntries": 3}]] * 3)
+    assert _run(aws=aws)[10].status == "failed"
+
+
+def test_revoked_certificate_fails_when_the_balancer_still_accepts_it() -> None:
+    network = replace(_healthy_network(), revoked_rejected=False)
+    assert _run(network=network)[10].status == "failed"
+
+
+# --- 11: catálogo firmado ---------------------------------------------------------------------
+
+
+def test_signed_catalog_verifies_the_key_against_the_published_set() -> None:
+    assert _run()[11].status == "ok"
+
+
+def test_signed_catalog_fails_when_the_key_is_not_published() -> None:
+    network = _healthy_network()
+    network.certificate_responses[
+        (VALID.certificate_pem, "GET", f"/api/nodes/zones/{ZONE}/catalog")
+    ] = _json(200, {"key_id": "otra", "payload": {}})
+    assert _run(network=network)[11].status == "failed"
+
+
+def test_signed_catalog_fails_when_the_route_rejects() -> None:
+    network = _healthy_network()
+    network.certificate_responses[
+        (VALID.certificate_pem, "GET", f"/api/nodes/zones/{ZONE}/catalog")
+    ] = _json(403, {"code": "node_revoked"})
+    assert _run(network=network)[11].status == "failed"
+
+
+# --- 12: alta por app. y rechazo por nodes. ---------------------------------------------------
+
+
+def test_enrollment_reachable_expects_a_4xx_from_the_app_and_tls_rejection() -> None:
+    assert _run()[12].status == "ok"
+    network = replace(_healthy_network(), rejected=False)
+    assert _run(network=network)[12].status == "failed"
+    http = _healthy_http()
+    http.routes[("POST", "/api/nodes/enrollment")] = lambda _: _json(200, {})
+    assert _run(http=http)[12].status == "failed"
+
+
+# --- 13: origen cruzado y PUT sin suma --------------------------------------------------------
+
+
+def test_cross_origin_and_checksum_passes_with_cors_and_a_rejected_put() -> None:
+    assert _run(http=_healthy_checksum_http())[13].status == "ok"
+
+
+def test_cross_origin_fails_without_the_cors_headers() -> None:
+    http = _healthy_checksum_http()
+    http.routes[("OPTIONS", "/documents/scope.pdf")] = lambda _: Response(200, b"", {})
+    assert _run(http=http)[13].status == "failed"
+
+
+def test_cross_origin_fails_when_the_put_without_checksum_is_accepted() -> None:
+    http = _healthy_checksum_http()
+    http.routes[("PUT", "/documents/scope.pdf")] = lambda _: _json(200, {})
+    assert _run(http=http)[13].status == "failed"
+
+
+def test_cross_origin_skips_in_pilot() -> None:
+    assert _run(_target(environment="pilot", operator_email=None))[13].status == "skipped"
+
+
 # --- Omisión con motivo: nunca en silencio cuando el requisito ya existe -------------------
 
 
@@ -338,39 +607,48 @@ def _repository(tmp_path: Path, *paths: str, frontend: bool = False) -> Path:
     return tmp_path
 
 
-def test_the_u03_checks_fail_once_the_enrollment_route_exists(tmp_path: Path) -> None:
-    repository = _repository(tmp_path, "/api/nodes/enrollment")
-    results = _run(_target(repository=repository))
-    for number in (3, 4, 10, 11, 12, 13):
-        assert results[number].status == "failed", number
-
-
-def test_conformance_fails_once_any_contract_route_exists(tmp_path: Path) -> None:
-    results = _run(_target(repository=_repository(tmp_path, "/api/nodes/heartbeat")))
-    assert results[4].status == "failed"
-    assert results[10].status == "skipped"
-
-
 def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
-    repository = _repository(tmp_path, frontend=True)
+    repository = _repository(tmp_path, "/api/nodes/enrollment", frontend=True)
     assert _run(_target(repository=repository))[8].status == "failed"
     pilot = _run(_target(repository=repository, environment="pilot", operator_email=None))
     assert pilot[9].status == "failed"
 
 
 def test_the_current_repository_has_contract_routes_and_enrollment_but_no_frontend() -> None:
-    # VIG-152 (concesión y confirmación de clip) y TASK-223 (latido y catálogo por zona)
-    # publican rutas del contrato: la conformidad (nº 4) deja de omitirse y falla hasta que
-    # TASK-230 la escriba (nunca pasa en vacío). VIG-151 publica el alta: la 3 y las 10 a 13
-    # también fallan hasta que TASK-234 las escriba (test_the_u03_checks_fail_once_...).
+    # VIG-152 y TASK-223 publican rutas del contrato y VIG-151 el alta: las comprobaciones de
+    # U-03 ya están escritas (TASK-234) y corren contra el material del entorno.
     target = _target()
     assert target.has_contract_routes() and target.has_enrollment()
     assert not target.has_frontend()
     assert "/health/live" in target.openapi_paths()
-    assert _run(target)[4].status == "failed"
 
 
-# --- Orden ------------------------------------------------------------------------------------
+# --- Adaptadores y argumentos ----------------------------------------------------------------
+
+
+def test_secrets_fixtures_reads_the_material_and_tolerates_a_missing_secret() -> None:
+    def aws(*arguments: str) -> Any:
+        if arguments[1] == "get-secret-value":
+            return {
+                "SecretString": json.dumps(
+                    {
+                        "valid": {"certificate_pem": "cert", "key_pem": "key"},
+                        "revoked": {"certificate_pem": "rc", "key_pem": "rk"},
+                        "synthetic_zone_id": ZONE,
+                    }
+                )
+            }
+        raise AssertionError(arguments)
+
+    loaded = deploy_checks.SecretsFixtures(aws).load("staging-7")
+    assert loaded.valid_certificate == Certificate("cert", "key")
+    assert loaded.revoked_certificate == Certificate("rc", "rk")
+    assert loaded.synthetic_zone_id == ZONE
+
+    def missing(*arguments: str) -> Any:
+        raise deploy_checks.subprocess.CalledProcessError(1, arguments)
+
+    assert deploy_checks.SecretsFixtures(missing).load("staging-7") == Fixtures()
 
 
 @pytest.mark.parametrize(

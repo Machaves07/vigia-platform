@@ -422,6 +422,51 @@ def test_staging_follows_the_corrected_first_deployment_order() -> None:
     assert '-c environment="$STAGING"' in run
 
 
+def soak_artifact_problems(text: str) -> list[str]:
+    """PR-GOB-31: el artefacto del soak es solo el informe, nunca los secretos del entorno.
+
+    La flota, la sesión de consola y las credenciales viven en otro directorio, se enmascaran y se
+    borran antes de subir el artefacto.
+    """
+    steps = _load(text)["jobs"]["staging"]["steps"]
+    uploads = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+        and step["with"].get("name") == "informe-soak"
+    ]
+    if not uploads:
+        return ["el trabajo staging no sube un artefacto «informe-soak»"]
+    problems = []
+    path = str(uploads[0]["with"]["path"])
+    for forbidden in ("secretos", "fleet", "console-session", "files"):
+        if forbidden in path:
+            problems.append(f"el artefacto informe-soak sube {forbidden!r}: {path}")
+    runs = [str(step.get("run") or "") for step in steps]
+    cleanup = [index for index, run in enumerate(runs) if "rm -rf" in run and "secretos" in run]
+    if not cleanup:
+        problems.append("no hay un paso que borre los secretos del soak")
+    elif cleanup[0] > steps.index(uploads[0]):
+        problems.append("el artefacto del soak se sube antes de borrar los secretos")
+    if not any("::add-mask::" in run for run in runs):
+        problems.append("la cookie de la sesión de consola no se enmascara con ::add-mask::")
+    return problems
+
+
+def test_the_soak_artifact_carries_only_the_report_never_the_secrets() -> None:
+    release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+    assert soak_artifact_problems(release) == []
+    # Negativos: el artefacto que sube el directorio de secretos y el que se sube antes de
+    # borrarlos fallan.
+    assert soak_artifact_problems(
+        release.replace("path: ${{ runner.temp }}/soak/", "path: ${{ runner.temp }}/soak-secretos/")
+    )
+    without_cleanup = release.replace('rm -rf "${{ runner.temp }}/soak-secretos"', "true")
+    assert any(
+        "borre los secretos" in problem for problem in soak_artifact_problems(without_cleanup)
+    )
+
+
 def test_staging_is_destroyed_always_and_checked_for_residue() -> None:
     release = _workflow("release")
     job = release["jobs"]["destruir-staging"]
@@ -591,6 +636,12 @@ def test_ci_has_the_jobs_of_lc_nuc_35() -> None:
     assert "--migrate-image vigia-platform:n " in previous
     flows = next(text for name, text in jobs.items() if name.startswith("flujos"))
     assert "actionlint" in flows
+
+
+def test_the_coverage_job_keeps_its_exact_name() -> None:
+    """NFR-GOB-59: el nombre del trabajo de cobertura no cambia al añadir `catalog` y `fleet`."""
+    names = [job["name"] for job in _ci()["jobs"].values()]
+    assert names.count("cobertura (≥ 90 % identity y ledger, ≥ 80 % global)") == 1
 
 
 def test_the_previous_image_job_fails_when_the_base_cannot_boot() -> None:

@@ -1,14 +1,16 @@
-"""Umbrales de cobertura de líneas de ``ci.yml`` (NFR-NUC-45, NFR-CTR-32 y 33; TASK-143).
+"""Umbrales de cobertura de líneas de ``ci.yml`` (NFR-NUC-45, NFR-GOB-59, NFR-CTR-32 y 33).
 
 Lee el informe JSON de coverage.py (``coverage json``, con ``relative_files``: rutas
-``src/vigia_platform/…``) de la suite completa (los dos trabajos «backend» combinados) y exige:
+``src/vigia_platform/…``) de la suite completa (los trabajos «backend» combinados) y exige:
 
-- **≥ 90 %** en el dominio y la aplicación de ``identity`` y de ``ledger``, cada módulo por
-  separado ``[objetivos propios]``. Dominio y aplicación es todo el módulo **salvo sus
-  adaptadores** (``adapters/``: HTTP y PostgreSQL, la frontera de puertos y adaptadores de
-  tech-stack-decisions.md §7): ``domain/`` y ``application/``, y también los módulos críticos
-  que viven fuera de esas carpetas (``identity.auth``, ``identity.authz``, ``ledger.chain``…).
-- **≥ 80 %** en el total del paquete ``vigia_platform``.
+- **≥ 90 %** en el dominio y la aplicación de ``identity``, ``ledger``, ``catalog`` y ``fleet``,
+  cada módulo por separado ``[objetivos propios]``. Dominio y aplicación es todo el módulo
+  **salvo sus adaptadores** (``adapters/``: HTTP, PostgreSQL y demás, la frontera de puertos y
+  adaptadores de tech-stack-decisions.md §7): ``domain/`` y ``application/``, y también los
+  módulos críticos que viven fuera de esas carpetas (``identity.auth``, ``identity.authz``,
+  ``ledger.chain``…). ``node_api`` (las rutas del contrato) no tiene área propia: cuenta en el
+  total del paquete.
+- **≥ 80 %** en el total del paquete ``vigia_platform`` (incluye ``node_api``).
 
 Un área sin ninguna sentencia medida falla: un informe que no cubre el módulo no demuestra nada.
 
@@ -59,6 +61,18 @@ AREAS: Final = (
         name="ledger (dominio y aplicación)",
         include=f"{PACKAGE_PREFIX}ledger/",
         exclude=(f"{PACKAGE_PREFIX}ledger/adapters/",),
+        minimum=Decimal(90),
+    ),
+    Area(
+        name="catalog (dominio y aplicación)",
+        include=f"{PACKAGE_PREFIX}catalog/",
+        exclude=(f"{PACKAGE_PREFIX}catalog/adapters/",),
+        minimum=Decimal(90),
+    ),
+    Area(
+        name="fleet (dominio y aplicación)",
+        include=f"{PACKAGE_PREFIX}fleet/",
+        exclude=(f"{PACKAGE_PREFIX}fleet/adapters/",),
         minimum=Decimal(90),
     ),
 )
