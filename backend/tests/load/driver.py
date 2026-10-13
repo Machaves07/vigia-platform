@@ -26,6 +26,11 @@ Lo que este proceso añade al nodo simulado, sin tocar su cliente:
   recupera: si el nodo estuvo ocupado (un vaciado largo tras la reconexión) o su cliente ya latió
   por su cuenta, el latido del calendario que saldría a menos de un intervalo del anterior se omite
   (``heartbeats_skipped``) en lugar de salir en ráfaga.
+- **Vaciado final** (VIG-192): tras las fases, cada nodo sigue hasta vaciar su bandeja durante
+  ``flush_seconds``; si a esa hora el cliente aún tiene un reintento programado
+  (``next_attempt_at``, con el retroceso de hasta 5 minutos de PAT-RES-02), el tope se alarga hasta
+  ese reintento más dos ``heartbeat_seconds``, sin pasar de ``FLUSH_EXTENSION_SECONDS`` más. Lo que
+  quede sin enviar es pérdida y sale en ``unsent`` con su recorrido (sin identificadores).
 - **Mediciones**: latencia por ruta del contrato (sin la URL de las subidas, que es prefirmada),
   eventos del cliente por operación, resultado y ``rejection_code``, instante de emisión y de
   aceptación de cada registro, recibos ``accepted_duplicate`` de la bandeja.
@@ -52,7 +57,7 @@ from typing import Any, Final
 
 import httpx
 from vigia_contracts.client import AsyncClient, ClientConfig, ClientEvent
-from vigia_contracts.client.core import Wait
+from vigia_contracts.client.core import DEFAULT_CAP_MS, Wait
 from vigia_contracts.clock import SystemClock
 from vigia_contracts.conformance.simulated_node.clips import ClipCache, SyntheticClip
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
@@ -79,12 +84,13 @@ from vigia_contracts.conformance.simulated_node.schedule import (
 )
 from vigia_contracts.credentials import FileCredentialStore, NodeCredentials, NodeIdentity
 from vigia_contracts.models.tolerant.node_enrollment import NodeInitialConfiguration
-from vigia_contracts.outbox import Outbox, OutboxState
+from vigia_contracts.outbox import Outbox, OutboxItem, OutboxState
 
 from tests.load.profiles import PROFILES, LoadProfile, simulation_profile
 from tests.load.report import latency_summary
 
 __all__ = [
+    "FLUSH_EXTENSION_SECONDS",
     "HEARTBEAT_FLOOR_SECONDS",
     "HEARTBEAT_SLACK_SECONDS",
     "RECORD_ROUTES",
@@ -109,6 +115,11 @@ HEARTBEAT_PATH: Final = "/heartbeats"
 LIVE_VIEW_HOST: Final = "10.0.0.5"
 SOFTWARE_VERSION: Final = "1.0.0"
 UPLOAD_LABEL: Final = "PUT almacén (URL prefirmada)"
+FLUSH_EXTENSION_SECONDS: Final = 2 * DEFAULT_CAP_MS / 1000
+"""Lo más que se alarga el vaciado final por reintentos programados: dos esperas en el tope del
+retroceso del cliente (300 s, PAT-RES-02), que no decrece mientras un registro siga fallando."""
+HISTORY_EVENTS: Final = 16
+"""Eventos del cliente que se guardan por registro sin aceptar (para ``unsent``)."""
 _MAX_DRAIN_ROUNDS: Final = 100_000
 _UUID_LENGTH: Final = 36
 
@@ -180,6 +191,15 @@ class Stats:
     halted: dict[int, str] = field(default_factory=dict)
     heartbeats_skipped: int = 0
     """Latidos del calendario omitidos porque el anterior salió hace menos de un intervalo."""
+    history: dict[str, list[list[str]]] = field(default_factory=dict)
+    """Por registro aún sin aceptar: sus últimos ``[instante, operación, resultado, código]``;
+    se descarta al aceptarse, así que al final solo queda el de lo que no se envió."""
+    unsent: list[dict[str, Any]] = field(default_factory=list)
+    """Lo que quedó en una bandeja al cerrar el vaciado, con su recorrido (sin identificadores)."""
+    flush_seconds: dict[int, float] = field(default_factory=dict)
+    """Por nodo, cuánto duró su vaciado final."""
+    flush_extended: dict[int, float] = field(default_factory=dict)
+    """Por nodo, cuánto se alargó el vaciado más allá de ``flush_seconds`` por reintentos."""
 
 
 class LoadTransport(httpx.AsyncBaseTransport):
@@ -263,10 +283,25 @@ class Sink:
             self.journal.response(event.subject, event.result, code=code)
             if event.result == "success":
                 self.stats.accepted_at.setdefault(event.subject, at)
-        elif event.operation in ("request_grant", "upload_clip") and event.result != "success":
+                self.stats.history.pop(event.subject, None)
+            else:
+                self._remember(event.subject, at, event.operation, event.result, code)
+        elif event.operation in ("request_grant", "upload_clip"):
             record = self.node.clip_records.get(event.subject)
-            if record is not None:
+            if record is None:
+                return
+            self._remember(record, at, event.operation, event.result, code)
+            if event.result != "success":
                 self.journal.response(record, event.result, code=code)
+
+    def _remember(
+        self, record: str, at: str, operation: str, result: str, code: str | None
+    ) -> None:
+        if record in self.stats.accepted_at:
+            return
+        events = self.stats.history.setdefault(record, [])
+        events.append([at, operation, result, code or ""])
+        del events[:-HISTORY_EVENTS]
 
 
 # --- Un nodo --------------------------------------------------------------------------------------
@@ -308,8 +343,24 @@ async def _drain(client: AsyncClient) -> Wait | None:
     return None
 
 
-def _unsent(outbox: Outbox) -> bool:
-    return bool(outbox.records(OutboxState.PENDING) or outbox.records(OutboxState.READY))
+def _unsent(outbox: Outbox) -> list[OutboxItem]:
+    return outbox.records(OutboxState.PENDING) + outbox.records(OutboxState.READY)
+
+
+def _flush_deadline(
+    unsent: Sequence[OutboxItem], deadline: datetime, limit: datetime, grace: timedelta
+) -> datetime:
+    """El tope del vaciado: ``deadline`` o, si el cliente tiene un reintento programado más
+    tarde (``next_attempt_at``), ese reintento más ``grace``, nunca después de ``limit``.
+
+    Tras una caída larga un registro acumula intentos y su espera llega al tope del retroceso
+    (5 minutos, y no decrece mientras siga fallando): si el vaciado de la flota aún satura la
+    plataforma cuando acaba ``deadline``, cortar ahí da por perdido lo que el nodo real enviaría
+    en su próximo reintento (VIG-192)."""
+    retries = [item.next_attempt_at for item in unsent if item.next_attempt_at is not None]
+    if not retries:
+        return deadline
+    return min(limit, max(deadline, max(retries) + grace))
 
 
 async def run_node(
@@ -355,23 +406,35 @@ async def run_node(
                 )
                 stats.emitted_at[built.record_id] = (format_timestamp(now), node.index)
         wait = await _drain(client)
-    deadline = clock.now() + timedelta(seconds=flush_seconds)
+    flush_start = clock.now()
+    base = deadline = flush_start + timedelta(seconds=flush_seconds)
+    limit = base + timedelta(seconds=FLUSH_EXTENSION_SECONDS)
+    grace = timedelta(seconds=2 * heartbeat_seconds)
     beat = clock.now() + timedelta(seconds=heartbeat_seconds)
-    while _unsent(node.outbox) and clock.now() < deadline:
+    while unsent := _unsent(node.outbox):
+        deadline = _flush_deadline(unsent, deadline, limit, grace)
+        if clock.now() >= deadline:
+            break
         if clock.now() >= beat:
             await _beat(run, stats, clock, heartbeat_seconds)
             beat = clock.now() + timedelta(seconds=heartbeat_seconds)
         wait = await _drain(client)
         until = min(deadline, beat) if wait is None else min(wait.until, deadline, beat)
         await _sleep_until(clock, until)
+    stats.flush_seconds[node.index] = (clock.now() - flush_start).total_seconds()
+    if deadline > base:
+        stats.flush_extended[node.index] = (deadline - base).total_seconds()
     if client.halted_reason is not None:
         stats.halted[node.index] = str(client.halted_reason)
-    _reconcile(node, journal, stats)
+    _reconcile(node, journal, stats, start)
 
 
-def _reconcile(node: SimulatedNode, journal: Journal, stats: Stats) -> None:
+def _reconcile(node: SimulatedNode, journal: Journal, stats: Stats, start: datetime) -> None:
     """Estado final de cada registro según la bandeja, como el nodo simulado del kit, y el
-    recibo de cada aceptado (``accepted`` o ``accepted_duplicate``)."""
+    recibo de cada aceptado (``accepted`` o ``accepted_duplicate``). De lo que quedó sin enviar
+    guarda su recorrido en ``stats.unsent``: tipo, nodo, segundos desde el inicio (emisión y
+    próximo reintento), intentos, estado de sus clips y sus últimos eventos, nunca su
+    identificador."""
     for item in node.outbox.records(OutboxState.RETAINED):
         status = "accepted" if item.receipt is None else item.receipt.status.value
         stats.receipts[status] += 1
@@ -382,6 +445,32 @@ def _reconcile(node: SimulatedNode, journal: Journal, stats: Stats) -> None:
     for state in (OutboxState.PENDING, OutboxState.READY):
         for item in node.outbox.records(state):
             journal.response(item.record_id, "unsent")
+            stats.unsent.append(_unsent_entry(item, node.index, stats, start))
+
+
+def _unsent_entry(item: OutboxItem, index: int, stats: Stats, start: datetime) -> dict[str, Any]:
+    def since(moment: datetime | None) -> float | None:
+        return None if moment is None else round((moment - start).total_seconds(), 1)
+
+    emitted = stats.emitted_at.get(item.record_id)
+    history = stats.history.get(item.record_id, [])
+    return {
+        "node_index": index,
+        "kind": item.kind.value,
+        "state": item.state.value,
+        "attempts": item.attempts,
+        "emitted_s": None if emitted is None else since(_instant(emitted[0])),
+        "next_attempt_s": since(item.next_attempt_at),
+        "clips": [clip.state.value for clip in item.clips],
+        "history": [
+            [since(_instant(at)), operation, result, code]
+            for at, operation, result, code in history
+        ],
+    }
+
+
+def _instant(stamp: str) -> datetime:
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
 
 
 # --- Plan -----------------------------------------------------------------------------------------
@@ -581,6 +670,14 @@ async def drive(plan: dict[str, Any]) -> dict[str, Any]:
         },
         "rate_limited": stats.rate_limited,
         "heartbeats_skipped": stats.heartbeats_skipped,
+        "flush": {
+            "base_seconds": float(plan["flush_seconds"]),
+            "extension_limit_seconds": FLUSH_EXTENSION_SECONDS,
+            "max_seconds": round(max(stats.flush_seconds.values(), default=0.0), 1),
+            "extended_nodes": len(stats.flush_extended),
+            "max_extension_seconds": round(max(stats.flush_extended.values(), default=0.0), 1),
+        },
+        "unsent": stats.unsent,
         "sends": {str(index): sends for index, sends in stats.sends.items()},
         "latency": {
             label: latency_summary(values, stats.statuses[label])

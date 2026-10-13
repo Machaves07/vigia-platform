@@ -17,13 +17,17 @@ import json
 import socket
 import uuid
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
 import pytest
+from vigia_contracts.client import ClientEvent
+from vigia_contracts.client.core import RetryPolicy, Wait
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
+from vigia_contracts.outbox import OutboxState, RecordKind
 
 from tests.load import soak
 from tests.load.console_client import (
@@ -34,13 +38,16 @@ from tests.load.console_client import (
     evaluate,
 )
 from tests.load.driver import (
+    FLUSH_EXTENSION_SECONDS,
     HEARTBEAT_FLOOR_SECONDS,
     HEARTBEAT_SLACK_SECONDS,
     LoadTransport,
     LostReplies,
     NodeRun,
     Reachability,
+    Sink,
     Stats,
+    _flush_deadline,
     _timeline,
     route_label,
     run_node,
@@ -719,3 +726,171 @@ def test_the_heartbeat_keeps_its_fifteen_second_rhythm_when_the_node_is_barely_l
     statuses, stats = _heartbeats(busy=(60.0, 15.5))  # el de 75 s sale a 75,5 s
     assert stats.heartbeats_skipped == 0
     assert statuses == Counter({200: 20})
+
+
+# --- Vaciado final frente al retroceso del cliente (VIG-192) --------------------------------------
+
+
+@dataclass
+class _Item:
+    """Lo que ``run_node`` y ``_reconcile`` leen de un registro de la bandeja."""
+
+    record_id: str
+    next_attempt_at: dt.datetime | None
+    attempts: int
+    kind: RecordKind = RecordKind.DETECTION_FOR_REVIEW
+    state: OutboxState = OutboxState.READY
+    clips: tuple[Any, ...] = ()
+    receipt: Any = None
+    dead_letter_code: Any = None
+
+
+@dataclass
+class _ItemOutbox:
+    items: list[_Item]
+
+    def records(self, state: OutboxState) -> list[_Item]:
+        return [item for item in self.items if item.state is state]
+
+
+class _Journal:
+    def __init__(self) -> None:
+        self.responses: list[tuple[str, str]] = []
+
+    def response(self, record: str, result: str, code: str | None = None) -> None:
+        self.responses.append((record, result))
+
+    def dead_letter(self, record: str, code: str) -> None:
+        raise AssertionError("sin cola muerta en este escenario")
+
+
+class _Ceiling:
+    """El sorteo del retroceso siempre en lo alto de su techo."""
+
+    def random(self) -> float:
+        return 0.999
+
+
+class _RetryingClient(_Client):
+    """El cliente reducido a un registro ``ready`` que se presenta cuando vence su reintento: la
+    plataforma responde ``503`` hasta ``saturated_until`` (s del bucle) y lo acepta después; cada
+    ``503`` programa el siguiente con el ``RetryPolicy`` real del cliente (tope de 300 s, sin
+    decrecer mientras siga fallando), como ``SendPlanner``."""
+
+    def __init__(
+        self, transport: LoadTransport, outbox: _ItemOutbox, sink: Sink, saturated_until: float
+    ) -> None:
+        super().__init__(transport, busy=None)
+        self.outbox = outbox
+        self.sink = sink
+        self.saturated_until = saturated_until
+        self.previous_ms = 0
+
+    async def run_once(self) -> Wait | None:  # type: ignore[override]
+        clock = _LoopClock()
+        now = clock.now()
+        item = next((i for i in self.outbox.items if i.state is OutboxState.READY), None)
+        if item is None:
+            return None
+        if item.next_attempt_at is not None and item.next_attempt_at > now:
+            return Wait(item.next_attempt_at)
+        if clock.monotonic() < self.saturated_until:
+            item.attempts += 1
+            wait = RetryPolicy().next_wait_ms(
+                item.attempts, _Ceiling(), previous_ms=self.previous_ms
+            )
+            self.previous_ms = wait
+            item.next_attempt_at = now + dt.timedelta(milliseconds=wait)
+            self.sink(ClientEvent(now, "submit_record", item.record_id, "unavailable"))
+            return Wait(item.next_attempt_at)
+        item.state = OutboxState.RETAINED
+        self.sink(ClientEvent(now, "submit_record", item.record_id, "success"))
+        return None
+
+
+RECORD_ID = "0199d5a0-0000-7000-8000-000000000192"
+
+
+def _flush(*, first_retry: float, saturated_until: float) -> tuple[Stats, _Item, _Journal]:
+    """``run_node`` sin calendario (el vaciado empieza a los 0 s, con ``flush_seconds`` de 600 s)
+    y un registro que arrastra 8 intentos de las dos caídas: su próximo reintento es a los
+    ``first_retry`` s y la plataforma sigue saturada por el vaciado de la flota hasta
+    ``saturated_until`` s."""
+
+    async def scenario() -> tuple[Stats, _Item, _Journal]:
+        clock = _LoopClock()
+        stats = Stats()
+        journal = _Journal()
+        item = _Item(RECORD_ID, clock.now() + dt.timedelta(seconds=first_retry), attempts=8)
+        stats.emitted_at[RECORD_ID] = (_stamp(clock.now()), 0)
+        outbox = _ItemOutbox([item])
+        transport = LoadTransport(
+            httpx.MockTransport(lambda _: httpx.Response(200, stream=httpx.ByteStream(b"{}"))),
+            Reachability(cast(Any, clock)),
+            stats,
+        )
+        sink = Sink(cast(Any, journal), stats, 0)
+        client = _RetryingClient(transport, outbox, sink, saturated_until)
+        node = SimpleNamespace(client=client, outbox=outbox, clip_records={}, index=0)
+        sink.node = cast(Any, node)
+        run = NodeRun(cast(Any, node), "planta", [], cast(Any, None), transport)
+        await run_node(
+            run,
+            {},
+            cast(Any, journal),
+            stats,
+            cast(Any, clock),
+            start=clock.now(),
+            speed_factor=1.0,
+            heartbeat_seconds=HEARTBEAT_FLOOR_SECONDS,
+            flush_seconds=600.0,
+        )
+        return stats, item, journal
+
+    return run_virtual(scenario(), cap_seconds=7_200)
+
+
+def test_a_retry_scheduled_past_the_flush_deadline_is_still_sent() -> None:
+    # Run 38371594923: el vaciado del nodo agotó sus 600 s (2759,0 s = 2159,0 + 600,0) con una
+    # detección aún en la bandeja; el vaciado de la flota tras la caída de 4 h duró 486 s, y un
+    # 503 a esa altura deja al registro (8 intentos acumulados) esperando ~300 s más. El nodo
+    # real la habría enviado en su reintento; el arnés la contaba como perdida.
+    stats, item, journal = _flush(first_retry=320.0, saturated_until=480.0)
+    assert item.state is OutboxState.RETAINED, stats.unsent
+    assert stats.unsent == []
+    assert (RECORD_ID, "accepted") in journal.responses
+    assert RECORD_ID in stats.accepted_at and stats.history == {}
+    assert 600.0 < stats.flush_seconds[0] < 600.0 + FLUSH_EXTENSION_SECONDS
+    assert stats.flush_extended[0] > 0
+
+
+def test_a_record_still_refused_at_the_extension_limit_is_reported_unsent_without_its_id() -> None:
+    # Si la plataforma nunca deja de responder 503, el vaciado no cuelga: corta en
+    # ``flush_seconds + FLUSH_EXTENSION_SECONDS`` y lo que queda es pérdida, con su recorrido.
+    stats, item, journal = _flush(first_retry=320.0, saturated_until=float("inf"))
+    assert item.state is OutboxState.READY
+    assert stats.flush_seconds[0] == pytest.approx(600.0 + FLUSH_EXTENSION_SECONDS)
+    assert (RECORD_ID, "unsent") in journal.responses
+    [entry] = stats.unsent
+    assert entry["kind"] == "detection_for_review" and entry["state"] == "ready"
+    assert entry["attempts"] > 8 and entry["emitted_s"] == 0.0
+    assert entry["next_attempt_s"] > 600.0 + FLUSH_EXTENSION_SECONDS
+    assert {event[2] for event in entry["history"]} == {"unavailable"}
+    assert RECORD_ID not in json.dumps(stats.unsent)
+    assert not secret_findings({"unsent": json.dumps(stats.unsent)})
+
+
+def test_the_flush_deadline_follows_the_latest_scheduled_retry_up_to_its_limit() -> None:
+    deadline, limit, grace = T0, T0 + dt.timedelta(seconds=600), dt.timedelta(seconds=30)
+
+    def at(seconds: float | None) -> Any:
+        moment = None if seconds is None else T0 + dt.timedelta(seconds=seconds)
+        return _Item(RECORD_ID, moment, attempts=1)
+
+    assert _flush_deadline([], deadline, limit, grace) == deadline
+    assert _flush_deadline([at(None)], deadline, limit, grace) == deadline
+    assert _flush_deadline([at(-30)], deadline, limit, grace) == deadline  # reintento + gracia
+    later = _flush_deadline([at(-40), at(100)], deadline, limit, grace)
+    assert later == T0 + dt.timedelta(seconds=130)
+    assert _flush_deadline([at(570)], deadline, limit, grace) == limit
+    assert _flush_deadline([at(900)], deadline, limit, grace) == limit
