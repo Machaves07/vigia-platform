@@ -53,6 +53,7 @@ from vigia_contracts.models.tolerant.node_enrollment import (
     NodeInitialConfiguration,
 )
 
+from tests.load.driver import FLUSH_EXTENSION_SECONDS
 from tests.load.profiles import (
     ABSOLUTE_TARGETS,
     PROFILES,
@@ -328,8 +329,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = settings_from(arguments)
         profile = settings.profile
-        from tests.load.driver import FLUSH_EXTENSION_SECONDS
-
         ends_at = WALL.now() + dt.timedelta(
             hours=settings.hours, seconds=FLUSH_SECONDS + FLUSH_EXTENSION_SECONDS
         )
