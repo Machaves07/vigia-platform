@@ -11,11 +11,15 @@ cuerpo y que la etiqueta de una subida nunca lleva su URL prefirmada.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import socket
+import uuid
+from collections import Counter
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -29,10 +33,25 @@ from tests.load.console_client import (
     Sample,
     evaluate,
 )
-from tests.load.driver import LostReplies, route_label
+from tests.load.driver import (
+    HEARTBEAT_FLOOR_SECONDS,
+    HEARTBEAT_SLACK_SECONDS,
+    LoadTransport,
+    LostReplies,
+    NodeRun,
+    Reachability,
+    Stats,
+    _timeline,
+    route_label,
+    run_node,
+)
 from tests.load.profiles import PROFILES, nightly_profile, write_sealed_dataset
 from tests.load.report import analyse, drains_of, percentile, saturation_transients, secret_findings
 from tests.load.test_load_ci import assert_functional
+from tests.virtual_time import run_virtual
+from vigia_platform.node_api.limits import NODE_BUDGETS
+from vigia_platform.shared.api.declarations import NodeRoute
+from vigia_platform.shared.ratelimit import Allowed, RateLimiter, node_key
 
 T0 = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.UTC)
 
@@ -546,3 +565,119 @@ def test_an_upload_label_never_carries_its_presigned_url() -> None:
     zone = "0b5d0a0e-5a6b-4f3c-9e0d-2b1a3c4d5e6f"
     catalog = httpx.Request("GET", f"https://127.0.0.1/api/nodes/zones/{zone}/catalog")
     assert route_label(catalog, upload=False) == "GET /api/nodes/zones/{zone_id}/catalog"
+
+
+# --- Latidos frente al cubo de 4 por minuto (VIG-190) ---------------------------------------------
+
+
+class _LoopClock:
+    """``SystemClock`` sobre el reloj del bucle (virtual con ``run_virtual``)."""
+
+    def now(self) -> dt.datetime:
+        return T0 + dt.timedelta(seconds=asyncio.get_running_loop().time())
+
+    def monotonic(self) -> float:
+        return asyncio.get_running_loop().time()
+
+
+class _Outbox:
+    def records(self, state: object) -> list[Any]:
+        return []
+
+
+class _Client:
+    """El cliente del nodo reducido a lo que usa ``run_node``: cada latido pasa por el
+    ``LoadTransport`` real. ``busy`` es un vaciado: a los ``busy[0]`` s el primer ``run_once``
+    tarda ``busy[1]`` s y, si ``planner_beat_after`` no es ``None``, el planificador del cliente
+    late por su cuenta a mitad (como ``SendPlanner`` cuando pasa su intervalo sin latido)."""
+
+    halted_reason = None
+
+    def __init__(
+        self,
+        transport: LoadTransport,
+        *,
+        busy: tuple[float, float] | None,
+        planner_beat_after: float | None = None,
+    ) -> None:
+        self.transport = transport
+        self.busy = busy
+        self.planner_beat_after = planner_beat_after
+
+    async def heartbeat_now(self) -> None:
+        request = httpx.Request("POST", "https://127.0.0.1/api/nodes/heartbeats", content=b"{}")
+        await self.transport.handle_async_request(request)
+
+    async def run_once(self) -> None:
+        if self.busy is None or asyncio.get_running_loop().time() < self.busy[0]:
+            return
+        _, seconds = self.busy
+        self.busy = None
+        if self.planner_beat_after is None:
+            await asyncio.sleep(seconds)
+            return
+        await asyncio.sleep(self.planner_beat_after)
+        await self.heartbeat_now()
+        await asyncio.sleep(seconds - self.planner_beat_after)
+
+
+def _heartbeats(
+    *, busy: tuple[float, float] | None, planner_beat_after: float | None = None
+) -> tuple[Counter[int], Stats]:
+    """``run_node`` con solo latidos (cada 15 s durante 5 min) contra el cubo real del latido de
+    la plataforma (``NODE_BUDGETS``, 4 por minuto y nodo); devuelve los estados y ``Stats``."""
+    statuses: Counter[int] = Counter()
+    budget = NODE_BUDGETS[NodeRoute.HEARTBEAT]
+    key = node_key(uuid.UUID(int=1), budget.operation)
+
+    async def scenario() -> Stats:
+        clock = _LoopClock()
+        limiter = RateLimiter(cast(Any, clock))
+
+        def platform(request: httpx.Request) -> httpx.Response:
+            status = 200 if isinstance(limiter.check(key, budget.budget), Allowed) else 429
+            statuses[status] += 1
+            return httpx.Response(status, stream=httpx.ByteStream(b"{}"))
+
+        stats = Stats()
+        transport = LoadTransport(
+            httpx.MockTransport(platform), Reachability(cast(Any, clock)), stats
+        )
+        client = _Client(transport, busy=busy, planner_beat_after=planner_beat_after)
+        node = SimpleNamespace(client=client, outbox=_Outbox(), clip_records={}, index=0)
+        run = NodeRun(
+            cast(Any, node), "planta", _timeline([], 300_000, 15_000), cast(Any, None), transport
+        )
+        await run_node(
+            run,
+            {},
+            cast(Any, None),
+            stats,
+            cast(Any, clock),
+            start=clock.now(),
+            speed_factor=1.0,
+            heartbeat_seconds=HEARTBEAT_FLOOR_SECONDS,
+            flush_seconds=0.0,
+        )
+        return stats
+
+    return statuses, run_virtual(scenario(), cap_seconds=3_600)
+
+
+def test_overdue_heartbeats_after_a_long_drain_never_burst_into_rate_limited() -> None:
+    # Run 38348603446: tras la reconexión masiva un nodo pasa más de un minuto vaciando su cola,
+    # su planificador late a mitad y, al volver, los latidos vencidos del calendario salían en
+    # ráfaga contra el cubo de 4 por minuto (``{'heartbeat': 1}``). Ahora se omiten.
+    statuses, stats = _heartbeats(busy=(60.0, 80.0), planner_beat_after=30.0)
+    assert statuses[429] == 0, statuses
+    assert stats.heartbeats_skipped > 0
+    assert statuses[200] >= 16  # sin hueco de más de un intervalo fuera del vaciado
+
+
+def test_the_heartbeat_keeps_its_fifteen_second_rhythm_when_the_node_is_barely_late() -> None:
+    # Un latido medio segundo tarde (dentro de ``HEARTBEAT_SLACK_SECONDS``) no hace omitir el
+    # siguiente: los 20 del calendario (0, 15, …, 285 s) salen y la plataforma los acepta.
+    assert HEARTBEAT_SLACK_SECONDS < HEARTBEAT_FLOOR_SECONDS
+    statuses, stats = _heartbeats(busy=(60.0, 15.5))  # el de 75 s sale a 75,5 s
+    assert stats.heartbeats_skipped == 0
+    assert statuses == Counter({200: 20})
