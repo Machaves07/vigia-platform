@@ -6,10 +6,11 @@ fuera de los trabajos «backend» de ``ci.yml`` alguna de las suites nuevas de U
 ``ci`` de ``tests/load`` (marcado ``integration``).
 
 La prueba lee el flujo real y simula la cobertura de cada suite por el conjunto de los trabajos
-«backend»: una suite está cubierta si algún trabajo la selecciona sin ignorarla ni deseleccionarla.
-El reparto entre la mitad sin integración (``-m "not integration"``) y las mitades con integración
-(``-m integration``) es lo que hace que, juntas, cubran cada directorio. Un marcador que nombre una
-suite concreta para excluirla también falla.
+«backend». Como cada suite tiene pruebas sin integración y con integración (salvo ``tests/load``,
+que solo es de integración), la suite tiene que quedar cubierta por **las dos** clases de marcador:
+una orden que la seleccione sin ignorarla en ``-m "not integration"`` y otra en ``-m integration``
+(o una sin marcador). Ignorarla en una sola de las clases deja su otra mitad sin correr y falla. Un
+marcador que nombre una suite concreta para excluirla también falla.
 """
 
 from __future__ import annotations
@@ -143,18 +144,38 @@ def _backend_commands(text: str) -> list[Command]:
     return commands
 
 
+def _marker_classes(command: Command) -> set[str]:
+    """Las clases de marcador que una orden ejecuta: ``not-integration`` e ``integration``."""
+    if not command.marker:
+        return {"not-integration", "integration"}
+    if "not integration" in command.marker:
+        return {"not-integration"}
+    if "integration" in command.marker:
+        return {"integration"}
+    return set()
+
+
 def coverage_problems(text: str) -> list[str]:
-    """Lo que dejaría alguna suite de U-03 sin ejecutar en los trabajos «backend»."""
+    """Lo que dejaría alguna suite de U-03 sin ejecutar en los trabajos «backend».
+
+    Cada suite tiene pruebas sin integración y con integración (salvo ``tests/load``, que solo es
+    de integración): la orden que la selecciona tiene que cubrir **las dos** clases, porque
+    ignorarla en una sola deja su otra mitad sin correr (por ejemplo, ``--ignore=tests/properties/
+    gob`` solo en la segunda mitad de la integración deja las PR-GOB de integración sin ejecutar).
+    """
     commands = _backend_commands(text)
     problems: list[str] = []
     for suite in SUITES:
-        if not any(c.selects(suite) and not c.excludes(suite) for c in commands):
-            problems.append(f"{suite}: ningún trabajo «backend» la ejecuta sin ignorarla")
-    markers = {c.marker for c in commands}
-    if "not integration" not in markers:
-        problems.append('falta el reparto sin integración (-m "not integration")')
-    if "integration" not in markers:
-        problems.append("falta el reparto con integración (-m integration)")
+        classes = {
+            kind
+            for command in commands
+            if command.selects(suite) and not command.excludes(suite)
+            for kind in _marker_classes(command)
+        }
+        if "not-integration" not in classes:
+            problems.append(f"{suite}: ningún trabajo «backend» corre sus pruebas sin integración")
+        if "integration" not in classes:
+            problems.append(f"{suite}: ningún trabajo «backend» corre sus pruebas con integración")
     load = [c for c in commands if c.selects(LOAD_SUITE) and not c.excludes(LOAD_SUITE)]
     if not any(c.integration and c.profile == "ci" for c in load):
         problems.append(
@@ -200,6 +221,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: {integracion}
+  backend-integracion-2:
+    name: backend (pruebas de integración, segunda mitad)
+    runs-on: ubuntu-24.04
+    steps:
+      - run: {integracion2}
   backend-carga:
     name: backend (carga ci)
     runs-on: ubuntu-24.04
@@ -208,14 +234,25 @@ jobs:
 """
 
 _GOOD_BACKEND = "uv run pytest -q --hypothesis-profile=ci -m 'not integration'"
-_GOOD_INTEGRACION = "uv run pytest -q --hypothesis-profile=ci -m integration --ignore=tests/load"
+_GOOD_INTEGRACION = (
+    "uv run pytest -q --hypothesis-profile=ci -m integration --ignore=tests/load"
+    " --ignore=tests/properties"
+)
+_GOOD_INTEGRACION2 = (
+    "uv run pytest -q --hypothesis-profile=ci -m integration --ignore=tests/load tests/properties"
+)
 _GOOD_CARGA = "uv run pytest -q --hypothesis-profile=ci -m integration tests/load"
 
 
 def _workflow(
-    backend: str = _GOOD_BACKEND, integracion: str = _GOOD_INTEGRACION, carga: str = _GOOD_CARGA
+    backend: str = _GOOD_BACKEND,
+    integracion: str = _GOOD_INTEGRACION,
+    integracion2: str = _GOOD_INTEGRACION2,
+    carga: str = _GOOD_CARGA,
 ) -> str:
-    return _HEADER.format(backend=backend, integracion=integracion, carga=carga)
+    return _HEADER.format(
+        backend=backend, integracion=integracion, integracion2=integracion2, carga=carga
+    )
 
 
 def test_a_healthy_synthetic_workflow_passes() -> None:
@@ -227,15 +264,27 @@ def test_ignoring_a_suite_everywhere_fails() -> None:
         workflow = _workflow(
             backend=f"{_GOOD_BACKEND} --ignore={suite}",
             integracion=f"{_GOOD_INTEGRACION} --ignore={suite}",
-            carga=f"{_GOOD_CARGA} --ignore={suite}",
+            integracion2=f"{_GOOD_INTEGRACION2} --ignore={suite}",
         )
         assert any(suite in problem for problem in coverage_problems(workflow)), suite
+
+
+def test_ignoring_a_suite_in_only_one_marker_class_fails() -> None:
+    # El escenario del revisor: ignorar tests/properties/gob solo en la segunda mitad de la
+    # integración deja sus PR-GOB de integración (21, 26, 27, 30…) sin ejecutar.
+    only_integration = _workflow(integracion2=f"{_GOOD_INTEGRACION2} --ignore=tests/properties/gob")
+    assert any("tests/properties/gob" in problem for problem in coverage_problems(only_integration))
+    # Y al revés: ignorar tests/isolation solo en el trabajo sin integración pierde su mitad sin
+    # integración.
+    only_without = _workflow(backend=f"{_GOOD_BACKEND} --ignore=tests/isolation")
+    assert any("tests/isolation" in problem for problem in coverage_problems(only_without))
 
 
 def test_deselecting_a_suite_everywhere_fails() -> None:
     workflow = _workflow(
         backend=f"{_GOOD_BACKEND} --deselect=tests/isolation",
         integracion=f"{_GOOD_INTEGRACION} --deselect=tests/isolation",
+        integracion2=f"{_GOOD_INTEGRACION2} --deselect=tests/isolation",
     )
     assert any("tests/isolation" in problem for problem in coverage_problems(workflow))
 
@@ -266,6 +315,9 @@ def test_dropping_the_load_profile_fails() -> None:
 def test_dropping_a_marker_class_fails() -> None:
     workflow = _workflow(
         integracion="uv run pytest -q --hypothesis-profile=ci --ignore=tests/load",
+        integracion2=(
+            "uv run pytest -q --hypothesis-profile=ci --ignore=tests/load tests/properties"
+        ),
         carga="uv run pytest -q --hypothesis-profile=ci tests/load",
     )
     assert any("integration" in problem for problem in coverage_problems(workflow))
@@ -275,5 +327,6 @@ def test_a_suite_ignored_by_every_job_that_selects_it_fails() -> None:
     workflow = _workflow(
         backend=f"{_GOOD_BACKEND} --ignore=tests/properties/gob",
         integracion=f"{_GOOD_INTEGRACION} --ignore=tests/properties/gob",
+        integracion2=f"{_GOOD_INTEGRACION2} --ignore=tests/properties/gob",
     )
     assert any("tests/properties/gob" in problem for problem in coverage_problems(workflow))

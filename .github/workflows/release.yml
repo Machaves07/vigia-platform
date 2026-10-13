@@ -275,6 +275,21 @@ jobs:
       - name: instalación congelada de infra
         working-directory: infra
         run: uv sync --frozen
+      - name: clave de despliegue de vigia-contracts (solo lectura, para instalar el backend del soak)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada del backend (para el soak)
+        working-directory: backend
+        run: uv sync --frozen
+      - name: borrar la clave (antes de federar con AWS)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
       - name: federación con vigia-deploy (sin claves)
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: pilas con first_deploy=true (servicios con 0 tareas, sin almacén de confianza)
@@ -309,21 +324,39 @@ jobs:
           uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment "$STAGING" --domain "$DOMAIN" \
             --verifier-sha256 "$VERIFIER" --operator-email "operadora@$STAGING.$DOMAIN" \
             --report "$RUNNER_TEMP/comprobaciones-staging.json" --summary "$GITHUB_STEP_SUMMARY"
+      - name: flota y sesión de consola del soak (secreto del entorno; TASK-238)
+        if: inputs.soak
+        env:
+          SOAK_DIR: ${{ runner.temp }}/soak
+        run: |
+          mkdir -p "$SOAK_DIR/files"
+          SECRETO=$(aws secretsmanager get-secret-value --secret-id "vigia/$STAGING/deploy-checks" --query SecretString --output text)
+          if ! printf '%s' "$SECRETO" | jq -e '.soak.fleet and .soak.console_session' > /dev/null; then
+            echo "El entorno no publica la flota ni la sesión de consola del soak (clave soak de vigia/$STAGING/deploy-checks): las prepara el runbook de TASK-238 (VIG-174)." >&2
+            exit 1
+          fi
+          printf '%s' "$SECRETO" | jq -r '.soak.files // {} | to_entries[] | "\(.key)\t\(.value)"' |
+            while IFS=$'\t' read -r name content; do
+              mkdir -p "$SOAK_DIR/files/$(dirname "$name")"
+              printf '%s' "$content" | base64 -d > "$SOAK_DIR/files/$name"
+            done
+          printf '%s' "$SECRETO" | jq --arg dir "$SOAK_DIR/files" '
+            .soak.fleet
+            | .verify = ($dir + "/" + .verify)
+            | .nodes = [.nodes[] | .credential = ($dir + "/" + .credential) | .configuration = ($dir + "/" + .configuration)]
+          ' > "$SOAK_DIR/fleet.json"
+          printf '%s' "$SECRETO" | jq '.soak.console_session' > "$SOAK_DIR/console-session.json"
       - name: soak de 8 h (nº 19)
         if: inputs.soak
+        working-directory: backend
         env:
           VIGIA_LOAD_REPORT_DIR: ${{ runner.temp }}/soak
         run: |
-          mkdir -p "$RUNNER_TEMP/soak"
           # Tope de un runner de GitHub: 6 h, menor que las 8 h del soak. Para el soak real,
           # VIGIA_RUNS_ON debe apuntar a un runner propio sin ese tope (A-39); con un runner
           # hospedado el paso se corta por tiempo antes de terminar.
           echo "El soak de 8 h necesita VIGIA_RUNS_ON con un runner propio (tope de 6 h de GitHub)." >> "$GITHUB_STEP_SUMMARY"
-          if [ ! -f "$RUNNER_TEMP/soak/fleet.json" ] || [ ! -f "$RUNNER_TEMP/soak/console-session.json" ]; then
-            echo "Soak pedido sin la flota ni la sesión de consola del entorno: las prepara el runbook de TASK-238 (VIG-174)." | tee -a "$GITHUB_STEP_SUMMARY" >&2
-            exit 1
-          fi
-          uv run --no-project --python 3.12 python backend/tests/load/soak.py \
+          uv run --frozen python tests/load/soak.py \
             --target "https://$STAGING.$DOMAIN" \
             --fleet "$RUNNER_TEMP/soak/fleet.json" \
             --console-session "$RUNNER_TEMP/soak/console-session.json" \

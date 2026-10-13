@@ -75,7 +75,7 @@ jobs:
 
   # Las propiedades de U-02 y U-03 con el perfil nightly (PR-GOB-01 a 32 y las de U-02): el
   # conjunto más lento de la suite. En su propio trabajo, con el tope del runner alojado.
-  propiedades-propiedades:
+  propiedades-suite:
     name: propiedades nightly (tests/properties)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -319,7 +319,10 @@ jobs:
   # Carga de U-03 (TASK-231; LC-GOB-22; NFR-GOB-06, 02, 18, 19 y 50): el perfil nightly de
   # tests/load (100 nodos y 300 zonas a speed_factor 60, la reconexión masiva de una hora y cuatro
   # horas de indisponibilidad) con el cliente sintético de consola, en su propio trabajo para que
-  # las propiedades no carguen con él. El informe va como artefacto de 90 días.
+  # las propiedades no carguen con él. El informe va como artefacto de 90 días. Aquí solo corre la
+  # prueba marcada `nightly`; `test_load_ci` y `test_the_console_client_fails_naming…` (marcadas
+  # `integration` sin `nightly`) ya corren en el trabajo «backend (carga ci)» de ci.yml, así que la
+  # integración de este flujo las ignora con `--ignore=tests/load` sin perder cobertura.
   carga:
     name: carga nightly (100 nodos, reconexión masiva y consola)
     runs-on: ubuntu-24.04
@@ -365,7 +368,7 @@ jobs:
 
   informe:
     name: informe nocturno
-    needs: [propiedades, propiedades-propiedades, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
+    needs: [propiedades, propiedades-suite, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10

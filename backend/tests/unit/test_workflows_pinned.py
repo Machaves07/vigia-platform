@@ -593,6 +593,12 @@ def test_ci_has_the_jobs_of_lc_nuc_35() -> None:
     assert "actionlint" in flows
 
 
+def test_the_coverage_job_keeps_its_exact_name() -> None:
+    """NFR-GOB-59: el nombre del trabajo de cobertura no cambia al añadir `catalog` y `fleet`."""
+    names = [job["name"] for job in _ci()["jobs"].values()]
+    assert names.count("cobertura (≥ 90 % identity y ledger, ≥ 80 % global)") == 1
+
+
 def test_the_previous_image_job_fails_when_the_base_cannot_boot() -> None:
     """Seguimiento de VIG-94: sin Dockerfile o image_boot.py en la base, «arranque N-1» falla."""
     job = _ci()["jobs"]["arranque-n-1"]
