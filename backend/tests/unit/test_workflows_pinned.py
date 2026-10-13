@@ -551,6 +551,56 @@ def test_the_sweeper_destroys_staging_older_than_six_hours_every_night() -> None
     )
 
 
+def _check_property_parts(job: dict[Any, Any]) -> None:
+    """Las partes de ``propiedades-integracion``: cada una nombra solo archivos de
+    tests/properties, y la última es ``tests/properties`` excluyendo exactamente los de las demás
+    (ni un archivo sin correr, ni uno corrido dos veces)."""
+    assert "--hypothesis-profile=nightly -m integration" in _run_text(job)
+    parts = [str(entry["pruebas"]).split() for entry in job["strategy"]["matrix"]["include"]]
+    assert len(parts) >= 2
+    *named_parts, rest = parts
+    named = [path for part in named_parts for path in part]
+    assert named and all(path.startswith("tests/properties/") for path in named), named
+    assert len(named) == len(set(named)), "un archivo en dos partes"
+    assert rest[0] == "tests/properties"
+    excluded = rest[1:]
+    assert all(arg.startswith("--ignore=tests/properties/") for arg in excluded), excluded
+    assert sorted(arg.removeprefix("--ignore=") for arg in excluded) == sorted(named)
+
+
+def _parts_job(*parts: str) -> dict[Any, Any]:
+    return {
+        "strategy": {"matrix": {"include": [{"pruebas": part} for part in parts]}},
+        "steps": [{"run": "pytest --hypothesis-profile=nightly -m integration"}],
+    }
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        # una parte con un archivo fuera de tests/properties
+        ("tests/integration/test_x.py", "tests/properties --ignore=tests/integration/test_x.py"),
+        # el resto no excluye un archivo de otra parte: correría dos veces
+        (
+            "tests/properties/a.py tests/properties/b.py",
+            "tests/properties --ignore=tests/properties/a.py",
+        ),
+        # el resto excluye un archivo que ninguna parte corre: quedaría fuera
+        (
+            "tests/properties/a.py",
+            "tests/properties --ignore=tests/properties/a.py --ignore=tests/properties/c.py",
+        ),
+        # sin parte de resto
+        ("tests/properties/a.py", "tests/properties/b.py"),
+    ],
+)
+def test_a_property_split_that_leaves_out_or_repeats_a_file_is_detected(
+    parts: tuple[str, ...],
+) -> None:
+    with pytest.raises(AssertionError):
+        _check_property_parts(_parts_job(*parts))
+
+
 def test_nightly_runs_the_suites_of_lc_nuc_35_and_keeps_the_report_90_days() -> None:
     nightly = _workflow("nightly")
     assert _triggers(nightly) == {"schedule", "workflow_dispatch"}
@@ -573,7 +623,14 @@ def test_nightly_runs_the_suites_of_lc_nuc_35_and_keeps_the_report_90_days() -> 
     assert "--hypothesis-profile=nightly -m integration tests/conformance" in run
     assert "Conformidad omitida" not in run and "exit 1" not in run
     assert _position(run, "uv sync --frozen") < _position(run, "rm -f ~/.ssh/vigia_contracts")
-    assert "--ignore=tests/conformance" in _run_text(jobs["propiedades-integracion"])
+    # Reparto del 2026-10-13 (VIG-173): la integración sin propiedades excluye la conformidad y las
+    # propiedades; las propiedades con base van en partes que solo nombran tests/properties, y la
+    # última es el resto por exclusión de las demás, para que ningún archivo nuevo quede fuera.
+    integration = _run_text(jobs["integracion"])
+    assert "--hypothesis-profile=nightly -m integration" in integration
+    assert "--ignore=tests/conformance" in integration
+    assert "--ignore=tests/properties" in integration
+    _check_property_parts(jobs["propiedades-integracion"])
     (artifact,) = [
         step["with"]
         for step in conformance["steps"]
