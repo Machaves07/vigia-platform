@@ -27,6 +27,11 @@ Sin ``VIGIA_FORWARDED_ALLOW_IPS``, uvicorn tampoco: ninguna cabecera cambia esa 
 ella (redes separadas por espacios: las subredes del balanceador), uvicorn toma la dirección del
 cliente de ``X-Forwarded-For`` **solo** en las conexiones que llegan desde esas redes. Una red que
 lo admita todo (``*``, ``0.0.0.0/0``, ``::/0``) no se acepta: equivale a creer a cualquiera.
+
+**Conexiones persistentes** (VIG-196). El balanceador reutiliza sus conexiones hacia la tarea
+mientras no pasen ``LOAD_BALANCER_IDLE_SECONDS`` sin uso; uvicorn las mantiene
+``KEEP_ALIVE_SECONDS``, más tiempo, para que nunca sea el proceso quien cierre una conexión que el
+balanceador va a reutilizar (un ``502`` para esa petición).
 """
 
 from __future__ import annotations
@@ -59,6 +64,8 @@ from vigia_platform.shared.runtime.config import report_invalid
 __all__ = [
     "API_PORT",
     "FORWARDED_VARIABLE",
+    "KEEP_ALIVE_SECONDS",
+    "LOAD_BALANCER_IDLE_SECONDS",
     "RUNTIME_VARIABLE",
     "ApiServerConfig",
     "build_server",
@@ -79,6 +86,15 @@ MAX_FORWARDED_NETWORKS: Final = 16
 GRACEFUL_SHUTDOWN_SECONDS: Final = 25.0
 """Espera de las peticiones en curso al parar: menos que los 30 s de ``stopTimeout`` por defecto
 de Fargate ``[objetivo propio]``."""
+LOAD_BALANCER_IDLE_SECONDS: Final = 60
+"""Tiempo de inactividad de los balanceadores de ``infra/stacks/edge.py`` (el de AWS por
+defecto)."""
+KEEP_ALIVE_SECONDS: Final = 75
+"""Cuánto mantiene uvicorn una conexión persistente ociosa: **más** que
+``LOAD_BALANCER_IDLE_SECONDS``, como pide AWS para los destinos de un balanceador de aplicación.
+Con los 5 s de uvicorn por defecto, el proceso cierra la conexión que el balanceador aún cree
+abierta y la petición que la reutiliza en ese instante recibe un ``502`` del balanceador
+(VIG-196)."""
 _SIGNALS: Final = (signal.SIGINT, signal.SIGTERM)
 _RUNTIME_REFERENCE: Final = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
 """Solo un constructor del propio paquete: la variable no puede nombrar cualquier función."""
@@ -182,6 +198,7 @@ def build_server(app: FastAPI, server: ApiServerConfig) -> uvicorn.Server:
             log_config=None,
             access_log=False,
             timeout_graceful_shutdown=int(server.graceful_shutdown_seconds),
+            timeout_keep_alive=KEEP_ALIVE_SECONDS,
         )
     )
 
