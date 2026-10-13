@@ -2,7 +2,8 @@
 # un nightly verde sobre el mismo commit.
 #
 # Qué corre (fila nightly de LC-NUC-35, con los trabajos de U-03 de LC-GOB-22):
-# - propiedades perfil nightly (2 000 ejemplos por propiedad), sin y con integración;
+# - propiedades perfil nightly (2 000 ejemplos por propiedad), sin y con integración (la integración
+#   en un trabajo y las propiedades con base en tres partes en paralelo);
 # - carga de U-03 (TASK-231): perfil nightly de tests/load (100 nodos, 300 zonas y reconexión
 #   masiva) con el cliente sintético de consola, en su propio trabajo;
 # - bancos de NFR-NUC-01 y 02 (regresión del 50 %) y de NFR-GOB-01, 03, 04, 05, 09 y 10
@@ -106,8 +107,13 @@ jobs:
       - name: propiedades de U-02 y U-03 con el perfil nightly
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --durations=15 tests/properties
 
-  propiedades-integracion:
-    name: propiedades nightly (integración)
+  # Desde el 2026-10-13 la integración se reparte en dos: el run 38326591602 llegó al tope de 240 min
+  # con todo junto (las propiedades de tests/properties que usan la base, 2 000 ejemplos en serie).
+  # Este trabajo corre la integración que no son propiedades; `propiedades-integracion` reparte las
+  # propiedades con base en tres partes. La tercera es «el resto» por exclusión, así que un archivo
+  # nuevo de tests/properties nunca queda fuera.
+  integracion:
+    name: integración nightly (sin tests/properties)
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     defaults:
@@ -134,8 +140,53 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: pruebas perfil nightly con integration (sin carga, bancos, volumetría, resiliencia ni conformidad)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/load --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance --durations=15
+      - name: pruebas perfil nightly con integration (sin propiedades, carga, bancos, volumetría, resiliencia ni conformidad)
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/properties --ignore=tests/load --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance --durations=15
+
+  propiedades-integracion:
+    name: propiedades nightly (integración, ${{ matrix.parte }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - parte: ledger e identidad
+            pruebas: tests/properties/test_append_only_ledger.py tests/properties/test_append_only_identity.py tests/properties/test_ledger_canonical.py tests/properties/test_ledger_chain_stateful.py tests/properties/test_writer_idempotency.py tests/properties/test_writer_atomicity.py tests/properties/test_verify_mutations.py tests/properties/test_verify_sql_vs_python.py tests/properties/test_canonical_envelope_oracle.py tests/properties/test_outbox_stateful.py tests/properties/test_outbox_publish_atomicity.py
+          - parte: consulta, vistas y autorización
+            pruebas: tests/properties/test_labels_query.py tests/properties/test_live_view_token.py tests/properties/test_live_view_rate_limit.py tests/properties/test_concessions.py tests/properties/test_partitions.py tests/properties/test_partition_sharing.py tests/properties/test_throttle.py tests/properties/test_provider_policy.py tests/properties/test_authz.py tests/properties/test_role_incompatibility.py
+          - parte: resto (gob y máquinas de estado)
+            pruebas: tests/properties --ignore=tests/properties/test_append_only_ledger.py --ignore=tests/properties/test_append_only_identity.py --ignore=tests/properties/test_ledger_canonical.py --ignore=tests/properties/test_ledger_chain_stateful.py --ignore=tests/properties/test_writer_idempotency.py --ignore=tests/properties/test_writer_atomicity.py --ignore=tests/properties/test_verify_mutations.py --ignore=tests/properties/test_verify_sql_vs_python.py --ignore=tests/properties/test_canonical_envelope_oracle.py --ignore=tests/properties/test_outbox_stateful.py --ignore=tests/properties/test_outbox_publish_atomicity.py --ignore=tests/properties/test_labels_query.py --ignore=tests/properties/test_live_view_token.py --ignore=tests/properties/test_live_view_rate_limit.py --ignore=tests/properties/test_concessions.py --ignore=tests/properties/test_partitions.py --ignore=tests/properties/test_partition_sharing.py --ignore=tests/properties/test_throttle.py --ignore=tests/properties/test_provider_policy.py --ignore=tests/properties/test_authz.py --ignore=tests/properties/test_role_incompatibility.py
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: propiedades con base, perfil nightly (${{ matrix.parte }})
+        env:
+          PRUEBAS: ${{ matrix.pruebas }}
+        run: |
+          read -r -a pruebas <<< "$PRUEBAS"
+          uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --durations=15 "${pruebas[@]}"
 
   bancos:
     name: bancos (regresión del 20 % en U-03 y del 50 % en U-02)
@@ -368,7 +419,7 @@ jobs:
 
   informe:
     name: informe nocturno
-    needs: [propiedades, propiedades-suite, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
+    needs: [propiedades, propiedades-suite, integracion, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
