@@ -328,7 +328,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings = settings_from(arguments)
         profile = settings.profile
-        ends_at = WALL.now() + dt.timedelta(hours=settings.hours, seconds=FLUSH_SECONDS)
+        from tests.load.driver import FLUSH_EXTENSION_SECONDS
+
+        ends_at = WALL.now() + dt.timedelta(
+            hours=settings.hours, seconds=FLUSH_SECONDS + FLUSH_EXTENSION_SECONDS
+        )
         provisioning = check_fleet(settings, ends_at)
     except SoakError as error:
         sys.stderr.write(f"error: {error}\n")

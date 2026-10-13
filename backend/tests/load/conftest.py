@@ -51,8 +51,9 @@ SEED_VARIABLE: Final = "VIGIA_LOAD_SEED"
 MAX_SEED: Final = 2**53 - 1
 API_LOG: Final = "api-carga.log"
 FLUSH_SECONDS: Final = 600.0
-"""Tope real para vaciar las bandejas al final de las fases (nunca decide un resultado: lo que
-quede sin enviar es pérdida y falla la prueba)."""
+"""Tope real para vaciar las bandejas al final de las fases, alargado por los reintentos que el
+cliente tenga programados (``driver.FLUSH_EXTENSION_SECONDS``); nunca decide un resultado: lo que
+quede sin enviar es pérdida, sale en ``unsent`` del informe y falla la prueba."""
 
 _SEED: int | None = None
 
