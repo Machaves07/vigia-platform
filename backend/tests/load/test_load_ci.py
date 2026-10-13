@@ -36,6 +36,7 @@ from tests.load.provision import Fleet
 from tests.load.report import (
     BulkheadSampler,
     analyse,
+    rate_limited_trend,
     saturation_transients,
     secret_findings,
     write_report,
@@ -153,18 +154,25 @@ def assert_functional(
 ) -> None:
     """Lo común a ``ci`` y ``nightly``: sin pérdida, sin duplicados, cadena íntegra.
 
-    Con ``saturation_blocks`` (``ci``), ningún transitorio por saturación; sin él (el banco de
-    ``nightly``, A-65), los transitorios son tendencia: van al informe y no fallan la ejecución,
-    porque NFR-GOB-02 solo bloquea en el ``soak`` sobre ``staging``. Lo demás bloquea siempre."""
+    Con ``saturation_blocks`` (``ci``), ningún transitorio por saturación ni ningún
+    ``rate_limited``; sin él (el banco de ``nightly``), los transitorios (A-65) y los
+    ``rate_limited`` de registros y concesiones por encima del mínimo de NFR-CTR-02 (A-67) son
+    tendencia: van al informe y no fallan la ejecución, porque NFR-GOB-02 solo bloquea en el
+    ``soak`` sobre ``staging``. Lo demás bloquea siempre, también un ``rate_limited`` por debajo
+    del mínimo o en el latido."""
     assert analysis["emitted"] > 0
     assert analysis["accepted"] == analysis["emitted"], analysis
     assert analysis["lost"] == 0, analysis
     assert analysis["dead_letter"] == {}, analysis["dead_letter"]
     assert analysis["halted"] == {}, analysis["halted"]
-    assert analysis["rate_limited_below_minimum"] == 0, analysis["rate_limited_by_operation"]
-    assert analysis["rate_limited_by_operation"] == {}, analysis["rate_limited_by_operation"]
+    limited = analysis["rate_limited_by_operation"]
+    assert analysis["rate_limited_below_minimum"] == 0, limited
     if saturation_blocks:
+        assert limited == {}, limited
         assert not saturation_transients(analysis)
+    else:
+        tolerated = rate_limited_trend(analysis)
+        assert {op: n for op, n in limited.items() if op not in tolerated} == {}, limited
     assert ledger["missing"] == 0 and ledger["unexpected"] == 0, ledger
     assert ledger["records"] == analysis["emitted"], ledger
     assert ledger["duplicated_source_keys"] == 0, ledger
