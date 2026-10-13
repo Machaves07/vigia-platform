@@ -7,6 +7,7 @@ Contra una aplicación de eco (devuelve las cabeceras que recibe), sin contenedo
   ``app.``, ninguna. La sonda con el descarte apagado demuestra que la prueba detecta el reenvío.
 - Un certificado de otra autoridad no completa el saludo TLS (modo *verify*).
 - Reparto alterno **por petición**, también dentro de una conexión persistente.
+- Su ``502`` propio dice qué error de transporte tuvo hacia el proceso (VIG-196).
 
 Solo datos generados.
 """
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import socket
 import ssl
 import threading
 import time
@@ -32,7 +34,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from starlette.types import Receive, Scope, Send
 
-from tests.conformance.mtls_proxy import ServerTls, mtls_proxy, server_tls
+from tests.conformance.mtls_proxy import (
+    UPSTREAM_ERROR_HEADER,
+    ServerTls,
+    mtls_proxy,
+    server_tls,
+)
 from tests.node_api_support import alb_headers
 from tests.resilience.harness import WALL, free_port
 from vigia_platform.node_api.certificate_profile import NodeSubject, subject_name
@@ -262,6 +269,59 @@ def test_a_head_keeps_the_content_length_of_the_application(world: World) -> Non
     assert response.status_code == 200
     assert response.headers["content-length"] == str(OBJECT_SIZE)
     assert response.content == b""
+
+
+@contextlib.contextmanager
+def hanging_up_backend() -> Iterator[str]:
+    """Un proceso que acepta la conexión y la cierra sin responder (lo que vio el balanceador en
+    VIG-196, cuando ``vigia-api`` cerraba una conexión persistente ociosa)."""
+    listener = socket.create_server(("127.0.0.1", 0))
+    listener.settimeout(START_SECONDS)
+    stopped = threading.Event()
+
+    def accept() -> None:
+        while not stopped.is_set():
+            try:
+                connection, _ = listener.accept()
+            except OSError:
+                return
+            connection.recv(65_536)
+            connection.close()
+
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        stopped.set()
+        listener.close()
+        thread.join(timeout=START_SECONDS)
+
+
+def test_a_502_of_the_balancer_says_which_transport_error_it_had(world: World) -> None:
+    with (
+        hanging_up_backend() as hanging,
+        mtls_proxy("app", [hanging, f"http://127.0.0.1:{free_port()}"], world.tls) as proxy,
+        world.client() as client,
+    ):
+        answers = [client.get(proxy.url + "/fleet/nodes/x?limit=1") for _ in range(2)]
+    assert [answer.status_code for answer in answers] == [502, 502]
+    errors = ["RemoteProtocolError", "ConnectError"]
+    assert [answer.headers[UPSTREAM_ERROR_HEADER] for answer in answers] == errors
+    assert [exchange.upstream_error for exchange in proxy.exchanges] == errors
+    assert [exchange.path for exchange in proxy.exchanges] == ["/fleet/nodes/x"] * 2
+
+
+def test_an_answer_of_the_application_has_no_balancer_error(world: World) -> None:
+    with (
+        echo_backend() as backend,
+        mtls_proxy("app", [backend], world.tls) as proxy,
+        world.client() as client,
+    ):
+        answer = client.get(proxy.url + "/fleet/nodes")
+    assert answer.status_code == 200
+    assert UPSTREAM_ERROR_HEADER not in answer.headers
+    assert [exchange.upstream_error for exchange in proxy.exchanges] == [None]
 
 
 def test_the_storage_listener_keeps_the_host_of_the_signature(world: World) -> None:

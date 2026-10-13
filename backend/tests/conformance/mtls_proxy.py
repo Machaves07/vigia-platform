@@ -29,6 +29,7 @@ import contextlib
 import datetime as dt
 import itertools
 import ssl
+import sys
 import threading
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -44,9 +45,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests.node_api_support import alb_headers
+from vigia_platform.shared.clock import SystemClock
 
 __all__ = [
     "MTLS_HEADER_PREFIX",
+    "UPSTREAM_ERROR_HEADER",
     "Exchange",
     "MtlsProxy",
     "ServerTls",
@@ -57,7 +60,11 @@ __all__ = [
 MTLS_HEADER_PREFIX: Final = "x-amzn-mtls-"
 UPSTREAM_TIMEOUT_SECONDS: Final = 120.0
 """Tope de la petición a la aplicación: nunca decide una prueba (retro 15)."""
+UPSTREAM_ERROR_HEADER: Final = "x-vigia-balancer-error"
+"""En el ``502`` propio del balanceador: la clase del ``httpx.HTTPError`` hacia el proceso
+(``ConnectError``, ``RemoteProtocolError``, ``ReadTimeout``…), para el informe de carga."""
 START_TIMEOUT_SECONDS: Final = 30.0
+_WALL: Final = SystemClock()
 _READ_CHUNK: Final = 65_536
 _HOP_BY_HOP: Final = frozenset(
     {
@@ -160,6 +167,8 @@ class Exchange:
     """Las cabeceras ``X-Amzn-Mtls-*`` que llegaron a la aplicación (nombre en minúsculas)."""
     dropped_mtls: tuple[str, ...]
     """Los nombres de las ``X-Amzn-Mtls-*`` que traía el cliente y se descartaron."""
+    upstream_error: str | None = None
+    """En un ``502`` del balanceador, la clase del ``httpx.HTTPError`` hacia el proceso."""
 
 
 @dataclass
@@ -314,6 +323,9 @@ class MtlsProxy:
         status, response_headers, content = await self._upstream(
             self.backends[index], request.method.decode("ascii"), target, headers, body
         )
+        upstream_error = next(
+            (value for name, value in response_headers if name == UPSTREAM_ERROR_HEADER), None
+        )
         with self._lock:
             self.exchanges.append(
                 Exchange(
@@ -325,6 +337,7 @@ class MtlsProxy:
                     client_certificate=certificate is not None,
                     forwarded_mtls=forwarded_mtls,
                     dropped_mtls=tuple(dropped),
+                    upstream_error=upstream_error,
                 )
             )
         if request.method != b"HEAD":
@@ -343,8 +356,21 @@ class MtlsProxy:
         upstream = self._client.build_request(method, base + target, headers=headers, content=body)
         try:
             response = await self._client.send(upstream, stream=True)
-        except httpx.HTTPError:
-            return 502, [("content-type", "text/plain")], b"balanceador: proceso sin respuesta"
+        except httpx.HTTPError as error:
+            # Como el balanceador real (``HTTPCode_ELB_502_Count``), un 502; además, qué error de
+            # transporte fue, en la respuesta y en la salida del proceso (sin cuerpos ni consultas).
+            kind = type(error).__name__
+            print(
+                f"{_WALL.now().isoformat()} balanceador {self.name}: 502 {method} "
+                f"{target.split('?', 1)[0]} ({base}): {kind}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return (
+                502,
+                [("content-type", "text/plain"), (UPSTREAM_ERROR_HEADER, kind)],
+                f"balanceador: proceso sin respuesta ({kind})".encode(),
+            )
         try:
             # Los bytes tal cual (sin descomprimir): el cliente recibe lo que envió la aplicación.
             content = b"".join([chunk async for chunk in response.aiter_raw()])

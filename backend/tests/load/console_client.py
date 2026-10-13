@@ -22,7 +22,9 @@ reunió ``MIN_SAMPLES`` muestras. La ruta del acta estructurada (``GET /commissi
 {record_id}``, interfaces §3.3) aún no está en ``openapi/app.yaml``: el cliente la declara, la
 informa como ``unpublished`` y la medirá en cuanto exista (``published_routes``).
 
-Las respuestas no se guardan: la de ``POST /documents`` lleva una URL prefirmada (PR-GOB-31).
+Las respuestas no se guardan: la de ``POST /documents`` lleva una URL prefirmada (PR-GOB-31). De
+cada respuesta fuera de 2xx, el informe guarda el instante, el estado, la duración y, si el ``502``
+es del balanceador local, qué error de transporte tuvo hacia el proceso (VIG-196).
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from typing import Any, Final
 import httpx
 import yaml
 
+from tests.conformance.mtls_proxy import UPSTREAM_ERROR_HEADER
 from tests.conformance.platform_target import BACKEND, WALL
 from tests.load.provision import ConsoleSession
 from tests.load.report import percentile
@@ -69,6 +72,9 @@ HTTP_SECONDS: Final = 60.0
 SATURATION_STATUS: Final = 503
 """``temporarily_unavailable`` (mamparo de personas lleno, base o almacén sin respuesta): falta de
 capacidad, tendencia donde el p95 lo es (A-65); cualquier otro estado fuera de 2xx es un error."""
+NON_2XX_REPORTED: Final = 10
+"""Respuestas fuera de 2xx por ruta que el informe detalla (instante, estado, duración y error del
+balanceador), para situarlas frente a las ventanas de caída y de reconexión."""
 CONCESSION_HEADER: Final = "X-Vigia-Concession"
 DOCUMENT_BYTES: Final = 4_096
 
@@ -115,6 +121,9 @@ class Sample:
     at: dt.datetime
     elapsed_ms: float
     status: int
+    balancer_error: str | None = None
+    """En un ``502`` del balanceador local, el error de transporte hacia el proceso
+    (``UPSTREAM_ERROR_HEADER``): dice si la plataforma colgó o cortó la conexión (VIG-196)."""
 
 
 @dataclass(frozen=True)
@@ -206,7 +215,15 @@ class ConsoleClient:
             response = client.request(method, path, json=body)
             response.read()
             elapsed_ms = (WALL.monotonic() - started) * 1000
-            self.samples.append(Sample(route.name, WALL.now(), elapsed_ms, response.status_code))
+            self.samples.append(
+                Sample(
+                    route.name,
+                    WALL.now(),
+                    elapsed_ms,
+                    response.status_code,
+                    response.headers.get(UPSTREAM_ERROR_HEADER),
+                )
+            )
 
     def run(self, rounds: int | None = None) -> None:
         """``rounds`` pasadas, o hasta ``stop`` si es ``None``."""
@@ -302,7 +319,8 @@ def evaluate(
         measured = selected.get(route.name, [])
         values = [sample.elapsed_ms for sample in measured]
         p95 = percentile(values, 95)
-        errors = sorted({sample.status for sample in measured if not 200 <= sample.status < 300})
+        failed = [sample for sample in measured if not 200 <= sample.status < 300]
+        errors = sorted({sample.status for sample in failed})
         summary[route.name] = {
             "p95_target_ms": route.p95_ms,
             "count": len(values),
@@ -310,6 +328,15 @@ def evaluate(
             "p95_ms": None if p95 is None else round(p95, 1),
             "max_ms": None if not values else round(max(values), 1),
             "non_2xx": errors,
+            "non_2xx_samples": [
+                {
+                    "at": sample.at.isoformat(),
+                    "status": sample.status,
+                    "elapsed_ms": round(sample.elapsed_ms, 1),
+                    "balancer_error": sample.balancer_error,
+                }
+                for sample in failed[:NON_2XX_REPORTED]
+            ],
         }
         if len(values) < min_samples:
             failures.append(f"{route.name}: {len(values)} muestras (mínimo {min_samples})")
@@ -322,7 +349,9 @@ def evaluate(
             failures.append(f"{route.name}: respondió {', '.join(map(str, errors))}")
         unexpected = [status for status in errors if status != SATURATION_STATUS]
         if unexpected:
-            broken.append(f"{route.name}: respondió {', '.join(map(str, unexpected))}")
+            causes = sorted({s.balancer_error for s in failed if s.balancer_error is not None})
+            detail = f" (balanceador: {', '.join(causes)})" if causes else ""
+            broken.append(f"{route.name}: respondió {', '.join(map(str, unexpected))}{detail}")
     return ConsoleVerdict(
         summary, tuple(failures), tuple(unpublished), tuple(broken), tuple(unmeasured)
     )
