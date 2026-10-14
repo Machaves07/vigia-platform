@@ -3,7 +3,7 @@
 #
 # Qué corre (fila nightly de LC-NUC-35, con los trabajos de U-03 de LC-GOB-22):
 # - propiedades perfil nightly (2 000 ejemplos por propiedad), sin y con integración (la integración
-#   en un trabajo y las propiedades con base en tres partes en paralelo);
+#   en un trabajo; tests/properties, sin y con base, en grupos por tiempos medidos en paralelo);
 # - carga de U-03 (TASK-231): perfil nightly de tests/load (100 nodos, 300 zonas y reconexión
 #   masiva) con el cliente sintético de consola, en su propio trabajo;
 # - bancos de NFR-NUC-01 y 02 (regresión del 50 %) y de NFR-GOB-01, 03, 04, 05, 09 y 10
@@ -75,11 +75,25 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks --ignore=tests/properties --durations=15
 
   # Las propiedades de U-02 y U-03 con el perfil nightly (PR-GOB-01 a 32 y las de U-02): el
-  # conjunto más lento de la suite. En su propio trabajo, con el tope del runner alojado.
+  # conjunto más lento de la suite. Desde VIG-199 (2026-10-13), en 5 grupos por tiempos medidos
+  # (pytest-split, least_duration) en lugar de un trabajo de 3 h 24 min (run 38414715206); medidos
+  # en el run 38499404963: 12 a 39 min por grupo. Los tiempos son los de
+  # backend/.test_durations_nightly (perfil nightly; el de ci.yml es otro archivo, perfil ci): una
+  # prueba que no está cuenta con la media y cae en algún grupo igual. La unión de los grupos es
+  # `-m "not integration" tests/properties` entera: lo comprueba tools/check_test_split.py --collect
+  # en cada PR. Cada grupo deja sus tiempos medidos (--store-durations --clean-durations sobre la
+  # copia del runner) en el artefacto tiempos-propiedades-N. Para renovar el archivo con los de un
+  # nightly en verde (desde la raíz):
+  #   gh run download <run> -p 'tiempos-*' -D /tmp/tiempos
+  #   jq -S --indent 4 -s add /tmp/tiempos/*/.test_durations_nightly > backend/.test_durations_nightly
   propiedades-suite:
-    name: propiedades nightly (tests/properties)
+    name: propiedades nightly (tests/properties, grupo ${{ matrix.grupo }} de 5)
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        grupo: [1, 2, 3, 4, 5]
     defaults:
       run:
         working-directory: backend
@@ -104,14 +118,24 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: propiedades de U-02 y U-03 con el perfil nightly
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --durations=15 tests/properties
+      - name: propiedades de U-02 y U-03 con el perfil nightly, un grupo de 5
+        env:
+          GRUPO: ${{ matrix.grupo }}
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --durations=15 --splits=5 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_nightly --store-durations --clean-durations tests/properties
+      - name: tiempos medidos del grupo
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: tiempos-propiedades-${{ matrix.grupo }}
+          path: backend/.test_durations_nightly
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90
 
   # Desde el 2026-10-13 la integración se reparte en dos: el run 38326591602 llegó al tope de 240 min
   # con todo junto (las propiedades de tests/properties que usan la base, 2 000 ejemplos en serie).
   # Este trabajo corre la integración que no son propiedades; `propiedades-integracion` reparte las
-  # propiedades con base en tres partes. La tercera es «el resto» por exclusión, así que un archivo
-  # nuevo de tests/properties nunca queda fuera.
+  # propiedades con base.
   integracion:
     name: integración nightly (sin tests/properties)
     runs-on: ubuntu-24.04
@@ -143,20 +167,18 @@ jobs:
       - name: pruebas perfil nightly con integration (sin propiedades, carga, bancos, volumetría, resiliencia ni conformidad)
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --ignore=tests/properties --ignore=tests/load --ignore=tests/benchmarks --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/conformance --durations=15
 
+  # Las propiedades con base (`-m integration tests/properties`) en 5 grupos por tiempos medidos,
+  # con la misma técnica y el mismo archivo de tiempos que `propiedades-suite` (VIG-199; antes, tres
+  # partes con listas de archivos a mano, la mayor de 82 min; medidos en el run 38499404963: 37 a
+  # 47 min por grupo). Artefactos tiempos-integracion-N.
   propiedades-integracion:
-    name: propiedades nightly (integración, ${{ matrix.parte }})
+    name: propiedades nightly (integración, grupo ${{ matrix.grupo }} de 5)
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - parte: ledger e identidad
-            pruebas: tests/properties/test_append_only_ledger.py tests/properties/test_append_only_identity.py tests/properties/test_ledger_canonical.py tests/properties/test_ledger_chain_stateful.py tests/properties/test_writer_idempotency.py tests/properties/test_writer_atomicity.py tests/properties/test_verify_mutations.py tests/properties/test_verify_sql_vs_python.py tests/properties/test_canonical_envelope_oracle.py tests/properties/test_outbox_stateful.py tests/properties/test_outbox_publish_atomicity.py
-          - parte: consulta, vistas y autorización
-            pruebas: tests/properties/test_labels_query.py tests/properties/test_live_view_token.py tests/properties/test_live_view_rate_limit.py tests/properties/test_concessions.py tests/properties/test_partitions.py tests/properties/test_partition_sharing.py tests/properties/test_throttle.py tests/properties/test_provider_policy.py tests/properties/test_authz.py tests/properties/test_role_incompatibility.py
-          - parte: resto (gob y máquinas de estado)
-            pruebas: tests/properties --ignore=tests/properties/test_append_only_ledger.py --ignore=tests/properties/test_append_only_identity.py --ignore=tests/properties/test_ledger_canonical.py --ignore=tests/properties/test_ledger_chain_stateful.py --ignore=tests/properties/test_writer_idempotency.py --ignore=tests/properties/test_writer_atomicity.py --ignore=tests/properties/test_verify_mutations.py --ignore=tests/properties/test_verify_sql_vs_python.py --ignore=tests/properties/test_canonical_envelope_oracle.py --ignore=tests/properties/test_outbox_stateful.py --ignore=tests/properties/test_outbox_publish_atomicity.py --ignore=tests/properties/test_labels_query.py --ignore=tests/properties/test_live_view_token.py --ignore=tests/properties/test_live_view_rate_limit.py --ignore=tests/properties/test_concessions.py --ignore=tests/properties/test_partitions.py --ignore=tests/properties/test_partition_sharing.py --ignore=tests/properties/test_throttle.py --ignore=tests/properties/test_provider_policy.py --ignore=tests/properties/test_authz.py --ignore=tests/properties/test_role_incompatibility.py
+        grupo: [1, 2, 3, 4, 5]
     defaults:
       run:
         working-directory: backend
@@ -181,12 +203,19 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: propiedades con base, perfil nightly (${{ matrix.parte }})
+      - name: propiedades con base, perfil nightly, un grupo de 5
         env:
-          PRUEBAS: ${{ matrix.pruebas }}
-        run: |
-          read -r -a pruebas <<< "$PRUEBAS"
-          uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --durations=15 "${pruebas[@]}"
+          GRUPO: ${{ matrix.grupo }}
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --durations=15 --splits=5 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_nightly --store-durations --clean-durations tests/properties
+      - name: tiempos medidos del grupo
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: tiempos-integracion-${{ matrix.grupo }}
+          path: backend/.test_durations_nightly
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90
 
   bancos:
     name: bancos (regresión del 20 % en U-03 y del 50 % en U-02)

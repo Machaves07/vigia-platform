@@ -1,11 +1,14 @@
-"""``tools/check_test_split.py``: los 4 grupos sin integración de ``ci.yml`` reparten la colección.
+"""``tools/check_test_split.py``: los grupos de pytest-split de ``ci.yml`` y ``nightly.yml``
+reparten su colección.
 
-Criterio de aceptación de VIG-198: la unión de los grupos de pytest-split es la colección completa
-de ``-m "not integration"``, sin pruebas fuera ni duplicadas, y la comprobación falla si un
-archivo queda fuera. Aquí se fijan:
+Criterios de aceptación de VIG-198 y VIG-199: la unión de los grupos de pytest-split es la
+colección completa de cada trabajo repartido (``-m "not integration"`` en ``ci.yml``;
+``-m "not integration" tests/properties`` y ``-m integration tests/properties`` en
+``nightly.yml``), sin pruebas fuera ni duplicadas, y la comprobación falla si un archivo queda
+fuera. Aquí se fijan:
 
-- la comprobación estática sobre el ``ci.yml`` real y, en negativo, sobre flujos sintéticos que
-  sacan pruebas antes del reparto o numeran mal la matriz;
+- la comprobación estática sobre los flujos reales y, en negativo, sobre flujos sintéticos que
+  sacan pruebas antes del reparto, nombran otras rutas o numeran mal la matriz;
 - la partición (``partition_problems``) con colecciones sintéticas;
 - la comprobación dinámica de punta a punta sobre un proyecto pytest sintético en ``tmp_path``:
   en verde con pytest-split de verdad y en rojo cuando un ``conftest`` saca un archivo de un grupo.
@@ -26,7 +29,12 @@ from tests.conftest import CI_FIXED_SEED
 from tools.check_test_split import (
     BACKEND,
     CI,
+    NIGHTLY,
+    NIGHTLY_INTEGRATION_SPEC,
+    NIGHTLY_SUITE_SPEC,
+    SPECS,
     SplitError,
+    SplitSpec,
     check,
     main,
     parse_collection,
@@ -40,16 +48,22 @@ _COMMAND = (
     'integration" --splits=4 --group="$GRUPO" --splitting-algorithm=least_duration '
     "--durations-path=.test_durations"
 )
+_NIGHTLY_COMMAND = (
+    "uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration "
+    '--durations=15 --splits=5 --group="$GRUPO" --splitting-algorithm=least_duration '
+    "--durations-path=.test_durations_nightly --store-durations --clean-durations tests/properties"
+)
 
 
 def _workflow(
     command: str = _COMMAND,
     groups: str = "[1, 2, 3, 4]",
     env: str = "GRUPO: ${{ matrix.grupo }}",
+    job_id: str = "backend-pruebas",
 ) -> str:
     return (
         "jobs:\n"
-        "  backend-pruebas:\n"
+        f"  {job_id}:\n"
         "    strategy:\n"
         f"      matrix: {{grupo: {groups}}}\n"
         "    steps:\n"
@@ -60,7 +74,11 @@ def _workflow(
     )
 
 
-# --- El ci.yml del repositorio ------------------------------------------------------------------
+def _nightly_workflow(command: str = _NIGHTLY_COMMAND, groups: str = "[1, 2, 3, 4, 5]") -> str:
+    return _workflow(command, groups, job_id=NIGHTLY_INTEGRATION_SPEC.job_id)
+
+
+# --- Los flujos del repositorio -----------------------------------------------------------------
 
 
 def test_the_ci_workflow_splits_without_excluding_anything() -> None:
@@ -69,6 +87,25 @@ def test_the_ci_workflow_splits_without_excluding_anything() -> None:
     assert job.groups == (1, 2, 3, 4)
     assert job.option("--splits") == "4"
     assert job.for_group(3)[job.arguments.index("--group=$GRUPO")] == "--group=3"
+
+
+@pytest.mark.parametrize("spec", [NIGHTLY_SUITE_SPEC, NIGHTLY_INTEGRATION_SPEC])
+def test_the_nightly_property_jobs_split_tests_properties_without_excluding_anything(
+    spec: SplitSpec,
+) -> None:
+    job = read_job(NIGHTLY.read_text(encoding="utf-8"), spec.job_id)
+    assert static_problems(job, spec) == []
+    assert job.groups == (1, 2, 3, 4, 5)
+    assert job.option("--durations-path") == ".test_durations_nightly"
+    assert (BACKEND / spec.durations).is_file()
+
+
+def test_the_three_split_jobs_are_checked() -> None:
+    assert [(spec.workflow, spec.job_id) for spec in SPECS] == [
+        (CI, "backend-pruebas"),
+        (NIGHTLY, "propiedades-suite"),
+        (NIGHTLY, "propiedades-integracion"),
+    ]
 
 
 def test_the_main_entry_point_passes_on_the_repository_workflow(
@@ -150,6 +187,64 @@ def test_a_broken_split_fails(arguments: dict[str, str], expected: str) -> None:
     assert expected in static_problems(read_job(_workflow(**arguments)))
 
 
+def test_the_synthetic_nightly_workflow_passes() -> None:
+    job = read_job(_nightly_workflow(), NIGHTLY_INTEGRATION_SPEC.job_id)
+    assert static_problems(job, NIGHTLY_INTEGRATION_SPEC) == []
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (
+            _NIGHTLY_COMMAND.removesuffix(" tests/properties"),
+            "la orden debe nombrar exactamente ['tests/properties']: []",
+        ),
+        (
+            _NIGHTLY_COMMAND.replace("tests/properties", "tests/properties/gob"),
+            "la orden debe nombrar exactamente ['tests/properties']: ['tests/properties/gob']",
+        ),
+        (
+            f"{_NIGHTLY_COMMAND} tests/integration",
+            "la orden debe nombrar exactamente ['tests/properties']: "
+            "['tests/properties', 'tests/integration']",
+        ),
+        (
+            f"{_NIGHTLY_COMMAND} --ignore=tests/properties/gob/test_pr_gob_29_node_rate_limits.py",
+            "la orden saca pruebas antes del reparto: "
+            "--ignore=tests/properties/gob/test_pr_gob_29_node_rate_limits.py",
+        ),
+        (
+            _NIGHTLY_COMMAND.replace("-m integration", '-m "not integration"'),
+            "la orden debe seleccionar exactamente -m \"integration\": ['not integration']",
+        ),
+        (
+            _NIGHTLY_COMMAND.replace(".test_durations_nightly", ".test_durations"),
+            "la orden debe leer los tiempos de --durations-path=.test_durations_nightly",
+        ),
+        (
+            _NIGHTLY_COMMAND.replace("--splits=5", "--splits=4"),
+            "la matriz debe numerar los grupos 1..4: [1, 2, 3, 4, 5]",
+        ),
+    ],
+)
+def test_a_broken_nightly_split_fails(command: str, expected: str) -> None:
+    job = read_job(_nightly_workflow(command), NIGHTLY_INTEGRATION_SPEC.job_id)
+    assert expected in static_problems(job, NIGHTLY_INTEGRATION_SPEC)
+
+
+def test_main_checks_every_split_job_of_a_given_workflow(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--workflow`` comprueba los trabajos repartidos que contiene, cada uno con su forma."""
+    workflow = tmp_path / "nightly.yml"
+    broken = _nightly_workflow(_NIGHTLY_COMMAND.replace("tests/properties", "tests/properties/gob"))
+    workflow.write_text(broken, encoding="utf-8")
+    assert main(["--workflow", str(workflow)]) == 1
+    assert "propiedades-integracion: la orden debe nombrar" in capsys.readouterr().err
+    workflow.write_text(_nightly_workflow(), encoding="utf-8")
+    assert main(["--workflow", str(workflow)]) == 0
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -161,7 +256,7 @@ def test_a_broken_split_fails(arguments: dict[str, str], expected: str) -> None:
         ),
         (_workflow(env="OTRO: 1"), "el paso de pytest debe tener env GRUPO"),
         (_workflow(command="echo sin pruebas"), "exactamente una orden pytest (0)"),
-        ("jobs: [\n", "ci.yml no es YAML válido"),
+        ("jobs: [\n", "el flujo no es YAML válido"),
     ],
 )
 def test_a_malformed_workflow_is_an_error(text: str, expected: str) -> None:
@@ -174,6 +269,8 @@ def test_main_reports_problems_and_errors(tmp_path: Path) -> None:
     broken.write_text(_workflow(groups="[1, 2, 3]"), encoding="utf-8")
     assert main(["--workflow", str(broken)]) == 1
     broken.write_text("jobs: {}\n", encoding="utf-8")
+    assert main(["--workflow", str(broken)]) == 2
+    broken.write_text("jobs: [\n", encoding="utf-8")
     assert main(["--workflow", str(broken)]) == 2
     assert main(["--workflow", str(tmp_path / "no-existe.yml")]) == 2
 
@@ -263,6 +360,68 @@ def test_a_file_dropped_from_one_group_is_detected(project: Path) -> None:
     assert check(_workflow(), collect=True, root=project) == [
         f"ningún grupo corre tests/test_c.py::test_c{n}" for n in range(3)
     ]
+
+
+@pytest.fixture
+def nightly_project(project: Path) -> Path:
+    """El proyecto sintético con un ``tests/properties`` de pruebas con y sin base, fuera de él
+    otras pruebas con base (que los grupos no deben correr) y un archivo de tiempos."""
+    (project / "tests" / "conftest.py").write_text(
+        "from hypothesis import settings\n"
+        "settings.register_profile('ci')\n"
+        "settings.register_profile('nightly')\n",
+        encoding="utf-8",
+    )
+    properties = project / "tests" / "properties"
+    properties.mkdir()
+    for name in ("p", "q", "r", "s", "t", "u"):
+        (properties / f"test_{name}.py").write_text(
+            "import pytest\n\n"
+            + "".join(
+                f"@pytest.mark.integration\ndef test_{name}{n}():\n    pass\n\n" for n in range(2)
+            )
+            + f"def test_{name}_sin_base():\n    pass\n",
+            encoding="utf-8",
+        )
+    durations = {f"tests/properties/test_p.py::test_p{n}": 100.0 + n for n in range(2)}
+    (project / ".test_durations_nightly").write_text(json.dumps(durations), encoding="utf-8")
+    return project
+
+
+def _nightly_ids(*names: str) -> list[str]:
+    return [f"tests/properties/test_{name}.py::test_{name}{n}" for name in names for n in range(2)]
+
+
+def test_the_nightly_groups_are_a_partition_and_collection_keeps_the_durations(
+    nightly_project: Path,
+) -> None:
+    durations = (nightly_project / ".test_durations_nightly").read_bytes()
+    assert (
+        check(
+            _nightly_workflow(), collect=True, root=nightly_project, spec=NIGHTLY_INTEGRATION_SPEC
+        )
+        == []
+    )
+    # La recolección quita --store-durations: sin eso reescribiría el archivo de tiempos.
+    assert (nightly_project / ".test_durations_nightly").read_bytes() == durations
+
+
+def test_a_property_file_dropped_from_the_nightly_groups_is_detected(
+    nightly_project: Path,
+) -> None:
+    """Mutación (VIG-199): un ``conftest`` saca ``tests/properties/test_r.py`` del grupo que le
+    toca; la comprobación lo dice prueba a prueba."""
+    with (nightly_project / "tests" / "conftest.py").open("a", encoding="utf-8") as conftest:
+        conftest.write(
+            "import pytest\n\n"
+            "@pytest.hookimpl(trylast=True)\n"
+            "def pytest_collection_modifyitems(config, items):\n"
+            "    if config.getoption('group', None):\n"
+            "        items[:] = [i for i in items if 'test_r.py' not in i.nodeid]\n"
+        )
+    assert check(
+        _nightly_workflow(), collect=True, root=nightly_project, spec=NIGHTLY_INTEGRATION_SPEC
+    ) == [f"ningún grupo corre {test}" for test in _nightly_ids("r")]
 
 
 def test_property_ids_do_not_depend_on_the_session_seed() -> None:
