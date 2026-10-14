@@ -11,7 +11,8 @@
 # - backend (lint y tipos): instalación congelada; ruff (deserialización insegura, hora del
 #   sistema, datetime sin zona); lint_rules (SQL por formato, tiempos de espera, registros); lint
 #   de migraciones; mypy estricto; export_openapi --check; build_verifier --check; y el reparto de
-#   los grupos (tools/check_test_split.py --collect: la unión de los 4 es la colección completa).
+#   los grupos (tools/check_test_split.py --collect: la unión de los 4 es la colección completa; y
+#   lo mismo para los grupos de propiedades de nightly.yml, VIG-199).
 # - backend (pruebas sin integración, grupo N de 4): matriz de 4 grupos por tiempos medidos
 #   (pytest-split con backend/.test_durations; VIG-198): pytest perfil ci sin integration
 #   (propiedades, tests/isolation, tests/abuse, tests/examples que no necesitan contenedores) con
@@ -134,7 +135,7 @@ jobs:
         run: uv run --frozen python -m vigia_platform.shared.api.export_openapi --check
       - name: build_verifier --check
         run: uv run --frozen python tools/build_verifier.py --check
-      - name: reparto de los grupos (la unión de los 4 es la colección completa sin integration)
+      - name: reparto de los grupos (la unión es la colección completa, en ci.yml y en nightly.yml)
         run: uv run --frozen python tools/check_test_split.py --collect
 
   # Grupos por tiempos de backend/.test_durations (pytest-split, algoritmo least_duration). Una prueba que no

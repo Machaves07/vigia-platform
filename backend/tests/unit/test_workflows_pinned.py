@@ -35,6 +35,7 @@ Cada regla se prueba también en negativo con un flujo sintético que la incumpl
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -45,6 +46,7 @@ import yaml
 
 from tests.integration.conftest import POSTGRES_IMAGE
 from tools import run_boot_check
+from tools.check_test_split import SPECS, read_job, static_problems
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 WORKFLOWS = REPOSITORY / ".github" / "workflows"
@@ -551,54 +553,49 @@ def test_the_sweeper_destroys_staging_older_than_six_hours_every_night() -> None
     )
 
 
-def _check_property_parts(job: dict[Any, Any]) -> None:
-    """Las partes de ``propiedades-integracion``: cada una nombra solo archivos de
-    tests/properties, y la última es ``tests/properties`` excluyendo exactamente los de las demás
-    (ni un archivo sin correr, ni uno corrido dos veces)."""
-    assert "--hypothesis-profile=nightly -m integration" in _run_text(job)
-    parts = [str(entry["pruebas"]).split() for entry in job["strategy"]["matrix"]["include"]]
-    assert len(parts) >= 2
-    *named_parts, rest = parts
-    named = [path for part in named_parts for path in part]
-    assert named and all(path.startswith("tests/properties/") for path in named), named
-    assert len(named) == len(set(named)), "un archivo en dos partes"
-    assert rest[0] == "tests/properties"
-    excluded = rest[1:]
-    assert all(arg.startswith("--ignore=tests/properties/") for arg in excluded), excluded
-    assert sorted(arg.removeprefix("--ignore=") for arg in excluded) == sorted(named)
-
-
-def _parts_job(*parts: str) -> dict[Any, Any]:
-    return {
-        "strategy": {"matrix": {"include": [{"pruebas": part} for part in parts]}},
-        "steps": [{"run": "pytest --hypothesis-profile=nightly -m integration"}],
-    }
-
-
 @pytest.mark.parametrize(
-    "parts",
+    ("job_id", "name"),
     [
-        # una parte con un archivo fuera de tests/properties
-        ("tests/integration/test_x.py", "tests/properties --ignore=tests/integration/test_x.py"),
-        # el resto no excluye un archivo de otra parte: correría dos veces
         (
-            "tests/properties/a.py tests/properties/b.py",
-            "tests/properties --ignore=tests/properties/a.py",
+            "propiedades-suite",
+            "propiedades nightly (tests/properties, grupo ${{ matrix.grupo }} de 5)",
         ),
-        # el resto excluye un archivo que ninguna parte corre: quedaría fuera
         (
-            "tests/properties/a.py",
-            "tests/properties --ignore=tests/properties/a.py --ignore=tests/properties/c.py",
+            "propiedades-integracion",
+            "propiedades nightly (integración, grupo ${{ matrix.grupo }} de 5)",
         ),
-        # sin parte de resto
-        ("tests/properties/a.py", "tests/properties/b.py"),
     ],
 )
-def test_a_property_split_that_leaves_out_or_repeats_a_file_is_detected(
-    parts: tuple[str, ...],
+def test_nightly_splits_the_properties_by_measured_times_without_hand_lists(
+    job_id: str, name: str
 ) -> None:
-    with pytest.raises(AssertionError):
-        _check_property_parts(_parts_job(*parts))
+    """VIG-199: los dos trabajos de propiedades del nightly son matrices de pytest-split por los
+    tiempos de ``.test_durations_nightly`` (perfil nightly; el de ``ci.yml`` es otro), sin listas
+    de archivos a mano; la forma la exige ``tools/check_test_split.py`` (estática aquí, con
+    ``--collect`` en «backend (lint y tipos)»). Cada grupo deja sus tiempos medidos como artefacto
+    y el tope de cada uno es de 90 min (la meta es ≤ 60)."""
+    spec = {spec.job_id: spec for spec in SPECS}[job_id]
+    nightly_text = (WORKFLOWS / "nightly.yml").read_text(encoding="utf-8")
+    assert static_problems(read_job(nightly_text, job_id), spec) == []
+    job = _workflow("nightly")["jobs"][job_id]
+    assert job["name"] == name
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"grupo": [1, 2, 3, 4, 5]}}
+    assert job["timeout-minutes"] <= 90
+    run = _run_text(job)
+    assert "--hypothesis-profile=nightly" in run and "include" not in str(job["strategy"])
+    assert "--store-durations --clean-durations" in run
+    (artifact,) = [
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert artifact["if"] == "always()"
+    assert artifact["with"]["path"] == "backend/.test_durations_nightly"
+    assert artifact["with"]["include-hidden-files"] is True
+    assert str(artifact["with"]["name"]).startswith("tiempos-")
+    durations = json.loads((REPOSITORY / "backend" / spec.durations).read_text(encoding="utf-8"))
+    assert isinstance(durations, dict) and durations
+    assert all(key.startswith("tests/properties/") for key in durations)
 
 
 def test_nightly_runs_the_suites_of_lc_nuc_35_and_keeps_the_report_90_days() -> None:
@@ -623,14 +620,22 @@ def test_nightly_runs_the_suites_of_lc_nuc_35_and_keeps_the_report_90_days() -> 
     assert "--hypothesis-profile=nightly -m integration tests/conformance" in run
     assert "Conformidad omitida" not in run and "exit 1" not in run
     assert _position(run, "uv sync --frozen") < _position(run, "rm -f ~/.ssh/vigia_contracts")
-    # Reparto del 2026-10-13 (VIG-173): la integración sin propiedades excluye la conformidad y las
-    # propiedades; las propiedades con base van en partes que solo nombran tests/properties, y la
-    # última es el resto por exclusión de las demás, para que ningún archivo nuevo quede fuera.
+    # Reparto del 2026-10-13 (VIG-173 y VIG-199): la integración y las pruebas sin base que no son
+    # propiedades excluyen tests/properties, y tests/properties entero (sin y con base) lo corren
+    # los grupos de pytest-split, cuya unión comprueba tools/check_test_split.py.
     integration = _run_text(jobs["integracion"])
     assert "--hypothesis-profile=nightly -m integration" in integration
     assert "--ignore=tests/conformance" in integration
     assert "--ignore=tests/properties" in integration
-    _check_property_parts(jobs["propiedades-integracion"])
+    assert "--ignore=tests/properties" in _run_text(jobs["propiedades"])
+    assert {spec.job_id for spec in SPECS if spec.workflow.name == "nightly.yml"} == {
+        "propiedades-suite",
+        "propiedades-integracion",
+    }
+    assert {(spec.marker, spec.paths) for spec in SPECS if spec.workflow.name == "nightly.yml"} == {
+        ("not integration", ("tests/properties",)),
+        ("integration", ("tests/properties",)),
+    }
     (artifact,) = [
         step["with"]
         for step in conformance["steps"]
