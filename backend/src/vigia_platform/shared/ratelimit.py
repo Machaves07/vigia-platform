@@ -22,7 +22,11 @@ aleatoria del proceso, así que ni un volcado de memoria contiene direcciones.
 
 **Aritmética entera**: el crédito de un cubo se cuenta en «fichas x nanosegundos de ventana»;
 cada nanosegundo suma ``limit`` unidades y una petición cuesta ``window_ns``. Así no hay errores
-de coma flotante que dejen pasar una petición de más o de menos.
+de coma flotante que dejen pasar una petición de más o de menos. El reloj, en cambio, da segundos
+en coma flotante: esperar exactamente ``retry_after_seconds`` puede convertirse en un nanosecundo
+menos (32,8 s pasan a 32 799 999 999 ns). Por eso una petición entra si al cubo le faltan como
+mucho ``_CLOCK_TOLERANCE_NS`` (100 ns) para la ficha: absorbe ese error y, como ningún presupuesto
+pasa de un millón de fichas por segundo, nunca adelanta una ficha entera dentro de una ventana.
 
 **Memoria acotada**: como mucho ``max_keys`` cubos. Cada ``prune_every`` comprobaciones (y siempre
 que se llega al tope) se podan los cubos que ya se han rellenado del todo, que equivalen a uno
@@ -76,6 +80,9 @@ __all__ = [
 
 _NS_PER_SECOND: Final = 1_000_000_000
 MAX_RETRY_AFTER_SECONDS: Final = 3_600
+_CLOCK_TOLERANCE_NS: Final = 100
+"""Error del reloj en coma flotante que absorbe la admisión (por debajo de 1 µs, el intervalo entre
+fichas del presupuesto más rápido posible: un millón por segundo)."""
 CONTRACT_MAX_RETRY_AFTER_SECONDS: Final = 60
 """Tope de ``retry_after_seconds`` en un ``rate_limited`` del contrato (NFR-GOB-33)."""
 BRAKE_KEY: Final = "brake:node"
@@ -232,9 +239,13 @@ class RateLimiter:
             self._buckets.move_to_end(key)
             bucket.refill(now_ns)
         cost = budget.window_ns
-        if bucket.credit >= cost:
+        if bucket.credit + _CLOCK_TOLERANCE_NS * budget.limit >= cost:
+            # El déficit tolerado (como mucho 100 ns de relleno) no se condona: el crédito puede
+            # quedar negativo y la ficha siguiente llega igual de tarde.
             bucket.credit -= cost
             return _ALLOWED
+        # El tiempo que falta se calcula sin la tolerancia: tras esperarlo, aunque el reloj pierda
+        # un nanosegundo al convertirlo, la tolerancia cubre la diferencia (PR-NUC-44).
         missing_ns = _ceil_div(cost - bucket.credit, budget.limit)
         seconds = _ceil_div(missing_ns, _NS_PER_SECOND)
         return Limited(min(max(seconds, 1), MAX_RETRY_AFTER_SECONDS))
