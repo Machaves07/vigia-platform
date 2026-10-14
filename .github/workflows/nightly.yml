@@ -76,8 +76,8 @@ jobs:
 
   # Las propiedades de U-02 y U-03 con el perfil nightly (PR-GOB-01 a 32 y las de U-02): el
   # conjunto más lento de la suite. Desde VIG-199 (2026-10-13), en 5 grupos por tiempos medidos
-  # (pytest-split, least_duration) en lugar de un trabajo de 3 h 24 min (run 38414715206); la prueba
-  # más lenta (PR-GOB-29, ~45 min) marca el mínimo de un grupo. Los tiempos son los de
+  # (pytest-split, least_duration) en lugar de un trabajo de 3 h 24 min (run 38414715206); medidos
+  # en el run 38499404963: 12 a 39 min por grupo. Los tiempos son los de
   # backend/.test_durations_nightly (perfil nightly; el de ci.yml es otro archivo, perfil ci): una
   # prueba que no está cuenta con la media y cae en algún grupo igual. La unión de los grupos es
   # `-m "not integration" tests/properties` entera: lo comprueba tools/check_test_split.py --collect
@@ -169,7 +169,8 @@ jobs:
 
   # Las propiedades con base (`-m integration tests/properties`) en 5 grupos por tiempos medidos,
   # con la misma técnica y el mismo archivo de tiempos que `propiedades-suite` (VIG-199; antes, tres
-  # partes con listas de archivos a mano, la mayor de 82 min). Artefactos tiempos-integracion-N.
+  # partes con listas de archivos a mano, la mayor de 82 min; medidos en el run 38499404963: 37 a
+  # 47 min por grupo). Artefactos tiempos-integracion-N.
   propiedades-integracion:
     name: propiedades nightly (integración, grupo ${{ matrix.grupo }} de 5)
     runs-on: ubuntu-24.04
