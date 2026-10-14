@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -143,6 +143,9 @@ def test_a_long_idle_period_never_banks_more_than_the_burst(budget: Budget, idle
 
 
 @given(budget=BUDGETS, gaps=GAPS)
+# Contraejemplo de VIG-175 (semilla 1676964334): tras esperar los 10 s prometidos, el reloj en coma
+# flotante daba 32 799 999 999 ns en vez de 32 800 000 000 y el cubo volvía a dar ``Limited(1)``.
+@example(budget=Budget(limit=1, window_seconds=10, burst=None), gaps=[1.9, 1.9, 0.0, 0.0])
 def test_retry_after_is_honest(budget: Budget, gaps: list[float]) -> None:
     clock = SimulatedClock(START)
     limiter = RateLimiter(clock)
@@ -152,6 +155,27 @@ def test_retry_after_is_honest(budget: Budget, gaps: list[float]) -> None:
         if isinstance(verdict, Limited):
             clock.advance(verdict.retry_after_seconds)
             assert isinstance(limiter.check(KEY, budget), Allowed)
+
+
+def test_the_clock_tolerance_is_bounded_and_never_accumulates() -> None:
+    # La admisión tolera 100 ns de déficit (el error del reloj en coma flotante, VIG-175), pero no
+    # lo condona: repetir esperas de 80 ns menos que el intervalo no adelanta una ficha cada vez.
+    budget = Budget(limit=1, window_seconds=1)
+    clock = SimulatedClock(START)
+    limiter = RateLimiter(clock)
+    assert isinstance(limiter.check(KEY, budget), Allowed)
+    clock.advance(1 - 150e-9)
+    assert limiter.check(KEY, budget) == Limited(1), "150 ns de déficit superan la tolerancia"
+
+    clock = SimulatedClock(START)
+    limiter = RateLimiter(clock)
+    assert isinstance(limiter.check(KEY, budget), Allowed)
+    clock.advance(1 - 80e-9)
+    assert isinstance(limiter.check(KEY, budget), Allowed), "80 ns de déficit entran"
+    clock.advance(1 - 80e-9)
+    assert isinstance(limiter.check(KEY, budget), Limited), "el déficit anterior se arrastra"
+    clock.advance(1.0)
+    assert isinstance(limiter.check(KEY, budget), Allowed)
 
 
 def test_the_published_budgets() -> None:
