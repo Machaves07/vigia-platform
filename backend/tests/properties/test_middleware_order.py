@@ -270,6 +270,8 @@ def test_a_valid_session_builds_the_context_of_its_organization() -> None:
         "__Host-vigia_session=",
         f"__Host-vigia_session={uuid.uuid4()}.{'A' * 43}",
     ],
+    # Identificadores estables, sin el UUID aleatorio: pytest-split reparte por identificador.
+    ids=["sin-cookie", "basura", "vacia", "uuid-desconocido"],
 )
 def test_without_a_usable_session_the_route_answers_unauthenticated(cookie: str | None) -> None:
     harness = Harness()
@@ -291,7 +293,11 @@ def test_a_repeated_session_cookie_is_ambiguous_and_denied() -> None:
     assert harness.store.lookups == []
 
 
-@pytest.mark.parametrize("value", ["no-es-uuid", str(uuid.uuid4()).upper(), "1" * 36])
+@pytest.mark.parametrize(
+    "value",
+    ["no-es-uuid", str(uuid.uuid4()).upper(), "1" * 36],
+    ids=["no-es-uuid", "uuid-mayusculas", "unos"],
+)
 def test_an_unreadable_concession_header_is_not_found(value: str) -> None:
     harness = Harness()
     cookie = harness.session("concesion")

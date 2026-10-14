@@ -8,11 +8,16 @@
 # terminar o, para construir la imagen, solo en ssh-agent (nunca en una capa: tools/image_audit.py).
 #
 # Qué cubre cada trabajo (lista de LC-NUC-35):
-# - backend (lint, tipos y pruebas sin integración): instalación congelada; ruff (deserialización
-#   insegura, hora del sistema, datetime sin zona); lint_rules (SQL por formato, tiempos de espera,
-#   registros); lint de migraciones; mypy estricto; export_openapi --check; build_verifier
-#   --check; pytest perfil ci sin integration (propiedades, tests/isolation, tests/abuse,
-#   tests/examples que no necesitan contenedores) con cobertura.
+# - backend (lint y tipos): instalación congelada; ruff (deserialización insegura, hora del
+#   sistema, datetime sin zona); lint_rules (SQL por formato, tiempos de espera, registros); lint
+#   de migraciones; mypy estricto; export_openapi --check; build_verifier --check; y el reparto de
+#   los grupos (tools/check_test_split.py --collect: la unión de los 4 es la colección completa).
+# - backend (pruebas sin integración, grupo N de 4): matriz de 4 grupos por tiempos medidos
+#   (pytest-split con backend/.test_durations; VIG-198): pytest perfil ci sin integration
+#   (propiedades, tests/isolation, tests/abuse, tests/examples que no necesitan contenedores) con
+#   cobertura, un artefacto por grupo.
+# - backend (lint, tipos y pruebas sin integración): el check obligatorio de siempre; agrega los
+#   dos anteriores y falla si alguno no terminó en verde.
 # - backend (pruebas de integración) y backend (pruebas de integración, segunda mitad): pytest
 #   perfil ci con integration (PostgreSQL y LocalStack con el Docker del runner) con cobertura,
 #   partido por directorio en dos trabajos paralelos (retro 23 C, 2026-10-07; antes 60-75 min en
@@ -22,7 +27,7 @@
 # - backend (carga ci): el perfil ci de tests/load (TASK-231, NFR-GOB-06) en su propio trabajo, en
 #   paralelo; las dos mitades de la integración lo ignoran (decisión del dueño del 2026-10-07;
 #   VIG-171 completa la canalización de carga). Sin cobertura: la carga no la cuenta.
-# - cobertura: combina los tres trabajos con cobertura (sin integración y las dos mitades) y exige
+# - cobertura: combina los trabajos con cobertura (los 4 grupos sin integración y las dos mitades) y exige
 #   ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 % global (tools/check_coverage.py).
 # - dependencias (licencias y pip-audit): lista permitida con LICENSE-EXCEPTIONS.md y avisos de
 #   vulnerabilidad de todo el bloqueo.
@@ -83,11 +88,16 @@ jobs:
   # El backend va en jobs paralelos (2026-10-01): con ~2900 pruebas el job único tardaba 32-37 min de un tope
   # de 45. Entre todos cubren exactamente la suite: `-m "not integration"` ∪ `-m integration`, y la integración
   # (sin tests/load, que va en «backend (carga ci)») en dos mitades por directorio (retro 23 C, 2026-10-07).
-  backend:
-    name: backend (lint, tipos y pruebas sin integración)
+  # Las pruebas sin integración van en 4 grupos por tiempos medidos (VIG-198, 2026-10-13; antes 35-60 min
+  # en un trabajo): «backend (lint y tipos)» corre el lint, los tipos y la comprobación del reparto;
+  # «backend (pruebas sin integración, grupo N de 4)» corre su grupo con cobertura; y el check obligatorio
+  # «backend (lint, tipos y pruebas sin integración)» conserva su nombre: solo da verde si los dos anteriores
+  # (los 4 grupos) terminaron en verde.
+  backend-lint:
+    name: backend (lint y tipos)
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -124,16 +134,76 @@ jobs:
         run: uv run --frozen python -m vigia_platform.shared.api.export_openapi --check
       - name: build_verifier --check
         run: uv run --frozen python tools/build_verifier.py --check
-      - name: pruebas perfil ci sin integration (con cobertura)
-        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not integration"
+      - name: reparto de los grupos (la unión de los 4 es la colección completa sin integration)
+        run: uv run --frozen python tools/check_test_split.py --collect
+
+  # Grupos por tiempos de backend/.test_durations (pytest-split, algoritmo least_duration). Una prueba que no
+  # está en el archivo cuenta con la media y cae en algún grupo igual; la unión la comprueba
+  # tools/check_test_split.py. Para renovar los tiempos (desde backend/, perfil ci, sin integración):
+  #   uv run coverage run -m pytest -p no:cacheprovider --hypothesis-profile=ci -m "not integration" \
+  #     --store-durations --clean-durations --durations-path=.test_durations
+  backend-pruebas:
+    name: backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        grupo: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada
+        run: uv sync --frozen
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: pruebas perfil ci sin integration, un grupo de 4 (con cobertura)
+        env:
+          GRUPO: ${{ matrix.grupo }}
+        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not integration" --splits=4 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations
       - name: datos de cobertura
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: cobertura-sin-integracion
+          name: cobertura-sin-integracion-${{ matrix.grupo }}
           path: backend/.coverage.*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
+
+  # El check obligatorio de siempre (rama y sesión de control). Corre aunque falle una dependencia
+  # (always()): un check obligatorio «omitido» cuenta como superado en GitHub, así que tiene que fallar.
+  backend:
+    name: backend (lint, tipos y pruebas sin integración)
+    needs: [backend-lint, backend-pruebas]
+    if: always() && (github.event_name == 'push' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: lint, tipos y los 4 grupos en verde
+        env:
+          LINT: ${{ needs.backend-lint.result }}
+          PRUEBAS: ${{ needs.backend-pruebas.result }}
+        run: |
+          echo "backend (lint y tipos): $LINT; pruebas sin integración (4 grupos): $PRUEBAS"
+          test "$LINT" = success && test "$PRUEBAS" = success
 
   # Integración en dos mitades por directorio (retro 23 C, 2026-10-07). Reparto medido en el CI de main
   # del 2026-10-07 (e57d499, 61,7 min en un trabajo): tests/properties ≈ 34,5 min (segunda mitad); el
@@ -258,10 +328,11 @@ jobs:
           fi
 
   # NFR-NUC-45: ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 % global, sobre la suite
-  # completa (los tres trabajos «backend» con cobertura). Solo necesita coverage.py y el código fuente.
+  # completa (los 4 grupos sin integración y las dos mitades de la integración, cada uno con su artefacto
+  # cobertura-*). Solo necesita coverage.py y el código fuente.
   cobertura:
     name: cobertura (≥ 90 % identity y ledger, ≥ 80 % global)
-    needs: [backend, backend-integracion, backend-integracion-2]
+    needs: [backend-pruebas, backend-integracion, backend-integracion-2]
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 15

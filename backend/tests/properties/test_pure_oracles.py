@@ -270,7 +270,9 @@ def test_rfc8785_any_double_bits_match_library(data: bytes) -> None:
         "\ud800",
         ["\udfff"],
     ],
-    ids=repr,
+    # repr(object()) lleva la dirección de memoria, distinta en cada proceso: pytest-split reparte
+    # por identificador (VIG-198).
+    ids=lambda document: "object()" if type(document) is object else repr(document),
 )
 def test_rfc8785_rejections_are_contract_errors(document: Any) -> None:
     assert library_canonical(document) is None

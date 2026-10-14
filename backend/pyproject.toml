@@ -74,6 +74,7 @@ dev = [
   "pyyaml>=6",
   "ruff>=0.6",
   "mypy>=1.11",
+  "pytest-split>=0.10",
 ]
 
 # La dependencia de `vigia-contracts` es una referencia directa (git+ssh), permitida por PEP 508.
