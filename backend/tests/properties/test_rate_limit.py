@@ -226,6 +226,19 @@ def test_keys_are_independent() -> None:
         "user:" + "a" * 64,
         "",
     ],
+    # Identificadores estables: el valor lleva un UUID aleatorio y los grupos de pytest-split de
+    # ci.yml reparten por identificador (VIG-198).
+    ids=[
+        "sesion-mayusculas",
+        "sesion-corta",
+        "origen",
+        "publica-salto-de-linea",
+        "nodo-uuid-mayusculas",
+        "nodo-operacion-mayuscula",
+        "nodo-sin-operacion",
+        "usuario",
+        "vacia",
+    ],
 )
 def test_keys_outside_the_closed_list_are_refused(key: str) -> None:
     with pytest.raises(ValueError):

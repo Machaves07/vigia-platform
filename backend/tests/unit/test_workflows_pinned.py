@@ -731,14 +731,73 @@ def test_ci_tools_are_installed_by_hash() -> None:
 
 
 def test_the_coverage_job_needs_every_backend_job_with_coverage() -> None:
-    """Sin integración y las dos mitades de la integración (retro 23 C): ninguna cifra baja."""
+    """Los 4 grupos sin integración (VIG-198) y las dos mitades de la integración (retro 23 C):
+    ninguna cifra baja. Cada trabajo con cobertura sube su artefacto ``cobertura-*`` (en la matriz,
+    uno por grupo) y «cobertura» los combina todos."""
     ci = _ci()
     job = next(job for job in ci["jobs"].values() if job["name"].startswith("cobertura"))
-    backend_jobs = ["backend", "backend-integracion", "backend-integracion-2"]
+    backend_jobs = ["backend-integracion", "backend-integracion-2", "backend-pruebas"]
     assert sorted(job["needs"]) == backend_jobs
+    artifacts = []
     for job_id in backend_jobs:
         steps = ci["jobs"][job_id]["steps"]
         assert any("coverage run -m pytest" in str(step.get("run")) for step in steps)
+        artifacts += [
+            str(step["with"]["name"])
+            for step in steps
+            if str(step.get("uses", "")).startswith("actions/upload-artifact")
+        ]
+    assert artifacts == [
+        "cobertura-integracion",
+        "cobertura-integracion-2",
+        "cobertura-sin-integracion-${{ matrix.grupo }}",
+    ]
+    (download,) = [
+        step["with"]
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact")
+    ]
+    assert download["pattern"] == "cobertura-*" and download["merge-multiple"] is True
+    # Ningún otro trabajo mide cobertura sin que «cobertura» lo espere.
+    measured = {
+        job_id for job_id, other in ci["jobs"].items() if "coverage run" in _job_text(other)
+    }
+    assert measured == set(backend_jobs)
+
+
+def test_the_required_backend_check_aggregates_lint_and_the_four_groups() -> None:
+    """VIG-198: el check obligatorio «backend (lint, tipos y pruebas sin integración)» conserva su
+    nombre, espera al lint y a la matriz, corre aunque fallen (un check omitido cuenta como verde)
+    y solo da verde si los dos terminaron en ``success``."""
+    jobs = _ci()["jobs"]
+    job = jobs["backend"]
+    assert job["name"] == "backend (lint, tipos y pruebas sin integración)"
+    assert sorted(job["needs"]) == ["backend-lint", "backend-pruebas"]
+    assert str(job["if"]).startswith("always() && ")
+    assert "github.event.pull_request.draft == false" in job["if"]
+    (step,) = job["steps"]
+    assert step["env"] == {
+        "LINT": "${{ needs.backend-lint.result }}",
+        "PRUEBAS": "${{ needs.backend-pruebas.result }}",
+    }
+    assert 'test "$LINT" = success && test "$PRUEBAS" = success' in step["run"]
+    lint = _job_text(jobs["backend-lint"])
+    for command in (
+        "ruff check",
+        "tools/lint_rules.py",
+        "tools/lint_migrations.py",
+        "mypy --strict src",
+        "export_openapi --check",
+        "build_verifier.py --check",
+        "tools/check_test_split.py --collect",
+    ):
+        assert command in lint, command
+    assert "pytest" not in lint
+    matrix = jobs["backend-pruebas"]
+    assert matrix["strategy"] == {"fail-fast": False, "matrix": {"grupo": [1, 2, 3, 4]}}
+    assert matrix["name"] == "backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)"
+    assert matrix["timeout-minutes"] <= 30
+    assert (REPOSITORY / "backend" / ".test_durations").is_file()
 
 
 def test_the_deploy_key_never_reaches_a_build_argument_or_a_file_in_the_image_jobs() -> None:

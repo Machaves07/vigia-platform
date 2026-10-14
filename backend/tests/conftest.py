@@ -41,6 +41,8 @@ localstack_endpoint = pytest.fixture(scope="session", name="localstack_endpoint"
 CI_PROFILE = "ci"
 NIGHTLY_PROFILE = "nightly"
 CI_FIXED_SEED = 20260929
+SESSION_SEED_ID = "seed=sesion"
+"""Identificador estable de la parametrización con la semilla de la sesión (VIG-198)."""
 
 settings.register_profile(CI_PROFILE, max_examples=200, deadline=None, print_blob=True)
 settings.register_profile(NIGHTLY_PROFILE, max_examples=2000, deadline=None, print_blob=True)
@@ -93,11 +95,21 @@ def pytest_report_header(config: pytest.Config) -> str:
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """Parametriza cada propiedad con las semillas del perfil activo."""
+    """Parametriza cada propiedad con las semillas del perfil activo.
+
+    El identificador de la semilla de la sesión es fijo (``seed=sesion``), no su valor: cambia en
+    cada proceso, y los grupos de pytest-split de ``ci.yml`` (VIG-198) ordenan y reparten por
+    identificador y buscan los tiempos de ``.test_durations`` por él. Con el valor en el
+    identificador, cada grupo repartía distinto (pruebas en dos grupos y pruebas en ninguno). El
+    valor se sigue imprimiendo en la cabecera y en el resumen para reproducir un fallo.
+    """
     if is_hypothesis_test(metafunc.function) and "_hypothesis_seed" in metafunc.fixturenames:
         seeds = _seeds_for_profile()
         metafunc.parametrize(
-            "_hypothesis_seed", seeds, indirect=True, ids=[f"seed={s}" for s in seeds]
+            "_hypothesis_seed",
+            seeds,
+            indirect=True,
+            ids=[f"seed={s}" if s == CI_FIXED_SEED else SESSION_SEED_ID for s in seeds],
         )
 
 
