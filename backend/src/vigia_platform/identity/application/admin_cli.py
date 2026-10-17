@@ -131,6 +131,7 @@ from vigia_platform.shared.runtime.config import RuntimeConfigInvalid
 from vigia_platform.shared.secrets import SecretsUnavailable
 from vigia_platform.shared.signing.keys import (
     KeySetPublicationRecord,
+    KeySetRotationDeferred,
     KeyStateConflict,
     SigningKeyRecord,
     SigningPurpose,
@@ -1630,6 +1631,9 @@ async def execute(
         return ExitCode.REJECTED
     except (KeyStateConflict, SigningKeyUnavailable):
         _fail(streams, "conflict", "las claves cambiaron o falta la key_set vigente; reintenta")
+        return ExitCode.REJECTED
+    except KeySetRotationDeferred as error:
+        _fail(streams, "key_set_overlap", str(error))
         return ExitCode.REJECTED
     except NodeCaError as error:
         _fail(streams, "node_ca_invalid", str(error))

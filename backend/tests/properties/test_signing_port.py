@@ -35,6 +35,7 @@ from vigia_contracts.signing import KeySet, SignatureInvalidError, verify
 from tests.signing_support import SigningWorld, bootstrapped_world, provider_context
 from vigia_platform.shared.signing import (
     NODE_PURPOSES,
+    OVERLAP,
     PlatformSignedEnvelope,
     SigningKeyRecord,
     SigningKeyUnavailable,
@@ -216,8 +217,13 @@ def test_key_set_publication_verifies_only_with_its_key_and_intact_bits(
 
     async def scenario() -> SigningWorld:
         world = await bootstrapped_world()
+        key_set_rotated = False
         for purpose in rotations:
             world.clock.advance(1)
+            if purpose is SigningPurpose.KEY_SET and key_set_rotated:
+                # Otra rotación de key_set espera a que venza el solapamiento (VIG-253).
+                world.clock.advance(OVERLAP.total_seconds())
+            key_set_rotated = key_set_rotated or purpose is SigningPurpose.KEY_SET
             await world.service.rotate(purpose, context=provider_context())
         return world
 

@@ -197,6 +197,25 @@ async def test_refresh_drops_material_of_keys_that_are_no_longer_active() -> Non
     assert len(world.service._private) == 5
 
 
+async def test_a_new_process_keeps_the_previous_key_set_material_for_the_overlap() -> None:
+    """VIG-253: la key_set ``overlapping`` firma las publicaciones de su solapamiento, así que
+    un proceso que arranca durante él carga su material; al retirarla, lo suelta."""
+    world = await bootstrapped_world()
+    previous = _active_id(world.service, SigningPurpose.KEY_SET)
+    await world.service.rotate(SigningPurpose.KEY_SET, context=provider_context())
+    fresh = world.new_service()
+    await fresh.start()
+    assert previous in fresh._private and len(fresh._private) == 6
+    publication = (
+        await fresh.rotate(SigningPurpose.CATALOG, context=provider_context())
+    ).publication
+    assert publication is not None and publication.signed_by_key_id == previous
+    world.clock.advance(timedelta(days=31).total_seconds())
+    await fresh.retire_expired()
+    assert await fresh.refresh() is True
+    assert previous not in fresh._private and len(fresh._private) == 5
+
+
 async def test_run_refresh_stops_when_asked() -> None:
     world = await bootstrapped_world()
     stop = asyncio.Event()

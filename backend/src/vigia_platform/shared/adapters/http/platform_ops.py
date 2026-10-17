@@ -41,7 +41,11 @@ from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.context import ActorKind, ScopeContext
-from vigia_platform.shared.signing.keys import SigningPurpose, format_timestamp
+from vigia_platform.shared.signing.keys import (
+    KeySetRotationDeferred,
+    SigningPurpose,
+    format_timestamp,
+)
 from vigia_platform.shared.signing.service import SigningKeyUnavailable, SigningNotReady
 
 __all__ = ["KeyRotatedOut", "ReplayOut", "platform_ops_router"]
@@ -137,7 +141,7 @@ def platform_ops_router() -> APIRouter:
         )
         try:
             result = await services.signing.rotate(purpose, context=authorized)
-        except SigningKeyUnavailable:
+        except (SigningKeyUnavailable, KeySetRotationDeferred):
             raise ApiError(ApiErrorCode.CONFLICT) from None
         except SigningNotReady:
             raise ApiError(ApiErrorCode.TEMPORARILY_UNAVAILABLE) from None
