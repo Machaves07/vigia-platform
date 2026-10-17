@@ -40,6 +40,7 @@ from vigia_platform.shared.storage import (
     PresignedRequest,
     S3Storage,
     StorageCredentials,
+    StoragePreconditionFailed,
     StorageSettings,
     StorageUnavailable,
     sha256_hex_to_b64,
@@ -241,6 +242,29 @@ def test_get_object_reads_the_requested_version() -> None:
         {"Bucket": BUCKET, "Key": KEY, "ChecksumMode": "ENABLED", "VersionId": "v1"},
         {"Bucket": BUCKET, "Key": KEY, "ChecksumMode": "ENABLED"},
     ]
+
+
+def test_conditional_put_passes_the_etag_and_returns_the_new_one() -> None:
+    calls: list[dict[str, Any]] = []
+
+    class Client:
+        def put_object(self, **kwargs: Any) -> dict[str, str]:
+            calls.append(kwargs)
+            return {"ETag": '"new"', "VersionId": "v2"}
+
+    head = asyncio.run(_storage(Client()).put_object(KEY, b"clip", "video/mp4", if_match='"old"'))
+    assert head.etag == '"new"'
+    assert head.version_id == "v2"
+    assert calls[0]["IfMatch"] == '"old"'
+
+
+def test_conditional_put_exposes_a_precondition_failure() -> None:
+    class Client:
+        def put_object(self, **_: Any) -> None:
+            raise _client_error(412, "PreconditionFailed")
+
+    with pytest.raises(StoragePreconditionFailed):
+        asyncio.run(_storage(Client()).put_object(KEY, b"clip", "video/mp4", if_match='"old"'))
 
 
 def test_no_object_listing_is_offered() -> None:

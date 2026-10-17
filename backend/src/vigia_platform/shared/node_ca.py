@@ -41,7 +41,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.storage import ObjectHead
+from vigia_platform.shared.storage import ObjectHead, StoragePreconditionFailed
 
 __all__ = [
     "MAX_BUNDLE_ROOTS",
@@ -99,6 +99,7 @@ class RootStorage(Protocol):
         *,
         kms_key_id: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> ObjectHead: ...
 
 
@@ -393,6 +394,7 @@ class PreparedRoot:
     already_published: bool = False
     """``ca/root.pem`` ya es esta raíz (``bootstrap`` repetido): ``publish`` no escribe."""
     version_id: str | None = None
+    etag: str | None = None
 
     @property
     def fingerprints(self) -> tuple[str, ...]:
@@ -466,11 +468,16 @@ class NodeCaPublisher:
 
     async def prepare_rotation(self, new_key_id: str, *, now: datetime) -> PreparedRoot:
         """``rotate-node-ca``: la vigente (leída del depósito) y la nueva, sin publicar."""
+        head = await self._storage.head_object(self._object_key)
+        if head is None or head.etag is None:
+            raise NodeCaError(
+                "ca/root.pem no tiene un ETag para publicar la rotación con seguridad"
+            )
         current = await self._storage.get_object(self._object_key)
         read_bundle(current)  # antes de firmar nada: un paquete inválido no se amplía
         root = await self._build(new_key_id, now)
         bundle = two_root_bundle(current, root)
-        return PreparedRoot(root, read_bundle(bundle), self._object_key)
+        return PreparedRoot(root, read_bundle(bundle), self._object_key, etag=head.etag)
 
     async def publish(self, prepared: PreparedRoot) -> PublishedRoot:
         """Escribe ``ca/root.pem`` con el paquete preparado (la única escritura)."""
@@ -480,7 +487,7 @@ class NodeCaPublisher:
             return PublishedRoot(
                 prepared.root, prepared.bundle, prepared.object_key, prepared.version_id
             )
-        return await self._put(prepared.bundle, prepared.root)
+        return await self._put(prepared.bundle, prepared.root, if_match=prepared.etag)
 
     async def publish_root(self, key_id: str, *, now: datetime) -> PublishedRoot:
         return await self.publish(await self.prepare_root(key_id, now=now))
@@ -498,9 +505,16 @@ class NodeCaPublisher:
         )
 
     async def _put(
-        self, bundle: Sequence[x509.Certificate], root: x509.Certificate
+        self, bundle: Sequence[x509.Certificate], root: x509.Certificate, *, if_match: str | None
     ) -> PublishedRoot:
         body = b"".join(certificate_pem(certificate) for certificate in bundle)
-        head = await self._storage.put_object(self._object_key, body, ROOT_CONTENT_TYPE)
+        try:
+            head = await self._storage.put_object(
+                self._object_key, body, ROOT_CONTENT_TYPE, if_match=if_match
+            )
+        except StoragePreconditionFailed:
+            raise NodeCaError(
+                "ca/root.pem cambió durante la publicación: vuelva a preparar la rotación"
+            ) from None
         _log.info("raíz de la autoridad de nodos publicada", roots=len(bundle))
         return PublishedRoot(root, tuple(bundle), self._object_key, head.version_id)
