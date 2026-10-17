@@ -15,6 +15,7 @@ import asyncio
 import base64
 import hashlib
 import threading
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,9 +33,11 @@ from vigia_platform.shared.storage import (
     PRESIGN_GET_MAX_TTL,
     PRESIGN_PUT_MAX_TTL,
     REGIONAL_ENDPOINT,
+    RETRY_AFTER_SECONDS,
     ChecksumType,
     CompletedPart,
     ObjectHead,
+    PresignedRequest,
     S3Storage,
     StorageCredentials,
     StorageSettings,
@@ -315,6 +318,109 @@ def test_hung_call_ends_at_the_call_timeout() -> None:
     finally:
         release.set()
         executor.shutdown(wait=True)
+
+
+def test_hung_presign_ends_at_the_call_timeout_without_blocking_the_loop() -> None:
+    """Firmar corre en el pool de hilos (seguimiento de VIG-32): el bucle sigue libre mientras
+    espera, y un bloqueo al firmar (p. ej. el refresco de credenciales del rol) termina por el
+    mismo tope que el resto de llamadas, no se cuelga para siempre."""
+    release = threading.Event()
+
+    class Hung:
+        def generate_presigned_url(self, *_: Any, **__: Any) -> Any:
+            release.wait(10)
+            raise AssertionError("no debía esperarse")
+
+    settings = StorageSettings(
+        bucket=BUCKET, connect_timeout_seconds=0.05, read_timeout_seconds=0.05
+    )
+    executor = ThreadPoolExecutor(max_workers=1)
+    storage = S3Storage(settings, SimulatedClock(START), client=Hung(), executor=executor)
+
+    async def run() -> tuple[int, BaseException | None]:
+        progressed = 0
+        stop = asyncio.Event()
+
+        async def ticker() -> None:
+            nonlocal progressed
+            while not stop.is_set():
+                await asyncio.sleep(0)
+                progressed += 1
+
+        ticker_task = asyncio.create_task(ticker())
+        error: BaseException | None = None
+        try:
+            # Tope de seguridad, no el tope bajo prueba (ese es call_timeout_seconds, ~1.1 s
+            # aquí): 10 s o más, para no acoplar la prueba a un reloj de pared corto (AGENTS.md).
+            await asyncio.wait_for(storage.presign_get(KEY), timeout=10)
+        except StorageUnavailable as exc:
+            error = exc
+        finally:
+            stop.set()
+            await ticker_task
+        return progressed, error
+
+    try:
+        progressed, error = asyncio.run(run())
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+
+    assert isinstance(error, StorageUnavailable)
+    # Mientras la firma estaba bloqueada en el pool de hilos, el bucle siguió atendiendo otra
+    # corrutina: si firmar bloqueara el bucle (el defecto de VIG-254), esto sería 0.
+    assert progressed > 0
+
+
+class RaisingPresignClient:
+    """Firma una URL lanzando ``error`` siempre, sin tocar la red de verdad."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def generate_presigned_url(self, *_: Any, **__: Any) -> Any:
+        raise self.error
+
+
+def _presign_get(storage: S3Storage) -> Awaitable[PresignedRequest]:
+    return storage.presign_get(KEY)
+
+
+def _presign_put(storage: S3Storage) -> Awaitable[PresignedRequest]:
+    return storage.presign_put(KEY, "video/mp4", SHA, {})
+
+
+def _presign_part(storage: S3Storage) -> Awaitable[PresignedRequest]:
+    return storage.presign_part(KEY, "upload-1", 1, SHA)
+
+
+@pytest.mark.parametrize(
+    "presign",
+    [_presign_get, _presign_put, _presign_part],
+    ids=["presign_get", "presign_put", "presign_part"],
+)
+@pytest.mark.parametrize(
+    "error",
+    [
+        botocore_exceptions.NoCredentialsError(),
+        botocore_exceptions.PartialCredentialsError(provider="iam-role", cred_var="secret_key"),
+        botocore_exceptions.CredentialRetrievalError(provider="iam-role", error_msg="timed out"),
+        botocore_exceptions.ConnectTimeoutError(endpoint_url="https://x"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_presign_credential_or_connection_failures_are_transient(
+    presign: Callable[[S3Storage], Awaitable[PresignedRequest]], error: Exception
+) -> None:
+    """Un fallo al refrescar las credenciales del rol durante la firma (sin credenciales,
+    parciales, el punto de credenciales inaccesible) es tan transitorio como un almacén que no
+    responde: ninguno sale crudo de ``presign_get``/``put``/``part`` (seguimiento de VIG-254)."""
+    storage = _storage(RaisingPresignClient(error))
+    with pytest.raises(StorageUnavailable) as raised:
+        asyncio.run(presign(storage))
+    assert raised.value.code == "storage_unavailable"
+    assert raised.value.retry_after_seconds == RETRY_AFTER_SECONDS
+    assert KEY not in str(raised.value)
 
 
 def test_default_timeouts_and_no_retries() -> None:
