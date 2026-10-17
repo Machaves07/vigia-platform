@@ -25,11 +25,13 @@ import json
 import os
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 
+from tests.load import soak
 from tests.load.conftest import LoadTarget, load_seed, run_profile
 from tests.load.profiles import PROFILES, LoadProfile
 from tests.load.provision import Fleet
@@ -177,6 +179,33 @@ def assert_functional(
     assert ledger["records"] == analysis["emitted"], ledger
     assert ledger["duplicated_source_keys"] == 0, ledger
     assert ledger["chains_verified"] >= 1
+
+
+def test_the_soak_reads_the_commissioning_records_the_nightly_console_reads(
+    load_target: LoadTarget,
+) -> None:
+    # VIG-259: el soak valida la flota con el formato de `provision` y da a su consola las mismas
+    # actas que el nightly (`Fleet.record_ids`), una por planta.
+    profile = replace(PROFILES["ci"], nodes=3, nodes_per_plant=1)
+    fleet = load_target.provision(profile)
+    settings = soak.SoakSettings(
+        target="https://staging-0.example.invalid",
+        nodes_url=load_target.nodes.url,
+        seed=load_seed(),
+        hours=1.0,
+        fleet=fleet.fleet_file,
+        console_session=None,
+        report_dir=None,
+        dry_run=True,
+    )
+    provisioning, targets = soak.check_fleet(settings, soak.WALL.now())
+    assert targets is not None
+    assert provisioning["status"] == "valid" and provisioning["commissioning_records"] == 3
+    assert len(fleet.record_ids) == len(fleet.plant_ids) == 3
+    assert targets.record_ids == fleet.record_ids
+    assert set(targets.plant_ids) == set(fleet.plant_ids)
+    assert targets.node_ids == tuple(node.node_id for node in fleet.nodes)
+    assert targets.zone_ids == fleet.zone_ids
 
 
 def test_ci_profile_ten_nodes_lose_nothing_duplicate_nothing_and_keep_the_chain(

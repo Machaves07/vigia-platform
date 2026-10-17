@@ -18,9 +18,11 @@ acta estructurada                           300 ms
 
 ``evaluate`` calcula el p95 por ruta en las ventanas pedidas (las reconexiones) y el veredicto
 **nombra cada ruta** que incumple su p95, que respondió con un estado fuera de 2xx o que no
-reunió ``MIN_SAMPLES`` muestras. La ruta del acta estructurada (``GET /commissioning-records/
-{record_id}``, interfaces §3.3) aún no está en ``openapi/app.yaml``: el cliente la declara, la
-informa como ``unpublished`` y la medirá en cuanto exista (``published_routes``).
+reunió ``MIN_SAMPLES`` muestras. Una ruta declarada que no está en ``openapi/app.yaml`` se informa
+como ``unpublished`` y se medirá en cuanto exista (``published_routes``). La del acta estructurada
+(``GET /commissioning-records/{record_id}``, interfaces §3.3; VIG-158) lee las actas reales de
+``ConsoleTargets.record_ids``: sin ellas, el cliente no arranca (un identificador cualquiera
+responde 404 y la ruta fallaría por la consola, no por la plataforma).
 
 Las respuestas no se guardan: la de ``POST /documents`` lleva una URL prefirmada (PR-GOB-31). De
 cada respuesta fuera de 2xx, el informe guarda el instante, el estado, la duración y, si el ``502``
@@ -76,6 +78,7 @@ NON_2XX_REPORTED: Final = 10
 """Respuestas fuera de 2xx por ruta que el informe detalla (instante, estado, duración y error del
 balanceador), para situarlas frente a las ventanas de caída y de reconexión."""
 CONCESSION_HEADER: Final = "X-Vigia-Concession"
+RECORD_ROUTE: Final = "GET /commissioning-records/{record_id}"
 DOCUMENT_BYTES: Final = 4_096
 
 
@@ -135,7 +138,7 @@ class ConsoleTargets:
     plant_ids: tuple[uuid.UUID, ...]
     record_ids: tuple[uuid.UUID, ...] = ()
     """Actas de comisionamiento cerradas de la flota (``GET /commissioning-records/{id}``, ya
-    publicada por VIG-158): sin ellas, el identificador es uno cualquiera y la ruta responde 404."""
+    publicada por VIG-158): obligatorias si el cliente mide esa ruta."""
 
 
 @dataclass
@@ -159,6 +162,9 @@ class ConsoleClient:
     def __post_init__(self) -> None:
         published = published_routes()
         self.unpublished = tuple(r.name for r in self.routes if r.name not in published)
+        measured = {route.name for route in self.routes} - set(self.unpublished)
+        if RECORD_ROUTE in measured and not self.targets.record_ids:
+            raise ValueError(f"{RECORD_ROUTE} necesita las actas de la flota (record_ids)")
         self._rng = random.Random(self.seed)  # noqa: S311 - orden de consulta, no un secreto
 
     def _client(self) -> httpx.Client:
@@ -186,9 +192,7 @@ class ConsoleClient:
         values = {
             "node_id": str(rng.choice(targets.node_ids)),
             "zone_id": str(rng.choice(targets.zone_ids)),
-            "record_id": str(
-                rng.choice(targets.record_ids) if targets.record_ids else uuid.uuid4()
-            ),
+            "record_id": str(rng.choice(targets.record_ids)) if targets.record_ids else "",
         }
         path = route.template.format(**values)
         if route.name == "GET /fleet/nodes":

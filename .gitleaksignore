@@ -20,3 +20,8 @@ c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_crede
 # siguiente las arma por partes en tiempo de ejecución.
 1a0036e5b5064b551610e93cc582d03d6512efb3:infra/tests/test_compute.py:generic-api-key:358
 1a0036e5b5064b551610e93cc582d03d6512efb3:infra/tests/test_compute.py:jwt:365
+#
+# VIG-259: PEM sintético mal formado (cabecera PKCS #8 truncada y relleno «SINTETICA»), sin clave
+# real, con que las pruebas del soak comprueban que ningún trozo llega a stderr. El commit
+# siguiente arma la cabecera y el pie por partes en tiempo de ejecución.
+b5a03d19f2d870482d70b435b2b7c7cc8eccc594:backend/tests/load/test_load_units.py:private-key:595

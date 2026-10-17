@@ -61,7 +61,13 @@ from tests.signing_support import (
 )
 from tests.writer_support import unit_context
 from vigia_platform.identity.adapters.second_factor_store import PostgresSecondFactorStore
-from vigia_platform.identity.auth.second_factor import SecondFactorService, SecondFactorUser
+from vigia_platform.identity.auth.second_factor import (
+    TOTP_TOLERANCE_STEPS,
+    SecondFactorService,
+    SecondFactorUser,
+    totp_code,
+    totp_step,
+)
 from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE
 from vigia_platform.shared.api.errors import ApiErrorCode, translate
@@ -89,6 +95,8 @@ EXIT_MARGIN_SECONDS: Final = 20.0
 """Holgura sobre el plazo: el último intento de cada comprobación puede agotar su tope (10 s)."""
 OPERATION_SECONDS: Final = 5 * 60 + 1
 """«Tras 5 minutos de operación»: vencen la caché del gestor y la de la clave de datos."""
+FIXTURE_TIMEOUT_SECONDS: Final = 60.0
+FIXTURE_TIMEOUT_MS: Final = 60_000
 
 
 def _aws(url: str) -> AwsSettings:
@@ -254,6 +262,11 @@ def operation(identity: tuple[MigratedDatabase, IdentitySeed]) -> Iterator[Opera
             url=migrated.as_role("vigia_app").sqlalchemy_url,
             process=ProcessKind.API,
             sslmode=SslMode.DISABLE,
+            # La base no es lo que se prueba: topes de fixture, no los de producción (AGENTS.md).
+            connect_timeout_seconds=FIXTURE_TIMEOUT_SECONDS,
+            statement_timeout_ms=FIXTURE_TIMEOUT_MS,
+            lock_timeout_ms=FIXTURE_TIMEOUT_MS,
+            pool_timeout_seconds=FIXTURE_TIMEOUT_SECONDS,
         )
     )
     clock = SimulatedClock(START)
@@ -276,6 +289,16 @@ def _secret(provisioning_uri: str) -> bytes:
 
 def _code(secret: bytes, now: datetime) -> str:
     return pyotp.TOTP(base64.b32encode(secret).decode()).at(now)
+
+
+def _wrong_code(secret: bytes, now: datetime) -> str:
+    """Seis dígitos que no son el código de ningún paso de la tolerancia de ``now``."""
+    current = totp_step(now)
+    valid = {
+        totp_code(secret, step)
+        for step in range(current - TOTP_TOLERANCE_STEPS, current + TOTP_TOLERANCE_STEPS + 1)
+    }
+    return next(code for code in (f"{digit}" * 6 for digit in range(10)) if code not in valid)
 
 
 def test_fs_nuc_05b_secrets_and_kms_blocked_in_operation(
@@ -336,8 +359,10 @@ def test_fs_nuc_05b_secrets_and_kms_blocked_in_operation(
             keys_unchanged = signing_store(signing).keys == keys_before
             credential = op.run(store.get_credential(context, user.user_id))
             now = op.clock.now()
+            # El código erróneo va antes que el bueno: ningún paso de la ventana está aceptado, así
+            # que solo la comparación del código lo rechaza, no la antirrepetición.
+            wrong = op.run(factor.verify_totp(context, credential, _wrong_code(secret, now), now))
             verified = op.run(factor.verify_totp(context, credential, _code(secret, now), now))
-            wrong = op.run(factor.verify_totp(context, credential, "000000", now))
             after_verify = metric_total(reader, MetricName.SECRETS_REFRESH_FAILED)
             newcomer = op.new_user()
             with pytest.raises(SecretsUnavailable) as enrollment:
@@ -371,7 +396,8 @@ def test_fs_nuc_05b_secrets_and_kms_blocked_in_operation(
         assert signed
         assert translate(rotation.value).code is ApiErrorCode.TEMPORARILY_UNAVAILABLE
         assert keys_unchanged
-        assert verified is True and wrong is False, "el factor se verifica, nunca se omite"
+        assert wrong is False, "un código erróneo se rechaza por su comparación: nunca se omite"
+        assert verified is True, "el factor se verifica con la clave de datos en memoria"
         assert after_verify - after_refresh >= 1, "KMS caído también alerta"
         assert translate(enrollment.value).code is ApiErrorCode.TEMPORARILY_UNAVAILABLE
         assert saved == []

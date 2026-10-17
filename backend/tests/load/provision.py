@@ -288,6 +288,7 @@ class FleetProvisioner(Provisioner):
                     tuple(catalogs[zone] for zone in zones),
                 )
             )
+        records = self._commissioning_records(site, nodes)
         fleet_file = directory / "fleet.json"
         fleet_file.write_text(
             json.dumps(
@@ -307,6 +308,10 @@ class FleetProvisioner(Provisioner):
                         }
                         for node in fleet_nodes
                     ],
+                    "commissioning_records": [
+                        {"plant_id": str(plant_id), "record_id": str(record_id)}
+                        for plant_id, record_id in records.items()
+                    ],
                 },
                 ensure_ascii=False,
             ),
@@ -320,18 +325,19 @@ class FleetProvisioner(Provisioner):
             _ceil_ms(since) + SUITE_LEAD,
             ConsoleSession(site.installer.value, site.concession_id),
             tuple(codes),
-            self._commissioning_records(site, nodes),
+            tuple(records.values()),
         )
 
     # --- Pasos ---------------------------------------------------------------------------------
 
     def _commissioning_records(
         self, site: _Site, nodes: Sequence[tuple[uuid.UUID, uuid.UUID, tuple[uuid.UUID, ...]]]
-    ) -> tuple[uuid.UUID, ...]:
+    ) -> dict[uuid.UUID, uuid.UUID]:
         """Un acta cerrada por planta (la primera zona de su primer nodo), por SQL con la forma
         del acta, como ``tests/isolation/test_route_isolation.py``: lo que mide la consola es la
         lectura del acta estructurada (``GET /commissioning-records/{id}``), no su cierre, que
-        tiene sus pruebas (``tests/integration/test_catalog_close_record.py``)."""
+        tiene sus pruebas (``tests/integration/test_catalog_close_record.py``). Devuelve
+        ``planta → acta``; ``fleet.json`` las lleva en ``commissioning_records`` para el soak."""
         now = WALL.now()
         latency = {
             "node_tranche": {
@@ -358,11 +364,11 @@ class FleetProvisioner(Provisioner):
         firsts: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
         for node_id, plant_id, zones in nodes:
             firsts.setdefault(plant_id, (node_id, zones[0]))
-        records: list[uuid.UUID] = []
+        records: dict[uuid.UUID, uuid.UUID] = {}
         statements: list[tuple[str, Sequence[Any]]] = []
         for plant_id, (node_id, zone_id) in firsts.items():
             session_id, record_id = uuid7(), uuid7()
-            records.append(record_id)
+            records[plant_id] = record_id
             statements += [
                 (
                     "INSERT INTO catalog.walk_test_session (session_id, organization_id, plant_id,"
@@ -395,7 +401,7 @@ class FleetProvisioner(Provisioner):
                 ),
             ]
         self.stack.admin(statements)
-        return tuple(records)
+        return records
 
     def _hierarchy(self, site: _Site, profile: LoadProfile) -> list[uuid.UUID]:
         """Las plantas (administradora) con la familia de coexistencia admitida en cada una."""

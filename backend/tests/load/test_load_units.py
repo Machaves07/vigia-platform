@@ -15,18 +15,33 @@ import asyncio
 import datetime as dt
 import json
 import socket
+import subprocess
+import sys
 import uuid
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from vigia_contracts.client import ClientEvent
 from vigia_contracts.client.core import RetryPolicy, Wait
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
+from vigia_contracts.credentials import (
+    CredentialStoreError,
+    FileCredentialStore,
+    IssuedCredential,
+    NodeIdentity,
+    NodeKey,
+    StoredCredential,
+    client_certificate_signing_request,
+)
 from vigia_contracts.outbox import OutboxState, RecordKind
 
 from tests.load import soak
@@ -52,7 +67,7 @@ from tests.load.driver import (
     route_label,
     run_node,
 )
-from tests.load.profiles import PROFILES, nightly_profile, write_sealed_dataset
+from tests.load.profiles import ABSOLUTE_TARGETS, PROFILES, nightly_profile, write_sealed_dataset
 from tests.load.report import (
     analyse,
     drains_of,
@@ -69,6 +84,8 @@ from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.ratelimit import Allowed, RateLimiter, node_key
 
 T0 = dt.datetime(2026, 10, 7, 12, 0, tzinfo=dt.UTC)
+SUBPROCESS_SECONDS: Final = 120.0
+"""Tope del proceso ``soak.py`` lanzado aparte (nunca decide nada: solo evita colgarse)."""
 
 
 def _stamp(moment: dt.datetime) -> str:
@@ -573,6 +590,398 @@ def test_the_soak_dry_run_rejects_a_fleet_pointing_elsewhere(
     assert "staging-0-nodes.example.invalid/api/nodes" in capsys.readouterr().err
 
 
+SOAK_TARGET: Final = "https://staging-0.example.invalid"
+SYNTHETIC_PEM_BODY: Final = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgU0lOVEVUSUNBU0lOVEVU"
+_PEM_LABEL: Final = "PRIVATE" + " KEY-----"
+SYNTHETIC_PEM: Final = (
+    f"-----BEGIN {_PEM_LABEL}\n{SYNTHETIC_PEM_BODY}\n{SYNTHETIC_PEM_BODY[::-1]}\n"
+    f"-----END {_PEM_LABEL}\n"
+)
+"""Un PEM sintético mal formado (no es una clave): ningún trozo puede llegar a la salida. La
+cabecera y el pie se arman por partes para que el escaneo de secretos no lo tome por una clave."""
+
+
+def _pem_fragments(text: str) -> list[str]:
+    """Qué trozos del PEM sintético (cabecera, pie o 8 caracteres seguidos del cuerpo) o qué
+    ``input_value`` aparecen en ``text``."""
+    pieces = ["-----BEGIN", "-----END", "PRIVATE KEY", "BEGIN P", "KEY-----", "input_value"]
+    bodies = (SYNTHETIC_PEM_BODY, SYNTHETIC_PEM_BODY[::-1])
+    pieces += [body[start : start + 8] for body in bodies for start in range(len(body) - 7)]
+    return [piece for piece in pieces if piece in text]
+
+
+def _synthetic_certificate(identity: NodeIdentity, key: NodeKey, expires: dt.datetime) -> str:
+    """Un certificado de ``key`` firmado por una autoridad sintética de un solo uso."""
+    authority = ec.generate_private_key(ec.SECP256R1())
+    request = x509.load_pem_x509_csr(client_certificate_signing_request(identity, key).encode())
+    issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Autoridad sintética")])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(request.subject)
+        .issuer_name(issuer)
+        .public_key(request.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(expires - dt.timedelta(days=30))
+        .not_valid_after(expires)
+        .sign(authority, hashes.SHA256())
+    )
+    return certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+
+
+@dataclass(frozen=True)
+class SyntheticNode:
+    node_id: str
+    plant_id: str
+    zone_id: str
+    credential: Path
+    configuration: Path
+
+
+def _synthetic_node(root: Path, plant_id: str, *, credential: str = "valid") -> SyntheticNode:
+    """Un nodo de la flota con su credencial: ``valid`` (generada, vigente un año), ``pem``
+    (archivo con el formato del almacén y un PEM sintético mal formado) o ``absent``."""
+    node_id, organization_id = str(uuid.uuid4()), str(uuid.uuid4())
+    directory = root / node_id
+    directory.mkdir(mode=0o700, parents=True)
+    path = directory / "credential.json"
+    if credential == "valid":
+        identity = NodeIdentity(node_id, organization_id, plant_id)
+        client, server = NodeKey.generate(), NodeKey.generate()
+        expires = soak.WALL.now() + dt.timedelta(days=365)
+        issued = IssuedCredential(
+            _synthetic_certificate(identity, client, expires),
+            _synthetic_certificate(identity, server, expires),
+            "",
+            expires,
+            client,
+            server,
+        )
+        FileCredentialStore(path).save(StoredCredential(identity, issued, ()))
+    elif credential == "pem":
+        document = {
+            "format": "vigia-node-credential/1",
+            "node_id": node_id,
+            "organization_id": organization_id,
+            "plant_id": plant_id,
+            "current": {
+                "certificate": SYNTHETIC_PEM,
+                "server_certificate_pem": SYNTHETIC_PEM,
+                "ca_chain": SYNTHETIC_PEM,
+                "expires_at": "2027-10-17T00:00:00.000Z",
+                "client_key": SYNTHETIC_PEM,
+                "server_key": SYNTHETIC_PEM,
+            },
+            "previous": None,
+            "rotated_at": None,
+            "platform_public_keys": [],
+            "key_set_issued_at": None,
+            "key_set_sha256": None,
+        }
+        path.write_text(json.dumps(document), encoding="utf-8")
+        path.chmod(0o600)
+    configuration = directory / "initial-configuration.json"
+    configuration.write_text(json.dumps({"zones": SYNTHETIC_PEM}), encoding="utf-8")
+    return SyntheticNode(node_id, plant_id, str(uuid.uuid4()), path, configuration)
+
+
+def _synthetic_fleet(
+    root: Path, nodes: list[SyntheticNode], records: list[dict[str, str]] | None
+) -> Path:
+    verify = root / "raiz.pem"
+    verify.write_text("raíz sintética del entorno\n", encoding="utf-8")
+    document: dict[str, Any] = {
+        "ingest_base_url": "https://staging-0-nodes.example.invalid/api/nodes",
+        "verify": str(verify),
+        "nodes": [
+            {
+                "index": index,
+                "node_id": node.node_id,
+                "plant_id": node.plant_id,
+                "credential": str(node.credential),
+                "configuration": str(node.configuration),
+                "catalogs": [{"zone_id": node.zone_id}],
+            }
+            for index, node in enumerate(nodes)
+        ],
+    }
+    if records is not None:
+        document["commissioning_records"] = records
+    fleet = root / "fleet.json"
+    fleet.write_text(json.dumps(document), encoding="utf-8")
+    return fleet
+
+
+def _accept_any_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La configuración inicial real va firmada por la plataforma: estas pruebas de la flota la
+    dan por buena (su validación tiene la suya, abajo)."""
+    monkeypatch.setattr(
+        soak, "NodeInitialConfiguration", SimpleNamespace(model_validate_json=lambda _: None)
+    )
+
+
+@pytest.mark.parametrize("credential", ["pem", "valid"])
+def test_a_malformed_credential_or_configuration_exits_two_without_any_piece_of_its_value(
+    credential: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    # `pem`: la credencial tiene el formato del almacén y un PEM mal formado (el error de
+    # `cryptography` lo encadena); `valid`: la credencial carga y la configuración inicial lleva el
+    # PEM donde va una lista (el error de Pydantic lo cita en `input_value`).
+    _no_network(monkeypatch)
+    plant = str(uuid.uuid4())
+    node = _synthetic_node(tmp_path / "nodos", plant, credential=credential)
+    record = {"plant_id": plant, "record_id": str(uuid.uuid4())}
+    fleet = _synthetic_fleet(tmp_path, [node], [record])
+    code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--seed", "5", "--fleet", str(fleet)])
+    captured = capsys.readouterr()
+    assert code == soak.EXIT_USAGE == 2, captured.err
+    what = "la credencial" if credential == "pem" else "la configuración inicial"
+    assert captured.err.startswith(f"error: nodes[0]: {what} no se pudo leer"), captured.err
+    assert "Traceback" not in captured.err
+    assert _pem_fragments(captured.err + captured.out) == []
+    assert not secret_findings({"stderr": captured.err})
+
+
+def test_a_credential_error_that_quotes_the_pem_never_reaches_the_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    # Defensa en profundidad: hoy `CredentialStoreError` solo lleva la ruta, pero un almacén que
+    # citara el valor leído no puede llevarlo a la salida (ni su texto ni su `repr`).
+    _no_network(monkeypatch)
+
+    class QuotingStore:
+        def __init__(self, path: object) -> None:
+            self.path = path
+
+        def load(self) -> None:
+            raise CredentialStoreError(f"clave ilegible: {SYNTHETIC_PEM}")
+
+    monkeypatch.setattr(soak, "FileCredentialStore", QuotingStore)
+    plant = str(uuid.uuid4())
+    node = _synthetic_node(tmp_path / "nodos", plant, credential="absent")
+    fleet = _synthetic_fleet(
+        tmp_path, [node], [{"plant_id": plant, "record_id": str(uuid.uuid4())}]
+    )
+    code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--seed", "5", "--fleet", str(fleet)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.err == (
+        "error: nodes[0]: la credencial no se pudo leer (CredentialStoreError)\n"
+    ), _pem_fragments(captured.err)
+    assert _pem_fragments(captured.err + captured.out) == []
+
+
+@pytest.mark.parametrize("credential", ["pem", "valid"])
+def test_a_malformed_credential_from_a_subprocess_exits_two_without_a_traceback(
+    credential: str, tmp_path: Path
+) -> None:
+    # Como lo lanza `release.yml`: `python tests/load/soak.py`, con su propio stderr (antes, el
+    # traceback de Pydantic citaba el PEM en `input_value`).
+    plant = str(uuid.uuid4())
+    node = _synthetic_node(tmp_path / "nodos", plant, credential=credential)
+    fleet = _synthetic_fleet(
+        tmp_path, [node], [{"plant_id": plant, "record_id": str(uuid.uuid4())}]
+    )
+    backend = Path(__file__).resolve().parents[2]
+    finished = subprocess.run(
+        [
+            sys.executable,
+            str(backend / "tests" / "load" / "soak.py"),
+            "--dry-run",
+            "--target",
+            SOAK_TARGET,
+            "--seed",
+            "5",
+            "--fleet",
+            str(fleet),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=backend,
+        timeout=SUBPROCESS_SECONDS,
+    )
+    assert finished.returncode == 2, finished.stderr
+    assert "Traceback" not in finished.stderr
+    assert _pem_fragments(finished.stderr + finished.stdout) == []
+
+
+def test_a_fleet_whose_entries_are_not_what_the_soak_reads_exits_two(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _no_network(monkeypatch)
+    _accept_any_configuration(monkeypatch)
+    plant = str(uuid.uuid4())
+    node = _synthetic_node(tmp_path / "nodos", plant)
+    fleet = _synthetic_fleet(tmp_path, [node], [{"plant_id": plant, "record_id": "x"}])
+    document = json.loads(fleet.read_text())
+    variants: list[tuple[Any, str]] = [
+        ([], "--fleet no es un objeto"),
+        ({**document, "nodes": [SYNTHETIC_PEM]}, "nodes[0] no es un objeto"),
+        ({**document, "nodes": [{**document["nodes"][0], "node_id": 7}]}, "node_id no es un UUID"),
+        ({**document, "nodes": [{**document["nodes"][0], "credential": None}]}, "la credencial"),
+        ({**document, "nodes": [{**document["nodes"][0], "catalogs": [{}]}]}, "zone_id no es"),
+        (document, "commissioning_records[0].record_id no es un UUID"),
+    ]
+    for variant, expected in variants:
+        fleet.write_text(json.dumps(variant))
+        code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--fleet", str(fleet)])
+        err = capsys.readouterr().err
+        assert code == 2 and expected in err, (expected, err)
+        assert _pem_fragments(err) == []
+
+
+@pytest.mark.parametrize("case", ["absent", "empty", "one_plant_only", "foreign_plant"])
+def test_the_soak_refuses_a_fleet_without_a_commissioning_record_per_plant(
+    case: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    _no_network(monkeypatch)
+    _accept_any_configuration(monkeypatch)
+    plants = [str(uuid.uuid4()), str(uuid.uuid4())]
+    nodes = [_synthetic_node(tmp_path / "nodos", plant) for plant in plants]
+    every = [{"plant_id": plant, "record_id": str(uuid.uuid4())} for plant in plants]
+    foreign = {"plant_id": str(uuid.uuid4()), "record_id": str(uuid.uuid4())}
+    records, expected = {
+        "absent": (None, "la flota no tiene actas de comisionamiento"),
+        "empty": ([], "la flota no tiene actas de comisionamiento"),
+        "one_plant_only": (every[:1], "1 planta(s) de la flota sin acta de comisionamiento"),
+        "foreign_plant": ([*every, foreign], "el acta es de una planta que no está en la flota"),
+    }[case]
+    fleet = _synthetic_fleet(tmp_path, nodes, records)
+    code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--fleet", str(fleet)])
+    assert code == 2
+    assert expected in capsys.readouterr().err
+
+
+def test_the_soak_dry_run_validates_the_fleet_its_records_and_the_console_session(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _no_network(monkeypatch)
+    _accept_any_configuration(monkeypatch)
+    plants = [str(uuid.uuid4()), str(uuid.uuid4())]
+    nodes = [_synthetic_node(tmp_path / "nodos", plant) for plant in [*plants, plants[0]]]
+    records = [{"plant_id": plant, "record_id": str(uuid.uuid4())} for plant in plants]
+    fleet = _synthetic_fleet(tmp_path, nodes, records)
+    session = tmp_path / "sesion.json"
+    cookie = "cookie-sintetica-" + uuid.uuid4().hex
+    session.write_text(json.dumps({"cookie": cookie, "concession_id": str(uuid.uuid4())}))
+    arguments = ["--dry-run", "--target", SOAK_TARGET, "--seed", "5", "--hours", "0.5"]
+    code = soak.main([*arguments, "--fleet", str(fleet), "--console-session", str(session)])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    document = json.loads(out[: out.rindex("}") + 1])
+    assert document["provisioning"]["status"] == "valid"
+    assert document["provisioning"]["nodes"] == 3 and document["provisioning"]["plants"] == 2
+    assert document["provisioning"]["commissioning_records"] == 2
+    assert document["console_session"] == "valid"
+    required = document["absolute_thresholds"]["required_node_routes"]
+    assert soak.OBSERVABILITY_ROUTE not in required  # media hora: no llega a la hora 1
+    assert cookie not in out
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{",
+        "[]",
+        json.dumps({"concession_id": "0190f5f2-0000-7000-8000-000000000001"}),
+        json.dumps({"cookie": "galleta-sintetica-7f3a"}),
+        json.dumps({"cookie": "galleta-sintetica-7f3a", "concession_id": "no-es-un-uuid"}),
+    ],
+    ids=["ilegible", "lista", "sin_cookie", "sin_concesion", "concesion_invalida"],
+)
+def test_a_malformed_console_session_exits_two_without_its_cookie(
+    content: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    _no_network(monkeypatch)
+    session = tmp_path / "sesion.json"
+    session.write_text(content)
+    code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--console-session", str(session)])
+    err = capsys.readouterr().err
+    assert code == 2 and err.startswith("error: --console-session"), err
+    assert "galleta-sintetica-7f3a" not in err
+
+
+@pytest.mark.parametrize("seed", ["once", "-1", str(2**53)])
+def test_a_malformed_seed_variable_exits_two(
+    seed: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _no_network(monkeypatch)
+    monkeypatch.setenv(soak.SEED_VARIABLE, seed)
+    assert soak.main(["--dry-run", "--target", SOAK_TARGET]) == 2
+    assert soak.SEED_VARIABLE in capsys.readouterr().err
+
+
+class _ConsoleStarted(Exception):
+    """Corta la ejecución real del soak en cuanto arranca la consola (sin red ni nodos)."""
+
+
+def test_the_soak_run_gives_the_console_the_commissioning_records_of_the_fleet(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # VIG-259: `_run` construía `ConsoleTargets` sin `record_ids` y la consola leía un acta
+    # inventada (404 en staging).
+    from tests.load import console_client
+
+    _no_network(monkeypatch)
+    _accept_any_configuration(monkeypatch)
+    plants = [str(uuid.uuid4()), str(uuid.uuid4())]
+    nodes = [_synthetic_node(tmp_path / "nodos", plant) for plant in plants]
+    records = [{"plant_id": plant, "record_id": str(uuid.uuid4())} for plant in plants]
+    fleet = _synthetic_fleet(tmp_path, nodes, records)
+    session = tmp_path / "sesion.json"
+    session.write_text(json.dumps({"cookie": "c", "concession_id": str(uuid.uuid4())}))
+    seen: list[Any] = []
+
+    class Recorder:
+        def __init__(self, *arguments: Any, **_: Any) -> None:
+            seen.append(arguments)
+
+        def start(self) -> None:
+            raise _ConsoleStarted
+
+    monkeypatch.setattr(console_client, "ConsoleClient", Recorder)
+    arguments = ["--target", SOAK_TARGET, "--seed", "5", "--hours", "0.5"]
+    with pytest.raises(_ConsoleStarted):
+        soak.main([*arguments, "--fleet", str(fleet), "--console-session", str(session)])
+    ((_, _, console_session, targets, seed),) = seen
+    assert targets.record_ids == tuple(uuid.UUID(record["record_id"]) for record in records)
+    assert set(targets.plant_ids) == {uuid.UUID(plant) for plant in plants}
+    assert targets.node_ids == tuple(uuid.UUID(node.node_id) for node in nodes)
+    assert targets.zone_ids == tuple(uuid.UUID(node.zone_id) for node in nodes)
+    assert console_session.cookie_value == "c" and seed == 5
+
+
+def test_the_console_client_refuses_to_measure_the_record_route_without_records(
+    tmp_path: Path,
+) -> None:
+    from tests.load.console_client import ConsoleClient, ConsoleTargets
+    from tests.load.provision import ConsoleSession
+
+    one = (uuid.uuid4(),)
+    session = ConsoleSession("c", uuid.uuid4())
+    with pytest.raises(ValueError, match="record_ids"):
+        ConsoleClient("https://app.invalid", tmp_path, session, ConsoleTargets(one, one, one), 1)
+    measured = ConsoleClient(
+        "https://app.invalid", tmp_path, session, ConsoleTargets(one, one, one, one), 1
+    )
+    assert "GET /commissioning-records/{record_id}" not in measured.unpublished
+    without_record = [
+        r for r in CONSOLE_ROUTES if r.name != "GET /commissioning-records/{record_id}"
+    ]
+    ConsoleClient(
+        "https://app.invalid", tmp_path, session, ConsoleTargets(one, one, one), 1, without_record
+    )
+
+
 def test_soak_thresholds_name_each_route_over_its_absolute_target() -> None:
     analysis = {
         "node_latency": {
@@ -583,10 +992,67 @@ def test_soak_thresholds_name_each_route_over_its_absolute_target() -> None:
         "events": {},
     }
     console = {"failures": ["GET /fleet/nodes: p95 600 ms > 500 ms (n=40)"]}
-    assert soak.evaluate_thresholds(analysis, console) == [
+    assert soak.evaluate_thresholds(analysis, console, required=()) == [
         "NFR-GOB-01 POST /api/nodes/findings: p95_ms 520.0 > 500",
         "NFR-GOB-03 GET /fleet/nodes: p95 600 ms > 500 ms (n=40)",
     ]
+
+
+def _every_node_route_within_target() -> dict[str, dict[str, Any]]:
+    return {
+        route: {"count": 10, "p95_ms": limits["p95_ms"], "p99_ms": limits.get("p99_ms")}
+        for route, limits in ABSOLUTE_TARGETS["NFR-GOB-01"].items()
+    }
+
+
+def test_soak_thresholds_fail_a_required_node_route_without_samples() -> None:
+    required = soak.required_node_routes(PROFILES["soak"], 11)
+    latency = _every_node_route_within_target()
+    clean = {"node_latency": latency, "rejection_codes": {}, "events": {}}
+    assert soak.evaluate_thresholds(clean, {"failures": []}, required=required) == []
+    for route in required:
+        for empty in (None, {"count": 0, "p95_ms": None, "p99_ms": None}):
+            measured = {name: value for name, value in latency.items() if name != route}
+            if empty is not None:
+                measured[route] = empty
+            analysis = {**clean, "node_latency": measured}
+            failures = soak.evaluate_thresholds(analysis, {"failures": []}, required=required)
+            assert failures == [f"NFR-GOB-01 {route}: sin muestras"]
+
+
+def test_soak_thresholds_do_not_require_the_routes_the_soak_does_not_exercise() -> None:
+    required = soak.required_node_routes(PROFILES["soak"], 11)
+    assert set(required) == set(ABSOLUTE_TARGETS["NFR-GOB-01"]) - set(soak.NOT_MEASURED_NODE_ROUTES)
+    assert set(soak.NOT_MEASURED_NODE_ROUTES) == {
+        "POST /api/nodes/enrollment",
+        "GET /api/nodes/zones/{zone_id}/catalog",
+    }
+    latency = {
+        route: value
+        for route, value in _every_node_route_within_target().items()
+        if route not in soak.NOT_MEASURED_NODE_ROUTES
+    }
+    analysis = {"node_latency": latency, "rejection_codes": {}, "events": {}}
+    assert soak.evaluate_thresholds(analysis, {"failures": []}, required=required) == []
+    # Si aun así se midieron, sus objetivos siguen valiendo.
+    slow = {**latency, "GET /api/nodes/zones/{zone_id}/catalog": {"count": 3, "p95_ms": 101.0}}
+    assert soak.evaluate_thresholds(
+        {**analysis, "node_latency": slow}, {"failures": []}, required=required
+    ) == ["NFR-GOB-01 GET /api/nodes/zones/{zone_id}/catalog: p95_ms 101.0 > 100"]
+
+
+@pytest.mark.parametrize(
+    ("hours", "observes"), [(8.0, True), (1.01, True), (1.0, False), (0.5, False)]
+)
+def test_the_observability_route_is_required_once_the_run_reaches_the_first_degradation(
+    hours: float, observes: bool
+) -> None:
+    # La primera degradación programada es a la hora 1 (`simulation_profile`): una ejecución que
+    # no llega no emite eventos de observabilidad, y exigirlos la haría fallar siempre.
+    profile = replace(PROFILES["soak"], steady_minutes=hours * 60)
+    required = soak.required_node_routes(profile, 11)
+    assert (soak.OBSERVABILITY_ROUTE in required) is observes
+    assert "POST /api/nodes/findings" in required and "POST /api/nodes/heartbeats" in required
 
 
 def test_soak_thresholds_block_on_a_single_saturation_transient() -> None:
@@ -597,11 +1063,11 @@ def test_soak_thresholds_block_on_a_single_saturation_transient() -> None:
         "rejection_codes": {"heartbeat:temporarily_unavailable": 1},
         "events": {},
     }
-    assert soak.evaluate_thresholds(analysis, {"failures": []}) == [
+    assert soak.evaluate_thresholds(analysis, {"failures": []}, required=()) == [
         "NFR-GOB-02 transitorios por saturación: {'heartbeat:temporarily_unavailable': 1}"
     ]
     clean = {"node_latency": {}, "rejection_codes": {}, "events": {"submit_record:success": 10}}
-    assert soak.evaluate_thresholds(clean, {"failures": []}) == []
+    assert soak.evaluate_thresholds(clean, {"failures": []}, required=()) == []
 
 
 # --- Nodo simulado -------------------------------------------------------------------------------
