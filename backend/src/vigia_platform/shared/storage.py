@@ -31,9 +31,11 @@ origen que ``VIGIA_CSP_STORE_ORIGINS`` declara para la política de contenido (U
 2026-09-23 de LC-NUC-30). En pruebas, ``StorageSettings.endpoint_url`` apunta a LocalStack.
 
 Tiempos de espera (NFR-NUC-36, ``[objetivos propios]``): conexión 5 s y lectura 10 s, **sin
-reintentos** en boto3; cada llamada tiene además un tope de conexión + lectura + 1 s en el bucle
-de eventos. boto3 es bloqueante: cada llamada corre en el pool de hilos. Un almacén inaccesible
-(conexión rechazada, tiempo de espera, conexión cortada, 5xx o limitación) termina en
+reintentos** en boto3; cada llamada, incluida la firma de una URL prefirmada, tiene además un
+tope de conexión + lectura + 1 s en el bucle de eventos. boto3 es bloqueante también al firmar
+(botocore puede refrescar las credenciales del rol de la tarea, que toca la red): toda llamada,
+firme una URL o no, corre en el pool de hilos, nunca en el hilo del bucle de eventos. Un almacén
+inaccesible (conexión rechazada, tiempo de espera, conexión cortada, 5xx o limitación) termina en
 ``StorageUnavailable``, transitorio, que hacia el nodo es ``storage_unavailable`` (BR-CTR-30).
 """
 
@@ -485,11 +487,18 @@ class S3Storage:
                 raise StorageUnavailable(operation) from error
             raise
 
-    def _presign(self, method: str, params: Mapping[str, Any], seconds: int) -> str:
-        url: str = self._client.generate_presigned_url(
-            method, Params=dict(params), ExpiresIn=seconds
-        )
-        return url
+    async def _presign(
+        self, operation: str, method: str, params: Mapping[str, Any], seconds: int
+    ) -> str:
+        """Firma en el pool de hilos, con el mismo tope que el resto de llamadas (``_call``)."""
+
+        def sign() -> str:
+            url: str = self._client.generate_presigned_url(
+                method, Params=dict(params), ExpiresIn=seconds
+            )
+            return url
+
+        return await self._call(operation, sign)
 
     # --- lectura -----------------------------------------------------------------------------
 
@@ -524,7 +533,7 @@ class S3Storage:
         params: dict[str, Any] = {"Bucket": self._settings.bucket, "Key": key}
         if version_id is not None:
             params["VersionId"] = version_id
-        url = self._presign("get_object", params, seconds)
+        url = await self._presign("presign_get", "get_object", params, seconds)
         return PresignedRequest("GET", url, {}, issued_at + timedelta(seconds=seconds))
 
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
@@ -607,7 +616,8 @@ class S3Storage:
         checksum = sha256_hex_to_b64(checksum_sha256)
         metadata = _metadata_from_headers(required_headers)
         issued_at = self._clock.now()
-        url = self._presign(
+        url = await self._presign(
+            "presign_put",
             "put_object",
             {
                 "Bucket": self._settings.bucket,
@@ -661,7 +671,8 @@ class S3Storage:
         seconds = _require_ttl(ttl, PRESIGN_PUT_MAX_TTL)
         checksum = sha256_hex_to_b64(checksum_sha256)
         issued_at = self._clock.now()
-        url = self._presign(
+        url = await self._presign(
+            "presign_part",
             "upload_part",
             {
                 "Bucket": self._settings.bucket,

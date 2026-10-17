@@ -16,12 +16,9 @@ Sobre el ``StoragePort`` heredado (LC-NUC-30), ligado al depósito de evidencias
 Tiempos de espera de NFR-GOB-43 ``[objetivos propios]``: firma de URL 5 s y consulta de metadatos
 10 s, además de los de ``StorageSettings`` (conexión 5 s, lectura 10 s, sin reintentos). Vencer
 cualquiera, o un fallo de ``botocore`` al firmar (credenciales del rol no disponibles), termina en
-``StorageUnavailable``: transitorio, con ``retry_after_seconds``.
-
-**Límite conocido (heredado de U-02).** ``S3Storage.presign_put`` llama a
-``generate_presigned_url`` de forma síncrona dentro del bucle de eventos, sin pasar por el pool de
-hilos: el tope de 5 s de la firma corta un almacén asíncrono colgado, pero no un bloqueo de
-``botocore`` al refrescar las credenciales del rol. Corregirlo es de ``shared.storage``.
+``StorageUnavailable``: transitorio, con ``retry_after_seconds``. ``S3Storage.presign_put`` firma
+en el pool de hilos (seguimiento de VIG-32), así que el tope de 5 s de la firma corta también un
+bloqueo de ``botocore`` al refrescar esas credenciales, no solo un almacén asíncrono colgado.
 """
 
 from __future__ import annotations

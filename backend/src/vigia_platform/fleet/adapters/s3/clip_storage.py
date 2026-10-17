@@ -23,9 +23,9 @@ dentro de la vigencia no se firma: el nodo envía exactamente ``required_headers
 contrato fijado no admite esa cabecera en el mapa (``RequiredHeaders`` cerrado), así que una URL
 que la exigiera no la podría usar ningún nodo. Queda declarado en el PR de TASK-222.
 
-**Límite conocido (heredado de U-02).** ``S3Storage.presign_put`` firma de forma síncrona dentro del
-bucle de eventos: el tope corta un almacén asíncrono colgado, no un bloqueo de ``botocore`` al
-refrescar las credenciales del rol (igual que ``catalog.adapters.s3.documents``).
+``S3Storage.presign_put`` firma en el pool de hilos (seguimiento de VIG-32, igual que
+``catalog.adapters.s3.documents``), así que ``signing_deadline`` corta también un bloqueo de
+``botocore`` al refrescar las credenciales del rol, no solo un almacén asíncrono colgado.
 """
 
 from __future__ import annotations

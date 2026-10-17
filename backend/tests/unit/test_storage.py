@@ -317,6 +317,56 @@ def test_hung_call_ends_at_the_call_timeout() -> None:
         executor.shutdown(wait=True)
 
 
+def test_hung_presign_ends_at_the_call_timeout_without_blocking_the_loop() -> None:
+    """Firmar corre en el pool de hilos (seguimiento de VIG-32): el bucle sigue libre mientras
+    espera, y un bloqueo al firmar (p. ej. el refresco de credenciales del rol) termina por el
+    mismo tope que el resto de llamadas, no se cuelga para siempre."""
+    release = threading.Event()
+
+    class Hung:
+        def generate_presigned_url(self, *_: Any, **__: Any) -> Any:
+            release.wait(5)
+            raise AssertionError("no debía esperarse")
+
+    settings = StorageSettings(
+        bucket=BUCKET, connect_timeout_seconds=0.05, read_timeout_seconds=0.05
+    )
+    executor = ThreadPoolExecutor(max_workers=1)
+    storage = S3Storage(settings, SimulatedClock(START), client=Hung(), executor=executor)
+
+    async def run() -> tuple[int, BaseException | None]:
+        progressed = 0
+        stop = asyncio.Event()
+
+        async def ticker() -> None:
+            nonlocal progressed
+            while not stop.is_set():
+                await asyncio.sleep(0)
+                progressed += 1
+
+        ticker_task = asyncio.create_task(ticker())
+        error: BaseException | None = None
+        try:
+            await asyncio.wait_for(storage.presign_get(KEY), timeout=3)
+        except StorageUnavailable as exc:
+            error = exc
+        finally:
+            stop.set()
+            await ticker_task
+        return progressed, error
+
+    try:
+        progressed, error = asyncio.run(run())
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+
+    assert isinstance(error, StorageUnavailable)
+    # Mientras la firma estaba bloqueada en el pool de hilos, el bucle siguió atendiendo otra
+    # corrutina: si firmar bloqueara el bucle (el defecto de VIG-254), esto sería 0.
+    assert progressed > 0
+
+
 def test_default_timeouts_and_no_retries() -> None:
     settings = StorageSettings(bucket=BUCKET)
     config = settings.botocore_config()
