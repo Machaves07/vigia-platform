@@ -10,15 +10,20 @@ el proceso. Después de cada paso:
   ``overlapping``, y el servicio, la base y el modelo coinciden clave por clave (estado y
   ``valid_until``);
 - toda publicación del conjunto está firmada por una clave ``key_set`` que estaba ``active`` u
-  ``overlapping`` y **vigente** al emitir, lista exactamente las claves ``active`` y
-  ``overlapping`` de los cuatro propósitos del nodo y la firma verifica;
-- un nodo simulado (``KeySet`` de U-01), fijado con el conjunto inicial, aplica cada publicación
-  en orden; la continuidad solo se rompe cuando la ``key_set`` anterior ya había vencido, y
-  entonces el nodo se vuelve a dar de alta (BR-NUC-86);
+  ``overlapping`` y **vigente** al emitir (la más antigua de ellas, VIG-253), lista exactamente
+  las claves ``active`` y ``overlapping`` de los cuatro propósitos del nodo y la firma verifica;
 - ninguna clave ``checkpoint`` deja de estar publicada.
 
+Un nodo simulado (``KeySet`` de U-01), fijado con el conjunto inicial, hace latidos en momentos
+generados y, como el latido real (BR-GOB-82), solo recibe la **última** publicación, nunca las
+intermedias (VIG-253). La acepta siempre que tenga fijada alguna ``key_set`` que la plataforma
+publicaba vigente al emitirla; si no, quedó fuera del contrato (sin latido durante todo un
+solapamiento) y se vuelve a dar de alta (BR-NUC-86). Si el firmante de la última ya venció, el
+nodo no aplica nada y conserva lo que tenía (BR-BOR-90).
+
 Además, el ejemplo del criterio de aceptación: un nodo con el conjunto inicial fijado acepta el
-conjunto publicado tras rotar la propia ``key_set`` (``KeySet.apply_signed_set``).
+conjunto publicado tras rotar la propia ``key_set`` (``KeySet.apply_signed_set``), y la sonda de
+VIG-253: tras la corrida diaria que rota los cinco propósitos acepta la última publicación.
 """
 
 from __future__ import annotations
@@ -122,14 +127,35 @@ class RotationModel:
             return self.last_issued + MS
         return now
 
+    def valid_key_sets(self, moment: datetime) -> set[str]:
+        """Claves ``key_set`` publicadas (``active`` u ``overlapping``) y vigentes en ``moment``."""
+        return {
+            key_id
+            for key_id, key in self.keys.items()
+            if key.purpose is SigningPurpose.KEY_SET
+            and key.status in (KeyStatus.ACTIVE, KeyStatus.OVERLAPPING)
+            and key.valid_at(moment)
+        }
+
+    def _previous_key_set(self, moment: datetime) -> str | None:
+        """La ``key_set`` ``overlapping`` si sigue vigente en ``moment``."""
+        for key_id in self.with_status(SigningPurpose.KEY_SET, KeyStatus.OVERLAPPING):
+            if self.keys[key_id].valid_at(moment):
+                return key_id
+        return None
+
     def rotation_allowed(self, purpose: SigningPurpose, now: datetime) -> bool:
-        """Otro propósito del nodo exige una ``key_set`` activa vigente al emitir."""
+        """Otro propósito del nodo exige una ``key_set`` vigente al emitir."""
         if purpose not in NODE_PURPOSES or purpose is SigningPurpose.KEY_SET:
+            return True
+        if self._previous_key_set(self.issued_at(now)) is not None:
             return True
         key_set = self.active(SigningPurpose.KEY_SET)
         return key_set is None or key_set[1].valid_at(self.issued_at(now))
 
     def expected_signer(self, purpose: SigningPurpose, now: datetime, new_id: str) -> str | None:
+        """La ``key_set`` vigente más antigua al emitir (VIG-253); al rotar la propia
+        ``key_set``, la activa de antes (o la nueva si ya venció)."""
         if purpose not in NODE_PURPOSES:
             return None
         key_set = self.active(SigningPurpose.KEY_SET)
@@ -137,6 +163,9 @@ class RotationModel:
             if key_set is not None and key_set[1].valid_at(self.issued_at(now)):
                 return key_set[0]
             return new_id
+        previous = self._previous_key_set(self.issued_at(now))
+        if previous is not None:
+            return previous
         return None if key_set is None else key_set[0]
 
     def rotate(self, purpose: SigningPurpose, new_id: str, now: datetime) -> None:
@@ -243,6 +272,10 @@ class KeyRotationMachine(RuleBasedStateMachine):
         latest = self.world.store.publications[-1]
         self.model = RotationModel.from_records(self.world.store.keys, latest.record.issued_at)
         self.node = pinned_node(self.world, latest.record)
+        self.trusted_at_issue: dict[Any, set[str]] = {
+            latest.record.publication_id: self.model.valid_key_sets(latest.record.issued_at)
+        }
+        """Por publicación: las ``key_set`` que el modelo publicaba vigentes al emitirla."""
         self.checked_publications = 0
         self.re_enrollments = 0
         # Segundo proceso vivo (API frente a worker) que nunca refresca por su cuenta: rota desde
@@ -266,16 +299,12 @@ class KeyRotationMachine(RuleBasedStateMachine):
         now = self.world.clock.now()
         return now.replace(microsecond=now.microsecond // 1000 * 1000)
 
-    def _node_receives(self, publication: KeySetPublicationRecord, continuity: bool) -> None:
-        if continuity:
-            self.node.apply_signed_set(publication.envelope)
-            assert publication.signed_by_key_id in self.node
-        else:
-            # La key_set anterior venció: el nodo no puede comprobar el conjunto (BR-NUC-86).
-            with pytest.raises(SignatureInvalidError):
-                self.node.apply_signed_set(publication.envelope)
-            self.node = pinned_node(self.world, publication)
-            self.re_enrollments += 1
+    def _published(self, publication: KeySetPublicationRecord) -> None:
+        """Tras ``model.rotate``: lo que el nodo podrá comprobar de esta publicación."""
+        self.model.last_issued = publication.issued_at
+        self.trusted_at_issue[publication.publication_id] = self.model.valid_key_sets(
+            publication.issued_at
+        )
 
     def _rotate_with(self, service: SigningService, purpose: SigningPurpose) -> None:
         now = self._now()
@@ -299,8 +328,7 @@ class KeyRotationMachine(RuleBasedStateMachine):
         assert publication is not None
         assert publication.signed_by_key_id == signer
         assert publication.issued_at == issued
-        self.model.last_issued = issued
-        self._node_receives(publication, continuity=signer != new_id)
+        self._published(publication)
 
     # --- reglas --------------------------------------------------------------------------------
 
@@ -360,8 +388,7 @@ class KeyRotationMachine(RuleBasedStateMachine):
             if signer is not None:
                 stored = new_publications.pop(0)
                 assert stored.record.signed_by_key_id == signer
-                self.model.last_issued = stored.record.issued_at
-                self._node_receives(stored.record, continuity=signer != content["key_id"])
+                self._published(stored.record)
         assert not new_publications
         self.model.retire(now)
         self.in_sync = True  # la tarea refresca antes de decidir
@@ -371,6 +398,32 @@ class KeyRotationMachine(RuleBasedStateMachine):
         self._run(self.service.retire_expired())
         self.model.retire(self._now())
         self.in_sync = True
+
+    @rule()
+    def heartbeat(self) -> None:
+        """El nodo recibe solo la última publicación, como en ``HeartbeatResponse``."""
+        latest = self.world.store.publications[-1].record
+        signer = self.model.keys[latest.signed_by_key_id]
+        if not signer.valid_at(self.world.clock.now()):
+            # El firmante de la última ya venció. Si el nodo no llegó a ver su vigencia acortada
+            # (la de su copia es más larga), la sigue aceptando; si la rechaza, conserva su
+            # conjunto tal cual (BR-BOR-90).
+            before = self.node.pinned_keys()
+            try:
+                self.node.apply_signed_set(latest.envelope)
+            except SignatureInvalidError:
+                assert self.node.pinned_keys() == before
+            return
+        if any(key_id in self.node for key_id in self.trusted_at_issue[latest.publication_id]):
+            # Con alguna key_set que la plataforma publicaba vigente al emitir, la acepta.
+            self.node.apply_signed_set(latest.envelope)
+            assert latest.signed_by_key_id in self.node
+            return
+        # Sin latido durante todo el solapamiento: fuera del contrato, nueva alta (BR-NUC-86).
+        with pytest.raises(SignatureInvalidError):
+            self.node.apply_signed_set(latest.envelope)
+        self.node = pinned_node(self.world, latest)
+        self.re_enrollments += 1
 
     @rule()
     def restart(self) -> None:
@@ -454,28 +507,76 @@ def test_node_with_initial_set_accepts_the_set_published_after_rotating_key_set(
         node.apply_signed_set(first.envelope)
         assert rotation.new_key.key_id in node
 
-        # 2. La siguiente publicación ya la firma la key_set nueva, y el nodo la acepta.
+        # 2. Dentro del solapamiento, la siguiente publicación también la firma la anterior
+        #    (VIG-253): un nodo que no recibió la primera, solo con el conjunto inicial, la acepta.
         world.clock.advance((10 * DAY).total_seconds())
         second = (await world.service.rotate(SigningPurpose.CATALOG, context=context)).publication
-        assert second is not None and second.signed_by_key_id == rotation.new_key.key_id
+        assert second is not None and second.signed_by_key_id == first_key_set
         node.apply_signed_set(second.envelope)
+        skipped = pinned_node(world, initial)
+        skipped.apply_signed_set(second.envelope)
+        assert rotation.new_key.key_id in skipped
         # Un conjunto viejo reenviado, bien firmado, no se aplica.
         with pytest.raises(KeySetConflictError):
             node.apply_signed_set(first.envelope)
 
-        # 3. Pasado el solapamiento, la key_set anterior deja de estar en el conjunto del nodo.
+        # 3. Pasado el solapamiento, la firma la nueva y la anterior deja de estar en el conjunto.
         world.clock.advance((21 * DAY).total_seconds())
         await world.service.retire_expired()
         third = (await world.service.rotate(SigningPurpose.GATE, context=context)).publication
         assert third is not None and first_key_set not in third.key_ids
+        assert third.signed_by_key_id == rotation.new_key.key_id
         node.apply_signed_set(third.envelope)
+        skipped.apply_signed_set(third.envelope)
         assert first_key_set not in node
 
-        # La continuidad exige el orden: un nodo que solo tiene el conjunto inicial no puede
-        # comprobar lo que firma la key_set nueva.
+        # Un nodo sin latido durante todo el solapamiento, solo con el conjunto inicial, no puede
+        # comprobar lo que firma la key_set nueva: fuera del contrato, nueva alta (BR-NUC-86).
         stale = pinned_node(world, initial)
         with pytest.raises(SignatureInvalidError):
             stale.apply_signed_set(third.envelope)
+
+    asyncio.run(scenario())
+
+
+def test_node_with_initial_set_accepts_the_latest_set_after_the_daily_run_rotates_everything() -> (
+    None
+):
+    """Regresión de VIG-253: las claves del alta vencen el mismo día, así que la corrida diaria
+    rota los cinco propósitos seguidos (``key_set`` primero). El latido solo entrega la última
+    publicación, y un nodo con el conjunto del alta tiene que poder comprobarla."""
+
+    async def scenario() -> None:
+        world = await bootstrapped_world()
+        initial = world.store.publications[-1].record
+        node = pinned_node(world, initial)
+        world.clock.advance((336 * DAY).total_seconds())
+        decision = world.service.reminder_decision(world.clock.now(), period=DAY)
+        assert decision.rotations[0] is SigningPurpose.KEY_SET and len(decision.rotations) == 5
+        for purpose in decision.rotations:
+            await world.service.rotate(purpose, context=provider_context())
+        latest = world.service.current_publication()
+        assert latest is not None
+        # Toda publicación del solapamiento la firma la key_set anterior, la que el nodo tiene.
+        assert latest.signed_by_key_id == initial.signed_by_key_id
+        envelope = world.service.current_key_set_envelope()
+        assert envelope is not None
+        node.apply_signed_set(envelope)
+        new_key_set = world.service.public_keys(SigningPurpose.KEY_SET)
+        assert {k.key_id for k in new_key_set} <= set(latest.key_ids)
+        assert all(k.key_id in node for k in new_key_set)
+
+        # Vencida la key_set anterior, la siguiente publicación la firma la nueva, y el nodo
+        # que aplicó una publicación del solapamiento la acepta.
+        world.clock.advance((31 * DAY).total_seconds())
+        await world.service.retire_expired()
+        after = (
+            await world.service.rotate(SigningPurpose.GATE, context=provider_context())
+        ).publication
+        assert after is not None and after.signed_by_key_id != initial.signed_by_key_id
+        assert after.signed_by_key_id in {k.key_id for k in new_key_set}
+        node.apply_signed_set(after.envelope)
+        assert initial.signed_by_key_id not in after.key_ids
 
     asyncio.run(scenario())
 

@@ -15,8 +15,10 @@ Reglas (BR-NUC-84 a 86; ``business-logic-model.md`` §9; ``domain-entities.md`` 
 - Al pasar ``valid_until``, ``overlapping`` → ``retired``. Una ``active`` vencida sigue ``active``
   hasta que se rote (la tarea ``key_rotation_reminder`` la rota), pero ya no firma.
 - Se publica a los nodos el conjunto de claves ``active`` y ``overlapping`` de los cuatro
-  propósitos del nodo, firmado por la clave ``key_set`` ``active``; al rotar la propia ``key_set``
-  firma la **anterior** (continuidad, BR-NUC-86). Las claves ``checkpoint`` no se publican a los
+  propósitos del nodo, firmado por la clave ``key_set`` vigente más antigua: la ``overlapping``
+  mientras dure su solapamiento (también al rotar la propia ``key_set``, la **anterior**:
+  continuidad, BR-NUC-86) y, fuera de él, la ``active`` (``publication_plan``; VIG-253: el latido
+  solo entrega la última publicación). Las claves ``checkpoint`` no se publican a los
   nodos, y a los clientes se publican todas, también las retiradas: nunca dejan de publicarse.
 - Aviso ``key_rotation_due`` 45 días antes del vencimiento de la clave activa; rotación
   automática cuando faltan 30 días (BR-NUC-85).
@@ -59,6 +61,7 @@ __all__ = [
     "days_to_expiry",
     "expiry_transitions",
     "format_timestamp",
+    "holds_private_material",
     "published_keys",
     "reminder_decision",
     "rotation_transitions",
@@ -397,6 +400,14 @@ class KeySetSignerUnavailable(ValueError):
     """La clave ``key_set`` activa ya no está vigente: no se puede publicar un conjunto válido."""
 
 
+def holds_private_material(key: SigningKeyRecord) -> bool:
+    """El servicio guarda en memoria el material de las ``active`` y de la ``key_set``
+    ``overlapping``: esta firma las publicaciones del solapamiento (``publication_plan``)."""
+    return key.status is KeyStatus.ACTIVE or (
+        key.purpose is SigningPurpose.KEY_SET and key.status is KeyStatus.OVERLAPPING
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PublicationPlan:
     """Quién firma el conjunto que sigue a una rotación.
@@ -414,18 +425,35 @@ def publication_plan(
 ) -> PublicationPlan | None:
     """Plan de publicación al rotar ``purpose`` en ``now``; ``None`` si no se publica.
 
-    Toda publicación la firma una ``key_set`` vigente en ``now`` (PR-NUC-35): la ``active``; al
-    rotar la propia ``key_set``, la anterior (continuidad, BR-NUC-86). ``checkpoint`` no se
-    publica a los nodos. Sin ninguna ``key_set`` todavía (alta) tampoco: la primera publicación
-    sale al crear la ``key_set`` y ya incluye las demás claves. Si la ``key_set`` activa venció,
-    rotar otro propósito lanza ``KeySetSignerUnavailable`` (hay que rotar antes la ``key_set``).
+    Toda publicación la firma una ``key_set`` vigente en ``now`` (PR-NUC-35), y siempre la **más
+    antigua** que siga vigente, porque el latido solo entrega la última publicación (BR-GOB-82) y
+    un nodo que no recibió las intermedias solo tiene fijada la anterior (VIG-253):
+
+    - Al rotar la propia ``key_set``: la ``active`` de antes, que pasa a ``overlapping``
+      (continuidad, BR-NUC-86). Si ya había otra ``overlapping`` (dos rotaciones de ``key_set``
+      en menos de 30 días), esa se retira en el acto y ya no firma: un nodo que solo tenía esa no
+      aplicó ninguna publicación desde la rotación anterior y queda fuera del contrato.
+    - Al rotar otro propósito del nodo durante el solapamiento de la ``key_set``: la
+      ``overlapping``, no la ``active`` nueva. El nodo que solo tiene la anterior comprueba
+      cualquier publicación del periodo y, al aplicarla, aprende la nueva (va en el conjunto).
+    - Fuera del solapamiento (la anterior venció, aunque la tarea aún no la haya retirado): la
+      ``active``. Un nodo sin latido durante todo el solapamiento debe volver a darse de alta.
+
+    ``checkpoint`` no se publica a los nodos. Sin ninguna ``key_set`` todavía (alta) tampoco: la
+    primera publicación sale al crear la ``key_set`` y ya incluye las demás claves. Si no queda
+    ninguna ``key_set`` vigente, rotar otro propósito lanza ``KeySetSignerUnavailable`` (hay que
+    rotar antes la ``key_set``).
     """
     if purpose not in NODE_PURPOSES:
         return None
-    signer = active_key(keys_before, SigningPurpose.KEY_SET)
+    listed = list(keys_before)
+    signer = active_key(listed, SigningPurpose.KEY_SET)
     if purpose is SigningPurpose.KEY_SET:
         continuity = signer is not None and signer.is_valid_at(now)
         return PublicationPlan(signer.key_id if continuity and signer is not None else None)
+    previous = _overlapping(listed, SigningPurpose.KEY_SET)
+    if previous is not None and previous.is_valid_at(now):
+        return PublicationPlan(previous.key_id)
     if signer is None:
         return None
     if not signer.is_valid_at(now):

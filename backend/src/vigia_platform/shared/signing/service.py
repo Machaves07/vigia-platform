@@ -13,7 +13,8 @@ Implementa ``SigningPort`` (``business-logic-model.md`` §10.1) y la rotación d
 - ``rotate(purpose, context=...)``: clave nueva en el gestor de secretos, anterior
   ``overlapping``, ``key_rotated`` en la cadena de la organización proveedora y, para los cuatro
   propósitos del nodo, ``KeySetPublication`` firmada por la ``key_set`` que el nodo ya tiene
-  fijada, más ``key_set_published`` (con su evento de la bandeja). La rotación y el retiro
+  fijada (la vigente más antigua, ``publication_plan``), más ``key_set_published`` (con su evento
+  de la bandeja). La rotación y el retiro
   releen la base con el candado tomado: nunca calculan desde una memoria que otro proceso
   (API o worker) dejó atrás, y el almacén rechaza con ``KeyStateConflict`` una confirmación
   calculada desde un estado ya superado.
@@ -24,11 +25,13 @@ Implementa ``SigningPort`` (``business-logic-model.md`` §10.1) y la rotación d
 32 bytes van **solo** al gestor de secretos (un secreto por propósito y versión,
 ``vigia/<entorno>/signing/<purpose>/<key_id>``) y a la memoria. La base guarda la referencia y la
 clave pública (``SigningKeyStore``); ningún ``repr``, registro, evento, registro del expediente ni
-respuesta lleva material privado. En memoria solo se conservan las claves ``active``.
+respuesta lleva material privado. En memoria solo se conservan las claves ``active`` y la
+``key_set`` ``overlapping``, que firma las publicaciones de su solapamiento (VIG-253).
 
 **Arranque cerrado** (PAT-NUC-RES-02, FS-NUC-05): ``start()`` carga las claves y el material de
-cada ``active``; si falta una clave requerida, el material no se puede leer (gestor de secretos
-inaccesible, secreto inexistente) o no corresponde a su clave pública, lanza
+cada ``active`` (y de la ``key_set`` ``overlapping``); si falta una clave requerida, el material
+no se puede leer (gestor de secretos inaccesible, secreto inexistente) o no corresponde a su clave
+pública, lanza
 ``SigningStartupError`` y el servicio no queda listo (``ready`` falso). **En operación**,
 ``refresh()`` (cada 5 minutos, ``run_refresh``) relee claves y secretos; si falla, se sigue
 firmando con lo que hay en memoria y se suma 1 a ``secrets_refresh_failed``. La rotación sin
@@ -85,6 +88,7 @@ from vigia_platform.shared.signing.keys import (
     days_to_expiry,
     expiry_transitions,
     format_timestamp,
+    holds_private_material,
     node_key_set,
     publication_plan,
     published_keys,
@@ -371,13 +375,13 @@ class SigningService:
         return True
 
     async def _probe_secrets(self, keys: Iterable[SigningKeyRecord]) -> None:
-        """Relee del gestor el material de las activas que ya está en memoria (FS-NUC-05 b).
+        """Relee del gestor el material que ya está en memoria (FS-NUC-05 b).
 
         No cambia nada: con el gestor caído se sigue firmando con lo de memoria, pero la caída se
         cuenta en ``secrets_refresh_failed`` aunque el proceso no rote. El adaptador sirve su
         caché y cuenta él mismo cuando responde con el último valor.
         """
-        refs = [k.private_key_ref for k in keys if k.status is KeyStatus.ACTIVE]
+        refs = [k.private_key_ref for k in keys if holds_private_material(k)]
         results = await asyncio.gather(
             *(self._secrets.get(ref) for ref in refs), return_exceptions=True
         )
@@ -422,16 +426,17 @@ class SigningService:
         keys: Iterable[SigningKeyRecord],
         known: Mapping[str, Ed25519PrivateKey],
     ) -> tuple[dict[str, Ed25519PrivateKey], list[str]]:
-        """Material de cada clave ``active``: de ``known`` si ya está, si no del gestor.
+        """Material de cada clave ``active`` y de la ``key_set`` ``overlapping``: de ``known`` si
+        ya está, si no del gestor.
 
         Las lecturas al gestor van en paralelo: con el gestor sin responder, el arranque falla en
         un solo tope de llamada (5 s), no en uno por clave.
         """
         loaded: dict[str, Ed25519PrivateKey] = {}
         failures: list[str] = []
-        active = [k for k in keys if k.status is KeyStatus.ACTIVE]
-        pending = [k for k in active if k.key_id not in known]
-        loaded.update((k.key_id, known[k.key_id]) for k in active if k.key_id in known)
+        held = [k for k in keys if holds_private_material(k)]
+        pending = [k for k in held if k.key_id not in known]
+        loaded.update((k.key_id, known[k.key_id]) for k in held if k.key_id in known)
         results = await asyncio.gather(
             *(self._secrets.get(key.private_key_ref) for key in pending), return_exceptions=True
         )
@@ -595,7 +600,7 @@ class SigningService:
         transitions = rotation_transitions(self._keys.values(), purpose, now)
         keys_after = apply_transitions(self._keys, transitions, new_key)
         private_after = {
-            k: v for k, v in self._private.items() if keys_after[k].status is KeyStatus.ACTIVE
+            k: v for k, v in self._private.items() if holds_private_material(keys_after[k])
         }
         private_after[key_id] = private
         previous_id = None if previous is None else previous.key_id
