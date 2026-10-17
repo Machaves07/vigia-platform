@@ -668,6 +668,31 @@ def test_restore_audit_partition_verifies_and_extracts(tmp_path: Path) -> None:
         "restore-audit-partition", "audit/x.zip", "--sha256", "ABC", "--output", str(other)
     )
     assert code == ExitCode.REJECTED and json.loads(err)["error"] == "invalid_value"
+    # Sin --version-id-hex se lee la versión actual (registros anteriores a VIG-255).
+    assert world.archive.versions == [None, None]
+
+
+def test_restore_audit_partition_reads_the_recorded_version(tmp_path: Path) -> None:
+    """VIG-255: con ``--version-id-hex`` se lee esa versión del objeto, no la actual."""
+    import hashlib
+
+    data = archive_of(fixed_partition())
+    digest = hashlib.sha256(data).hexdigest()
+    world = FakeWorld(archive_data=data)
+    version_hex = "Ki8Yy0tVTfGwPUfjsJUSmYHONr0OcXnT".encode("ascii").hex()
+    base = ("restore-audit-partition", "audit/x.zip", "--sha256", digest)
+    code, out, err = world.run(
+        *base, "--version-id-hex", version_hex, "--output", str(tmp_path / "a")
+    )
+    assert code == 0, err
+    assert output(out)["versioned"] is True
+    assert world.archive.versions == ["Ki8Yy0tVTfGwPUfjsJUSmYHONr0OcXnT"]
+    # Hexadecimal impar, en mayúsculas, vacío, o que no decodifica a ASCII visible: rechazado
+    # antes de leer nada.
+    for bad in ("abc", "4B69", "", "20", "ff" * 4, "41" * 513):
+        code, _, err = world.run(*base, "--version-id-hex", bad, "--output", str(tmp_path / "b"))
+        assert code == ExitCode.REJECTED and json.loads(err)["error"] == "invalid_value", bad
+    assert world.archive.versions == ["Ki8Yy0tVTfGwPUfjsJUSmYHONr0OcXnT"]
 
 
 # --- Salida y errores ---------------------------------------------------------------------------

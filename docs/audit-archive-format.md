@@ -16,6 +16,12 @@ solo entonces se desprende de la base. El procedimiento de investigación comple
   proveedora** lleva `partition_name`, `period`, `archive_object_key`, `archive_sha256` (SHA-256
   del objeto, en hexadecimal), `entry_count` y `archived_at`. Es la referencia de la restauración:
   un objeto con otro SHA-256 no se acepta.
+- Desde la versión 3 del registro (VIG-255) lleva también `archive_version_id_hex`: el
+  `VersionId` de la subida verificada, sus bytes ASCII en hexadecimal en minúsculas (el
+  identificador de S3 mezcla mayúsculas y minúsculas y el registro de tipos lo trataría como texto
+  libre). La clave es fija por mes y el depósito guarda una versión por subida: dos pasadas a la
+  vez dejan dos versiones, y solo la registrada casa con `archive_sha256`. Un registro sin el
+  campo (versiones 1 y 2) se restaura con la versión actual.
 
 ## 2. Contenido del ZIP
 
@@ -63,11 +69,13 @@ La orden la añade `vigia-admin` (TASK-132) sobre `restore_audit_partition` y `e
 
 ```text
 vigia-admin restore-audit-partition audit/2026-10/audit_entry_2026_10.zip \
-    --sha256 <archive_sha256 del registro audit_partition_archived> --output <directorio nuevo>
+    --sha256 <archive_sha256 del registro audit_partition_archived> \
+    --version-id-hex <archive_version_id_hex del registro, si lo tiene> --output <directorio nuevo>
 ```
 
-1. Descarga el objeto de `vigia-archive` (el rol de la tarea solo tiene `GetObject`) y exige el
-   SHA-256 del registro.
+1. Descarga el objeto de `vigia-archive` (`GetObject` y, con `--version-id-hex`, esa versión con
+   `GetObjectVersion`) y exige el SHA-256 del registro. Sin `--version-id-hex` lee la versión
+   actual (registros anteriores a VIG-255).
 2. Verifica cada cadena con las claves del propio archivo, sin acceso a la base.
 3. Escribe los paquetes y `vigia_verify.py` en `--output`, que no debe existir. Nada sale de ese
    directorio.

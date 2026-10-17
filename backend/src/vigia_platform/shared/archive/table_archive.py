@@ -23,13 +23,22 @@ Por cada partición adjunta vencida:
    de las filas; ``rows.jsonl`` con una fila por línea, exactamente el texto de la base).
 3. **Sube** el archivo a ``vigia-archive`` cifrado con la clave ``vigia-archive``, bajo un
    **prefijo por tabla**: ``fleet/<tabla>/<AAAA-MM>/<tabla>_AAAA_MM.zip``.
-4. **Lo lee de vuelta** y lo **verifica**: mismo SHA-256 que lo subido, manifiesto y miembros
+4. **Lo lee de vuelta** (la versión exacta que devolvió la subida, ``VersionId`` del depósito
+   versionado) y lo **verifica**: mismo SHA-256 que lo subido, manifiesto y miembros
    exactos, SHA-256 y recuento de las filas los declarados, y **cada fila igual, byte a byte**, a
    la de la base.
 5. Solo entonces, en **una** transacción: ``shared.vigia_detach_table_partition`` (recuento de
    nuevo bajo bloqueo exclusivo, ninguna fila posterior ni alarma abierta; desprende y deja la
    tabla desprendida de solo anexar) y el registro ``audit_partition_archived`` (versión 2, que
-   admite los nombres de ``fleet``) en la cadena de la **organización proveedora**.
+   admite los nombres de ``fleet``; la 3 añade ``archive_version_id_hex``, VIG-255) en la cadena
+   de la **organización proveedora**.
+
+La clave del objeto es fija por partición: dos pasadas a la vez (una que perdió el arrendamiento)
+suben dos versiones a la misma clave. Por eso el registro guarda la **versión** que se verificó y
+la restauración pide esa versión, no la actual. ``archive_version_id_hex`` es el ``VersionId`` en
+hexadecimal (``version_id_hex``): el identificador de S3 mezcla mayúsculas y minúsculas sin
+longitud fija y el registro de tipos lo trataría como texto libre. Un registro sin él (anterior a
+VIG-255, o de un depósito sin versionado) se restaura con la versión actual, como antes.
 
 Si la verificación falla, la partición **sigue adjunta**, no se registra como archivada y
 ``AuditArchiver`` alerta como con la auditoría (``security_alert`` y la entrada
@@ -81,6 +90,7 @@ __all__ = [
     "TableArchiver",
     "TablePartition",
     "TableSnapshot",
+    "archived_content",
     "build_table_archive",
     "parse_row",
     "read_table_archive",
@@ -88,6 +98,8 @@ __all__ = [
     "restore_table_rows",
     "verify_table_archive",
     "verify_table_download",
+    "version_id_from_hex",
+    "version_id_hex",
 ]
 
 _log = get_logger("shared.archive")
@@ -104,6 +116,12 @@ READ_BATCH: Final = 5_000
 """Filas por lote al exportar ``[objetivo propio]``."""
 
 _HEX64: Final = re.compile(r"[0-9a-f]{64}")
+_VERSION_HEX: Final = re.compile(r"(?:[0-9a-f]{2}){1,512}")
+_VERSION_ID: Final = re.compile(r"[\x21-\x7e]{1,512}")
+"""El ``VersionId`` que cabe en ``archive_version_id_hex``: ASCII visible (lo que acepta
+``shared.storage``) y hasta 512 bytes, la mitad del tope de una cadena cerrada del registro de
+tipos. Los de S3 tienen 32; uno más largo hace fallar el archivado (la partición sigue adjunta),
+nunca lo registra sin versión."""
 _ZIP_EPOCH: Final = (1980, 1, 1, 0, 0, 0)
 _MANIFEST_KEYS: Final = frozenset(
     {
@@ -262,6 +280,7 @@ class ArchivedTablePartition:
     sha256: str
     entry_count: int
     archived_at: datetime
+    version_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +472,48 @@ def restore_table_rows(contents: TableArchiveContents) -> tuple[dict[str, Any], 
         raise _unreadable(str(error)) from None
 
 
+def version_id_hex(version_id: str) -> str:
+    """``archive_version_id_hex`` de un ``VersionId``: sus bytes ASCII en hexadecimal."""
+    if not isinstance(version_id, str) or _VERSION_ID.fullmatch(version_id) is None:
+        raise ValueError("identificador de versión no válido")
+    return version_id.encode("ascii").hex()
+
+
+def version_id_from_hex(value: str | None) -> str | None:
+    """El ``VersionId`` de un ``archive_version_id_hex``; ``None`` si el registro no lo tiene."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or _VERSION_HEX.fullmatch(value) is None:
+        raise ValueError("archive_version_id_hex debe ser hexadecimal en minúsculas")
+    version_id = bytes.fromhex(value).decode("ascii", errors="replace")
+    if _VERSION_ID.fullmatch(version_id) is None:
+        raise ValueError("archive_version_id_hex no es un identificador de versión válido")
+    return version_id
+
+
+def archived_content(
+    partition_name: str,
+    period: str,
+    object_key: str,
+    sha256: str,
+    entry_count: int,
+    archived_at: datetime,
+    version_id: str | None,
+) -> dict[str, Any]:
+    """El contenido de ``audit_partition_archived``, con la versión si el depósito la dio."""
+    content: dict[str, Any] = {
+        "partition_name": partition_name,
+        "period": period,
+        "archive_object_key": object_key,
+        "archive_sha256": sha256,
+        "entry_count": entry_count,
+        "archived_at": format_timestamp(archived_at),
+    }
+    if version_id is not None:
+        content["archive_version_id_hex"] = version_id_hex(version_id)
+    return content
+
+
 def restored_table_from_bytes(data: bytes, expected_sha256: str) -> RestoredTablePartition:
     """Restauración de solo lectura sobre bytes ya descargados."""
     if not isinstance(expected_sha256, str) or _HEX64.fullmatch(expected_sha256) is None:
@@ -464,15 +525,22 @@ def restored_table_from_bytes(data: bytes, expected_sha256: str) -> RestoredTabl
 
 
 async def restore_table_partition(
-    storage: StoragePort, object_key: str, expected_sha256: str
+    storage: StoragePort,
+    object_key: str,
+    expected_sha256: str,
+    *,
+    version_id: str | None = None,
 ) -> RestoredTablePartition:
     """Descarga y verifica un archivo de ``fleet``; no escribe en la base.
 
-    ``expected_sha256`` es el ``archive_sha256`` del registro ``audit_partition_archived``.
+    ``expected_sha256`` es el ``archive_sha256`` del registro ``audit_partition_archived`` y
+    ``version_id`` su ``archive_version_id_hex`` decodificado (``version_id_from_hex``); sin él
+    se lee la versión actual de la clave (registros anteriores a VIG-255).
     """
     if not isinstance(expected_sha256, str) or _HEX64.fullmatch(expected_sha256) is None:
         raise ValueError("expected_sha256 debe ser un SHA-256 hexadecimal en minúsculas")
-    return restored_table_from_bytes(await storage.get_object(object_key), expected_sha256)
+    data = await storage.get_object(object_key, version_id=version_id)
+    return restored_table_from_bytes(data, expected_sha256)
 
 
 # --- Servicio -----------------------------------------------------------------------------------
@@ -590,18 +658,23 @@ class TableArchiver:
         data = build_table_archive(snapshot, self._clock.now())
         uploaded_sha256 = hashlib.sha256(data).hexdigest()
         key = partition.object_key
-        await self._storage.put_object(key, data, ARCHIVE_CONTENT_TYPE, kms_key_id=self._kms_key_id)
-        downloaded = await self._storage.get_object(key)
+        head = await self._storage.put_object(
+            key, data, ARCHIVE_CONTENT_TYPE, kms_key_id=self._kms_key_id
+        )
+        # La versión recién subida: otra pasada puede subir otra a la misma clave.
+        version_id = head.version_id
+        downloaded = await self._storage.get_object(key, version_id=version_id)
         verify_table_download(downloaded, uploaded_sha256, snapshot)
         archived_at = self._clock.now()
-        content = {
-            "partition_name": partition.qualified_name,
-            "period": partition.period,
-            "archive_object_key": key,
-            "archive_sha256": uploaded_sha256,
-            "entry_count": snapshot.row_count,
-            "archived_at": format_timestamp(archived_at),
-        }
+        content = archived_content(
+            partition.qualified_name,
+            partition.period,
+            key,
+            uploaded_sha256,
+            snapshot.row_count,
+            archived_at,
+            version_id,
+        )
         try:
             async with self._database.transaction(context) as transaction:
                 await transaction.execute(
@@ -631,5 +704,5 @@ class TableArchiver:
             entries=snapshot.row_count,
         )
         return ArchivedTablePartition(
-            partition, key, uploaded_sha256, snapshot.row_count, archived_at
+            partition, key, uploaded_sha256, snapshot.row_count, archived_at, version_id
         )
