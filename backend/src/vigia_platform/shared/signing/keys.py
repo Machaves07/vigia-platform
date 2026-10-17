@@ -11,12 +11,17 @@ Reglas (BR-NUC-84 a 86; ``business-logic-model.md`` §9; ``domain-entities.md`` 
 - Una clave nace ``active`` con vigencia de 365 días. Al rotar, la anterior pasa a ``overlapping``
   y deja de firmar; sigue publicada hasta su ``valid_until``, que se acota a **30 días** después de
   la rotación (solapamiento). Si ya había una ``overlapping`` de ese propósito (dos rotaciones en
-  menos de 30 días), esa se retira en el acto: nunca hay dos.
+  menos de 30 días), esa se retira en el acto: nunca hay dos. Para ``key_set`` no se llega a eso:
+  mientras la anterior siga vigente, otra rotación de ``key_set`` se rechaza
+  (``KeySetRotationDeferred``) y la tarea la aplaza, porque retirarla dejaría sin continuidad al
+  nodo que solo la tiene a ella (VIG-253).
 - Al pasar ``valid_until``, ``overlapping`` → ``retired``. Una ``active`` vencida sigue ``active``
   hasta que se rote (la tarea ``key_rotation_reminder`` la rota), pero ya no firma.
 - Se publica a los nodos el conjunto de claves ``active`` y ``overlapping`` de los cuatro
-  propósitos del nodo, firmado por la clave ``key_set`` ``active``; al rotar la propia ``key_set``
-  firma la **anterior** (continuidad, BR-NUC-86). Las claves ``checkpoint`` no se publican a los
+  propósitos del nodo, firmado por la clave ``key_set`` vigente más antigua: la ``overlapping``
+  mientras dure su solapamiento (también al rotar la propia ``key_set``, la **anterior**:
+  continuidad, BR-NUC-86) y, fuera de él, la ``active`` (``publication_plan``; VIG-253: el latido
+  solo entrega la última publicación). Las claves ``checkpoint`` no se publican a los
   nodos, y a los clientes se publican todas, también las retiradas: nunca dejan de publicarse.
 - Aviso ``key_rotation_due`` 45 días antes del vencimiento de la clave activa; rotación
   automática cuando faltan 30 días (BR-NUC-85).
@@ -46,6 +51,7 @@ __all__ = [
     "OVERLAP",
     "ROTATION_NOTICE_BEFORE",
     "KeySetPublicationRecord",
+    "KeySetRotationDeferred",
     "KeySetSignerUnavailable",
     "KeyStateConflict",
     "KeyStatus",
@@ -59,6 +65,8 @@ __all__ = [
     "days_to_expiry",
     "expiry_transitions",
     "format_timestamp",
+    "holds_private_material",
+    "key_set_overlap_until",
     "published_keys",
     "reminder_decision",
     "rotation_transitions",
@@ -397,6 +405,42 @@ class KeySetSignerUnavailable(ValueError):
     """La clave ``key_set`` activa ya no está vigente: no se puede publicar un conjunto válido."""
 
 
+class KeySetRotationDeferred(Exception):
+    """Otra rotación de ``key_set`` durante el solapamiento de la anterior: no se aplica.
+
+    Retirar la ``overlapping`` vigente dejaría sin continuidad al nodo que solo la tiene fijada a
+    ella (no recibió ninguna publicación desde la rotación anterior): ni ``unknown_key`` ni una
+    nueva alta silenciosa (VIG-253, BR-NUC-84 y 86). Se puede rotar desde ``not_before``, cuando
+    la anterior vence.
+    """
+
+    def __init__(self, not_before: datetime) -> None:
+        super().__init__(
+            "la key_set anterior sigue en solapamiento hasta "
+            f"{format_timestamp(not_before)}: no se rota otra vez hasta entonces"
+        )
+        self.not_before = not_before
+
+
+def key_set_overlap_until(keys: Iterable[SigningKeyRecord], now: datetime) -> datetime | None:
+    """``valid_until`` de la ``key_set`` ``overlapping`` si sigue vigente en ``now``, o ``None``.
+
+    Mientras no sea ``None``, la ``key_set`` no se rota (``KeySetRotationDeferred``).
+    """
+    previous = _overlapping(keys, SigningPurpose.KEY_SET)
+    if previous is not None and previous.is_valid_at(now):
+        return previous.valid_until
+    return None
+
+
+def holds_private_material(key: SigningKeyRecord) -> bool:
+    """El servicio guarda en memoria el material de las ``active`` y de la ``key_set``
+    ``overlapping``: esta firma las publicaciones del solapamiento (``publication_plan``)."""
+    return key.status is KeyStatus.ACTIVE or (
+        key.purpose is SigningPurpose.KEY_SET and key.status is KeyStatus.OVERLAPPING
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PublicationPlan:
     """Quién firma el conjunto que sigue a una rotación.
@@ -414,18 +458,38 @@ def publication_plan(
 ) -> PublicationPlan | None:
     """Plan de publicación al rotar ``purpose`` en ``now``; ``None`` si no se publica.
 
-    Toda publicación la firma una ``key_set`` vigente en ``now`` (PR-NUC-35): la ``active``; al
-    rotar la propia ``key_set``, la anterior (continuidad, BR-NUC-86). ``checkpoint`` no se
-    publica a los nodos. Sin ninguna ``key_set`` todavía (alta) tampoco: la primera publicación
-    sale al crear la ``key_set`` y ya incluye las demás claves. Si la ``key_set`` activa venció,
-    rotar otro propósito lanza ``KeySetSignerUnavailable`` (hay que rotar antes la ``key_set``).
+    Toda publicación la firma una ``key_set`` vigente en ``now`` (PR-NUC-35), y siempre la **más
+    antigua** que siga vigente, porque el latido solo entrega la última publicación (BR-GOB-82) y
+    un nodo que no recibió las intermedias solo tiene fijada la anterior (VIG-253):
+
+    - Al rotar la propia ``key_set``: la ``active`` de antes, que pasa a ``overlapping``
+      (continuidad, BR-NUC-86). Solo fuera del solapamiento: si la ``overlapping`` anterior sigue
+      vigente, ``KeySetRotationDeferred`` y no se rota (retirarla dejaría sin continuidad al nodo
+      que solo tiene esa). Así nunca hay más de una ``key_set`` que el nodo pueda no conocer.
+    - Al rotar otro propósito del nodo durante el solapamiento de la ``key_set``: la
+      ``overlapping``, no la ``active`` nueva. El nodo que solo tiene la anterior comprueba
+      cualquier publicación del periodo y, al aplicarla, aprende la nueva (va en el conjunto).
+    - Fuera del solapamiento (la anterior venció, aunque la tarea aún no la haya retirado): la
+      ``active``. Un nodo sin latido durante todo el solapamiento debe volver a darse de alta.
+
+    ``checkpoint`` no se publica a los nodos. Sin ninguna ``key_set`` todavía (alta) tampoco: la
+    primera publicación sale al crear la ``key_set`` y ya incluye las demás claves. Si no queda
+    ninguna ``key_set`` vigente, rotar otro propósito lanza ``KeySetSignerUnavailable`` (hay que
+    rotar antes la ``key_set``). Se llama antes de crear nada: con una excepción no se rota.
     """
     if purpose not in NODE_PURPOSES:
         return None
-    signer = active_key(keys_before, SigningPurpose.KEY_SET)
+    listed = list(keys_before)
+    signer = active_key(listed, SigningPurpose.KEY_SET)
     if purpose is SigningPurpose.KEY_SET:
+        overlap_until = key_set_overlap_until(listed, now)
+        if overlap_until is not None:
+            raise KeySetRotationDeferred(overlap_until)
         continuity = signer is not None and signer.is_valid_at(now)
         return PublicationPlan(signer.key_id if continuity and signer is not None else None)
+    previous = _overlapping(listed, SigningPurpose.KEY_SET)
+    if previous is not None and previous.is_valid_at(now):
+        return PublicationPlan(previous.key_id)
     if signer is None:
         return None
     if not signer.is_valid_at(now):
@@ -444,7 +508,8 @@ class ReminderDecision:
     """Claves activas que acaban de entrar en los 45 días: un ``key_rotation_due`` por clave."""
     rotations: tuple[SigningPurpose, ...]
     """Propósitos cuya clave activa vence en 30 días o menos: se rotan, ``key_set`` primero
-    (firma las publicaciones de las demás rotaciones)."""
+    (firma las publicaciones de las demás rotaciones). La ``key_set`` se aplaza mientras dure el
+    solapamiento de la anterior (``KeySetRotationDeferred``): la rota una corrida posterior."""
 
 
 def reminder_decision(
@@ -466,7 +531,11 @@ def reminder_decision(
             continue
         remaining = key.valid_until - now
         if remaining <= AUTO_ROTATION_BEFORE:
-            rotations.append(purpose)
+            deferred = purpose is SigningPurpose.KEY_SET and (
+                key_set_overlap_until(listed, now) is not None
+            )
+            if not deferred:
+                rotations.append(purpose)
         elif ROTATION_NOTICE_BEFORE - period < remaining <= ROTATION_NOTICE_BEFORE:
             notices.append(key)
     return ReminderDecision(tuple(notices), tuple(rotations))

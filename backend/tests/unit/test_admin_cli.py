@@ -52,7 +52,12 @@ from vigia_platform.shared.context import ActorKind, ContextOrigin, ScopeContext
 from vigia_platform.shared.db import TemporarilyUnavailable, Transaction
 from vigia_platform.shared.node_ca import ROOT_CERTIFICATE_KEY
 from vigia_platform.shared.secrets import Dependency, SecretsUnavailable
-from vigia_platform.shared.signing.keys import SigningPurpose
+from vigia_platform.shared.signing.keys import (
+    KeySetRotationDeferred,
+    SigningPurpose,
+    format_timestamp,
+)
+from vigia_platform.shared.signing.service import RotationResult
 from vigia_platform.shared.storage import StorageUnavailable
 
 TEST_SECRET = "vigia/test/bootstrap/invitation"  # noqa: S105 - nombre del secreto, no su valor
@@ -465,6 +470,21 @@ def test_rotate_key_is_authorized_with_its_permission() -> None:
     assert code == 0
     assert "authorize:platform.keys.rotate" in world.calls.reads
     assert output(out)["purpose"] == "checkpoint"
+
+
+def test_rotate_key_during_the_key_set_overlap_is_rejected_with_its_date() -> None:
+    world = FakeWorld()
+    not_before = world.clock.now() + timedelta(days=29)
+
+    async def deferred(purpose: SigningPurpose, *, context: ScopeContext) -> RotationResult:
+        raise KeySetRotationDeferred(not_before)
+
+    world.signing.rotate = deferred  # type: ignore[method-assign]
+    code, out, err = world.run("rotate-key", "key_set", "--operator", str(OPERATOR_ID))
+    assert code == ExitCode.REJECTED and out == ""
+    error = json.loads(err)
+    assert error["error"] == "key_set_overlap"
+    assert format_timestamp(not_before) in error["mensaje"]
 
 
 @pytest.mark.parametrize(("until", "message"), [("2026-09", "anterior"), ("2036-10", "120 meses")])
