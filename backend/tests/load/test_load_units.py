@@ -741,12 +741,14 @@ def test_a_malformed_credential_or_configuration_exits_two_without_any_piece_of_
     assert not secret_findings({"stderr": captured.err})
 
 
+@pytest.mark.parametrize("credential", ["pem", "valid"])
 def test_a_malformed_credential_from_a_subprocess_exits_two_without_a_traceback(
-    tmp_path: Path,
+    credential: str, tmp_path: Path
 ) -> None:
-    # Como lo lanza `release.yml`: `python tests/load/soak.py`, con su propio stderr.
+    # Como lo lanza `release.yml`: `python tests/load/soak.py`, con su propio stderr (antes, el
+    # traceback de Pydantic citaba el PEM en `input_value`).
     plant = str(uuid.uuid4())
-    node = _synthetic_node(tmp_path / "nodos", plant, credential="pem")
+    node = _synthetic_node(tmp_path / "nodos", plant, credential=credential)
     fleet = _synthetic_fleet(
         tmp_path, [node], [{"plant_id": plant, "record_id": str(uuid.uuid4())}]
     )
@@ -852,7 +854,14 @@ def test_the_soak_dry_run_validates_the_fleet_its_records_and_the_console_sessio
 
 @pytest.mark.parametrize(
     "content",
-    ["{", "[]", json.dumps({"concession_id": str(uuid.uuid4())}), json.dumps({"cookie": "c"})],
+    [
+        "{",
+        "[]",
+        json.dumps({"concession_id": "0190f5f2-0000-7000-8000-000000000001"}),
+        json.dumps({"cookie": "galleta-sintetica-7f3a"}),
+        json.dumps({"cookie": "galleta-sintetica-7f3a", "concession_id": "no-es-un-uuid"}),
+    ],
+    ids=["ilegible", "lista", "sin_cookie", "sin_concesion", "concesion_invalida"],
 )
 def test_a_malformed_console_session_exits_two_without_its_cookie(
     content: str,
@@ -866,6 +875,7 @@ def test_a_malformed_console_session_exits_two_without_its_cookie(
     code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--console-session", str(session)])
     err = capsys.readouterr().err
     assert code == 2 and err.startswith("error: --console-session"), err
+    assert "galleta-sintetica-7f3a" not in err
 
 
 @pytest.mark.parametrize("seed", ["once", "-1", str(2**53)])
