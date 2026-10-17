@@ -113,7 +113,12 @@ from vigia_platform.shared.signing.keys import (
 )
 from vigia_platform.shared.signing.service import RotationResult, SigningService
 from vigia_platform.shared.signing_store import SqlSigningKeyStore
-from vigia_platform.shared.storage import ChecksumType, ObjectHead, S3Storage
+from vigia_platform.shared.storage import (
+    ChecksumType,
+    ObjectHead,
+    S3Storage,
+    StoragePreconditionFailed,
+)
 
 LINK_BASE: Final = "https://app.vigia.example"
 START: Final = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
@@ -175,6 +180,7 @@ class MemoryStorage:
             content_type="application/x-pem-file",
             metadata={},
             version_id=f"v{len(self.puts)}",
+            etag=f'"{len(self.puts)}"',
         )
 
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
@@ -188,7 +194,11 @@ class MemoryStorage:
         *,
         kms_key_id: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> ObjectHead:
+        current_etag = f'"{len(self.puts)}"' if key in self.objects else None
+        if if_match is not None and if_match != current_etag:
+            raise StoragePreconditionFailed
         self.objects[key] = body
         self.puts.append(key)
         return ObjectHead(
@@ -199,6 +209,7 @@ class MemoryStorage:
             content_type=content_type,
             metadata={},
             version_id=f"v{len(self.puts)}",
+            etag=f'"{len(self.puts)}"',
         )
 
 
@@ -509,9 +520,10 @@ class RecordingStorage(MemoryStorage):
         *,
         kms_key_id: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> ObjectHead:
         self.calls.writes.append("edge.put_object")
-        return await super().put_object(key, body, content_type)
+        return await super().put_object(key, body, content_type, if_match=if_match)
 
 
 @dataclass

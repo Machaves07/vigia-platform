@@ -27,6 +27,7 @@ from vigia_platform.shared.node_ca import (
     ROOT_VALIDITY_YEARS,
     NodeCaError,
     NodeCaPublisher,
+    PublishedRoot,
     build_root_certificate,
     certificate_pem,
     read_bundle,
@@ -128,6 +129,61 @@ def test_rotation_publishes_both_roots_and_old_nodes_keep_validating() -> None:
     assert not validates(old_node, (published.root,), at)
     foreign = _root(kms, "intruder")
     assert not validates(new_node, (foreign,), at)
+
+
+def test_concurrent_rotations_do_not_overwrite_each_other_silently() -> None:
+    """La segunda publicación condicionada falla tras la barrera de lectura, no pisa la primera."""
+
+    class BarrierStorage(MemoryStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.readers = 0
+            self.both_read = asyncio.Event()
+
+        async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+            body = await super().get_object(key, version_id=version_id)
+            self.readers += 1
+            if self.readers == 2:
+                self.both_read.set()
+            await self.both_read.wait()
+            return body
+
+    async def rotate() -> tuple[object, object, tuple[x509.Certificate, ...]]:
+        kms = FakeKms()
+        for key in ("ca", "ca-a", "ca-b"):
+            kms.add(key)
+        storage = BarrierStorage()
+        storage.both_read.set()
+        initial = NodeCaPublisher(
+            storage=storage, kms=kms, environment="test", random_bytes=os.urandom
+        )
+        old = await initial.publish_root("ca", now=NOW)
+        storage.both_read.clear()
+        first = NodeCaPublisher(
+            storage=storage, kms=kms, environment="test", random_bytes=os.urandom
+        )
+        second = NodeCaPublisher(
+            storage=storage, kms=kms, environment="test", random_bytes=os.urandom
+        )
+        results = await asyncio.gather(
+            first.rotate_root("ca-a", now=NOW),
+            second.rotate_root("ca-b", now=NOW),
+            return_exceptions=True,
+        )
+        bundle = read_bundle(storage.objects[ROOT_CERTIFICATE_KEY])
+        return results[0], results[1], (old.root, *bundle)
+
+    first, second, roots = asyncio.run(rotate())
+    succeeded = [result for result in (first, second) if not isinstance(result, Exception)]
+    failures = [result for result in (first, second) if isinstance(result, Exception)]
+    assert len(succeeded) == len(failures) == 1
+    published, failed = succeeded[0], failures[0]
+    assert isinstance(published, PublishedRoot)
+    assert isinstance(failed, NodeCaError)
+    assert "cambió durante la publicación" in str(failed)
+    assert len(roots) == 3
+    assert roots[:2] == (roots[0], roots[0])
+    assert roots[2] == published.root
 
 
 def test_a_third_root_is_refused_while_a_substitution_is_in_progress() -> None:
