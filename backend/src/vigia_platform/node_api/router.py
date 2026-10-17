@@ -137,7 +137,7 @@ class NodeReply:
 
 type BeforeSchema = Callable[[NodeScope | None, object], None]
 type CheckBody = Callable[[NodeScope, object, datetime], Awaitable[None]]
-type OnRejection = Callable[[NodeScope, BaseException, datetime], Awaitable[None]]
+type OnRejection = Callable[[NodeScope, BaseException, datetime, object], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,8 +153,9 @@ class NodeOperation:
     on_rejection: OnRejection | None = None
     """Se llama con cualquier fallo de la petición una vez resuelta la identidad del nodo (también
     el de la versión: la identidad se resuelve entonces solo para esto), antes de responderlo
-    (TASK-221: la auditoría de todo rechazo permanente, BR-GOB-96). Lo que lance sustituye al
-    fallo (fallo cerrado: sin rastro, transitorio)."""
+    (TASK-221: la auditoría de todo rechazo permanente, BR-GOB-96). Recibe también el JSON del
+    cuerpo sin validar, o ``None`` si no se llegó a leer (la zona que nombra la presentación,
+    VIG-257). Lo que lance sustituye al fallo (fallo cerrado: sin rastro, transitorio)."""
 
 
 # --- Verificación previa -------------------------------------------------------------------------
@@ -276,6 +277,7 @@ class NodeApiGate:
             if certificate_rejection is not None or presented is None:
                 raise certificate_rejection or NodeRejection(RejectionCode.NODE_NOT_ENROLLED)
             node = await self._identity.resolve(presented, correlation_id)
+        loose: object = None
         try:
             if node is not None and spec.path_parameter is PathParameter.ZONE_ID:
                 self._require_zone(node, request.path_params.get("zone_id"))
@@ -295,7 +297,7 @@ class NodeApiGate:
                     raise NodeRejection(RejectionCode.SCHEMA_INVALID, field="clip_id")
         except Exception as error:
             if node is not None and operation is not None and operation.on_rejection is not None:
-                await operation.on_rejection(node, error, now)
+                await operation.on_rejection(node, error, now, loose)
             raise
         state.node = NodeRequest(
             route=route,
@@ -330,7 +332,7 @@ class NodeApiGate:
             node = await self._identity.resolve(presented, correlation_id)
         except NodeContextRejected:
             return
-        await operation.on_rejection(node, rejection, now)
+        await operation.on_rejection(node, rejection, now, None)
 
     @staticmethod
     def _require_zone(node: NodeScope, value: object) -> None:
