@@ -16,11 +16,19 @@ de vaciado (a ritmo real no hay cola que vaciar). Lo ejecuta TASK-238 (VIG-174) 
 ``--dry-run`` valida los argumentos y el aprovisionamiento **sin tocar la red**: la forma de las
 URL (sin resolverlas), la flota si se da (cada credencial se lee de su archivo, es del nodo
 declarado y sigue vigente al terminar la ejecución; los catálogos y la configuración inicial
-cumplen el contrato), el conjunto sellado sintético y el plan de cada nodo con la semilla. Imprime
-el informe JSON (objetivo, nodos, semilla, plan y umbrales absolutos) y lo deja en ``--report`` o
+cumplen el contrato; cada planta tiene su acta de comisionamiento cerrada), la sesión de consola
+si se da, el conjunto sellado sintético y el plan de cada nodo con la semilla. Imprime el informe
+JSON (objetivo, nodos, semilla, plan y umbrales absolutos) y lo deja en ``--report`` o
 ``VIGIA_LOAD_REPORT_DIR`` si se indica. Sin ``--fleet``, el aprovisionamiento queda ``pending``.
 
-Ni el informe ni la salida llevan un código de alta, un PEM ni una URL prefirmada (PR-GOB-31).
+Las actas son las de ``commissioning_records`` de la flota (``[{"plant_id", "record_id"}]``, las
+mismas que ``tests.load.provision`` da al cliente de consola del nightly): el cliente lee
+``GET /commissioning-records/{record_id}`` sobre ellas. Una ruta de NFR-GOB-01 que la ejecución
+debía medir y quedó sin muestras es un incumplimiento, no se salta (A-65).
+
+Ni el informe ni la salida llevan un código de alta, un PEM ni una URL prefirmada (PR-GOB-31): un
+error al leer la flota, una credencial, una configuración inicial o la sesión sale como
+``SoakError`` (código 2) con el nombre del error, nunca con el valor leído.
 """
 
 from __future__ import annotations
@@ -42,7 +50,7 @@ import secrets
 import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Final
 from urllib.parse import urlsplit
 
@@ -58,12 +66,19 @@ from tests.load.profiles import (
     ABSOLUTE_TARGETS,
     PROFILES,
     LoadProfile,
+    simulation_profile,
     write_sealed_dataset,
 )
 from tests.load.report import REPORT_DIR_VARIABLE, saturation_transients, secret_findings
 from vigia_platform.shared.clock import SystemClock
 
-__all__ = ["SoakSettings", "evaluate_thresholds", "main"]
+__all__ = [
+    "NOT_MEASURED_NODE_ROUTES",
+    "SoakSettings",
+    "evaluate_thresholds",
+    "main",
+    "required_node_routes",
+]
 
 SEED_VARIABLE: Final = "VIGIA_LOAD_SEED"
 MAX_SEED: Final = 2**53 - 1
@@ -77,6 +92,16 @@ EXIT_FAILED: Final = 1
 EXIT_USAGE: Final = 2
 WALL: Final = SystemClock()
 FLUSH_SECONDS: Final = 1_800.0
+OBSERVABILITY_ROUTE: Final = "POST /api/nodes/observability-events"
+NOT_MEASURED_NODE_ROUTES: Final[Mapping[str, str]] = {
+    "POST /api/nodes/enrollment": "la flota ya está dada de alta",
+    "GET /api/nodes/zones/{zone_id}/catalog": (
+        "cada nodo recibe sus catálogos en la configuración inicial y el soak no publica versiones"
+        " nuevas: el nodo solo pide la ruta cuando el latido anuncia una mayor"
+    ),
+}
+"""Rutas de NFR-GOB-01 que el tráfico del soak no ejercita, con su motivo; las demás son
+obligatorias (``required_node_routes``)."""
 
 
 class SoakError(ValueError):
@@ -131,7 +156,12 @@ def settings_from(arguments: argparse.Namespace) -> SoakSettings:
     seed = arguments.seed
     if seed is None:
         requested = os.environ.get(SEED_VARIABLE)
-        seed = int(requested) if requested else secrets.randbelow(MAX_SEED + 1)
+        try:
+            seed = int(requested) if requested else secrets.randbelow(MAX_SEED + 1)
+        except ValueError:
+            raise SoakError(f"{SEED_VARIABLE} no es un entero") from None
+        if not 0 <= seed <= MAX_SEED:
+            raise SoakError(f"{SEED_VARIABLE} va de 0 a 2^53 - 1")
     if not arguments.dry_run and (arguments.fleet is None or arguments.console_session is None):
         raise SoakError("sin --dry-run hacen falta --fleet y --console-session")
     report_dir = arguments.report or (
@@ -152,50 +182,170 @@ def settings_from(arguments: argparse.Namespace) -> SoakSettings:
 # --- Aprovisionamiento (sin red) ------------------------------------------------------------------
 
 
-def check_fleet(settings: SoakSettings, ends_at: dt.datetime) -> dict[str, Any]:
-    """Valida ``fleet.json`` leyendo solo archivos: base de ingesta del entorno, raíz del servidor,
-    y por nodo su credencial (del nodo declarado y vigente hasta ``ends_at``), su configuración
-    inicial y sus catálogos."""
-    if settings.fleet is None:
-        return {"status": "pending", "reason": "sin --fleet: la flota del entorno la da TASK-238"}
+@dataclass(frozen=True)
+class FleetTargets:
+    """De la flota validada, sobre qué recursos pregunta la consola (``ConsoleTargets``)."""
+
+    node_ids: tuple[uuid.UUID, ...]
+    zone_ids: tuple[uuid.UUID, ...]
+    plant_ids: tuple[uuid.UUID, ...]
+    record_ids: tuple[uuid.UUID, ...]
+
+
+@dataclass(frozen=True)
+class SessionFile:
+    """La sesión de consola validada; la cookie es un secreto (nunca en ``repr``)."""
+
+    cookie: str = field(repr=False)
+    concession_id: uuid.UUID
+
+
+def _read_json(path: Path, option: str) -> Any:
     try:
-        fleet = json.loads(settings.fleet.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise SoakError(f"--fleet no se pudo leer ({type(error).__name__})") from None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as error:
+        raise SoakError(f"{option} no se pudo leer ({type(error).__name__})") from None
+
+
+def _uuid(value: object, what: str) -> uuid.UUID:
+    if not isinstance(value, str):
+        raise SoakError(f"{what} no es un UUID")
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        raise SoakError(f"{what} no es un UUID") from None
+
+
+def _check_node(
+    entry: object, where: str, ends_at: dt.datetime
+) -> tuple[uuid.UUID, uuid.UUID, dt.datetime, tuple[uuid.UUID, ...]]:
+    """``(nodo, planta, vencimiento de la credencial, zonas)`` de una entrada de la flota. Todo
+    error de lectura sale como ``SoakError`` con el nombre del error: el de la credencial puede
+    encadenar el PEM leído y el de Pydantic lleva ``input_value`` (PR-GOB-31)."""
+    if not isinstance(entry, dict):
+        raise SoakError(f"{where} no es un objeto")
+    node_id = _uuid(entry.get("node_id"), f"{where}.node_id")
+    plant_id = _uuid(entry.get("plant_id"), f"{where}.plant_id")
+    try:
+        credential = FileCredentialStore(str(entry.get("credential", ""))).load()
+    except Exception as error:
+        raise SoakError(
+            f"{where}: la credencial no se pudo leer ({type(error).__name__})"
+        ) from None
+    if credential is None:
+        raise SoakError(f"{where}: falta la credencial")
+    if credential.identity.node_id != str(node_id):
+        raise SoakError(f"{where}: la credencial es de otro nodo")
+    expires = credential.current.expires_at
+    if expires <= ends_at:
+        raise SoakError(f"{where}: la credencial vence antes de terminar el soak")
+    try:
+        NodeInitialConfiguration.model_validate_json(
+            Path(str(entry.get("configuration", ""))).read_text(encoding="utf-8")
+        )
+    except Exception as error:
+        raise SoakError(
+            f"{where}: la configuración inicial no se pudo leer o no cumple el contrato"
+            f" ({type(error).__name__})"
+        ) from None
+    catalogs = entry.get("catalogs")
+    if not isinstance(catalogs, list) or not catalogs:
+        raise SoakError(f"{where}: sin catálogos")
+    zones = tuple(
+        _uuid(
+            catalog.get("zone_id") if isinstance(catalog, dict) else None,
+            f"{where}.catalogs[{index}].zone_id",
+        )
+        for index, catalog in enumerate(catalogs)
+    )
+    return node_id, plant_id, expires, zones
+
+
+def _check_records(fleet: Mapping[str, Any], plants: Sequence[uuid.UUID]) -> tuple[uuid.UUID, ...]:
+    """Las actas de ``commissioning_records``: cada una de una planta de la flota y al menos una
+    por planta, para que la consola lea actas reales (sin ellas, ``GET /commissioning-records/
+    {id}`` responde 404 y el soak falla por la consola, no por la plataforma)."""
+    records = fleet.get("commissioning_records")
+    if not isinstance(records, list) or not records:
+        raise SoakError("la flota no tiene actas de comisionamiento (commissioning_records)")
+    found: dict[uuid.UUID, None] = {}
+    covered: set[uuid.UUID] = set()
+    for position, record in enumerate(records):
+        where = f"commissioning_records[{position}]"
+        if not isinstance(record, dict):
+            raise SoakError(f"{where} no es un objeto")
+        plant_id = _uuid(record.get("plant_id"), f"{where}.plant_id")
+        record_id = _uuid(record.get("record_id"), f"{where}.record_id")
+        if plant_id not in plants:
+            raise SoakError(f"{where}: el acta es de una planta que no está en la flota")
+        covered.add(plant_id)
+        found[record_id] = None
+    missing = len(set(plants) - covered)
+    if missing:
+        raise SoakError(f"{missing} planta(s) de la flota sin acta de comisionamiento")
+    return tuple(found)
+
+
+def check_fleet(
+    settings: SoakSettings, ends_at: dt.datetime
+) -> tuple[dict[str, Any], FleetTargets | None]:
+    """Valida ``fleet.json`` leyendo solo archivos: base de ingesta del entorno, raíz del servidor,
+    por nodo su credencial (del nodo declarado y vigente hasta ``ends_at``), su configuración
+    inicial y sus catálogos, y las actas de cada planta. Devuelve el resumen del informe y los
+    recursos de la consola."""
+    if settings.fleet is None:
+        pending = {
+            "status": "pending",
+            "reason": "sin --fleet: la flota del entorno la da TASK-238",
+        }
+        return pending, None
+    fleet = _read_json(settings.fleet, "--fleet")
+    if not isinstance(fleet, dict):
+        raise SoakError("--fleet no es un objeto")
     expected = settings.nodes_url + "/api/nodes"
     if fleet.get("ingest_base_url") != expected:
         raise SoakError(f"la flota no apunta a {expected}")
     if not Path(str(fleet.get("verify", ""))).is_file():
         raise SoakError("la raíz del servidor del entorno (verify) no existe")
-    nodes = fleet.get("nodes") or []
-    if not nodes:
+    nodes = fleet.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
         raise SoakError("la flota no tiene nodos")
-    zones = 0
+    node_ids: list[uuid.UUID] = []
+    plants: dict[uuid.UUID, None] = {}
+    zones: list[uuid.UUID] = []
     earliest: dt.datetime | None = None
     for position, entry in enumerate(nodes):
-        where = f"nodes[{position}]"
-        credential = FileCredentialStore(entry["credential"]).load()
-        if credential is None:
-            raise SoakError(f"{where}: falta la credencial")
-        if credential.identity.node_id != str(entry["node_id"]).lower():
-            raise SoakError(f"{where}: la credencial es de otro nodo")
-        expires = credential.current.expires_at
+        node_id, plant_id, expires, node_zones = _check_node(entry, f"nodes[{position}]", ends_at)
+        node_ids.append(node_id)
+        plants[plant_id] = None
+        zones += node_zones
         earliest = expires if earliest is None else min(earliest, expires)
-        if expires <= ends_at:
-            raise SoakError(f"{where}: la credencial vence antes de terminar el soak")
-        NodeInitialConfiguration.model_validate_json(
-            Path(entry["configuration"]).read_text(encoding="utf-8")
-        )
-        catalogs = entry.get("catalogs") or []
-        if not catalogs:
-            raise SoakError(f"{where}: sin catálogos")
-        zones += len(catalogs)
+    records = _check_records(fleet, tuple(plants))
+    targets = FleetTargets(tuple(node_ids), tuple(zones), tuple(plants), records)
     return {
         "status": "valid",
         "nodes": len(nodes),
-        "zones": zones,
+        "zones": len(zones),
+        "plants": len(plants),
+        "commissioning_records": len(records),
         "earliest_credential_expiry": earliest.isoformat() if earliest else None,
-    }
+    }, targets
+
+
+def check_console_session(settings: SoakSettings) -> SessionFile | None:
+    """``--console-session`` (``{"cookie": …, "concession_id": …}``) leída sin red; un error sale
+    como ``SoakError`` sin la cookie."""
+    if settings.console_session is None:
+        return None
+    session = _read_json(settings.console_session, "--console-session")
+    if not isinstance(session, dict):
+        raise SoakError("--console-session no es un objeto")
+    cookie = session.get("cookie")
+    if not isinstance(cookie, str) or not cookie:
+        raise SoakError("--console-session no tiene cookie")
+    return SessionFile(
+        cookie, _uuid(session.get("concession_id"), "--console-session concession_id")
+    )
 
 
 def plan_summary(settings: SoakSettings, dataset: Path, nodes: int, zones: int) -> dict[str, Any]:
@@ -221,15 +371,35 @@ def plan_summary(settings: SoakSettings, dataset: Path, nodes: int, zones: int) 
 # --- Umbrales absolutos ---------------------------------------------------------------------------
 
 
-def evaluate_thresholds(analysis: Mapping[str, Any], console: Mapping[str, Any]) -> list[str]:
+def required_node_routes(profile: LoadProfile, seed: int) -> tuple[str, ...]:
+    """Las rutas de NFR-GOB-01 que el soak tiene que medir: todas menos las de
+    ``NOT_MEASURED_NODE_ROUTES``, y la de eventos de observabilidad solo si la ejecución llega a
+    la primera degradación programada (``simulation_profile``: la hora 1)."""
+    schedule = simulation_profile(
+        seed, profile.speed_factor, profile.episodes_per_day
+    ).observability_schedule
+    degrades = any(entry.at_offset_ms < profile.span_ms for entry in schedule)
+    return tuple(
+        route
+        for route in ABSOLUTE_TARGETS["NFR-GOB-01"]
+        if route not in NOT_MEASURED_NODE_ROUTES and (degrades or route != OBSERVABILITY_ROUTE)
+    )
+
+
+def evaluate_thresholds(
+    analysis: Mapping[str, Any], console: Mapping[str, Any], *, required: Sequence[str]
+) -> list[str]:
     """Incumplimientos de los objetivos absolutos (``ABSOLUTE_TARGETS``), cada uno con su ruta:
-    NFR-GOB-01 por ruta del contrato medida, NFR-GOB-03 por el veredicto de la consola y
-    NFR-GOB-02 por los transitorios por saturación que vieron los nodos (A-65: a ritmo real no hay
-    vaciado de cola, pero ni un solo ``temporarily_unavailable`` es admisible aquí)."""
+    NFR-GOB-01 por ruta del contrato medida, y cada ruta de ``required`` sin muestras (una ruta
+    que no se midió no pasó, A-65); NFR-GOB-03 por el veredicto de la consola y NFR-GOB-02 por
+    los transitorios por saturación que vieron los nodos (A-65: a ritmo real no hay vaciado de
+    cola, pero ni un solo ``temporarily_unavailable`` es admisible aquí)."""
     failures = []
     for route, limits in ABSOLUTE_TARGETS["NFR-GOB-01"].items():
         measured = analysis.get("node_latency", {}).get(route)
         if not measured or not measured.get("count"):
+            if route in required:
+                failures.append(f"NFR-GOB-01 {route}: sin muestras")
             continue
         for key in ("p95_ms", "p99_ms"):
             limit = limits.get(key)
@@ -243,12 +413,13 @@ def evaluate_thresholds(analysis: Mapping[str, Any], console: Mapping[str, Any])
     return failures
 
 
-def thresholds_document() -> dict[str, Any]:
+def thresholds_document(required: Sequence[str]) -> dict[str, Any]:
     return {
         "blocking": True,
         "targets": ABSOLUTE_TARGETS,
+        "required_node_routes": list(required),
         "not_measured_here": {
-            "NFR-GOB-01 POST /api/nodes/enrollment": "la flota ya está dada de alta",
+            **{f"NFR-GOB-01 {route}": why for route, why in NOT_MEASURED_NODE_ROUTES.items()},
             "NFR-GOB-02 caudal de vaciado": (
                 "a ritmo real no hay cola que vaciar; el caudal lo mide nightly como tendencia. Los"
                 " transitorios por saturación sí bloquean aquí (cero, A-65)"
@@ -265,26 +436,28 @@ def thresholds_document() -> dict[str, Any]:
 # --- Ejecución ------------------------------------------------------------------------------------
 
 
-def _run(settings: SoakSettings, work: Path, dataset: Path) -> tuple[dict[str, Any], list[str]]:
-    """La ejecución real: nodos en este proceso y la consola en un hilo."""
+def _run(
+    settings: SoakSettings,
+    work: Path,
+    dataset: Path,
+    targets: FleetTargets,
+    session: SessionFile,
+    required: Sequence[str],
+) -> tuple[dict[str, Any], list[str]]:
+    """La ejecución real: nodos en este proceso y la consola en un hilo, sobre la flota y la
+    sesión ya validadas (``check_fleet`` y ``check_console_session``)."""
     from tests.load.console_client import ConsoleClient, ConsoleTargets, evaluate
     from tests.load.driver import drive
     from tests.load.provision import ConsoleSession
     from tests.load.report import analyse
 
-    assert settings.fleet is not None and settings.console_session is not None
+    assert settings.fleet is not None
     fleet = json.loads(settings.fleet.read_text(encoding="utf-8"))
-    session = json.loads(settings.console_session.read_text(encoding="utf-8"))
-    nodes = fleet["nodes"]
     console = ConsoleClient(
         settings.target,
         Path(fleet["verify"]),
-        ConsoleSession(str(session["cookie"]), uuid.UUID(str(session["concession_id"]))),
-        ConsoleTargets(
-            tuple(uuid.UUID(node["node_id"]) for node in nodes),
-            tuple(uuid.UUID(c["zone_id"]) for node in nodes for c in node["catalogs"]),
-            tuple({uuid.UUID(node["plant_id"]) for node in nodes}),
-        ),
+        ConsoleSession(session.cookie, session.concession_id),
+        ConsoleTargets(targets.node_ids, targets.zone_ids, targets.plant_ids, targets.record_ids),
         settings.seed,
     )
     outboxes = work / "bandejas"
@@ -306,7 +479,7 @@ def _run(settings: SoakSettings, work: Path, dataset: Path) -> tuple[dict[str, A
         console.stop()
     analysis = analyse(result)
     verdict = evaluate(console.samples, unpublished=console.unpublished).to_json()
-    failures = evaluate_thresholds(analysis, verdict)
+    failures = evaluate_thresholds(analysis, verdict, required=required)
     if analysis["accepted"] != analysis["emitted"] or analysis["dead_letter"]:
         failures.append("registros perdidos o en cola muerta")
     return {"results": analysis, "console": verdict}, failures
@@ -332,10 +505,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ends_at = WALL.now() + dt.timedelta(
             hours=settings.hours, seconds=FLUSH_SECONDS + FLUSH_EXTENSION_SECONDS
         )
-        provisioning = check_fleet(settings, ends_at)
+        provisioning, targets = check_fleet(settings, ends_at)
+        session = check_console_session(settings)
     except SoakError as error:
         sys.stderr.write(f"error: {error}\n")
         return EXIT_USAGE
+    required = required_node_routes(profile, settings.seed)
     with tempfile.TemporaryDirectory(prefix="vigia-soak-") as directory:
         work = Path(directory)
         dataset = write_sealed_dataset(work / "conjunto", settings.seed, WALL.now())
@@ -352,12 +527,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "speed_factor": profile.speed_factor,
             "episodes_per_day": profile.episodes_per_day,
             "provisioning": provisioning,
+            "console_session": "pending" if session is None else "valid",
             "plan": plan_summary(settings, dataset, nodes, zones),
-            "absolute_thresholds": thresholds_document(),
+            "absolute_thresholds": thresholds_document(required),
         }
         code = EXIT_OK
         if not settings.dry_run:
-            outcome, failures = _run(settings, work, dataset)
+            assert targets is not None and session is not None
+            outcome, failures = _run(settings, work, dataset, targets, session, required)
             document.update(outcome)
             document["failures"] = failures
             code = EXIT_FAILED if failures else EXIT_OK
