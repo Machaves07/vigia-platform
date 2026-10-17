@@ -664,13 +664,20 @@ def test_worker_publishes_revocations_and_reads_the_edge_ca(pilot: Synthesized) 
     template = _compute(pilot)
     statements = _role_statements(pilot, "vigia-worker-task")
     edge_ca = [f"arn:aws:s3:::{_bucket(pilot, 'edge')}/ca/*"]
-    (read,) = _granting(statements, "s3:GetObjectVersion")
-    assert _actions(read) == {"s3:GetObject", "s3:GetObjectVersion"}
-    assert _rendered(read["Resource"], template) == edge_ca
+    archive = [f"arn:aws:s3:::{_bucket(pilot, 'archive')}/*"]
+    reads = {
+        tuple(_rendered(s["Resource"], template)): _actions(s)
+        for s in _granting(statements, "s3:GetObjectVersion")
+    }
+    # La raíz de la autoridad y, en vigia-archive, la versión recién subida (VIG-255).
+    assert reads == {
+        tuple(edge_ca): {"s3:GetObject", "s3:GetObjectVersion"},
+        tuple(archive): {"s3:PutObject", "s3:GetObject", "s3:GetObjectVersion"},
+    }
     puts = {
         r for s in _granting(statements, "s3:PutObject") for r in _rendered(s["Resource"], template)
     }
-    assert puts == {edge_ca[0], f"arn:aws:s3:::{_bucket(pilot, 'archive')}/*"}
+    assert puts == {edge_ca[0], archive[0]}
     (revocations,) = _granting(statements, "elasticloadbalancing:AddTrustStoreRevocations")
     assert _actions(revocations) == {
         "elasticloadbalancing:AddTrustStoreRevocations",
