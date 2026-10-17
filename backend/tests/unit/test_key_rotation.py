@@ -41,8 +41,10 @@ from vigia_platform.shared.outbox.registries import (
 from vigia_platform.shared.outbox.u02_events import KeyRotationDue
 from vigia_platform.shared.signing import KeyStatus, SigningKeyRecord, SigningPurpose
 from vigia_platform.shared.signing.keys import (
+    KeySetRotationDeferred,
     days_to_expiry,
     expiry_transitions,
+    publication_plan,
     reminder_decision,
     rotation_transitions,
 )
@@ -107,6 +109,50 @@ def test_due_rotations_start_with_key_set() -> None:
     decision = reminder_decision(keys, NOW)
     assert decision.rotations[0] is SigningPurpose.KEY_SET
     assert set(decision.rotations) == set(SigningPurpose)
+
+
+def _key_sets(active_until: datetime, overlap_until: datetime) -> list[SigningKeyRecord]:
+    """``key_set`` activa y la anterior en solapamiento hasta ``overlap_until``."""
+    return [
+        _key(SigningPurpose.KEY_SET, active_until, key_id="key_set-new"),
+        _key(SigningPurpose.KEY_SET, overlap_until, KeyStatus.OVERLAPPING, key_id="key_set-old"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("overlap_left", "deferred"),
+    [(timedelta(days=30), True), (MS, True), (timedelta(0), False), (-timedelta(days=1), False)],
+    ids=["30d", "1ms", "vence_ahora", "vencida"],
+)
+def test_key_set_is_not_rotated_again_while_the_previous_one_overlaps(
+    overlap_left: timedelta, deferred: bool
+) -> None:
+    """VIG-253: retirar la anterior vigente dejaría sin continuidad al nodo que solo la tiene."""
+    keys = _key_sets(NOW + timedelta(days=200), NOW + overlap_left)
+    if deferred:
+        with pytest.raises(KeySetRotationDeferred) as error:
+            publication_plan(keys, SigningPurpose.KEY_SET, NOW)
+        assert error.value.not_before == NOW + overlap_left
+    else:
+        plan = publication_plan(keys, SigningPurpose.KEY_SET, NOW)
+        assert plan is not None and plan.signer_key_id == "key_set-new"
+    # Los demás propósitos del nodo se rotan igual, firmados por la key_set más antigua vigente.
+    other = publication_plan(keys, SigningPurpose.CATALOG, NOW)
+    assert other is not None
+    assert other.signer_key_id == ("key_set-old" if deferred else "key_set-new")
+
+
+def test_the_daily_task_defers_key_set_until_the_overlap_ends() -> None:
+    keys = [
+        *_key_sets(NOW + timedelta(days=10), NOW + timedelta(days=2)),
+        _key(SigningPurpose.CATALOG, NOW + timedelta(days=10)),
+    ]
+    assert reminder_decision(keys, NOW).rotations == (SigningPurpose.CATALOG,)
+    later = NOW + timedelta(days=2)
+    assert reminder_decision(keys, later).rotations == (
+        SigningPurpose.KEY_SET,
+        SigningPurpose.CATALOG,
+    )
 
 
 def test_only_the_active_key_counts_for_the_reminder() -> None:
