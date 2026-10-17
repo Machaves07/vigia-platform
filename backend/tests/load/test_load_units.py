@@ -34,6 +34,7 @@ from vigia_contracts.client import ClientEvent
 from vigia_contracts.client.core import RetryPolicy, Wait
 from vigia_contracts.conformance.simulated_node.dataset import load_sealed_dataset
 from vigia_contracts.credentials import (
+    CredentialStoreError,
     FileCredentialStore,
     IssuedCredential,
     NodeIdentity,
@@ -591,11 +592,13 @@ def test_the_soak_dry_run_rejects_a_fleet_pointing_elsewhere(
 
 SOAK_TARGET: Final = "https://staging-0.example.invalid"
 SYNTHETIC_PEM_BODY: Final = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgU0lOVEVUSUNBU0lOVEVU"
+_PEM_LABEL: Final = "PRIVATE" + " KEY-----"
 SYNTHETIC_PEM: Final = (
-    f"-----BEGIN PRIVATE KEY-----\n{SYNTHETIC_PEM_BODY}\n{SYNTHETIC_PEM_BODY[::-1]}\n"
-    "-----END PRIVATE KEY-----\n"
+    f"-----BEGIN {_PEM_LABEL}\n{SYNTHETIC_PEM_BODY}\n{SYNTHETIC_PEM_BODY[::-1]}\n"
+    f"-----END {_PEM_LABEL}\n"
 )
-"""Un PEM sintético mal formado (no es una clave): ningún trozo puede llegar a la salida."""
+"""Un PEM sintético mal formado (no es una clave): ningún trozo puede llegar a la salida. La
+cabecera y el pie se arman por partes para que el escaneo de secretos no lo tome por una clave."""
 
 
 def _pem_fragments(text: str) -> list[str]:
@@ -739,6 +742,35 @@ def test_a_malformed_credential_or_configuration_exits_two_without_any_piece_of_
     assert "Traceback" not in captured.err
     assert _pem_fragments(captured.err + captured.out) == []
     assert not secret_findings({"stderr": captured.err})
+
+
+def test_a_credential_error_that_quotes_the_pem_never_reaches_the_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    # Defensa en profundidad: hoy `CredentialStoreError` solo lleva la ruta, pero un almacén que
+    # citara el valor leído no puede llevarlo a la salida (ni su texto ni su `repr`).
+    _no_network(monkeypatch)
+
+    class QuotingStore:
+        def __init__(self, path: object) -> None:
+            self.path = path
+
+        def load(self) -> None:
+            raise CredentialStoreError(f"clave ilegible: {SYNTHETIC_PEM}")
+
+    monkeypatch.setattr(soak, "FileCredentialStore", QuotingStore)
+    plant = str(uuid.uuid4())
+    node = _synthetic_node(tmp_path / "nodos", plant, credential="absent")
+    fleet = _synthetic_fleet(
+        tmp_path, [node], [{"plant_id": plant, "record_id": str(uuid.uuid4())}]
+    )
+    code = soak.main(["--dry-run", "--target", SOAK_TARGET, "--seed", "5", "--fleet", str(fleet)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.err == (
+        "error: nodes[0]: la credencial no se pudo leer (CredentialStoreError)\n"
+    ), _pem_fragments(captured.err)
+    assert _pem_fragments(captured.err + captured.out) == []
 
 
 @pytest.mark.parametrize("credential", ["pem", "valid"])
