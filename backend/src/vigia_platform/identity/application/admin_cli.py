@@ -105,6 +105,7 @@ from vigia_platform.shared.archive.audit_archive import (
     ArchiveVerificationFailed,
     extract_archive,
     restored_from_bytes,
+    version_id_from_hex,
 )
 from vigia_platform.shared.archive.partitions import (
     MAX_MONTHS_PER_CALL,
@@ -750,6 +751,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--sha256", required=True, metavar="HEX", help="archive_sha256 del registro archivado"
     )
     restore.add_argument(
+        "--version-id-hex",
+        metavar="HEX",
+        help=(
+            "archive_version_id_hex del registro archivado: se lee esa versión del objeto; sin él,"
+            " la versión actual (registros anteriores a VIG-255)"
+        ),
+    )
+    restore.add_argument(
         "--output", required=True, type=Path, metavar="DIRECTORIO", help="directorio nuevo"
     )
     _add_common(restore)
@@ -1365,6 +1374,12 @@ async def _restore_audit_partition(
         raise AdminError("invalid_value", "la clave del objeto no es válida")
     if _SHA256.fullmatch(expected) is None:
         raise AdminError("invalid_value", "--sha256 debe ser un SHA-256 hexadecimal en minúsculas")
+    try:
+        version_id = version_id_from_hex(args.version_id_hex)
+    except ValueError:
+        raise AdminError(
+            "invalid_value", "--version-id-hex debe ser el archive_version_id_hex del registro"
+        ) from None
     if output.exists():
         raise AdminError("invalid_value", "el directorio de salida ya existe")
     if not output.parent.is_dir():
@@ -1379,10 +1394,11 @@ async def _restore_audit_partition(
                 "dry_run": True,
                 "object_key": object_key,
                 "sha256": expected,
+                "versioned": version_id is not None,
             },
         )
         return
-    data = await runtime.archive.get_object(object_key)
+    data = await runtime.archive.get_object(object_key, version_id=version_id)
     restored = restored_from_bytes(data, expected)
     files = extract_archive(data, output)
     partition = restored.contents.partition
@@ -1393,6 +1409,7 @@ async def _restore_audit_partition(
             "dry_run": False,
             "object_key": object_key,
             "sha256": expected,
+            "versioned": version_id is not None,
             "partition": None if partition is None else partition.qualified_name,
             "entry_count": len(restored.rows),
             "organizations": [

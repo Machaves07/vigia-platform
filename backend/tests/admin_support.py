@@ -497,9 +497,11 @@ class FakeArchive:
     def __init__(self, calls: Calls, data: bytes = b"") -> None:
         self.calls = calls
         self.data = data
+        self.versions: list[str | None] = []
 
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
         self.calls.reads.append("archive.get_object")
+        self.versions.append(version_id)
         return self.data
 
 

@@ -20,9 +20,10 @@ hace al menos ``AUDIT_ONLINE_MONTHS`` meses según el reloj inyectado y, por cad
 
 3. **Sube** el archivo a ``vigia-archive`` (cifrado ``aws:kms`` con la clave ``vigia-archive``,
    suma SHA-256 calculada por el almacén), en ``audit/<AAAA-MM>/audit_entry_AAAA_MM.zip``.
-4. **Lo lee de vuelta** del almacén y lo **verifica**: mismo SHA-256 que lo subido; recuento por
-   organización y total igual al de la base; cada cadena íntegra con ``chain_walk`` (enlaces, hashes
-   y firma de cada punto de control con las claves publicadas); cada entrada, devuelta a columnas,
+4. **Lo lee de vuelta** del almacén (la versión exacta que devolvió la subida) y lo **verifica**:
+   mismo SHA-256 que lo subido; recuento por organización y total igual al de la base; cada
+   cadena íntegra con ``chain_walk`` (enlaces, hashes y firma de cada punto de control con las
+   claves publicadas); cada entrada, devuelta a columnas,
    **igual** a la fila de la base (hashes incluidos); puntos de control iguales a los declarados; y
    el verificador incluido, el esperado.
 5. Solo entonces, en **una** transacción: ``shared.vigia_detach_audit_partition`` (comprueba de
@@ -38,6 +39,13 @@ su propia transacción; después la tarea termina en ``AuditArchiveFailed`` para
 la cuente como fallida. Un fallo transitorio (almacén o base caídos) no alerta: la tarea falla y la
 siguiente pasada vuelve a empezar. Repetir es seguro: el objeto se sobrescribe (otra versión, con
 bloqueo de objetos) y una partición ya desprendida no vuelve a aparecer.
+
+**Versión del objeto** (VIG-255): la clave es fija por partición, así que dos pasadas a la vez
+(una que perdió el arrendamiento) suben dos versiones a la misma clave y la actual puede no ser la
+registrada. La verificación lee la versión que devolvió la subida y el registro la guarda en
+``archive_version_id_hex`` (``audit_partition_archived`` versión 3; ``table_archive.version_id_hex``
+explica la codificación); la restauración pide esa versión. Un registro sin ella (anterior a
+VIG-255) se restaura con la versión actual, como antes.
 
 ``restore_audit_partition`` es la restauración **de solo lectura** para investigación
 (``vigia-admin restore-audit-partition``, TASK-132; formato y orden en
@@ -95,6 +103,8 @@ from vigia_platform.shared.archive.table_archive import (
     PartitionStillOpen,
     TableArchiver,
     TablePartition,
+    archived_content,
+    version_id_from_hex,
 )
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
@@ -139,6 +149,7 @@ __all__ = [
     "restore_audit_partition",
     "restored_from_bytes",
     "verify_archive",
+    "version_id_from_hex",
 ]
 
 _log = get_logger("shared.archive")
@@ -364,6 +375,7 @@ class ArchivedPartition:
     sha256: str
     entry_count: int
     archived_at: datetime
+    version_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1052,18 +1064,23 @@ class AuditArchiver:
         data = build_archive(snapshot, keys, self._verifier, exported_at)
         uploaded_sha256 = hashlib.sha256(data).hexdigest()
         key = partition.object_key
-        await self._storage.put_object(key, data, ARCHIVE_CONTENT_TYPE, kms_key_id=self._kms_key_id)
-        downloaded = await self._storage.get_object(key)
+        head = await self._storage.put_object(
+            key, data, ARCHIVE_CONTENT_TYPE, kms_key_id=self._kms_key_id
+        )
+        # La versión recién subida: otra pasada puede subir otra a la misma clave.
+        version_id = head.version_id
+        downloaded = await self._storage.get_object(key, version_id=version_id)
         verify_download(downloaded, uploaded_sha256, snapshot, keys, self._verifier)
         archived_at = self._clock.now()
-        content = {
-            "partition_name": partition.qualified_name,
-            "period": partition.period,
-            "archive_object_key": key,
-            "archive_sha256": uploaded_sha256,
-            "entry_count": snapshot.entry_count,
-            "archived_at": format_timestamp(archived_at),
-        }
+        content = archived_content(
+            partition.qualified_name,
+            partition.period,
+            key,
+            uploaded_sha256,
+            snapshot.entry_count,
+            archived_at,
+            version_id,
+        )
         try:
             async with self._database.transaction(context) as transaction:
                 await transaction.execute(
@@ -1093,7 +1110,9 @@ class AuditArchiver:
             partition=partition.qualified_name,
             entries=snapshot.entry_count,
         )
-        return ArchivedPartition(partition, key, uploaded_sha256, snapshot.entry_count, archived_at)
+        return ArchivedPartition(
+            partition, key, uploaded_sha256, snapshot.entry_count, archived_at, version_id
+        )
 
     async def alert(
         self,
@@ -1189,14 +1208,21 @@ class AuditArchiver:
 
 
 async def restore_audit_partition(
-    storage: StoragePort, object_key: str, expected_sha256: str
+    storage: StoragePort,
+    object_key: str,
+    expected_sha256: str,
+    *,
+    version_id: str | None = None,
 ) -> RestoredPartition:
     """Descarga y verifica un archivo con sus propias claves; no escribe en la base.
 
-    ``expected_sha256`` es el ``archive_sha256`` del registro ``audit_partition_archived``.
+    ``expected_sha256`` es el ``archive_sha256`` del registro ``audit_partition_archived`` y
+    ``version_id`` su ``archive_version_id_hex`` decodificado (``version_id_from_hex``); sin él
+    se lee la versión actual de la clave (registros anteriores a VIG-255).
     """
     _require_sha256(expected_sha256)
-    return restored_from_bytes(await storage.get_object(object_key), expected_sha256)
+    data = await storage.get_object(object_key, version_id=version_id)
+    return restored_from_bytes(data, expected_sha256)
 
 
 def _require_sha256(expected_sha256: object) -> None:
