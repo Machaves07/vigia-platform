@@ -22,6 +22,8 @@
 - **Histogramas exponenciales** (``metric_aggregation``): ``awsemf`` solo publica los
   exponenciales con ``Values`` y ``Counts``, de los que CloudWatch calcula el p95 de las alarmas
   ``latency-*``; uno de cubos explícitos llega como conjunto estadístico sin percentiles.
+  Se exportan como DELTA: awsemf v0.131.0 no convierte histogramas acumulados. Cada punto
+  contiene solo su intervalo, sin arrastrar la distribución desde el arranque (VIG-258).
 - **Caída del colector**: una línea de registro al empezar a fallar la exportación de cada
   señal y otra al recuperarse, en lugar de una por lote (el exportador OTLP queda en silencio).
 - ``enable_auto_instrumentation`` activa FastAPI, SQLAlchemy, httpx y botocore desde la fábrica
@@ -44,6 +46,7 @@ from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, Histogram, MeterProvider
 from opentelemetry.sdk.metrics.export import (
+    AggregationTemporality,
     Buckets,
     ExponentialHistogramDataPoint,
     HistogramDataPoint,
@@ -539,7 +542,7 @@ def sanitize_metrics(data: MetricsData, policy: redaction.AttributePolicy) -> Me
 class SanitizingMetricExporter(MetricExporter):
     """Exportador que limpia atributos y retira ejemplares antes del exportador real.
 
-    ``preferred_aggregation`` sustituye, por clase de instrumento, la del exportador real.
+    Las preferencias sustituyen, por clase de instrumento, las del exportador real.
     """
 
     def __init__(
@@ -548,11 +551,14 @@ class SanitizingMetricExporter(MetricExporter):
         policy: redaction.AttributePolicy | None = None,
         *,
         preferred_aggregation: Mapping[type, Aggregation] | None = None,
+        preferred_temporality: Mapping[type, AggregationTemporality] | None = None,
     ) -> None:
         aggregation = dict(getattr(inner, "_preferred_aggregation", None) or {})
         aggregation.update(preferred_aggregation or {})
+        temporality = dict(getattr(inner, "_preferred_temporality", None) or {})
+        temporality.update(preferred_temporality or {})
         super().__init__(
-            preferred_temporality=getattr(inner, "_preferred_temporality", None),
+            preferred_temporality=temporality,
             preferred_aggregation=aggregation,
         )
         self._inner = inner
@@ -648,6 +654,9 @@ def configure_telemetry(
             ),
             policy,
             preferred_aggregation=metric_aggregation(),
+            # awsemf v0.131.0 no resta histogramas acumulados (datapoint.go, VIG-258).
+            # Solo cambia Histogram: los contadores conservan la preferencia del exportador.
+            preferred_temporality={Histogram: AggregationTemporality.DELTA},
         ),
         export_interval_millis=config.metric_export_interval_seconds * 1000,
         export_timeout_millis=config.export_timeout_seconds * 1000,
