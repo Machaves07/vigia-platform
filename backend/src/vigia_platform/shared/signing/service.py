@@ -14,7 +14,8 @@ Implementa ``SigningPort`` (``business-logic-model.md`` §10.1) y la rotación d
   ``overlapping``, ``key_rotated`` en la cadena de la organización proveedora y, para los cuatro
   propósitos del nodo, ``KeySetPublication`` firmada por la ``key_set`` que el nodo ya tiene
   fijada (la vigente más antigua, ``publication_plan``), más ``key_set_published`` (con su evento
-  de la bandeja). La rotación y el retiro
+  de la bandeja). Otra rotación de ``key_set`` durante el solapamiento de la anterior se rechaza
+  con ``KeySetRotationDeferred`` sin cambiar nada (VIG-253). La rotación y el retiro
   releen la base con el candado tomado: nunca calculan desde una memoria que otro proceso
   (API o worker) dejó atrás, y el almacén rechaza con ``KeyStateConflict`` una confirmación
   calculada desde un estado ya superado.
@@ -75,6 +76,7 @@ from vigia_platform.shared.secrets import (
 from vigia_platform.shared.signing.keys import (
     KEY_LIFETIME,
     KeySetPublicationRecord,
+    KeySetRotationDeferred,
     KeySetSignerUnavailable,
     KeyStatus,
     KeyTransition,
@@ -579,6 +581,9 @@ class SigningService:
         except KeySetSignerUnavailable:
             _log.warning("rotación rechazada: la clave key_set activa no está vigente")
             raise SigningKeyUnavailable(SigningPurpose.KEY_SET) from None
+        except KeySetRotationDeferred:
+            _log.warning("rotación rechazada: la key_set anterior sigue en solapamiento")
+            raise
         key_id = self._new_key_id(purpose, now)
         raw = self._random_bytes(_PRIVATE_KEY_BYTES)
         private = _private_key(raw)

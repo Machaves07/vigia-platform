@@ -109,7 +109,7 @@ from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import ActorKind, ActorUnit, AllowedScope, Role, ScopeLevel
 from vigia_platform.shared.outbox.publish import OutboxEvent
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
-from vigia_platform.shared.signing.keys import SigningPurpose
+from vigia_platform.shared.signing.keys import KeySetRotationDeferred, SigningPurpose
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import ChecksumType, ObjectHead, PresignedRequest
 
@@ -1396,6 +1396,25 @@ def test_rotated_and_retired_checkpoint_keys_stay_published(routes: Routes) -> N
     assert before <= set(published)
     assert all(set(key) == {"key_id", "algorithm", "public_key", "status", "valid_from",
                             "valid_until"} for key in _keys(routes))  # fmt: skip
+
+
+def test_rotating_key_set_during_its_overlap_answers_conflict(
+    routes: Routes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VIG-253: el servicio rechaza otra rotación de ``key_set`` en el solapamiento; la ruta
+    responde ``409 conflict`` sin auditar nada. La prueba con el servicio real está en
+    ``tests/properties/test_key_rotation_stateful.py``: aquí no se rota la ``key_set`` del
+    módulo, que comparten las demás pruebas."""
+    not_before = routes.env.clock.now() + timedelta(days=29)
+
+    async def deferred(purpose: SigningPurpose, *, context: Any) -> Any:
+        raise KeySetRotationDeferred(not_before)
+
+    monkeypatch.setattr(routes.signing, "rotate", deferred)
+    before = len(routes.audit_entries(routes.provider, "key_rotated"))
+    response = routes.call("POST", "/platform/keys/key_set/rotate", cookie=routes.operator())
+    _error(response, "conflict", 409)
+    assert len(routes.audit_entries(routes.provider, "key_rotated")) == before
 
 
 def test_platform_operations_are_only_for_the_operator(routes: Routes) -> None:

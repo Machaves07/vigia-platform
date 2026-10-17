@@ -17,9 +17,12 @@ el proceso. Después de cada paso:
 Un nodo simulado (``KeySet`` de U-01), fijado con el conjunto inicial, hace latidos en momentos
 generados y, como el latido real (BR-GOB-82), solo recibe la **última** publicación, nunca las
 intermedias (VIG-253). La acepta siempre que tenga fijada alguna ``key_set`` que la plataforma
-publicaba vigente al emitirla; si no, quedó fuera del contrato (sin latido durante todo un
-solapamiento) y se vuelve a dar de alta (BR-NUC-86). Si el firmante de la última ya venció, el
-nodo no aplica nada y conserva lo que tenía (BR-BOR-90).
+publicaba vigente al emitirla. Si no, la máquina exige que el nodo se haya saltado un
+solapamiento completo de ``key_set`` desde lo último que aplicó (fuera del contrato, BR-NUC-86)
+antes de darlo de alta de nuevo: ninguna otra secuencia admite una alta silenciosa. Otra rotación
+de ``key_set`` con la anterior aún en solapamiento se rechaza sin cambiar nada
+(``KeySetRotationDeferred``). Si el firmante de la última ya venció, el nodo no aplica nada y
+conserva lo que tenía (BR-BOR-90).
 
 Además, el ejemplo del criterio de aceptación: un nodo con el conjunto inicial fijado acepta el
 conjunto publicado tras rotar la propia ``key_set`` (``KeySet.apply_signed_set``), y la sonda de
@@ -62,6 +65,7 @@ from vigia_platform.shared.outbox.u02_events import KeyRotationDue
 from vigia_platform.shared.signing import (
     NODE_PURPOSES,
     KeySetPublicationRecord,
+    KeySetRotationDeferred,
     KeyStatus,
     SigningKeyRecord,
     SigningKeyUnavailable,
@@ -144,9 +148,15 @@ class RotationModel:
                 return key_id
         return None
 
+    def key_set_deferred(self, now: datetime) -> bool:
+        """Otra rotación de ``key_set`` con la anterior aún en solapamiento se rechaza (VIG-253)."""
+        return self._previous_key_set(self.issued_at(now)) is not None
+
     def rotation_allowed(self, purpose: SigningPurpose, now: datetime) -> bool:
         """Otro propósito del nodo exige una ``key_set`` vigente al emitir."""
-        if purpose not in NODE_PURPOSES or purpose is SigningPurpose.KEY_SET:
+        if purpose is SigningPurpose.KEY_SET:
+            return not self.key_set_deferred(now)
+        if purpose not in NODE_PURPOSES:
             return True
         if self._previous_key_set(self.issued_at(now)) is not None:
             return True
@@ -200,7 +210,11 @@ class RotationModel:
             if found is None:
                 continue
             remaining = found[1].valid_until - now
-            if remaining <= timedelta(days=30):
+            deferred = purpose is SigningPurpose.KEY_SET and any(
+                self.keys[k].valid_at(now)
+                for k in self.with_status(SigningPurpose.KEY_SET, KeyStatus.OVERLAPPING)
+            )
+            if remaining <= timedelta(days=30) and not deferred:
                 due.append(purpose)
             elif timedelta(days=44) < remaining <= timedelta(days=45):
                 notices.add(found[0])
@@ -278,6 +292,11 @@ class KeyRotationMachine(RuleBasedStateMachine):
         """Por publicación: las ``key_set`` que el modelo publicaba vigentes al emitirla."""
         self.checked_publications = 0
         self.re_enrollments = 0
+        self.last_sync = latest.record.issued_at
+        """``issued_at`` del último conjunto que aplicó el nodo: lo que sabe de las claves."""
+        self.key_set_rotations: list[tuple[datetime, datetime]] = []
+        """Por rotación de ``key_set``: ``issued_at`` y fin previsto del solapamiento de la
+        anterior."""
         # Segundo proceso vivo (API frente a worker) que nunca refresca por su cuenta: rota desde
         # una memoria que puede haberse quedado atrás (sonda R2 de la revisión del PR #21).
         self.stale = self.world.new_service()
@@ -306,21 +325,38 @@ class KeyRotationMachine(RuleBasedStateMachine):
             publication.issued_at
         )
 
+    def _model_rotate(
+        self, purpose: SigningPurpose, new_id: str, now: datetime, issued: datetime
+    ) -> None:
+        """``model.rotate`` anotando, si es la ``key_set``, hasta cuándo quedó en solapamiento la
+        anterior (el fin previsto entonces: una retirada posterior no lo adelanta)."""
+        previous = self.model.active(SigningPurpose.KEY_SET)
+        self.model.rotate(purpose, new_id, now)
+        if purpose is SigningPurpose.KEY_SET and previous is not None:
+            self.key_set_rotations.append((issued, self.model.keys[previous[0]].valid_until))
+
     def _rotate_with(self, service: SigningService, purpose: SigningPurpose) -> None:
         now = self._now()
         before_keys = dict(self.world.store.keys)
         before_secrets = len(self.world.secrets.values)
+        before_publications = len(self.world.store.publications)
         if not self.model.rotation_allowed(purpose, now):
-            with pytest.raises(SigningKeyUnavailable):
+            expected = (
+                KeySetRotationDeferred
+                if purpose is SigningPurpose.KEY_SET
+                else SigningKeyUnavailable
+            )
+            with pytest.raises(expected):
                 self._run(service.rotate(purpose, context=provider_context()))
             assert self.world.store.keys == before_keys
             assert len(self.world.secrets.values) == before_secrets
+            assert len(self.world.store.publications) == before_publications
             return
         issued = self.model.issued_at(now)
         result = self._run(service.rotate(purpose, context=provider_context()))
         new_id = result.new_key.key_id
         signer = self.model.expected_signer(purpose, now, new_id)
-        self.model.rotate(purpose, new_id, now)
+        self._model_rotate(purpose, new_id, now, issued)
         if signer is None:
             assert result.publication is None
             return
@@ -384,7 +420,7 @@ class KeyRotationMachine(RuleBasedStateMachine):
         for content in rotated:
             purpose = SigningPurpose(content["purpose"])
             signer = self.model.expected_signer(purpose, now, content["key_id"])
-            self.model.rotate(purpose, content["key_id"], now)
+            self._model_rotate(purpose, content["key_id"], now, self.model.issued_at(now))
             if signer is not None:
                 stored = new_publications.pop(0)
                 assert stored.record.signed_by_key_id == signer
@@ -413,16 +449,26 @@ class KeyRotationMachine(RuleBasedStateMachine):
                 self.node.apply_signed_set(latest.envelope)
             except SignatureInvalidError:
                 assert self.node.pinned_keys() == before
+            else:
+                self.last_sync = latest.issued_at
             return
         if any(key_id in self.node for key_id in self.trusted_at_issue[latest.publication_id]):
             # Con alguna key_set que la plataforma publicaba vigente al emitir, la acepta.
             self.node.apply_signed_set(latest.envelope)
             assert latest.signed_by_key_id in self.node
+            self.last_sync = latest.issued_at
             return
-        # Sin latido durante todo el solapamiento: fuera del contrato, nueva alta (BR-NUC-86).
+        # Solo fuera del contrato (BR-NUC-86): desde lo último que aplicó hubo una rotación de
+        # key_set y el nodo no hizo ningún latido en todo su solapamiento (la anterior ya no era
+        # vigente al emitir la última). Ninguna otra secuencia admite una nueva alta (VIG-253).
+        assert any(
+            rotated_at > self.last_sync and overlap_end <= latest.issued_at
+            for rotated_at, overlap_end in self.key_set_rotations
+        ), "el nodo perdió la continuidad sin haberse saltado un solapamiento completo"
         with pytest.raises(SignatureInvalidError):
             self.node.apply_signed_set(latest.envelope)
         self.node = pinned_node(self.world, latest)
+        self.last_sync = latest.issued_at
         self.re_enrollments += 1
 
     @rule()
@@ -581,25 +627,55 @@ def test_node_with_initial_set_accepts_the_latest_set_after_the_daily_run_rotate
     asyncio.run(scenario())
 
 
-def test_rotating_key_set_twice_inside_the_overlap_keeps_the_node_in_sync() -> None:
+def test_a_second_key_set_rotation_inside_the_overlap_is_rejected_and_continuity_holds() -> None:
+    """Revisión de VIG-253: rotar ``key_set``, un día después rotar ``key_set`` y ``catalog``. El
+    nodo con el conjunto del alta se salta las dos publicaciones intermedias y aun así acepta la
+    última: la segunda rotación de ``key_set`` se rechaza sin cambiar nada, sin nueva alta."""
+
     async def scenario() -> None:
         world = await bootstrapped_world()
-        node = pinned_node(world, world.store.publications[-1].record)
+        initial = world.store.publications[-1].record
+        node = pinned_node(world, initial)
         context = provider_context()
-        signers = []
-        for _ in range(3):
-            world.clock.advance((5 * DAY).total_seconds())
-            publication = (
-                await world.service.rotate(SigningPurpose.KEY_SET, context=context)
-            ).publication
-            assert publication is not None
-            signers.append(publication.signed_by_key_id)
-            node.apply_signed_set(publication.envelope)
-        keys = world.service.all_keys()
-        key_sets = [k for k in keys if k.purpose is SigningPurpose.KEY_SET]
+        world.clock.advance((100 * DAY).total_seconds())
+        first = await world.service.rotate(SigningPurpose.KEY_SET, context=context)
+        overlap_end = world.clock.now() + timedelta(days=30)
+
+        world.clock.advance(DAY.total_seconds())
+        keys, secrets = dict(world.store.keys), len(world.secrets.values)
+        publications, rotated = len(world.store.publications), len(world.events.rotated)
+        with pytest.raises(KeySetRotationDeferred) as deferred:
+            await world.service.rotate(SigningPurpose.KEY_SET, context=context)
+        assert deferred.value.not_before == overlap_end
+        assert world.store.keys == keys and len(world.secrets.values) == secrets
+        assert len(world.store.publications) == publications
+        assert len(world.events.rotated) == rotated
+        assert len(world.events.published) == publications
+        # Tampoco desde otro proceso, que relee la base antes de decidir.
+        other = world.new_service()
+        await other.start()
+        with pytest.raises(KeySetRotationDeferred):
+            await other.rotate(SigningPurpose.KEY_SET, context=context)
+        assert world.store.keys == keys
+
+        await world.service.rotate(SigningPurpose.CATALOG, context=context)
+        envelope = world.service.current_key_set_envelope()
+        assert envelope is not None
+        node.apply_signed_set(envelope)  # solo con el conjunto del alta
+        assert first.new_key.key_id in node
+
+        # Borde: hasta el último milisegundo del solapamiento se rechaza; al vencer, se rota.
+        world.clock.set(overlap_end - MS)
+        with pytest.raises(KeySetRotationDeferred):
+            await world.service.rotate(SigningPurpose.KEY_SET, context=context)
+        world.clock.set(overlap_end)
+        second = await world.service.rotate(SigningPurpose.KEY_SET, context=context)
+        assert second.publication is not None
+        # La firma la key_set del primer giro, que el nodo aprendió durante el solapamiento.
+        assert second.publication.signed_by_key_id == first.new_key.key_id
+        node.apply_signed_set(second.publication.envelope)
+        key_sets = [k for k in world.service.all_keys() if k.purpose is SigningPurpose.KEY_SET]
         assert [k.status for k in key_sets].count(KeyStatus.OVERLAPPING) == 1
-        assert [k.status for k in key_sets].count(KeyStatus.RETIRED) == 2
-        assert len(set(signers)) == 3
 
     asyncio.run(scenario())
 
