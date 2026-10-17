@@ -7,7 +7,8 @@
   ``accepted_duplicate``, BR-CTR-27);
 - ``on_rejection`` (y todo fallo de ``handle``): el fallo se traduce con ``rejections.translate``,
   la traducción **única** de ``node_api``, y si es permanente ``IngestService.record_rejection``
-  deja su auditoría y, con ``zone_gate_not_approved`` o ``node_zone_mismatch``, el registro
+  deja su auditoría (con la zona que nombra la presentación: en un rechazo anterior al esquema, la
+  del JSON sin validar) y, con ``zone_gate_not_approved`` o ``node_zone_mismatch``, el registro
   ``ingest_rejected`` (BR-GOB-96). Un fallo al dejar ese rastro sale en su lugar (transitorio: el
   nodo reintenta).
 """
@@ -15,6 +16,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 
 from vigia_platform.fleet.application.ingest import IngestRejected, IngestService
@@ -26,11 +28,18 @@ from vigia_platform.node_api.router import NodeOperation, NodeReply, NodeRequest
 __all__ = ["ingest_operation"]
 
 
-def _zone_of(request: NodeRequest | None, error: BaseException) -> uuid.UUID | None:
+def _zone_of(
+    request: NodeRequest | None, error: BaseException, presentation: object = None
+) -> uuid.UUID | None:
+    """La zona que nombra la presentación, si se pudo leer (``record_rejection`` comprueba que
+    sea de la organización del certificado): la del rechazo de la ingesta, la del documento
+    validado o, en un rechazo anterior al esquema, la del JSON sin validar."""
     if isinstance(error, IngestRejected) and error.zone_id is not None:
         return error.zone_id
     document = None if request is None else request.document
     zone = getattr(document, "zone_id", None)
+    if zone is None and isinstance(presentation, Mapping):
+        zone = presentation.get("zone_id")
     if isinstance(zone, str):
         try:
             return uuid.UUID(zone)
@@ -48,6 +57,7 @@ def ingest_operation(kind: IngestKind, service: IngestService) -> NodeOperation:
         error: BaseException,
         received_at: datetime,
         request: NodeRequest | None = None,
+        presentation: object = None,
     ) -> None:
         rejection = translate(error)
         if rejection is None or rejection.code in TRANSIENT_CODES:
@@ -57,14 +67,16 @@ def ingest_operation(kind: IngestKind, service: IngestService) -> NodeOperation:
             node,
             rejection.code,
             received_at=received_at,
-            zone_id=_zone_of(request, error),
+            zone_id=_zone_of(request, error, presentation),
         )
 
     async def check_body(node: NodeScope, document: object, received_at: datetime) -> None:
         await service.check_body_scope(kind, node, document, received_at)
 
-    async def on_rejection(node: NodeScope, error: BaseException, received_at: datetime) -> None:
-        await record(node, error, received_at)
+    async def on_rejection(
+        node: NodeScope, error: BaseException, received_at: datetime, presentation: object
+    ) -> None:
+        await record(node, error, received_at, presentation=presentation)
 
     async def handle(request: NodeRequest) -> NodeReply:
         node, document = request.node, request.document
