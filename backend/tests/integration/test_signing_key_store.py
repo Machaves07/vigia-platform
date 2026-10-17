@@ -42,6 +42,7 @@ from vigia_platform.shared.context import ActorKind, ScopeContext, _seal_scope_c
 from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.signing.keys import (
     NODE_PURPOSES,
+    KeySetRotationDeferred,
     KeyStateConflict,
     KeyStatus,
     KeyTransition,
@@ -277,7 +278,9 @@ def test_concurrent_rotations_never_lose_a_key(world: World) -> None:
                 (SigningPurpose.GATE, SigningPurpose.KEY_SET),
                 (SigningPurpose.CATALOG, SigningPurpose.LIVE_VIEW_TOKEN),
                 (SigningPurpose.GATE, SigningPurpose.CATALOG),
-                (SigningPurpose.KEY_SET, SigningPurpose.GATE),
+                # La key_set ya rotó arriba y su solapamiento sigue: otra rotación se rechaza
+                # (VIG-253; la prueba concurrente de eso es la siguiente).
+                (SigningPurpose.LIVE_VIEW_TOKEN, SigningPurpose.GATE),
             ]
             for first, second in pairs:
                 await asyncio.gather(rotate(a, first, operator), rotate(b, second, operator))
@@ -290,6 +293,60 @@ def test_concurrent_rotations_never_lose_a_key(world: World) -> None:
     publications = _publications(world)
     assert len(publications) == 4 + 12  # alta: key_set y tres más; después, doce rotaciones
     assert conflicts >= 1, "las rotaciones no llegaron a solaparse: la prueba no ejerció nada"
+
+
+def test_concurrent_key_set_rotations_rotate_it_once_per_overlap(world: World) -> None:
+    """VIG-253: dos procesos rotan la ``key_set`` a la vez. Uno gana; el otro, al reintentar
+    sobre lo confirmado, recibe ``KeySetRotationDeferred``: nunca dos rotaciones de ``key_set``
+    dentro del mismo solapamiento (el nodo que solo tiene la anterior perdería la continuidad)."""
+    outcomes: list[str] = []
+
+    async def rotate(service: SigningService, context: ScopeContext) -> None:
+        for _ in range(20):
+            try:
+                await service.rotate(SigningPurpose.KEY_SET, context=context)
+            except KeyStateConflict:
+                continue
+            except KeySetRotationDeferred:
+                outcomes.append("deferred")
+                return
+            outcomes.append("rotated")
+            return
+        raise AssertionError("demasiados conflictos seguidos")
+
+    async def scenario() -> None:
+        secrets = InMemorySecrets()
+        database_a = app_database(world.migrated, worker_pool_size=2)
+        database_b = app_database(world.migrated, worker_pool_size=2)
+        a = _service(
+            world,
+            database_a,
+            secrets,
+            SqlSigningKeyStore(database=database_a, context=world.context),
+        )
+        b = _service(
+            world,
+            database_b,
+            secrets,
+            SqlSigningKeyStore(database=database_b, context=world.context),
+        )
+        operator = world.operator_context()
+        try:
+            await _bootstrap(a, operator)
+            await b.start()
+            await asyncio.gather(rotate(a, operator), rotate(b, operator))
+        finally:
+            await database_a.dispose()
+            await database_b.dispose()
+
+    asyncio.run(scenario())
+    assert sorted(outcomes) == ["deferred", "rotated"]
+    _check_history(world)
+    key_sets = world.fetch(
+        "SELECT status, count(*) AS n FROM identity.signing_key WHERE purpose = 'key_set'"
+        " GROUP BY status"
+    )
+    assert {(r["status"], r["n"]) for r in key_sets} == {("active", 1), ("overlapping", 1)}
 
 
 class AuditingRecorder:
