@@ -81,6 +81,7 @@ __all__ = [
     "S3Storage",
     "StorageCredentials",
     "StoragePort",
+    "StoragePreconditionFailed",
     "StorageSettings",
     "StorageUnavailable",
     "sha256_b64",
@@ -161,6 +162,15 @@ class StorageUnavailable(Exception):
         self.retry_after_seconds = RETRY_AFTER_SECONDS
 
 
+class StoragePreconditionFailed(Exception):
+    """La versión condicional de un objeto ya no coincide con la esperada.
+
+    El llamador debe releer el objeto antes de decidir si puede reintentar. No es
+    transitorio: reintentar los mismos bytes con el mismo ETag perdería una
+    actualización concurrente.
+    """
+
+
 class AddressingStyle(enum.StrEnum):
     VIRTUAL = "virtual"
     PATH = "path"
@@ -237,6 +247,8 @@ class ObjectHead:
     content_type: str | None
     metadata: Mapping[str, str]
     version_id: str | None
+    etag: str | None = None
+    """ETag opaco del objeto, apto para una precondición ``If-Match``."""
 
     @property
     def full_object_sha256_hex(self) -> str | None:
@@ -294,6 +306,7 @@ class StoragePort(Protocol):
         *,
         kms_key_id: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> ObjectHead: ...
 
     async def presign_put(
@@ -439,6 +452,7 @@ def _object_head(key: str, response: Mapping[str, Any]) -> ObjectHead:
         content_type=response.get("ContentType"),
         metadata=metadata,
         version_id=response.get("VersionId"),
+        etag=response.get("ETag"),
     )
 
 
@@ -577,6 +591,7 @@ class S3Storage:
         *,
         kms_key_id: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> ObjectHead:
         """Sube con la suma SHA-256 de los bytes y cifrado ``aws:kms`` (archivado)."""
         _require_key(key)
@@ -592,9 +607,16 @@ class S3Storage:
         }
         if kms_key_id is not None:
             params["SSEKMSKeyId"] = kms_key_id
+        if if_match is not None:
+            params["IfMatch"] = if_match
 
         def put() -> ObjectHead:
-            response = self._client.put_object(**params)
+            try:
+                response = self._client.put_object(**params)
+            except botocore_exceptions.ClientError as error:
+                if _http_status(error) in (409, 412):
+                    raise StoragePreconditionFailed from None
+                raise
             return ObjectHead(
                 key=key,
                 size_bytes=len(body),
@@ -603,6 +625,7 @@ class S3Storage:
                 content_type=content_type,
                 metadata=checked,
                 version_id=response.get("VersionId"),
+                etag=response.get("ETag"),
             )
 
         return await self._call("put_object", put)
