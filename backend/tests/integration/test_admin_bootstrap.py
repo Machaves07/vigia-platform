@@ -27,8 +27,9 @@ import contextlib
 import io
 import json
 import logging
+import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -61,9 +62,16 @@ from vigia_platform.ledger.application.audit_writer import AuditOperation
 from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain
 from vigia_platform.ledger.chain.verify import IntegrityService, VerificationMode
 from vigia_platform.shared.archive.restore_drill import RestoreDrills
-from vigia_platform.shared.node_ca import ROOT_CERTIFICATE_KEY, read_bundle
+from vigia_platform.shared.node_ca import (
+    ROOT_CERTIFICATE_KEY,
+    NodeCaError,
+    NodeCaPublisher,
+    PublishedRoot,
+    read_bundle,
+)
 from vigia_platform.shared.observability.logging import QUIET_LOGGERS, configure_logging
 from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose
+from vigia_platform.shared.storage import ObjectHead, S3Storage
 
 pytestmark = pytest.mark.integration
 
@@ -412,6 +420,83 @@ def test_rotate_node_ca_publishes_two_roots_and_old_nodes_keep_validating(env: E
     assert validates(old_node, bundle, at)  # el nodo de la raíz anterior sigue validando
     assert validates(new_node, bundle, at)
     assert not validates(old_node, (new_root,), at)  # sonda: sin la raíz vigente, no valida
+
+
+def test_concurrent_node_ca_rotations_fail_closed_after_the_read_barrier(env: Env) -> None:
+    """LocalStack aplica ``If-Match``: una rotación queda completa y la otra es visible."""
+
+    class BarrierStorage:
+        def __init__(self, storage: S3Storage) -> None:
+            self.storage = storage
+            self.readers = 0
+            self.both_read = asyncio.Event()
+
+        async def head_object(self, key: str) -> ObjectHead | None:
+            return await self.storage.head_object(key)
+
+        async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+            body = await self.storage.get_object(key, version_id=version_id)
+            self.readers += 1
+            if self.readers == 2:
+                self.both_read.set()
+            await self.both_read.wait()
+            return body
+
+        async def put_object(
+            self,
+            key: str,
+            body: bytes,
+            content_type: str,
+            *,
+            kms_key_id: str | None = None,
+            metadata: Mapping[str, str] | None = None,
+            if_match: str | None = None,
+        ) -> ObjectHead:
+            return await self.storage.put_object(
+                key,
+                body,
+                content_type,
+                kms_key_id=kms_key_id,
+                metadata=metadata,
+                if_match=if_match,
+            )
+
+    _bootstrap(env)
+    (old_root,) = read_bundle(env.object(ROOT_CERTIFICATE_KEY))
+    kms_client = env.localstack.aws_client("kms")
+    first_key = kms_client.create_key(KeyUsage="SIGN_VERIFY", KeySpec="ECC_NIST_P256")[
+        "KeyMetadata"
+    ]["KeyId"]
+    second_key = kms_client.create_key(KeyUsage="SIGN_VERIFY", KeySpec="ECC_NIST_P256")[
+        "KeyMetadata"
+    ]["KeyId"]
+
+    async def rotate() -> tuple[object, object]:
+        storage = BarrierStorage(
+            S3Storage(env.localstack.storage_settings(env.world.edge_bucket), env.world.clock)
+        )
+        first = NodeCaPublisher(
+            storage=storage, kms=_kms(env), environment="test", random_bytes=os.urandom
+        )
+        second = NodeCaPublisher(
+            storage=storage, kms=_kms(env), environment="test", random_bytes=os.urandom
+        )
+        results = await asyncio.gather(
+            first.rotate_root(first_key, now=env.world.clock.now()),
+            second.rotate_root(second_key, now=env.world.clock.now()),
+            return_exceptions=True,
+        )
+        return results[0], results[1]
+
+    first, second = asyncio.run(rotate())
+    succeeded = [result for result in (first, second) if not isinstance(result, Exception)]
+    failures = [result for result in (first, second) if isinstance(result, Exception)]
+    assert len(succeeded) == len(failures) == 1
+    published, failed = succeeded[0], failures[0]
+    assert isinstance(published, PublishedRoot)
+    assert isinstance(failed, NodeCaError)
+    assert "cambió durante la publicación" in str(failed)
+    assert read_bundle(env.object(ROOT_CERTIFICATE_KEY)) == (old_root, published.root)
 
 
 def _kms(env: Env) -> Any:
