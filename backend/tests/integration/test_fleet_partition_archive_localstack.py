@@ -26,6 +26,8 @@ Solo datos generados.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import hashlib
 import json
 import uuid
@@ -52,6 +54,7 @@ from vigia_platform.shared.archive.audit_archive import (
     ARCHIVE_AUDIT_PARTITIONS,
     ARCHIVED_RECORD_TYPE,
     ArchiveFailure,
+    ArchiveVerificationFailed,
     AuditArchiveFailed,
     AuditArchiver,
     archive_audit_partitions_handler,
@@ -66,6 +69,8 @@ from vigia_platform.shared.archive.table_archive import (
     ArchivedTable,
     TablePartition,
     restore_table_partition,
+    restored_table_from_bytes,
+    version_id_from_hex,
 )
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
@@ -99,9 +104,13 @@ class World:
         return TablePartition(table, add_months(self.month, -back))
 
     def archiver(
-        self, storage: Any = None, tables: tuple[ArchivedTable, ...] = ARCHIVED_TABLES
+        self,
+        storage: Any = None,
+        tables: tuple[ArchivedTable, ...] = ARCHIVED_TABLES,
+        offset: timedelta = timedelta(0),
     ) -> AuditArchiver:
-        clock = SimulatedClock(datetime(self.month.year, self.month.month, 3, 3, 0, tzinfo=UTC))
+        start = datetime(self.month.year, self.month.month, 3, 3, 0, tzinfo=UTC)
+        clock = SimulatedClock(start + offset)
         return AuditArchiver(
             database=self.env.database,
             storage=storage or self.storage,
@@ -364,7 +373,7 @@ def test_the_task_archives_what_is_due_and_nothing_else(world: World) -> None:
     for partition in archived:
         record = records[partition.qualified_name]
         assert record["_organization_id"] == world.provider
-        assert record["_schema_version"] == 2
+        assert record["_schema_version"] == 3
         assert record["period"] == partition.period
         assert record["entry_count"] == 2 * ROWS_PER_PARTITION
         key = record["archive_object_key"]
@@ -374,11 +383,21 @@ def test_the_task_archives_what_is_due_and_nothing_else(world: World) -> None:
         assert hashlib.sha256(body).hexdigest() == record["archive_sha256"]
         assert stored["ServerSideEncryption"] == "aws:kms"
         assert world.kms_key_id in stored["SSEKMSKeyId"]
+        # La versión registrada es la subida (VIG-255).
+        version_id = version_id_from_hex(record["archive_version_id_hex"])
+        assert version_id == stored["VersionId"]
         # Restauración de solo lectura: las mismas filas, columna a columna.
         restored = world.env.loop.run(
-            restore_table_partition(world.storage, key, record["archive_sha256"])
+            restore_table_partition(
+                world.storage, key, record["archive_sha256"], version_id=version_id
+            )
         )
         assert sorted(restored.rows, key=_order) == before[partition]
+        # Sin versión (registros anteriores a VIG-255): la versión actual, que aquí es la misma.
+        current = world.env.loop.run(
+            restore_table_partition(world.storage, key, record["archive_sha256"])
+        )
+        assert current.rows == restored.rows
     world.env.loop.run(verify_ledger_chains(world.env.migrated, world.provider))
     assert world.alerts() == []
 
@@ -435,7 +454,8 @@ def test_closing_the_last_open_alarm_lets_its_partition_go(world: World) -> None
 
 
 class CorruptingStorage:
-    """Sube de verdad y después altera un bit del objeto en el almacén (como un fallo del medio)."""
+    """Sube de verdad y después altera un bit del objeto en el almacén (como un fallo del medio):
+    la versión que devuelve la subida es la alterada, la que el depósito dice haber guardado."""
 
     def __init__(self, world: World, position: float, bit: int) -> None:
         self._world = world
@@ -446,8 +466,8 @@ class CorruptingStorage:
         head = await self._world.storage.put_object(key, body, content_type, **kwargs)
         flipped = bytearray(body)
         flipped[int((len(body) - 1) * self._position)] ^= 1 << self._bit
-        self._world.s3.put_object(Bucket=self._world.bucket, Key=key, Body=bytes(flipped))
-        return head
+        stored = self._world.s3.put_object(Bucket=self._world.bucket, Key=key, Body=bytes(flipped))
+        return dataclasses.replace(head, version_id=stored["VersionId"])
 
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
         return await self._world.storage.get_object(key, version_id=version_id)
@@ -514,6 +534,145 @@ def test_a_row_written_after_export_rejects_the_detach(world: World) -> None:
     assert world.archived_records() == []
     reasons = [audit["failure_reason"] for audit in world.failure_audits()]
     assert reasons == [ArchiveFailure.PARTITION_CHANGED.value]
+
+
+# --- Dos archivadores a la vez (VIG-255) --------------------------------------------------------
+
+
+class GatedStorage:
+    """Almacén real con puertas para fijar el orden de dos pasadas: al llegar a la subida abre
+    ``entered``; sube cuando se abre ``put_after``; al terminar la subida abre ``uploaded``; y lee
+    de vuelta cuando se abre ``get_after``."""
+
+    def __init__(
+        self,
+        world: World,
+        *,
+        entered: asyncio.Event | None = None,
+        put_after: asyncio.Event | None = None,
+        uploaded: asyncio.Event | None = None,
+        get_after: asyncio.Event | None = None,
+    ) -> None:
+        self._world = world
+        self._entered = entered
+        self._put_after = put_after
+        self._uploaded = uploaded
+        self._get_after = get_after
+
+    async def put_object(self, key: str, body: bytes, content_type: str, **kwargs: Any) -> Any:
+        if self._entered is not None:
+            self._entered.set()
+        if self._put_after is not None:
+            await self._put_after.wait()
+        head = await self._world.storage.put_object(key, body, content_type, **kwargs)
+        if self._uploaded is not None:
+            self._uploaded.set()
+        return head
+
+    async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
+        if self._get_after is not None:
+            await self._get_after.wait()
+        return await self._world.storage.get_object(key, version_id=version_id)
+
+
+def test_both_upload_before_either_reads_back_and_each_verifies_its_own(world: World) -> None:
+    """Las dos pasadas suben antes de que la primera lea de vuelta: cada una verifica **su**
+    versión, ninguna falla por resumen, una registra y la otra se rechaza al desprender."""
+    partition = world.partition(HEARTBEAT_HISTORY, 4)
+    before = world.rows(partition)
+    first_uploaded = asyncio.Event()
+    second_uploaded = asyncio.Event()
+    first = world.archiver(
+        storage=GatedStorage(world, uploaded=first_uploaded, get_after=second_uploaded),
+        tables=(HEARTBEAT_HISTORY,),
+    ).tables
+    second = world.archiver(
+        storage=GatedStorage(world, put_after=first_uploaded, uploaded=second_uploaded),
+        tables=(HEARTBEAT_HISTORY,),
+        offset=timedelta(seconds=1),
+    ).tables
+
+    async def both() -> list[Any]:
+        return await asyncio.gather(
+            first.archive(world.system(), partition),
+            second.archive(world.system(), partition),
+            return_exceptions=True,
+        )
+
+    outcomes = world.env.loop.run(both())
+    archived = [outcome for outcome in outcomes if not isinstance(outcome, BaseException)]
+    failed = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert len(archived) == 1, outcomes
+    assert len(failed) == 1, outcomes
+    assert isinstance(failed[0], ArchiveVerificationFailed), failed
+    assert failed[0].reason is ArchiveFailure.PARTITION_CHANGED, failed
+    (record,) = world.archived_records()
+    version_id = version_id_from_hex(record["archive_version_id_hex"])
+    assert version_id == archived[0].version_id
+    restored = world.env.loop.run(
+        restore_table_partition(
+            world.storage, record["archive_object_key"], record["archive_sha256"],
+            version_id=version_id,
+        )
+    )  # fmt: skip
+    assert sorted(restored.rows, key=_order) == before
+
+
+def test_two_concurrent_archives_leave_a_record_that_restores(world: World) -> None:
+    """Dos archivados de la misma partición de ``fleet`` a la vez, con horas de exportación
+    distintas: el rezagado sube su versión a la misma clave después del registro del otro y falla
+    al desprender. Lo registrado se restaura con su versión; la actual no casa con su SHA-256."""
+    partition = world.partition(HEARTBEAT_HISTORY, 4)
+    before = world.rows(partition)
+    late_snapshot = asyncio.Event()
+    winner_done = asyncio.Event()
+    winner = world.archiver(
+        storage=GatedStorage(world, put_after=late_snapshot),
+        tables=(HEARTBEAT_HISTORY,),
+    ).tables
+    late = world.archiver(
+        storage=GatedStorage(world, entered=late_snapshot, put_after=winner_done),
+        tables=(HEARTBEAT_HISTORY,),
+        offset=timedelta(seconds=1),
+    ).tables
+
+    async def first() -> Any:
+        try:
+            return await winner.archive(world.system(), partition)
+        finally:
+            winner_done.set()
+
+    async def both() -> list[Any]:
+        return await asyncio.gather(
+            first(), late.archive(world.system(), partition), return_exceptions=True
+        )
+
+    archived, failure = world.env.loop.run(both())
+    assert not isinstance(archived, BaseException), archived
+    assert isinstance(failure, ArchiveVerificationFailed), failure
+    assert failure.reason is ArchiveFailure.PARTITION_CHANGED
+    assert not world.attached(partition)
+    records = world.archived_records()
+    assert len(records) == 1
+    record = records[0]
+    key = record["archive_object_key"]
+    versions = world.s3.list_object_versions(Bucket=world.bucket, Prefix=key)["Versions"]
+    assert len(versions) == 2
+    # Sin la versión, la clave lleva a los bytes del rezagado (el defecto de VIG-255).
+    with pytest.raises(ArchiveVerificationFailed) as mismatch:
+        world.env.loop.run(restore_table_partition(world.storage, key, record["archive_sha256"]))
+    assert mismatch.value.reason is ArchiveFailure.DIGEST_MISMATCH
+
+    version_id = version_id_from_hex(record["archive_version_id_hex"])
+    assert version_id == archived.version_id
+    restored = world.env.loop.run(
+        restore_table_partition(world.storage, key, record["archive_sha256"], version_id=version_id)
+    )
+    assert sorted(restored.rows, key=_order) == before
+    data = world.env.loop.run(world.storage.get_object(key, version_id=version_id))
+    assert hashlib.sha256(data).hexdigest() == record["archive_sha256"]
+    from_bytes = restored_table_from_bytes(data, record["archive_sha256"])
+    assert sorted(from_bytes.rows, key=_order) == before
 
 
 # --- Guardas de las funciones de gob_0018 -------------------------------------------------------

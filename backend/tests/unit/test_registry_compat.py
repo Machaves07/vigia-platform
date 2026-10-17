@@ -415,9 +415,11 @@ def test_u02_registers_its_fourteen_types_once() -> None:
     registry = RecordTypeRegistry()
     register_u02_record_types(registry)
     assert len(registry.record_types()) == 14
-    # audit_partition_archived (TASK-203) y node_zone_unassigned (TASK-218) con dos versiones.
-    assert len(U02_RECORD_TYPES) == 16
-    assert registry.get("audit_partition_archived").schema_version == 2
+    # audit_partition_archived con tres versiones (TASK-203, VIG-255) y node_zone_unassigned
+    # (TASK-218) con dos.
+    assert len(U02_RECORD_TYPES) == 17
+    assert registry.get("audit_partition_archived").schema_version == 3
+    assert registry.get("audit_partition_archived", schema_version=2).schema_version == 2
     assert registry.get("audit_partition_archived", schema_version=1).schema_version == 1
     assert registry.get("node_zone_unassigned").schema_version == 2
     assert registry.get("node_zone_unassigned", schema_version=1).schema_version == 1

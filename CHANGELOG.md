@@ -73,3 +73,4 @@ Mientras U-02 se cierra sin cuenta de AWS (adenda A-47), no hay ninguna etiqueta
 - Cancelación en cola determinista del pool de CPU (VIG-130) y prueba del servidor colgado en tiempo virtual (VIG-134).
 - Alias rechazados en el registro de tipos por privacidad (P3) (VIG-129).
 - Concesiones sin fecha de caducidad y auditoría de `GET /hierarchy` bajo concesión (VIG-135, adenda A-50).
+- El archivado mensual verifica y registra la versión exacta del objeto subido (`archive_version_id_hex`, `audit_partition_archived` versión 3) y la restauración la pide: dos pasadas a la vez ya no dejan una referencia que restaura otra versión (VIG-255).

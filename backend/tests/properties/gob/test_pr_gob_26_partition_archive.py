@@ -71,6 +71,7 @@ from vigia_platform.shared.archive.table_archive import (
 )
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
+from vigia_platform.shared.storage import ObjectHead
 
 BACKEND = Path(__file__).resolve().parents[3]
 VERSIONS = BACKEND / "migrations" / "versions"
@@ -330,19 +331,20 @@ def world(postgres_endpoint: PostgresEndpoint) -> Iterator[World]:
 
 
 class MemoryStorage:
-    """Almacén en memoria; con ``flip``, altera ese bit del objeto al guardarlo (un fallo del
-    medio)."""
+    """Almacén en memoria sin versionado (la subida no devuelve versión); con ``flip``, altera ese
+    bit del objeto al guardarlo (un fallo del medio)."""
 
     def __init__(self, flip: tuple[float, int] | None = None) -> None:
         self.objects: dict[str, bytes] = {}
         self._flip = flip
 
-    async def put_object(self, key: str, body: bytes, content_type: str, **_: Any) -> None:
+    async def put_object(self, key: str, body: bytes, content_type: str, **_: Any) -> ObjectHead:
         stored = bytearray(body)
         if self._flip is not None:
             position, bit = self._flip
             stored[int((len(stored) - 1) * position)] ^= 1 << bit
         self.objects[key] = bytes(stored)
+        return ObjectHead(key, len(body), None, None, content_type, {}, None)
 
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
         return self.objects[key]

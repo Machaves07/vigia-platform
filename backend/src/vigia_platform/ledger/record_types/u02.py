@@ -96,6 +96,12 @@ MonthPeriod = Annotated[
 ObjectKey = Annotated[
     StrictStr, Field(min_length=1, max_length=512, pattern=r"^[a-z0-9][a-z0-9/_.-]{0,511}$")
 ]
+ObjectVersionHex = Annotated[
+    StrictStr, Field(min_length=2, max_length=1024, pattern=r"^[0-9a-f]{2,1024}$")
+]
+"""El ``VersionId`` de un objeto (ASCII visible, hasta 512 bytes; los de S3 tienen 32) en
+hexadecimal en minúsculas. 1024 es el tope de una cadena cerrada del registro de tipos; la paridad
+la comprueba ``table_archive.version_id_from_hex`` al leerlo."""
 
 ConcessionReason = Annotated[StrictStr, Field(min_length=10, max_length=500)]
 """Motivo de la concesión: texto libre de 10 a 500 (domain-entities §2.11)."""
@@ -268,6 +274,22 @@ class AuditPartitionArchivedV2(ContentModel):
     archived_at: Timestamp
 
 
+class AuditPartitionArchivedV3(ContentModel):
+    """Versión 3 (VIG-255): la clave del archivo es fija por partición y el depósito versionado
+    guarda una versión por subida, así que ``archive_version_id_hex`` dice cuál se verificó y la
+    restauración la pide. Es el ``VersionId`` en hexadecimal (``table_archive.version_id_hex``):
+    tal cual mezcla mayúsculas y minúsculas sin longitud fija y sería texto libre. Opcional, para
+    que solo amplíe la versión 2 (BR-NUC-52); falta si el depósito no devolvió versión."""
+
+    partition_name: AuditPartition | FleetPartition
+    period: MonthPeriod
+    archive_object_key: ObjectKey
+    archive_sha256: Sha256Hex
+    entry_count: Count64
+    archived_at: Timestamp
+    archive_version_id_hex: ObjectVersionHex | None = None
+
+
 def _u02(
     record_type: str,
     chain_level: ChainLevel,
@@ -341,7 +363,8 @@ U02_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
     _u02("key_set_published", _ORG, KeySetPublished, outbox_events=("key_set_published",)),
     _u02("audit_partition_archived", _ORG, AuditPartitionArchived),
     _u02("audit_partition_archived", _ORG, AuditPartitionArchivedV2, schema_version=2),
+    _u02("audit_partition_archived", _ORG, AuditPartitionArchivedV3, schema_version=3),
 )
 """Los catorce tipos de U-02, cada uno con todas sus versiones en orden: todos en la 1,
-``audit_partition_archived`` también en la 2 (TASK-203) y ``node_zone_unassigned`` también en la
-2 (TASK-218, ``reason_es``)."""
+``audit_partition_archived`` también en la 2 (TASK-203) y en la 3 (VIG-255,
+``archive_version_id_hex``) y ``node_zone_unassigned`` también en la 2 (TASK-218, ``reason_es``)."""

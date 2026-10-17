@@ -661,10 +661,12 @@ class ComputeStack(VigiaStack):
                 resources=[self._key_arn(KeyName.NODE_CA)],
                 conditions={"StringEquals": {"kms:SigningAlgorithm": SIGNING_ALGORITHM}},
             ),
-            # §6.2 y LC-NUC-33: particiones de auditoría archivadas.
+            # §6.2 y LC-NUC-33: particiones de auditoría archivadas. La lectura de vuelta pide
+            # la versión recién subida (VIG-255): ``GetObject`` con ``VersionId`` exige
+            # ``s3:GetObjectVersion``.
             iam.PolicyStatement(
                 sid="Archive",
-                actions=["s3:PutObject", "s3:GetObject"],
+                actions=["s3:PutObject", "s3:GetObject", "s3:GetObjectVersion"],
                 resources=[self._objects(BucketUsage.ARCHIVE, "*")],
             ),
             iam.PolicyStatement(
