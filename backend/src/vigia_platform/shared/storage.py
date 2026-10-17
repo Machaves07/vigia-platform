@@ -35,8 +35,10 @@ reintentos** en boto3; cada llamada, incluida la firma de una URL prefirmada, ti
 tope de conexión + lectura + 1 s en el bucle de eventos. boto3 es bloqueante también al firmar
 (botocore puede refrescar las credenciales del rol de la tarea, que toca la red): toda llamada,
 firme una URL o no, corre en el pool de hilos, nunca en el hilo del bucle de eventos. Un almacén
-inaccesible (conexión rechazada, tiempo de espera, conexión cortada, 5xx o limitación) termina en
-``StorageUnavailable``, transitorio, que hacia el nodo es ``storage_unavailable`` (BR-CTR-30).
+inaccesible (conexión rechazada, tiempo de espera, conexión cortada, 5xx o limitación) o un fallo
+al refrescar las credenciales del rol (sin credenciales, parciales o el punto de credenciales
+inaccesible) termina en ``StorageUnavailable``, transitorio, que hacia el nodo es
+``storage_unavailable`` (BR-CTR-30).
 """
 
 from __future__ import annotations
@@ -392,11 +394,21 @@ def _checked_metadata(metadata: Mapping[str, str] | None) -> dict[str, str]:
     return checked
 
 
+_TRANSIENT_BOTOCORE_ERRORS: Final = (
+    botocore_exceptions.ConnectionError,
+    botocore_exceptions.HTTPClientError,
+    botocore_exceptions.NoCredentialsError,
+    botocore_exceptions.PartialCredentialsError,
+    botocore_exceptions.CredentialRetrievalError,
+)
+"""Errores de ``botocore`` sin respuesta del servicio que son del punto de credenciales del rol,
+no del almacén: un fallo o un tiempo de espera al refrescarlas (p. ej. IMDS o STS lentos o
+inaccesibles) durante una llamada, incluida la firma de una URL prefirmada (seguimiento de
+VIG-32/VIG-254)."""
+
+
 def _is_transient(error: Exception) -> bool:
-    if isinstance(
-        error,
-        botocore_exceptions.ConnectionError | botocore_exceptions.HTTPClientError,
-    ):
+    if isinstance(error, _TRANSIENT_BOTOCORE_ERRORS):
         return True
     if isinstance(error, botocore_exceptions.ClientError):
         response = error.response
