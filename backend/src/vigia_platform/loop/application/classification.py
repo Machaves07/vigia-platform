@@ -136,9 +136,13 @@ _REASON_FIELD: Final = FreeTextField(
 
 REASONS_BY_OUTCOME: Final[Mapping[ClassificationOutcome, frozenset[str]]] = MappingProxyType(
     {
-        ClassificationOutcome.CONFIRMED: frozenset(ReasonCategoryConfirmed),
-        ClassificationOutcome.AUTHORIZED_OPERATION: frozenset(ReasonCategoryAuthorized),
-        ClassificationOutcome.FALSE_POSITIVE: frozenset(ReasonCategoryFalsePositive),
+        ClassificationOutcome.CONFIRMED: frozenset(c.value for c in ReasonCategoryConfirmed),
+        ClassificationOutcome.AUTHORIZED_OPERATION: frozenset(
+            c.value for c in ReasonCategoryAuthorized
+        ),
+        ClassificationOutcome.FALSE_POSITIVE: frozenset(
+            c.value for c in ReasonCategoryFalsePositive
+        ),
     }
 )
 """La lista cerrada de categorías de cada salida (DE §1; hipótesis U04-H-12)."""
