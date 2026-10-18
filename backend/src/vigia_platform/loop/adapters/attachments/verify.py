@@ -10,9 +10,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from vigia_platform.loop.domain.enums import AttachmentContentType
-from vigia_platform.shared.storage import ObjectHead
+from vigia_platform.shared.storage import ObjectHead, StoragePort
 
-__all__ = ["AttachmentRejected", "AttachmentRejection", "verify_attachment"]
+__all__ = [
+    "AttachmentCandidate",
+    "AttachmentRejected",
+    "AttachmentRejection",
+    "ClosureAttachmentVerifier",
+    "verify_attachment",
+]
 
 
 class AttachmentRejection(enum.StrEnum):
@@ -49,6 +55,35 @@ class AttachmentCandidate:
     declared_no_identifiable_person: object
     head: ObjectHead | None
     header: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ClosureAttachmentVerifier:
+    """Obtiene solo metadatos y encabezado acotado antes de aplicar las guardas."""
+
+    storage: StoragePort
+
+    async def verify(
+        self,
+        *,
+        storage_key: str,
+        content_type: object,
+        size_bytes: object,
+        sha256: object,
+        declared_no_identifiable_person: object,
+    ) -> None:
+        head = await self.storage.head_object(storage_key)
+        header = b"" if head is None else await self.storage.get_object_range(storage_key, 65_535)
+        verify_attachment(
+            AttachmentCandidate(
+                content_type=content_type,
+                size_bytes=size_bytes,
+                sha256=sha256,
+                declared_no_identifiable_person=declared_no_identifiable_person,
+                head=head,
+                header=header,
+            )
+        )
 
 
 def verify_attachment(candidate: AttachmentCandidate) -> None:
