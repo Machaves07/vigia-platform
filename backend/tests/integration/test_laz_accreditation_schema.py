@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -69,3 +71,42 @@ def test_adoption_counter_has_no_user_column(database: MigratedDatabase) -> None
         "session_count",
         "last_activity_at",
     }
+
+
+@pytest.mark.asyncio
+async def test_period_idempotency_keys_are_unique(database: MigratedDatabase) -> None:
+    """Los dos sellos por zona y periodo no admiten una segunda materialización."""
+    connection = await database.connect()
+    organization, plant, zone = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    try:
+        for table, identifier, values in (
+            (
+                "monthly_package",
+                "package_id",
+                "state, generated_at, findings_summary, recurrence_summary, coverage_summary",
+            ),
+            (
+                "program_metric_snapshot",
+                "snapshot_id",
+                "granularity, values, materialized_at, inputs_digest",
+            ),
+        ):
+            common = [uuid.uuid4(), organization, plant, zone, dt.date(2026, 9, 1)]
+            if table == "monthly_package":
+                tail = ["sealed", dt.datetime(2026, 10, 1, tzinfo=dt.UTC), "{}", "{}", "{}"]
+            else:
+                tail = ["month", "[]", dt.datetime(2026, 10, 1, tzinfo=dt.UTC), "0" * 64]
+            columns = f"{identifier}, organization_id, plant_id, zone_id, period, {values}"
+            placeholders = ", ".join(f"${number}" for number in range(1, len(common + tail) + 1))
+            await connection.execute(
+                f"INSERT INTO accreditation.{table} ({columns}) VALUES ({placeholders})",  # noqa: S608
+                *(common + tail),
+            )
+            with pytest.raises(Exception) as error:
+                await connection.execute(
+                    f"INSERT INTO accreditation.{table} ({columns}) VALUES ({placeholders})",  # noqa: S608
+                    *([uuid.uuid4(), *common[1:], *tail]),
+                )
+            assert getattr(error.value, "sqlstate", None) == "23505"
+    finally:
+        await connection.close()
