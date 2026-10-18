@@ -1,0 +1,1 @@
+"""Adaptadores PostgreSQL de acreditación."""
