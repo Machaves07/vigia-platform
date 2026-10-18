@@ -4,6 +4,10 @@
 ``domain-entities.md`` §1 (y los mensajes de ``api_error_code``). Ningún valor crudo se muestra a
 una persona: se muestra su etiqueta.
 
+``labels.loop.es.json`` (U-04, NFR-LAZ-52) lo **extiende** con las enumeraciones del lazo, la
+acreditación y las notificaciones: ``load`` lee los dos y una enumeración que esté en ambos
+impide arrancar (``LabelsInvalid``), igual que un archivo que falta.
+
 **Fallo cerrado**: ``label(enumeración, valor)`` lanza ``MissingLabel`` ante un valor sin
 etiqueta (nunca devuelve el valor crudo ni una cadena vacía), y ``require_complete`` impide
 arrancar si a un miembro de una enumeración del código le falta su etiqueta. ``load`` rechaza un
@@ -19,10 +23,12 @@ import re
 import unicodedata
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 __all__ = [
+    "DEFAULT_EXTENSION_LABELS_PATHS",
     "DEFAULT_LABELS_PATH",
+    "DEFAULT_LOOP_LABELS_PATH",
     "MAX_LABEL_CHARS",
     "LabelsInvalid",
     "MissingLabel",
@@ -33,6 +39,10 @@ DEFAULT_LABELS_PATH: Final = (
     Path(__file__).resolve().parents[4] / "resources/labels.platform.es.json"
 )
 """``backend/resources/labels.platform.es.json`` (se copia a la imagen con ``backend/``)."""
+DEFAULT_LOOP_LABELS_PATH: Final = DEFAULT_LABELS_PATH.with_name("labels.loop.es.json")
+"""``backend/resources/labels.loop.es.json``: las etiquetas de U-04 (NFR-LAZ-52)."""
+DEFAULT_EXTENSION_LABELS_PATHS: Final[tuple[Path, ...]] = (DEFAULT_LOOP_LABELS_PATH,)
+"""Archivos que extienden a ``labels.platform.es.json`` y se cargan siempre con él."""
 MAX_LABEL_CHARS: Final = 256
 _MAX_FILE_BYTES: Final = 256 * 1024
 _KEY: Final = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -81,20 +91,22 @@ class PlatformLabels:
         self._labels = table
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_LABELS_PATH) -> PlatformLabels:
-        """Lee y valida el archivo; ``LabelsInvalid`` si falta o está mal formado."""
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            raise LabelsInvalid("no se pudo leer el archivo de etiquetas") from None
-        if len(raw) > _MAX_FILE_BYTES:
-            raise LabelsInvalid("el archivo de etiquetas es demasiado grande")
-        try:
-            document = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
-        except (UnicodeDecodeError, ValueError, RecursionError):
-            raise LabelsInvalid("el archivo de etiquetas no es JSON válido") from None
-        if not isinstance(document, dict):
-            raise LabelsInvalid("el archivo de etiquetas debe ser un objeto")
+    def load(
+        cls,
+        path: Path = DEFAULT_LABELS_PATH,
+        extensions: Iterable[Path] = DEFAULT_EXTENSION_LABELS_PATHS,
+    ) -> PlatformLabels:
+        """Lee y valida ``path`` y cada archivo de ``extensions``; ``LabelsInvalid`` si alguno
+        falta o está mal formado, o si una enumeración está en dos archivos."""
+        document = _read(path)
+        for extension in extensions:
+            extra = _read(extension)
+            repeated = sorted(set(document) & set(extra))
+            if repeated:
+                raise LabelsInvalid(
+                    "enumeraciones repetidas entre archivos de etiquetas: " + ", ".join(repeated)
+                )
+            document.update(extra)
         return cls(document)
 
     def enumerations(self) -> frozenset[str]:
@@ -132,6 +144,23 @@ class PlatformLabels:
             for enumeration, kind in bindings.items()
             for value in self.missing(enumeration, kind)
         ]
+
+
+def _read(path: Path) -> dict[str, Any]:
+    """Un archivo de etiquetas como objeto JSON; ``LabelsInvalid`` si falta o está mal formado."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise LabelsInvalid("no se pudo leer el archivo de etiquetas") from None
+    if len(raw) > _MAX_FILE_BYTES:
+        raise LabelsInvalid("el archivo de etiquetas es demasiado grande")
+    try:
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise LabelsInvalid("el archivo de etiquetas no es JSON válido") from None
+    if not isinstance(document, dict):
+        raise LabelsInvalid("el archivo de etiquetas debe ser un objeto")
+    return document
 
 
 def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:

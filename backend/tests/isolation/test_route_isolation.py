@@ -47,11 +47,10 @@ Solo datos generados (NFR-CTR-43).
 
 from __future__ import annotations
 
-import enum
 import hashlib
 import json
 import uuid
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -77,6 +76,8 @@ from tests.hierarchy_support import (
 )
 from tests.integration.conftest import PostgresEndpoint
 from tests.integration.test_coverage_port import COVERAGE_TYPES
+from tests.isolation.laz_cases import LAZ_CASES
+from tests.isolation.route_cases import Call, Case, Ids, Kind
 from tests.ledger_database import evidence_values, insert_evidence, set_organization
 from tests.live_view_support import LIVE_VIEW_URL, LiveViewEnvironment, live_view_environment
 from tests.second_factor_support import FakeKms
@@ -339,77 +340,6 @@ def _stamp(moment: datetime) -> str:
 # --- Catálogo de casos ------------------------------------------------------------------------
 
 
-class Kind(enum.Enum):
-    RESOURCE = "resource"
-    OWN = "own"
-    SESSION = "session"
-    PROVIDER_ONLY = "provider_only"
-    PUBLIC = "public"
-    NODE = "node"
-    """Ruta del contrato (``node_route``, A-51): con el certificado de un nodo de A y un recurso
-    de B responde ``node_zone_mismatch`` o ``not_found`` (TASK-206; los casos de cada ruta
-    publicada los añade su tarea y TASK-228)."""
-
-
-@dataclass(frozen=True)
-class Ids:
-    """Identificadores de una organización: los de B (conocidos) o inexistentes."""
-
-    organization: uuid.UUID
-    plant: uuid.UUID
-    zone: uuid.UUID
-    user: uuid.UUID
-    assignment: uuid.UUID
-    concession: uuid.UUID
-    record: uuid.UUID
-    evidence: uuid.UUID
-    event: uuid.UUID
-    label: uuid.UUID
-    node: uuid.UUID
-    """Nodo ``declared`` con ficha de flota (rutas de SCR-07, VIG-147)."""
-    spare_zone: uuid.UUID
-    """Zona de la planta sin nodo: se asigna y se retira en la misma pasada."""
-    retired_node: uuid.UUID
-    """Nodo revocado con ficha de flota: el de la baja."""
-    agreement: uuid.UUID
-    """Acuerdo de uso ``pending_signatures`` de la zona (VIG-149)."""
-    walk_test: uuid.UUID
-    """Sesión de walk-test ``in_progress`` de la zona, con matriz vacía (VIG-150)."""
-    step: uuid.UUID
-    """Paso abierto de esa sesión (VIG-150)."""
-    commissioning_record: uuid.UUID
-    """Acta cerrada de otra sesión de la zona (VIG-158)."""
-
-    @classmethod
-    def missing(cls) -> Ids:
-        return cls(*(uuid7() for _ in cls.__dataclass_fields__))
-
-    def values(self) -> tuple[uuid.UUID, ...]:
-        return tuple(getattr(self, name) for name in self.__dataclass_fields__)
-
-
-@dataclass(frozen=True)
-class Call:
-    method: str
-    path: str
-    params: dict[str, str] | None = None
-    json: Any = None
-
-
-Builder = Callable[[Ids], Call]
-
-
-@dataclass(frozen=True)
-class Case:
-    kind: Kind
-    call: Builder | None = None
-    why: str = ""
-    own_trail: bool = False
-    """La respuesta lista la auditoría de la organización del contexto: incluye las entradas de
-    las peticiones de la propia persona que nombró ese identificador (su rastro, no datos de B),
-    que no cuentan al comparar."""
-
-
 def _assignment(ids: Ids) -> list[dict[str, str]]:
     return [{"role": "coordinator_sst", "scope_level": "plant", "scope_id": str(ids.plant)}]
 
@@ -443,7 +373,7 @@ def _coverage_period() -> dict[str, str]:
 
 _PUBLIC_WHY = "sin sesión no hay organización de contexto"
 
-CASES: Final[dict[tuple[str, str], Case]] = {
+_U02_U03_CASES: Final[dict[tuple[str, str], Case]] = {
     # --- Públicas (``unauthenticated``) ---
     ("GET", "/health/live"): Case(Kind.PUBLIC, why=_PUBLIC_WHY),
     ("GET", "/health/ready"): Case(Kind.PUBLIC, why=_PUBLIC_WHY),
@@ -1100,7 +1030,19 @@ CASES: Final[dict[tuple[str, str], Case]] = {
         Kind.PROVIDER_ONLY, lambda i: Call("POST", "/platform/keys/checkpoint/rotate")
     ),
 }
-"""Un caso por método y plantilla registrados (``uncovered`` lo exige)."""
+"""Los casos de U-02 y U-03."""
+
+CASES: Final[dict[tuple[str, str], Case]] = {**_U02_U03_CASES, **dict(LAZ_CASES)}
+"""Un caso por método y plantilla registrados (``uncovered`` lo exige). Los de U-04 viven en
+``laz_cases.py`` (TASK-302): ninguna tarea de U-04 edita este archivo."""
+
+
+def test_the_u04_cases_neither_repeat_nor_replace_a_route() -> None:
+    keys = [key for key, _ in LAZ_CASES]
+    assert len(set(keys)) == len(keys)
+    assert not set(keys) & set(_U02_U03_CASES)
+    assert len(CASES) == len(_U02_U03_CASES) + len(keys)
+
 
 PROVIDER_SIDE_ONLY: Final = frozenset(
     {("POST", "/provider/concessions"), ("GET", "/provider/concessions")}
