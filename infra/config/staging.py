@@ -33,13 +33,17 @@ NODE_CA_PENDING_WINDOW_DAYS = 7
 HOSTED_ZONE_SOURCE = "pilot"
 
 # --- U-04: pila vigia-loop (infrastructure-design de U-04 §2.1; deployment-architecture §3) ---
-# Tema, colas y punto privado propios del entorno; sin secreto del asistente (doble de prueba);
-# todo se destruye con el entorno y vigia-queue con el borrado programado mínimo del servicio.
+# Tema, colas, punto privado y conjunto de configuración propios del entorno; identidad de correo
+# sin verificar y sin registros DNS; sin secreto del asistente (doble de prueba); todo se destruye
+# con el entorno y vigia-queue con el borrado programado mínimo del servicio.
 LOOP = LoopConfig(
     assistant_secret=False,
     email_topic_service_managed_key=pilot.EMAIL_TOPIC_SERVICE_MANAGED_KEY,
     retained=False,
     queue_key_pending_window_days=NODE_CA_PENDING_WINDOW_DAYS,
+    email_dns=False,
+    ses_configuration_set_condition=pilot.SES_CONFIGURATION_SET_CONDITION,
+    ses_reputation_subscription=pilot.SES_REPUTATION_SUBSCRIPTION,
 )
 
 

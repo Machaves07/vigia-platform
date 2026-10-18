@@ -116,6 +116,16 @@ class LoopConfig:
     retained: bool
     #: Borrado programado de ``vigia-queue`` al destruir (mínimo del servicio en ``staging``).
     queue_key_pending_window_days: int
+    #: Identidad ``mail.<dominio>`` verificada por DNS, con remitente de rebotes y los siete
+    #: registros de §4.1 en ``vigia-zone``. En ``staging-<n>``, identidad sin verificar y sin
+    #: registros (§2.1): la verificación por DNS no cabe en la vida del entorno.
+    email_dns: bool
+    #: Interruptor de H-LAZ-10 (§9.1): condición del conjunto de configuración en
+    #: ``ses:SendEmail``. Apagado mientras la clave de condición no se confirme en la consola.
+    ses_configuration_set_condition: bool
+    #: Interruptor de H-LAZ-11 (§4.2): eventos de reputación del correo hacia ``vigia-alerts``.
+    #: Apagado mientras la suscripción no se confirme en la consola.
+    ses_reputation_subscription: bool
 
 
 @dataclass(frozen=True)
