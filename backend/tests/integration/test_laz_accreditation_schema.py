@@ -9,7 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.identity_db import MigratedDatabase, migrated_database
+from tests.identity_db import MigratedDatabase, migrated_database, seeded_identity, set_scope
 from tests.integration.conftest import PostgresEndpoint
 
 pytestmark = pytest.mark.integration
@@ -74,6 +74,46 @@ def test_all_accreditation_tables_have_restrictive_provider_policy(
             "organization_isolation": "PERMISSIVE",
             "provider_concession_scope": "RESTRICTIVE",
         }
+
+
+def test_rls_never_exposes_another_organization(postgres_endpoint: PostgresEndpoint) -> None:
+    """Sonda conductual mínima: el contador agregado sigue aislado por organización."""
+    with seeded_identity(postgres_endpoint, "vigia_laz_accreditation_rls") as (database, identity):
+
+        async def run() -> None:
+            superuser = await database.connect()
+            app = await database.connect("vigia_app")
+            try:
+                for tenant in (identity.a, identity.b):
+                    plant = tenant.plants[0]
+                    await superuser.execute(
+                        "INSERT INTO accreditation.adoption_counter"
+                        " (organization_id, plant_id, zone_id, day, activity_counts, session_count)"
+                        " VALUES ($1, $2, $3, $4, $5, $6)",
+                        tenant.organization_id,
+                        plant.plant_id,
+                        plant.zone_id,
+                        dt.date(2026, 9, 1),
+                        "{}",
+                        0,
+                    )
+                async with app.transaction():
+                    await set_scope(app, identity.a.organization_id)
+                    assert (
+                        await app.fetchval("SELECT count(*) FROM accreditation.adoption_counter")
+                        == 1
+                    )
+                async with app.transaction():
+                    await set_scope(app, identity.b.organization_id)
+                    assert (
+                        await app.fetchval("SELECT count(*) FROM accreditation.adoption_counter")
+                        == 1
+                    )
+            finally:
+                await app.close()
+                await superuser.close()
+
+        asyncio.run(run())
 
 
 def test_adoption_counter_has_no_user_column(database: MigratedDatabase) -> None:

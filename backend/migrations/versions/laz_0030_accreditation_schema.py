@@ -119,6 +119,7 @@ _TABLES: Final = (
 def upgrade() -> None:
     op.execute("SET LOCAL ROLE vigia_migrate")
     op.execute("CREATE SCHEMA accreditation AUTHORIZATION vigia_migrate")
+    op.execute("GRANT USAGE ON SCHEMA accreditation TO vigia_app")
     for statement in _TABLES:
         op.execute(statement)
     for table in TABLES:
