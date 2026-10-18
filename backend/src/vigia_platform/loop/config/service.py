@@ -42,6 +42,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
 
@@ -88,9 +89,11 @@ __all__ = [
     "LOOP_CONFIGURATION_CHANGED",
     "REASON_MAX_CHARS",
     "REASON_MIN_CHARS",
+    "ConfigurationChange",
     "ConfigurationRequestInvalid",
     "ConfigurationUnavailable",
     "LoopConfigurationService",
+    "validated_change",
 ]
 
 LOOP_CONFIGURATION_CHANGED: Final = "loop_configuration_changed"
@@ -113,6 +116,52 @@ class ConfigurationRequestInvalid(Exception):
 
 class ConfigurationUnavailable(ExternalDependencyDown):
     """Transitorio: la fila ya no tenía la versión leída (respaldo del candado)."""
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigurationChange:
+    """Un cambio ya validado fuera de la base: enteros en su rango, calendario y motivo NFC."""
+
+    integers: Mapping[str, int]
+    business_calendar: BusinessCalendar | None
+    reason: str
+
+
+def validated_change(
+    free_text: FreeTextPolicyRegistry,
+    *,
+    integers: Mapping[str, object],
+    business_calendar: object | None,
+    reason: object,
+) -> ConfigurationChange:
+    """Las comprobaciones de ``change`` que no miran la base (paso 1), en su orden: motivo,
+    enteros y calendario. Sin operaciones de datos; las reglas entre parámetros van después,
+    sobre la fila vigente."""
+    reason_text = _checked_reason(free_text, reason)
+    new_integers = _integers(integers)
+    calendar = _calendar(business_calendar)
+    if not new_integers and calendar is None:
+        raise ConfigurationRequestInvalid("el cambio no nombra ningún parámetro")
+    return ConfigurationChange(
+        integers=new_integers, business_calendar=calendar, reason=reason_text
+    )
+
+
+def _checked_reason(free_text: FreeTextPolicyRegistry, reason: object) -> str:
+    if reason is None or (isinstance(reason, str) and not reason.strip()):
+        raise ConfigurationRejected(LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED)
+    if not isinstance(reason, str):
+        raise ConfigurationRequestInvalid("el motivo es una cadena")
+    if len(reason.strip()) < REASON_MIN_CHARS:
+        raise ConfigurationRejected(LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED)
+    try:
+        return free_text.apply(reason, _REASON)
+    except FreeTextRejected as rejected:
+        if rejected.reason == FreeTextRejection.TOO_SHORT:
+            raise ConfigurationRejected(
+                LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED
+            ) from None
+        raise ConfigurationRequestInvalid("motivo rechazado por la política") from None
 
 
 def _written(written: Receipt | LedgerRejection) -> None:
@@ -203,11 +252,14 @@ class LoopConfigurationService:
         authorized, timezone = await self._plant(
             context, plant_id, PermissionKey.ORGANIZATION_SETTINGS
         )
-        reason_text = self._reason(reason)
-        new_integers = _integers(integers)
-        calendar = _calendar(business_calendar)
-        if not new_integers and calendar is None:
-            raise ConfigurationRequestInvalid("el cambio no nombra ningún parámetro")
+        request = validated_change(
+            self._free_text, integers=integers, business_calendar=business_calendar, reason=reason
+        )
+        new_integers, calendar, reason_text = (
+            request.integers,
+            request.business_calendar,
+            request.reason,
+        )
         writer_context = with_unit(authorized, ActorUnit.U04)
         async with self._database.transaction(writer_context) as transaction:
             await self._repository.lock_plant(transaction, plant_id)
@@ -233,22 +285,6 @@ class LoopConfigurationService:
 
     def _now(self) -> datetime:
         return to_millisecond(self._clock.now())
-
-    def _reason(self, reason: object) -> str:
-        if reason is None or (isinstance(reason, str) and not reason.strip()):
-            raise ConfigurationRejected(LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED)
-        if not isinstance(reason, str):
-            raise ConfigurationRequestInvalid("el motivo es una cadena")
-        if len(reason.strip()) < REASON_MIN_CHARS:
-            raise ConfigurationRejected(LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED)
-        try:
-            return self._free_text.apply(reason, _REASON)
-        except FreeTextRejected as rejected:
-            if rejected.reason == FreeTextRejection.TOO_SHORT:
-                raise ConfigurationRejected(
-                    LoopDetailCode.CONFIGURATION_CHANGE_REASON_REQUIRED
-                ) from None
-            raise ConfigurationRequestInvalid("motivo rechazado por la política") from None
 
     async def _current_or_defaults(
         self, transaction: Transaction, plant_id: uuid.UUID, timezone: str
