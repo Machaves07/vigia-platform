@@ -57,6 +57,25 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             ),
         ),
     ),
+    # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
+    (
+        ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call(
+                "POST",
+                f"/loop/actions/{ids.record}/attachments/upload-grant",
+                json={"content_type": "image/png", "size_bytes": 1, "sha256": "a" * 64},
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/attachments/{attachment_id}/read-url"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call("POST", f"/loop/attachments/{ids.evidence}/read-url"),
+        ),
+    ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
 

@@ -1,12 +1,12 @@
 {
   "description": "Línea base de los bancos de NFR-NUC-01 y 02 (TASK-142) y de NFR-GOB-01 a 10 (TASK-233). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1 y conserva lo que no se midió. Una mediana peor que la de su entrada más allá de su regression_factor (1,5 si no lo lleva; 1,2 en U-03) falla nightly.",
-  "measured_at": "2026-10-07",
+  "measured_at": "2026-10-18",
   "environment": {
-    "commit": "243ba76",
+    "commit": "282a2a4",
     "python": "3.12.14",
     "machine": "x86_64",
     "system": "Linux",
-    "release": "6.18.40.1-microsoft-standard-WSL2",
+    "release": "6.18.54.1-microsoft-standard-WSL2",
     "cpus": 20,
     "runner": "local"
   },
@@ -448,6 +448,16 @@
       "p95": 1677.973,
       "objective": 3000.0,
       "regression_factor": 1.2
+    },
+    "laz_validators_1000_chars": {
+      "label": "Validadores de texto de U-04 (blocked_vocabulary) sobre 1 000 caracteres",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 1.72,
+      "p95": 2.077,
+      "objective": 20.0,
+      "measured_at": "2026-10-18",
+      "runner": "local"
     },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",

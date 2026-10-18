@@ -3964,6 +3964,66 @@
                 "$ref": "#/components/schemas/ApiErrorBody"
       "x-vigia-mutual-tls": true
       "x-vigia-content-encodings": []
+  "/loop/actions/{action_id}/attachments/upload-grant":
+    "post":
+      "tags":
+        - "adjuntos de cierre"
+      "summary": "Concesión de subida de un adjunto de cierre: un solo PUT de 15 minutos"
+      "operationId": "upload_grant_loop_actions__action_id__attachments_upload_grant_post"
+      "parameters":
+        - "name": "action_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Action Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UploadGrantRequest"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/UploadGrantResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/attachments/{attachment_id}/read-url":
+    "post":
+      "tags":
+        - "adjuntos de cierre"
+      "summary": "URL de descarga de un adjunto de cierre, vigente 15 minutos (concesión auditada)"
+      "operationId": "read_url_loop_attachments__attachment_id__read_url_post"
+      "parameters":
+        - "name": "attachment_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Attachment Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReadUrlResponse"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/plants/{plant_id}/configuration":
     "get":
       "tags":
@@ -9215,6 +9275,30 @@
       "required":
         - "assignments"
       "title": "ReactivateBody"
+    "ReadUrlResponse":
+      "properties":
+        "attachment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Attachment Id"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "content_disposition":
+          "type": "string"
+          "const": "attachment"
+          "title": "Content Disposition"
+          "default": "attachment"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attachment_id"
+        - "url"
+        - "expires_at"
+      "title": "ReadUrlResponse"
     "Receipt":
       "properties":
         "platform_record_id":
@@ -10544,6 +10628,72 @@
       "minLength": 36
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       "title": "UUIDv7"
+    "UploadGrantRequest":
+      "properties":
+        "content_type":
+          "type": "string"
+          "maxLength": 255
+          "minLength": 1
+          "title": "Content Type"
+        "size_bytes":
+          "type": "integer"
+          "minimum": 1.0
+          "title": "Size Bytes"
+        "sha256":
+          "type": "string"
+          "pattern": "^[0-9a-f]{64}$"
+          "title": "Sha256"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "content_type"
+        - "size_bytes"
+        - "sha256"
+      "title": "UploadGrantRequest"
+      "description": "El tipo y el tamaño se comprueban después, con su ``detail_code`` (SUP-U05-09)."
+    "UploadGrantResponse":
+      "properties":
+        "attachment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Attachment Id"
+        "storage_key":
+          "type": "string"
+          "title": "Storage Key"
+        "upload":
+          "$ref": "#/components/schemas/UploadRequest"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attachment_id"
+        - "storage_key"
+        - "upload"
+      "title": "UploadGrantResponse"
+    "UploadRequest":
+      "properties":
+        "method":
+          "type": "string"
+          "const": "PUT"
+          "title": "Method"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "required_headers":
+          "additionalProperties":
+            "type": "string"
+          "type": "object"
+          "title": "Required Headers"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "method"
+        - "url"
+        - "required_headers"
+        - "expires_at"
+      "title": "UploadRequest"
     "UsageGate":
       "properties":
         "status":

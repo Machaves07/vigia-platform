@@ -11,7 +11,9 @@ de verificación; el primer fallo fija el código (como BR-CTR-32):
    y bytes canónicos ≤ 256 KB (``content_invalid`` con el puntero del primer campo que falla),
    todo antes de cualquier consulta a la base;
 4. **texto libre**: cada ruta de ``free_text_paths`` pasa ``FreeTextPolicy``; se guarda el texto
-   en NFC (``free_text_rejected``);
+   en NFC (``free_text_rejected``, con el ``detail_code`` del validador que lo rechazó si lo
+   lleva). Si algún validador registró un preparador, corre antes, con la organización del
+   contexto y una lectura de la base (PAT-LAZ-REN-02): el validador no consulta la base;
 5. **idempotencia** por (organización, tipo, ``source_key``): mismo ``content_hash`` →
    ``accepted_duplicate`` con el recibo original y sin registro nuevo; distinto →
    ``idempotency_conflict`` (BR-NUC-48);
@@ -90,7 +92,12 @@ from vigia_platform.ledger.evidence import (
     EvidenceOwner,
     first_failure,
 )
-from vigia_platform.ledger.free_text import FreeTextPolicyRegistry, FreeTextRejected
+from vigia_platform.ledger.free_text import (
+    FreeTextPolicyRegistry,
+    FreeTextPreparation,
+    FreeTextRejected,
+    RowReader,
+)
 from vigia_platform.ledger.labels_projection import (
     LabelProjection,
     LabelRuleViolation,
@@ -241,10 +248,20 @@ class LedgerRejection:
     code: LedgerRejectionCode
     field: str | None = None
     message_es: str = ""
+    detail_code: str | None = None
+    """El ``detail_code`` del validador de texto libre que rechazó (``free_text_rejected``)."""
 
     @classmethod
-    def of(cls, code: LedgerRejectionCode, field: str | None = None) -> LedgerRejection:
-        return cls(code=code, field=field or None, message_es=_MESSAGES[code])
+    def of(
+        cls,
+        code: LedgerRejectionCode,
+        field: str | None = None,
+        *,
+        detail_code: str | None = None,
+    ) -> LedgerRejection:
+        return cls(
+            code=code, field=field or None, message_es=_MESSAGES[code], detail_code=detail_code
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,8 +429,10 @@ class _Rejected(Exception):
         self.rejection = rejection
 
 
-def _reject(code: LedgerRejectionCode, field: str | None = None) -> _Rejected:
-    return _Rejected(LedgerRejection.of(code, field))
+def _reject(
+    code: LedgerRejectionCode, field: str | None = None, *, detail_code: str | None = None
+) -> _Rejected:
+    return _Rejected(LedgerRejection.of(code, field, detail_code=detail_code))
 
 
 def _document(content: object) -> Any:
@@ -693,8 +712,17 @@ class EscritorExpediente:
         source_key = self._source_key(compiled, document)
         label = self._project_label(compiled, document)
         # (4) texto libre, sobre el documento ya válido: se guarda el texto en NFC. Las rutas de
-        # la clave y de la etiqueta nunca son texto libre (el registro lo exige): no cambian.
-        self._apply_free_text(compiled, document)
+        # la clave y de la etiqueta nunca son texto libre (el registro lo exige): no cambian. Los
+        # preparadores (la versión de la lista de vocabulario de U-04) leen antes de validar.
+        if compiled.definition.free_text_paths and self._free_text.has_preparers:
+            await self._free_text.prepare(
+                FreeTextPreparation(
+                    organization_id=context.organization_id,
+                    rows=self._row_reader(context, transaction),
+                    clock=self._clock,
+                )
+            )
+        self._apply_free_text(compiled, document, context.organization_id)
         content_bytes = await self._canonical(document)
         content_hash = hashlib.sha256(content_bytes).hexdigest()
         # (1) con la base: la zona de una sesión existe y es de la planta del registro. Es la
@@ -784,16 +812,34 @@ class EscritorExpediente:
         record_scope, chain_plant = _resolve_scope(parsed, scope, compiled)
         return parsed, record_scope, chain_plant
 
-    def _apply_free_text(self, compiled: CompiledType, document: Any) -> None:
+    def _row_reader(self, context: ScopeContext, transaction: Transaction | None) -> RowReader:
+        """Lecturas de los preparadores: en la transacción del llamador o en una propia."""
+
+        async def rows(statement: Executable, parameters: Mapping[str, Any]) -> Sequence[Row[Any]]:
+            if transaction is not None:
+                return (await transaction.execute(statement, parameters)).all()
+            return await self._database.read(context, statement, parameters)
+
+        return rows
+
+    def _apply_free_text(
+        self, compiled: CompiledType, document: Any, organization_id: uuid.UUID | None = None
+    ) -> None:
         for path in compiled.definition.free_text_paths:
             field = compiled.free_text_fields[path]
             for located in locate(document, path):
                 if not isinstance(located.value, str):  # pragma: no cover - esquema
                     raise _reject(LedgerRejectionCode.CONTENT_INVALID, located.pointer)
                 try:
-                    normalized = self._free_text.apply(located.value, field)
-                except FreeTextRejected:
-                    raise _reject(LedgerRejectionCode.FREE_TEXT_REJECTED, located.pointer) from None
+                    normalized = self._free_text.apply(
+                        located.value, field, organization_id=organization_id
+                    )
+                except FreeTextRejected as rejected:
+                    raise _reject(
+                        LedgerRejectionCode.FREE_TEXT_REJECTED,
+                        located.pointer,
+                        detail_code=rejected.detail_code,
+                    ) from None
                 if normalized != located.value:
                     replace_value(document, located.segments, normalized)
 

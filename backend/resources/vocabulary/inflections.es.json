@@ -1,0 +1,284 @@
+{
+  "description": "Flexiones de los lemas del vocabulario bloqueado de BLM §14.1 a §14.4 (TASK-303, VIG-204).",
+  "origin": "Escrita para Vigía el 2026-10-18 por decisión del dueño (sin lematizador de terceros): singular y plural, masculino y femenino, adverbios en -mente y, para los verbos de la lista, la conjugación regular del español; no copia ninguna lista de terceros.",
+  "language": "es",
+  "version": 1,
+  "lemmas": {
+    "vacio": [
+      "vacía",
+      "vacías",
+      "vacío",
+      "vacíos"
+    ],
+    "despejado": [
+      "despejada",
+      "despejadas",
+      "despejado",
+      "despejados"
+    ],
+    "ausencia": [
+      "ausencia",
+      "ausencias"
+    ],
+    "garantizar": [
+      "garantice",
+      "garanticemos",
+      "garanticen",
+      "garantices",
+      "garanticé",
+      "garanticéis",
+      "garantiza",
+      "garantizaba",
+      "garantizabais",
+      "garantizaban",
+      "garantizabas",
+      "garantizad",
+      "garantizada",
+      "garantizadas",
+      "garantizado",
+      "garantizados",
+      "garantizamos",
+      "garantizan",
+      "garantizando",
+      "garantizar",
+      "garantizara",
+      "garantizarais",
+      "garantizaran",
+      "garantizaras",
+      "garantizaremos",
+      "garantizaron",
+      "garantizará",
+      "garantizarán",
+      "garantizarás",
+      "garantizaré",
+      "garantizaréis",
+      "garantizaría",
+      "garantizaríais",
+      "garantizaríamos",
+      "garantizarían",
+      "garantizarías",
+      "garantizas",
+      "garantizase",
+      "garantizaseis",
+      "garantizasen",
+      "garantizases",
+      "garantizaste",
+      "garantizasteis",
+      "garantizo",
+      "garantizábamos",
+      "garantizáis",
+      "garantizáramos",
+      "garantizásemos",
+      "garantizó"
+    ],
+    "garantia": [
+      "garantía",
+      "garantías"
+    ],
+    "infalible": [
+      "infalible",
+      "infaliblemente",
+      "infalibles"
+    ],
+    "disminuira": [
+      "disminuiremos",
+      "disminuirá",
+      "disminuirán",
+      "disminuirás",
+      "disminuiré",
+      "disminuiréis",
+      "disminuiría",
+      "disminuiríais",
+      "disminuiríamos",
+      "disminuirían",
+      "disminuirías"
+    ],
+    "sabotaje": [
+      "sabotaje",
+      "sabotajes"
+    ],
+    "saboteo": [
+      "sabotea",
+      "saboteaba",
+      "saboteabais",
+      "saboteaban",
+      "saboteabas",
+      "sabotead",
+      "saboteada",
+      "saboteadas",
+      "saboteado",
+      "saboteador",
+      "saboteadora",
+      "saboteadoras",
+      "saboteadores",
+      "saboteados",
+      "saboteamos",
+      "sabotean",
+      "saboteando",
+      "sabotear",
+      "saboteara",
+      "sabotearais",
+      "sabotearan",
+      "sabotearas",
+      "sabotearemos",
+      "sabotearon",
+      "saboteará",
+      "sabotearán",
+      "sabotearás",
+      "sabotearé",
+      "sabotearéis",
+      "sabotearía",
+      "sabotearíais",
+      "sabotearíamos",
+      "sabotearían",
+      "sabotearías",
+      "saboteas",
+      "sabotease",
+      "saboteaseis",
+      "saboteasen",
+      "saboteases",
+      "saboteaste",
+      "saboteasteis",
+      "sabotee",
+      "saboteemos",
+      "saboteen",
+      "sabotees",
+      "saboteo",
+      "saboteos",
+      "saboteábamos",
+      "saboteáis",
+      "saboteáramos",
+      "saboteásemos",
+      "saboteé",
+      "saboteéis",
+      "saboteó"
+    ],
+    "intencional": [
+      "intencional",
+      "intencionales",
+      "intencionalmente"
+    ],
+    "deliberado": [
+      "deliberada",
+      "deliberadamente",
+      "deliberadas",
+      "deliberado",
+      "deliberados"
+    ],
+    "adrede": [
+      "adrede"
+    ],
+    "negligencia": [
+      "negligencia",
+      "negligencias"
+    ],
+    "negligente": [
+      "negligente",
+      "negligentemente",
+      "negligentes"
+    ],
+    "imprudencia": [
+      "imprudencia",
+      "imprudencias"
+    ],
+    "imprudente": [
+      "imprudente",
+      "imprudentemente",
+      "imprudentes"
+    ],
+    "temerario": [
+      "temeraria",
+      "temerariamente",
+      "temerarias",
+      "temerario",
+      "temerarios"
+    ],
+    "descuido": [
+      "descuido",
+      "descuidos"
+    ],
+    "descuidado": [
+      "descuidada",
+      "descuidadamente",
+      "descuidadas",
+      "descuidado",
+      "descuidados"
+    ],
+    "culpa": [
+      "culpa",
+      "culpas"
+    ],
+    "culpable": [
+      "culpable",
+      "culpables"
+    ],
+    "culpar": [
+      "culpa",
+      "culpaba",
+      "culpabais",
+      "culpaban",
+      "culpabas",
+      "culpad",
+      "culpada",
+      "culpadas",
+      "culpado",
+      "culpados",
+      "culpamos",
+      "culpan",
+      "culpando",
+      "culpar",
+      "culpara",
+      "culparais",
+      "culparan",
+      "culparas",
+      "culparemos",
+      "culparon",
+      "culpará",
+      "culparán",
+      "culparás",
+      "culparé",
+      "culparéis",
+      "culparía",
+      "culparíais",
+      "culparíamos",
+      "culparían",
+      "culparías",
+      "culpas",
+      "culpase",
+      "culpaseis",
+      "culpasen",
+      "culpases",
+      "culpaste",
+      "culpasteis",
+      "culpe",
+      "culpemos",
+      "culpen",
+      "culpes",
+      "culpo",
+      "culpábamos",
+      "culpáis",
+      "culpáramos",
+      "culpásemos",
+      "culpé",
+      "culpéis",
+      "culpó"
+    ],
+    "irresponsabilidad": [
+      "irresponsabilidad",
+      "irresponsabilidades"
+    ],
+    "irresponsable": [
+      "irresponsable",
+      "irresponsablemente",
+      "irresponsables"
+    ],
+    "desobediencia": [
+      "desobediencia",
+      "desobediencias"
+    ],
+    "indisciplina": [
+      "indisciplina",
+      "indisciplinas"
+    ]
+  }
+}
