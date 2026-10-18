@@ -73,7 +73,9 @@ def expected_foundation_resources(config: EnvironmentConfig) -> Counter[str]:
             # Eventos de la base de ``vigia-data`` y, en ``pilot``, presupuestos.
             "AWS::SNS::TopicPolicy": 1,
             "AWS::SNS::Subscription": 1,
-            "AWS::SSM::Parameter": 1,
+            # ``sg-worker`` y, para ``vigia-loop`` (U-04), la red, sus dos subredes de
+            # aplicación, dos claves y el tema de alertas.
+            "AWS::SSM::Parameter": 7,
         }
     )
     if budgets_enabled(config):
@@ -449,12 +451,54 @@ def test_load_balancer_groups_are_not_in_this_stack(pilot_foundation: JsonObject
     assert set(_groups(pilot_foundation)) == {name.value for name in SecurityGroupName}
 
 
+def _parameters(template: JsonObject) -> dict[str, Any]:
+    """Nombre del parámetro SSM publicado → su valor."""
+    return {
+        str(properties(r)["Name"]): properties(r)["Value"]
+        for _, r in _of_type(template, "AWS::SSM::Parameter")
+    }
+
+
 def test_sg_worker_is_published_for_other_units(deployment: Synthesized) -> None:
     template = _foundation(deployment)
-    ((_, parameter),) = _of_type(template, "AWS::SSM::Parameter")
-    props = properties(parameter)
-    assert props["Name"] == f"/vigia/{deployment.config.deployment}/sg-worker-id"
-    assert props["Value"] == {"Fn::GetAtt": [_groups(template)["sg-worker"], "GroupId"]}
+    parameters = _parameters(template)
+    assert parameters[f"/vigia/{deployment.config.deployment}/sg-worker-id"] == {
+        "Fn::GetAtt": [_groups(template)["sg-worker"], "GroupId"]
+    }
+
+
+def test_loop_imports_are_published_for_u04(deployment: Synthesized) -> None:
+    """Productores aditivos que ``vigia-loop`` (U-04, TASK-331) lee por SSM: la red, las
+    subredes ``vigia-app-a`` y ``-b`` en su zona, las claves y el tema ``vigia-alerts``."""
+    template = _foundation(deployment)
+    config = deployment.config
+    prefix = f"/vigia/{config.deployment}"
+    parameters = _parameters(template)
+    del parameters[f"{prefix}/sg-worker-id"]
+    (vpc,) = (logical_id for logical_id, _ in _of_type(template, "AWS::EC2::VPC"))
+    (topic,) = (logical_id for logical_id, _ in _of_type(template, "AWS::SNS::Topic"))
+    subnets = _named(template, "AWS::EC2::Subnet")
+    key_ids = {
+        str(properties(alias)["AliasName"]): reference_target(properties(alias)["TargetKeyId"])
+        for _, alias in _of_type(template, "AWS::KMS::Alias")
+    }
+    app_a = subnets[config.resource_name("app-a")]
+    app_b = subnets[config.resource_name("app-b")]
+    assert parameters == {
+        f"{prefix}/vpc-id": {"Ref": vpc},
+        f"{prefix}/app-subnet-a-id": {"Ref": app_a},
+        f"{prefix}/app-subnet-b-id": {"Ref": app_b},
+        f"{prefix}/evidence-key-arn": {
+            "Fn::GetAtt": [key_ids[f"alias/{config.resource_name('evidence')}"], "Arn"]
+        },
+        f"{prefix}/secrets-key-arn": {
+            "Fn::GetAtt": [key_ids[f"alias/{config.resource_name('secrets')}"], "Arn"]
+        },
+        f"{prefix}/alerts-topic-arn": {"Ref": topic},
+    }
+    zones = template["Resources"]
+    assert properties(zones[app_a])["AvailabilityZone"] == "us-east-1a"
+    assert properties(zones[app_b])["AvailabilityZone"] == "us-east-1b"
 
 
 # --- Puntos privados (§3) --------------------------------------------------------------

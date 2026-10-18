@@ -15,7 +15,9 @@ Red (infrastructure-design §3):
 - Grupos ``sg-api``, ``sg-worker``, ``sg-tasks``, ``sg-db`` y ``sg-endpoints`` de la tabla de §3,
   sin salida abierta por defecto. ``sg-alb-app`` y ``sg-alb-nodes`` (los únicos con entrada
   pública) y la regla 8000 de ``sg-api`` desde ellos son de ``vigia-edge`` (TASK-147).
-  ``sg-worker`` se publica en ``/vigia/<despliegue>/sg-worker-id`` (contrato de salidas nº 38).
+  ``sg-worker`` se publica en ``/vigia/<despliegue>/sg-worker-id`` (contrato de salidas nº 38);
+  para ``vigia-loop`` (U-04) también la red, las dos subredes de aplicación, las claves
+  ``vigia-evidence`` y ``vigia-secrets`` y el tema ``vigia-alerts``.
 
 Claves (§7.1 y su nota de 2026-09-23, U02-H-01): seis simétricas con rotación anual y
 ``vigia-node-ca`` (ECC P-256, ``SIGN_VERIFY``, sin rotación). Cada política de clave es
@@ -61,7 +63,7 @@ from constructs import Construct
 from config import BOOTSTRAP_QUALIFIER, EnvironmentConfig
 from config.environment import PILOT, SHARED_INSTANCE
 from stacks.base import VigiaStack
-from stacks.outputs import Output, TaskRole, publish, role_name
+from stacks.outputs import APP_SUBNET_ZONES, Output, TaskRole, publish, role_name
 
 # --- Red (§3) -----------------------------------------------------------------------------
 
@@ -258,6 +260,26 @@ class FoundationStack(VigiaStack):
             Output.WORKER_SECURITY_GROUP_ID,
             self.security_groups[SecurityGroupName.WORKER].security_group_id,
         )
+        self._publish_for_loop()
+
+    def _publish_for_loop(self) -> None:
+        """Productores que ``vigia-loop`` (U-04, TASK-331) importa sin editar esta pila: la red,
+        las subredes de aplicación ``vigia-app-a`` y ``-b``, las claves ``vigia-evidence`` y
+        ``vigia-secrets`` y el tema ``vigia-alerts``. Cambio aditivo: solo parámetros."""
+        config = self.config
+        app_subnets = self.vpc.select_subnets(subnet_group_name=APP_SUBNETS).subnets
+        values = {
+            Output.VPC_ID: self.vpc.vpc_id,
+            **{
+                output: subnet.subnet_id
+                for (_, output), subnet in zip(APP_SUBNET_ZONES, app_subnets, strict=True)
+            },
+            Output.EVIDENCE_KEY_ARN: self.keys[KeyName.EVIDENCE].key_arn,
+            Output.SECRETS_KEY_ARN: self.keys[KeyName.SECRETS].key_arn,
+            Output.ALERTS_TOPIC_ARN: self.alerts_topic.topic_arn,
+        }
+        for output, value in values.items():
+            publish(self, config, output, value)
 
     # --- Principales ----------------------------------------------------------------------
 

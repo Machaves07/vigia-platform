@@ -22,6 +22,8 @@ class VigiaStack(Stack):
     key: str = ""
     #: Descripción de la plantilla, en español sin tildes (CloudFormation la muestra tal cual).
     summary: str = ""
+    #: Unidad propietaria de la pila: ``vigia-loop`` es de U-04.
+    unit: str = "U-02"
 
     def __init__(
         self, scope: Construct, config: EnvironmentConfig, *, tags: Mapping[str, str]
@@ -37,7 +39,7 @@ class VigiaStack(Stack):
             stack_name=name,
             env=Environment(region=config.region),
             synthesizer=DefaultStackSynthesizer(qualifier=BOOTSTRAP_QUALIFIER),
-            description=f"Vigia U-02 ({config.deployment}): {self.summary}",
+            description=f"Vigia {self.unit} ({config.deployment}): {self.summary}",
             tags=dict(tags),
         )
         self.config = config

@@ -104,6 +104,21 @@ class ObjectLock:
 
 
 @dataclass(frozen=True)
+class LoopConfig:
+    """Sección de U-04 (pila ``vigia-loop``, infrastructure-design de U-04 §2.1, §5 y §8)."""
+
+    #: Secreto ``vigia/<despliegue>/assistant/api-key``: no existe en ``staging-<n>`` (§2.1).
+    assistant_secret: bool
+    #: Interruptor de la contingencia de H-LAZ-9 (§5): el tema pasa a la clave del servicio y la
+    #: cola conserva ``vigia-queue``. Apagado hasta que el primer despliegue lo decida.
+    email_topic_service_managed_key: bool
+    #: ``RETAIN`` en ``pilot``; ``DESTROY`` con el entorno en ``staging-<n>``.
+    retained: bool
+    #: Borrado programado de ``vigia-queue`` al destruir (mínimo del servicio en ``staging``).
+    queue_key_pending_window_days: int
+
+
+@dataclass(frozen=True)
 class EnvironmentConfig:
     """Configuración de un despliegue: la tabla ``pilot`` frente a ``staging-<n>`` (D-8).
 
@@ -151,6 +166,9 @@ class EnvironmentConfig:
     api_max_tasks: int
     worker_min_tasks: int
     worker_max_tasks: int
+
+    # U-04: pila ``vigia-loop`` (TASK-331).
+    loop: LoopConfig
 
     # Red (§3): una traducción de direcciones, excepción R13; ``nat_per_az`` añade la segunda.
     nat_per_az: bool = False

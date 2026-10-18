@@ -24,6 +24,7 @@ from config.environment import (
     PILOT,
     SHARED_INSTANCE,
     EnvironmentConfig,
+    LoopConfig,
     NodesTlsMode,
     ObjectLock,
     ObjectLockMode,
@@ -48,6 +49,18 @@ WORKER_MAX_TASKS = 3
 OTEL_COLLECTOR_IMAGE = (
     "public.ecr.aws/aws-observability/aws-otel-collector:v0.45.1"
     "@sha256:4eabdc3213c7897d12df8daa4b8f1bf2fd3ebffc72ccdb8279102169a932342e"
+)
+
+# --- U-04: pila vigia-loop (infrastructure-design de U-04 §2.1, §5 y §8) --------------------
+# Ventana máxima de borrado programado de KMS; la clave de pilot se retiene igualmente.
+QUEUE_KEY_PENDING_WINDOW_DAYS = 30
+# H-LAZ-9 (§5): el tema usa vigia-queue mientras el primer despliegue no demuestre lo contrario.
+EMAIL_TOPIC_SERVICE_MANAGED_KEY = False
+LOOP = LoopConfig(
+    assistant_secret=True,
+    email_topic_service_managed_key=EMAIL_TOPIC_SERVICE_MANAGED_KEY,
+    retained=True,
+    queue_key_pending_window_days=QUEUE_KEY_PENDING_WINDOW_DAYS,
 )
 
 
@@ -87,6 +100,7 @@ def pilot_config(
         api_max_tasks=API_MAX_TASKS,
         worker_min_tasks=WORKER_MIN_TASKS,
         worker_max_tasks=WORKER_MAX_TASKS,
+        loop=LOOP,
         nat_per_az=nat_per_az,
         nodes_tls_mode=nodes_tls_mode,
     )
