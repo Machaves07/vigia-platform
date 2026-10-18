@@ -66,7 +66,12 @@ from vigia_platform.shared.outbox.registries import (
     ScheduleKind,
     TaskIteration,
 )
-from vigia_platform.shared.runtime.units import UnitServices, outbox_catalog, registered_units
+from vigia_platform.shared.runtime.units import (
+    UnitServices,
+    free_text_registry,
+    outbox_catalog,
+    registered_units,
+)
 from vigia_platform.shared.secrets import KmsPort
 from vigia_platform.shared.worker.main import WorkerConfig, WorkerProcess, WorkerRuntime
 
@@ -145,7 +150,7 @@ def u02_catalog(environment: WorkerEnvironment) -> OutboxCatalog:
         audit=unused,
         outbox=unused,
         writer=unused,
-        free_text=unused,
+        free_text=free_text_registry(registered_units()),
         signing=unused,
         checkpoints=unused,
         kms=unused,
