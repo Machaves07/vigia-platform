@@ -2,9 +2,11 @@
 
 - **Tres unidades** en ``REGISTERED_UNITS`` (``loop``, ``accreditation`` y ``notifications``),
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
-- **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (25) coinciden con lo
-  que registra el código; ``U04_TASKS`` y ``U04_CONSUMERS`` vacíos, y en ``ROUTERS`` solo las dos
-  rutas de adjuntos de cierre (TASK-310) y las dos de la configuración del lazo (TASK-304).
+- **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
+  trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
+  ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de
+  adjuntos de cierre (TASK-310) y las dos de la configuración del lazo (TASK-304) de ``loop`` y
+  las dos de exportación de ``accreditation`` (TASK-317).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -27,7 +29,11 @@ from fastapi.routing import APIRoute
 
 from tests.properties.laz.strategies.u04_records import u04_event_registry, u04_registry
 from vigia_platform.accreditation import registration as accreditation_registration
-from vigia_platform.accreditation.events import ACCREDITATION_EVENT_TYPES
+from vigia_platform.accreditation.adapters.http.services import ACCREDITATION_STATE_KEY
+from vigia_platform.accreditation.events import (
+    ACCREDITATION_EVENT_TYPES,
+    ACCREDITATION_INTERNAL_EVENT_TYPES,
+)
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
@@ -109,6 +115,9 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
 
 
 def test_the_u04_units_register_only_what_their_tasks_added() -> None:
+    # TASK-310: los adjuntos de cierre en loop; TASK-304: la configuración del lazo en loop;
+    # TASK-317: la exportación (dos rutas, export_worker con concurrencia 1 y su app.state) en
+    # accreditation. Nada más todavía.
     units = {unit.name: unit for unit in registered_units()}
     tasks = PeriodicTaskRegistry()
     consumers = ConsumerRegistry()
@@ -135,17 +144,28 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
+        elif name == "accreditation":
+            # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker.
+            assert routes == [
+                ("POST", "/accreditation/exports"),
+                ("GET", "/accreditation/exports/{export_id}"),
+            ]
+            assert set(state) == {ACCREDITATION_STATE_KEY}
         else:
             assert routes == [] and state == {}
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
-    assert tasks.tasks() == () and consumers.consumers() == ()
+    assert tasks.tasks() == ()
+    assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
+        ("export_worker", ActorUnit.U04, ("export_requested",))
+    ]
     assert (attachment_router, configuration_router) == registration.ROUTERS
-    for module in (accreditation_registration, notifications_registration):
-        assert module.ROUTERS == ()
-    for module in (registration, accreditation_registration, notifications_registration):
+    assert notifications_registration.ROUTERS == ()
+    for module in (registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
-    assert registration.U04_TASKS == {} and registration.U04_CONSUMERS == {}
+    assert accreditation_registration.TASK_REGISTRARS == ()
+    assert registration.U04_TASKS == {}
+    assert registration.U04_CONSUMERS == {"export_worker": 1}
     # TASK-303: el único registrador de texto libre es el del vocabulario (TASK-340 añade otro).
     assert (registration.register_blocked_vocabulary,) == registration.FREE_TEXT_REGISTRARS
 
@@ -154,15 +174,24 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
 
 
 def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
-    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 25
+    # 25 eventos de §11.3 más el trabajo interno export_requested (TASK-317).
+    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 26
     assert len(LOOP_RECORD_TYPES) == 13 and len(ACCREDITATION_RECORD_TYPES) == 4
     assert len(LOOP_EVENT_TYPES) == 21 and len(ACCREDITATION_EVENT_TYPES) == 4
+    assert [event.event_name for event in ACCREDITATION_INTERNAL_EVENT_TYPES] == [
+        "export_requested"
+    ]
     assert NOTIFICATIONS_EVENT_TYPES == ()
     assert {
         definition.record_type for definition in (*LOOP_RECORD_TYPES, *ACCREDITATION_RECORD_TYPES)
     } == registration.U04_RECORD_TYPES
     assert {
-        event.event_name for event in (*LOOP_EVENT_TYPES, *ACCREDITATION_EVENT_TYPES)
+        event.event_name
+        for event in (
+            *LOOP_EVENT_TYPES,
+            *ACCREDITATION_EVENT_TYPES,
+            *ACCREDITATION_INTERNAL_EVENT_TYPES,
+        )
     } == registration.U04_EVENT_TYPES
     assert set(u04_registry().record_types()) == registration.U04_RECORD_TYPES
     assert set(u04_event_registry().event_names()) == registration.U04_EVENT_TYPES
@@ -205,6 +234,8 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
         for compiled in full.event_types.compiled_types():
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
+        # Los consumidores de la raíz (export_worker, TASK-317): solo falta el evento.
+        unit.consumers(reduced.consumers, _services())
     return reduced
 
 

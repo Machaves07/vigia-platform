@@ -27,9 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from hypothesis import given
 from hypothesis import strategies as st
+from vigia_contracts.clock import SimulatedClock
 from vigia_contracts.models.enumerations import RejectionCode
 from vigia_contracts.models.rejection_response import RejectionResponse
 
+from tests.attachment_support import utc
 from tests.factories import uuid7
 from tests.middleware_support import (
     NODE_HEARTBEAT_PATH,
@@ -41,6 +43,11 @@ from tests.middleware_support import (
     UnlimitedRateLimiter,
     cookie_header,
 )
+from vigia_platform.accreditation.adapters.http.services import (
+    ACCREDITATION_STATE_KEY,
+    AccreditationHttp,
+)
+from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.shared.api.app import (
     AppConfig,
     UnitRegistration,
@@ -90,6 +97,12 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "review_deadline_business_days": 7,
         "reason": "Ajuste acordado en el comité de seguridad",
     },
+    ("POST", "/accreditation/exports"): {
+        "plant_id": str(uuid.uuid4()),
+        "zone_ids": [str(uuid.uuid4())],
+        "period": {"from": "2026-09-01T00:00:00.000Z", "to": "2026-10-01T00:00:00.000Z"},
+        "package_form": "without_clips",
+    },
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -120,19 +133,39 @@ def world() -> Iterator[tuple[Harness, Any, dict[str, str]]]:
     # puerto de adjuntos real sobre memoria (sin acciones) y el doble de la configuración, para que
     # un cuerpo válido llegue a su servicio.
     app = harness.app(rate_limiter=UnlimitedRateLimiter())
+    # La exportación (TASK-317) necesita la base: un cuerpo válido llega a un servicio que no
+    # encuentra las zonas sintéticas (``not_found``), como el de adjuntos con la acción.
+    setattr(app.state, ACCREDITATION_STATE_KEY, AccreditationHttp(exports=_NoZones()))  # type: ignore[arg-type]
     with TestClient(app, raise_server_exceptions=False) as client:
         yield harness, client, {**cookie_header(cookie), **SAME_ORIGIN}
 
 
+class _NoZones:
+    """``ExportRequests`` sin base: ninguna zona sintética existe (``ResourceNotFound``)."""
+
+    clock = SimulatedClock(utc())
+
+    async def request(self, context: Any, scope: Any) -> Any:
+        raise ResourceNotFound()
+
+    async def status(self, context: Any, export_id: Any) -> Any:
+        raise ResourceNotFound()
+
+
 _ROLE_HEADERS: dict[str, str] = {}
-"""Sesión de coordinación SST: ``actions.manage`` no está en la columna del administrador, y sin la
-clave la ruta responde ``not_found`` antes de validar el cuerpo (TASK-310)."""
+"""Sesión de coordinación SST: ``actions.manage`` y ``export.create`` no están en la columna del
+administrador, y sin la clave la ruta responde ``not_found`` antes de validar el cuerpo (TASK-310
+y TASK-317)."""
 ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
-    {("POST", "/loop/actions/{action_id}/attachments/upload-grant")}
+    {
+        ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+        ("POST", "/accreditation/exports"),
+    }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
-    # Cuerpo válido: llega al servicio, que no encuentra la acción sintética.
+    # Cuerpo válido: llega al servicio, que no encuentra la acción ni las zonas sintéticas.
     ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
+    ("POST", "/accreditation/exports"): 404,
 }
 
 

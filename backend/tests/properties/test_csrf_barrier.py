@@ -63,14 +63,21 @@ BODIES: dict[str, dict[str, Any]] = {
         "review_deadline_business_days": 7,
         "reason": "Ajuste acordado en el comité de seguridad",
     },
+    "/accreditation/exports": {
+        "plant_id": str(uuid.uuid4()),
+        "zone_ids": [str(uuid.uuid4())],
+        "period": {"from": "2026-09-01T00:00:00.000Z", "to": "2026-10-01T00:00:00.000Z"},
+        "package_form": "without_clips",
+    },
 }
 OPERATION_PREFIX = "/platform/"
 """Rutas reales de operación (TASK-137): sin servicios en el arnés no tienen efecto observable, así
 que entran en las falsificadas (``forbidden`` sin efecto) y no en las que se procesan."""
-REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/")
-"""Rutas con servicios reales o dobles (operación, adjuntos de cierre de U-04, TASK-310, y
-configuración del lazo, TASK-304): se prueban entre las falsificadas; su procesamiento, en
-``tests/properties/laz`` y ``tests/integration/test_loop_configuration_routes.py``."""
+REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/", "/accreditation/")
+"""Rutas con servicios reales o dobles (operación, adjuntos de cierre de U-04, TASK-310,
+configuración del lazo, TASK-304, y exportación, TASK-317): se prueban entre las falsificadas; su
+procesamiento, en ``tests/properties/laz``, ``tests/integration/test_loop_configuration_routes.py``
+y ``tests/integration/test_export_request_routes.py``."""
 
 
 def _state_changing_routes(app: Any) -> list[tuple[str, str]]:
@@ -120,6 +127,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/attachments/{attachment_id}/read-url"),
         # Configuración del lazo de U-04 (TASK-304).
         ("PUT", "/loop/plants/{plant_id}/configuration"),
+        # Solicitud de exportación de U-04 (TASK-317).
+        ("POST", "/accreditation/exports"),
         ("POST", "/users"),
         ("PATCH", "/users/{user_id}"),
         ("POST", "/privacy-notice/accept"),

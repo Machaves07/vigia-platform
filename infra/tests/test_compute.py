@@ -975,6 +975,36 @@ def test_u03_variables_are_the_ones_the_composition_root_reads(pilot: Synthesize
     assert "Fn::GetStackOutput" in trust_store
 
 
+def test_u04_worker_has_exactly_two_egress_destinations_and_its_bulkheads(
+    pilot: Synthesized,
+) -> None:
+    """TASK-349 (LC-LAZ-39 y 40, nota U04-H-10): en ``pilot`` el worker lleva **dos** destinos
+    de salida (el asistente y SES v2 de la región) y las concurrencias del diseño; ``vigia-api``
+    no lleva ninguna de las tres variables."""
+    template = _compute(pilot)
+    worker = _environment(_container(_task_definition(pilot, "worker"), "worker"))
+    api = _environment(_container(_task_definition(pilot, "api"), "api"))
+    hosts = {
+        render(worker["VIGIA_ASSISTANT_API_HOST"], template),
+        render(worker["VIGIA_EMAIL_API_HOST"], template),
+    }
+    assert hosts == {"api.anthropic.com", f"email.{pilot.config.region}.amazonaws.com"}
+    sizes = dict(
+        entry.split("=") for entry in render(worker["VIGIA_LOOP_BULKHEADS"], template).split(",")
+    )
+    assert sizes == {
+        "notification_engine": "4",
+        "loop_projection": "4",
+        "review_queue": "2",
+        "assistant_worker": "2",
+        "export_worker": "1",
+        "email_delivery_events": "2",
+    }
+    for name in ("VIGIA_ASSISTANT_API_HOST", "VIGIA_EMAIL_API_HOST", "VIGIA_LOOP_BULKHEADS"):
+        assert name in runtime_variables(), name
+        assert name not in api, name
+
+
 def test_api_reads_only_the_published_root_of_vigia_edge(pilot: Synthesized) -> None:
     """El alta y la emisión de códigos leen ``ca/root.pem``; vigia-api no escribe en vigia-edge."""
     template = _compute(pilot)

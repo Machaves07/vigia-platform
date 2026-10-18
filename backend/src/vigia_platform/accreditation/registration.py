@@ -24,13 +24,32 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter
 
+from vigia_platform.accreditation.adapters.http.export_routes import export_router
+from vigia_platform.accreditation.adapters.http.services import (
+    ACCREDITATION_STATE_KEY,
+    AccreditationHttp,
+)
 from vigia_platform.accreditation.detail_codes import (
     ACCREDITATION_DETAIL_CODE_LABEL_BINDINGS,
     AccreditationDetailCode,
 )
 from vigia_platform.accreditation.events import register_accreditation_event_types
+from vigia_platform.accreditation.export.composer_port import (
+    MissingPackageComposer,
+    MissingUploadPort,
+)
+from vigia_platform.accreditation.export.lease import SqlExportLeaseStore
+from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.export.worker import (
+    EXPORT_WORKER,
+    EXPORT_WORKER_CONCURRENCY,
+    ExportWorker,
+    LoggingExportAlarm,
+    register_export_worker,
+)
 from vigia_platform.accreditation.record_types import register_accreditation_record_types
 from vigia_platform.loop.domain.enums import ACCREDITATION_LABEL_BINDINGS
+from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.shared.outbox.registries import (
     ConsumerRegistry,
     EventTypeRegistry,
@@ -64,18 +83,51 @@ type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = ()
-"""Fábricas de los enrutadores de ``/accreditation/*``; hoy ninguna ruta."""
+
+def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``export_worker`` (TASK-317): el compositor real es de TASK-318 y el flujo de bytes de
+    TASK-345; hasta entonces, los que fallan sin publicar nada (nunca un paquete inventado)."""
+    register_export_worker(
+        registry,
+        ExportWorker(
+            leases=SqlExportLeaseStore(database=services.database),
+            checkpoints=services.checkpoints,
+            uploads=MissingUploadPort(),
+            composer=MissingPackageComposer(),
+            alarm=LoggingExportAlarm(),
+            clock=services.clock,
+        ),
+    )
+
+
+def _export_state(services: UnitServices) -> Mapping[str, object]:
+    return {
+        ACCREDITATION_STATE_KEY: AccreditationHttp(
+            exports=ExportRequests(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                outbox=services.outbox,
+                clock=services.clock,
+            )
+        )
+    }
+
+
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (export_router,)
+"""Fábricas de los enrutadores de ``/accreditation/*``."""
 
 ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
 
-ACCREDITATION_CONSUMERS: Final[Mapping[str, int]] = {}
+ACCREDITATION_CONSUMERS: Final[Mapping[str, int]] = {
+    EXPORT_WORKER: EXPORT_WORKER_CONCURRENCY,
+}
 """Consumidores del módulo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
-CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = ()
+CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (_register_export_worker,)
 
-API_STATE: Final[tuple[StateBuilder, ...]] = ()
+API_STATE: Final[tuple[StateBuilder, ...]] = (_export_state,)
 
 ACCREDITATION_LABELS: Final[Mapping[str, type[enum.Enum]]] = {
     **ACCREDITATION_LABEL_BINDINGS,
@@ -106,8 +158,10 @@ def accreditation_tasks(registry: PeriodicTaskRegistry, services: UnitServices) 
 
 
 def accreditation_consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+    # Cada consumidor sale con su mamparo (LC-LAZ-40); el registrador no lo conoce.
+    bulkheaded = bulkheaded_registry(registry, services)
     for register in CONSUMER_REGISTRARS:
-        register(registry, services)
+        register(bulkheaded, services)
 
 
 def accreditation_api_state(services: UnitServices) -> Mapping[str, object]:

@@ -4083,6 +4083,58 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exports":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "Solicita una exportación de una planta (1 a 20 zonas, hasta 366 días)"
+      "operationId": "request_export_accreditation_exports_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ExportRequestBody"
+        "required": true
+      "responses":
+        "202":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportStatusOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exports/{export_id}":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Estado y progreso de una exportación, con el resumen del manifiesto si está lista"
+      "operationId": "export_status_accreditation_exports__export_id__get"
+      "parameters":
+        - "name": "export_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Export Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportStatusOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "AcceptanceStatus":
@@ -6740,6 +6792,124 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "ExportRequestBody":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 80
+          "minItems": 1
+          "title": "Zone Ids"
+        "period":
+          "$ref": "#/components/schemas/PeriodBody"
+        "package_form":
+          "$ref": "#/components/schemas/PackageForm"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "zone_ids"
+        - "period"
+        - "package_form"
+      "title": "ExportRequestBody"
+    "ExportState":
+      "type": "string"
+      "enum":
+        - "requested"
+        - "in_progress"
+        - "ready"
+        - "failed"
+        - "expired"
+      "title": "ExportState"
+      "description": "``export_state`` (respuesta 11): manda sobre el de U-05; sin ``composing`` (U04-H-02)."
+    "ExportStatusOut":
+      "properties":
+        "export_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Export Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Zone Ids"
+        "period":
+          "$ref": "#/components/schemas/PeriodView"
+        "package_form":
+          "$ref": "#/components/schemas/PackageForm"
+        "export_state":
+          "$ref": "#/components/schemas/ExportState"
+        "progress_percent":
+          "type": "integer"
+          "title": "Progress Percent"
+        "current_artifact":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Current Artifact"
+        "attempt_count":
+          "type": "integer"
+          "title": "Attempt Count"
+        "failure_code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Failure Code"
+        "requested_at":
+          "type": "string"
+          "title": "Requested At"
+        "started_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Started At"
+        "completed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Completed At"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+        "correlation_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Correlation Id"
+        "manifest_summary":
+          "anyOf":
+            - "$ref": "#/components/schemas/ManifestSummaryView"
+            - "type": "null"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "export_id"
+        - "plant_id"
+        - "zone_ids"
+        - "period"
+        - "package_form"
+        - "export_state"
+        - "progress_percent"
+        - "current_artifact"
+        - "attempt_count"
+        - "failure_code"
+        - "requested_at"
+        - "started_at"
+        - "completed_at"
+        - "expires_at"
+        - "correlation_id"
+        - "manifest_summary"
+      "title": "ExportStatusOut"
     "ExposureSampleBody":
       "properties":
         "pass_id":
@@ -7905,6 +8075,37 @@
         - "second_factor_enrolled"
         - "assignments"
       "title": "ManagedUserView"
+    "ManifestSummaryView":
+      "properties":
+        "document_sha256":
+          "type": "string"
+          "title": "Document Sha256"
+        "archive_sha256":
+          "type": "string"
+          "title": "Archive Sha256"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "artifact_count":
+          "type": "integer"
+          "title": "Artifact Count"
+        "checkpoint_count":
+          "type": "integer"
+          "title": "Checkpoint Count"
+        "verifier_version":
+          "type": "string"
+          "title": "Verifier Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "document_sha256"
+        - "archive_sha256"
+        - "size_bytes"
+        - "artifact_count"
+        - "checkpoint_count"
+        - "verifier_version"
+      "title": "ManifestSummaryView"
+      "description": "Resumen del manifiesto de un paquete ``ready``."
     "MatrixResultOut":
       "properties":
         "row_id":
@@ -8780,6 +8981,13 @@
         - "name"
         - "kind"
       "title": "OrganizationView"
+    "PackageForm":
+      "type": "string"
+      "enum":
+        - "with_clips"
+        - "without_clips"
+      "title": "PackageForm"
+      "description": "``package_form`` de la exportación (nota U04-H-03)."
     "PassBody":
       "properties":
         "row_id":
@@ -8883,6 +9091,37 @@
         - "current_password"
         - "new_password"
       "title": "PasswordChangeRequest"
+    "PeriodBody":
+      "properties":
+        "from":
+          "type": "string"
+          "format": "date-time"
+          "title": "From"
+        "to":
+          "type": "string"
+          "format": "date-time"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "PeriodBody"
+      "description": "``{from, to}``: ``from`` es palabra reservada de Python, de ahí el alias."
+    "PeriodView":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "PeriodView"
     "PlantBody":
       "properties":
         "code":

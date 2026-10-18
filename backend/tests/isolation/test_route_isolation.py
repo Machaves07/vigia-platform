@@ -76,7 +76,13 @@ from tests.hierarchy_support import (
 )
 from tests.integration.conftest import PostgresEndpoint
 from tests.integration.test_coverage_port import COVERAGE_TYPES
-from tests.isolation.laz_cases import LAZ_CASES, LAZ_DENIED_UNDER_CONCESSION, laz_state
+from tests.isolation.laz_cases import (
+    LAZ_CASES,
+    LAZ_DENIED_UNDER_CONCESSION,
+    LAZ_EVENT_REGISTRARS,
+    LazServices,
+    laz_state,
+)
 from tests.isolation.route_cases import Call, Case, Ids, Kind
 from tests.ledger_database import evidence_values, insert_evidence, set_organization
 from tests.live_view_support import LIVE_VIEW_URL, LiveViewEnvironment, live_view_environment
@@ -1738,6 +1744,9 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
         events = OutboxCatalog()
         register_u02_event_types(events.event_types)
         register_fleet_event_types(events.event_types)
+        # Los eventos que publican las rutas de U-04 (laz_cases.py, desde TASK-317).
+        for register_laz_events in LAZ_EVENT_REGISTRARS:
+            register_laz_events(events.event_types)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
@@ -2065,13 +2074,17 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                         ),
                         authz.provider_organization_id,
                     ),
-                    # U-04: sus servicios vienen de ``laz_cases.py`` (VIG-205).
+                    # Los servicios de las rutas de U-04 (laz_cases.py, desde TASK-317).
                     **laz_state(
-                        database=sessions.database,
-                        writer=writer,
-                        authorizer=authz.authorizer,
-                        free_text=free_text,
-                        clock=sessions.clock,
+                        LazServices(
+                            database=sessions.database,
+                            authorizer=authz.authorizer,
+                            audit=sessions.audit,
+                            outbox=Outbox(events, env.clock),
+                            clock=sessions.clock,
+                            writer=writer,
+                            free_text=free_text,
+                        )
                     ),
                 },
             },
