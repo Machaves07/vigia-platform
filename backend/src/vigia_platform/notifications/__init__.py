@@ -1,2 +1,1 @@
-"""Módulo de notificaciones (esquema ``notifications``, U-04): avisos en la aplicación, entregas,
-lotes de correo, preferencias del usuario y correos."""
+"""Módulo de notificaciones (esquema ``notifications``): catálogo, motor, correo y preferencias."""

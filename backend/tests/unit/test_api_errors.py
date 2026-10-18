@@ -37,12 +37,15 @@ from tests.api_support import World
 from tests.factories import make_context
 from tests.properties.test_db_retry import FakeConnection, FakePool, Journal, Phase
 from tests.virtual_time import run_virtual
+from vigia_platform.accreditation.registration import ACCREDITATION_LABELS
 from vigia_platform.catalog.detail_codes import CATALOG_DETAIL_CODE_LABEL_BINDINGS
 from vigia_platform.catalog.domain.enums import CATALOG_LABEL_BINDINGS
 from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.fleet.domain.fleet_warnings import INVENTORY_LABEL_BINDINGS
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
+from vigia_platform.loop.registration import LOOP_LABELS
+from vigia_platform.notifications.registration import NOTIFICATIONS_LABELS
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
     UnitRegistration,
@@ -381,9 +384,12 @@ U03_ENUMERATIONS = {
 """Las 21 de U-03 (domain-entities §4 de U-03), sus ``detail_code`` (pendiente nº 33) y el rótulo
 del inventario ``heartbeat_notice`` (BR-GOB-75, VIG-159)."""
 
+U04_ENUMERATIONS = {*LOOP_LABELS, *ACCREDITATION_LABELS, *NOTIFICATIONS_LABELS}
+"""Las de ``labels.loop.es.json`` (VIG-201, NFR-LAZ-52), que se carga junto a la de U-02."""
+
 
 def test_the_labels_file_covers_every_labelled_enumeration() -> None:
-    assert LABELS.enumerations() == DESIGN_ENUMERATIONS | U03_ENUMERATIONS
+    assert LABELS.enumerations() == DESIGN_ENUMERATIONS | U03_ENUMERATIONS | U04_ENUMERATIONS
     assert LABELS.require_complete(LABEL_BINDINGS) == []
     assert LABELS.label("role", Role.COPASST) == "COPASST"
 
