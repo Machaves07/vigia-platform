@@ -2,8 +2,8 @@
 
 TASK-303 (BR-LAZ-79 a 81; LC-LAZ-16). Sobre la lista inicial de BLM §14.1 a §14.4:
 
-- **todo texto generado con una flexión de un lema bloqueado** (las formas del diccionario español
-  de simplemma cuyo lema es el del término, con sus tildes y mayúsculas al azar) **o con una
+- **todo texto generado con una flexión de un lema bloqueado** (las formas de la tabla propia
+  ``resources/vocabulary/inflections.es.json``, con sus tildes y mayúsculas al azar) **o con una
   instancia de un patrón** se rechaza con ``BlockedVocabularyRejected``: código
   ``blocked_vocabulary_term``, el ``term_id`` del término, el tramo que coincidió, la sugerencia y
   ``list_version = 1``; el ``detail_code`` es ``loop_blocked_vocabulary_term``;

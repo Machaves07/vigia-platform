@@ -1,7 +1,7 @@
 """Textos de los validadores de U-04 (TASK-303; PR-LAZ-22, 23 y 53; A-45).
 
 - ``blocked_vocabulary_texts``: un texto con **una** flexión de un lema de la lista inicial (una
-  forma del diccionario español de simplemma, con sus tildes, cuyo lema es el del término) o con
+  forma de la tabla ``resources/vocabulary/inflections.es.json``, con sus tildes) o con
   **una** instancia de un patrón (``PATTERN_INSTANCES``: la columna «Qué cae» de BLM §14 y sus
   variantes), entre palabras del vocabulario permitido, con mayúsculas al azar. Devuelve el texto
   y el ``term_id`` que el rechazo debe nombrar.
@@ -17,13 +17,13 @@ Solo datos generados: ninguna persona, ningún nombre, ningún texto real.
 from __future__ import annotations
 
 import functools
+import json
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final, Literal
 
 from hypothesis import strategies as st
-from simplemma.strategies.dictionaries.dictionary_factory import DefaultDictionaryFactory
 
 from vigia_platform.loop.domain.enums import BlockedTermForm
 from vigia_platform.loop.validators import lexicon
@@ -116,22 +116,18 @@ class BlockedText:
 
 @functools.cache
 def inflections() -> Mapping[uuid.UUID, tuple[str, ...]]:
-    """Por término de lema, sus formas del diccionario (con tildes) cuyo lema es el guardado."""
-    lemma_terms = [term for term in INITIAL_TERMS if term.form is BlockedTermForm.LEMMA]
-    expansions = lexicon.expand(term.value for term in lemma_terms)  # una sola pasada
-    wanted = {term.term_id: expansions[term.value].lemmas for term in lemma_terms}
-    by_lemma: dict[str, set[str]] = {}
-    targets = frozenset().union(*wanted.values())
-    dictionary = DefaultDictionaryFactory(cache_max_size=0).get_dictionary(lexicon.LANGUAGE)
-    for form, lemma in dictionary.items():
-        folded = lexicon.fold_word(lemma)
-        if folded in targets and form.isalpha():
-            by_lemma.setdefault(folded, set()).add(form)
-    result: dict[uuid.UUID, tuple[str, ...]] = {}
-    for term in lemma_terms:
-        forms = {term.value}.union(*(by_lemma.get(lemma, set()) for lemma in wanted[term.term_id]))
-        result[term.term_id] = tuple(sorted(forms))
-    return result
+    """Por término de lema, sus formas de la tabla tal como están escritas (con tildes).
+
+    Se leen del archivo directamente, sin pasar por ``lexicon``: la prueba comprueba que el
+    validador pliega y reconoce cada forma escrita.
+    """
+    document = json.loads(lexicon.INFLECTIONS_PATH.read_text(encoding="utf-8"))
+    table: dict[str, list[str]] = document["lemmas"]
+    return {
+        term.term_id: tuple(sorted({term.value, *table[term.value]}))
+        for term in INITIAL_TERMS
+        if term.form is BlockedTermForm.LEMMA
+    }
 
 
 def _cased(word: str, how: str) -> str:

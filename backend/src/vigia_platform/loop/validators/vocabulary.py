@@ -4,8 +4,8 @@ Rechaza con **fallo cerrado** (BR-LAZ-80) todo texto libre que, en su forma de v
 (``folding.validation_form``: A-45 con ``casefold`` y confusables de UTS #39), contenga un término
 de la lista vigente de su organización:
 
-- un **lema** cae con cualquiera de sus flexiones (``lexicon``: diccionario español de simplemma,
-  expandido al compilar la lista, de modo que validar no lematiza ni carga el diccionario);
+- un **lema** cae con cualquiera de sus flexiones (``lexicon``: la tabla propia de flexiones,
+  expandida al compilar la lista, de modo que validar no lematiza nada);
 - un **patrón** (``re`` de la biblioteca estándar, entre límites de palabra) cae con cualquier
   instancia.
 
@@ -172,8 +172,8 @@ def compile_vocabulary(vocabulary: VocabularyList) -> CompiledVocabulary:
     """Compila la lista inicial (siempre, BR-LAZ-86) más los términos de ``vocabulary``.
 
     Un término repetido (misma forma y mismo valor plegado) cuenta una vez, con el ``term_id``
-    del primero: la lista inicial va primero. Expandir lemas nuevos lee el diccionario (CPU): la
-    caché lo llama fuera del bucle de eventos.
+    del primero: la lista inicial va primero. Compilar es trabajo de CPU: la caché lo llama fuera
+    del bucle de eventos.
     """
     seen: set[tuple[BlockedTermForm, str]] = set()
     terms: list[VocabularyTerm] = []

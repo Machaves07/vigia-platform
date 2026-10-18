@@ -8,7 +8,7 @@ persiste (BR-LAZ-80).
   forma canónica de U-02);
 - ``vocabulary``: el validador ``blocked_vocabulary`` (lemas y patrones, D-9);
 - ``initial_list``: la lista derivada de BLM §14.1 a §14.4 (versión 1, ``origin = derived``);
-- ``lexicon``: lemas y flexiones del diccionario español de simplemma;
+- ``lexicon``: lemas y flexiones de la tabla propia ``resources/vocabulary/inflections.es.json``;
 - ``cache``: la lista compilada de cada organización en memoria del proceso (PAT-LAZ-REN-02).
 
 El validador ``person_attribution`` (BLM §14.5) llega con TASK-340 sobre el mismo plegado. El

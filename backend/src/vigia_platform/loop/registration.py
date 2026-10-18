@@ -181,8 +181,8 @@ def register_blocked_vocabulary(registry: FreeTextPolicyRegistry) -> None:
     """``blocked_vocabulary`` (TASK-303) con su caché por proceso y su preparador.
 
     El preparador comprueba la versión de la lista al abrir cada escritura (PAT-LAZ-REN-02); el
-    validador solo lee la caché. La lista inicial se compila aquí, al arrancar, y no en la primera
-    escritura (expandir sus lemas lee el diccionario: del orden de un segundo).
+    validador solo lee la caché. La lista inicial se compila aquí, al arrancar: un error en la tabla
+    de flexiones o en un patrón detiene el arranque, no la primera escritura.
     """
     initial_vocabulary()
     cache = VocabularyCache(PostgresVocabularyStore())

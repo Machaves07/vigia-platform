@@ -75,7 +75,7 @@ from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyS
 from vigia_platform.loop.domain.enums import BlockedTermCategory, BlockedTermForm, BlockedTermOrigin
 from vigia_platform.loop.validators.cache import TTL_SECONDS, VocabularyCache
 from vigia_platform.loop.validators.folding import validation_form
-from vigia_platform.loop.validators.initial_list import INITIAL_LIST_VERSION
+from vigia_platform.loop.validators.initial_list import INITIAL_LIST_VERSION, INITIAL_TERMS
 from vigia_platform.loop.validators.vocabulary import (
     BlockedVocabularyRejected,
     BlockedVocabularyValidator,
@@ -146,6 +146,25 @@ def test_the_cached_verdict_is_the_verdict_of_that_list_version(
         assert validator.verdict(_candidate(text, other)) == _expected(text, initial)
         assert validator.verdict(_candidate(text, None)) == _expected(text, initial)
     assert cache.compiled_for(organization).list_version == vocabulary.version
+
+
+def test_a_customer_list_always_keeps_the_initial_list() -> None:
+    """BR-LAZ-86: la lista de un cliente con sus términos sigue rechazando los de §14."""
+    organization = uuid.uuid4()
+    vocabulary = VocabularyList(
+        version=9,
+        terms=(
+            customer_term("pasillo"),
+            customer_term(r"linea[\W_]*sur", form=BlockedTermForm.PATTERN),
+        ),
+    )
+    cache = VocabularyCache(MemoryStore({organization: vocabulary}))
+    asyncio.run(cache.refresh(_preparation(organization, SimulatedClock(NOW))))
+    validator = BlockedVocabularyValidator(cache.compiled_for)
+    verdict = validator.verdict(_candidate("Zona despejada al final del turno", organization))
+    despejado = next(term for term in INITIAL_TERMS if term.value == "despejado")
+    assert verdict is not None
+    assert (verdict.term_id, verdict.list_version) == (despejado.term_id, 9)
 
 
 def test_a_customer_term_is_rejected_only_in_its_organization() -> None:

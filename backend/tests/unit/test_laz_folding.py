@@ -20,6 +20,9 @@ Solo datos generados.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import importlib.util
+import json
 import subprocess
 import sys
 import uuid
@@ -37,6 +40,7 @@ from vigia_platform.ledger.free_text import (
     canonical_form,
 )
 from vigia_platform.loop.detail_codes import LoopDetailCode
+from vigia_platform.loop.domain.enums import BlockedTermForm
 from vigia_platform.loop.validators import lexicon
 from vigia_platform.loop.validators.folding import (
     CONFUSABLES_PATH,
@@ -171,19 +175,46 @@ def test_initial_term_ids_are_stable_and_unique() -> None:
     )
 
 
-def test_the_lemmatizer_version_fits_the_list_column() -> None:
+def test_the_lemmatizer_version_identifies_the_own_table_and_fits_the_list_column() -> None:
     version = lexicon.LEMMATIZER_VERSION
     assert 1 <= len(version) <= 64
     name, number, language, digest = version.split(" ")
-    assert (name, language) == ("simplemma", "es") and number.count(".") == 2
-    assert digest.startswith("sha256:") and len(digest) == len("sha256:") + 16
+    assert (name, number, language) == ("vigia-inflections", "1", "es")
+    raw = lexicon.INFLECTIONS_PATH.read_bytes()
+    assert digest == "sha256:" + hashlib.sha256(raw).hexdigest()[:16]
 
 
-def test_lemmas_are_stored_already_lemmatized() -> None:
-    assert lexicon.lemmas_of("vacio") == {"vacio"}
-    assert lexicon.lemmas_of("despejado") == {"despejar"}
-    assert lexicon.lemmas_of("disminuira") == {"disminuir"}
+def test_the_inflection_table_is_own_documented_and_covers_exactly_the_list_lemmas() -> None:
+    document = json.loads(lexicon.INFLECTIONS_PATH.read_text(encoding="utf-8"))
+    assert set(document) == {"description", "origin", "language", "version", "lemmas"}
+    assert document["origin"] and document["language"] == "es"
+    lemma_values = {term.value for term in INITIAL_TERMS if term.form is BlockedTermForm.LEMMA}
+    assert set(document["lemmas"]) == lemma_values
+    for forms in document["lemmas"].values():
+        assert forms == sorted(set(forms))  # determinista: ordenada y sin repetidos
+    assert importlib.util.find_spec("simplemma") is None  # ningún lematizador de terceros
+
+
+def test_lemmas_are_stored_as_written_and_expand_to_the_table() -> None:
+    assert lexicon.lemmas_of("despejado") == {"despejado"}
     assert {"garantizamos", "garantizado", "garantice"} <= lexicon.forms_of("garantizar")
+    assert {"despejada", "despejados"} <= lexicon.forms_of("despejado")
+    assert "despejar" not in lexicon.forms_of("despejado")
+    assert "disminuyo" not in lexicon.forms_of("disminuira")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Hay que despejar el área antes del arranque", "La siniestralidad disminuyó en el periodo"],
+)
+def test_the_table_does_not_block_the_verb_behind_an_adjective_or_a_promise(text: str) -> None:
+    assert POLICY.apply(text, FIELD) == text
+
+
+def test_a_lemma_outside_the_table_gets_its_plural_and_gender() -> None:
+    assert lexicon.forms_of("pasillo") == {"pasillo", "pasillos", "pasilla", "pasillas"}
+    assert lexicon.forms_of("umbral") == {"umbral", "umbrales"}
+    assert lexicon.forms_of("baliza") == {"baliza", "balizas", "balizo", "balizos"}
 
 
 def test_the_critical_modules_import_without_fastapi_or_sqlalchemy() -> None:
