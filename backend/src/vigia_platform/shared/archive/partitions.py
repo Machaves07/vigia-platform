@@ -6,17 +6,20 @@
 volumen de ``fleet`` (``heartbeat_history`` por ``received_at``, ``enrollment_attempt`` por
 ``attempted_at`` y ``fleet_alarm`` por ``raised_at``; gob_0018, PAT-GOB-ESC-02) y las tres de
 ``loop`` (``finding_state`` por ``occurred_at_bucket``, ``classification`` por ``classified_at`` y
-``review_resolution`` por ``resolved_at``; laz_0029, NFR-LAZ-07), cada una con
-una partición por defecto que recibe cualquier fila fuera de rango sin rechazarla. La migración
-dejó el mes en curso y los tres siguientes; esta tarea, **semanal** (lunes a las 01:00 UTC) y
-con arrendamiento, mantiene siempre creados el mes en curso y los ``PARTITION_MONTHS_AHEAD``
-siguientes según el reloj inyectado, y publica ``default_partition_rows`` por tabla: una sola fila
-en una partición por defecto dispara la alarma (señal de que la tarea falló).
+``review_resolution`` por ``resolved_at``; laz_0029, NFR-LAZ-07) y las tres de ``notifications``
+(``notification`` por ``created_at``, ``notification_delivery`` por ``notification_created_at`` y
+``email_message`` por ``queued_at``; laz_0030), cada una con una partición por defecto que
+recibe cualquier fila fuera de rango sin rechazarla. La migración dejó el mes en curso y los
+tres siguientes; esta tarea, **semanal** (lunes a las 01:00 UTC) y con arrendamiento, mantiene
+siempre creados el mes en curso y los ``PARTITION_MONTHS_AHEAD`` siguientes según el reloj
+inyectado, y publica ``default_partition_rows`` por tabla: una sola fila en una partición por
+defecto dispara la alarma (señal de que la tarea falló).
 
-La creación la hacen ``shared.vigia_create_month_partitions`` (nuc_0016) y, para ``fleet`` y
-``loop``, ``shared.vigia_create_fleet_month_partitions`` (gob_0018) y
-``shared.vigia_create_loop_month_partitions`` (laz_0029; las anteriores no cambian, para que la
-imagen N-1 siga funcionando contra el esquema N), con el mismo candado; son **idempotentes**:
+La creación la hacen ``shared.vigia_create_month_partitions`` (nuc_0016) y, para ``fleet``,
+``loop`` y ``notifications``, ``shared.vigia_create_fleet_month_partitions`` (gob_0018),
+``shared.vigia_create_loop_month_partitions`` (laz_0029) y
+``shared.vigia_create_notifications_month_partitions`` (laz_0030; las anteriores no cambian, para
+que la imagen N-1 siga funcionando contra el esquema N), con el mismo candado; son **idempotentes**:
 un mes que ya tiene partición no se toca, así que ejecutar la tarea dos veces no falla ni duplica
 nada. Si la partición por defecto ya tiene filas de un mes, ese mes no se puede crear (PostgreSQL
 lo impide y las filas no se pueden mover: la tabla es de solo anexar); la función lo devuelve como
@@ -85,19 +88,23 @@ _CREATE: Final = text(
     " FROM shared.vigia_create_fleet_month_partitions(:first_month, :last_month)"
     " UNION ALL SELECT parent, partition, month, created, blocked"
     " FROM shared.vigia_create_loop_month_partitions(:first_month, :last_month)"
+    " UNION ALL SELECT parent, partition, month, created, blocked"
+    " FROM shared.vigia_create_notifications_month_partitions(:first_month, :last_month)"
 )
 _DEFAULT_ROWS: Final = text(
     "SELECT parent, row_count FROM shared.vigia_default_partition_rows()"
     " UNION ALL SELECT parent, row_count FROM shared.vigia_fleet_default_partition_rows()"
     " UNION ALL SELECT parent, row_count FROM shared.vigia_loop_default_partition_rows()"
+    " UNION ALL SELECT parent, row_count FROM shared.vigia_notifications_default_partition_rows()"
 )
-"""Las funciones de nuc_0016 (tablas de U-02), las de ``fleet`` de gob_0018 y las de ``loop`` de
-laz_0029, en una sentencia. Las anteriores siguen devolviendo solo sus tablas: la imagen N-1 las
-lee sin cambios."""
+"""Las funciones de nuc_0016 (tablas de U-02), las de ``fleet`` de gob_0018, las de ``loop`` de
+laz_0029 y las de ``notifications`` de laz_0030, en una sentencia. Las anteriores siguen
+devolviendo solo sus tablas: la imagen N-1 las lee sin cambios."""
 
 
 class PartitionedTable(enum.StrEnum):
-    """Las tablas particionadas por mes; el valor es el atributo ``table`` de la métrica."""
+    """Las tablas particionadas por mes; el valor es la tabla padre (``esquema.tabla``) y, salvo
+    en ``_METRIC_LABELS``, el atributo ``table`` de la métrica."""
 
     LEDGER_RECORD = "ledger.ledger_record"
     EVIDENCE = "ledger.evidence"
@@ -108,6 +115,22 @@ class PartitionedTable(enum.StrEnum):
     FINDING_STATE = "loop.finding_state"
     CLASSIFICATION = "loop.classification"
     REVIEW_RESOLUTION = "loop.review_resolution"
+    NOTIFICATION = "notifications.notification"
+    NOTIFICATION_DELIVERY = "notifications.notification_delivery"
+    EMAIL_MESSAGE = "notifications.email_message"
+
+    @property
+    def metric_label(self) -> str:
+        """El atributo ``table`` de ``default_partition_rows``."""
+        return _METRIC_LABELS.get(self, self.value)
+
+
+_METRIC_LABELS: Final[dict[PartitionedTable, str]] = {
+    PartitionedTable.NOTIFICATION_DELIVERY: "notifications.delivery",
+}
+"""Etiquetas que no son el nombre de la tabla: la redacción toma por un token cualquier tira de 20
+o más caracteres sin punto (``notification_delivery`` tiene 21) y rechazaría el registro entero de
+la lista cerrada, con lo que todas las tablas saldrían como ``other``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +194,9 @@ class PartitionMaintenance:
         self._metrics = metrics if metrics is not None else get_metrics()
         self._months_ahead = months_ahead
         try:
-            redaction.DEFAULT_POLICY.register("table", [table.value for table in PartitionedTable])
+            redaction.DEFAULT_POLICY.register(
+                "table", [table.metric_label for table in PartitionedTable]
+            )
         except ValueError:  # pragma: no cover - valores constantes del código
             _log.warning("nombre sin dimensión de métrica; se registra como «other»")
 
@@ -223,9 +248,11 @@ class PartitionMaintenance:
         rows = (await transaction.execute(_DEFAULT_ROWS)).all()
         counts = {PartitionedTable(row.parent): int(row.row_count) for row in rows}
         for table, count in counts.items():
-            self._metrics.default_partition_rows.set(count, {"table": table.value})
+            self._metrics.default_partition_rows.set(count, {"table": table.metric_label})
             if count > 0:
-                _log.error("la partición por defecto tiene filas", table=table.value, rows=count)
+                _log.error(
+                    "la partición por defecto tiene filas", table=table.metric_label, rows=count
+                )
         return counts
 
 
