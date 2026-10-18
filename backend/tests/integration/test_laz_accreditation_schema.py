@@ -215,6 +215,66 @@ def test_removing_organization_policy_is_detected(postgres_endpoint: PostgresEnd
         asyncio.run(run())
 
 
+def test_permissive_provider_policy_is_detected(postgres_endpoint: PostgresEndpoint) -> None:
+    """Sonda negativa: la política de proveedor debe permanecer RESTRICTIVE."""
+    with seeded_identity(postgres_endpoint, "vigia_laz_accreditation_permissive") as (
+        database,
+        identity,
+    ):
+
+        async def run() -> None:
+            connection = await database.connect()
+            try:
+                tenant = identity.a
+                concession = await insert_concession(
+                    connection,
+                    identity,
+                    tenant.organization_id,
+                    scope_level="plant",
+                    scope_id=tenant.plants[0].plant_id,
+                    status="active",
+                )
+                for plant in tenant.plants:
+                    await connection.execute(
+                        "INSERT INTO accreditation.adoption_counter"
+                        " (organization_id, plant_id, zone_id, day, activity_counts, session_count)"
+                        " VALUES ($1, $2, $3, $4, $5, $6)",
+                        tenant.organization_id,
+                        plant.plant_id,
+                        plant.zone_id,
+                        dt.date(2026, 9, 1),
+                        "{}",
+                        0,
+                    )
+                async with connection.transaction():
+                    await connection.execute(
+                        "DROP POLICY provider_concession_scope ON accreditation.adoption_counter"
+                    )
+                    await connection.execute(
+                        "CREATE POLICY provider_concession_scope ON accreditation.adoption_counter"
+                        " AS PERMISSIVE FOR ALL TO PUBLIC"
+                        " USING (identity.rls_provider_scope_allows(organization_id, plant_id))"
+                        " WITH CHECK (identity.rls_provider_scope_allows(organization_id, plant_id))"
+                    )
+                    await connection.execute("SET LOCAL ROLE vigia_app")
+                    await set_scope(
+                        connection,
+                        tenant.organization_id,
+                        actor_kind="provider_user",
+                        concession_id=concession,
+                    )
+                    assert (
+                        await connection.fetchval(
+                            "SELECT count(*) FROM accreditation.adoption_counter"
+                        )
+                        == 2
+                    )
+            finally:
+                await connection.close()
+
+        asyncio.run(run())
+
+
 def test_adoption_counter_has_no_user_column(database: MigratedDatabase) -> None:
     async def query() -> set[str]:
         connection = await database.connect()
