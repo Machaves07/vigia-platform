@@ -32,7 +32,7 @@ import hashlib
 import json
 import secrets
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -804,7 +804,14 @@ class IngestStack:
 
 
 @contextlib.contextmanager
-def ingest_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[IngestStack]:
+def ingest_stack(
+    endpoint: PostgresEndpoint,
+    prefix: str,
+    *,
+    register: Callable[[RecordTypeRegistry, OutboxCatalog], None] | None = None,
+) -> Iterator[IngestStack]:
+    """``register`` añade tipos de registro y de evento de otra unidad antes de sellar (el mundo
+    de U-04, ``tests/laz_support.py``); sin él, solo U-02 y la flota (D-3)."""
     with authz_environment(endpoint, prefix) as authz:
         sessions = authz.sessions
         (now,) = authz.fetch("SELECT now() AS now")
@@ -816,6 +823,8 @@ def ingest_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[IngestStac
         catalog = OutboxCatalog()
         register_u02_event_types(catalog.event_types)
         register_fleet_event_types(catalog.event_types)
+        if register is not None:
+            register(registry, catalog)
 
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
