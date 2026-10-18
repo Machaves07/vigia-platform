@@ -234,7 +234,11 @@ def _local_midnight_utc(day: date, zone: ZoneInfo) -> datetime:
 
 def local_date(instant: datetime, zone: ZoneInfo | str) -> date:
     """La fecha de ``instant`` en la zona de la planta."""
-    return _aware(instant).astimezone(_zone(zone)).date()
+    tz = _zone(zone)
+    try:
+        return _aware(instant).astimezone(tz).date()
+    except OverflowError:
+        raise CalendarInvalid("el instante sale del calendario representable") from None
 
 
 def today(clock: Clock, zone: ZoneInfo | str) -> date:

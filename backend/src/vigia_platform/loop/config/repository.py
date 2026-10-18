@@ -147,6 +147,20 @@ class PostgresLoopConfigurationRepository:
         row = result.first()
         return None if row is None else _configuration(row)
 
+    async def settings_in(
+        self, transaction: Transaction, plant_id: uuid.UUID
+    ) -> tuple[LoopSettings, int | None]:
+        """Los parámetros vigentes de la planta y su versión, en la transacción de otro módulo.
+
+        Es la interfaz que usan los módulos que **fijan** un plazo (cola, acciones, incerrables):
+        lo calculan con lo que devuelve y lo guardan; un cambio posterior de configuración no lo
+        mueve (BR-LAZ-145). Sin fila, los valores por defecto y versión ``None`` (no escribe).
+        """
+        current = await self.current(transaction, plant_id)
+        if current is None:
+            return LoopSettings.defaults(), None
+        return current.settings, current.version
+
     async def insert(self, transaction: Transaction, configuration: PlantLoopConfiguration) -> None:
         """Crea la fila (la versión 1); una planta que ya la tiene sale como ``IntegrityError``."""
         _same_organization(transaction, configuration)

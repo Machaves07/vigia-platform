@@ -10,7 +10,7 @@ ejemplo, contra PostgreSQL 16 real como ``vigia_app`` y el ``LoopConfigurationSe
   valor anterior y el nuevo; uno que no mueve nada, ninguno; uno rechazado (motivo, rango o regla
   entre parámetros, según un oráculo propio sobre la tabla de DE §2.13), ninguno.
 - **Lo ya fijado no cambia**: un **doble de otro módulo** fija plazos de revisión intercalados con
-  los cambios, leyendo ``loop.config`` por su interfaz pública (``settings_in``) dentro de su
+  los cambios, leyendo ``loop.config`` por su interfaz pública (``repository.settings_in``) en su
   propia transacción, y guarda el plazo y la versión con que lo calculó. Al final, cada plazo
   guardado sigue igual y es el que da la configuración **de su versión**, reconstruida plegando los
   registros del expediente; la fila vigente es el pliegue de todos (la fila es la proyección).
@@ -43,7 +43,7 @@ from vigia_platform.loop.config.parameters import (
     ConfigurationRejected,
     LoopSettings,
 )
-from vigia_platform.loop.config.service import ConfigurationRequestInvalid, settings_in
+from vigia_platform.loop.config.service import ConfigurationRequestInvalid
 from vigia_platform.loop.detail_codes import LoopDetailCode
 
 pytestmark = pytest.mark.integration
@@ -206,7 +206,7 @@ def _assign(stack: LoopConfigStack, context: Any, plant: uuid.UUID, start: date)
 
     async def fix() -> Assigned:
         async with stack.database.transaction(context) as transaction:
-            settings_, version = await settings_in(stack.service.repository, transaction, plant)
+            settings_, version = await stack.service.repository.settings_in(transaction, plant)
             deadline = add_business_days(start, settings_[REVIEW], settings_.business_calendar)
         return Assigned(start=start, version=version, deadline=deadline)
 

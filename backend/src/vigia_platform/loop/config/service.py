@@ -24,7 +24,8 @@ cambian y el motivo.
 
 **Un cambio no altera nada ya fijado** (BR-LAZ-145, PR-LAZ-47): este módulo solo escribe su fila
 y su registro; un plazo ya asignado lo guarda el módulo que lo asignó, calculado con la versión que
-leyó (``settings_in``). ``applies_to_new_items_only`` es constante ``true`` en el registro.
+leyó (``PostgresLoopConfigurationRepository.settings_in``, con la guarda de contexto).
+``applies_to_new_items_only`` es constante ``true`` en el registro.
 
 **Orden de candados**: primero el de configuración de la planta (``loop_configuration|<planta>``)
 y después la cadena de la planta del expediente (la toma el escritor al anexar). Ninguna operación
@@ -90,7 +91,6 @@ __all__ = [
     "ConfigurationRequestInvalid",
     "ConfigurationUnavailable",
     "LoopConfigurationService",
-    "settings_in",
 ]
 
 LOOP_CONFIGURATION_CHANGED: Final = "loop_configuration_changed"
@@ -113,23 +113,6 @@ class ConfigurationRequestInvalid(Exception):
 
 class ConfigurationUnavailable(ExternalDependencyDown):
     """Transitorio: la fila ya no tenía la versión leída (respaldo del candado)."""
-
-
-async def settings_in(
-    repository: PostgresLoopConfigurationRepository,
-    transaction: Transaction,
-    plant_id: uuid.UUID,
-) -> tuple[LoopSettings, int | None]:
-    """Los parámetros vigentes de la planta y su versión, dentro de la transacción de otro módulo.
-
-    Es la interfaz que usan los módulos que **fijan** un plazo (cola, acciones, incerrables): lo
-    calculan con lo que devuelve y lo guardan; un cambio posterior de configuración no lo mueve
-    (BR-LAZ-145). Sin fila, los valores por defecto y versión ``None`` (no escribe nada).
-    """
-    current = await repository.current(transaction, plant_id)
-    if current is None:
-        return LoopSettings.defaults(), None
-    return current.settings, current.version
 
 
 def _written(written: Receipt | LedgerRejection) -> None:

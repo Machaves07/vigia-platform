@@ -300,6 +300,11 @@ def test_periods_and_zones_borders() -> None:
         lambda: add_business_days(date(9999, 12, 30), 3, weekdays),
         lambda: business_deadline(late, 1, weekdays, "UTC"),
         lambda: business_deadline(late, 1, weekdays, "Etc/GMT+12"),
+        lambda: local_date(datetime(9999, 12, 31, 23, tzinfo=UTC), "Etc/GMT-14"),
+        lambda: local_date(datetime(1, 1, 1, 1, tzinfo=UTC), "Etc/GMT+12"),
+        lambda: business_deadline(
+            datetime(9999, 12, 31, 23, tzinfo=UTC), 1, weekdays, "Etc/GMT-14"
+        ),
     ):
         with pytest.raises(CalendarInvalid):
             call()
