@@ -254,7 +254,7 @@ def test_permissive_provider_policy_is_detected(postgres_endpoint: PostgresEndpo
                         "CREATE POLICY provider_concession_scope ON accreditation.adoption_counter"
                         " AS PERMISSIVE FOR ALL TO PUBLIC"
                         " USING (identity.rls_provider_scope_allows(organization_id, plant_id))"
-                        " WITH CHECK (identity.rls_provider_scope_allows(organization_id, plant_id))"
+                        " WITH CHECK (identity.rls_provider_scope_allows(organization_id, plant_id))",  # noqa: E501
                     )
                     await connection.execute("SET LOCAL ROLE vigia_app")
                     await set_scope(
