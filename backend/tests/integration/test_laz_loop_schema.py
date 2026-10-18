@@ -301,13 +301,16 @@ def test_append_only_registry_lists_every_append_only_table() -> None:
 @pytest.mark.asyncio
 async def test_append_only_triggers_are_always_enabled(superuser: Any) -> None:
     rows = await superuser.fetch(
-        "SELECT c.relname, t.tgname, t.tgenabled::text AS tgenabled FROM pg_trigger t"
-        " JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace"
+        "SELECT c.relname, c.relispartition, t.tgname, t.tgenabled::text AS tgenabled"
+        " FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid"
+        " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'loop' AND NOT t.tgisinternal"
     )
     triggers: dict[str, dict[str, str]] = {}
+    partitions: dict[str, dict[str, str]] = {}
     for row in rows:
-        triggers.setdefault(row["relname"], {})[row["tgname"]] = row["tgenabled"]
+        target = partitions if row["relispartition"] else triggers
+        target.setdefault(row["relname"], {})[row["tgname"]] = row["tgenabled"]
     assert set(triggers) == set(MIGRATION.APPEND_ONLY_TABLES)
     for table in MIGRATION.APPEND_ONLY_TABLES:
         assert triggers[table] == {
@@ -315,6 +318,13 @@ async def test_append_only_triggers_are_always_enabled(superuser: Any) -> None:
             "append_only_delete": "A",
             "append_only_no_truncate": "A",
         }, table
+    # Cada partición de las tres tablas particionadas: vaciarla falla (nuc_0002), como en U-02.
+    children = await superuser.fetch(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = 'loop' AND c.relispartition AND c.relkind = 'r'"
+    )
+    assert {row["relname"] for row in children} == set(partitions)
+    assert all(found == {"append_only_truncate": "A"} for found in partitions.values()), partitions
 
 
 @pytest.mark.asyncio

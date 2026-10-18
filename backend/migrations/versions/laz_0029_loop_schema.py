@@ -23,9 +23,12 @@ operativo, y todo hecho se escribe por ``EscritorExpediente``.
   ``shared.vigia_create_loop_month_partitions`` y ``shared.vigia_loop_default_partition_rows``
   (mismo cuerpo, guarda de actor y candado que las de ``fleet``): las de nuc_0016 y gob_0018 no
   se tocan, porque la imagen N-1 convierte cada fila que devuelven a su ``PartitionedTable`` y
-  una fila de ``loop`` haría fallar su ``create_partitions`` (NFR-NUC-14). Las particiones no se
-  protegen como de solo anexar: son proyecciones que la reconstrucción reescribe (LC-LAZ-03).
-  La clave primaria lleva la columna de partición (PostgreSQL no admite otra cosa).
+  una fila de ``loop`` haría fallar su ``create_partitions`` (NFR-NUC-14). Cada partición nace
+  protegida con ``shared.vigia_protect_append_only_partition`` (nuc_0002: vaciarla falla), como
+  todas las de ``PartitionedTable``; la tabla padre no tiene disparadores de fila, así que las
+  proyecciones siguen siendo actualizables y la reconstrucción (LC-LAZ-03) intercambia una tabla
+  sombra, nunca vacía particiones. La clave primaria lleva la columna de partición (PostgreSQL
+  no admite otra cosa).
 - **Índices** (PAT-LAZ-ESC-03 y 02): ``finding_state_inbox`` parcial sobre los siete estados
   activos, ``finding_state_overdue`` parcial sobre ``action_assigned`` y ``overdue``, y
   ``assistant_request_rate`` por ``(organization_id, user_id, requested_at)`` para el límite
@@ -1333,6 +1336,8 @@ BEGIN
     FOREACH parent IN ARRAY ARRAY[{_in(tuple(PARTITIONED_TABLES))}] LOOP
         EXECUTE format('CREATE TABLE loop.%I PARTITION OF loop.%I DEFAULT',
                        parent || '_default', parent);
+        PERFORM shared.vigia_protect_append_only_partition(
+            format('loop.%I', parent || '_default')::regclass);
         FOR offset_months IN 0..{PARTITION_MONTHS_AHEAD} LOOP
             month_start := first_month + make_interval(months => offset_months);
             EXECUTE format(
@@ -1342,6 +1347,8 @@ BEGIN
                 to_char(month_start, 'YYYY-MM-DD HH24:MI:SS') || '+00',
                 to_char(month_start + interval '1 month', 'YYYY-MM-DD HH24:MI:SS') || '+00'
             );
+            PERFORM shared.vigia_protect_append_only_partition(
+                format('loop.%I', parent || to_char(month_start, '"_"YYYY"_"MM'))::regclass);
         END LOOP;
     END LOOP;
 END
@@ -1351,8 +1358,8 @@ $$
 _PARTITION_FUNCTIONS = (
     # Las funciones de nuc_0016 y gob_0018 no se tocan: la imagen N-1 convierte cada fila que
     # devuelven a su PartitionedTable y una fila de loop haría fallar (y revertir) su
-    # create_partitions (NFR-NUC-14). Mismo cuerpo, guarda de actor y candado que las de fleet,
-    # sin proteger la partición como de solo anexar (la proyección se reconstruye).
+    # create_partitions (NFR-NUC-14). Mismo cuerpo, guarda de actor, candado y protección contra
+    # el vaciado que las de fleet.
     """
     CREATE FUNCTION shared.vigia_create_loop_month_partitions(first_month date, last_month date)
         RETURNS TABLE (parent text, partition text, month date, created boolean, blocked boolean)
@@ -1421,6 +1428,8 @@ _PARTITION_FUNCTIONS = (
                                 target.schema_name, partition_name,
                                 target.schema_name, target.table_name,
                                 range_start, range_end);
+                            PERFORM shared.vigia_protect_append_only_partition(
+                                format('%I.%I', target.schema_name, partition_name)::regclass);
                             created := true;
                         EXCEPTION WHEN duplicate_table THEN
                             created := false;
