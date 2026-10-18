@@ -389,9 +389,11 @@ _PATTERNS: Final[tuple[tuple[AttributionPattern, re.Pattern[str]], ...]] = (
     (
         AttributionPattern.EMAIL,
         re.compile(
-            rf"{_B}[a-z0-9][a-z0-9._%+-]*(?: ?@ ?| ?[(\[]at[)\]] ?| arroba )"
-            r"[a-z0-9-]+(?:(?:\.| punto | ?[(\[]dot[)\]] ?)[a-z0-9-]+)*"
-            rf"(?:\.| punto | ?[(\[]dot[)\]] ?)[a-z]{{2,}}{_E}"
+            # Longitudes acotadas como en RFC 5321 (64 la parte local, 63 cada etiqueta): sin
+            # cota, «a.a.a.…» cuesta un recorrido hasta el final desde cada letra (cuadrático).
+            rf"{_B}[a-z0-9][a-z0-9._%+-]{{0,63}}(?: ?@ ?| ?[(\[]at[)\]] ?| arroba )"
+            r"[a-z0-9-]{1,63}(?:(?:\.| punto | ?[(\[]dot[)\]] ?)[a-z0-9-]{1,63}){0,8}"
+            rf"(?:\.| punto | ?[(\[]dot[)\]] ?)[a-z]{{2,24}}{_E}"
         ),
     ),
     (

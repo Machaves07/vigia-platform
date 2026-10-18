@@ -173,6 +173,8 @@ EDGES: tuple[tuple[str, str, AttributionPattern | None], ...] = (
     # correo
     ("arroba suelta", "Turno @ 10 en la zona", None),
     ("correo", "Contacto ana.gomez@example.test", AttributionPattern.EMAIL),
+    ("parte local de 64", f"Contacto {'a.' * 31}bc@example.test", AttributionPattern.EMAIL),
+    ("puntos sin arroba", f"Registro {'a.' * 900}", None),
 )
 
 
