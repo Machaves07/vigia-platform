@@ -1,9 +1,11 @@
-"""Pila ``vigia-loop`` de U-04 (TASK-331, parte 1 de 2): pruebas de plantilla, solo ``cdk synth``.
+"""Pila ``vigia-loop`` de U-04 (TASK-331 y TASK-351): pruebas de plantilla, solo ``cdk synth``.
 
-Infrastructure-design de U-04 §2.2 (pila e importaciones por el contrato nº 38), §2.3 (pruebas
-bloqueantes 1, 2, 3, 4, 6 y 7; la 5, de alarmas, llega con ellas), §3.2 (punto privado y
-``sg-queue-endpoint``), §5 (tema, cola y cola muerta), §8 (clave y secreto) y §9.1 (política
-``vigia-loop-worker``, sin ``ses:SendEmail`` hasta TASK-351). A-47: nada toca una cuenta de AWS.
+Infrastructure-design de U-04 §2.2 (pila e importaciones por el contrato nº 38), §2.3 (las siete
+pruebas bloqueantes; la 5, de alarmas, sin alarmas hasta TASK-332), §3.2 (punto privado y
+``sg-queue-endpoint``), §4 (identidad de correo, los siete registros DNS, DMARC y conjunto de
+configuración con sus dos destinos), §5 (tema, cola y cola muerta), §8 (clave y secreto), §9.1
+(política ``vigia-loop-worker`` con ``ses:SendEmail``) y §14.2 (interruptores H-LAZ-9, 10 y 11).
+A-47: nada toca una cuenta de AWS.
 """
 
 from __future__ import annotations
@@ -15,23 +17,30 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from aws_cdk import App
+from aws_cdk import App, Duration
+from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_sns as sns
 from aws_cdk.assertions import Template
 
 import app as cdk_app
 from config import EnvironmentConfig
 from stacks import register_stacks
 from stacks.loop import (
+    CONFIGURATION_SET_CONDITION_KEY,
     CONSUME_ACTIONS,
+    DMARC_REPORTS_PARAMETER,
     ENDPOINT_ACTIONS,
     LoopStack,
     assistant_secret_name,
+    configuration_set_name,
     email_events_dlq_name,
     email_events_name,
     loop_worker_policy_name,
     queue_endpoint_name,
+    reputation_rule_name,
 )
+from stacks.outputs import import_alerts_topic
 from tests.conftest import DEPLOYMENTS, Synthesized, default_context, synthesize
 from tests.template_rules import (
     RESOURCE_WILDCARDS,
@@ -51,9 +60,25 @@ SECRET = "AWS::SecretsManager::Secret"  # noqa: S105 - tipo de recurso, no una c
 POLICY = "AWS::IAM::ManagedPolicy"
 ENDPOINT = "AWS::EC2::VPCEndpoint"
 GROUP = "AWS::EC2::SecurityGroup"
+IDENTITY = "AWS::SES::EmailIdentity"
+CONFIGURATION_SET = "AWS::SES::ConfigurationSet"
+EVENT_DESTINATION = "AWS::SES::ConfigurationSetEventDestination"
+RECORD = "AWS::Route53::RecordSet"
+ALARM = "AWS::CloudWatch::Alarm"
+RULE = "AWS::Events::Rule"
 TLS_DENIED = {"Bool": {"aws:SecureTransport": "false"}}
-# Lo que conserva ``RETAIN`` en ``pilot`` (deployment-architecture de U-04 §4) y la clave.
-RETAINED_TYPES = (KEY, TOPIC, QUEUE, SECRET)
+# Lo que conserva ``RETAIN`` en ``pilot`` (deployment-architecture de U-04 §4), la clave y lo que
+# obligaría a repetir la verificación por DNS: identidad, conjunto y registros.
+RETAINED_TYPES = (KEY, TOPIC, QUEUE, SECRET, IDENTITY, CONFIGURATION_SET, RECORD)
+# Los siete registros de §4.1: nombre relativo a la zona → tipo (los tres de DKIM aparte).
+EMAIL_RECORDS = {
+    ("mail.", "TXT"),
+    ("bounce.mail.", "MX"),
+    ("bounce.mail.", "TXT"),
+    ("_dmarc.", "TXT"),
+}
+SPF = '"v=spf1 include:amazonses.com ~all"'
+TOPIC_EVENT_TYPES = ["delivery", "bounce", "complaint", "reject"]
 # Las pilas de U-02 que se comparan antes y después de añadir ``vigia-loop``.
 COMPARED = ("pilot", "staging-7", "dedicated-acme")
 
@@ -73,10 +98,17 @@ def expected_loop_resources(config: EnvironmentConfig) -> Counter[str]:
             "AWS::EC2::SecurityGroupIngress": 1,
             ENDPOINT: 1,
             POLICY: 1,
+            IDENTITY: 1,
+            CONFIGURATION_SET: 1,
+            EVENT_DESTINATION: 2,
         }
     )
     if config.loop.assistant_secret:
         expected += Counter({SECRET: 1, "AWS::SecretsManager::ResourcePolicy": 1})
+    if config.loop.email_dns:
+        expected += Counter({RECORD: 7})
+    if config.loop.ses_reputation_subscription:
+        expected += Counter({RULE: 1})
     return expected
 
 
@@ -127,6 +159,42 @@ def _queue_policy(template: JsonObject, queue: str) -> list[JsonObject]:
 
 def _arn(logical_id: str) -> dict[str, list[str]]:
     return {"Fn::GetAtt": [logical_id, "Arn"]}
+
+
+def _ses_arn(kind: str, logical_id: str) -> dict[str, Any]:
+    """ARN de un recurso del servicio de correo de esta pila (``identity`` o
+    ``configuration-set``)."""
+    return {
+        "Fn::Join": [
+            "",
+            ["arn:aws:ses:us-east-1:", {"Ref": "AWS::AccountId"}, f":{kind}/", {"Ref": logical_id}],
+        ]
+    }
+
+
+def _configuration_set_arn(logical_id: str) -> dict[str, Any]:
+    return _ses_arn("configuration-set", logical_id)
+
+
+def _zone_name(template: JsonObject, config: EnvironmentConfig) -> dict[str, str]:
+    """``Ref`` al nombre de ``vigia-zone``: el del despliegue o, en ``staging-<n>``, el del
+    despliegue permanente que la aloja (D-8)."""
+    source = config.deployment if config.hosted_zone_owned else config.hosted_zone_source
+    return _parameter(template, f"/vigia/{source}/zone-name")
+
+
+def _under_domain(text: str, template: JsonObject, config: EnvironmentConfig) -> dict[str, Any]:
+    """``<text><dominio>`` tal como lo escribe CloudFormation."""
+    return {"Fn::Join": ["", [text, _zone_name(template, config)]]}
+
+
+def _mail_prefix(config: EnvironmentConfig) -> str:
+    """``mail.`` en ``pilot``; ``mail-<entorno>.`` en ``staging-<n>`` (identidad propia)."""
+    return "mail." if config.loop.email_dns else f"mail-{config.deployment}."
+
+
+def _sender(template: JsonObject, config: EnvironmentConfig) -> dict[str, Any]:
+    return _under_domain(f"no-responder@{_mail_prefix(config)}", template, config)
 
 
 def _tags(resource: JsonObject) -> dict[str, str]:
@@ -186,8 +254,16 @@ def test_loop_reads_u02_only_through_the_contract(loop: tuple[Synthesized, JsonO
     assert deployment.missing_context == ()
     defaults = {p.get("Default") for p in template["Parameters"].values()}
     prefix = f"/vigia/{config.deployment}"
+    # Con registros, la zona propia entera y el buzón de DMARC; en ``staging-<n>``, solo el nombre
+    # de la zona del despliegue que la aloja (D-8).
+    zone = (
+        {f"{prefix}/zone-id", f"{prefix}/zone-name", DMARC_REPORTS_PARAMETER}
+        if config.loop.email_dns
+        else {f"/vigia/{config.hosted_zone_source}/zone-name"}
+    )
     assert defaults == {
         "/cdk-bootstrap/vigia/version",
+        *zone,
         *(
             f"{prefix}/{name}"
             for name in (
@@ -341,11 +417,65 @@ def test_every_loop_resource_carries_the_four_tags_with_u04(
     # Las etiquetas de la pila, que CloudFormation propaga a todo recurso que las admite.
     assert deployment.tags[config.stack_name("loop")] == expected
     tagged = {str(r["Type"]) for _, r in resources(template) if "Tags" in properties(r)}
-    assert tagged >= {KEY, TOPIC, QUEUE, GROUP, ENDPOINT}
+    assert tagged >= {KEY, TOPIC, QUEUE, GROUP, ENDPOINT, IDENTITY, CONFIGURATION_SET}
     for logical_id, resource in resources(template):
         if "Tags" in properties(resource):
             tags = _tags(resource)
             assert {k: tags.get(k) for k in REQUIRED_TAGS} == expected, logical_id
+
+
+# --- §2.3 nº 5: toda alarma de U-04 avisa a ``vigia-alerts`` --------------------------
+
+
+def _alarms_not_routed_to_alerts(template: JsonObject, config: EnvironmentConfig) -> list[str]:
+    """Alarmas sin acción o con alguna acción distinta del tema ``vigia-alerts`` importado por
+    el contrato (``/vigia/<despliegue>/alerts-topic-arn``)."""
+    alerts = f"/vigia/{config.deployment}/alerts-topic-arn"
+    parameters = template.get("Parameters", {})
+    wrong: list[str] = []
+    for logical_id, alarm in _of_type(template, ALARM):
+        actions = properties(alarm).get("AlarmActions") or []
+        if not actions or any(
+            not isinstance(action, Mapping)
+            or parameters.get(str(action.get("Ref")), {}).get("Default") != alerts
+            for action in actions
+        ):
+            wrong.append(logical_id)
+    return wrong
+
+
+def test_every_loop_alarm_notifies_vigia_alerts(loop: tuple[Synthesized, JsonObject]) -> None:
+    """Sin alarmas hasta TASK-332, que las añade a esta misma regla."""
+    deployment, template = loop
+    assert not _alarms_not_routed_to_alerts(template, deployment.config)
+
+
+def test_alarm_rule_detects_alarms_without_vigia_alerts() -> None:
+    """La regla falla con una alarma sin acción o con acción hacia otro tema, y acepta la que
+    avisa a ``vigia-alerts``."""
+    config = _config()
+    application = App(context=default_context())
+    stack = LoopStack(application, config, tags=cdk_app.global_tags(config))
+    metric = stack.email_events_dlq.metric_approximate_number_of_messages_visible(
+        period=Duration.minutes(5)
+    )
+
+    def alarm(construct_id: str, topic: sns.ITopic | None) -> None:
+        created = metric.create_alarm(stack, construct_id, threshold=1, evaluation_periods=1)
+        if topic is not None:
+            created.add_alarm_action(cloudwatch_actions.SnsAction(topic))
+
+    alarm("Routed", import_alerts_topic(stack, "Alerts", config))
+    alarm("Silent", None)
+    alarm("Elsewhere", sns.Topic(stack, "Other"))
+    template = dict(Template.from_stack(stack).to_json())
+    wrong = _alarms_not_routed_to_alerts(template, config)
+    assert sorted(wrong) == sorted(
+        logical_id
+        for logical_id, _ in _of_type(template, ALARM)
+        if not logical_id.startswith("Routed")
+    )
+    assert len(wrong) == 2
 
 
 # --- §2.3 nº 6: ``vigia-api`` no referencia el secreto --------------------------------
@@ -458,6 +588,7 @@ def test_topic_admits_publications_only_from_the_email_service_of_the_account(
     topic, resource = _one(template, TOPIC)
     assert properties(resource)["TopicName"] == email_events_name(deployment.config)
     _, policy = _one(template, "AWS::SNS::TopicPolicy")
+    configuration_set, _ = _one(template, CONFIGURATION_SET)
     assert _allows(list(properties(policy)["PolicyDocument"]["Statement"])) == [
         {
             "Sid": "EmailServicePublishes",
@@ -465,7 +596,11 @@ def test_topic_admits_publications_only_from_the_email_service_of_the_account(
             "Principal": {"Service": "ses.amazonaws.com"},
             "Action": "sns:Publish",
             "Resource": {"Ref": topic},
-            "Condition": {"StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}},
+            # Y solo para el conjunto de configuración de este despliegue.
+            "Condition": {
+                "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}},
+                "ArnEquals": {"aws:SourceArn": _configuration_set_arn(configuration_set)},
+            },
         }
     ]
 
@@ -570,9 +705,17 @@ def test_h_laz_9_switch_moves_only_the_topic_to_the_service_key() -> None:
     }
 
 
-def test_h_laz_9_switch_is_off_in_both_environments() -> None:
-    assert not _config().loop.email_topic_service_managed_key
-    assert not _config(environment="staging-1").loop.email_topic_service_managed_key
+@pytest.mark.parametrize(
+    "switch",
+    [
+        "email_topic_service_managed_key",
+        "ses_configuration_set_condition",
+        "ses_reputation_subscription",
+    ],
+)
+def test_h_laz_9_10_and_11_switches_are_off_in_both_environments(switch: str) -> None:
+    assert getattr(_config().loop, switch) is False
+    assert getattr(_config(environment="staging-1").loop, switch) is False
 
 
 # --- §3.2: punto privado y ``sg-queue-endpoint`` --------------------------------------
@@ -698,9 +841,11 @@ def test_assistant_secret_is_absent_in_staging(staging: Synthesized) -> None:
 def _expected_loop_worker_document(
     template: JsonObject, config: EnvironmentConfig
 ) -> dict[str, Any]:
-    """La tabla de §9.1, sentencia por sentencia, sin ``ses:SendEmail`` (TASK-351)."""
+    """La tabla de §9.1, sentencia por sentencia."""
     prefix = f"/vigia/{config.deployment}"
     key, _ = _one(template, KEY)
+    identity, _ = _one(template, IDENTITY)
+    configuration_set, _ = _one(template, CONFIGURATION_SET)
     queues = _queues(template)
     main = _arn(queues[email_events_name(config)])
     dlq = _arn(queues[email_events_dlq_name(config)])
@@ -741,6 +886,16 @@ def _expected_loop_worker_document(
             "Effect": "Allow",
             "Action": "s3:GetObject",
             "Resource": packages,
+        },
+        {
+            "Sid": "SendEmail",
+            "Effect": "Allow",
+            "Action": "ses:SendEmail",
+            "Resource": [
+                _ses_arn("identity", identity),
+                _configuration_set_arn(configuration_set),
+            ],
+            "Condition": {"StringEquals": {"ses:FromAddress": _sender(template, config)}},
         },
         {
             "Sid": "ConsumeEmailEvents",
@@ -802,7 +957,6 @@ def test_loop_worker_policy_equals_the_table_of_section_9_1(
     assert _normalized(props["PolicyDocument"]) == _normalized(
         _expected_loop_worker_document(template, config)
     )
-    assert "ses:" not in json.dumps(props)
 
 
 def test_loop_worker_policy_never_reaches_other_prefixes_nor_deletes(
@@ -810,9 +964,18 @@ def test_loop_worker_policy_never_reaches_other_prefixes_nor_deletes(
 ) -> None:
     _, template = loop
     _, policy = _one(template, POLICY)
-    text = json.dumps(properties(policy)["PolicyDocument"])
-    for forbidden in ("closure/", "node/", "documents/", "Delete", "ses:", "logs:", "sns:"):
+    document = properties(policy)["PolicyDocument"]
+    text = json.dumps(document)
+    for forbidden in ("closure/", "node/", "documents/", "Delete", "logs:", "sns:"):
         assert forbidden not in text.replace("sqs:DeleteMessage", ""), forbidden
+    # Del servicio de correo, solo enviar: ninguna administración de identidades ni conjuntos.
+    ses_actions = {
+        action
+        for statement in document["Statement"]
+        for action in _as_list(statement["Action"])
+        if action.startswith("ses:")
+    }
+    assert ses_actions == {"ses:SendEmail"}
 
 
 def test_loop_worker_policy_is_attached_to_the_imported_worker_role(
@@ -878,3 +1041,216 @@ def test_names_derive_from_environment_and_instance(loop: tuple[Synthesized, Jso
     assert properties(policy)["ManagedPolicyName"] == f"vigia-loop-worker{suffix}"
     secrets = [properties(r)["Name"] for _, r in _of_type(template, SECRET)]
     assert secrets == ([] if config.ephemeral else [f"vigia/{deployment_name}/assistant/api-key"])
+    _, configuration_set = _one(template, CONFIGURATION_SET)
+    assert properties(configuration_set)["Name"] == f"vigia-email-{deployment_name}"
+
+
+# --- §4.1: identidad de correo, los siete registros y DMARC ---------------------------
+
+
+def _records(template: JsonObject) -> list[JsonObject]:
+    return [properties(r) for _, r in _of_type(template, RECORD)]
+
+
+def test_permanent_deployments_publish_exactly_the_seven_records_of_section_4_1(
+    permanent_deployment: Synthesized,
+) -> None:
+    template = _loop(permanent_deployment)
+    config = permanent_deployment.config
+    identity, _ = _one(template, IDENTITY)
+    records = _records(template)
+    assert len(records) == 7
+    zone_id = _parameter(template, f"/vigia/{config.deployment}/zone-id")
+    assert all(record["HostedZoneId"] == zone_id for record in records)
+    # H-LAZ-3: tres CNAME con el nombre y el valor que devuelve el DKIM gestionado.
+    assert [(r["Name"], r["ResourceRecords"]) for r in records if r["Type"] == "CNAME"] == [
+        (
+            {"Fn::Join": ["", [{"Fn::GetAtt": [identity, f"DkimDNSTokenName{n}"]}, "."]]},
+            [{"Fn::GetAtt": [identity, f"DkimDNSTokenValue{n}"]}],
+        )
+        for n in (1, 2, 3)
+    ]
+    others = {
+        (str(r["Name"]["Fn::Join"][1][0]), str(r["Type"])): r
+        for r in records
+        if r["Type"] != "CNAME"
+    }
+    assert set(others) == EMAIL_RECORDS
+    for (name, _), record in others.items():
+        assert record["Name"] == {"Fn::Join": ["", [name, _zone_name(template, config), "."]]}
+    assert others[("mail.", "TXT")]["ResourceRecords"] == [SPF]
+    assert others[("bounce.mail.", "TXT")]["ResourceRecords"] == [SPF]
+    assert others[("bounce.mail.", "MX")]["ResourceRecords"] == [
+        "10 feedback-smtp.us-east-1.amazonses.com"
+    ]
+
+
+def test_dmarc_starts_at_p_none_with_aggregate_reports_to_the_owner(
+    permanent_deployment: Synthesized,
+) -> None:
+    """``p=none`` durante el piloto; ``p=quarantine`` es un cambio posterior registrado."""
+    template = _loop(permanent_deployment)
+    (dmarc,) = (r for r in _records(template) if r["Name"]["Fn::Join"][1][0] == "_dmarc.")
+    assert dmarc["Type"] == "TXT"
+    assert dmarc["ResourceRecords"] == [
+        {
+            "Fn::Join": [
+                "",
+                [
+                    '"v=DMARC1; p=none; rua=mailto:',
+                    _parameter(template, DMARC_REPORTS_PARAMETER),
+                    '"',
+                ],
+            ]
+        }
+    ]
+    assert "quarantine" not in json.dumps(template)
+
+
+def test_staging_has_no_records_no_secret_and_an_unverified_identity_of_its_own(
+    staging: Synthesized,
+) -> None:
+    """La identidad de ``pilot`` ya existe en la cuenta y la región: la de ``staging-<n>`` lleva
+    su propio nombre, sin registros que la verifiquen ni remitente de rebotes."""
+    template = _loop(staging)
+    config = staging.config
+    assert not list(_of_type(template, RECORD))
+    assert not list(_of_type(template, SECRET))
+    parameters = json.dumps(template["Parameters"])
+    assert "zone-id" not in parameters
+    assert DMARC_REPORTS_PARAMETER not in parameters
+    _, identity = _one(template, IDENTITY)
+    props = properties(identity)
+    assert props["EmailIdentity"] == _under_domain("mail-staging-7.", template, config)
+    assert "MailFromAttributes" not in props
+
+
+def test_email_identity_has_managed_dkim_and_rejects_without_its_bounce_domain(
+    loop: tuple[Synthesized, JsonObject],
+) -> None:
+    deployment, template = loop
+    config = deployment.config
+    configuration_set, _ = _one(template, CONFIGURATION_SET)
+    _, identity = _one(template, IDENTITY)
+    props = properties(identity)
+    assert props["EmailIdentity"] == _under_domain(_mail_prefix(config), template, config)
+    # DKIM gestionado por el servicio: firma activa y ninguna clave propia.
+    assert props["DkimAttributes"] == {"SigningEnabled": True}
+    assert "DkimSigningAttributes" not in props
+    assert props["ConfigurationSetAttributes"] == {
+        "ConfigurationSetName": {"Ref": configuration_set}
+    }
+    if config.loop.email_dns:
+        assert props["MailFromAttributes"] == {
+            "BehaviorOnMxFailure": "REJECT_MESSAGE",
+            "MailFromDomain": _under_domain("bounce.mail.", template, config),
+        }
+
+
+# --- §4.2: conjunto de configuración y sus dos destinos -------------------------------
+
+
+def test_configuration_set_tracks_reputation_and_requires_tls(
+    loop: tuple[Synthesized, JsonObject],
+) -> None:
+    deployment, template = loop
+    _, configuration_set = _one(template, CONFIGURATION_SET)
+    props = dict(properties(configuration_set))
+    props.pop("Tags")
+    assert props == {
+        "Name": configuration_set_name(deployment.config),
+        "DeliveryOptions": {"TlsPolicy": "REQUIRE"},
+        "ReputationOptions": {"ReputationMetricsEnabled": True},
+        "SendingOptions": {"SendingEnabled": True},
+    }
+
+
+def test_configuration_set_publishes_to_cloudwatch_and_to_the_topic_never_opens_or_clicks(
+    loop: tuple[Synthesized, JsonObject],
+) -> None:
+    deployment, template = loop
+    configuration_set, _ = _one(template, CONFIGURATION_SET)
+    topic, _ = _one(template, TOPIC)
+    topic_policy, _ = _one(template, "AWS::SNS::TopicPolicy")
+    destinations = {
+        str(properties(r)["EventDestination"]["Name"]): (r, properties(r))
+        for _, r in _of_type(template, EVENT_DESTINATION)
+    }
+    assert set(destinations) == {"cloudwatch", "topic"}
+    for _, props in destinations.values():
+        assert props["ConfigurationSetName"] == {"Ref": configuration_set}
+        assert props["EventDestination"]["Enabled"] is True
+        assert not {"open", "click"} & set(props["EventDestination"]["MatchingEventTypes"])
+    resource, props = destinations["topic"]
+    assert props["EventDestination"] == {
+        "Name": "topic",
+        "Enabled": True,
+        "MatchingEventTypes": TOPIC_EVENT_TYPES,
+        "SnsDestination": {"TopicARN": {"Ref": topic}},
+    }
+    # El servicio comprueba al crearlo que puede publicar: después de la política del tema.
+    assert resource["DependsOn"] == [topic_policy]
+    _, props = destinations["cloudwatch"]
+    assert props["EventDestination"] == {
+        "Name": "cloudwatch",
+        "Enabled": True,
+        "MatchingEventTypes": ["send", *TOPIC_EVENT_TYPES],
+        "CloudWatchDestination": {
+            "DimensionConfigurations": [
+                {
+                    "DefaultDimensionValue": configuration_set_name(deployment.config),
+                    "DimensionName": "ses:configuration-set",
+                    "DimensionValueSource": "messageTag",
+                }
+            ]
+        },
+    }
+
+
+# --- §9.1 y §14.2: interruptores H-LAZ-10 y H-LAZ-11 ----------------------------------
+
+
+def _send_email_condition(template: JsonObject) -> JsonObject:
+    _, policy = _one(template, POLICY)
+    (statement,) = (
+        s for s in properties(policy)["PolicyDocument"]["Statement"] if s["Sid"] == "SendEmail"
+    )
+    return dict(statement["Condition"])
+
+
+def test_h_laz_10_switch_adds_the_configuration_set_condition_to_send_email() -> None:
+    config = _config()
+    off = _loop_alone(config)
+    sender = {"ses:FromAddress": _sender(off, config)}
+    assert _send_email_condition(off) == {"StringEquals": sender}
+    assert CONFIGURATION_SET_CONDITION_KEY not in json.dumps(off)
+    switched = replace(config, loop=replace(config.loop, ses_configuration_set_condition=True))
+    on = _loop_alone(switched)
+    assert _send_email_condition(on) == {
+        "StringEquals": {
+            **{"ses:FromAddress": _sender(on, config)},
+            CONFIGURATION_SET_CONDITION_KEY: "vigia-email-pilot",
+        }
+    }
+
+
+def test_h_laz_11_switch_sends_email_health_events_to_vigia_alerts() -> None:
+    config = _config()
+    off = _loop_alone(config)
+    assert not list(_of_type(off, RULE))
+    assert "alerts-topic-arn" not in json.dumps(off)
+    switched = replace(config, loop=replace(config.loop, ses_reputation_subscription=True))
+    on = _loop_alone(switched)
+    _, rule = _one(on, RULE)
+    props = properties(rule)
+    assert props["Name"] == reputation_rule_name(config) == "vigia-ses-reputation"
+    assert props["State"] == "ENABLED"
+    assert props["EventPattern"] == {
+        "source": ["aws.health"],
+        "detail-type": ["AWS Health Event"],
+        "detail": {"service": ["SES"]},
+    }
+    assert props["Targets"] == [
+        {"Arn": _parameter(on, "/vigia/pilot/alerts-topic-arn"), "Id": "Target0"}
+    ]
+    assert Counter(str(r["Type"]) for _, r in resources(on)) == expected_loop_resources(switched)
