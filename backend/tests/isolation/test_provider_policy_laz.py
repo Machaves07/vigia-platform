@@ -1,13 +1,14 @@
-"""PAT-LAZ-SEG-03 y A-69 en ``loop`` y ``notifications``: las políticas RESTRICTIVE del proveedor
-(TASK-301 y TASK-339).
+"""PAT-LAZ-SEG-03 y A-69 en ``loop``, ``notifications`` y ``accreditation``: las políticas
+RESTRICTIVE del proveedor (TASK-301, TASK-339 y TASK-338).
 
 Sobre una base migrada con los clientes A y B de ``tests/identity_db.py`` (dos plantas cada uno),
-una fila de cada tabla de ``loop`` y de ``notifications`` en cada planta (``tests/loop_db.py`` y
-``tests/notifications_db.py``) y concesiones de la planta 0 de A vigente, de la planta 1, revocada,
-vencida y ``unswept`` (``active`` pero ya vencida: la tarea de vencimiento aún no pasó), más la de
-toda la organización de la siembra:
+una fila de cada tabla de ``loop``, ``notifications`` y ``accreditation`` en cada planta
+(``tests/loop_db.py``, ``tests/notifications_db.py`` y ``tests/accreditation_db.py``; las nueve
+de ``accreditation`` tienen planta) y concesiones de la planta 0 de A vigente, de la planta 1,
+revocada, vencida y ``unswept`` (``active`` pero ya vencida: la tarea de vencimiento aún no
+pasó), más la de toda la organización de la siembra:
 
-- **estructura**: toda tabla de los dos esquemas con planta tiene ``provider_concession_scope``
+- **estructura**: toda tabla de los tres esquemas con planta tiene ``provider_concession_scope``
   RESTRICTIVE para todas las órdenes con ``identity.rls_provider_scope_allows(organization_id,
   plant_id)`` en ``USING`` y ``WITH CHECK``; las de solo organización (A-69: cinco de ``loop`` y,
   en ``notifications``, ``user_notification_preference``, ``digest_batch``, ``email_message`` y
@@ -43,6 +44,8 @@ import asyncpg  # type: ignore[import-untyped]
 import pytest
 import pytest_asyncio
 
+from tests.accreditation_db import ACCREDITATION_TABLES, AccreditationSeed, seed_accreditation
+from tests.accreditation_db import ROW_BUILDERS as ACCREDITATION_ROW_BUILDERS
 from tests.identity_db import (
     IdentitySeed,
     insert_concession,
@@ -79,18 +82,22 @@ pytestmark = pytest.mark.integration
 PROVIDER: Final = "provider_user"
 INSUFFICIENT_PRIVILEGE: Final = "42501"
 UNIQUE_VIOLATION: Final = "23505"
-SCHEMAS: Final = ("loop", "notifications")
-ALL_TABLES: Final = tuple(f"loop.{table}" for table in LOOP_TABLES) + tuple(
-    f"notifications.{table}" for table in NOTIFICATIONS_TABLES
+SCHEMAS: Final = ("loop", "notifications", "accreditation")
+ALL_TABLES: Final = (
+    tuple(f"loop.{table}" for table in LOOP_TABLES)
+    + tuple(f"notifications.{table}" for table in NOTIFICATIONS_TABLES)
+    + tuple(f"accreditation.{table}" for table in ACCREDITATION_TABLES)
 )
-"""Las tablas de los dos esquemas, con su esquema."""
+"""Las tablas de los tres esquemas, con su esquema."""
 ORGANIZATION_ONLY_TABLES: Final = tuple(
     f"loop.{table}" for table in LOOP_ORGANIZATION_ONLY
 ) + tuple(f"notifications.{table}" for table in NOTIFICATIONS_ORGANIZATION_ONLY)
 """Las de solo organización (A-69): ninguna fila bajo una concesión de proveedor."""
-SCOPED_TABLES: Final = tuple(
-    f"loop.{table}" for table in LOOP_PLANT_TABLES if table not in LOOP_ORGANIZATION_ONLY
-) + tuple(f"notifications.{table}" for table in NOTIFICATIONS_PLANT_TABLES)
+SCOPED_TABLES: Final = (
+    tuple(f"loop.{table}" for table in LOOP_PLANT_TABLES if table not in LOOP_ORGANIZATION_ONLY)
+    + tuple(f"notifications.{table}" for table in NOTIFICATIONS_PLANT_TABLES)
+    + tuple(f"accreditation.{table}" for table in ACCREDITATION_TABLES)
+)
 """Las tablas con planta que la concesión acota por planta (las demás no dejan nada)."""
 WRITABLE_SCOPED_TABLES: Final = tuple(
     name for name in SCOPED_TABLES if name.split(".")[1] not in KEY_TABLES
@@ -115,6 +122,7 @@ class World:
     """Abre una conexión: sin rol, como superusuario; con rol, como ese rol."""
     loop: LoopSeed
     notifications: NotificationsSeed
+    accreditation: AccreditationSeed
     concessions: dict[str, uuid.UUID]
     """Las de ``CONCESSIONS`` (todas de A) y ``organization``, la de toda la organización A."""
 
@@ -143,6 +151,8 @@ class World:
         schema, table = name.split(".")
         if schema == "loop":
             return LOOP_ROW_BUILDERS[table](self.loop.plant(self.a, plant))
+        if schema == "accreditation":
+            return ACCREDITATION_ROW_BUILDERS[table](self.accreditation.plant(self.a, plant))
         return NOTIFICATIONS_ROW_BUILDERS[table](self.notifications.plant(self.a, plant))
 
 
@@ -151,6 +161,7 @@ async def _prepare(connect: Connect, identity: IdentitySeed) -> World:
     try:
         loop = await seed_loop(connection, identity)
         notifications = await seed_notifications(connection, identity)
+        accreditation = await seed_accreditation(connection, identity)
         plants = [plant.plant_id for plant in identity.a.plants]
         past: dict[str, Any] = {
             "granted_offset": -dt.timedelta(days=10),
@@ -178,7 +189,7 @@ async def _prepare(connect: Connect, identity: IdentitySeed) -> World:
         concessions["organization"] = identity.concessions[identity.a.organization_id]
     finally:
         await connection.close()
-    return World(connect, loop, notifications, concessions)
+    return World(connect, loop, notifications, accreditation, concessions)
 
 
 @pytest.fixture(scope="module")
@@ -443,6 +454,7 @@ def test_the_same_isolation_with_a_non_superuser_master(cluster: RdsLikeCluster)
     assert upgrade.returncode == 0, upgrade.stderr
     assert "Running upgrade gob_0028 -> laz_0029" in upgrade.stderr
     assert "Running upgrade laz_0029 -> laz_0030" in upgrade.stderr
+    assert "Running upgrade laz_0030 -> laz_0031" in upgrade.stderr
     rds = _RdsDatabase(cluster, database)
 
     async def run() -> None:
