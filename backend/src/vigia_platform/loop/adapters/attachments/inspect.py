@@ -14,7 +14,9 @@ Coordenadas de posición (``attachment_metadata_not_allowed``), **sin limpiar na
   TIFF y se rechaza si el IFD de GPS (etiqueta ``0x8825``) trae latitud o longitud (etiquetas 1 a
   4);
 - XMP y texto (``APP1`` XMP, ``tEXt``, ``zTXt`` e ``iTXt``): se rechaza si nombra
-  ``GPSLatitude`` o ``GPSLongitude``; el texto comprimido se descomprime con tope.
+  ``GPSLatitude`` o ``GPSLongitude`` sin distinguir mayúsculas; el texto comprimido se descomprime
+  con tope. Los perfiles en hexadecimal de ImageMagick y exiftool (``Raw profile type exif``,
+  ``APP1``…) se decodifican y su TIFF se recorre como el EXIF.
 
 **Fallo cerrado**: una estructura que no se puede recorrer dentro de la ventana (truncada,
 desplazamientos fuera de rango, metadatos que no caben en el prefijo, texto comprimido que no se
@@ -58,10 +60,15 @@ _SIGNATURES: Final[Mapping[AttachmentContentType, bytes]] = {
     AttachmentContentType.APPLICATION_PDF: b"%PDF-",
 }
 _EXIF_HEADER: Final = b"Exif\x00\x00"
-_GPS_NAMES: Final = (b"GPSLatitude", b"GPSLongitude")
+_GPS_NAMES: Final = (b"gpslatitude", b"gpslongitude")
+"""Nombres de XMP y texto con coordenadas, comparados **sin distinguir mayúsculas**."""
+_RAW_PROFILE: Final = b"raw profile type"
+"""Prefijo (en minúsculas) de los perfiles en hexadecimal que escriben ImageMagick y exiftool en
+los fragmentos de texto de PNG (``Raw profile type exif``, ``… APP1``, ``… xmp``…)."""
+_RAW_EXIF_TYPES: Final = frozenset({b"exif", b"app1"})
 _GPS_IFD_TAG: Final = 0x8825
 _GPS_POSITION_TAGS: Final = frozenset({1, 2, 3, 4})
-_SUFFIX_MARKERS: Final = (_EXIF_HEADER, b"eXIf", b"zTXt", b"iTXt", *_GPS_NAMES)
+_SUFFIX_MARKERS: Final = (_EXIF_HEADER, b"eXIf", b"zTXt", b"iTXt")
 
 type _Endian = Literal["little", "big"]
 
@@ -93,7 +100,7 @@ def has_position_metadata(
     # Del sufijo solo cuenta lo que queda después de la zona ya recorrida del prefijo.
     suffix_start = size_bytes - len(suffix)
     tail = suffix[max(0, walked - suffix_start) :]
-    return any(marker in tail for marker in _SUFFIX_MARKERS)
+    return _trace_of_metadata(tail)
 
 
 # --- JPEG ---------------------------------------------------------------------------------------
@@ -132,7 +139,7 @@ def _jpeg_metadata_end(data: bytes, *, whole: bool) -> int | None:
             if whole:
                 # Con el objeto entero a la vista, se mira también lo que va tras el escaneo.
                 rest = data[end:]
-                return None if any(m in rest for m in _SUFFIX_MARKERS) else len(data)
+                return None if _trace_of_metadata(rest) else len(data)
             return end
         offset = end
 
@@ -140,7 +147,7 @@ def _jpeg_metadata_end(data: bytes, *, whole: bool) -> int | None:
 def _segment_has_position(segment: bytes) -> bool:
     if segment.startswith(_EXIF_HEADER) and _tiff_has_position(segment[len(_EXIF_HEADER) :]):
         return True
-    return any(name in segment for name in _GPS_NAMES)
+    return _names_position(segment)
 
 
 # --- PNG ----------------------------------------------------------------------------------------
@@ -159,7 +166,7 @@ def _png_metadata_end(data: bytes, *, whole: bool) -> int | None:
         if kind in (b"IDAT", b"IEND"):
             if whole:
                 rest = data[offset:]
-                return None if any(m in rest for m in _SUFFIX_MARKERS) else len(data)
+                return None if _trace_of_metadata(rest) else len(data)
             return offset
         end = offset + 12 + length
         if end > len(data):
@@ -168,19 +175,60 @@ def _png_metadata_end(data: bytes, *, whole: bool) -> int | None:
         if kind == b"eXIf" and _tiff_has_position(body):
             return None
         if kind in (b"tEXt", b"zTXt", b"iTXt"):
+            keyword = body[: max(body.find(b"\x00"), 0)]
             text = _png_text(kind, body)
-            if text is None or any(name in text for name in _GPS_NAMES):
+            if text is None or _names_position(keyword + b"\x00" + text):
+                return None
+            if keyword.lower().startswith(_RAW_PROFILE) and _raw_profile_has_position(
+                keyword, text
+            ):
                 return None
         offset = end
 
 
+def _names_position(data: bytes) -> bool:
+    """El texto nombra coordenadas (``GPSLatitude``, ``gpslongitude``…), en cualquier caja."""
+    lowered = data.lower()
+    return any(name in lowered for name in _GPS_NAMES)
+
+
+def _trace_of_metadata(data: bytes) -> bool:
+    """Rastro de metadatos fuera de la zona recorrida: EXIF, texto comprimido, GPS o perfiles."""
+    if any(marker in data for marker in _SUFFIX_MARKERS) or _names_position(data):
+        return True
+    return _RAW_PROFILE in data.lower()
+
+
+def _raw_profile_has_position(keyword: bytes, text: bytes) -> bool:
+    """Perfil en hexadecimal (``\\n<tipo>\\n<longitud>\\n<hex…>``): se decodifica y se mira.
+
+    Un perfil EXIF o APP1 se recorre como TIFF; uno que no se puede decodificar, o un EXIF que no
+    es TIFF, falla cerrado.
+    """
+    profile = keyword.lower().removeprefix(_RAW_PROFILE).strip()
+    lines = [line.strip() for line in text.split(b"\n") if line.strip()]
+    if len(lines) < 2:
+        return True
+    try:
+        decoded = bytes.fromhex(b"".join(lines[2:]).decode("ascii"))
+    except (UnicodeDecodeError, ValueError):
+        return True
+    decoded = decoded.removeprefix(_EXIF_HEADER)
+    if decoded[:2] in (b"II", b"MM"):
+        return _tiff_has_position(decoded)
+    if profile in _RAW_EXIF_TYPES and not decoded.startswith(b"http://ns.adobe.com/"):
+        return True
+    return _names_position(decoded)
+
+
 def _png_text(kind: bytes, body: bytes) -> bytes | None:
-    """El texto de un fragmento, descomprimido con tope; ``None`` si no se puede leer."""
+    """El texto de un fragmento (sin su palabra clave), descomprimido con tope; ``None`` si no
+    se puede leer."""
     keyword_end = body.find(b"\x00")
     if keyword_end < 0:
         return None
     if kind == b"tEXt":
-        return body
+        return body[keyword_end + 1 :]
     if kind == b"zTXt":
         return _inflate(body[keyword_end + 2 :]) if len(body) > keyword_end + 1 else None
     # iTXt: palabra clave\0, marca de compresión, método, idioma\0, palabra traducida\0, texto.
@@ -194,7 +242,7 @@ def _png_text(kind: bytes, body: bytes) -> bytes | None:
         return None
     text = rest[translated_end + 1 :]
     if flags[0] == 0:
-        return body
+        return text
     return _inflate(text)
 
 

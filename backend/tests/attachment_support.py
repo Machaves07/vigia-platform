@@ -110,6 +110,14 @@ def png(
     return data + _chunk(b"IEND", b"")
 
 
+def raw_profile(kind: bytes, payload: bytes) -> bytes:
+    """Texto de un perfil en hexadecimal como lo escriben ImageMagick y exiftool en PNG:
+    ``\\n<tipo>\\n<longitud>\\n<hex en líneas de 72>\\n``."""
+    hexed = payload.hex()
+    lines = [hexed[start : start + 72] for start in range(0, len(hexed), 72)]
+    return b"\n" + kind + b"\n" + f"{len(payload):8d}".encode() + b"\n" + "\n".join(lines).encode()
+
+
 def pdf(note: bytes = b"documento sintetico") -> bytes:
     return b"%PDF-1.7\n% " + note + b"\n%%EOF\n"
 

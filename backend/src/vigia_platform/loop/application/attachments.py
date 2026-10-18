@@ -47,7 +47,7 @@ from vigia_platform.loop.adapters.attachments.verify import (
     VerifiedAttachment,
 )
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.ratelimit import (
     CLOSURE_ATTACHMENT_BUDGET,
     Budget,
@@ -130,6 +130,7 @@ class AttachmentReadGrant:
     expires_at: datetime
 
 
+@repository
 @dataclass(slots=True)
 class ClosureAttachmentService:
     """Coordina el puerto; los efectos externos están en los adaptadores."""

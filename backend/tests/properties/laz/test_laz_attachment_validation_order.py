@@ -26,6 +26,7 @@ from tests.attachment_support import (
     jpeg,
     pdf,
     png,
+    raw_profile,
     sha256_hex,
     tiff,
     utc,
@@ -174,6 +175,56 @@ def test_a_jpeg_with_gps_coordinates_is_rejected_without_cleaning(
 def test_a_png_with_gps_coordinates_is_rejected(data: bytes) -> None:
     assert (
         _rejected(data, AttachmentContentType.IMAGE_PNG)
+        is LoopDetailCode.ATTACHMENT_METADATA_NOT_ALLOWED
+    )
+
+
+_EXIF_GPS = b"Exif\x00\x00" + tiff(gps_tags=(1, 2, 3, 4))
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        png(texts=((b"tEXt", b"Raw profile type exif\x00" + raw_profile(b"exif", _EXIF_GPS)),)),
+        png(
+            texts=(
+                (
+                    b"zTXt",
+                    b"Raw profile type exif\x00\x00"
+                    + zlib.compress(raw_profile(b"exif", _EXIF_GPS)),
+                ),
+            )
+        ),
+        png(texts=((b"tEXt", b"Raw profile type APP1\x00" + raw_profile(b"APP1", _EXIF_GPS)),)),
+        png(
+            texts=(
+                (b"tEXt", b"Raw profile type exif\x00" + raw_profile(b"exif", tiff(gps_tags=(2,)))),
+            )
+        ),
+        png(texts=((b"tEXt", b"Raw profile type exif\x00\nexif\n  12\nno-es-hex"),)),
+        png(after_idat=((b"tEXt", b"Raw profile type exif\x00" + raw_profile(b"exif", b"x")),)),
+    ],
+    ids=["text", "compressed-text", "app1", "bare-tiff", "broken-hex", "after-idat"],
+)
+def test_a_png_with_a_hex_raw_exif_profile_with_gps_is_rejected(data: bytes) -> None:
+    """Revisión automática, ronda 1: el EXIF en hexadecimal de ImageMagick y exiftool."""
+    assert (
+        _rejected(data, AttachmentContentType.IMAGE_PNG)
+        is LoopDetailCode.ATTACHMENT_METADATA_NOT_ALLOWED
+    )
+
+
+def test_a_hex_raw_exif_profile_without_gps_is_accepted() -> None:
+    profile = raw_profile(b"exif", b"Exif\x00\x00" + tiff(gps_tags=(0, 5)))
+    data = png(texts=((b"tEXt", b"Raw profile type exif\x00" + profile),))
+    _verify(data, AttachmentContentType.IMAGE_PNG)
+
+
+@pytest.mark.parametrize("name", [b"GpsLatitude", b"gpslongitude", b"GPSLATITUDE"])
+def test_gps_names_are_matched_in_any_case(name: bytes) -> None:
+    xmp = b"<x:xmpmeta><rdf:Description exif:" + name + b'="4,36.0N"/></x:xmpmeta>'
+    assert (
+        _rejected(jpeg(xmp=xmp), AttachmentContentType.IMAGE_JPEG)
         is LoopDetailCode.ATTACHMENT_METADATA_NOT_ALLOWED
     )
 

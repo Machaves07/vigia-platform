@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 from vigia_contracts.models.enumerations import RejectionCode
 from vigia_contracts.models.rejection_response import RejectionResponse
 
+from tests.attachment_support import attachment_world, utc
 from tests.factories import uuid7
 from tests.middleware_support import (
     NODE_HEARTBEAT_PATH,
@@ -41,6 +42,7 @@ from tests.middleware_support import (
     UnlimitedRateLimiter,
     cookie_header,
 )
+from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.shared.api.app import (
     AppConfig,
     UnitRegistration,
@@ -62,6 +64,8 @@ from vigia_platform.shared.api.middleware import (
     parse_store_origins,
 )
 from vigia_platform.shared.api.middleware.headers import store_origin
+from vigia_platform.shared.clock import SimulatedClock
+from vigia_platform.shared.context import Role
 
 LABELS = PlatformLabels.load()
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "static"
@@ -80,6 +84,11 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
     ("POST", "/users"): {"email": "a@b.co", "role": "copasst", "plant_id": str(uuid.uuid4())},
     ("PATCH", "/users/{user_id}"): {"display_name": "Nombre sintético", "active": True},
     ("POST", "/auth/login"): {"email": "a@b.co", "password": "contraseña-sintética"},
+    ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): {
+        "content_type": "image/png",
+        "size_bytes": 10,
+        "sha256": "a" * 64,
+    },
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -91,6 +100,7 @@ def _url(path: str, user_id: str | None = None) -> str:
     return (
         path.replace("{user_id}", user_id or str(uuid.uuid4()))
         .replace("{zone_id}", str(uuid.uuid4()))
+        .replace("{action_id}", str(uuid.uuid4()))
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -100,10 +110,32 @@ def _url(path: str, user_id: str | None = None) -> str:
 def world() -> Iterator[tuple[Harness, Any, dict[str, str]]]:
     harness = Harness()
     cookie = harness.session("mutaciones")
+    coordinator = harness.session("mutaciones-coordinacion", role=Role.COORDINATOR_SST)
+    _ROLE_HEADERS.clear()
+    _ROLE_HEADERS.update({**cookie_header(coordinator), **SAME_ORIGIN})
     # La tasa no es el asunto de este archivo (lo es de test_rate_limit.py).
     app = harness.app(rate_limiter=UnlimitedRateLimiter())
+    # El arnés no compone ``app.state`` de las unidades: el puerto de adjuntos real, con almacén y
+    # proyección en memoria (sin acciones), para que un cuerpo válido llegue a su servicio.
+    setattr(app.state, ATTACHMENTS_STATE_KEY, attachment_world(SimulatedClock(utc())).service)
     with TestClient(app, raise_server_exceptions=False) as client:
         yield harness, client, {**cookie_header(cookie), **SAME_ORIGIN}
+
+
+_ROLE_HEADERS: dict[str, str] = {}
+"""Sesión de coordinación SST: ``actions.manage`` no está en la columna del administrador, y sin la
+clave la ruta responde ``not_found`` antes de validar el cuerpo (TASK-310)."""
+ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {("POST", "/loop/actions/{action_id}/attachments/upload-grant")}
+)
+ACCEPTED_STATUS: dict[tuple[str, str], int] = {
+    # Cuerpo válido: llega al servicio, que no encuentra la acción sintética.
+    ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
+}
+
+
+def _headers_for(route: tuple[str, str], headers: dict[str, str]) -> dict[str, str]:
+    return dict(_ROLE_HEADERS) if route in ROLE_ROUTES else headers
 
 
 def _routes(client: Any) -> list[DeclaredRoute]:
@@ -125,8 +157,10 @@ def test_the_catalog_of_body_routes_is_complete(world: tuple[Harness, Any, Any])
 def test_the_valid_bodies_are_accepted(world: tuple[Harness, Any, dict[str, str]]) -> None:
     _, client, headers = world
     for (method, path), body in VALID_BODIES.items():
-        response = client.request(method, _url(path), headers=headers, json=body)
-        assert response.status_code == 200, (method, path, response.text)
+        route_headers = _headers_for((method, path), headers)
+        response = client.request(method, _url(path), headers=route_headers, json=body)
+        expected = ACCEPTED_STATUS.get((method, path), 200)
+        assert response.status_code == expected, (method, path, response.text)
 
 
 MUTATIONS = st.sampled_from(
@@ -172,6 +206,9 @@ def _mutated(
         if "{user_id}" in path:
             bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
             url = _url(path, bad)
+        elif "{action_id}" in path:
+            bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
+            url = path.replace("{action_id}", bad)
         elif "plant_id" in body:
             body["plant_id"] = data.draw(st.sampled_from(["no-es-uuid", "", "0" * 31]))
         else:
@@ -198,7 +235,8 @@ def test_pr_nuc_38_every_mutated_body_is_a_generic_rejection(
     harness, client, headers = world
     handled = len(harness.observed.handled)
     url, content, extra = _mutated(data, mutation, route)
-    response = client.request(route[0], url, headers={**headers, **extra}, content=content)
+    route_headers = _headers_for(route, headers)
+    response = client.request(route[0], url, headers={**route_headers, **extra}, content=content)
     body = _generic_error(response)
     expected = (
         {ApiErrorCode.PAYLOAD_TOO_LARGE}

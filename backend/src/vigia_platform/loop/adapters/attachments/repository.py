@@ -16,7 +16,7 @@ from typing import Any, Protocol
 from sqlalchemy import select
 
 from vigia_platform.loop.adapters.postgres.tables import CLOSURE_ATTACHMENT, CORRECTIVE_ACTION
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 
 __all__ = ["ActionPlace", "AttachmentDatabase", "PostgresAttachmentRepository", "StoredAttachment"]
 
@@ -54,6 +54,7 @@ def _plain(value: object) -> uuid.UUID:
     return uuid.UUID(str(value))
 
 
+@repository
 @dataclass(frozen=True, slots=True)
 class PostgresAttachmentRepository:
     database: AttachmentDatabase
