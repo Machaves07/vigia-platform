@@ -3,8 +3,8 @@
 - **Tres unidades** en ``REGISTERED_UNITS`` (``loop``, ``accreditation`` y ``notifications``),
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (25) coinciden con lo
-  que registra el código; ``U04_TASKS``, ``U04_CONSUMERS`` y los ``ROUTERS`` de los tres módulos,
-  hoy vacíos.
+  que registra el código; ``U04_TASKS`` y ``U04_CONSUMERS`` vacíos, y en ``ROUTERS`` solo las dos
+  rutas de adjuntos de cierre de ``loop`` (TASK-310).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -18,10 +18,12 @@ Sin base ni red: los consumidores y las tareas se componen con dependencias iner
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any, Final
 from unittest.mock import Mock
 
 import pytest
+from fastapi.routing import APIRoute
 
 from tests.properties.laz.strategies.u04_records import u04_event_registry, u04_registry
 from vigia_platform.accreditation import registration as accreditation_registration
@@ -29,6 +31,11 @@ from vigia_platform.accreditation.events import ACCREDITATION_EVENT_TYPES
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
+from vigia_platform.loop.adapters.http.attachment_routes import (
+    ATTACHMENTS_STATE_KEY,
+    attachment_router,
+)
+from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.events import LOOP_EVENT_TYPES
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
 from vigia_platform.notifications import registration as notifications_registration
@@ -99,19 +106,38 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
     assert notifications.event_types is notifications_registration.notifications_event_types
 
 
-def test_the_u04_units_have_no_routes_tasks_consumers_nor_state_yet() -> None:
+def test_the_u04_units_register_only_the_closure_attachment_routes_so_far() -> None:
     units = {unit.name: unit for unit in registered_units()}
     tasks = PeriodicTaskRegistry()
     consumers = ConsumerRegistry()
+    services = replace(_services(), evidence=Mock())
     for name in U04_UNITS:
         unit = units[name]
-        assert unit.routers() == ()
-        assert unit.api_state(_services()) == {}
-        unit.periodic_tasks(tasks, _services())
-        unit.consumers(consumers, _services())
+        routes = [
+            (method, route.path)
+            for router in unit.routers()
+            for route in router.routes
+            if isinstance(route, APIRoute)
+            for method in sorted(route.methods)
+        ]
+        state = unit.api_state(services)
+        if name == "loop":
+            # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``.
+            assert routes == [
+                ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+                ("POST", "/loop/attachments/{attachment_id}/read-url"),
+            ]
+            assert set(state) == {ATTACHMENTS_STATE_KEY}
+            assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
+        else:
+            assert routes == [] and state == {}
+        unit.periodic_tasks(tasks, services)
+        unit.consumers(consumers, services)
     assert tasks.tasks() == () and consumers.consumers() == ()
-    for module in (registration, accreditation_registration, notifications_registration):
+    assert (attachment_router,) == registration.ROUTERS
+    for module in (accreditation_registration, notifications_registration):
         assert module.ROUTERS == ()
+    for module in (registration, accreditation_registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
     assert registration.U04_TASKS == {} and registration.U04_CONSUMERS == {}
     # TASK-303: el único registrador de texto libre es el del vocabulario (TASK-340 añade otro).

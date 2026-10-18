@@ -56,6 +56,7 @@ __all__ = [
     "AUTHENTICATED_ORIGIN_BUDGET",
     "BRAKE_KEY",
     "BRAKE_OFF",
+    "CLOSURE_ATTACHMENT_BUDGET",
     "CONTRACT_MAX_RETRY_AFTER_SECONDS",
     "DEFAULT_MAX_KEYS",
     "KEY_PATTERN",
@@ -69,6 +70,7 @@ __all__ = [
     "Limited",
     "RateLimiter",
     "brake_filters",
+    "closure_attachment_key",
     "contract_retry_after",
     "enrollment_origin_key",
     "node_key",
@@ -96,6 +98,7 @@ KEY_PATTERN: Final = re.compile(
     r"|node:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[a-z][a-z0-9_]{0,63}"
     r"|enrollment:[0-9a-f]{64}:(?:quarter|day)"
     r"|brake:node"
+    r"|closure_attachment:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 )
 """Forma cerrada de una clave del limitador; ninguna lleva una dirección ni un secreto en claro."""
 
@@ -139,6 +142,8 @@ AUTHENTICATED_ORIGIN_BUDGET: Final = Budget(1_200)
 """1 200 peticiones por minuto por origen en rutas autenticadas (NFR-NUC-25)."""
 PUBLIC_ORIGIN_BUDGET: Final = Budget(60)
 """60 peticiones por minuto por origen en rutas públicas (NFR-NUC-25)."""
+CLOSURE_ATTACHMENT_BUDGET: Final = Budget(60, window_seconds=60 * 60)
+"""60 concesiones de adjuntos de cierre por persona y hora (SUP-U05-09)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,6 +348,15 @@ def parse_brake(filters: object) -> int | None:
     if not value.isdigit() or not 1 <= int(value) <= MAX_BRAKE_PER_MINUTE:
         return None
     return int(value)
+
+
+def closure_attachment_key(user_id: object) -> str:
+    """Clave de límite de concesiones de adjuntos; solo conserva el UUID de la persona interna."""
+    text = str(user_id)
+    key = f"closure_attachment:{text}"
+    if KEY_PATTERN.fullmatch(key) is None:
+        raise ValueError("user_id debe ser un UUID")
+    return key
 
 
 def node_key(node_id: object, operation: str) -> str:

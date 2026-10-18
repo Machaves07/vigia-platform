@@ -38,7 +38,13 @@ from vigia_platform.accreditation.registration import (
     ACCREDITATION_CONSUMERS,
     ACCREDITATION_TASKS,
 )
+from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
+from vigia_platform.loop.adapters.http.attachment_routes import (
+    ATTACHMENTS_STATE_KEY,
+    attachment_router,
+)
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
+from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
@@ -159,8 +165,8 @@ type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type FreeTextRegistrar = Callable[[FreeTextPolicyRegistry], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = ()
-"""Fábricas de los enrutadores de ``/loop/*``; hoy ninguna ruta."""
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (attachment_router,)
+"""Fábricas de los enrutadores de ``/loop/*``: hoy, los adjuntos de cierre (SUP-U05-09 y 10)."""
 
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
@@ -191,7 +197,21 @@ con TASK-340)."""
 U04_FREE_TEXT_VALIDATORS: Final = frozenset({BLOCKED_VOCABULARY})
 """Los validadores que U-04 exige en la política sellada (BLM §9; NFR-LAZ-14)."""
 
-API_STATE: Final[tuple[StateBuilder, ...]] = ()
+
+def _attachments_state(services: UnitServices) -> Mapping[str, object]:
+    """``ClosureAttachmentPort`` sobre ``vigia-evidence`` (prefijo ``closure/``, LC-LAZ-10)."""
+    return {
+        ATTACHMENTS_STATE_KEY: build_attachment_service(
+            repository=PostgresAttachmentRepository(services.database),
+            storage=services.require_evidence(),
+            authorizer=services.authorizer,
+            audit=services.audit,
+            clock=services.clock,
+        )
+    }
+
+
+API_STATE: Final[tuple[StateBuilder, ...]] = (_attachments_state,)
 
 U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **LOOP_TASKS,
