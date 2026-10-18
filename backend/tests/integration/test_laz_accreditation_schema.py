@@ -172,6 +172,49 @@ def test_provider_concession_only_sees_its_plant(postgres_endpoint: PostgresEndp
         asyncio.run(run())
 
 
+def test_removing_organization_policy_is_detected(postgres_endpoint: PostgresEndpoint) -> None:
+    """Sonda negativa: sin la política, la comprobación de aislamiento caería en rojo."""
+    with seeded_identity(postgres_endpoint, "vigia_laz_accreditation_mutation") as (
+        database,
+        identity,
+    ):
+
+        async def run() -> None:
+            connection = await database.connect()
+            try:
+                for tenant in (identity.a, identity.b):
+                    plant = tenant.plants[0]
+                    await connection.execute(
+                        "INSERT INTO accreditation.adoption_counter"
+                        " (organization_id, plant_id, zone_id, day, activity_counts, session_count)"
+                        " VALUES ($1, $2, $3, $4, $5, $6)",
+                        tenant.organization_id,
+                        plant.plant_id,
+                        plant.zone_id,
+                        dt.date(2026, 9, 1),
+                        "{}",
+                        0,
+                    )
+                async with connection.transaction():
+                    await connection.execute(
+                        "DROP POLICY organization_isolation ON accreditation.adoption_counter"
+                    )
+                    await connection.execute("SET LOCAL ROLE vigia_app")
+                    await set_scope(connection, identity.a.organization_id)
+                    # Sin la única política PERMISSIVE no hay fila propia visible: la prueba
+                    # normal (que exige exactamente una) detecta la mutación.
+                    assert (
+                        await connection.fetchval(
+                            "SELECT count(*) FROM accreditation.adoption_counter"
+                        )
+                        == 0
+                    )
+            finally:
+                await connection.close()
+
+        asyncio.run(run())
+
+
 def test_adoption_counter_has_no_user_column(database: MigratedDatabase) -> None:
     async def query() -> set[str]:
         connection = await database.connect()
