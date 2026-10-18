@@ -85,7 +85,9 @@ SERIALIZE_LOCK_WAIT_MS: Final = 20_000
 """Espera máxima del candado que serializa las llamadas concurrentes (la tarea y la orden
 administrativa), por debajo de los 30 s de ``statement_timeout`` del worker."""
 _SERIALIZE: Final = (
-    text(f"SET LOCAL lock_timeout = {SERIALIZE_LOCK_WAIT_MS}"),
+    text("SELECT pg_catalog.set_config('lock_timeout', :wait, true)").bindparams(
+        wait=str(SERIALIZE_LOCK_WAIT_MS)
+    ),
     text(
         "SELECT pg_catalog.pg_advisory_xact_lock("
         "pg_catalog.hashtextextended('vigia_create_month_partitions', 0))"
