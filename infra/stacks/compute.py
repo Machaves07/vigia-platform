@@ -35,6 +35,9 @@ Servicios (§5.2, §5.3 con su nota U02-H-10, nº 17 y A-21):
   ``VIGIA_PUBLIC_ORIGIN`` (``https://app.<dominio>``) llega a la API y a ``vigia-admin``, y
   ``VIGIA_PROVIDER_ORGANIZATION_ID`` a los tres solo con el contexto ``provider_organization_id``
   (la proveedora que imprime ``vigia-admin bootstrap``; antes de ella no existe).
+- U-04 (TASK-349), solo en el worker: ``VIGIA_ASSISTANT_API_HOST`` y ``VIGIA_EMAIL_API_HOST``
+  (los dos únicos destinos de salida, LC-LAZ-39) y ``VIGIA_LOOP_BULKHEADS`` (mamparos por
+  consumidor, LC-LAZ-40).
 
 Tareas puntuales (§5.4 y nota U02-H-01): ``vigia-migrate`` (``alembic upgrade head``) y
 ``vigia-admin`` (``vigia-admin <orden>``), con red ``sg-tasks`` al lanzarlas.
@@ -164,6 +167,21 @@ API_TUNING: Mapping[str, str] = {
     "VIGIA_DOCUMENTS_MAX_BYTES": str(20 * 1024 * 1024),
 }
 WORKER_STATEMENT_TIMEOUT_MS = "30000"  # NFR-NUC-36, solo en el worker
+# U-04 (TASK-349): los dos únicos destinos de salida del worker (LC-LAZ-39, nota U04-H-10: la
+# barrera efectiva es la lista del código) y las concurrencias de los mamparos por consumidor
+# (LC-LAZ-40) `[objetivos propios, a ajustar con NFR-LAZ-49]`. El correo es SES v2 de la región.
+ASSISTANT_API_HOST = "api.anthropic.com"
+LOOP_BULKHEADS = (
+    "notification_engine=4,loop_projection=4,review_queue=2,"
+    "assistant_worker=2,export_worker=1,email_delivery_events=2"
+)
+
+
+def email_api_host(region: str) -> str:
+    """Punto de SES v2 de ``region`` (``VIGIA_EMAIL_API_HOST`` del worker)."""
+    return f"email.{region}.amazonaws.com"
+
+
 # Raíz de composición de producción (VIG-137, A-52): el constructor de dependencias de cada
 # proceso, ``vigia_platform.<módulo>:<función>`` (``_RUNTIME_REFERENCE`` de la aplicación).
 API_RUNTIME = "vigia_platform.shared.runtime.api:build_api_runtime"
@@ -1227,6 +1245,9 @@ class ComputeStack(VigiaStack):
             "VIGIA_EDGE_BUCKET": self._bucket(BucketUsage.EDGE),
             "VIGIA_CRL_KEY": CRL_KEY,
             "VIGIA_TMP_BUDGET_BYTES": str(WORKER_TMP_BUDGET_BYTES),
+            "VIGIA_ASSISTANT_API_HOST": ASSISTANT_API_HOST,
+            "VIGIA_EMAIL_API_HOST": email_api_host(self.region),
+            "VIGIA_LOOP_BULKHEADS": LOOP_BULKHEADS,
         }
         if self.edge.trust_store is not None:
             environment["VIGIA_NODE_TRUST_STORE_ARN"] = self.edge.trust_store.trust_store_arn

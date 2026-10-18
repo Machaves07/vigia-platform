@@ -31,6 +31,11 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
 - alta del nodo (TASK-219): ``VIGIA_NODES_BASE_URL`` (``https://nodes.<dominio>/api/nodes``, la
   que se entrega al nodo) y ``VIGIA_ENROLLMENT_SOURCE_KEY_SECRET`` (el secreto de la clave estable
   del hash de origen de los intentos), opcionales: sin ellas el alta responde transitorio;
+- U-04 (TASK-349): ``VIGIA_ASSISTANT_API_HOST`` y ``VIGIA_EMAIL_API_HOST``, los **dos** únicos
+  destinos de salida del worker (LC-LAZ-39; por defecto ``api.anthropic.com`` y
+  ``email.<AWS_REGION>.amazonaws.com``), y ``VIGIA_LOOP_BULKHEADS``
+  (``consumidor=concurrencia,…``), que cambia las concurrencias del diseño de los mamparos
+  (LC-LAZ-40);
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -60,6 +65,7 @@ from vigia_platform.shared.bulkheads import (
 from vigia_platform.shared.db import SslMode
 
 __all__ = [
+    "EGRESS_HOST",
     "ENDPOINT_ENVIRONMENTS",
     "KNOWN_VARIABLES",
     "VARIABLES",
@@ -90,6 +96,13 @@ _NODES_BASE_URL: Final = re.compile(
 )
 """``Endpoints.ingest_base_url`` del contrato: ``https``, sin consulta ni fragmento."""
 _SECRET_ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9:/_+=.@-]{0,2047}")
+EGRESS_HOST: Final = re.compile(
+    r"(?=.{4,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
+)
+"""Destino de salida de U-04 (LC-LAZ-39): un nombre DNS en minúsculas, sin esquema, puerto, ruta,
+comodín ni dirección IP (la última etiqueta empieza por letra)."""
+_BULKHEAD_ENTRY: Final = re.compile(r"([a-z][a-z0-9_]{0,63})=([1-9][0-9]?)")
+"""Una entrada de ``VIGIA_LOOP_BULKHEADS``: ``consumidor=concurrencia`` (de 1 a 99)."""
 
 
 class RuntimeConfigInvalid(ValueError):
@@ -178,6 +191,17 @@ def _sslmode(value: str) -> object:
     return SslMode(value)
 
 
+def _bulkheads(value: str) -> object:
+    """``notification_engine=4,export_worker=1``: sin repetidos ni entradas vacías."""
+    sizes: dict[str, int] = {}
+    for entry in value.split(","):
+        match = _BULKHEAD_ENTRY.fullmatch(entry)
+        if match is None or match.group(1) in sizes:
+            raise ValueError
+        sizes[match.group(1)] = int(match.group(2))
+    return sizes
+
+
 @dataclass(frozen=True, slots=True)
 class _Variable:
     field: str
@@ -225,6 +249,9 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
         "VIGIA_ENROLLMENT_SOURCE_KEY_SECRET",
         _text(_SECRET_ID),
     ),
+    _Variable("assistant_api_host", "VIGIA_ASSISTANT_API_HOST", _text(EGRESS_HOST)),
+    _Variable("email_api_host", "VIGIA_EMAIL_API_HOST", _text(EGRESS_HOST)),
+    _Variable("loop_bulkheads", "VIGIA_LOOP_BULKHEADS", _bulkheads),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -275,6 +302,14 @@ class RuntimeConfig(BaseModel):
     enrollment_source_key_secret: str | None = None
     """ARN o nombre del secreto con la clave estable del hash de origen del alta (≥ 32 bytes, la
     misma en todas las instancias); sin ella, el alta falla cerrada (TASK-218, TASK-219)."""
+    assistant_api_host: str | None = None
+    """Destino de la interfaz del proveedor del asistente (U-04, LC-LAZ-39); sin ella,
+    ``api.anthropic.com``."""
+    email_api_host: str | None = None
+    """Destino del servicio de correo (U-04, LC-LAZ-39); sin ella,
+    ``email.<AWS_REGION>.amazonaws.com``."""
+    loop_bulkheads: dict[str, int] | None = None
+    """Concurrencias de los mamparos de U-04 que cambian el valor del diseño (LC-LAZ-40)."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:

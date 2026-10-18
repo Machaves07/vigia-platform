@@ -33,6 +33,12 @@ series. La lectura queda declarada en el PR de TASK-233 para que decida el dueñ
 ``test_catalog_declares_no_forbidden_label`` aplica las mismas reglas a lo **declarado** en
 ``CATALOG`` (una métrica que la ejecución no llegó a emitir también cuenta).
 
+**U-04** (TASK-349, A-66): las métricas de ``loop.observability.metrics`` (``LOOP_CATALOG``) son del
+mismo catálogo a efectos de esta metapropiedad, con su regla: dimensión de organización y
+**planta** (``plant_id`` permitido) y **nunca de nodo ni de usuario** (``node_id`` prohibido además
+de ``ENTITY_LABELS``). ``tests/properties/laz/test_pr_laz_55_trace_attributes.py`` aplica
+``violations`` a lo que exporta una ejecución generada de U-04.
+
 Solo datos generados.
 """
 
@@ -64,6 +70,7 @@ from tests.conftest import _active_profile, _seeds_for_profile
 from tests.factories import uuid7
 from tests.gob_platform_support import GobPlatform, gob_platform, ok
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from vigia_platform.loop.observability.metrics import LOOP_CATALOG, LoopMetricSpec
 from vigia_platform.shared.api.declarations import NodeRoute
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.metrics import (
@@ -119,6 +126,11 @@ ORPHAN_AFTER: Final = timedelta(hours=25)
 BUDGET: Final[Mapping[str, int]] = {"ci": 2, "nightly": 6}
 """Ejemplos por semilla: cada uno levanta organizaciones y zonas por las rutas reales."""
 PROBE: Final = "probe_node_latency_ms"
+ALL_SPECS: Final[tuple[MetricSpec | LoopMetricSpec, ...]] = (*CATALOG, *LOOP_CATALOG)
+"""Los catálogos de U-02/U-03 y de U-04: el mismo medidor y el mismo espacio de nombres."""
+LOOP_NAMES: Final = frozenset(str(spec.name) for spec in LOOP_CATALOG)
+LOOP_FORBIDDEN_LABELS: Final = (ENTITY_LABELS - {"plant_id"}) | {NODE_LABEL}
+"""U-04: organización y planta sí; nodo y usuario nunca (NFR-LAZ-41, A-66)."""
 
 
 # --- lo exportado --------------------------------------------------------------------------------
@@ -165,8 +177,10 @@ def exported(reader: InMemoryMetricReader) -> list[Point]:
     return sorted(points, key=lambda point: (point.metric, point.attributes))
 
 
-def violations(points: Sequence[Point], catalog: Sequence[MetricSpec] = CATALOG) -> list[str]:
-    """Cada incumplimiento de NFR-GOB-13 en ``points``, nombrado."""
+def violations(
+    points: Sequence[Point], catalog: Sequence[MetricSpec | LoopMetricSpec] = ALL_SPECS
+) -> list[str]:
+    """Cada incumplimiento de NFR-GOB-13 (y de NFR-LAZ-41 en U-04) en ``points``, nombrado."""
     specs = {str(spec.name): spec for spec in catalog}
     found: list[str] = []
     families: dict[str, set[str]] = defaultdict(set)
@@ -178,10 +192,9 @@ def violations(points: Sequence[Point], catalog: Sequence[MetricSpec] = CATALOG)
             found.append(f"{point.metric}: etiquetas fuera de su lista {sorted(point.keys)}")
         if spec is not None and spec.kind is not point.kind:
             found.append(f"{point.metric}: exportada como {point.kind}, declarada {spec.kind}")
-        if point.keys & ENTITY_LABELS:
-            found.append(
-                f"{point.metric}: etiqueta de entidad {sorted(point.keys & ENTITY_LABELS)}"
-            )
+        forbidden = LOOP_FORBIDDEN_LABELS if point.metric in LOOP_NAMES else ENTITY_LABELS
+        if point.keys & forbidden:
+            found.append(f"{point.metric}: etiqueta de entidad {sorted(point.keys & forbidden)}")
         if NODE_LABEL in point.keys:
             if point.kind is MetricKind.HISTOGRAM:
                 found.append(f"{point.metric}: histograma con etiqueta de nodo")
@@ -371,11 +384,28 @@ def test_catalog_declares_no_forbidden_label() -> None:
     etiquetas (la ejecución solo ve lo que emite; una métrica sin emitir aún también cuenta)."""
     points = [
         Point(str(spec.name), spec.kind, tuple((key, "x") for key in sorted(spec.attributes)))
-        for spec in CATALOG
+        for spec in ALL_SPECS
     ]
     assert violations(points) == []
     per_node = {point.metric for point in points if NODE_LABEL in point.keys}
     assert len(per_node) == MAX_NODE_FAMILIES, sorted(per_node)
+    assert not per_node & LOOP_NAMES
+
+
+def test_a_u04_metric_with_node_or_user_label_is_caught() -> None:
+    """La sonda de U-04: una métrica del lazo con ``node_id``, ``actor_id`` o ``zone_id`` cae en
+    rojo; con organización y planta, no."""
+    loop_metric = str(LOOP_CATALOG[0].name)
+    kind = LOOP_CATALOG[0].kind
+    for label in (NODE_LABEL, "actor_id", "zone_id", "user_id", "assistant_request_id"):
+        probe = LoopMetricSpec(
+            LOOP_CATALOG[0].name, kind, "1", "Sonda de TASK-349.", "TASK-349", frozenset({label})
+        )
+        found = violations([Point(loop_metric, kind, ((label, "x"),))], (probe,))
+        assert f"{loop_metric}: etiqueta de entidad {[label]}" in found, found
+    spec = next(spec for spec in LOOP_CATALOG if "plant_id" in spec.attributes)
+    point = Point(str(spec.name), spec.kind, (("organization_id", "o"), ("plant_id", "p")))
+    assert violations([point]) == []
 
 
 def test_probe_histogram_with_node_id_is_caught(world: World) -> None:

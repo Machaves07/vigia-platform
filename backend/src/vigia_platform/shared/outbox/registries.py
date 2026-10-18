@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CompiledEventType",
     "Consumer",
+    "ConsumerAdmission",
     "ConsumerHandler",
     "ConsumerRegistry",
     "DiscardedCycle",
@@ -106,6 +107,21 @@ MAX_INTERVAL_SECONDS: Final = 31 * 24 * 3600
 type ConsumerHandler = Callable[[OutboxEvent, Transaction], Awaitable[None]]
 """Manejador de un consumidor: recibe el evento y la transacción abierta con el contexto de la
 organización del evento (BR-NUC-80); el despachador (TASK-129) lo invoca y marca la entrega."""
+
+
+class ConsumerAdmission(Protocol):
+    """Admisión de una entrega en el proceso (mamparo por consumidor de U-04, LC-LAZ-40).
+
+    El despachador llama a ``try_enter`` **antes** de abrir la transacción y de tomar el bloqueo
+    consultivo de la partición; con ``False`` deja la partición para el siguiente ciclo sin tocar
+    la entrega (no consume intentos). Cada ``try_enter`` que devuelve ``True`` va seguido de un
+    ``leave`` cuando la entrega termina, también si falla.
+    """
+
+    def try_enter(self) -> bool: ...
+
+    def leave(self) -> None: ...
+
 
 type PeriodicHandler = Callable[[Transaction], Awaitable[None]]
 """Manejador de una tarea periódica: una invocación por organización, cada una en su transacción
@@ -365,6 +381,8 @@ class Consumer:
     subscribed_events: tuple[str, ...]
     handler: ConsumerHandler
     has_external_dependency: bool = False
+    admission: ConsumerAdmission | None = None
+    """Mamparo del proceso (U-04 lo aplica al registrar, LC-LAZ-40); no se persiste."""
 
     def to_persisted(self) -> PersistedConsumer:
         return PersistedConsumer(
@@ -406,6 +424,12 @@ def _consumer_problems(consumer: Consumer) -> list[SchemaProblem | str]:
         problems.append("handler debe ser invocable")
     if not isinstance(external, bool):
         problems.append("has_external_dependency debe ser bool")
+    admission: object = consumer.admission
+    if admission is not None and not (
+        callable(getattr(admission, "try_enter", None))
+        and callable(getattr(admission, "leave", None))
+    ):
+        problems.append("admission debe ofrecer try_enter y leave")
     return problems
 
 
