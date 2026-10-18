@@ -14,7 +14,8 @@ TASK-340 (BLM §14.5; BR-LAZ-84; A-45 punto 3 y su nota del 2026-09-30; LC-LAZ-1
   los equipos con marca solo con su nombre declarado (sin él, el par cae como nombre propio);
 - **bordes** de cada regla: 6 y 7 dígitos, 4 y 5 dígitos de documento, la palabra de vehículo a 3 y
   a 4 palabras de la placa, fechas y cifras con miles, una sola palabra con mayúscula, cargos sin
-  verbo, clases de campo (``name``, ``identifier``, ``prose``) y la ruta exenta de §2.12;
+  verbo, clases de campo (``name``, ``identifier``, ``machine``, ``prose``) y la ruta exenta de
+  §2.12;
 - **vocabulario declarado** (``DeclaredNamesCache``): sin entrada se valida sin él; el preparador
   lo lee al abrir la escritura, como mucho una vez cada ``TTL_SECONDS``, y validar nunca lo lee.
 
@@ -209,10 +210,10 @@ KINDS: tuple[tuple[str, str, FieldKind], ...] = (
     ("zone", "/name", FieldKind.NAME),
     ("zone_created", "/name", FieldKind.NAME),
     ("closure", "/signer/professional_license", FieldKind.IDENTIFIER),
-    ("finding_received", "/cameras[*]/clips[*]/storage_key", FieldKind.IDENTIFIER),
-    ("finding_received", "/node_time/clock/source", FieldKind.IDENTIFIER),
+    ("finding_received", "/cameras[*]/clips[*]/storage_key", FieldKind.MACHINE),
+    ("finding_received", "/node_time/clock/source", FieldKind.MACHINE),
     ("action_evidence_added", "/attachments[*]/filename", FieldKind.IDENTIFIER),
-    ("plant_created", "/timezone", FieldKind.IDENTIFIER),
+    ("plant_created", "/timezone", FieldKind.MACHINE),
     ("classification", "/reason_text", FieldKind.PROSE),
     ("zone", "/description", FieldKind.PROSE),
     ("organization_created", "/display", FieldKind.PROSE),

@@ -22,7 +22,8 @@ TASK-340 (BR-LAZ-77 y 78; BLM §9; LC-LAZ-16). Extiende N-14 de U-02
   metapropiedad encuentra rutas por las que el texto escapa;
 - **identificadores generados por máquina** (claves de almacenamiento de clip y de evidencia con
   UUID aleatorios, UUID, sumas hexadecimales y versiones) pasan la política compuesta real en
-  **toda** ruta ``identifier``: un grupo de UUID como ``cc54-4333`` no es una cédula.
+  **toda** ruta ``machine``: un grupo de UUID como ``cc54-4333`` no es una cédula; en las rutas
+  ``identifier`` que teclea una persona (adjunto, licencia, concepto legal) una cédula sí cae.
 
 Solo datos generados.
 """
@@ -106,8 +107,20 @@ IDENTIFIER_PATHS: Final = frozenset(
     {
         ("action_assigned", "/assigned_by/professional_license"),
         ("action_evidence_added", "/attachments[*]/filename"),
-        ("catalog_version_published", "/envelope/key_id"),
         ("closure", "/signer/professional_license"),
+        ("plant_policy_signed", "/legal_opinion_reference"),
+        ("root_cause_analysis", "/signer/professional_license"),
+        ("sample_audit_result", "/reviewed_by/professional_license"),
+        ("unclosable_review", "/reviewer/professional_license"),
+        ("unclosable_state_declared", "/signer/professional_license"),
+        ("user_account", "/professional_license"),
+    }
+)
+"""Identificadores que teclea una persona: aceptan cifras y códigos, no una cédula."""
+
+MACHINE_PATHS: Final = frozenset(
+    {
+        ("catalog_version_published", "/envelope/key_id"),
         ("detection_for_review_received", "/cameras[*]/clips[*]/storage_key"),
         ("detection_for_review_received", "/contract_version"),
         ("detection_for_review_received", "/node_time/clock/source"),
@@ -121,16 +134,10 @@ IDENTIFIER_PATHS: Final = frozenset(
         ("observability_event_received", "/node_time/clock/source"),
         ("observability_event_received", "/software_version"),
         ("plant_created", "/timezone"),
-        ("plant_policy_signed", "/legal_opinion_reference"),
-        ("root_cause_analysis", "/signer/professional_license"),
-        ("sample_audit_result", "/reviewed_by/professional_license"),
-        ("unclosable_review", "/reviewer/professional_license"),
-        ("unclosable_state_declared", "/signer/professional_license"),
         ("update_result_received", "/target_version"),
-        ("user_account", "/professional_license"),
     }
 )
-"""Rutas de identificadores técnicos o de credenciales: aceptan cifras y códigos."""
+"""Identificadores que genera una máquina: aceptan además grupos de UUID con forma de cédula."""
 
 EXEMPT: Final = frozenset(
     {
@@ -159,9 +166,9 @@ def _expectations(kind: FieldKind) -> tuple[tuple[str, Expected], ...]:
         (VOCABULARY, BLOCKED_VOCABULARY_TERM),
         (EMAIL, attribution),
         (ROLE, attribution),
-        (DOCUMENT, None if kind is FieldKind.IDENTIFIER else attribution),
+        (DOCUMENT, None if kind is FieldKind.MACHINE else attribution),
         (NAME, attribution if kind is FieldKind.PROSE else None),
-        (PHONE, None if kind is FieldKind.IDENTIFIER else attribution),
+        (PHONE, None if kind in {FieldKind.IDENTIFIER, FieldKind.MACHINE} else attribution),
     )
 
 
@@ -247,6 +254,7 @@ def test_the_name_and_identifier_classes_are_exactly_the_declared_ones() -> None
         by_kind[field_kind(field)].add((field.record_type, field.path))
     assert by_kind[FieldKind.NAME] == NAME_PATHS
     assert by_kind[FieldKind.IDENTIFIER] == IDENTIFIER_PATHS
+    assert by_kind[FieldKind.MACHINE] == MACHINE_PATHS
 
 
 def test_the_only_exclusion_is_the_declared_one_of_the_vocabulary_list() -> None:
@@ -275,8 +283,8 @@ def _real_policy() -> FreeTextPolicyRegistry:
     return free_text_registry(registered_units())
 
 
-def _identifier_fields() -> tuple[FreeTextField, ...]:
-    return tuple(field for field in _real_fields() if field_kind(field) is FieldKind.IDENTIFIER)
+def _fields_of(kind: FieldKind) -> tuple[FreeTextField, ...]:
+    return tuple(field for field in _real_fields() if field_kind(field) is kind)
 
 
 def _group(size: int) -> st.SearchStrategy[str]:
@@ -314,10 +322,10 @@ STORAGE_KEY_WITH_CC: Final = (
 
 
 @given(value=_MACHINE_VALUES, data=st.data())
-def test_machine_generated_identifiers_are_accepted_on_every_identifier_path(
+def test_machine_generated_identifiers_are_accepted_on_every_machine_path(
     value: str, data: st.DataObject
 ) -> None:
-    field = data.draw(st.sampled_from(_identifier_fields()))
+    field = data.draw(st.sampled_from(_fields_of(FieldKind.MACHINE)))
     assume(field.min_length <= len(value) <= field.max_length)
     assert _real_policy().apply(value, field) == value
 
@@ -327,6 +335,34 @@ def test_machine_generated_identifiers_are_accepted_on_every_identifier_path(
     ["/cameras[*]/clips[*]/storage_key", "/evidence[*]/storage_key"],
 )
 def test_a_storage_key_with_a_cc_uuid_group_is_accepted(path: str) -> None:
-    for field in _identifier_fields():
-        if field.path == path:
-            assert _real_policy().apply(STORAGE_KEY_WITH_CC, field) == STORAGE_KEY_WITH_CC
+    matching = [field for field in _fields_of(FieldKind.MACHINE) if field.path == path]
+    assert matching  # si la ruta cambia de nombre o desaparece, la prueba no pasa en vacío
+    for field in matching:
+        assert _real_policy().apply(STORAGE_KEY_WITH_CC, field) == STORAGE_KEY_WITH_CC
+
+
+TYPED_IDENTITY_DOCUMENTS: Final = (
+    ("action_evidence_added", "/attachments[*]/filename", "CC 1020304050.pdf"),
+    ("action_evidence_added", "/attachments[*]/filename", "cedula 1020304050.jpg"),
+    ("action_evidence_added", "/attachments[*]/filename", "Juan Perez CC 1020304050.pdf"),
+    ("plant_policy_signed", "/legal_opinion_reference", "Concepto 2026-17 C.C. 79.123.456"),
+    ("closure", "/signer/professional_license", "CC 1020304050"),
+    ("user_account", "/professional_license", "CC 1020304050"),
+)
+"""Cédulas en identificadores que teclea una persona (revisión de VIG-218, ronda 2)."""
+
+
+@pytest.mark.parametrize(("record_type", "path", "text"), TYPED_IDENTITY_DOCUMENTS)
+def test_an_identity_document_typed_in_an_identifier_field_is_rejected(
+    record_type: str, path: str, text: str
+) -> None:
+    matching = [
+        field
+        for field in _fields_of(FieldKind.IDENTIFIER)
+        if (field.record_type, field.path) == (record_type, path)
+    ]
+    assert matching
+    for field in matching:
+        with pytest.raises(FreeTextRejected) as raised:
+            _real_policy().apply(text, field)
+        assert raised.value.reason == PERSON_ATTRIBUTION_DETECTED

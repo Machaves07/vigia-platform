@@ -39,16 +39,19 @@ espacio y los confusables de UTS #39 conservando la mayúscula: la je cirílica 
 - ``name``: los nombres visibles de usuarios (``…/display_name``, ``…_display_name``) y los de
   organización, planta y zona. Un nombre ahí es lo esperado: no se aplica ``proper_name``; el
   resto sí (un correo en un nombre se rechaza, N-14);
-- ``identifier``: licencias profesionales, versiones, claves de almacenamiento y de firma, zona
-  horaria, fuente del reloj, nombres de archivo y referencias de concepto legal. No se aplican
-  ``proper_name``, ``phone``, ``vehicle_plate`` ni ``identity_document``: sus cifras y códigos no
-  son de una persona, y un grupo de UUID como ``cc54-4333`` parecería una cédula (el correo y los
-  cargos con verbo sí se aplican);
+- ``identifier``: identificadores que **teclea una persona**: licencias profesionales, nombres de
+  archivo y referencias de concepto legal. No se aplican ``proper_name``, ``phone`` ni
+  ``vehicle_plate`` (sus cifras y códigos no son de una persona); ``identity_document`` sí: una
+  cédula en el nombre de un adjunto se rechaza;
+- ``machine``: identificadores que **genera una máquina**: claves de almacenamiento y de firma,
+  versiones de contrato, de software y de destino, fuente del reloj y zona horaria. Además de lo
+  anterior no se aplica ``identity_document``: un grupo de UUID como ``cc54-4333`` parecería una
+  cédula y el nodo perdería el hallazgo. El correo y los cargos con verbo se aplican en todas;
 - ``prose``: todo lo demás, con **todos** los patrones. Una ruta nueva sin declarar es ``prose``.
 
 Las rutas exentas de §2.12 (``/added[*]/value`` y ``/removed[*]/value`` de
 ``vocabulary_list_changed``, ``VALIDATOR_EXEMPT_PATHS``) no pasan por aquí, igual que en
-``blocked_vocabulary``. La metapropiedad PR-LAZ-24 fija las tres clases sobre el registro real.
+``blocked_vocabulary``. La metapropiedad PR-LAZ-24 fija las clases sobre el registro real.
 
 El rechazo es ``PersonAttributionRejected``: un ``FreeTextRejected`` con
 ``detail_code = loop_person_attribution_detected``, que el escritor responde como
@@ -135,20 +138,18 @@ class FieldKind(enum.Enum):
     PROSE = "prose"
     NAME = "name"
     IDENTIFIER = "identifier"
+    MACHINE = "machine"
 
 
+_IDENTIFIER_SKIPPED: Final = frozenset(
+    {AttributionPattern.PROPER_NAME, AttributionPattern.PHONE, AttributionPattern.VEHICLE_PLATE}
+)
 _SKIPPED: Final[Mapping[FieldKind, frozenset[AttributionPattern]]] = {
     FieldKind.PROSE: frozenset(),
     FieldKind.NAME: frozenset({AttributionPattern.PROPER_NAME}),
-    FieldKind.IDENTIFIER: frozenset(
-        {
-            AttributionPattern.PROPER_NAME,
-            AttributionPattern.PHONE,
-            AttributionPattern.VEHICLE_PLATE,
-            # Un grupo de UUID como «cc54-4333…» parece «cc» y un número: rechazaría hallazgos.
-            AttributionPattern.IDENTITY_DOCUMENT,
-        }
-    ),
+    FieldKind.IDENTIFIER: _IDENTIFIER_SKIPPED,
+    # Un grupo de UUID como «cc54-4333…» parece «cc» y un número: rechazaría hallazgos del nodo.
+    FieldKind.MACHINE: _IDENTIFIER_SKIPPED | {AttributionPattern.IDENTITY_DOCUMENT},
 }
 
 _SUGGESTIONS: Final[Mapping[AttributionPattern, str]] = {
@@ -186,29 +187,26 @@ _NAME_FIELDS: Final = frozenset(
 """Nombres de organización, planta y zona (los de ``identity`` y sus registros de alta)."""
 
 _IDENTIFIER_SEGMENTS: Final = frozenset(
-    {
-        "professional_license",
-        "contract_version",
-        "software_version",
-        "target_version",
-        "storage_key",
-        "key_id",
-        "timezone",
-        "filename",
-        "legal_opinion_reference",
-    }
+    {"professional_license", "filename", "legal_opinion_reference"}
 )
-_IDENTIFIER_SUFFIXES: Final = ("/clock/source",)
+"""Identificadores que teclea una persona."""
+_MACHINE_SEGMENTS: Final = frozenset(
+    {"contract_version", "software_version", "target_version", "storage_key", "key_id", "timezone"}
+)
+_MACHINE_SUFFIXES: Final = ("/clock/source",)
+"""Identificadores que genera una máquina (el nodo o la plataforma)."""
 
 
 def field_kind(field: FreeTextField) -> FieldKind:
-    """La clase de ``field``: ``name``, ``identifier`` o, si no se declaró, ``prose``."""
+    """La clase de ``field``: ``name``, ``identifier``, ``machine`` o, sin declarar, ``prose``."""
     last = field.path.rsplit("/", 1)[-1]
     if last == "display_name" or last.endswith("_display_name"):
         return FieldKind.NAME
     if (field.record_type, field.path) in _NAME_FIELDS:
         return FieldKind.NAME
-    if last in _IDENTIFIER_SEGMENTS or field.path.endswith(_IDENTIFIER_SUFFIXES):
+    if last in _MACHINE_SEGMENTS or field.path.endswith(_MACHINE_SUFFIXES):
+        return FieldKind.MACHINE
+    if last in _IDENTIFIER_SEGMENTS:
         return FieldKind.IDENTIFIER
     return FieldKind.PROSE
 
