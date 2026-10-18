@@ -76,7 +76,13 @@ from tests.hierarchy_support import (
 )
 from tests.integration.conftest import PostgresEndpoint
 from tests.integration.test_coverage_port import COVERAGE_TYPES
-from tests.isolation.laz_cases import LAZ_CASES, LAZ_EVENT_REGISTRARS, LazServices, laz_state
+from tests.isolation.laz_cases import (
+    LAZ_CASES,
+    LAZ_DENIED_UNDER_CONCESSION,
+    LAZ_EVENT_REGISTRARS,
+    LazServices,
+    laz_state,
+)
 from tests.isolation.route_cases import Call, Case, Ids, Kind
 from tests.ledger_database import evidence_values, insert_evidence, set_organization
 from tests.live_view_support import LIVE_VIEW_URL, LiveViewEnvironment, live_view_environment
@@ -1050,12 +1056,14 @@ PROVIDER_SIDE_ONLY: Final = frozenset(
 """Clave de la columna, pero solo desde la proveedora sin concesión (A-46): bajo concesión,
 ``not_found`` tras su ``provider_query``."""
 
-DENIED_UNDER_CONCESSION: Final = frozenset(
-    {("POST", "/use-agreements/{agreement_id}/confirmations")}
+DENIED_UNDER_CONCESSION: Final = (
+    frozenset({("POST", "/use-agreements/{agreement_id}/confirmations")})
+    | LAZ_DENIED_UNDER_CONCESSION
 )
 """La ruta se declara con ``transparency.read`` (en la columna), pero el servicio nunca deja
 confirmar bajo concesión (BR-GOB-27, G-9; VIG-149): ``not_found`` tras su ``provider_query``,
-con ``authorization_denied`` en la auditoría del cliente."""
+con ``authorization_denied`` en la auditoría del cliente. Las de U-04 vienen de ``laz_cases.py``
+(VIG-205)."""
 
 STATEFUL_WRITES: Final[Mapping[tuple[str, str], str]] = {
     # La zona de B no tiene catálogo: los encuadres no son sus cámaras.
@@ -2074,6 +2082,8 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
                             audit=sessions.audit,
                             outbox=Outbox(events, env.clock),
                             clock=sessions.clock,
+                            writer=writer,
+                            free_text=free_text,
                         )
                     ),
                 },

@@ -27,10 +27,11 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from hypothesis import given
 from hypothesis import strategies as st
+from vigia_contracts.clock import SimulatedClock
 from vigia_contracts.models.enumerations import RejectionCode
 from vigia_contracts.models.rejection_response import RejectionResponse
 
-from tests.attachment_support import attachment_world, utc
+from tests.attachment_support import utc
 from tests.factories import uuid7
 from tests.middleware_support import (
     NODE_HEARTBEAT_PATH,
@@ -47,7 +48,6 @@ from vigia_platform.accreditation.adapters.http.services import (
     AccreditationHttp,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
-from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.shared.api.app import (
     AppConfig,
     UnitRegistration,
@@ -69,7 +69,6 @@ from vigia_platform.shared.api.middleware import (
     parse_store_origins,
 )
 from vigia_platform.shared.api.middleware.headers import store_origin
-from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import Role
 
 LABELS = PlatformLabels.load()
@@ -94,6 +93,10 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "size_bytes": 10,
         "sha256": "a" * 64,
     },
+    ("PUT", "/loop/plants/{plant_id}/configuration"): {
+        "review_deadline_business_days": 7,
+        "reason": "Ajuste acordado en el comité de seguridad",
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -112,6 +115,7 @@ def _url(path: str, user_id: str | None = None) -> str:
         path.replace("{user_id}", user_id or str(uuid.uuid4()))
         .replace("{zone_id}", str(uuid.uuid4()))
         .replace("{action_id}", str(uuid.uuid4()))
+        .replace("{plant_id}", str(uuid.uuid4()))
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -125,10 +129,10 @@ def world() -> Iterator[tuple[Harness, Any, dict[str, str]]]:
     _ROLE_HEADERS.clear()
     _ROLE_HEADERS.update({**cookie_header(coordinator), **SAME_ORIGIN})
     # La tasa no es el asunto de este archivo (lo es de test_rate_limit.py).
+    # El arnés pone en ``app.state`` los dobles de ``loop`` (``middleware_support.loop_state``): el
+    # puerto de adjuntos real sobre memoria (sin acciones) y el doble de la configuración, para que
+    # un cuerpo válido llegue a su servicio.
     app = harness.app(rate_limiter=UnlimitedRateLimiter())
-    # El arnés no compone ``app.state`` de las unidades: el puerto de adjuntos real, con almacén y
-    # proyección en memoria (sin acciones), para que un cuerpo válido llegue a su servicio.
-    setattr(app.state, ATTACHMENTS_STATE_KEY, attachment_world(SimulatedClock(utc())).service)
     # La exportación (TASK-317) necesita la base: un cuerpo válido llega a un servicio que no
     # encuentra las zonas sintéticas (``not_found``), como el de adjuntos con la acción.
     setattr(app.state, ACCREDITATION_STATE_KEY, AccreditationHttp(exports=_NoZones()))  # type: ignore[arg-type]
@@ -171,6 +175,18 @@ def _headers_for(route: tuple[str, str], headers: dict[str, str]) -> dict[str, s
 
 def _routes(client: Any) -> list[DeclaredRoute]:
     return list(iter_declared_routes(client.app.routes))
+
+
+def _declared_detail_codes(client: Any, route: tuple[str, str]) -> frozenset[str]:
+    """Los ``detail_code`` que declara la ruta ``(método, plantilla)``."""
+    method, path = route
+    return frozenset(
+        code
+        for declared in _routes(client)
+        if declared.path == path and method in declared.methods
+        for declaration in declared.declarations
+        for code in declaration.detail_codes
+    )
 
 
 def test_the_catalog_of_body_routes_is_complete(world: tuple[Harness, Any, Any]) -> None:
@@ -240,6 +256,9 @@ def _mutated(
         elif "{action_id}" in path:
             bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
             url = path.replace("{action_id}", bad)
+        elif "{plant_id}" in path:
+            bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
+            url = path.replace("{plant_id}", bad)
         elif "plant_id" in body:
             body["plant_id"] = data.draw(st.sampled_from(["no-es-uuid", "", "0" * 31]))
         else:
@@ -250,10 +269,20 @@ def _mutated(
     return url, json.dumps(body).encode(), {"Content-Type": "application/json"}
 
 
-def _generic_error(response: Any) -> ApiErrorBody:
+def _generic_error(response: Any, detail_codes: frozenset[str] = frozenset()) -> ApiErrorBody:
+    """El rechazo con el mensaje genérico de su código y sin detalle interno.
+
+    ``detail_codes`` son los códigos de negocio que la ruta **declara** (``requires(...,
+    detail_codes=...)``, A-68): uno de ellos puede acompañar al ``code`` (p. ej. un motivo que falta
+    en ``PUT /loop/plants/{plant_id}/configuration``); cualquier otro ``detail_code``, no.
+    """
     body = ApiErrorBody.model_validate_json(response.content)
     assert body.message_es == LABELS.label("api_error_code", body.code.value)
-    assert set(response.json()) <= {"code", "message_es", "correlation_id", "retry_after_seconds"}
+    allowed = {"code", "message_es", "correlation_id", "retry_after_seconds"}
+    if body.detail_code is not None:
+        assert body.detail_code in detail_codes, (body.detail_code, detail_codes)
+        allowed.add("detail_code")
+    assert set(response.json()) <= allowed
     for marker in INTERNAL_MARKERS:
         assert marker not in response.text
     return body
@@ -268,7 +297,7 @@ def test_pr_nuc_38_every_mutated_body_is_a_generic_rejection(
     url, content, extra = _mutated(data, mutation, route)
     route_headers = _headers_for(route, headers)
     response = client.request(route[0], url, headers={**route_headers, **extra}, content=content)
-    body = _generic_error(response)
+    body = _generic_error(response, _declared_detail_codes(client, route))
     expected = (
         {ApiErrorCode.PAYLOAD_TOO_LARGE}
         if mutation == "oversized"

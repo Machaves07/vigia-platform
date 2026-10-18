@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
@@ -28,6 +28,7 @@ from vigia_contracts.clock import SimulatedClock
 from vigia_contracts.models.enumerations import RejectionCode
 
 from tests.api_support import World
+from tests.attachment_support import attachment_world
 from tests.signing_support import START
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCookie
 from vigia_platform.identity.authz.authorize import Resource
@@ -37,6 +38,16 @@ from vigia_platform.identity.authz.context import (
     SessionRow,
 )
 from vigia_platform.identity.authz.matrix import PermissionKey
+from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
+from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.config.parameters import (
+    INITIAL_DEFAULTS_REASON,
+    LoopSettings,
+    PlantLoopConfiguration,
+    check_values,
+)
+from vigia_platform.loop.config.service import validated_change
 from vigia_platform.node_api.rejections import NodeRejection
 from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.shared.api.declarations import (
@@ -57,6 +68,7 @@ from vigia_platform.shared.api.request_state import request_state
 from vigia_platform.shared.context import AllowedScope, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import RouteClass, current_route_class
 from vigia_platform.shared.ratelimit import Allowed, Budget, Limited, RateLimiter
+from vigia_platform.shared.signing.keys import to_millisecond
 
 __all__ = [
     "CLIENT_ORG",
@@ -98,12 +110,81 @@ def chain_units() -> tuple[UnitRegistration, ...]:
     ``test_fleet_node_identity.py`` y el aislamiento de ``tests/isolation``. Tampoco las de
     ``node_api``: desde TASK-223 publica el latido y el catálogo por zona, y este arnés declara sus
     propias rutas del contrato con ``HarnessNodeGate`` (las reales las prueban
-    ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``)."""
+    ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``).
+
+    Las de ``loop`` sí entran, con sus dobles en ``app.state`` (``loop_state``): los adjuntos de
+    cierre (TASK-310, el puerto real sobre memoria) y la configuración del lazo (TASK-304,
+    ``LoopConfigurationDouble``, sin base). Así los catálogos de CSRF y de cuerpos mutados
+    (PR-NUC-38) cubren todas las rutas de ``loop`` registradas."""
     return tuple(
         unit
         for unit in platform_units()
         if unit.name not in ("identity", "ledger", "catalog", "fleet", "node_api")
     )
+
+
+class LoopConfigurationDouble:
+    """Doble de ``LoopConfigurationService`` para el arnés, sin base.
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código
+    (``validated_change`` y ``check_values``): motivo, rangos, calendario y reglas entre
+    parámetros. Un cambio válido devuelve la versión 2 sobre los valores por defecto, sin escribir
+    nada. La lectura devuelve los valores por defecto (versión 1).
+    """
+
+    def __init__(self, clock: Any) -> None:
+        self._clock = clock
+        self._free_text = FreeTextPolicyRegistry()
+        self._free_text.seal()
+
+    def _configuration(
+        self, context: ScopeContext, plant_id: uuid.UUID, settings: LoopSettings, version: int
+    ) -> PlantLoopConfiguration:
+        role = context.actor.role_in_use or Role.ADMINISTRATOR
+        return PlantLoopConfiguration(
+            plant_id=plant_id,
+            organization_id=context.organization_id,
+            settings=settings,
+            timezone="America/Bogota",
+            version=version,
+            changed_at=to_millisecond(self._clock.now()),
+            changed_by={
+                "user_id": str(context.actor.id),
+                "display_name": context.actor.display_name_snapshot,
+                "role_in_use": role.value,
+            },
+            change_reason=INITIAL_DEFAULTS_REASON,
+        )
+
+    async def configuration(
+        self, context: ScopeContext, plant_id: uuid.UUID
+    ) -> PlantLoopConfiguration:
+        return self._configuration(context, plant_id, LoopSettings.defaults(), 1)
+
+    async def change(
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        *,
+        integers: Mapping[str, object],
+        business_calendar: object | None,
+        reason: object,
+    ) -> PlantLoopConfiguration:
+        request = validated_change(
+            self._free_text, integers=integers, business_calendar=business_calendar, reason=reason
+        )
+        settings = check_values(
+            LoopSettings.defaults().replaced(request.integers, request.business_calendar)
+        )
+        return self._configuration(context, plant_id, settings, 2)
+
+
+def loop_state(clock: Any) -> dict[str, Any]:
+    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos y configuración)."""
+    return {
+        ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
+        LOOP_STATE_KEY: LoopHttp(configuration=cast(Any, LoopConfigurationDouble(clock))),
+    }
 
 
 def cookie_header(cookie: SessionCookie) -> dict[str, str]:
@@ -384,7 +465,7 @@ class Harness:
             "origin_secret": b"k" * 32,
             "privacy_notice_version": self.privacy_notice_version,
             "authorizer": authorizer,
-            "state": {NODE_GATE_STATE_KEY: HarnessNodeGate()},
+            "state": {NODE_GATE_STATE_KEY: HarnessNodeGate(), **loop_state(self.world.clock)},
         }
         values.update(runtime)
         return self.world.app(

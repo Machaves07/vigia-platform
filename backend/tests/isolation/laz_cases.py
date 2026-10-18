@@ -11,6 +11,12 @@ de ``tests.isolation.route_cases``::
 y, si la ruta necesita servicios en ``app.state``, su constructor en ``LAZ_STATE`` (sobre
 ``LazServices``, la infraestructura real de la prueba) y los eventos que publica en
 ``LAZ_EVENT_REGISTRARS`` (TASK-317 añadió los dos ganchos; la prueba los consume una vez).
+
+``LAZ_DENIED_UNDER_CONCESSION`` (TASK-304) son las rutas cuya clave está en la columna
+``provider_installer`` pero cuyo servicio deniega bajo concesión (``not_found`` tras su
+``provider_query``, con ``authorization_denied`` en la auditoría del cliente). ``GET
+/loop/plants/{plant_id}/configuration`` es la primera: ``hierarchy.read`` la tienen todos los
+roles, también el instalador, y la configuración del lazo no es de la puesta en marcha (VIG-205).
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from tests.isolation.route_cases import Call, Case, Kind
 from vigia_platform.accreditation.adapters.http.services import (
@@ -29,13 +35,27 @@ from vigia_platform.accreditation.events import register_accreditation_event_typ
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.ledger.application.audit_writer import AuditWriter
+from vigia_platform.ledger.application.writer import EscritorExpediente
+from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.publish import OutboxPort
 from vigia_platform.shared.outbox.registries import EventTypeRegistry
 
-__all__ = ["LAZ_CASES", "LAZ_EVENT_REGISTRARS", "LAZ_STATE", "LazServices", "laz_state"]
+__all__ = [
+    "LAZ_CASES",
+    "LAZ_DENIED_UNDER_CONCESSION",
+    "LAZ_EVENT_REGISTRARS",
+    "LAZ_STATE",
+    "LazServices",
+    "laz_state",
+]
+
+_CONFIGURATION: Final = "/loop/plants/{plant_id}/configuration"
 
 
 class _Database(Protocol):
@@ -54,6 +74,25 @@ class LazServices:
     outbox: OutboxPort
     """Bandeja sobre un catálogo con los eventos de ``LAZ_EVENT_REGISTRARS``."""
     clock: Clock
+    writer: EscritorExpediente
+    """El escritor del expediente de la prueba (la configuración del lazo, TASK-304)."""
+    free_text: FreeTextPolicyRegistry
+
+
+def _configuration(services: LazServices) -> Mapping[str, object]:
+    database: Any = services.database
+    return {
+        LOOP_STATE_KEY: LoopHttp(
+            configuration=LoopConfigurationService(
+                repository=PostgresLoopConfigurationRepository(database),
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                free_text=services.free_text,
+                clock=services.clock,
+            ),
+        ),
+    }
 
 
 def _accreditation(services: LazServices) -> Mapping[str, object]:
@@ -70,7 +109,10 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
     }
 
 
-LAZ_STATE: tuple[Callable[[LazServices], Mapping[str, object]], ...] = (_accreditation,)
+LAZ_STATE: tuple[Callable[[LazServices], Mapping[str, object]], ...] = (
+    _configuration,  # TASK-304
+    _accreditation,  # TASK-317
+)
 """Constructores del ``app.state`` de las rutas de U-04 en la aplicación de la prueba."""
 
 LAZ_EVENT_REGISTRARS: tuple[Callable[[EventTypeRegistry], None], ...] = (
@@ -96,6 +138,26 @@ def _export_body(plant: Any, zone: Any) -> dict[str, Any]:
 
 
 LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
+    # VIG-205 (TASK-304): configuración del lazo de la planta (SUP-U05-38 y 39).
+    (
+        ("GET", _CONFIGURATION),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/plants/{i.plant}/configuration")),
+    ),
+    (
+        ("PUT", _CONFIGURATION),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "PUT",
+                f"/loop/plants/{i.plant}/configuration",
+                json={
+                    "review_deadline_business_days": 7,
+                    "reason": "Ajuste acordado en el comité de seguridad",
+                },
+            ),
+        ),
+    ),
+    # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
     (
         ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
         Case(
@@ -131,3 +193,8 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
+
+LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
+    {("GET", _CONFIGURATION)}
+)
+"""Rutas de U-04 con la clave en la columna que el servicio deniega bajo concesión."""

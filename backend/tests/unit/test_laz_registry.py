@@ -5,8 +5,8 @@
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
   ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de
-  adjuntos de cierre de ``loop`` (TASK-310) y las dos de exportación de ``accreditation``
-  (TASK-317).
+  adjuntos de cierre (TASK-310) y las dos de la configuración del lazo (TASK-304) de ``loop`` y
+  las dos de exportación de ``accreditation`` (TASK-317).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -41,6 +41,8 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
 )
+from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.events import LOOP_EVENT_TYPES
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
@@ -112,9 +114,10 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
     assert notifications.event_types is notifications_registration.notifications_event_types
 
 
-def test_the_u04_units_register_only_the_attachments_and_the_export_so_far() -> None:
-    # TASK-310: los adjuntos de cierre en loop; TASK-317: la exportación (dos rutas, export_worker
-    # con concurrencia 1 y su app.state) en accreditation. Nada más todavía.
+def test_the_u04_units_register_only_what_their_tasks_added() -> None:
+    # TASK-310: los adjuntos de cierre en loop; TASK-304: la configuración del lazo en loop;
+    # TASK-317: la exportación (dos rutas, export_worker con concurrencia 1 y su app.state) en
+    # accreditation. Nada más todavía.
     units = {unit.name: unit for unit in registered_units()}
     tasks = PeriodicTaskRegistry()
     consumers = ConsumerRegistry()
@@ -130,13 +133,17 @@ def test_the_u04_units_register_only_the_attachments_and_the_export_so_far() -> 
         ]
         state = unit.api_state(services)
         if name == "loop":
-            # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``.
+            # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``;
+            # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``.
             assert routes == [
                 ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
                 ("POST", "/loop/attachments/{attachment_id}/read-url"),
+                ("GET", "/loop/plants/{plant_id}/configuration"),
+                ("PUT", "/loop/plants/{plant_id}/configuration"),
             ]
-            assert set(state) == {ATTACHMENTS_STATE_KEY}
+            assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
+            assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
         elif name == "accreditation":
             # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker.
             assert routes == [
@@ -152,7 +159,7 @@ def test_the_u04_units_register_only_the_attachments_and_the_export_so_far() -> 
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("export_worker", ActorUnit.U04, ("export_requested",))
     ]
-    assert (attachment_router,) == registration.ROUTERS
+    assert (attachment_router, configuration_router) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()

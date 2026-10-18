@@ -53,6 +53,8 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
 )
+from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
@@ -183,8 +185,11 @@ type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type FreeTextRegistrar = Callable[[FreeTextPolicyRegistry], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (attachment_router,)
-"""Fábricas de los enrutadores de ``/loop/*``: hoy, los adjuntos de cierre (SUP-U05-09 y 10)."""
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
+    attachment_router,  # SUP-U05-09 y 10 (TASK-310)
+    configuration_router,  # SUP-U05-38 y 39 (TASK-304)
+)
+"""Fábricas de los enrutadores de ``/loop/*``."""
 
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
@@ -229,7 +234,10 @@ def _attachments_state(services: UnitServices) -> Mapping[str, object]:
     }
 
 
-API_STATE: Final[tuple[StateBuilder, ...]] = (_attachments_state,)
+API_STATE: Final[tuple[StateBuilder, ...]] = (
+    _attachments_state,  # ClosureAttachmentPort (TASK-310)
+    loop_http_state,  # LoopHttp (TASK-304)
+)
 
 U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **LOOP_TASKS,

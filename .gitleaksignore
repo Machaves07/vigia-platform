@@ -25,3 +25,8 @@ c0f6cabde92c322cc5a6ca90baf0f685173e6739:backend/tests/unit/test_migration_crede
 # real, con que las pruebas del soak comprueban que ningún trozo llega a stderr. El commit
 # siguiente arma la cabecera y el pie por partes en tiempo de ejecución.
 b5a03d19f2d870482d70b435b2b7c7cc8eccc594:backend/tests/load/test_load_units.py:private-key:595
+#
+# VIG-205: el nombre de una zona horaria IANA («America/Santiago») comparado con el atributo key
+# de la zona en una prueba del calendario; no es un secreto. El commit siguiente compara con la
+# constante SANTIAGO.
+15fd4d98e860b33b95d7a32c1fb1c9998b26d397:backend/tests/properties/laz/test_laz_calendar.py:generic-api-key:303
