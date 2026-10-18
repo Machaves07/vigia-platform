@@ -28,14 +28,20 @@ from vigia_platform.loop.application.attachments import (
     AttachmentRateLimited,
     ClosureAttachmentService,
 )
-from vigia_platform.loop.detail_codes import HTTP_STATUS_BY_DETAIL_CODE
+from vigia_platform.loop.detail_codes import HTTP_STATUS_BY_DETAIL_CODE, LoopDetailCode
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.storage import StorageUnavailable
 
-__all__ = ["ATTACHMENTS_STATE_KEY", "attachment_router", "attachment_service"]
+__all__ = [
+    "ATTACHMENTS_STATE_KEY",
+    "attachment_router",
+    "attachment_service",
+    "rejection_error",
+    "unavailable_error",
+]
 
 ATTACHMENTS_STATE_KEY: Final = "vigia_loop_attachments"
 
@@ -82,12 +88,12 @@ def attachment_service(request: Request) -> ClosureAttachmentService:
 Service = Annotated[ClosureAttachmentService, Depends(attachment_service)]
 
 
-def _rejected(error: AttachmentRejected) -> ApiError:
+def rejection_error(error: AttachmentRejected) -> ApiError:
     code, _ = HTTP_STATUS_BY_DETAIL_CODE[error.detail]
     return ApiError(code, detail_code=error.detail.value)
 
 
-def _unavailable(error: StorageUnavailable) -> ApiError:
+def unavailable_error(error: StorageUnavailable) -> ApiError:
     return ApiError(ApiErrorCode.STORAGE_UNAVAILABLE, retry_after_seconds=error.retry_after_seconds)
 
 
@@ -97,7 +103,15 @@ def attachment_router() -> APIRouter:
     @router.post(
         "/loop/actions/{action_id}/attachments/upload-grant",
         status_code=201,
-        dependencies=[requires(PermissionKey.ACTIONS_MANAGE.value)],
+        dependencies=[
+            requires(
+                PermissionKey.ACTIONS_MANAGE.value,
+                detail_codes=(
+                    LoopDetailCode.ATTACHMENT_TYPE_NOT_ALLOWED.value,
+                    LoopDetailCode.ATTACHMENT_TOO_LARGE.value,
+                ),
+            )
+        ],
         summary="Concesión de subida de un adjunto de cierre: un solo PUT de 15 minutos",
     )
     async def upload_grant(
@@ -117,7 +131,7 @@ def attachment_router() -> APIRouter:
                 sha256=body.sha256,
             )
         except AttachmentRejected as error:
-            raise _rejected(error) from None
+            raise rejection_error(error) from None
         except AttachmentSchemaInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         except AttachmentRateLimited as error:
@@ -125,7 +139,7 @@ def attachment_router() -> APIRouter:
                 ApiErrorCode.RATE_LIMITED, retry_after_seconds=error.retry_after_seconds
             ) from None
         except StorageUnavailable as error:
-            raise _unavailable(error) from None
+            raise unavailable_error(error) from None
         return UploadGrantResponse(
             attachment_id=issued.grant.attachment_id,
             storage_key=issued.grant.storage_key,
@@ -151,7 +165,7 @@ def attachment_router() -> APIRouter:
         except AttachmentUnreadable:
             raise ApiError(ApiErrorCode.CONFLICT) from None
         except StorageUnavailable as error:
-            raise _unavailable(error) from None
+            raise unavailable_error(error) from None
         return ReadUrlResponse(
             attachment_id=grant.attachment_id,
             url=grant.url,

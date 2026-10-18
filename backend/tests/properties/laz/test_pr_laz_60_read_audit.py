@@ -140,6 +140,20 @@ def test_the_url_is_pinned_to_the_verified_version_for_fifteen_minutes() -> None
     assert grant.expires_at == utc() + timedelta(minutes=15)
 
 
+def test_bytes_that_are_not_the_verified_ones_are_never_served() -> None:
+    """Mismo tamaño, otra suma: sin URL y con la entrada ``error`` (nunca ``success``)."""
+    world = attachment_world(SimulatedClock(utc()))
+    organization = uuid.uuid4()
+    attachment_id, stored = _stored(world, organization)
+    original = world.store.objects[stored.storage_key][0]
+    world.store.put(stored.storage_key, original[:-1] + b"?", "application/pdf")
+    with pytest.raises(AttachmentUnreadable):
+        asyncio.run(world.service.read_url(_reader(organization, stored.zone_id), attachment_id))
+    assert world.audit.successes() == []
+    assert [entry.outcome for entry in world.audit.entries] == ["error"]
+    assert "presign_attachment_get" not in world.store.calls
+
+
 def test_without_its_audit_entry_the_url_never_leaves() -> None:
     world = attachment_world(SimulatedClock(utc()))
     organization = uuid.uuid4()

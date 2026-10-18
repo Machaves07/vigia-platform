@@ -42,8 +42,10 @@ from vigia_platform.loop.adapters.attachments.rules import (
     AttachmentSchemaInvalid,
 )
 from vigia_platform.loop.adapters.attachments.store import StoreCircuit
+from vigia_platform.loop.adapters.http.attachment_routes import rejection_error, unavailable_error
 from vigia_platform.loop.application.attachments import AttachmentRateLimited, IssuedAttachmentGrant
 from vigia_platform.loop.detail_codes import LoopDetailCode
+from vigia_platform.shared.api.errors import ApiErrorCode
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import AllowedScope, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.outbox.breaker import CircuitState
@@ -350,3 +352,23 @@ def test_a_stopped_store_is_declared_and_the_circuit_spares_it_until_the_probe()
     issued = _grant(world, context, action)  # la sonda pasa y cierra
     assert issued.upload.method == "PUT"
     assert world.service.signer.circuit.state is CircuitState.CLOSED
+
+
+@pytest.mark.parametrize(
+    "detail", [LoopDetailCode.ATTACHMENT_TYPE_NOT_ALLOWED, LoopDetailCode.ATTACHMENT_TOO_LARGE]
+)
+def test_business_rejections_travel_as_invalid_request_with_their_detail_code(
+    detail: LoopDetailCode,
+) -> None:
+    error = rejection_error(AttachmentRejected(detail))
+    assert (error.code, error.status_code, error.detail_code) == (
+        ApiErrorCode.INVALID_REQUEST,
+        400,
+        detail.value,
+    )
+
+
+def test_an_unavailable_store_travels_as_storage_unavailable_with_retry() -> None:
+    error = unavailable_error(StorageUnavailable("head_object"))
+    assert (error.code, error.status_code) == (ApiErrorCode.STORAGE_UNAVAILABLE, 503)
+    assert error.retry_after_seconds == 5
