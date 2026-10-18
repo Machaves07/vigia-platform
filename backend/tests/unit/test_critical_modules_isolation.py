@@ -24,6 +24,10 @@ CRITICAL_MODULES = (
     "vigia_platform.ledger.chain",
     "vigia_platform.shared.signing",
     "vigia_platform.shared.crypto",
+    # Módulos sin marco de U-04 (PAT-LAZ-SEG-09, TASK-305).
+    "vigia_platform.loop.domain.lifecycle",
+    "vigia_platform.loop.projection.fold",
+    "vigia_platform.loop.projection.digest",
 )
 
 
