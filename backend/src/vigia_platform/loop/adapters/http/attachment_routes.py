@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from vigia_platform.identity.authz.matrix import PermissionKey
-from vigia_platform.loop.application.attachments import ClosureAttachmentService
+from vigia_platform.loop.application.attachments import (
+    AttachmentRateLimited,
+    ClosureAttachmentService,
+)
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
@@ -89,6 +92,10 @@ def attachment_router() -> APIRouter:
             raise ApiError(ApiErrorCode.NOT_FOUND) from None
         except ValueError:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
+        except AttachmentRateLimited as error:
+            raise ApiError(
+                ApiErrorCode.RATE_LIMITED, retry_after_seconds=error.retry_after_seconds
+            ) from None
         except StorageUnavailable as error:
             raise ApiError(
                 ApiErrorCode.STORAGE_UNAVAILABLE, retry_after_seconds=error.retry_after_seconds

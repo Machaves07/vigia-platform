@@ -60,6 +60,7 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
+from vigia_platform.shared.ratelimit import RateLimiter
 
 if TYPE_CHECKING:
     from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -177,6 +178,7 @@ def _attachments_state(services: UnitServices) -> Mapping[str, object]:
             reader=ClosureAttachmentReader(storage),
             clock=services.clock,
             audit=services.audit,
+            limiter=RateLimiter(services.clock),
         )
     }
 

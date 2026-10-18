@@ -16,9 +16,20 @@ from vigia_platform.loop.adapters.attachments.grants import (
 from vigia_platform.loop.adapters.attachments.read import ClosureAttachmentReader
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.ratelimit import (
+    CLOSURE_ATTACHMENT_BUDGET,
+    Limited,
+    RateLimiter,
+    closure_attachment_key,
+)
 from vigia_platform.shared.storage import PresignedRequest
 
 __all__ = ["AttachmentRepository", "ClosureAttachmentService", "IssuedAttachmentGrant"]
+
+
+class AttachmentRateLimited(Exception):
+    def __init__(self, retry_after_seconds: int) -> None:
+        self.retry_after_seconds = retry_after_seconds
 
 
 class AttachmentRepository(Protocol):
@@ -48,6 +59,7 @@ class ClosureAttachmentService:
     reader: ClosureAttachmentReader
     clock: Clock
     audit: AuditWriter
+    limiter: RateLimiter
 
     async def grant_upload(
         self,
@@ -59,6 +71,11 @@ class ClosureAttachmentService:
         sha256: object,
         random_bytes: Callable[[int], bytes],
     ) -> IssuedAttachmentGrant:
+        limit = self.limiter.check(
+            closure_attachment_key(context.actor.id), CLOSURE_ATTACHMENT_BUDGET
+        )
+        if isinstance(limit, Limited):
+            raise AttachmentRateLimited(limit.retry_after_seconds)
         scope = await self.repository.action_scope(context, action_id)
         if scope is None:
             raise LookupError("acción no encontrada")
