@@ -95,6 +95,7 @@ __all__ = [
     "ProjectionInconsistent",
     "ProjectionInput",
     "Step",
+    "aggregation_bucket",
     "episode_term",
     "finding_term",
     "fold",
@@ -346,7 +347,8 @@ def subject_id_of(item: ProjectionInput) -> uuid.UUID | None:
     return None
 
 
-def _bucket(moment: datetime, minutes: int) -> datetime:
+def aggregation_bucket(moment: datetime, minutes: int) -> datetime:
+    """``moment`` truncado al inicio de su ventana de ``minutes`` (``occurred_at_bucket``, §2.2)."""
     window = timedelta(minutes=minutes)
     return _EPOCH + ((moment - _EPOCH) // window) * window
 
@@ -439,7 +441,7 @@ def _new_finding(
         walk_test_regression_pending=False,
         walk_test_regression_cause=None,
         occurred_at_exact=occurred,
-        occurred_at_bucket=_bucket(occurred, window),
+        occurred_at_bucket=aggregation_bucket(occurred, window),
         age_days=0,
         evidence_flagged=False,
         missing_segments_declared=missing_segments,

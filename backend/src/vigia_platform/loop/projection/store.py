@@ -30,6 +30,16 @@ segunda ve ``last_record_id`` y no hace nada (PR-LAZ-43). Una planta no bloquea 
 Las columnas que se actualizan son solo las que ``laz_0029`` concede a ``vigia_app``
 (``_EPISODE_MUTABLE`` y ``_FINDING_STATE_MUTABLE``): la organización, la planta, la zona, el
 sujeto, el estándar con que se evaluó y el instante del hecho no cambian nunca.
+
+**Enriquecimiento** (TASK-341; NFR-LAZ-05): ``apply_in_transaction(..., enrich=...)`` rellena las
+columnas que el pliegue deja con el valor conservador **antes** de escribir la fila (el
+``occurred_at_bucket`` es la clave de partición y no se puede cambiar después);
+``update_enrichment`` cambia las columnas enriquecidas (``ENRICHED_COLUMNS``) de todas las filas
+de una selección (una zona, varias zonas o las acciones de un responsable) con **una sola
+sentencia** ``UPDATE … FROM unnest(…)``, después de bloquear el control de cada planta (en orden de
+``plant_id``) y todas las filas (``SELECT … ORDER BY plant_id, finding_state_id FOR UPDATE``, de una
+vez), y solo las que aún no llevan el ``last_event_id`` del evento: la segunda entrega del mismo
+evento no escribe nada (BR-LAZ-151).
 """
 
 from __future__ import annotations
@@ -37,11 +47,11 @@ from __future__ import annotations
 import dataclasses
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Final
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import ColumnElement, insert, select, text, update
 from sqlalchemy.engine import Row
 from vigia_contracts.models.enumerations import AcceptanceStatus
 
@@ -69,7 +79,19 @@ from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.publish import NewEvent
 
-__all__ = ["LoopProjectionStore", "ProjectionRecordMissing", "projection_input"]
+__all__ = [
+    "ENRICHED_COLUMNS",
+    "Enrich",
+    "LoopProjectionStore",
+    "ProjectionRecordMissing",
+    "RowChange",
+    "projection_input",
+]
+
+type Enrich = Callable[[FindingStateRow | None, FindingStateRow], FindingStateRow]
+"""Enriquece la fila que el pliegue calculó; recibe también la fila anterior (o ``None``)."""
+type RowChange = Callable[[FindingStateRow], FindingStateRow]
+"""Cambia las columnas enriquecidas de una fila de la selección de ``update_enrichment``."""
 
 _RECORD: Final = text(
     "SELECT record_id, organization_id, plant_id, chain_sequence, record_type, received_at,"
@@ -142,6 +164,53 @@ _FINDING_STATE_MUTABLE: Final = tuple(
 """Columnas de ``loop.finding_state`` con ``UPDATE`` de ``vigia_app`` (``laz_0029``): todas menos
 lo que nace con el hallazgo."""
 
+ENRICHED_COLUMNS: Final = (
+    "assignee_inactive",
+    "zone_agreement_revoked",
+    "zone_agreement_revoked_at",
+    "single_occupancy_zone",
+    "aggregation_window_minutes",
+    "walk_test_regression_pending",
+    "walk_test_regression_cause",
+)
+"""Lo único que ``update_enrichment`` puede cambiar (NFR-LAZ-05 y BR-LAZ-154)."""
+_STAMP_COLUMNS: Final = frozenset({"last_event_id", "projection_updated_at", "projection_digest"})
+
+_UPDATE_ENRICHED: Final = text(
+    "UPDATE loop.finding_state AS f SET"
+    " assignee_inactive = v.assignee_inactive,"
+    " zone_agreement_revoked = v.zone_agreement_revoked,"
+    " zone_agreement_revoked_at = v.zone_agreement_revoked_at,"
+    " single_occupancy_zone = v.single_occupancy_zone,"
+    " aggregation_window_minutes = v.aggregation_window_minutes,"
+    " walk_test_regression_pending = v.walk_test_regression_pending,"
+    " walk_test_regression_cause = v.walk_test_regression_cause,"
+    " last_event_id = v.last_event_id,"
+    " projection_updated_at = v.projection_updated_at,"
+    " projection_digest = v.projection_digest"
+    " FROM unnest("
+    " CAST(:finding_state_id AS uuid[]), CAST(:occurred_at_bucket AS timestamptz[]),"
+    " CAST(:assignee_inactive AS boolean[]), CAST(:zone_agreement_revoked AS boolean[]),"
+    " CAST(:zone_agreement_revoked_at AS timestamptz[]),"
+    " CAST(:single_occupancy_zone AS boolean[]), CAST(:aggregation_window_minutes AS integer[]),"
+    " CAST(:walk_test_regression_pending AS boolean[]),"
+    " CAST(:walk_test_regression_cause AS text[]), CAST(:last_event_id AS uuid[]),"
+    " CAST(:projection_updated_at AS timestamptz[]), CAST(:projection_digest AS text[])"
+    " ) AS v(finding_state_id, occurred_at_bucket, assignee_inactive, zone_agreement_revoked,"
+    " zone_agreement_revoked_at, single_occupancy_zone, aggregation_window_minutes,"
+    " walk_test_regression_pending, walk_test_regression_cause, last_event_id,"
+    " projection_updated_at, projection_digest)"
+    " WHERE f.organization_id = :organization_id"
+    " AND f.finding_state_id = v.finding_state_id"
+    " AND f.occurred_at_bucket = v.occurred_at_bucket"
+)
+"""El cambio de todas las filas de la selección en **una** sentencia (NFR-LAZ-05)."""
+_ADVANCE_EVENT: Final = text(
+    "UPDATE loop.loop_projection_checkpoint SET"
+    " last_applied_event_id = :event_id, projection_digest = :projection_digest"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+)
+
 
 class ProjectionRecordMissing(LookupError):
     """El registro del recibo no está en el expediente visible para la transacción."""
@@ -213,6 +282,53 @@ def _finding(row: Row[Any]) -> FindingStateRow:
     return FindingStateRow(**values)
 
 
+def _enriched(
+    previous: FindingStateRow | None, computed: FindingStateRow, enrich: Enrich
+) -> FindingStateRow:
+    row = enrich(previous, computed)
+    if previous is not None:
+        changed = [
+            name for name in _FINDING_STATE_FIXED if getattr(row, name) != getattr(computed, name)
+        ]
+        if changed:
+            raise ValueError(f"el enriquecimiento no puede cambiar {sorted(changed)}")
+    return dataclasses.replace(row, projection_digest=row.computed_digest())
+
+
+def _stamped(
+    row: FindingStateRow, change: RowChange, event_id: uuid.UUID, at: datetime
+) -> FindingStateRow:
+    """La fila tras ``change`` con el evento que la cambió y su resumen recalculado."""
+    changed = change(row)
+    touched = [
+        field.name
+        for field in dataclasses.fields(FindingStateRow)
+        if field.name not in ENRICHED_COLUMNS
+        and field.name not in _STAMP_COLUMNS
+        and getattr(changed, field.name) != getattr(row, field.name)
+    ]
+    if touched:
+        raise ValueError(f"update_enrichment solo cambia lo enriquecido, no {touched}")
+    stamped = dataclasses.replace(changed, last_event_id=event_id, projection_updated_at=at)
+    return dataclasses.replace(stamped, projection_digest=stamped.computed_digest())
+
+
+def _enriched_arrays(organization_id: uuid.UUID, rows: Sequence[FindingStateRow]) -> dict[str, Any]:
+    """Los parámetros de ``_UPDATE_ENRICHED``: una lista por columna, en el orden de las filas."""
+    names = (
+        "finding_state_id",
+        "occurred_at_bucket",
+        *ENRICHED_COLUMNS,
+        "last_event_id",
+        "projection_updated_at",
+        "projection_digest",
+    )
+    return {
+        "organization_id": organization_id,
+        **{name: [getattr(row, name) for row in rows] for name in names},
+    }
+
+
 def _episode_values(row: EpisodeRow) -> dict[str, Any]:
     values = dataclasses.asdict(row)
     values["segment_record_ids"] = list(row.segment_record_ids)
@@ -226,7 +342,11 @@ class LoopProjectionStore:
     """``apply_in_transaction``: la proyección en la misma transacción que el registro."""
 
     async def apply_in_transaction(
-        self, transaction: Transaction, source: ProjectionInput | Receipt
+        self,
+        transaction: Transaction,
+        source: ProjectionInput | Receipt,
+        *,
+        enrich: Enrich | None = None,
     ) -> Step:
         """Aplica ``source`` (el recibo de una escritura o el registro de un evento).
 
@@ -234,7 +354,11 @@ class LoopProjectionStore:
         duplicado del escritor o si el tipo no afecta a la proyección. Lanza
         ``ProjectionInconsistent`` si el registro no es aplicable (y la transacción no debe
         confirmarse) y ``ProjectionRecordMissing`` si el recibo no corresponde a ningún registro
-        visible."""
+        visible.
+
+        ``enrich`` (la vía de eventos, TASK-341) recibe la fila anterior y la que calculó el
+        pliegue, y devuelve la que se escribe; el resumen de la fila se recalcula aquí. En una fila
+        que ya existía no puede cambiar lo que nace con el hallazgo (``ValueError``)."""
         if isinstance(source, Receipt):
             if source.status is not AcceptanceStatus.ACCEPTED:
                 return Step(None, None, False)
@@ -255,6 +379,10 @@ class LoopProjectionStore:
             episode = await self._episode(transaction, item, subject)
             finding = await self._finding(transaction, item, subject)
             result = step(episode, finding, item)
+            if enrich is not None and result.applied and result.finding is not None:
+                result = dataclasses.replace(
+                    result, finding=_enriched(finding, result.finding, enrich)
+                )
             if result.applied:
                 digest = await self._write(transaction, episode, finding, result, digest)
         await transaction.execute(
@@ -333,9 +461,93 @@ class LoopProjectionStore:
             event_id=event_id,
         )
 
+    async def preview(
+        self, transaction: Transaction, item: ProjectionInput
+    ) -> tuple[FindingStateRow | None, Step]:
+        """La fila actual del sujeto y el ``Step`` que aplicar ``item`` daría ahora, **sin
+        bloquear ni escribir**.
+
+        La vía de eventos lo usa para saber, antes de tomar ningún candado de la proyección, si
+        el tramo llegará tarde (y escribir antes su registro, en el orden de candados del
+        módulo) y si el hallazgo es nuevo (y consultar los puertos solo entonces)."""
+        if item.record_type not in PROJECTED_RECORD_TYPES or item.plant_id is None:
+            return None, Step(None, None, False)
+        subject = subject_id_of(item)
+        if subject is None:
+            return None, Step(None, None, False)
+        episode = await self._episode(transaction, item, subject, lock=False)
+        finding = await self._finding(transaction, item, subject, lock=False)
+        return finding, step(episode, finding, item)
+
+    async def update_enrichment(
+        self,
+        transaction: Transaction,
+        *,
+        event_id: uuid.UUID,
+        at: datetime,
+        change: RowChange,
+        plant_ids: Sequence[uuid.UUID] | None = None,
+        zone_ids: Sequence[uuid.UUID] | None = None,
+        assignee_user_id: uuid.UUID | None = None,
+    ) -> int:
+        """Aplica ``change`` a las filas seleccionadas que aún no vieron ``event_id``.
+
+        La selección es la de la organización de la transacción, acotada por ``plant_ids``,
+        ``zone_ids`` y ``assignee_user_id`` (los que lleguen). Orden de candados: el control de
+        cada planta (``plant_id`` ascendente), después **todas** las filas de una vez
+        (``plant_id, finding_state_id``); luego **una** sentencia para todas las filas y el control
+        de cada planta. Devuelve cuántas filas escribió (0 si el evento ya se aplicó)."""
+        organization_id = transaction.context.organization_id
+        conditions: list[ColumnElement[bool]] = [FINDING_STATE.c.organization_id == organization_id]
+        if zone_ids is not None:
+            if not zone_ids:
+                return 0
+            conditions.append(FINDING_STATE.c.zone_id.in_(list(dict.fromkeys(zone_ids))))
+        if assignee_user_id is not None:
+            conditions.append(FINDING_STATE.c.assignee_user_id == assignee_user_id)
+        if plant_ids is None:
+            found = select(FINDING_STATE.c.plant_id).where(*conditions).distinct()
+            plant_ids = [_uuid(row.plant_id) for row in (await transaction.execute(found)).all()]
+        plants = sorted(set(plant_ids))
+        if not plants:
+            return 0
+        digests: dict[uuid.UUID, str] = {}
+        for plant_id in plants:
+            partition = {"organization_id": organization_id, "plant_id": plant_id}
+            await transaction.execute(_ENSURE_CHECKPOINT, partition)
+            checkpoint = (await transaction.execute(_LOCK_CHECKPOINT, partition)).one()
+            digests[plant_id] = checkpoint.projection_digest or EMPTY_PARTITION_DIGEST
+        statement = (
+            select(FINDING_STATE)
+            .where(*conditions)
+            .where(FINDING_STATE.c.plant_id.in_(plants))
+            .where(FINDING_STATE.c.last_event_id != event_id)
+            .order_by(FINDING_STATE.c.plant_id, FINDING_STATE.c.finding_state_id)
+            .with_for_update()
+        )
+        before = [_finding(row) for row in (await transaction.execute(statement)).all()]
+        after = [_stamped(row, change, event_id, at) for row in before]
+        if after:
+            await transaction.execute(_UPDATE_ENRICHED, _enriched_arrays(organization_id, after))
+        for old, new in zip(before, after, strict=True):
+            digests[old.plant_id] = replace_term(
+                digests[old.plant_id], finding_term(old), finding_term(new)
+            )
+        for plant_id in plants:
+            await transaction.execute(
+                _ADVANCE_EVENT,
+                {
+                    "organization_id": organization_id,
+                    "plant_id": plant_id,
+                    "event_id": event_id,
+                    "projection_digest": digests[plant_id],
+                },
+            )
+        return len(after)
+
     @staticmethod
     async def _episode(
-        transaction: Transaction, item: ProjectionInput, subject: uuid.UUID
+        transaction: Transaction, item: ProjectionInput, subject: uuid.UUID, *, lock: bool = True
     ) -> EpisodeRow | None:
         # ``episode_id`` es la clave primaria: no hace falta la planta. El alcance por planta lo
         # pone ``finding_state`` (un tramo de otra planta no encuentra el estado y falla al crear).
@@ -343,22 +555,24 @@ class LoopProjectionStore:
             select(EPISODE)
             .where(EPISODE.c.organization_id == item.organization_id)
             .where(EPISODE.c.episode_id == subject)
-            .with_for_update()
         )
+        if lock:
+            statement = statement.with_for_update()
         rows = (await transaction.execute(statement)).all()
         return _episode(rows[0]) if rows else None
 
     @staticmethod
     async def _finding(
-        transaction: Transaction, item: ProjectionInput, subject: uuid.UUID
+        transaction: Transaction, item: ProjectionInput, subject: uuid.UUID, *, lock: bool = True
     ) -> FindingStateRow | None:
         statement = (
             select(FINDING_STATE)
             .where(FINDING_STATE.c.organization_id == item.organization_id)
             .where(FINDING_STATE.c.plant_id == item.plant_id)
             .where(FINDING_STATE.c.subject_id == subject)
-            .with_for_update()
         )
+        if lock:
+            statement = statement.with_for_update()
         rows = (await transaction.execute(statement)).all()
         return _finding(rows[0]) if rows else None
 
