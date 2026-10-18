@@ -519,22 +519,22 @@ class ArchiveWriter:
             if document is not None:
                 document.write(piece)
 
-        try:
-            async for chunk in _chunks(chunks):
-                view = memoryview(chunk)
-                for start in range(0, len(view), SLICE_BYTES):
-                    piece = view[start : start + SLICE_BYTES]
-                    written += len(piece)
-                    if written > artifact.size_bytes:
-                        raise ValueError("el artefacto supera su tamaño declarado")
-                    await self._run(functools.partial(write, piece))
-                    await volume.upload.drain()
-                    if document is not None:
-                        await document.drain()
-            if written != artifact.size_bytes:
-                raise ValueError("el artefacto no llega a su tamaño declarado")
-        finally:
-            await self._run(entry.close)
+        # Si algo falla a mitad, la entrada se queda abierta: el ``async with`` abandona el paquete
+        # entero (cerrarla aquí podría cruzarse con una escritura cancelada aún en su hilo).
+        async for chunk in _chunks(chunks):
+            view = memoryview(chunk)
+            for start in range(0, len(view), SLICE_BYTES):
+                piece = view[start : start + SLICE_BYTES]
+                written += len(piece)
+                if written > artifact.size_bytes:
+                    raise ValueError("el artefacto supera su tamaño declarado")
+                await self._run(functools.partial(write, piece))
+                await volume.upload.drain()
+                if document is not None:
+                    await document.drain()
+        if written != artifact.size_bytes:
+            raise ValueError("el artefacto no llega a su tamaño declarado")
+        await self._run(entry.close)
         await volume.upload.drain()
         volume.directory += _CENTRAL_HEADER + len(artifact.path.encode("ascii"))
         volume.entries += 1

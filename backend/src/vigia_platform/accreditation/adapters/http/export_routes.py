@@ -62,6 +62,7 @@ from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.clock import Clock
+from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = ["ExportStatusOut", "export_router", "export_status_view"]
@@ -76,6 +77,8 @@ _MAX_ZONES_PARSED: Final = 4 * MAX_ZONES
 cuerpo inválido; por encima de esto, ``invalid_request``."""
 
 Services = Annotated[AccreditationHttp, Depends(accreditation_http)]
+
+_log = get_logger("accreditation.http")
 
 
 class _Strict(BaseModel):
@@ -279,6 +282,7 @@ def export_router() -> APIRouter:
         except ExportNotDownloadable as error:
             return await _conflict(request, error)
         except ExportPackageUnreadable:
+            _log.error("exportación lista sin objetos escritos", export_request_id=str(export_id))
             raise ApiError(ApiErrorCode.INTERNAL_ERROR) from None
         return ExportDownloadOut(
             export_id=grant.export_id,
@@ -313,6 +317,7 @@ def export_router() -> APIRouter:
         except ExportNotDownloadable as error:
             return await _conflict(request, error)
         except ExportPackageUnreadable:
+            _log.error("exportación lista sin objetos escritos", export_request_id=str(export_id))
             raise ApiError(ApiErrorCode.INTERNAL_ERROR) from None
         return ExportDocumentUrlOut(
             export_id=grant.export_id,
