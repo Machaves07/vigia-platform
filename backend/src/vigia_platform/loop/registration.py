@@ -176,6 +176,7 @@ def _attachments_state(services: UnitServices) -> Mapping[str, object]:
             grants=ClosureObjectStore(storage),
             reader=ClosureAttachmentReader(storage),
             clock=services.clock,
+            audit=services.audit,
         )
     }
 

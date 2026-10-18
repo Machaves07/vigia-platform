@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol
 
+from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter, ResourceRef
 from vigia_platform.loop.adapters.attachments.grants import (
     AttachmentUploadGrant,
     ClosureObjectStore,
@@ -46,6 +47,7 @@ class ClosureAttachmentService:
     grants: ClosureObjectStore
     reader: ClosureAttachmentReader
     clock: Clock
+    audit: AuditWriter
 
     async def grant_upload(
         self,
@@ -76,11 +78,16 @@ class ClosureAttachmentService:
         upload = await self.grants.grant(grant, self.clock.now())
         return IssuedAttachmentGrant(grant, upload)
 
-    async def read_url(
-        self, context: ScopeContext, attachment_id: uuid.UUID
-    ) -> str:
+    async def read_url(self, context: ScopeContext, attachment_id: uuid.UUID) -> str:
         key = await self.repository.attachment_key(context, attachment_id)
         if key is None:
             raise LookupError("adjunto no encontrado")
         now = self.clock.now()
-        return (await self.reader.read_url(key, now, now + timedelta(minutes=15))).url
+        issued = await self.reader.read_url(key, now, now + timedelta(minutes=15))
+        await self.audit.append(
+            context,
+            AuditOperation.CLOSURE_ATTACHMENT_READ_GRANTED,
+            resource=ResourceRef("closure_attachment", attachment_id),
+            result_count=1,
+        )
+        return issued.url

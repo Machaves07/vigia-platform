@@ -103,6 +103,7 @@ class AuditOperation(enum.StrEnum):
     LEDGER_READ = "ledger_read"
     LEDGER_DETAIL_READ = "ledger_detail_read"
     EVIDENCE_READ_GRANTED = "evidence_read_granted"
+    CLOSURE_ATTACHMENT_READ_GRANTED = "closure_attachment_read_granted"
     LABEL_READ = "label_read"
     COVERAGE_READ = "coverage_read"
     AUDIT_READ = "audit_read"
