@@ -56,11 +56,18 @@ OTEL_COLLECTOR_IMAGE = (
 QUEUE_KEY_PENDING_WINDOW_DAYS = 30
 # H-LAZ-9 (§5): el tema usa vigia-queue mientras el primer despliegue no demuestre lo contrario.
 EMAIL_TOPIC_SERVICE_MANAGED_KEY = False
+# H-LAZ-10 (§9.1): sin la condición del conjunto en ses:SendEmail hasta confirmar su clave.
+SES_CONFIGURATION_SET_CONDITION = False
+# H-LAZ-11 (§4.2): sin la suscripción de reputación hacia vigia-alerts hasta confirmarla.
+SES_REPUTATION_SUBSCRIPTION = False
 LOOP = LoopConfig(
     assistant_secret=True,
     email_topic_service_managed_key=EMAIL_TOPIC_SERVICE_MANAGED_KEY,
     retained=True,
     queue_key_pending_window_days=QUEUE_KEY_PENDING_WINDOW_DAYS,
+    email_dns=True,
+    ses_configuration_set_condition=SES_CONFIGURATION_SET_CONDITION,
+    ses_reputation_subscription=SES_REPUTATION_SUBSCRIPTION,
 )
 
 
