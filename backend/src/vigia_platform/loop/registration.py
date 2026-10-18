@@ -15,7 +15,10 @@ manifiestos de U-04, escritos **a mano** (no derivados de los registros):
 - ``U04_EVENT_TYPES``: los 25 eventos de §11.3 (nota R14 de §7: 25, no 20; 21 del lazo y 4 de
   la acreditación; ``user_invited`` no es de U-04, U04-H-13);
 - ``U04_TASKS``: las tareas periódicas con su cadencia e iteración, todas con ``unit = U-04``;
-- ``U04_CONSUMERS``: los consumidores con su concurrencia, todos con ``unit = U-04``.
+- ``U04_CONSUMERS``: los consumidores con su concurrencia, todos con ``unit = U-04``;
+- ``U04_FREE_TEXT_VALIDATORS``: los validadores de texto libre (BLM §9: sin ellos U-04 **no
+  arranca**). Los mira ``loop_tasks`` sobre la política ya sellada de ``UnitServices``, porque
+  ``required`` solo recibe los tipos y el catálogo (``units.py`` no se edita).
 
 Si falta uno, o una tarea cambió de cadencia, unidad o iteración, ``vigia-api``,
 ``vigia-worker`` y ``vigia-admin`` no arrancan y la salida nombra lo que falta
@@ -35,10 +38,17 @@ from vigia_platform.accreditation.registration import (
     ACCREDITATION_CONSUMERS,
     ACCREDITATION_TASKS,
 )
+from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
 from vigia_platform.loop.record_types import register_loop_record_types
+from vigia_platform.loop.validators.cache import VocabularyCache
+from vigia_platform.loop.validators.vocabulary import (
+    BLOCKED_VOCABULARY,
+    BlockedVocabularyValidator,
+    initial_vocabulary,
+)
 from vigia_platform.notifications.registration import (
     NOTIFICATIONS_CONSUMERS,
     NOTIFICATIONS_TASKS,
@@ -52,6 +62,7 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
+from vigia_platform.shared.runtime.config import RegistrationIncomplete
 
 if TYPE_CHECKING:
     from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -70,6 +81,7 @@ __all__ = [
     "TASK_REGISTRARS",
     "U04_CONSUMERS",
     "U04_EVENT_TYPES",
+    "U04_FREE_TEXT_VALIDATORS",
     "U04_RECORD_TYPES",
     "U04_TASKS",
     "loop_api_state",
@@ -79,7 +91,9 @@ __all__ = [
     "loop_record_types",
     "loop_routers",
     "loop_tasks",
+    "missing_free_text_validators",
     "missing_u04_registrations",
+    "register_blocked_vocabulary",
 ]
 
 U04_RECORD_TYPES: Final = frozenset(
@@ -156,8 +170,26 @@ LOOP_CONSUMERS: Final[Mapping[str, int]] = {}
 """Consumidores del lazo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = ()
 
-FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = ()
-"""Los validadores de texto libre de U-04 (``blocked_vocabulary``, ``person_attribution``)."""
+
+def register_blocked_vocabulary(registry: FreeTextPolicyRegistry) -> None:
+    """``blocked_vocabulary`` (TASK-303) con su caché por proceso y su preparador.
+
+    El preparador comprueba la versión de la lista al abrir cada escritura (PAT-LAZ-REN-02); el
+    validador solo lee la caché. La lista inicial se compila aquí, al arrancar, y no en la primera
+    escritura (expandir sus lemas lee el diccionario: del orden de un segundo).
+    """
+    initial_vocabulary()
+    cache = VocabularyCache(PostgresVocabularyStore())
+    registry.register(BLOCKED_VOCABULARY, BlockedVocabularyValidator(cache.compiled_for))
+    registry.register_preparer(BLOCKED_VOCABULARY, cache.refresh)
+
+
+FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = (register_blocked_vocabulary,)
+"""Los validadores de texto libre de U-04 (``blocked_vocabulary``; ``person_attribution`` llega
+con TASK-340)."""
+
+U04_FREE_TEXT_VALIDATORS: Final = frozenset({BLOCKED_VOCABULARY})
+"""Los validadores que U-04 exige en la política sellada (BLM §9; NFR-LAZ-14)."""
 
 API_STATE: Final[tuple[StateBuilder, ...]] = ()
 
@@ -237,7 +269,20 @@ def loop_free_text(registry: FreeTextPolicyRegistry) -> None:
         register(registry)
 
 
+def missing_free_text_validators(services: UnitServices) -> tuple[tuple[str, str], ...]:
+    """Los validadores de ``U04_FREE_TEXT_VALIDATORS`` que la política sellada no tiene."""
+    present = set(services.free_text.validator_names)
+    return tuple(
+        ("free_text_validator", name) for name in sorted(U04_FREE_TEXT_VALIDATORS - present)
+    )
+
+
 def loop_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    # Arranque cerrado (BLM §9): sin los validadores de U-04 no arranca ningún proceso. Esta es la
+    # primera llamada de la composición que ve la política ya sellada.
+    missing = missing_free_text_validators(services)
+    if missing:
+        raise RegistrationIncomplete(missing)
     for register in TASK_REGISTRARS:
         register(registry, services)
 

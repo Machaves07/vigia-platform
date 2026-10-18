@@ -1417,6 +1417,15 @@ wheels = [
 ]
 
 [[package]]
+name = "simplemma"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/58/81fc31ae8a83a2c422ca51784825b8b2d1ebdf068e351d364fedd9707307/simplemma-1.1.2.tar.gz", hash = "sha256:8549eefc288b25262c38027ef09f2db28ee0355b2a0cc62c1a8abbe948ef72bd", size = 67189658, upload-time = "2024-11-19T16:47:09.231Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/fe/cea4c2d96505425954ef281d08fc71019a42a459bfc1a9e4bc91245c9c00/simplemma-1.1.2-py3-none-any.whl", hash = "sha256:90a3060b0c59679c8a954a201c2dc8b589f3f55872b125eede5f2447fda02e8b", size = 67154845, upload-time = "2024-11-19T16:45:36.423Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1602,6 +1611,7 @@ dependencies = [
     { name = "pyotp" },
     { name = "qrcode" },
     { name = "rfc8785" },
+    { name = "simplemma" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn" },
     { name = "vigia-contracts" },
@@ -1646,6 +1656,7 @@ requires-dist = [
     { name = "pyotp", specifier = ">=2.9" },
     { name = "qrcode", specifier = ">=8" },
     { name = "rfc8785", specifier = ">=0.1.4" },
+    { name = "simplemma", specifier = ">=1.1.2,<1.2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2,<2.1" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "vigia-contracts", git = "ssh://git@github.com/Machaves07/vigia-contracts.git?subdirectory=generated%2Fpython&rev=v1.1.0" },

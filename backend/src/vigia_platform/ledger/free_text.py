@@ -24,9 +24,18 @@ Todo texto libre del expediente vive en una ruta declarada en ``free_text_paths`
    texto NFC y su **forma canónica** (``canonical_form``, adenda A-45): NFKC, espacios Unicode
    como un espacio ASCII, sin diacríticos y en minúsculas, para que un patrón no se esquive con
    NBSP, U+3000, dígitos de ancho completo o tildes. La forma canónica nunca se persiste. Un
-   validador acepta o lanza ``FreeTextRejected``; no puede reescribir el texto.
+   validador acepta o lanza ``FreeTextRejected``; no puede reescribir el texto. El candidato
+   lleva además la **organización** cuyo texto se valida (``organization_id``, BLM §9:
+   ``validate(organization_id, path, text)``), o ``None`` si quien valida no la da: el de
+   vocabulario de U-04 aplica entonces la lista mínima del producto.
 
-El rechazo lo traduce el escritor (TASK-113) a ``free_text_rejected``.
+3. **Preparadores** (``FreeTextPolicyRegistry.register_preparer``): lo que un validador necesita
+   leer de la base lo lee **antes** de validar, al abrir la escritura (``prepare``, que llama el
+   escritor con la organización del contexto y un lector de filas), nunca dentro del validador:
+   U-04 comprueba ahí la versión de la lista de vocabulario de la organización (PAT-LAZ-REN-02).
+
+El rechazo lo traduce el escritor (TASK-113) a ``free_text_rejected``, con el ``detail_code`` del
+validador si lo lleva (U-04: ``loop_blocked_vocabulary_term``).
 """
 
 from __future__ import annotations
@@ -34,17 +43,27 @@ from __future__ import annotations
 import enum
 import re
 import unicodedata
-from collections.abc import Callable
+import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Row
+    from sqlalchemy.sql import Executable
+
+    from vigia_platform.shared.clock import Clock
 
 __all__ = [
     "FreeTextCandidate",
     "FreeTextField",
     "FreeTextPolicyRegistry",
+    "FreeTextPreparation",
+    "FreeTextPreparer",
     "FreeTextRejected",
     "FreeTextRejection",
     "FreeTextValidator",
+    "RowReader",
     "apply_base_policy",
     "canonical_form",
 ]
@@ -132,12 +151,25 @@ class FreeTextField:
 
 
 class FreeTextRejected(ValueError):
-    """Un texto que no pasa la política; ``reason`` es un código cerrado, sin el texto."""
+    """Un texto que no pasa la política; ``reason`` es un código cerrado, sin el texto.
 
-    def __init__(self, reason: str, field: FreeTextField, message: str) -> None:
+    ``detail_code`` es el ``detail_code`` registrado de la unidad del validador (p. ej.
+    ``loop_blocked_vocabulary_term``), que el escritor conserva en su rechazo; la política base no
+    lo lleva.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        field: FreeTextField,
+        message: str,
+        *,
+        detail_code: str | None = None,
+    ) -> None:
         super().__init__(f"{field.record_type} {field.path}: {message}")
         self.reason = reason
         self.field = field
+        self.detail_code = detail_code
 
 
 _REPEATED_SPACES: Final = re.compile(" {2,}")
@@ -169,10 +201,31 @@ class FreeTextCandidate:
     """El texto en NFC que se persiste y se firma."""
     canonical: str
     """``canonical_form(text)``: solo para buscar patrones; nunca se guarda."""
+    organization_id: uuid.UUID | None = None
+    """La organización cuyo texto se valida; ``None`` si quien valida no la da."""
 
 
 FreeTextValidator = Callable[[FreeTextCandidate, FreeTextField], None]
 """Validador enchufable: recibe el candidato y lanza ``FreeTextRejected`` si lo rechaza."""
+
+type RowReader = Callable[[Executable, Mapping[str, Any]], Awaitable[Sequence[Row[Any]]]]
+"""Lector de filas con el contexto de la escritura (su transacción o una lectura propia)."""
+
+
+@dataclass(frozen=True)
+class FreeTextPreparation:
+    """Lo que recibe un preparador al abrir la escritura."""
+
+    organization_id: uuid.UUID
+    """La organización del contexto de la escritura."""
+    rows: RowReader
+    """Lecturas con el contexto de la escritura."""
+    clock: Clock
+    """El reloj del escritor (las caducidades de una caché; PAT-NUC-RES-07)."""
+
+
+type FreeTextPreparer = Callable[[FreeTextPreparation], Awaitable[None]]
+"""Preparador: deja en memoria lo que su validador usará, para que este no lea la base."""
 
 
 def _reject(reason: FreeTextRejection, field: FreeTextField) -> FreeTextRejected:
@@ -208,6 +261,7 @@ class FreeTextPolicyRegistry:
 
     def __init__(self) -> None:
         self._validators: dict[str, FreeTextValidator] = {}
+        self._preparers: dict[str, FreeTextPreparer] = {}
         self._sealed = False
 
     def register(self, name: str, validator: FreeTextValidator) -> None:
@@ -220,6 +274,18 @@ class FreeTextPolicyRegistry:
             raise ValueError(f"el validador de texto libre «{name}» ya está registrado")
         self._validators[name] = validator
 
+    def register_preparer(self, name: str, preparer: FreeTextPreparer) -> None:
+        """Añade el preparador del validador ``name``, ya registrado; solo antes de sellar."""
+        if self._sealed:
+            raise RuntimeError(
+                "la política de texto libre ya está sellada: se registra al arrancar"
+            )
+        if name not in self._validators:
+            raise ValueError(f"el validador de texto libre «{name}» no está registrado")
+        if name in self._preparers:
+            raise ValueError(f"el preparador de «{name}» ya está registrado")
+        self._preparers[name] = preparer
+
     def seal(self) -> None:
         """Cierra el registro: después del arranque no se añaden validadores."""
         self._sealed = True
@@ -228,15 +294,30 @@ class FreeTextPolicyRegistry:
     def validator_names(self) -> tuple[str, ...]:
         return tuple(self._validators)
 
-    def apply(self, text: str, field: FreeTextField) -> str:
+    @property
+    def has_preparers(self) -> bool:
+        return bool(self._preparers)
+
+    async def prepare(self, preparation: FreeTextPreparation) -> None:
+        """Corre los preparadores al abrir la escritura, antes de validar (PAT-LAZ-REN-02)."""
+        for preparer in self._preparers.values():
+            await preparer(preparation)
+
+    def apply(
+        self, text: str, field: FreeTextField, *, organization_id: uuid.UUID | None = None
+    ) -> str:
         """Política base y después cada validador; devuelve el texto NFC que se guarda.
 
-        Cada validador recibe el texto NFC y su forma canónica (A-45): lo que se devuelve y se
-        persiste es siempre el texto NFC.
+        Cada validador recibe el texto NFC, su forma canónica (A-45) y ``organization_id``: lo
+        que se devuelve y se persiste es siempre el texto NFC.
         """
         normalized = apply_base_policy(text, field)
         if self._validators:
-            candidate = FreeTextCandidate(text=normalized, canonical=canonical_form(normalized))
+            candidate = FreeTextCandidate(
+                text=normalized,
+                canonical=canonical_form(normalized),
+                organization_id=organization_id,
+            )
             for validator in self._validators.values():
                 validator(candidate, field)
         return normalized

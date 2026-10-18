@@ -316,10 +316,14 @@ _REJECTION_CODES: Final[Mapping[LedgerRejectionCode, ApiErrorCode]] = {
 
 
 def from_ledger_rejection(rejection: LedgerRejection) -> ApiError:
-    """``ApiError`` de un rechazo del expediente; el puntero del campo no sale en la respuesta."""
+    """``ApiError`` de un rechazo del expediente; el puntero del campo no sale en la respuesta.
+
+    Un ``free_text_rejected`` de un validador enchufado lleva su ``detail_code`` (p. ej.
+    ``loop_blocked_vocabulary_term``, U-04); la política base no lo lleva.
+    """
     if not isinstance(rejection, LedgerRejection):
         raise TypeError("rejection debe ser LedgerRejection")
-    return ApiError(_REJECTION_CODES[rejection.code])
+    return ApiError(_REJECTION_CODES[rejection.code], detail_code=rejection.detail_code)
 
 
 _HTTP_EXCEPTION_CODES: Final[Mapping[int, ApiErrorCode]] = {
