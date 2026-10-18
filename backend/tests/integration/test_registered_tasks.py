@@ -1,4 +1,4 @@
-"""Tareas periódicas y consumidores registrados al arrancar (TASK-153; U-03: TASK-227).
+"""Tareas periódicas y consumidores registrados al arrancar (TASK-153; U-03: TASK-227; U-04: 302).
 
 ``domain-entities.md`` §4.3 y su nota del 2026-09-20 fijan las **diez** tareas periódicas de
 U-02 y su cadencia; la nota de U-03 en esa sección y NFR-GOB-12 añaden las **siete** de U-03;
@@ -11,6 +11,9 @@ Contra PostgreSQL 16 real, como ``vigia_app``:
   mensual) más ``restore_drill_age`` (TASK-132), y las siete de U-03 con su cadencia (cada 60 s,
   cada hora o diaria), su unidad ``U-03`` y su iteración (por organización salvo
   ``regenerate_revocation_list``, global, D-7); una tarea nueva o retirada se nota aquí.
+- **U-04** (TASK-302): el recuento y las cadencias de sus tareas y sus consumidores salen de los
+  manifiestos ``U04_TASKS`` y ``U04_CONSUMERS`` de ``loop.registration`` (hoy vacíos: 11 + 7 +
+  0). Cada tarea de U-04 añade su línea al manifiesto de su módulo y **no edita esta prueba**.
 - **Arranque**: un ``WorkerProcess`` con ese catálogo supera el arranque supervisado, deja en
   ``shared.periodic_task`` una fila por tarea con su horario persistido y una próxima ejecución
   sobre la rejilla del horario, en ``shared.consumer`` sus dos consumidores, abre un bucle de
@@ -48,6 +51,7 @@ from tests.worker_support import (
 from vigia_platform.ledger.application.integrity_requests import (
     INTEGRITY_ON_DEMAND_CONSUMER,
 )
+from vigia_platform.loop.registration import U04_CONSUMERS, U04_TASKS
 from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.observability.alerts_consumer import (
@@ -106,6 +110,16 @@ U03_TASKS: Final[dict[str, tuple[ScheduleKind, int, TaskIteration]]] = {
 iteración."""
 
 U02_CONSUMERS: Final = (ALERTS_CONSUMER, INTEGRITY_ON_DEMAND_CONSUMER)
+
+TASK_COUNT: Final = 11 + 7 + len(U04_TASKS)
+"""Las once de U-02, las siete de U-03 y las del manifiesto de U-04 (TASK-302)."""
+
+
+def unit_of_task(name: str) -> str:
+    """La unidad que declara la tarea ``name`` según los manifiestos de U-03 y U-04."""
+    if name in U03_TASKS:
+        return "U-03"
+    return "U-04" if name in U04_TASKS else "U-02"
 
 
 class _NotInvoked:
@@ -250,14 +264,22 @@ def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
     catalog = u02_catalog(environment)
     every = {task.task_name: task for task in catalog.periodic_tasks.tasks()}
     assert len(U03_TASKS) == 7
-    assert len(every) == 11 + 7
-    assert set(every) == set(DESIGN_TASKS) | set(OTHER_U02_TASKS) | set(U03_TASKS)
+    assert len(every) == TASK_COUNT
+    assert set(every) == (
+        set(DESIGN_TASKS) | set(OTHER_U02_TASKS) | set(U03_TASKS) | set(U04_TASKS)
+    )
     assert set(unit_tasks(catalog, ActorUnit.U03)) == set(U03_TASKS)
+    assert set(unit_tasks(catalog, ActorUnit.U04)) == set(U04_TASKS)
     for name, (kind, value, iteration) in U03_TASKS.items():
         task = every[name]
         assert task.unit is ActorUnit.U03, name
         assert task.iteration is iteration, name
         _check_cadence(name, task.schedule, kind, value)
+    for name, (schedule, iteration) in U04_TASKS.items():
+        task = every[name]
+        assert task.unit is ActorUnit.U04, name
+        assert task.iteration is iteration, name
+        assert task.schedule == schedule, name
     assert all(
         task.iteration is TaskIteration.PER_ORGANIZATION for task in u02_tasks(catalog).values()
     )
@@ -314,7 +336,7 @@ def test_worker_boots_with_every_task_and_consumer_registered(
     catalog = u02_catalog(environment)
     expected = {task.task_name: task.schedule for task in catalog.periodic_tasks.tasks()}
     units = {task.task_name: task.unit.value for task in catalog.periodic_tasks.tasks()}
-    assert len(expected) == 11 + 7
+    assert len(expected) == TASK_COUNT
     process, dispatcher, port = _worker(environment, catalog)
     booted_at = environment.clock.now()
 
@@ -340,15 +362,15 @@ def test_worker_boots_with_every_task_and_consumer_registered(
 
     assert catalog.sealed
     assert live == 200
-    assert sorted(dispatcher.started) == sorted(U02_CONSUMERS)
-    assert [(row["consumer_name"], row["unit"]) for row in consumers] == [
-        (name, "U-02") for name in sorted(U02_CONSUMERS)
-    ]
+    assert sorted(dispatcher.started) == sorted((*U02_CONSUMERS, *U04_CONSUMERS))
+    assert [(row["consumer_name"], row["unit"]) for row in consumers] == sorted(
+        [(name, "U-02") for name in U02_CONSUMERS] + [(name, "U-04") for name in U04_CONSUMERS]
+    )
     assert [row["task_name"] for row in tasks] == sorted(expected)
     for row in tasks:
         schedule = expected[row["task_name"]]
         assert row["unit"] == units[row["task_name"]]
-        assert row["unit"] == ("U-03" if row["task_name"] in U03_TASKS else "U-02")
+        assert row["unit"] == unit_of_task(row["task_name"])
         assert row["schedule"] == schedule.text
         assert row["lease_owner"] is None  # nada venció: nadie tomó la tarea
         next_run = row["next_run_at"]
@@ -396,7 +418,15 @@ def test_the_catalog_without_one_registration_differs_only_by_it(
 
 
 @pytest.mark.parametrize(
-    "missing", [INTEGRITY_ON_DEMAND_CONSUMER, ALERTS_CONSUMER, *DESIGN_TASKS, *U03_TASKS]
+    "missing",
+    [
+        INTEGRITY_ON_DEMAND_CONSUMER,
+        ALERTS_CONSUMER,
+        *DESIGN_TASKS,
+        *U03_TASKS,
+        *U04_TASKS,
+        *U04_CONSUMERS,
+    ],
 )
 def test_worker_missing_a_registration_does_not_start(
     environment: WorkerEnvironment, missing: str

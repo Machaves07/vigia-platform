@@ -26,7 +26,9 @@ proceso no tiene (``VIGIA_EVIDENCE_BUCKET``, ``VIGIA_ARCHIVE_BUCKET``) se constr
 y solo el worker los ejecuta.
 
 U-02 queda registrada con tres entradas (``shared``, ``identity`` y ``ledger``). U-03 (VIG-139,
-VIG-144, VIG-163) y U-04 añaden la suya a ``REGISTERED_UNITS`` sin tocar los constructores.
+VIG-144, VIG-163) y U-04 (VIG-201: ``loop``, ``accreditation`` y ``notifications``, que delegan
+en el ``registration.py`` de cada paquete) añaden la suya a ``REGISTERED_UNITS`` sin tocar los
+constructores.
 """
 
 from __future__ import annotations
@@ -47,6 +49,16 @@ from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
 from vigia_contracts.versioning import Version
 
+from vigia_platform.accreditation.registration import (
+    ACCREDITATION_DETAIL_CODES,
+    ACCREDITATION_LABELS,
+    accreditation_api_state,
+    accreditation_consumers,
+    accreditation_event_types,
+    accreditation_record_types,
+    accreditation_routers,
+    accreditation_tasks,
+)
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp, catalog_routers
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
@@ -187,6 +199,18 @@ from vigia_platform.ledger.domain.coverage import (
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types import register_u02_record_types
 from vigia_platform.ledger.registry import ChainLevel, RecordTypeRegistry
+from vigia_platform.loop.registration import (
+    LOOP_DETAIL_CODES,
+    LOOP_LABELS,
+    loop_api_state,
+    loop_consumers,
+    loop_event_types,
+    loop_free_text,
+    loop_record_types,
+    loop_routers,
+    loop_tasks,
+    missing_u04_registrations,
+)
 from vigia_platform.node_api.identity import NodeIdentity, PostgresNodeContextStore
 from vigia_platform.node_api.limits import AuditBrakeSource, EmergencyBrake, NodeRateLimits
 from vigia_platform.node_api.observability import NodeResponses
@@ -202,6 +226,15 @@ from vigia_platform.node_api.routes.observability_events import observability_ev
 from vigia_platform.node_api.routes.update_results import update_result_operation
 from vigia_platform.node_api.routes.zone_catalogs import zone_catalog_operation
 from vigia_platform.node_api.versioning import VersionPolicy
+from vigia_platform.notifications.registration import (
+    NOTIFICATIONS_DETAIL_CODES,
+    NOTIFICATIONS_LABELS,
+    notifications_api_state,
+    notifications_consumers,
+    notifications_event_types,
+    notifications_routers,
+    notifications_tasks,
+)
 from vigia_platform.shared.adapters.http import DEFAULT_VERIFIER_PATH, shared_routers
 from vigia_platform.shared.api.declarations import NODE_GATE_STATE_KEY, NodeRoute
 from vigia_platform.shared.api.errors import ApiErrorCode
@@ -1126,8 +1159,46 @@ REGISTERED_UNITS: Final[tuple[PlatformUnit, ...]] = (
     ),
     # VIG-144 (TASK-206): el adaptador único de las rutas del contrato (LC-GOB-19, A-51).
     PlatformUnit(name="node_api", routers=_node_routers, api_state=_node_api_state),
+    # U-04 (VIG-201, TASK-302; LC-LAZ-37): las tres unidades delegan en el ``registration.py`` de
+    # su paquete, al que cada tarea de U-04 añade sus rutas, tareas, consumidores y servicios;
+    # ninguna vuelve a editar esta tabla. ``loop`` lleva la comprobación de arranque de las tres
+    # (los 17 tipos, los 25 eventos y los manifiestos ``U04_TASKS`` y ``U04_CONSUMERS``).
+    PlatformUnit(
+        name="loop",
+        routers=loop_routers,
+        detail_codes=LOOP_DETAIL_CODES,
+        labels=LOOP_LABELS,
+        record_types=loop_record_types,
+        event_types=loop_event_types,
+        free_text=loop_free_text,
+        consumers=loop_consumers,
+        periodic_tasks=loop_tasks,
+        api_state=loop_api_state,
+        required=missing_u04_registrations,
+    ),
+    PlatformUnit(
+        name="accreditation",
+        routers=accreditation_routers,
+        detail_codes=ACCREDITATION_DETAIL_CODES,
+        labels=ACCREDITATION_LABELS,
+        record_types=accreditation_record_types,
+        event_types=accreditation_event_types,
+        consumers=accreditation_consumers,
+        periodic_tasks=accreditation_tasks,
+        api_state=accreditation_api_state,
+    ),
+    PlatformUnit(
+        name="notifications",
+        routers=notifications_routers,
+        detail_codes=NOTIFICATIONS_DETAIL_CODES,
+        labels=NOTIFICATIONS_LABELS,
+        event_types=notifications_event_types,
+        consumers=notifications_consumers,
+        periodic_tasks=notifications_tasks,
+        api_state=notifications_api_state,
+    ),
 )
-"""Las unidades registradas, en orden de registro. U-03 y U-04 añaden aquí su entrada."""
+"""Las unidades registradas, en orden de registro (U-02, U-03 y U-04)."""
 
 
 def registered_units() -> tuple[PlatformUnit, ...]:

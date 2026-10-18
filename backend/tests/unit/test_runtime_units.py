@@ -49,6 +49,7 @@ from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.rendering import DOCUMENT_TIMEOUT_SECONDS
 from vigia_platform.fleet.registration import U03_RECORD_TYPES
 from vigia_platform.identity.application.admin_cli import AdminConfig
+from vigia_platform.loop.registration import U04_RECORD_TYPES
 from vigia_platform.shared.api.app import (
     LABEL_BINDINGS,
     AppConfig,
@@ -152,9 +153,11 @@ def test_u02_record_types_come_from_the_registry() -> None:
     assert {"key_rotated", "key_set_published"} <= names
     u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
     assert len(u02) == 14
-    # U-03: sus 26 tipos, también los que todavía no escribe ninguna ruta (VIG-163, TASK-227).
-    assert names - u02 == U03_RECORD_TYPES
+    # U-03: sus 26 tipos, también los que todavía no escribe ninguna ruta (VIG-163, TASK-227);
+    # U-04: sus 17 (VIG-201, TASK-302).
+    assert names - u02 == U03_RECORD_TYPES | U04_RECORD_TYPES
     assert len(U03_RECORD_TYPES) == 26
+    assert len(U04_RECORD_TYPES) == 17
 
 
 def test_the_registry_rejects_duplicates_and_bad_names(monkeypatch: pytest.MonkeyPatch) -> None:
