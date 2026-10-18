@@ -13,9 +13,28 @@ Hoy U-04 no registra ninguna ruta: la lista está vacía.
 
 from __future__ import annotations
 
-from tests.isolation.route_cases import Case
+from tests.isolation.route_cases import Call, Case, Kind
 
 __all__ = ["LAZ_CASES"]
 
-LAZ_CASES: list[tuple[tuple[str, str], Case]] = []
+LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
+    (
+        ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call(
+                "POST",
+                f"/loop/actions/{ids.record}/attachments/upload-grant",
+                json={"content_type": "image/png", "size_bytes": 1, "sha256": "a" * 64},
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/attachments/{attachment_id}/read-url"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call("POST", f"/loop/attachments/{ids.evidence}/read-url"),
+        ),
+    ),
+]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
