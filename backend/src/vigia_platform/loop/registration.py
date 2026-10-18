@@ -35,6 +35,8 @@ from vigia_platform.accreditation.registration import (
     ACCREDITATION_CONSUMERS,
     ACCREDITATION_TASKS,
 )
+from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
@@ -145,8 +147,10 @@ type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type FreeTextRegistrar = Callable[[FreeTextPolicyRegistry], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = ()
-"""Fábricas de los enrutadores de ``/loop/*``; hoy ninguna ruta."""
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
+    configuration_router,  # SUP-U05-38 y 39 (TASK-304)
+)
+"""Fábricas de los enrutadores de ``/loop/*``."""
 
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
@@ -159,7 +163,9 @@ CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = ()
 FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = ()
 """Los validadores de texto libre de U-04 (``blocked_vocabulary``, ``person_attribution``)."""
 
-API_STATE: Final[tuple[StateBuilder, ...]] = ()
+API_STATE: Final[tuple[StateBuilder, ...]] = (
+    loop_http_state,  # LoopHttp (TASK-304)
+)
 
 U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **LOOP_TASKS,

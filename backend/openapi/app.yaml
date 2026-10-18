@@ -3964,6 +3964,65 @@
                 "$ref": "#/components/schemas/ApiErrorBody"
       "x-vigia-mutual-tls": true
       "x-vigia-content-encodings": []
+  "/loop/plants/{plant_id}/configuration":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Configuración del lazo de la planta: plazos, umbrales, calendario y zona"
+      "operationId": "configuration_loop_plants__plant_id__configuration_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ConfigurationOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "put":
+      "tags":
+        - "lazo"
+      "summary": "Cambia la configuración del lazo de la planta con motivo (versión nueva)"
+      "operationId": "change_configuration_loop_plants__plant_id__configuration_put"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ConfigurationChangeBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ConfigurationOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "AcceptanceStatus":
@@ -4554,6 +4613,44 @@
       "type": "object"
       "title": "BlurVerificationBody"
       "description": "Parte declarada del difuminado (D-2). Los dos campos son opcionales en la forma para que\nsu ausencia responda ``catalog_blur_not_verified``, no ``invalid_request``."
+    "BusinessCalendarBody":
+      "properties":
+        "working_weekdays":
+          "items":
+            "type": "integer"
+          "type": "array"
+          "maxItems": 7
+          "minItems": 1
+          "title": "Working Weekdays"
+        "non_working_dates":
+          "items":
+            "type": "string"
+          "type": "array"
+          "maxItems": 400
+          "title": "Non Working Dates"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "working_weekdays"
+        - "non_working_dates"
+      "title": "BusinessCalendarBody"
+    "BusinessCalendarOut":
+      "properties":
+        "working_weekdays":
+          "items":
+            "type": "integer"
+          "type": "array"
+          "title": "Working Weekdays"
+        "non_working_dates":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Non Working Dates"
+      "type": "object"
+      "required":
+        - "working_weekdays"
+        - "non_working_dates"
+      "title": "BusinessCalendarOut"
     "CameraBody":
       "properties":
         "camera_id":
@@ -4943,6 +5040,24 @@
         - "kind"
         - "plant_id"
       "title": "ChainOut"
+    "ChangedByOut":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "role_in_use":
+          "type": "string"
+          "title": "Role In Use"
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "role_in_use"
+      "title": "ChangedByOut"
     "CheckpointKeyOut":
       "properties":
         "key_id":
@@ -5476,6 +5591,224 @@
       "required":
         - "concessions"
       "title": "ConcessionsView"
+    "ConfigurationChangeBody":
+      "properties":
+        "classification_deadline_business_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Classification Deadline Business Days"
+        "review_deadline_business_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Review Deadline Business Days"
+        "action_deadline_default_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Action Deadline Default Days"
+        "action_deadline_min_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Action Deadline Min Days"
+        "action_deadline_max_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Action Deadline Max Days"
+        "manager_highlight_overdue_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Manager Highlight Overdue Days"
+        "unclosable_review_default_months":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Unclosable Review Default Months"
+        "unclosable_review_max_months":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Unclosable Review Max Months"
+        "monthly_package_generation_day":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Monthly Package Generation Day"
+        "sample_percent":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Sample Percent"
+        "sample_min":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Sample Min"
+        "sample_max":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Sample Max"
+        "adoption_silence_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Adoption Silence Days"
+        "exposure_coverage_threshold_percent":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Exposure Coverage Threshold Percent"
+        "email_grouping_hours":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Email Grouping Hours"
+        "export_max_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Export Max Days"
+        "export_max_zones":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Export Max Zones"
+        "single_occupancy_default_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Single Occupancy Default Window Minutes"
+        "reminder_interval_hours":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Reminder Interval Hours"
+        "business_calendar":
+          "anyOf":
+            - "$ref": "#/components/schemas/BusinessCalendarBody"
+            - "type": "null"
+        "reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason"
+      "additionalProperties": false
+      "type": "object"
+      "title": "ConfigurationChangeBody"
+      "description": "Solo los parámetros que cambian, y el motivo."
+    "ConfigurationOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "classification_deadline_business_days":
+          "type": "integer"
+          "title": "Classification Deadline Business Days"
+        "review_deadline_business_days":
+          "type": "integer"
+          "title": "Review Deadline Business Days"
+        "action_deadline_default_days":
+          "type": "integer"
+          "title": "Action Deadline Default Days"
+        "action_deadline_min_days":
+          "type": "integer"
+          "title": "Action Deadline Min Days"
+        "action_deadline_max_days":
+          "type": "integer"
+          "title": "Action Deadline Max Days"
+        "manager_highlight_overdue_days":
+          "type": "integer"
+          "title": "Manager Highlight Overdue Days"
+        "unclosable_review_default_months":
+          "type": "integer"
+          "title": "Unclosable Review Default Months"
+        "unclosable_review_max_months":
+          "type": "integer"
+          "title": "Unclosable Review Max Months"
+        "monthly_package_generation_day":
+          "type": "integer"
+          "title": "Monthly Package Generation Day"
+        "sample_percent":
+          "type": "integer"
+          "title": "Sample Percent"
+        "sample_min":
+          "type": "integer"
+          "title": "Sample Min"
+        "sample_max":
+          "type": "integer"
+          "title": "Sample Max"
+        "adoption_silence_days":
+          "type": "integer"
+          "title": "Adoption Silence Days"
+        "exposure_coverage_threshold_percent":
+          "type": "integer"
+          "title": "Exposure Coverage Threshold Percent"
+        "email_grouping_hours":
+          "type": "integer"
+          "title": "Email Grouping Hours"
+        "export_max_days":
+          "type": "integer"
+          "title": "Export Max Days"
+        "export_max_zones":
+          "type": "integer"
+          "title": "Export Max Zones"
+        "single_occupancy_default_window_minutes":
+          "type": "integer"
+          "title": "Single Occupancy Default Window Minutes"
+        "reminder_interval_hours":
+          "type": "integer"
+          "title": "Reminder Interval Hours"
+        "business_calendar":
+          "$ref": "#/components/schemas/BusinessCalendarOut"
+        "timezone":
+          "type": "string"
+          "title": "Timezone"
+        "version":
+          "type": "integer"
+          "title": "Version"
+        "changed_at":
+          "type": "string"
+          "title": "Changed At"
+        "changed_by":
+          "$ref": "#/components/schemas/ChangedByOut"
+        "change_reason":
+          "type": "string"
+          "title": "Change Reason"
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "classification_deadline_business_days"
+        - "review_deadline_business_days"
+        - "action_deadline_default_days"
+        - "action_deadline_min_days"
+        - "action_deadline_max_days"
+        - "manager_highlight_overdue_days"
+        - "unclosable_review_default_months"
+        - "unclosable_review_max_months"
+        - "monthly_package_generation_day"
+        - "sample_percent"
+        - "sample_min"
+        - "sample_max"
+        - "adoption_silence_days"
+        - "exposure_coverage_threshold_percent"
+        - "email_grouping_hours"
+        - "export_max_days"
+        - "export_max_zones"
+        - "single_occupancy_default_window_minutes"
+        - "reminder_interval_hours"
+        - "business_calendar"
+        - "timezone"
+        - "version"
+        - "changed_at"
+        - "changed_by"
+        - "change_reason"
+      "title": "ConfigurationOut"
     "ConfirmationOrigin":
       "type": "string"
       "enum":
