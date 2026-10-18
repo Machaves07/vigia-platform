@@ -403,6 +403,11 @@ RESOURCE_WILDCARDS: tuple[DeclaredWildcard, ...] = (
         "A-34: PutObject de vigia-api-task sobre node/, documents/ y closure/",
     ),
     DeclaredWildcard(
+        "evidence-package-prefixes",
+        re.compile(rf"{_S3}vigia-evidence[^/*?]*/org/\*/(export|monthly)/\*$"),
+        "U-04 §9.1: paquetes de vigia-worker-task sobre org/*/export/* y org/*/monthly/*",
+    ),
+    DeclaredWildcard(
         "archive",
         re.compile(rf"{_S3}vigia-archive[^/*?]*/\*$"),
         "§8: PutObject y GetObject de vigia-worker-task sobre vigia-archive/*",

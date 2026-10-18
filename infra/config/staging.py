@@ -21,7 +21,7 @@ Las tareas mínimas son las de ``pilot`` (§10: 3 vCPU más en ``staging``: 2 de
 from __future__ import annotations
 
 from config import pilot
-from config.environment import SHARED_INSTANCE, EnvironmentConfig, NodesTlsMode
+from config.environment import SHARED_INSTANCE, EnvironmentConfig, LoopConfig, NodesTlsMode
 
 # §6.1 y nota D-8.
 DB_INSTANCE_CLASS = "db.t4g.small"
@@ -31,6 +31,16 @@ NODE_CA_PENDING_WINDOW_DAYS = 7
 # D-8: la zona la aloja pilot y staging la importa por sus parámetros SSM (en una
 # instancia dedicada, los de su propio despliegue permanente).
 HOSTED_ZONE_SOURCE = "pilot"
+
+# --- U-04: pila vigia-loop (infrastructure-design de U-04 §2.1; deployment-architecture §3) ---
+# Tema, colas y punto privado propios del entorno; sin secreto del asistente (doble de prueba);
+# todo se destruye con el entorno y vigia-queue con el borrado programado mínimo del servicio.
+LOOP = LoopConfig(
+    assistant_secret=False,
+    email_topic_service_managed_key=pilot.EMAIL_TOPIC_SERVICE_MANAGED_KEY,
+    retained=False,
+    queue_key_pending_window_days=NODE_CA_PENDING_WINDOW_DAYS,
+)
 
 
 def staging_config(
@@ -69,6 +79,7 @@ def staging_config(
         api_max_tasks=pilot.API_MAX_TASKS,
         worker_min_tasks=pilot.WORKER_MIN_TASKS,
         worker_max_tasks=pilot.WORKER_MAX_TASKS,
+        loop=LOOP,
         nat_per_az=nat_per_az,
         nodes_tls_mode=nodes_tls_mode,
     )

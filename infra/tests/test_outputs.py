@@ -20,12 +20,17 @@ from aws_cdk import aws_route53 as route53
 from config import EnvironmentConfig, load_config
 from stacks.base import VigiaStack
 from stacks.outputs import (
+    CONTRACT_KEYS,
     Output,
     TaskRole,
+    import_alerts_topic,
+    import_app_network,
     import_hosted_zone,
+    import_key,
     import_value,
     import_worker_security_group,
     import_worker_task_role,
+    import_worker_task_role_from_arn,
     parameter_name,
     publish,
     role_name,
@@ -44,6 +49,12 @@ def test_parameter_paths_follow_the_contract() -> None:
         Output.WORKER_SECURITY_GROUP_ID: "/vigia/pilot/sg-worker-id",
         Output.HOSTED_ZONE_ID: "/vigia/pilot/zone-id",
         Output.HOSTED_ZONE_NAME: "/vigia/pilot/zone-name",
+        Output.VPC_ID: "/vigia/pilot/vpc-id",
+        Output.APP_SUBNET_A_ID: "/vigia/pilot/app-subnet-a-id",
+        Output.APP_SUBNET_B_ID: "/vigia/pilot/app-subnet-b-id",
+        Output.EVIDENCE_KEY_ARN: "/vigia/pilot/evidence-key-arn",
+        Output.SECRETS_KEY_ARN: "/vigia/pilot/secrets-key-arn",
+        Output.ALERTS_TOPIC_ARN: "/vigia/pilot/alerts-topic-arn",
     }
     assert parameter_name("staging-7", Output.HOSTED_ZONE_ID) == "/vigia/staging-7/zone-id"
 
@@ -114,10 +125,45 @@ def test_pilot_imports_its_own_zone() -> None:
     assert {"/vigia/pilot/zone-id", "/vigia/pilot/zone-name"} <= defaults
 
 
-class _LoopStack(VigiaStack):
-    """Imitación de ``vigia-loop`` (U-04): solo usa el contrato para leer lo de U-02."""
+def test_u04_network_and_keys_are_read_from_ssm() -> None:
+    """``vigia-loop`` (TASK-331) lee la red, las dos subredes de aplicación, las claves, el tema
+    de alertas y el rol del worker por sus parámetros, sin búsquedas."""
+    config = _config(environment="staging-7")
 
-    key = "loop"
+    def build(stack: Stack) -> None:
+        vpc = import_app_network(stack, "Network", config)
+        assert [s.availability_zone for s in vpc.private_subnets] == ["us-east-1a", "us-east-1b"]
+        import_key(stack, "Evidence", config, Output.EVIDENCE_KEY_ARN)
+        import_key(stack, "Secrets", config, Output.SECRETS_KEY_ARN)
+        import_alerts_topic(stack, "Alerts", config)
+        import_worker_task_role_from_arn(stack, "Worker", config)
+
+    template = probe(build)
+    defaults = {p["Default"] for p in template["Parameters"].values()}
+    assert {
+        f"/vigia/staging-7/{name}"
+        for name in (
+            "vpc-id",
+            "app-subnet-a-id",
+            "app-subnet-b-id",
+            "evidence-key-arn",
+            "secrets-key-arn",
+            "alerts-topic-arn",
+            "worker-task-role-arn",
+        )
+    } <= defaults
+
+
+@pytest.mark.parametrize("output", [o for o in Output if o not in CONTRACT_KEYS])
+def test_import_key_only_reads_contract_keys(output: Output) -> None:
+    with pytest.raises(ValueError, match="no es una clave"):
+        probe(lambda stack: import_key(stack, "Key", _config(), output))
+
+
+class _LoopStack(VigiaStack):
+    """Imitación de una pila de otra unidad: solo usa el contrato para leer lo de U-02."""
+
+    key = "contract-probe"
     summary = "pila de prueba del contrato de salidas"
 
     def __init__(self, scope: App, config: EnvironmentConfig) -> None:
@@ -128,7 +174,7 @@ class _LoopStack(VigiaStack):
         policy = iam.ManagedPolicy(
             self,
             "LoopWorker",
-            managed_policy_name=config.resource_name("loop-worker"),
+            managed_policy_name=config.resource_name("contract-probe"),
             statements=[
                 iam.PolicyStatement(
                     actions=["sqs:SendMessage"],
@@ -152,7 +198,7 @@ def test_another_unit_reads_the_contract_without_touching_u02(environment: str) 
     baseline: Synthesized = synthesize(environment=environment)
     extended = synthesize(_add_loop, environment=environment)
     config = extended.config
-    loop_name = config.stack_name("loop")
+    loop_name = config.stack_name(_LoopStack.key)
 
     assert extended.stack_names == (*baseline.stack_names, loop_name)
     for name in baseline.stack_names:
