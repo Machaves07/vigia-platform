@@ -149,13 +149,13 @@ def test_finding_received_reads_the_finding_and_enriches_it_from_the_ports(
     assert row["single_occupancy_zone"] is occupancy.single_occupancy
     assert row["aggregation_window_minutes"] == occupancy.aggregation_window_minutes
     assert row["walk_test_regression_pending"] is False and row["evidence_flagged"] is False
-    assert dict(ports.calls) == {"estado_en": 1, "state_at": 1, "single_occupancy_many": 1}
+    assert dict(ports.calls) == {"estado_en": 1, "state_at": 2, "single_occupancy_many": 1}
     checkpoint = world.checkpoint(organization)
     assert checkpoint is not None and checkpoint["last_applied_event_id"] == event.event_id
     # La segunda entrega (al menos una vez) ni escribe ni consulta los puertos.
     assert world.deliver(consumer, event) == 0
     assert _row(world, subject) == row
-    assert dict(ports.calls) == {"estado_en": 1, "state_at": 1, "single_occupancy_many": 1}
+    assert dict(ports.calls) == {"estado_en": 1, "state_at": 2, "single_occupancy_many": 1}
 
 
 def test_without_single_occupancy_the_zone_is_aggregated_with_the_configured_window(
@@ -236,6 +236,7 @@ def test_a_revoked_usage_gate_marks_every_row_of_the_zone_with_one_statement(
     subjects = [_projected(world, organization) for _ in range(3)]
     other_zone = world.clone_row(subjects[0], zone_id=organization.site.other_zone_id)
     elsewhere = _projected(world, world.organization())
+    revoked_at = world.stack.now()
     event = world.gate_event(organization, "revoked")
     written, counting = _counted(world, event)
     assert written == 3
@@ -243,7 +244,8 @@ def test_a_revoked_usage_gate_marks_every_row_of_the_zone_with_one_statement(
     for subject in subjects:
         row = _row(world, subject)
         assert row["zone_agreement_revoked"] is True
-        assert row["zone_agreement_revoked_at"] == event.created_at
+        # El inicio del intervalo revocado de la historia, no la hora del evento.
+        assert row["zone_agreement_revoked_at"] == revoked_at != event.created_at
         assert row["lifecycle_state"] == "received" and row["last_event_id"] == event.event_id
     (cloned,) = world.rows(organization, subject_id=other_zone)
     assert cloned["zone_agreement_revoked"] is False
@@ -263,6 +265,28 @@ def test_a_revoked_usage_gate_marks_every_row_of_the_zone_with_one_statement(
     for subject in subjects:
         row = _row(world, subject)
         assert (row["zone_agreement_revoked"], row["zone_agreement_revoked_at"]) == (False, None)
+
+
+def test_a_finding_projected_after_the_revocation_is_born_revoked(world: LoopWorld) -> None:
+    """Un hallazgo en búfer: ingresado con la compuerta aprobada, proyectado cuando ya está
+    revocada (y el ``gate_state_changed`` ya se aplicó a las demás filas). Nace revocado, con el
+    mismo «desde cuándo» que las filas que marcó el evento (domain-entities §2.2)."""
+    organization = world.organization()
+    earlier = _projected(world, organization)
+    buffered = world.ingest_finding(organization)
+    revoked_at = world.stack.now()
+    event = world.gate_event(organization, "revoked")
+    assert world.deliver(world.projection_consumer()[0], event) == 1
+    world.stack.tick()
+    assert world.deliver(world.projection_consumer()[0], world.outbox_event(buffered)) == 1
+    for subject in (earlier, buffered):
+        row = _row(world, subject)
+        assert (row["zone_agreement_revoked"], row["zone_agreement_revoked_at"]) == (
+            True,
+            revoked_at,
+        )
+    # En el instante del hecho la compuerta estaba aprobada: eso no cambia.
+    assert _row(world, buffered)["zone_gate_status_at_event"] == "approved"
 
 
 def test_catalog_updated_refreshes_the_occupancy_of_the_zone_rows(world: LoopWorld) -> None:

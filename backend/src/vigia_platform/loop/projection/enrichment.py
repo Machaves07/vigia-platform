@@ -21,8 +21,11 @@ NFR-LAZ-03) y que el pliegue puro deja con el valor conservador:
   avisaría de una marca rota después no existe (pendiente nº 21, adición E no aplicada): la
   proyección refleja la marca **con la latencia de la lectura al proyectar**, no de un evento.
 
-``zone_agreement_revoked`` (desde ``gate_state_changed``) y ``assignee_inactive`` (desde
-``user_deactivated``) no consultan ningún puerto: los fija el consumidor con la carga del evento.
+``zone_agreement_revoked`` es el estado **de hoy** de la compuerta de uso (§2.2): al nacer la fila,
+``GateQueryPort.state_at`` en el instante del ``Clock`` (un hallazgo en búfer puede llegar después
+de la revocación); después, ``gate_state_changed``. En los dos casos ``zone_agreement_revoked_at``
+es el ``effective_from`` del intervalo revocado. ``assignee_inactive`` (desde ``user_deactivated``)
+no consulta ningún puerto: lo fija el consumidor con la carga del evento.
 
 **Sin llamadas dentro de un bucle sobre elementos**: cada consulta recibe la lista entera de zonas
 (o de evidencias) y su número de llamadas depende solo del número de zonas, nunca del de filas.
@@ -53,7 +56,7 @@ from vigia_platform.ledger.application.coverage import CoveragePort
 from vigia_platform.ledger.application.evidence_read import MarkerResult, MarkerVerification
 from vigia_platform.loop.config.parameters import LoopSettings
 from vigia_platform.loop.projection.fold import FindingStateRow, aggregation_bucket
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -166,6 +169,8 @@ class FindingFacts:
     occupancy: ZoneOccupancy | None
     regression: tuple[RegressionMark, ...]
     evidence_flagged: bool
+    revoked_since: datetime | None = None
+    """Desde cuándo está revocada **hoy** la compuerta de uso de la zona (``None``: no lo está)."""
 
     def enrich(self, previous: FindingStateRow | None, row: FindingStateRow) -> FindingStateRow:
         """``store.Enrich``: la fila nueva entera; en una fila que ya existía, solo la marca de
@@ -183,6 +188,8 @@ class FindingFacts:
             zone_gate_status_at_event=self.gate_status,
             occurred_at_bucket=aggregation_bucket(row.occurred_at_exact, window),
             evidence_flagged=self.evidence_flagged,
+            zone_agreement_revoked=self.revoked_since is not None,
+            zone_agreement_revoked_at=self.revoked_since,
         )
         return enriched
 
@@ -191,8 +198,10 @@ def _instant(value: Any) -> datetime:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(UTC)
 
 
+@repository
 class ProjectionEnrichment:
-    """Las consultas del enriquecimiento, siempre por lote (NFR-LAZ-03 y 05)."""
+    """Las consultas del enriquecimiento, siempre por lote (NFR-LAZ-03 y 05); sin contexto,
+    ``ContextAbsent`` antes de llamar a ningún puerto (PR-NUC-02)."""
 
     def __init__(
         self,
@@ -289,6 +298,16 @@ class ProjectionEnrichment:
         results = await self._markers.resultados_marca(context, evidence_ids)
         return any(result.result is MarkerResult.BROKEN for result in results.values())
 
+    async def revoked_since(
+        self, context: ScopeContext, zone_id: uuid.UUID, at: datetime
+    ) -> datetime | None:
+        """Desde cuándo está revocada la compuerta de **uso** de la zona en ``at`` (el
+        ``effective_from`` del intervalo ``revoked`` que lo contiene), o ``None``. Una llamada."""
+        interval = await self._gates.state_at(context, zone_id, GateKind.USAGE, at)
+        if interval is None or interval.status is not GateStatus.REVOKED:
+            return None
+        return interval.effective_from
+
     async def finding_facts(
         self,
         transaction: Transaction,
@@ -298,15 +317,18 @@ class ProjectionEnrichment:
         occurred_at: datetime,
         evidence_ids: Sequence[uuid.UUID],
         new: bool,
+        now: datetime,
     ) -> FindingFacts:
-        """Los hechos de un hallazgo: con ``new``, una llamada a cada puerto; si no, solo la marca
-        de sus evidencias."""
+        """Los hechos de un hallazgo: con ``new``, una llamada a cada puerto (y una más a
+        ``state_at`` en ``now``: la fila que nace en una zona ya revocada nace revocada); si no,
+        solo la marca de sus evidencias."""
         context = transaction.context
         flagged = await self.evidence_flagged(context, evidence_ids)
         if not new:
             return FindingFacts(None, None, None, (), flagged)
         coverage = await self._coverage.estado_en(context, zone_id, occurred_at)
         interval = await self._gates.state_at(context, zone_id, GateKind.USAGE, occurred_at)
+        revoked = await self.revoked_since(context, zone_id, now)
         default_window = await self.default_window(transaction, plant_id)
         occupancy = await self.occupancy(context, [zone_id], default_window)
         history = await self.regression_history(transaction, plant_id, [zone_id])
@@ -316,4 +338,5 @@ class ProjectionEnrichment:
             occupancy=occupancy[zone_id],
             regression=history.get(zone_id, ()),
             evidence_flagged=flagged,
+            revoked_since=revoked,
         )

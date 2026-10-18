@@ -71,6 +71,13 @@ def zone_history(draw: st.DrawFn) -> dict[str, Any]:
             unique_by=lambda change: change[0],
         )
     )
+    mounting = draw(
+        st.lists(
+            st.tuples(offsets, st.sampled_from(list(GateStatus))),
+            max_size=6,
+            unique_by=lambda change: change[0],
+        )
+    )
     coverage = draw(
         st.lists(
             st.tuples(offsets, st.sampled_from(list(CoverageState))),
@@ -84,7 +91,9 @@ def zone_history(draw: st.DrawFn) -> dict[str, Any]:
             max_size=8,
         )
     )
-    borders = [change[0] for change in (*gates, *coverage)] + [mark[0] for mark in regression]
+    borders = [change[0] for change in (*gates, *mounting, *coverage)] + [
+        mark[0] for mark in regression
+    ]
     near = st.sampled_from(borders).flatmap(
         lambda border: st.sampled_from([border - 1, border, border + 1])
     )
@@ -93,8 +102,11 @@ def zone_history(draw: st.DrawFn) -> dict[str, Any]:
     )
     occupancy = draw(st.none() | st.tuples(st.booleans(), st.integers(min_value=15, max_value=480)))
     default_window = draw(st.integers(min_value=15, max_value=480))
+    now = draw(st.one_of(offsets, near) if borders else offsets)
     return {
         "gates": gates,
+        "mounting": mounting,
+        "now": now,
         "coverage": coverage,
         "regression": regression,
         "instants": instants,
@@ -110,6 +122,7 @@ def _ports(history: dict[str, Any]) -> InstrumentedPorts:
         plant_id=PLANT,
         occupancy={} if occupancy is None else {ZONE: occupancy},
         gate_changes={ZONE: [(_moment(at), status) for at, status in history["gates"]]},
+        mounting_changes={ZONE: [(_moment(at), status) for at, status in history["mounting"]]},
         coverage_changes={ZONE: [(_moment(at), state) for at, state in history["coverage"]]},
         fail_single_occupancy=occupancy is None,
     )
@@ -150,21 +163,28 @@ async def _project(history: dict[str, Any], instant: datetime) -> tuple[FindingS
         occurred_at=instant,
         evidence_ids=[],
         new=True,
+        now=_moment(history["now"]),
     )
     row = facts.enrich(None, synthetic_row(ORGANIZATION, PLANT, ZONE, instant))
     coverage = await ports.estado_en(_context(), ZONE, instant)
     interval = await ports.state_at(_context(), ZONE, GateKind.USAGE, instant)
-    return row, (coverage, interval)
+    today = await ports.state_at(_context(), ZONE, GateKind.USAGE, _moment(history["now"]))
+    return row, (coverage, interval, today)
 
 
 @given(history=zone_history())
 def test_pr_laz_03_each_projected_finding_matches_its_sources(history: dict[str, Any]) -> None:
     for minutes in history["instants"]:
         instant = _moment(minutes)
-        row, (coverage, interval) = asyncio.run(_project(history, instant))
+        row, (coverage, interval, today) = asyncio.run(_project(history, instant))
         assert row.observability_state_at_event == coverage.state.value
         expected_gate = GateStatus.PENDING if interval is None else interval.status
         assert row.zone_gate_status_at_event == expected_gate.value
+        # La fila que nace con la compuerta de uso revocada **hoy** nace revocada, desde el inicio
+        # del intervalo revocado (§2.2).
+        revoked = today is not None and today.status is GateStatus.REVOKED
+        assert row.zone_agreement_revoked is revoked
+        assert row.zone_agreement_revoked_at == (today.effective_from if revoked else None)
         pending, cause = _replayed(history, instant)
         assert (row.walk_test_regression_pending, row.walk_test_regression_cause) == (
             pending,

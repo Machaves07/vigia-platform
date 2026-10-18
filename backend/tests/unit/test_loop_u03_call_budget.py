@@ -11,7 +11,8 @@ Con el doble instrumentado (``InstrumentedPorts``, ``tests/laz_support.py``), si
   zona no cambia entre 1 y 500 filas de la zona, ni el de un hallazgo con 1 o 30 evidencias (una
   sola consulta de marcas);
 - cada evento consulta solo lo que cambia: ``catalog_updated`` la ocupación, ``regression_*`` la
-  historia (una sentencia), ``gate_state_changed`` y ``user_deactivated`` ningún puerto.
+  historia (una sentencia), ``gate_state_changed`` revocado un ``state_at`` (el inicio del
+  intervalo) y ``user_deactivated`` ningún puerto.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import pytest
+from vigia_contracts.models.enumerations import GateStatus
 
 from tests.laz_support import (
     FakeMarkers,
@@ -128,9 +130,10 @@ def test_a_new_finding_asks_each_port_once_whatever_its_evidences(evidences: int
             occurred_at=AT,
             evidence_ids=[uuid.uuid4() for _ in range(evidences)],
             new=True,
+            now=AT,
         )
     )
-    assert dict(ports.calls) == {"estado_en": 1, "state_at": 1, "single_occupancy_many": 1}
+    assert dict(ports.calls) == {"estado_en": 1, "state_at": 2, "single_occupancy_many": 1}
     assert markers.batches == [evidences]
     assert len(transaction.statements) == 1  # la historia de regresión de la zona
 
@@ -148,6 +151,7 @@ def test_a_segment_of_a_known_finding_only_reads_its_markers() -> None:
             occurred_at=AT,
             evidence_ids=[uuid.uuid4()],
             new=False,
+            now=AT,
         )
     )
     assert dict(ports.calls) == {}
@@ -243,9 +247,10 @@ def test_regression_events_read_the_history_once_and_ask_no_port() -> None:
     assert dict(ports.calls) == {} and len(transaction.statements) == 1 and len(store.calls) == 1
 
 
-def test_gate_and_user_events_ask_no_port() -> None:
+@pytest.mark.parametrize("per_zone", [1, 500])
+def test_a_revocation_asks_state_at_once_and_a_deactivation_no_port(per_zone: int) -> None:
     zone = _zones(1)
-    ports = _ports(zone)
+    ports = _ports(zone, gate_changes={zone[0]: [(AT - timedelta(hours=1), GateStatus.REVOKED)]})
     gate = _event(
         "gate_state_changed",
         {
@@ -262,7 +267,9 @@ def test_gate_and_user_events_ask_no_port() -> None:
         {"user_id": str(uuid.uuid4()), "deactivated_by": str(uuid.uuid4()), "deactivated_at": "x"},
         plant=False,
     )
-    for event in (gate, user):
-        _, transaction = _deliver(event, ports, _rows(zone, 10))
-        assert transaction.statements == []
-    assert dict(ports.calls) == {}
+    store, transaction = _deliver(gate, ports, _rows(zone, per_zone))
+    assert transaction.statements == [] and dict(ports.calls) == {"state_at": 1}
+    # «Desde cuándo» es el inicio del intervalo revocado, el mismo que recibe una fila que nace.
+    assert {row.zone_agreement_revoked_at for row in store.rows} == {AT - timedelta(hours=1)}
+    _, transaction = _deliver(user, ports, _rows(zone, per_zone))
+    assert transaction.statements == [] and dict(ports.calls) == {"state_at": 1}

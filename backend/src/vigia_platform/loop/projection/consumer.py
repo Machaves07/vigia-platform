@@ -63,7 +63,7 @@ from vigia_platform.loop.projection.fold import (
 from vigia_platform.loop.projection.store import LoopProjectionStore, ProjectionRecordMissing
 from vigia_platform.loop.projection.store import projection_input as as_projection_input
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.outbox.publish import NewEvent, OutboxEvent
@@ -146,8 +146,10 @@ class _ZoneRefresh:
         return row if occupancy is None else with_occupancy(row, occupancy)
 
 
+@repository
 class LoopProjectionConsumer:
-    """El manejador de ``loop_projection`` (``ConsumerHandler``)."""
+    """El manejador de ``loop_projection`` (``ConsumerHandler``); sin la transacción con contexto
+    del evento, ``ContextAbsent`` antes de leer nada (PR-NUC-02, BR-LAZ-140)."""
 
     def __init__(
         self,
@@ -216,6 +218,7 @@ class LoopProjectionConsumer:
             occurred_at=_instant(document["node_time"]["started_at"]),
             evidence_ids=[evidence.evidence_id for evidence in view.evidences],
             new=current is None,
+            now=self._clock.now(),
         )
         late = preview.late_segment
         receipt = await self._late_record(transaction, item, late) if late is not None else None
@@ -282,7 +285,15 @@ class LoopProjectionConsumer:
         if payload["gate"] != GateKind.USAGE.value:
             return 0
         revoked = payload["status"] == GateStatus.REVOKED.value
+        zone_id = _uuid(payload["zone_id"])
         since = event.created_at
+        if revoked:
+            # El mismo «desde cuándo» que recibe una fila que nace ya revocada: el inicio del
+            # intervalo revocado (si al entregar ya no lo está, la marca del evento).
+            found = await self._enrichment.revoked_since(
+                transaction.context, zone_id, event.created_at
+            )
+            since = found if found is not None else since
 
         def change(row: FindingStateRow) -> FindingStateRow:
             if not revoked:

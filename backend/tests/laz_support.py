@@ -142,6 +142,11 @@ class InstrumentedPorts:
     plant_id: uuid.UUID = field(default_factory=uuid.uuid4)
     occupancy: dict[uuid.UUID, tuple[bool, int]] = field(default_factory=dict)
     gate_changes: dict[uuid.UUID, list[tuple[datetime, GateStatus]]] = field(default_factory=dict)
+    """La compuerta de **uso**."""
+    mounting_changes: dict[uuid.UUID, list[tuple[datetime, GateStatus]]] = field(
+        default_factory=dict
+    )
+    """La compuerta de montaje: otra historia, para que consultar la compuerta equivocada se vea."""
     coverage_changes: dict[uuid.UUID, list[tuple[datetime, CoverageState]]] = field(
         default_factory=dict
     )
@@ -154,21 +159,24 @@ class InstrumentedPorts:
 
     # --- historia generada --------------------------------------------------------------------
 
-    def gate_intervals(self, zone_id: uuid.UUID) -> tuple[GateInterval, ...]:
-        changes = sorted(self.gate_changes.get(zone_id, ()), key=lambda change: change[0])
+    def gate_intervals(
+        self, zone_id: uuid.UUID, gate: GateKind = GateKind.USAGE
+    ) -> tuple[GateInterval, ...]:
+        source = self.gate_changes if gate is GateKind.USAGE else self.mounting_changes
+        changes = sorted(source.get(zone_id, ()), key=lambda change: change[0])
         return tuple(
             GateInterval(
                 organization_id=self.organization_id,
                 plant_id=self.plant_id,
                 zone_id=zone_id,
-                gate=GateKind.USAGE,
+                gate=gate,
                 status=status,
                 effective_from=start,
                 effective_until=changes[index + 1][0] if index + 1 < len(changes) else None,
                 decided_by=self.organization_id,
                 reason_es=None,
                 record_id=None,
-                ledger_record_id=uuid.uuid5(zone_id, str(index)),
+                ledger_record_id=uuid.uuid5(zone_id, f"{gate.value}{index}"),
             )
             for index, (start, status) in enumerate(changes)
         )
@@ -212,7 +220,7 @@ class InstrumentedPorts:
                 context, zone_id, gate, at
             )
             return found
-        for interval in self.gate_intervals(zone_id):
+        for interval in self.gate_intervals(zone_id, gate):
             if interval.effective_from <= at and (
                 interval.effective_until is None or at < interval.effective_until
             ):
@@ -225,7 +233,8 @@ class InstrumentedPorts:
         self._count("gate_history")
         return tuple(
             interval
-            for interval in self.gate_intervals(zone_id)
+            for gate in (GateKind.MOUNTING, GateKind.USAGE)
+            for interval in self.gate_intervals(zone_id, gate)
             if interval.effective_from <= end
             and (interval.effective_until is None or interval.effective_until > start)
         )
@@ -853,7 +862,9 @@ class LoopWorld:
         )
 
     def gate_event(self, organization: LoopOrganization, status: str) -> OutboxEvent:
-        """``gate_state_changed`` de la compuerta de uso de la zona del sitio."""
+        """La compuerta de uso de la zona del sitio pasa a ``status`` en la historia (en
+        ``stack.now()``) y su ``gate_state_changed``."""
+        self.stack.usage(organization.site, approved=status == "approved", at=self.stack.now())
         return self.synthetic_event(
             organization,
             "gate_state_changed",
