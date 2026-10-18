@@ -61,7 +61,7 @@ def u04_registry() -> RecordTypeRegistry:
 
 
 def u04_event_registry() -> EventTypeRegistry:
-    """Registro con los 25 eventos de U-04."""
+    """Registro con los 25 eventos de U-04 y el trabajo interno ``export_requested``."""
     registry = EventTypeRegistry()
     register_loop_event_types(registry)
     register_accreditation_event_types(registry)

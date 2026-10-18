@@ -9,7 +9,8 @@
 - **Metapropiedad de privacidad de U-02** (PR-NUC-16) sobre los 17 tipos registrados.
 - **Esquema estricto**, con ``record_by_type`` de U-04: un contenido generado valida; con un campo
   de más (en la raíz o en un objeto anidado) o sin un campo obligatorio, se rechaza.
-- **Eventos**: los 25 de §11.3 por igualdad, de U-04, con la carga al tope por debajo de 64 KB.
+- **Eventos**: los 25 de §11.3 por igualdad (más el trabajo interno ``export_requested`` de
+  TASK-317), de U-04, con la carga al tope por debajo de 64 KB.
 
 Solo datos generados.
 """
@@ -181,6 +182,9 @@ DESIGN_EVENTS: Final = frozenset(
     }
 )
 """Los nombres de §11.3 cuya unidad publicadora es U-04 (nota R14 de §7: veinticinco)."""
+
+INTERNAL_EVENTS: Final = frozenset({"export_requested"})
+"""Eventos internos de U-04 fuera de §11.3: el trabajo de ``export_worker`` (TASK-317)."""
 
 NARRATIVE: Final = {
     **loop_types.NARRATIVE_FREE_TEXT_PATHS,
@@ -423,9 +427,11 @@ def test_every_type_requires_its_source_key(name: str) -> None:
 
 
 def test_the_twenty_five_events_are_exactly_those_of_11_3() -> None:
+    # Más el trabajo interno de la exportación (TASK-317), que ningún consumidor de
+    # notificaciones escucha.
     names = set(EVENTS.event_names())
     assert len(DESIGN_EVENTS) == 25
-    assert names == DESIGN_EVENTS == U04_EVENT_TYPES
+    assert names == DESIGN_EVENTS | INTERNAL_EVENTS == U04_EVENT_TYPES
     assert "user_invited" not in names  # U04-H-13: lo envía U-02
     for compiled in EVENTS.compiled_types():
         assert compiled.definition.publisher_unit is ActorUnit.U04
@@ -436,7 +442,7 @@ def test_every_type_publishes_only_registered_u04_events() -> None:
     assert published <= set(EVENTS.event_names())
 
 
-@pytest.mark.parametrize("name", sorted(DESIGN_EVENTS))
+@pytest.mark.parametrize("name", sorted(DESIGN_EVENTS | INTERNAL_EVENTS))
 @settings(max_examples=5)
 @given(data=st.data())
 def test_a_payload_at_its_limit_fits_in_64_kb_and_validates(name: str, data: st.DataObject) -> None:
