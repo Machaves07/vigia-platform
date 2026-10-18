@@ -1,14 +1,17 @@
 """Metapropiedad de retención de U-04 (TASK-301; NFR-LAZ-08 y 34; PAT-LAZ-ESC-04).
 
-Toda tabla de los esquemas de U-04 (``loop`` hoy; ``accreditation`` y ``notifications`` cuando
-TASK-338 y TASK-339 los creen, sin tocar esta prueba) declara **exactamente una** de las tres
+Toda tabla de los esquemas de U-04 (``loop``, ``notifications`` y ``accreditation``) declara
+**exactamente una** de las tres
 categorías (``ledger_projection``, ``operational_state``, ``operational_state_with_retention``)
 en su ``COMMENT ON TABLE`` con la marca ``retention_category=…``
 (``migrations/laz_policies.py``):
 
 - la comprobación pura (``retention_violations``) detecta una tabla sin categoría, con dos o con
   una desconocida;
-- la migración ``laz_0029`` clasifica sus 19 tablas, una categoría por tabla;
+- la migración ``laz_0029`` clasifica sus 19 tablas, una categoría por tabla, y ``laz_0030`` sus
+  7 con el plazo de la nota de ``domain-entities.md`` §6.2 (24 meses, 90 días del cuerpo del
+  correo, 12 meses y sin caducidad) y ``laz_0031`` sus 9 (la solicitud de exportación 24 meses,
+  la adopción sin caducidad y el resto proyección, DE §9);
 - contra la base migrada (``information_schema`` de los tres esquemas), ninguna tabla queda sin
   categoría o con dos; quitar la marca o duplicarla en un comentario la hace fallar.
 """
@@ -45,7 +48,8 @@ def _load(name: str) -> Any:
 
 
 MIGRATION: Final = _load("laz_0029_loop_schema.py")
-ACCREDITATION_MIGRATION: Final = _load("laz_0030_accreditation_schema.py")
+NOTIFICATIONS: Final = _load("laz_0030_notifications_schema.py")
+ACCREDITATION: Final = _load("laz_0031_accreditation_schema.py")
 
 
 # --- La comprobación pura -----
@@ -102,14 +106,55 @@ def test_the_migration_classifies_each_loop_table_once() -> None:
     assert MIGRATION.RETENTION["finding_state"] == "ledger_projection"
 
 
+# --- La declaración de laz_0030 -----
+
+
+def test_the_migration_classifies_each_notifications_table_once() -> None:
+    assert set(NOTIFICATIONS.RETENTION) == set(NOTIFICATIONS.TABLES)
+    assert set(NOTIFICATIONS.RETENTION_PERIODS) == set(NOTIFICATIONS.TABLES)
+    # domain-entities §6.2 (nota de 2026-09-20) y §9: estado operativo; solo la preferencia, que
+    # es configuración vigente, no caduca. Ninguna tabla de notifications es proyección.
+    assert NOTIFICATIONS.RETENTION == {
+        "notification": "operational_state_with_retention",
+        "notification_delivery": "operational_state_with_retention",
+        "digest_batch": "operational_state_with_retention",
+        "user_notification_preference": "operational_state",
+        "email_message": "operational_state_with_retention",
+        "notification_source_key": "operational_state_with_retention",
+        "email_provider_message_key": "operational_state_with_retention",
+    }
+    periods = NOTIFICATIONS.RETENTION_PERIODS
+    assert periods["notification"].startswith("24 meses")
+    assert periods["notification_delivery"].startswith("24 meses")
+    assert periods["digest_batch"] == "12 meses"
+    assert periods["user_notification_preference"].startswith("sin caducidad")
+    assert "metadatos 24 meses" in periods["email_message"]
+    assert "90 días" in periods["email_message"]
+
+
+# --- La declaración de laz_0031 -----
+
+
 def test_the_migration_classifies_each_accreditation_table_once() -> None:
-    assert set(ACCREDITATION_MIGRATION.RETENTION) == set(ACCREDITATION_MIGRATION.TABLES)
-    assert set(ACCREDITATION_MIGRATION.RETENTION.values()) <= set(RETENTION_CATEGORIES)
-    assert ACCREDITATION_MIGRATION.RETENTION["export_request"] == (
-        "operational_state_with_retention"
-    )
-    assert ACCREDITATION_MIGRATION.RETENTION["adoption_counter"] == "operational_state"
-    assert ACCREDITATION_MIGRATION.RETENTION["monthly_package"] == "ledger_projection"
+    assert set(ACCREDITATION.RETENTION) == set(ACCREDITATION.TABLES)
+    assert set(ACCREDITATION.RETENTION_PERIODS) == set(ACCREDITATION.TABLES)
+    # domain-entities §9: la solicitud de exportación (24 meses) y el contador de adopción (sin
+    # caducidad) son estado operativo; el resto, proyección del expediente.
+    assert ACCREDITATION.RETENTION == {
+        "export_request": "operational_state_with_retention",
+        "export_package": "ledger_projection",
+        "monthly_package": "ledger_projection",
+        "audit_sample": "ledger_projection",
+        "audit_sample_item": "ledger_projection",
+        "commitment": "ledger_projection",
+        "program_metric_snapshot": "ledger_projection",
+        "exposure_indicator": "ledger_projection",
+        "adoption_counter": "operational_state",
+    }
+    periods = ACCREDITATION.RETENTION_PERIODS
+    assert periods["export_request"].startswith("24 meses")
+    assert "el paquete producido no se borra" in periods["export_request"]
+    assert periods["adoption_counter"] == "sin caducidad"
 
 
 # --- Contra la base migrada -----
@@ -153,37 +198,50 @@ def test_every_u04_table_declares_exactly_one_category(database: MigratedDatabas
             await connection.close()
 
     comments = asyncio.run(run())
-    # No pasa por un esquema vacío: las 19 de loop están, también las particionadas.
+    # No pasa por un esquema vacío: las 19 de loop, las 7 de notifications y las 9 de
+    # accreditation están, también las particionadas.
     assert {name for name in comments if name.startswith("loop.")} == {
         f"loop.{table}" for table in MIGRATION.TABLES
     }
+    assert {name for name in comments if name.startswith("notifications.")} == {
+        f"notifications.{table}" for table in NOTIFICATIONS.TABLES
+    }
     assert {name for name in comments if name.startswith("accreditation.")} == {
-        f"accreditation.{table}" for table in ACCREDITATION_MIGRATION.TABLES
+        f"accreditation.{table}" for table in ACCREDITATION.TABLES
     }
     assert retention_violations(comments) == []
+    # La categoría de la base es la que declara la migración, con su plazo.
+    for schema, migration in (("notifications", NOTIFICATIONS), ("accreditation", ACCREDITATION)):
+        for table, category in migration.RETENTION.items():
+            comment = comments[f"{schema}.{table}"] or ""
+            assert retention_tag(category) in comment, table
+            assert migration.RETENTION_PERIODS[table] in comment, table
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
+    "table", ["loop.finding_state", "notifications.email_message", "accreditation.export_request"]
+)
+@pytest.mark.parametrize(
     ("comment", "fragment"),
     [
-        ("FindingState sin categoría", "sin categoría"),
+        ("Entidad sin categoría", "sin categoría"),
         (
-            "FindingState; retention_category=ledger_projection;"
+            "Entidad; retention_category=ledger_projection;"
             " retention_category=operational_state_with_retention",
             "2 categorías",
         ),
     ],
 )
 def test_a_table_comment_without_one_category_is_detected(
-    comment: str, fragment: str, database: MigratedDatabase
+    table: str, comment: str, fragment: str, database: MigratedDatabase
 ) -> None:
     async def run() -> list[str]:
         connection = await database.connect()
         violations: list[str] = []
         try:
             async with connection.transaction():
-                await connection.execute(f"COMMENT ON TABLE loop.finding_state IS '{comment}'")
+                await connection.execute(f"COMMENT ON TABLE {table} IS '{comment}'")
                 violations = retention_violations(await _comments(connection))
                 raise _Rollback
         except _Rollback:
@@ -194,4 +252,4 @@ def test_a_table_comment_without_one_category_is_detected(
 
     violations = asyncio.run(run())
     assert len(violations) == 1
-    assert violations[0].startswith("loop.finding_state:") and fragment in violations[0]
+    assert violations[0].startswith(f"{table}:") and fragment in violations[0]

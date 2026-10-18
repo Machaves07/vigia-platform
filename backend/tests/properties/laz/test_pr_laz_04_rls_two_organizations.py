@@ -1,11 +1,11 @@
 """PR-LAZ-04 (base de datos): con dos organizaciones, ninguna tabla de U-04 deja ver la otra
 (TASK-301; NFR-LAZ-22; PAT-LAZ-SEG-03; BR-NUC-01 a 03).
 
-Paramétrica por esquema: ``SCHEMAS`` lleva hoy ``loop``; TASK-338 (``accreditation``) y TASK-339
-(``notifications``) solo añaden su entrada (nombre, tablas esperadas, siembra y constructores de
-filas) y heredan todas las comprobaciones. Sobre una base migrada con los clientes A y B de
-``tests/identity_db.py`` (el par de organizaciones de U-02, dos plantas cada uno) y filas de cada
-tabla en cada planta:
+Paramétrica por esquema: ``SCHEMAS`` lleva ``loop``, ``notifications`` (TASK-339) y
+``accreditation`` (TASK-338), cada uno con su entrada (nombre, tablas esperadas, siembra y
+constructores de filas), y todos heredan las mismas comprobaciones. Sobre una base migrada con los
+clientes A y B de ``tests/identity_db.py`` (el par de organizaciones de U-02, dos plantas cada
+uno) y filas de cada tabla en cada planta:
 
 1. **Cobertura**: las tablas del esquema en la base (las que haya, no una lista escrita a mano)
    son exactamente las esperadas, y todas tienen ``organization_id``.
@@ -37,13 +37,21 @@ from hypothesis import given
 from hypothesis import strategies as st
 from sqlalchemy import MetaData, Table, Text, cast, event, func, select
 
+from tests.accreditation_db import ACCREDITATION_TABLES, seed_accreditation
+from tests.accreditation_db import ROW_BUILDERS as ACCREDITATION_ROW_BUILDERS
+from tests.accreditation_db import SINGLE_ROW_TABLES as ACCREDITATION_SINGLE_ROW_TABLES
 from tests.factories import make_context
 from tests.identity_db import IdentitySeed, MigratedDatabase, seeded_identity, set_scope
 from tests.integration.conftest import PostgresEndpoint
-from tests.loop_db import LOOP_TABLES, SINGLE_ROW_TABLES, LoopScope, seed_loop
+from tests.loop_db import LOOP_TABLES, SINGLE_ROW_TABLES, seed_loop
 from tests.loop_db import ROW_BUILDERS as LOOP_ROW_BUILDERS
+from tests.notifications_db import NOTIFICATIONS_TABLES, seed_notifications
+from tests.notifications_db import ROW_BUILDERS as NOTIFICATIONS_ROW_BUILDERS
+from tests.notifications_db import SINGLE_ROW_TABLES as NOTIFICATIONS_SINGLE_ROW_TABLES
 from tests.outbox_support import app_database
+from vigia_platform.accreditation.adapters.postgres import tables as accreditation_tables
 from vigia_platform.loop.adapters.postgres import tables as loop_tables
+from vigia_platform.notifications.adapters.postgres import tables as notifications_tables
 from vigia_platform.shared.context import ContextAbsent
 
 pytestmark = pytest.mark.integration
@@ -79,8 +87,26 @@ SCHEMAS: Final = (
         single_row_tables=SINGLE_ROW_TABLES,
         metadata=loop_tables.METADATA,
     ),
+    SchemaUnderTest(
+        name="notifications",
+        tables=NOTIFICATIONS_TABLES,
+        seed=seed_notifications,
+        scopes=lambda seeded, organization_id: seeded.scopes[organization_id],
+        row_builders=NOTIFICATIONS_ROW_BUILDERS,
+        single_row_tables=NOTIFICATIONS_SINGLE_ROW_TABLES,
+        metadata=notifications_tables.METADATA,
+    ),
+    SchemaUnderTest(
+        name="accreditation",
+        tables=ACCREDITATION_TABLES,
+        seed=seed_accreditation,
+        scopes=lambda seeded, organization_id: seeded.scopes[organization_id],
+        row_builders=ACCREDITATION_ROW_BUILDERS,
+        single_row_tables=ACCREDITATION_SINGLE_ROW_TABLES,
+        metadata=accreditation_tables.METADATA,
+    ),
 )
-"""Los esquemas de U-04 bajo la prueba. TASK-338 y TASK-339 añaden aquí el suyo."""
+"""Los esquemas de U-04 bajo la prueba."""
 
 TABLE_CASES: Final = [(schema, table) for schema in SCHEMAS for table in schema.tables]
 TABLE_IDS: Final = [f"{schema.name}.{table}" for schema, table in TABLE_CASES]
@@ -289,7 +315,9 @@ def test_pr_laz_04_generated_rows_never_cross_organizations(
             async with connection.transaction():
                 if table not in schema.single_row_tables:
                     for organization, extra in ((world.a, extra_a), (world.b, extra_b)):
-                        scope: LoopScope = schema.scopes(seeded, organization)[0]
+                        # Los disparadores de las claves de notifications exigen el contexto.
+                        await set_scope(connection, organization)
+                        scope = schema.scopes(seeded, organization)[0]
                         for _ in range(extra):
                             sql, args = schema.row_builders[table](scope)
                             await connection.execute(sql, *args)

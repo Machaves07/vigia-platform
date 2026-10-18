@@ -1,0 +1,248 @@
+{
+  "finding_lifecycle_state": {
+    "received": "recibido, sin clasificar",
+    "in_review": "en revisión",
+    "discarded": "descartado",
+    "open": "abierto",
+    "action_assigned": "con acción asignada",
+    "overdue": "vencido",
+    "closed": "cerrado con acción y evidencia",
+    "unclosable": "SIN ALTERNATIVA SEGURA DISPONIBLE",
+    "suspended_by_reclassification": "lazo suspendido por reclasificación"
+  },
+  "classification_outcome": {
+    "confirmed": "confirmado",
+    "authorized_operation": "operación autorizada",
+    "false_positive": "falso positivo"
+  },
+  "review_resolution_outcome": {
+    "review_confirmed": "confirmado en revisión",
+    "review_discarded": "descartado en revisión"
+  },
+  "reason_category_confirmed": {
+    "real_coexistence": "coexistencia real con energía peligrosa",
+    "guard_bypassed": "resguardo burlado",
+    "procedure_gap": "vacío de procedimiento",
+    "engineering_gap": "vacío de ingeniería",
+    "other_confirmed": "otro motivo de confirmación"
+  },
+  "reason_category_authorized": {
+    "scheduled_maintenance": "mantenimiento programado",
+    "authorized_intervention": "intervención autorizada",
+    "cleaning_or_setup": "limpieza o alistamiento",
+    "commissioning_activity": "actividad de comisionamiento",
+    "other_authorized": "otra operación autorizada"
+  },
+  "reason_category_false_positive": {
+    "no_person_present": "no había persona",
+    "reflection_or_glare": "reflejo o contraluz",
+    "object_mistaken_for_person": "objeto confundido con persona",
+    "invalid_signal": "señal no válida en el instante",
+    "zone_boundary_error": "error de límite de zona",
+    "other_false_positive": "otro falso positivo"
+  },
+  "action_type": {
+    "engineering": "acción de ingeniería",
+    "process": "acción de proceso"
+  },
+  "cause_category": {
+    "process": "causa de proceso",
+    "engineering": "causa de ingeniería",
+    "organization": "causa de organización"
+  },
+  "root_cause_analysis_state": {
+    "draft": "borrador",
+    "pending_information": "pendiente de información",
+    "signed": "firmado"
+  },
+  "assistant_request_state": {
+    "pending": "pendiente",
+    "ready": "listo",
+    "unavailable": "no disponible",
+    "rejected_by_validators": "rechazado por los validadores"
+  },
+  "assistant_unavailable_cause": {
+    "no_api_key": "sin clave del proveedor del asistente",
+    "circuit_open": "cortacircuito abierto",
+    "timeout": "tiempo de espera agotado",
+    "provider_error": "error del proveedor del asistente"
+  },
+  "unclosable_review_outcome": {
+    "renewed": "declaración renovada",
+    "converted_to_action": "convertida en acción"
+  },
+  "attachment_content_type": {
+    "image_jpeg": "imagen JPEG",
+    "image_png": "imagen PNG",
+    "application_pdf": "documento PDF"
+  },
+  "blocked_term_form": {
+    "lemma": "lema",
+    "pattern": "patrón"
+  },
+  "blocked_term_category": {
+    "absence_claim": "afirmación de ausencia",
+    "percentage_guarantee": "garantía de porcentaje",
+    "reduction_promise": "promesa de reducción",
+    "intent_or_blame_attribution": "atribución de intención o culpa"
+  },
+  "text_validation_verdict": {
+    "accepted": "aceptado",
+    "rejected_blocked_vocabulary": "rechazado por vocabulario bloqueado",
+    "rejected_person_attribution": "rechazado por atribuir causa a una persona"
+  },
+  "loop_activity_kind": {
+    "inbox_opened": "apertura de la bandeja",
+    "finding_classified": "clasificación de un hallazgo",
+    "queue_resolved": "resolución de la cola",
+    "analysis_advanced": "avance de un análisis",
+    "action_managed": "gestión de una acción",
+    "finding_closed": "cierre de un hallazgo"
+  },
+  "subject_kind": {
+    "finding": "hallazgo",
+    "detection": "detección confirmada en revisión"
+  },
+  "effect_on_loop": {
+    "none": "sin efecto sobre el lazo",
+    "loop_opened": "lazo abierto",
+    "loop_suspended": "lazo suspendido",
+    "loop_resumed": "lazo reanudado",
+    "closed_marked": "marcado como cerrado"
+  },
+  "escalation_level": {
+    "coordinator": "aviso al coordinador SST",
+    "manager_weekly": "resumen semanal al gerente de planta"
+  },
+  "evidence_ref_kind": {
+    "record": "registro del expediente",
+    "clip": "clip del episodio",
+    "metric": "métrica",
+    "coverage": "línea de tiempo de cobertura"
+  },
+  "blocked_term_origin": {
+    "derived": "mínimo irreductible del producto",
+    "customer_added": "añadido por la organización"
+  },
+  "export_state": {
+    "requested": "solicitada",
+    "in_progress": "en curso",
+    "ready": "lista",
+    "failed": "fallida",
+    "expired": "caducada para descarga"
+  },
+  "package_form": {
+    "with_clips": "con clips",
+    "without_clips": "sin clips (solo hashes de los clips)"
+  },
+  "monthly_package_state": {
+    "generating": "generándose",
+    "sealed": "sellado",
+    "failed": "fallido"
+  },
+  "metric_key": {
+    "primary_engineering_closures": "cierres de ingeniería con evidencia (métrica principal)",
+    "activation": "activación de zonas",
+    "adoption": "adopción",
+    "classified_in_time": "clasificados en plazo",
+    "overdue": "vencidos",
+    "recurrence": "reincidencia",
+    "exposure": "exposición"
+  },
+  "metric_status": {
+    "computed": "calculada",
+    "partial": "parcial",
+    "not_computable": "no calculable"
+  },
+  "metric_unit": {
+    "count": "recuento",
+    "ratio": "proporción",
+    "minutes": "minutos"
+  },
+  "exposure_status": {
+    "computed": "calculado",
+    "partial": "parcial",
+    "not_computable": "no calculable"
+  },
+  "sample_audit_outcome": {
+    "consistent_criterion": "criterio consistente",
+    "doubtful_criterion": "criterio dudoso",
+    "criterion_error": "error de criterio"
+  },
+  "commitment_state": {
+    "open": "compromiso abierto",
+    "done": "compromiso cumplido",
+    "dropped": "compromiso abandonado con constancia"
+  },
+  "notification_urgency": {
+    "immediate": "inmediata",
+    "normal": "normal",
+    "digest": "resumen"
+  },
+  "notification_channel": {
+    "in_app": "en la aplicación",
+    "email": "correo electrónico"
+  },
+  "notification_delivery_status": {
+    "pending": "pendiente",
+    "sent": "enviada",
+    "failed": "fallida",
+    "suppressed_by_preference": "silenciada por preferencia del usuario",
+    "degraded_app_only": "entregada solo en la aplicación (sin servicio de correo)"
+  },
+  "notification_audience": {
+    "client": "destinatarios del cliente",
+    "provider": "destinatarios del proveedor",
+    "both": "cliente y proveedor"
+  },
+  "loop_detail_code": {
+    "loop_reason_required": "El motivo es obligatorio.",
+    "loop_reason_too_short": "El motivo es más corto que el mínimo que exige el campo.",
+    "loop_blocked_vocabulary_term": "El texto contiene un término que el sistema no puede afirmar; la respuesta indica cuál y una alternativa.",
+    "loop_person_attribution_detected": "El texto atribuye la causa a una persona. La causa se declara como proceso, ingeniería u organización.",
+    "loop_action_on_person_forbidden": "La acción debe ser de ingeniería o de proceso sobre la zona, nunca sobre una persona.",
+    "loop_action_type_not_allowed": "El tipo de acción no está admitido: solo de ingeniería o de proceso.",
+    "loop_deadline_out_of_range": "El plazo de la acción está fuera del intervalo que admite la configuración de la planta.",
+    "loop_closure_evidence_missing": "Para cerrar hace falta la evidencia de la acción ejecutada.",
+    "loop_signer_license_missing": "La firma exige nombre y número de licencia profesional.",
+    "loop_closure_requires_assigned_action": "Este hallazgo no tiene acción asignada: asígnela antes de cerrar.",
+    "loop_unclosable_fields_incomplete": "El estado SIN ALTERNATIVA SEGURA DISPONIBLE exige los cinco campos completos.",
+    "loop_unclosable_policy_not_signed": "Esta planta aún no ha firmado la política de hallazgos incerrables (compuerta de planta).",
+    "loop_unclosable_policy_unavailable": "No se puede confirmar la política de hallazgos incerrables de la planta; la operación se detiene.",
+    "loop_unclosable_policy_revoked": "La política de hallazgos incerrables de la planta está revocada: no se declaran incerrables nuevos.",
+    "loop_unclosable_review_date_out_of_range": "La fecha de revisión debe ser posterior a hoy y no más de doce meses después.",
+    "loop_transition_not_allowed": "Ese cambio de estado no existe en el ciclo de vida del hallazgo.",
+    "loop_reopening_reason_required": "Reabrir un hallazgo exige un motivo.",
+    "loop_cause_category_not_allowed": "La categoría de causa debe ser de proceso, de ingeniería o de organización.",
+    "loop_analysis_information_insufficient": "El análisis está pendiente de información: complételo antes de firmarlo.",
+    "loop_analysis_step_out_of_order": "Complete el paso anterior del análisis antes de avanzar a este.",
+    "loop_assistant_unavailable": "El asistente no está disponible; el flujo guiado continúa sin él.",
+    "loop_assistant_output_rejected": "El borrador del asistente no pasó los validadores y no se muestra.",
+    "loop_gate_state_unavailable": "No se puede confirmar el estado del acuerdo de la zona; el hallazgo no se muestra.",
+    "loop_zone_gate_not_approved": "La zona no tiene compuerta de uso aprobada en ese instante.",
+    "loop_standard_text_unavailable": "No se puede obtener el texto del estándar citado; la operación se detiene.",
+    "loop_vocabulary_change_reason_required": "Cambiar la lista de vocabulario exige un motivo.",
+    "loop_vocabulary_term_duplicate": "Ese término ya está vigente en la lista de la organización.",
+    "loop_configuration_change_reason_required": "Cambiar la configuración del lazo exige un motivo.",
+    "loop_attachment_type_not_allowed": "El adjunto debe ser una imagen JPEG o PNG o un documento PDF.",
+    "loop_attachment_too_large": "El adjunto supera el tamaño máximo admitido.",
+    "loop_attachment_hash_mismatch": "El adjunto almacenado no coincide con el que se declaró: vuelva a subirlo.",
+    "loop_attachment_declaration_missing": "Falta la declaración de que el adjunto no contiene ninguna persona identificable.",
+    "loop_attachment_metadata_not_allowed": "La imagen trae coordenadas de posición en sus metadatos: vuelva a subirla sin ellas."
+  },
+  "accreditation_detail_code": {
+    "accreditation_export_scope_too_large": "La exportación excede el tope de periodo, de zonas o de tamaño; divídala por zona o por mes.",
+    "accreditation_export_zones_span_plants": "Las zonas de una exportación deben pertenecer a una sola planta.",
+    "accreditation_export_zone_out_of_scope": "Alguna de las zonas pedidas no está disponible para esta exportación.",
+    "accreditation_coverage_unavailable": "La línea de tiempo de cobertura del periodo no está disponible; la operación se detiene.",
+    "accreditation_metric_not_computable": "Falta un insumo de esta métrica; no se muestra un valor parcial.",
+    "accreditation_exposure_not_computable": "La zona no declara señal dura: el indicador de exposición no se calcula.",
+    "accreditation_sample_already_reviewed": "Ese elemento de la muestra ya tiene su resultado registrado.",
+    "accreditation_sample_cannot_modify_classification": "La auditoría por muestra deja constancia y no cambia ninguna clasificación.",
+    "accreditation_commitment_out_of_scope": "Solo se registran compromisos de los paquetes de su alcance.",
+    "accreditation_monthly_package_not_available": "El paquete del periodo aún no está sellado."
+  },
+  "notifications_detail_code": {
+    "notifications_notification_preference_not_owned": "Solo se pueden cambiar las preferencias propias."
+  }
+}

@@ -105,7 +105,12 @@ from vigia_platform.shared.api.health import (
     ReadinessProbe,
     SentinelPort,
 )
-from vigia_platform.shared.api.labels import DEFAULT_LABELS_PATH, LabelsInvalid, PlatformLabels
+from vigia_platform.shared.api.labels import (
+    DEFAULT_EXTENSION_LABELS_PATHS,
+    DEFAULT_LABELS_PATH,
+    LabelsInvalid,
+    PlatformLabels,
+)
 from vigia_platform.shared.api.middleware import (
     ChainSettings,
     CsrfAuditPort,
@@ -198,6 +203,8 @@ class AppConfig(BaseModel):
     health_sentinel_key: str = Field(default="health/ready-sentinel", pattern=_SENTINEL_KEY)
     """Objeto centinela del depósito de evidencias que consulta ``/health/ready``."""
     labels_path: Path = DEFAULT_LABELS_PATH
+    extension_labels_paths: tuple[Path, ...] = DEFAULT_EXTENSION_LABELS_PATHS
+    """Archivos que extienden a ``labels_path`` (``labels.loop.es.json`` de U-04, NFR-LAZ-52)."""
     static_dir: Path = DEFAULT_STATIC_DIR
     """Construcción de la aplicación de página única (``shared.api.static``)."""
     verifier_path: Path = DEFAULT_VERIFIER_PATH
@@ -543,7 +550,7 @@ def _bindings(units: Iterable[UnitRegistration]) -> dict[str, type[enum.Enum]]:
 
 def _labels(config: AppConfig, units: Iterable[UnitRegistration] = ()) -> PlatformLabels:
     try:
-        labels = PlatformLabels.load(config.labels_path)
+        labels = PlatformLabels.load(config.labels_path, config.extension_labels_paths)
     except LabelsInvalid as error:
         raise ApiStartupError([str(error)]) from None
     problems = labels.require_complete(_bindings(units))

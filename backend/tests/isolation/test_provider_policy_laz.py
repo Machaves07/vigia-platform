@@ -1,23 +1,29 @@
-"""PAT-LAZ-SEG-03 y A-69 en ``loop``: las políticas RESTRICTIVE del proveedor (TASK-301).
+"""PAT-LAZ-SEG-03 y A-69 en ``loop``, ``notifications`` y ``accreditation``: las políticas
+RESTRICTIVE del proveedor (TASK-301, TASK-339 y TASK-338).
 
 Sobre una base migrada con los clientes A y B de ``tests/identity_db.py`` (dos plantas cada uno),
-una fila de cada tabla de ``loop`` en cada planta (``tests/loop_db.py``) y concesiones de la
-planta 0 de A vigente, de la planta 1, revocada, vencida y ``unswept`` (``active`` pero ya
-vencida: la tarea de vencimiento aún no pasó), más la de toda la organización de la siembra:
+una fila de cada tabla de ``loop``, ``notifications`` y ``accreditation`` en cada planta
+(``tests/loop_db.py``, ``tests/notifications_db.py`` y ``tests/accreditation_db.py``; las nueve
+de ``accreditation`` tienen planta) y concesiones de la planta 0 de A vigente, de la planta 1,
+revocada, vencida y ``unswept`` (``active`` pero ya vencida: la tarea de vencimiento aún no
+pasó), más la de toda la organización de la siembra:
 
-- **estructura**: toda tabla de ``loop`` con planta tiene ``provider_concession_scope``
+- **estructura**: toda tabla de los tres esquemas con planta tiene ``provider_concession_scope``
   RESTRICTIVE para todas las órdenes con ``identity.rls_provider_scope_allows(organization_id,
-  plant_id)`` en ``USING`` y ``WITH CHECK``; las cinco de solo organización (A-69) tienen
-  ``provider_context_denied`` RESTRICTIVE con ``NOT identity.rls_provider_context()``; ninguna
-  tabla queda sin política de proveedor, y la función exige la concesión **vigente**;
+  plant_id)`` en ``USING`` y ``WITH CHECK``; las de solo organización (A-69: cinco de ``loop`` y,
+  en ``notifications``, ``user_notification_preference``, ``digest_batch``, ``email_message`` y
+  su clave) tienen ``provider_context_denied`` RESTRICTIVE con
+  ``NOT identity.rls_provider_context()``; ninguna tabla queda sin política de proveedor, y la
+  función exige la concesión **vigente**;
 - **comportamiento** con el contexto del proveedor (``actor_kind = provider_user``), como
   ``vigia_app`` y, en una base migrada por un **maestro sin SUPERUSER** (como ``vigia_owner`` en
   RDS), como ``vigia_app`` y como el dueño ``vigia_migrate``:
   * tablas con planta: la concesión vigente de la planta 0 ve exactamente esa planta; la de la
     otra planta no la ve; la revocada, la vencida y la ``unswept`` no ven nada; con la concesión
     de A en el contexto de B, nada; y nadie escribe una fila en una planta fuera de su concesión;
-  * las cinco de solo organización: bajo **cualquier** concesión (también la de toda la
-    organización), ni una fila visible ni una escritura admitida;
+  * un aviso de la organización (sin planta) solo lo ve la concesión de toda la organización;
+  * las de solo organización: bajo **cualquier** concesión (también la de toda la organización),
+    ni una fila visible ni una escritura admitida;
 - **sondas negativas** (en transacciones revertidas): la política de proveedor convertida en
   PERMISSIVE, la vigencia quitada (de la función y de ``provider_concession_own``) o la política
   de A-69 convertida en PERMISSIVE hacen fallar la comprobación.
@@ -38,6 +44,8 @@ import asyncpg  # type: ignore[import-untyped]
 import pytest
 import pytest_asyncio
 
+from tests.accreditation_db import ACCREDITATION_TABLES, AccreditationSeed, seed_accreditation
+from tests.accreditation_db import ROW_BUILDERS as ACCREDITATION_ROW_BUILDERS
 from tests.identity_db import (
     IdentitySeed,
     insert_concession,
@@ -53,25 +61,49 @@ from tests.integration.test_roles_rds_master import (
 )
 from tests.integration.test_roles_rds_master import _master_database as master_database
 from tests.integration.test_roles_rds_master import _upgrade as upgrade_as_master
-from tests.loop_db import (
-    LOOP_TABLES,
-    ORGANIZATION_ONLY_TABLES,
-    PLANT_TABLES,
-    ROW_BUILDERS,
-    SINGLE_ROW_TABLES,
-    LoopSeed,
-    seed_loop,
+from tests.loop_db import LOOP_TABLES, LoopSeed, seed_loop
+from tests.loop_db import ORGANIZATION_ONLY_TABLES as LOOP_ORGANIZATION_ONLY
+from tests.loop_db import PLANT_TABLES as LOOP_PLANT_TABLES
+from tests.loop_db import ROW_BUILDERS as LOOP_ROW_BUILDERS
+from tests.loop_db import SINGLE_ROW_TABLES as LOOP_SINGLE_ROW_TABLES
+from tests.notifications_db import (
+    KEY_TABLES,
+    NOTIFICATIONS_TABLES,
+    NotificationsSeed,
+    notification,
+    seed_notifications,
 )
+from tests.notifications_db import ORGANIZATION_ONLY_TABLES as NOTIFICATIONS_ORGANIZATION_ONLY
+from tests.notifications_db import PLANT_TABLES as NOTIFICATIONS_PLANT_TABLES
+from tests.notifications_db import ROW_BUILDERS as NOTIFICATIONS_ROW_BUILDERS
 
 pytestmark = pytest.mark.integration
 
 PROVIDER: Final = "provider_user"
 INSUFFICIENT_PRIVILEGE: Final = "42501"
 UNIQUE_VIOLATION: Final = "23505"
-SCOPED_TABLES: Final = tuple(
-    table for table in PLANT_TABLES if table not in ORGANIZATION_ONLY_TABLES
+SCHEMAS: Final = ("loop", "notifications", "accreditation")
+ALL_TABLES: Final = (
+    tuple(f"loop.{table}" for table in LOOP_TABLES)
+    + tuple(f"notifications.{table}" for table in NOTIFICATIONS_TABLES)
+    + tuple(f"accreditation.{table}" for table in ACCREDITATION_TABLES)
+)
+"""Las tablas de los tres esquemas, con su esquema."""
+ORGANIZATION_ONLY_TABLES: Final = tuple(
+    f"loop.{table}" for table in LOOP_ORGANIZATION_ONLY
+) + tuple(f"notifications.{table}" for table in NOTIFICATIONS_ORGANIZATION_ONLY)
+"""Las de solo organización (A-69): ninguna fila bajo una concesión de proveedor."""
+SCOPED_TABLES: Final = (
+    tuple(f"loop.{table}" for table in LOOP_PLANT_TABLES if table not in LOOP_ORGANIZATION_ONLY)
+    + tuple(f"notifications.{table}" for table in NOTIFICATIONS_PLANT_TABLES)
+    + tuple(f"accreditation.{table}" for table in ACCREDITATION_TABLES)
 )
 """Las tablas con planta que la concesión acota por planta (las demás no dejan nada)."""
+WRITABLE_SCOPED_TABLES: Final = tuple(
+    name for name in SCOPED_TABLES if name.split(".")[1] not in KEY_TABLES
+)
+"""Las que ``vigia_app`` escribe directamente (las claves las llena el disparador de su tabla)."""
+SINGLE_ROW_TABLES: Final = frozenset(f"loop.{table}" for table in LOOP_SINGLE_ROW_TABLES)
 VIGENCY: Final = (
     "status = 'active'",
     "revoked_at IS NULL",
@@ -89,6 +121,8 @@ class World:
     connect: Connect
     """Abre una conexión: sin rol, como superusuario; con rol, como ese rol."""
     loop: LoopSeed
+    notifications: NotificationsSeed
+    accreditation: AccreditationSeed
     concessions: dict[str, uuid.UUID]
     """Las de ``CONCESSIONS`` (todas de A) y ``organization``, la de toda la organización A."""
 
@@ -112,11 +146,22 @@ class World:
     def other_plant(self) -> uuid.UUID:
         return self.identity.a.plants[1].plant_id
 
+    def row(self, name: str, plant: int) -> tuple[str, list[Any]]:
+        """Una fila nueva de ``name`` (con esquema) en la planta ``plant`` de A."""
+        schema, table = name.split(".")
+        if schema == "loop":
+            return LOOP_ROW_BUILDERS[table](self.loop.plant(self.a, plant))
+        if schema == "accreditation":
+            return ACCREDITATION_ROW_BUILDERS[table](self.accreditation.plant(self.a, plant))
+        return NOTIFICATIONS_ROW_BUILDERS[table](self.notifications.plant(self.a, plant))
+
 
 async def _prepare(connect: Connect, identity: IdentitySeed) -> World:
     connection = await connect()
     try:
         loop = await seed_loop(connection, identity)
+        notifications = await seed_notifications(connection, identity)
+        accreditation = await seed_accreditation(connection, identity)
         plants = [plant.plant_id for plant in identity.a.plants]
         past: dict[str, Any] = {
             "granted_offset": -dt.timedelta(days=10),
@@ -144,7 +189,7 @@ async def _prepare(connect: Connect, identity: IdentitySeed) -> World:
         concessions["organization"] = identity.concessions[identity.a.organization_id]
     finally:
         await connection.close()
-    return World(connect, loop, concessions)
+    return World(connect, loop, notifications, accreditation, concessions)
 
 
 @pytest.fixture(scope="module")
@@ -179,9 +224,10 @@ class _Rollback(Exception):
 
 
 @pytest.mark.asyncio
-async def test_every_loop_table_has_a_restrictive_provider_policy(superuser: Any) -> None:
+async def test_every_u04_table_has_a_restrictive_provider_policy(superuser: Any) -> None:
     rows = await superuser.fetch(
-        "SELECT c.relname AS name, p.polname AS policy, p.polpermissive, p.polcmd::text AS cmd,"
+        "SELECT n.nspname || '.' || c.relname AS name, p.polname AS policy, p.polpermissive,"
+        " p.polcmd::text AS cmd,"
         " pg_catalog.pg_get_expr(p.polqual, p.polrelid) AS qual,"
         " pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid) AS checked,"
         " EXISTS (SELECT FROM pg_attribute a WHERE a.attrelid = c.oid"
@@ -190,7 +236,8 @@ async def test_every_loop_table_has_a_restrictive_provider_policy(superuser: Any
         "  AND a.attname = 'zone_id' AND NOT a.attisdropped) AS has_zone"
         " FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
         " LEFT JOIN pg_policy p ON p.polrelid = c.oid AND p.polname <> 'organization_isolation'"
-        " WHERE n.nspname = 'loop' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
+        " WHERE n.nspname = ANY ($1::text[]) AND c.relkind IN ('r', 'p') AND NOT c.relispartition",
+        list(SCHEMAS),
     )
     policies: dict[str, dict[str, Any]] = {}
     plant: dict[str, bool] = {}
@@ -201,7 +248,7 @@ async def test_every_loop_table_has_a_restrictive_provider_policy(superuser: Any
             failures.append(f"{row['name']}: zona sin planta")
         if row["policy"] is not None:
             policies.setdefault(row["name"], {})[row["policy"]] = row
-    assert set(plant) == set(LOOP_TABLES)
+    assert set(plant) == set(ALL_TABLES)
     expected_scope = "identity.rls_provider_scope_allows(organization_id, plant_id)"
     expected_denied = "(NOT identity.rls_provider_context())"
     for name in sorted(plant):
@@ -225,6 +272,12 @@ async def test_every_loop_table_has_a_restrictive_provider_policy(superuser: Any
                     failures.append(f"{name}: {policy} {label} = {row[label]}")
     assert not failures, "\n".join(failures)
     assert set(ORGANIZATION_ONLY_TABLES) >= {name for name, has in plant.items() if not has}
+    # A-69 en notifications: las preferencias, los lotes y los correos no dejan nada.
+    assert {
+        "notifications.user_notification_preference",
+        "notifications.digest_batch",
+        "notifications.email_message",
+    } <= set(ORGANIZATION_ONLY_TABLES)
     definition = await superuser.fetchval(
         "SELECT pg_catalog.pg_get_functiondef('identity.rls_provider_scope_allows(uuid, uuid)'"
         "::regprocedure)"
@@ -236,24 +289,24 @@ async def test_every_loop_table_has_a_restrictive_provider_policy(superuser: Any
 
 
 async def _visible_plants(
-    connection: Any, organization_id: uuid.UUID, concession_id: uuid.UUID, table: str
+    connection: Any, organization_id: uuid.UUID, concession_id: uuid.UUID, name: str
 ) -> set[uuid.UUID | None]:
     async with connection.transaction():
         await set_scope(
             connection, organization_id, actor_kind=PROVIDER, concession_id=concession_id
         )
-        rows = await connection.fetch(f"SELECT DISTINCT plant_id FROM loop.{table}")  # noqa: S608
+        rows = await connection.fetch(f"SELECT DISTINCT plant_id FROM {name}")  # noqa: S608
     return {row["plant_id"] for row in rows}
 
 
 async def _visible_rows(
-    connection: Any, organization_id: uuid.UUID, concession_id: uuid.UUID, table: str
+    connection: Any, organization_id: uuid.UUID, concession_id: uuid.UUID, name: str
 ) -> int:
     async with connection.transaction():
         await set_scope(
             connection, organization_id, actor_kind=PROVIDER, concession_id=concession_id
         )
-        return int(await connection.fetchval(f"SELECT count(*) FROM loop.{table}"))  # noqa: S608
+        return int(await connection.fetchval(f"SELECT count(*) FROM {name}"))  # noqa: S608
 
 
 async def _write(
@@ -283,38 +336,32 @@ async def _leaks(
     """Lo que ve o escribe cada concesión de más (o ve de menos, la vigente)."""
     leaks: list[str] = []
     concessions = world.concessions
-    other_scope = world.loop.plant(world.a, 1)
-    for table in scoped:
-        seen = await _visible_plants(connection, world.a, concessions["active"], table)
+    for name in scoped:
+        seen = await _visible_plants(connection, world.a, concessions["active"], name)
         if seen != {world.conceded}:
-            leaks.append(f"{table}: la vigente ve {seen}")
-        seen = await _visible_plants(connection, world.a, concessions["other_plant"], table)
+            leaks.append(f"{name}: la vigente ve {seen}")
+        seen = await _visible_plants(connection, world.a, concessions["other_plant"], name)
         if world.conceded in seen or world.other_plant not in seen:
-            leaks.append(f"{table}: la de la otra planta ve {seen}")
-        for name in ("revoked", "expired", "unswept"):
-            seen = await _visible_plants(connection, world.a, concessions[name], table)
+            leaks.append(f"{name}: la de la otra planta ve {seen}")
+        for concession in ("revoked", "expired", "unswept"):
+            seen = await _visible_plants(connection, world.a, concessions[concession], name)
             if seen:
-                leaks.append(f"{table}: la {name} ve {seen}")
-        seen = await _visible_plants(connection, world.b, concessions["active"], table)
+                leaks.append(f"{name}: la {concession} ve {seen}")
+        seen = await _visible_plants(connection, world.b, concessions["active"], name)
         if seen:
-            leaks.append(f"{table}: en el contexto de B ve {seen}")
+            leaks.append(f"{name}: en el contexto de B ve {seen}")
         # Escribir en la planta 1 con la concesión de la planta 0: la política lo rechaza.
-        outcome = await _write(
-            connection, world.a, concessions["active"], ROW_BUILDERS[table](other_scope)
-        )
+        outcome = await _write(connection, world.a, concessions["active"], world.row(name, 1))
         if outcome != INSUFFICIENT_PRIVILEGE:
-            leaks.append(f"{table}: la vigente escribe en otra planta ({outcome})")
-    own_scope = world.loop.plant(world.a, 0)
-    for table in organization_only:
-        for name in (*CONCESSIONS, "organization"):
-            count = await _visible_rows(connection, world.a, concessions[name], table)
+            leaks.append(f"{name}: la vigente escribe en otra planta ({outcome})")
+    for name in organization_only:
+        for concession in (*CONCESSIONS, "organization"):
+            count = await _visible_rows(connection, world.a, concessions[concession], name)
             if count:
-                leaks.append(f"{table}: la {name} ve {count} filas (A-69)")
-            outcome = await _write(
-                connection, world.a, concessions[name], ROW_BUILDERS[table](own_scope)
-            )
+                leaks.append(f"{name}: la {concession} ve {count} filas (A-69)")
+            outcome = await _write(connection, world.a, concessions[concession], world.row(name, 0))
             if outcome != INSUFFICIENT_PRIVILEGE:
-                leaks.append(f"{table}: la {name} escribe ({outcome}) (A-69)")
+                leaks.append(f"{name}: la {concession} escribe ({outcome}) (A-69)")
     return leaks
 
 
@@ -328,14 +375,15 @@ async def test_only_the_valid_concession_sees_its_plant_and_nothing_of_organizat
 @pytest.mark.asyncio
 async def test_the_valid_concession_writes_in_its_own_plant(app: Any, world: World) -> None:
     """La política no lo bloquea todo: la vigente escribe en su planta (las tablas de una fila
-    por planta chocan por clave con la sembrada, después de pasar la política)."""
-    scope = world.loop.plant(world.a, 0)
+    por planta chocan por clave con la sembrada, después de pasar la política). El aviso reclama
+    además su clave de idempotencia bajo la misma concesión."""
     outcomes = {
-        table: await _write(app, world.a, world.concessions["active"], ROW_BUILDERS[table](scope))
-        for table in SCOPED_TABLES
+        name: await _write(app, world.a, world.concessions["active"], world.row(name, 0))
+        for name in WRITABLE_SCOPED_TABLES
     }
     assert outcomes == {
-        table: UNIQUE_VIOLATION if table in SINGLE_ROW_TABLES else "ok" for table in SCOPED_TABLES
+        name: UNIQUE_VIOLATION if name in SINGLE_ROW_TABLES else "ok"
+        for name in WRITABLE_SCOPED_TABLES
     }
 
 
@@ -344,10 +392,31 @@ async def test_without_a_concession_the_client_sees_its_organization_tables(
     app: Any, world: World
 ) -> None:
     """Las de solo organización no son tablas vacías: el cliente (sin concesión) ve sus filas."""
-    for table in ORGANIZATION_ONLY_TABLES:
+    for name in ORGANIZATION_ONLY_TABLES:
         async with app.transaction():
             await set_scope(app, world.a)
-            assert await app.fetchval(f"SELECT count(*) FROM loop.{table}") > 0, table  # noqa: S608
+            assert await app.fetchval(f"SELECT count(*) FROM {name}") > 0, name  # noqa: S608
+
+
+@pytest.mark.asyncio
+async def test_an_organization_notification_is_only_for_the_organization_concession(
+    app: Any, world: World
+) -> None:
+    """Un aviso sin planta (de la organización): lo ven el cliente y la concesión de toda la
+    organización; ninguna concesión de planta, ni para leerlo ni para escribir otro."""
+    plantless = "notifications.notification WHERE plant_id IS NULL"
+    assert await _visible_rows(app, world.a, world.concessions["organization"], plantless) == 1
+    for concession in CONCESSIONS:
+        assert await _visible_rows(app, world.a, world.concessions[concession], plantless) == 0
+    async with app.transaction():
+        await set_scope(app, world.a)
+        assert await app.fetchval(f"SELECT count(*) FROM {plantless}") == 1  # noqa: S608
+    scope = world.notifications.plant(world.a, 0)
+    statement = notification(scope, with_plant=False)
+    assert await _write(app, world.a, world.concessions["active"], statement) == (
+        INSUFFICIENT_PRIVILEGE
+    )
+    assert await _write(app, world.a, world.concessions["organization"], statement) == "ok"
 
 
 # --- Maestro sin SUPERUSER (como vigia_owner en RDS) -----
@@ -384,6 +453,8 @@ def test_the_same_isolation_with_a_non_superuser_master(cluster: RdsLikeCluster)
     upgrade = upgrade_as_master(cluster, database)
     assert upgrade.returncode == 0, upgrade.stderr
     assert "Running upgrade gob_0028 -> laz_0029" in upgrade.stderr
+    assert "Running upgrade laz_0029 -> laz_0030" in upgrade.stderr
+    assert "Running upgrade laz_0030 -> laz_0031" in upgrade.stderr
     rds = _RdsDatabase(cluster, database)
 
     async def run() -> None:
@@ -456,19 +527,19 @@ async def _probe_leaks(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("table", SCOPED_TABLES)
+@pytest.mark.parametrize("name", SCOPED_TABLES)
 async def test_a_permissive_provider_policy_is_detected(
-    table: str, superuser: Any, world: World
+    name: str, superuser: Any, world: World
 ) -> None:
     permissive = [
-        f"DROP POLICY provider_concession_scope ON loop.{table}",
-        f"CREATE POLICY provider_concession_scope ON loop.{table} AS PERMISSIVE FOR ALL TO PUBLIC"
+        f"DROP POLICY provider_concession_scope ON {name}",
+        f"CREATE POLICY provider_concession_scope ON {name} AS PERMISSIVE FOR ALL TO PUBLIC"
         " USING (identity.rls_provider_scope_allows(organization_id, plant_id))"
         " WITH CHECK (identity.rls_provider_scope_allows(organization_id, plant_id))",
     ]
-    leaks = await _probe_leaks(superuser, world, permissive, (table,))
+    leaks = await _probe_leaks(superuser, world, permissive, (name,))
     # PERMISSIVE se suma a ``organization_isolation`` (O lógico): la concesión ve las dos plantas.
-    assert any(leak.startswith(f"{table}: la vigente ve") for leak in leaks), leaks
+    assert any(leak.startswith(f"{name}: la vigente ve") for leak in leaks), leaks
 
 
 @pytest.mark.asyncio
@@ -483,24 +554,28 @@ async def test_a_provider_scope_without_the_vigency_condition_is_detected(
         "DROP POLICY provider_concession_own ON identity.provider_concession",
     ]
     leaks = await _probe_leaks(superuser, world, without_both)
-    for table in SCOPED_TABLES:
-        for name in ("revoked", "expired", "unswept"):
-            assert any(leak.startswith(f"{table}: la {name} ve") for leak in leaks), (table, name)
+    for name in SCOPED_TABLES:
+        for concession in ("revoked", "expired", "unswept"):
+            assert any(leak.startswith(f"{name}: la {concession} ve") for leak in leaks), (
+                name,
+                concession,
+            )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("table", ORGANIZATION_ONLY_TABLES)
+@pytest.mark.parametrize("name", ORGANIZATION_ONLY_TABLES)
 async def test_a_permissive_organization_only_policy_is_detected(
-    table: str, superuser: Any, world: World
+    name: str, superuser: Any, world: World
 ) -> None:
     permissive = [
-        f"DROP POLICY provider_context_denied ON loop.{table}",
-        f"CREATE POLICY provider_context_denied ON loop.{table} AS PERMISSIVE FOR ALL TO PUBLIC"
+        f"DROP POLICY provider_context_denied ON {name}",
+        f"CREATE POLICY provider_context_denied ON {name} AS PERMISSIVE FOR ALL TO PUBLIC"
         " USING (NOT identity.rls_provider_context())"
         " WITH CHECK (NOT identity.rls_provider_context())",
     ]
-    leaks = await _probe_leaks(superuser, world, permissive, (), (table,))
-    # PERMISSIVE se suma a ``organization_isolation``: la concesión de toda la organización ve y
-    # escribe las filas de A.
-    assert any(leak.startswith(f"{table}: la organization ve") for leak in leaks), leaks
-    assert any(leak.startswith(f"{table}: la organization escribe") for leak in leaks), leaks
+    leaks = await _probe_leaks(superuser, world, permissive, (), (name,))
+    # PERMISSIVE se suma a ``organization_isolation``: la concesión de toda la organización ve las
+    # filas de A (y las escribe, salvo en las tablas de clave, donde vigia_app no tiene INSERT).
+    assert any(leak.startswith(f"{name}: la organization ve") for leak in leaks), leaks
+    if name.split(".")[1] not in KEY_TABLES:
+        assert any(leak.startswith(f"{name}: la organization escribe") for leak in leaks), leaks
