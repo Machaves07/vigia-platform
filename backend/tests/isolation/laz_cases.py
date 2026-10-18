@@ -96,6 +96,24 @@ def _export_body(plant: Any, zone: Any) -> dict[str, Any]:
 
 
 LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
+    (
+        ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call(
+                "POST",
+                f"/loop/actions/{ids.record}/attachments/upload-grant",
+                json={"content_type": "image/png", "size_bytes": 1, "sha256": "a" * 64},
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/attachments/{attachment_id}/read-url"),
+        Case(
+            Kind.RESOURCE,
+            call=lambda ids: Call("POST", f"/loop/attachments/{ids.evidence}/read-url"),
+        ),
+    ),
     # VIG-215 (TASK-317): una zona de B en el cuerpo responde igual que una inexistente
     # (not_found, nunca forbidden ni export_zone_out_of_scope); nada se encola ni se audita en B.
     (
