@@ -12,6 +12,7 @@ from typing import Final
 
 from fastapi import Request
 
+from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
@@ -29,6 +30,9 @@ class AccreditationHttp:
 
     exports: ExportRequests | None = None
     """``POST /accreditation/exports`` y ``GET /accreditation/exports/{export_id}`` (TASK-317)."""
+    downloads: ExportDownloads | None = None
+    """``GET /accreditation/exports/{export_id}/download`` y ``POST …/download-url`` (TASK-345);
+    sin depósito de evidencias, ``None`` y las dos responden ``internal_error``."""
 
 
 def installed[T](service: T | None) -> T:

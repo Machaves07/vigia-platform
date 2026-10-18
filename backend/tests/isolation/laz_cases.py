@@ -32,6 +32,7 @@ from vigia_platform.accreditation.adapters.http.services import (
     AccreditationHttp,
 )
 from vigia_platform.accreditation.events import register_accreditation_event_types
+from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.ledger.application.audit_writer import AuditWriter
@@ -95,6 +96,13 @@ def _configuration(services: LazServices) -> Mapping[str, object]:
     }
 
 
+class _NoSigner:
+    """Las descargas de B nunca llegan al almacén: responden ``not_found`` antes de firmar."""
+
+    async def presign_attachment_get(self, *args: object, **kwargs: object) -> Any:
+        raise AssertionError("una descarga fuera de alcance no firma ninguna URL")
+
+
 def _accreditation(services: LazServices) -> Mapping[str, object]:
     return {
         ACCREDITATION_STATE_KEY: AccreditationHttp(
@@ -104,7 +112,14 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 audit=services.audit,
                 outbox=services.outbox,
                 clock=services.clock,
-            )
+            ),
+            downloads=ExportDownloads(  # TASK-345
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                storage=_NoSigner(),
+                clock=services.clock,
+            ),
         )
     }
 
@@ -190,6 +205,20 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     (
         ("GET", "/accreditation/exports/{export_id}"),
         Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.event}")),
+    ),
+    # VIG-226 (TASK-345): las descargas de una exportación de otra organización responden como
+    # una inexistente y no firman ni auditan ninguna concesión (las pruebas con una exportación
+    # lista de B están en tests/integration/test_export_download_routes.py).
+    (
+        ("GET", "/accreditation/exports/{export_id}/download"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.event}/download")),
+    ),
+    (
+        ("POST", "/accreditation/exports/{export_id}/download-url"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("POST", f"/accreditation/exports/{i.event}/download-url"),
+        ),
     ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""

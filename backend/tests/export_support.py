@@ -30,7 +30,7 @@ import hashlib
 import json
 import secrets
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Final
@@ -55,8 +55,10 @@ from vigia_platform.accreditation.export.composer_port import (
     ExportPackage,
     ExportSink,
 )
+from vigia_platform.accreditation.export.download import ExportDownloads, ExportDownloadSigner
 from vigia_platform.accreditation.export.lease import ExportLeaseSettings, SqlExportLeaseStore
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.export.volumes import ExportLocation
 from vigia_platform.accreditation.export.worker import (
     ExportWorker,
     register_export_worker,
@@ -126,12 +128,17 @@ class CountingCheckpoints:
 
 @dataclass
 class RecordingUploads:
-    """``UploadPort`` que registra las subidas abortadas."""
+    """``UploadPort`` que registra las subidas abortadas (y cada llamada, con su ubicación)."""
 
     aborted: list[str] = field(default_factory=list)
+    calls: list[tuple[ExportLocation, str | None]] = field(default_factory=list)
 
-    async def abort_previous_upload(self, multipart_upload_id: str) -> None:
-        self.aborted.append(multipart_upload_id)
+    async def abort_previous_upload(
+        self, location: ExportLocation, multipart_upload_id: str | None
+    ) -> None:
+        self.calls.append((location, multipart_upload_id))
+        if multipart_upload_id is not None:
+            self.aborted.append(multipart_upload_id)
 
 
 @dataclass
@@ -463,7 +470,7 @@ class ExportStack:
         *,
         composer: Any = None,
         checkpoints: CountingCheckpoints | None = None,
-        uploads: RecordingUploads | None = None,
+        uploads: Any = None,
         alarm: RecordingAlarm | None = None,
         database: Database | None = None,
         sleep: Any = None,
@@ -506,8 +513,15 @@ async def _delegate(stack_ref: list[ExportStack], event: OutboxEvent, tx: Transa
 
 @contextlib.contextmanager
 def export_stack(
-    endpoint: PostgresEndpoint, prefix: str, *, pool: int = 12
+    endpoint: PostgresEndpoint,
+    prefix: str,
+    *,
+    pool: int = 12,
+    storage: Callable[[Any], ExportDownloadSigner] | None = None,
+    audit: Callable[[Any], Any] | None = None,
 ) -> Iterator[ExportStack]:
+    """``storage(clock)`` da el firmante de las descargas (TASK-345) con el reloj de la pila;
+    ``audit(writer)`` envuelve la auditoría de las descargas (para inyectarle fallos)."""
     with authz_environment(endpoint, prefix) as authz:
         sessions = authz.sessions
         (now,) = authz.fetch("SELECT now() AS now")
@@ -553,6 +567,17 @@ def export_stack(
             outbox=outbox,
             clock=sessions.clock,
         )
+        downloads = (
+            None
+            if storage is None
+            else ExportDownloads(
+                database=database,
+                authorizer=authz.authorizer,
+                audit=sessions.audit if audit is None else audit(sessions.audit),
+                storage=storage(sessions.clock),
+                clock=sessions.clock,
+            )
+        )
         app = World(clock=sessions.clock).app(
             runtime={
                 "sessions": authz.contexts,
@@ -562,7 +587,9 @@ def export_stack(
                     provider_queries=LedgerProviderQueryLedger(writer),
                     clock=sessions.clock,
                 ),
-                "state": {ACCREDITATION_STATE_KEY: AccreditationHttp(exports=exports)},
+                "state": {
+                    ACCREDITATION_STATE_KEY: AccreditationHttp(exports=exports, downloads=downloads)
+                },
             },
         )
         client = httpx.AsyncClient(

@@ -121,7 +121,10 @@ EXPORT_PACKAGE: Final = Table(
     _integer("artifact_count"),
     _uuids("checkpoint_record_ids"),
     _text("verifier_version"),
+    _json("stored_objects"),
 )
+"""§3.1 ``ExportPackage`` más ``stored_objects`` (laz_0032, TASK-345): los volúmenes y el
+documento escritos, con su ``version_id``."""
 
 MONTHLY_PACKAGE: Final = Table(
     "monthly_package",

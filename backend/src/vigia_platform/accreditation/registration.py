@@ -37,9 +37,12 @@ from vigia_platform.accreditation.events import register_accreditation_event_typ
 from vigia_platform.accreditation.export.composer_port import (
     MissingPackageComposer,
     MissingUploadPort,
+    UploadPort,
 )
+from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.lease import SqlExportLeaseStore
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.export.stream import ExportStream
 from vigia_platform.accreditation.export.worker import (
     EXPORT_WORKER,
     EXPORT_WORKER_CONCURRENCY,
@@ -85,14 +88,17 @@ type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
 
 def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) -> None:
-    """``export_worker`` (TASK-317): el compositor real es de TASK-318 y el flujo de bytes de
-    TASK-345; hasta entonces, los que fallan sin publicar nada (nunca un paquete inventado)."""
+    """``export_worker`` (TASK-317) con el flujo de bytes sobre ``vigia-evidence`` (TASK-345). El
+    compositor real es de TASK-318; hasta entonces, uno que falla sin publicar nada (nunca un
+    paquete inventado). Sin depósito de evidencias, el flujo tampoco existe."""
+    evidence = services.evidence
+    uploads: UploadPort = MissingUploadPort() if evidence is None else ExportStream(store=evidence)
     register_export_worker(
         registry,
         ExportWorker(
             leases=SqlExportLeaseStore(database=services.database),
             checkpoints=services.checkpoints,
-            uploads=MissingUploadPort(),
+            uploads=uploads,
             composer=MissingPackageComposer(),
             alarm=LoggingExportAlarm(),
             clock=services.clock,
@@ -101,6 +107,7 @@ def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) 
 
 
 def _export_state(services: UnitServices) -> Mapping[str, object]:
+    evidence = services.evidence
     return {
         ACCREDITATION_STATE_KEY: AccreditationHttp(
             exports=ExportRequests(
@@ -109,7 +116,19 @@ def _export_state(services: UnitServices) -> Mapping[str, object]:
                 audit=services.audit,
                 outbox=services.outbox,
                 clock=services.clock,
-            )
+            ),
+            # TASK-345: SUP-U05-40 y 23, firmadas por vigia-api sobre vigia-evidence.
+            downloads=(
+                None
+                if evidence is None
+                else ExportDownloads(
+                    database=services.database,
+                    authorizer=services.authorizer,
+                    audit=services.audit,
+                    storage=evidence,
+                    clock=services.clock,
+                )
+            ),
         )
     }
 

@@ -13,16 +13,29 @@
   ``expired``), ``progress_percent``, ``current_artifact``, ``attempt_count``, ``failure_code``,
   ``expires_at`` y, si está ``ready``, el resumen del manifiesto.
 
+- ``GET /accreditation/exports/{export_id}/download`` (SUP-U05-40, ``export.create`` sobre sus
+  zonas): los volúmenes ``vol-{nn}.zip`` (el manifiesto en el primero) con **una URL prefirmada
+  de 15 minutos por volumen** y el ``archive_sha256``.
+- ``POST /accreditation/exports/{export_id}/download-url`` (SUP-U05-23, la misma clave): la URL
+  de 15 minutos del documento portátil (``document_sha256``).
+
+  Las dos solo con ``export_state = ready``; si no, ``409 conflict`` con ``export_state`` en el
+  cuerpo (``expired`` cuando la descarga venció). Cada URL deja **una** entrada de auditoría
+  ``export_download_granted`` en la transacción que la emite, que declara que registra la
+  concesión de acceso y no la descarga (TASK-345, PAT-LAZ-SEG-04).
+
 ``Cache-Control: no-store``. Las marcas, ISO 8601 UTC con milisegundos y ``Z``.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from vigia_platform.accreditation.adapters.http.services import (
@@ -31,6 +44,10 @@ from vigia_platform.accreditation.adapters.http.services import (
     installed,
 )
 from vigia_platform.accreditation.detail_codes import AccreditationDetailCode
+from vigia_platform.accreditation.export.download import (
+    ExportNotDownloadable,
+    ExportPackageUnreadable,
+)
 from vigia_platform.accreditation.export.request import (
     ExportRateLimited,
     ExportRequestInvalid,
@@ -114,6 +131,41 @@ class ExportStatusOut(_Strict):
     correlation_id: uuid.UUID
     manifest_summary: ManifestSummaryView | None
     """Solo cuando el paquete está listo."""
+
+
+class VolumeDownloadView(_Strict):
+    volume: int
+    name: str
+    """``vol-01.zip`` …; el manifiesto va en el primero."""
+    size_bytes: int
+    sha256: str
+    url: str
+    """URL prefirmada de 15 minutos (descarga como archivo); no se promete uso único."""
+    expires_at: str
+
+
+class ExportDownloadOut(_Strict):
+    export_id: uuid.UUID
+    archive_sha256: str
+    """SHA-256 de los bytes canónicos de la lista de volúmenes (nombre, SHA-256 y tamaño)."""
+    volumes: tuple[VolumeDownloadView, ...]
+
+
+class ExportDocumentUrlOut(_Strict):
+    export_id: uuid.UUID
+    document_sha256: str
+    size_bytes: int
+    url: str
+    expires_at: str
+
+
+class ExportConflictOut(_Strict):
+    """409: el cuerpo de error común más el estado que se muestra de la exportación."""
+
+    code: str
+    message_es: str
+    correlation_id: uuid.UUID
+    export_state: ExportState
 
 
 def _stamp(moment: datetime | None) -> str | None:
@@ -210,4 +262,81 @@ def export_router() -> APIRouter:
         status = await exports.status(request_context(request), export_id)
         return export_status_view(status, exports.clock)
 
+    @router.get(
+        "/accreditation/exports/{export_id}/download",
+        dependencies=[requires(_CREATE), Depends(exact_query())],
+        response_model=ExportDownloadOut,
+        responses={409: {"model": ExportConflictOut}},
+        summary="Volúmenes de una exportación lista, con una URL de descarga de 15 min por volumen",
+    )
+    async def export_download(
+        export_id: uuid.UUID, request: Request, response: Response, services: Services
+    ) -> Response | ExportDownloadOut:
+        no_store(response)
+        downloads = installed(services.downloads)
+        try:
+            grant = await downloads.volumes(request_context(request), export_id)
+        except ExportNotDownloadable as error:
+            return await _conflict(request, error)
+        except ExportPackageUnreadable:
+            raise ApiError(ApiErrorCode.INTERNAL_ERROR) from None
+        return ExportDownloadOut(
+            export_id=grant.export_id,
+            archive_sha256=grant.archive_sha256,
+            volumes=tuple(
+                VolumeDownloadView(
+                    volume=volume.number,
+                    name=volume.name,
+                    size_bytes=volume.size_bytes,
+                    sha256=volume.sha256,
+                    url=volume.url,
+                    expires_at=format_timestamp(volume.expires_at),
+                )
+                for volume in grant.volumes
+            ),
+        )
+
+    @router.post(
+        "/accreditation/exports/{export_id}/download-url",
+        dependencies=[requires(_CREATE), Depends(exact_query())],
+        response_model=ExportDocumentUrlOut,
+        responses={409: {"model": ExportConflictOut}},
+        summary="URL de descarga de 15 min del documento portátil de una exportación lista",
+    )
+    async def export_document_url(
+        export_id: uuid.UUID, request: Request, response: Response, services: Services
+    ) -> Response | ExportDocumentUrlOut:
+        no_store(response)
+        downloads = installed(services.downloads)
+        try:
+            grant = await downloads.document(request_context(request), export_id)
+        except ExportNotDownloadable as error:
+            return await _conflict(request, error)
+        except ExportPackageUnreadable:
+            raise ApiError(ApiErrorCode.INTERNAL_ERROR) from None
+        return ExportDocumentUrlOut(
+            export_id=grant.export_id,
+            document_sha256=grant.document_sha256,
+            size_bytes=grant.size_bytes,
+            url=grant.url,
+            expires_at=format_timestamp(grant.expires_at),
+        )
+
     return router
+
+
+async def _conflict(request: Request, error: ExportNotDownloadable) -> Response:
+    """409 ``conflict`` con el cuerpo de error común y, además, ``export_state``.
+
+    La lista cerrada de códigos no tiene uno propio para «la exportación no está lista o caducó»
+    (LC §6.7 solo declara el 409): no se inventa un ``detail_code``. El cuerpo lo escribe el
+    manejador de ``ApiError`` de la aplicación (mensaje, ``correlation_id``) y la ruta añade el
+    estado que se muestra.
+    """
+    handler = request.app.exception_handlers.get(ApiError)
+    if handler is None:
+        raise ApiError(ApiErrorCode.CONFLICT)
+    base = await handler(request, ApiError(ApiErrorCode.CONFLICT))
+    body = json.loads(bytes(base.body))
+    body["export_state"] = error.state.value
+    return JSONResponse(body, status_code=base.status_code, headers={"Cache-Control": "no-store"})
