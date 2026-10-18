@@ -14,8 +14,12 @@ Una ronda:
 2. Pide a ``shared.vigia_outbox_due_heads`` la cabeza vencida de cada partición: solo
    identificadores, porque con ``FORCE ROW LEVEL SECURITY`` el proceso no ve entregas sin una
    organización fijada (nuc_0010).
-3. Por cada cabeza, una transacción con ``context_from_event`` (la organización emisora y su
-   ``correlation_id``, BR-NUC-80):
+3. Por cada cabeza, si el consumidor declara mamparo (``Consumer.admission``, U-04, LC-LAZ-40),
+   se pide puesto **antes** de abrir la transacción y de tomar el bloqueo de la partición: en su
+   tope, la ronda termina (``Outcome.SATURATED``) sin tocar la base, la partición queda para el
+   siguiente ciclo (o para otro proceso) y la entrega **no consume intentos**. Con puesto, una
+   transacción con ``context_from_event`` (la organización emisora y su ``correlation_id``,
+   BR-NUC-80):
 
    - ``pg_try_advisory_xact_lock(hashtextextended(consumidor|partición, 0))``: si otro proceso
      tiene la partición, se salta; dos procesos nunca entregan la misma partición a la vez;
@@ -198,6 +202,8 @@ class Outcome(enum.StrEnum):
     DEPENDENCY_DOWN = "dependency_down"
     PAUSED = "paused"
     SKIPPED = "skipped"
+    SATURATED = "saturated"
+    """El mamparo del consumidor estaba en su tope: ni transacción ni bloqueo ni intento."""
 
 
 _COUNTED_OUTCOMES: Final = frozenset(
@@ -319,6 +325,8 @@ class Dispatcher:
             ("result", [outcome.value for outcome in _COUNTED_OUTCOMES]),
         ):
             for value in values:
+                if value in redaction.DEFAULT_POLICY.values(key):
+                    continue  # ya fijo en la política (p. ej. los consumidores de U-04)
                 try:
                     redaction.DEFAULT_POLICY.register(key, [value])
                 except ValueError:
@@ -383,7 +391,7 @@ class Dispatcher:
         for head in heads:
             outcome = await self._process(consumer, head, probe)
             report.add(outcome)
-            if outcome in (Outcome.DEPENDENCY_DOWN, Outcome.PAUSED):
+            if outcome in (Outcome.DEPENDENCY_DOWN, Outcome.PAUSED, Outcome.SATURATED):
                 break
         return report
 
@@ -454,6 +462,22 @@ class Dispatcher:
     # --- Una cabeza -------------------------------------------------------------------------
 
     async def _process(
+        self, consumer: Consumer, head: DueHead, probe: BreakerState | None
+    ) -> Outcome:
+        # El mamparo, antes de la transacción y del bloqueo de la partición (LC-LAZ-40): en su
+        # tope no se toca la base, así que la entrega no consume intentos y otro proceso puede
+        # tomar la partición.
+        admission = consumer.admission
+        if admission is None:
+            return await self._process_admitted(consumer, head, probe)
+        if not admission.try_enter():
+            return Outcome.SATURATED
+        try:
+            return await self._process_admitted(consumer, head, probe)
+        finally:
+            admission.leave()
+
+    async def _process_admitted(
         self, consumer: Consumer, head: DueHead, probe: BreakerState | None
     ) -> Outcome:
         context = self._contexts.context_from_event(head, unit=consumer.unit)

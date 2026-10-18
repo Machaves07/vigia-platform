@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import APIRouter
 
 from vigia_platform.loop.domain.enums import NOTIFICATIONS_LABEL_BINDINGS
+from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.notifications.detail_codes import (
     NOTIFICATIONS_DETAIL_CODE_LABEL_BINDINGS,
     NotificationsDetailCode,
@@ -91,8 +92,10 @@ def notifications_tasks(registry: PeriodicTaskRegistry, services: UnitServices) 
 
 
 def notifications_consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+    # Cada consumidor sale con su mamparo (LC-LAZ-40); el registrador no lo conoce.
+    bulkheaded = bulkheaded_registry(registry, services)
     for register in CONSUMER_REGISTRARS:
-        register(registry, services)
+        register(bulkheaded, services)
 
 
 def notifications_api_state(services: UnitServices) -> Mapping[str, object]:
