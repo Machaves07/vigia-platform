@@ -1,1 +1,2 @@
-"""Módulo del lazo (esquema ``loop``): clasificación, revisión, acciones, cierre y causa raíz."""
+"""Módulo del lazo (esquema ``loop``, U-04): proyección del lazo, decisiones, acciones, asistente,
+vocabulario y configuración."""

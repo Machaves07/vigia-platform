@@ -15,6 +15,11 @@ sintetizar (``from_lookup``, que necesita credenciales). Lee por dos vías estab
 Con esto U-04 añade ``stacks/loop.py`` a ``app.py`` e importa el rol de tarea del worker,
 ``sg-worker`` y la zona DNS sin editar ninguna pila de U-02. ``staging-<n>`` importa por la
 misma vía la zona que aloja ``pilot`` (D-8).
+
+U-04 (TASK-331) añade los productores que le faltaban, todos en ``vigia-foundation``: la red y
+sus dos subredes de aplicación, las claves ``vigia-evidence`` y ``vigia-secrets`` y el tema
+``vigia-alerts``. El depósito ``vigia-evidence`` no necesita parámetro: su nombre se deriva del
+despliegue y de la cuenta (``EnvironmentConfig.bucket_name``).
 """
 
 from __future__ import annotations
@@ -25,7 +30,9 @@ from enum import StrEnum
 from aws_cdk import Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_kms as kms
 from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_sns as sns
 from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
@@ -43,6 +50,13 @@ class Output(StrEnum):
     WORKER_SECURITY_GROUP_ID = "sg-worker-id"
     HOSTED_ZONE_ID = "zone-id"
     HOSTED_ZONE_NAME = "zone-name"
+    # U-04 (TASK-331): lo que ``vigia-loop`` importa de ``vigia-foundation``.
+    VPC_ID = "vpc-id"
+    APP_SUBNET_A_ID = "app-subnet-a-id"
+    APP_SUBNET_B_ID = "app-subnet-b-id"
+    EVIDENCE_KEY_ARN = "evidence-key-arn"
+    SECRETS_KEY_ARN = "secrets-key-arn"
+    ALERTS_TOPIC_ARN = "alerts-topic-arn"
 
 
 class TaskRole(StrEnum):
@@ -60,7 +74,20 @@ _DESCRIPTIONS: dict[Output, str] = {
     Output.WORKER_SECURITY_GROUP_ID: "Identificador del grupo sg-worker (salidas nº 38)",
     Output.HOSTED_ZONE_ID: "Identificador de la zona DNS vigia-zone (salidas nº 38)",
     Output.HOSTED_ZONE_NAME: "Nombre de la zona DNS vigia-zone (salidas nº 38)",
+    Output.VPC_ID: "Identificador de la red vigia-vpc (salidas nº 38)",
+    Output.APP_SUBNET_A_ID: "Identificador de la subred vigia-app-a (salidas nº 38)",
+    Output.APP_SUBNET_B_ID: "Identificador de la subred vigia-app-b (salidas nº 38)",
+    Output.EVIDENCE_KEY_ARN: "ARN de la clave vigia-evidence (salidas nº 38)",
+    Output.SECRETS_KEY_ARN: "ARN de la clave vigia-secrets (salidas nº 38)",
+    Output.ALERTS_TOPIC_ARN: "ARN del tema vigia-alerts (salidas nº 38)",
 }
+
+# Zonas de las subredes de aplicación, en el orden de sus parámetros (``vigia-app-a`` y ``-b``).
+APP_SUBNET_ZONES: tuple[tuple[str, Output], ...] = (
+    ("us-east-1a", Output.APP_SUBNET_A_ID),
+    ("us-east-1b", Output.APP_SUBNET_B_ID),
+)
+CONTRACT_KEYS = (Output.EVIDENCE_KEY_ARN, Output.SECRETS_KEY_ARN)
 
 
 def parameter_name(deployment: str, output: Output) -> str:
@@ -112,6 +139,49 @@ def import_worker_task_role(
     política gestionada aditiva (U-04, ``vigia-loop-worker``)."""
     return iam.Role.from_role_name(
         scope, construct_id, role_name(config, TaskRole.WORKER_TASK), mutable=mutable
+    )
+
+
+def import_worker_task_role_from_arn(
+    scope: Construct, construct_id: str, config: EnvironmentConfig
+) -> iam.IRole:
+    """Rol ``vigia-worker-task`` por el ARN que publica ``vigia-compute``, inmutable: la política
+    gestionada de U-04 se adjunta desde la propia política (``Roles``), sin cambiar el rol."""
+    return iam.Role.from_role_arn(
+        scope,
+        construct_id,
+        import_value(scope, config, Output.WORKER_TASK_ROLE_ARN),
+        mutable=False,
+    )
+
+
+def import_app_network(scope: Construct, construct_id: str, config: EnvironmentConfig) -> ec2.IVpc:
+    """Red ``vigia-vpc`` con sus dos subredes de aplicación, por sus identificadores publicados
+    (sin búsquedas contra AWS)."""
+    return ec2.Vpc.from_vpc_attributes(
+        scope,
+        construct_id,
+        vpc_id=import_value(scope, config, Output.VPC_ID),
+        availability_zones=[zone for zone, _ in APP_SUBNET_ZONES],
+        private_subnet_ids=[import_value(scope, config, output) for _, output in APP_SUBNET_ZONES],
+    )
+
+
+def import_key(
+    scope: Construct, construct_id: str, config: EnvironmentConfig, output: Output
+) -> kms.IKey:
+    """Clave del cliente de ``vigia-foundation`` por su ARN publicado."""
+    if output not in CONTRACT_KEYS:
+        raise ValueError(f"{output.value} no es una clave del contrato de salidas")
+    return kms.Key.from_key_arn(scope, construct_id, import_value(scope, config, output))
+
+
+def import_alerts_topic(
+    scope: Construct, construct_id: str, config: EnvironmentConfig
+) -> sns.ITopic:
+    """Tema ``vigia-alerts`` por su ARN publicado."""
+    return sns.Topic.from_topic_arn(
+        scope, construct_id, import_value(scope, config, Output.ALERTS_TOPIC_ARN)
     )
 
 

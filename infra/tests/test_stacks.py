@@ -3,7 +3,8 @@
 Infrastructure-design §2.3: seis pilas en el orden ``foundation``, ``data``, ``edge``,
 ``compute``, ``observability`` y ``datasets``, con las dependencias de su tabla. TASK-144 las
 registra vacías; cada tarea de TASK-145 a TASK-150 amplía :data:`EXPECTED_RESOURCES` con
-los recursos que añade a su pila.
+los recursos que añade a su pila. La séptima, ``vigia-loop`` de U-04 (TASK-331), va al final,
+con ``unit=U-04`` y las dependencias de U-04 deployment-architecture §3.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from aws_cdk import App, Stack
 from aws_cdk import aws_kms as kms
 from aws_cdk import aws_s3 as s3
 
+import app as cdk_app
 from config import EnvironmentConfig
 from stacks import DEPENDENCIES, STACK_ORDER
 from tests.conftest import Synthesized, cdk_settings, synthesize
@@ -23,10 +25,15 @@ from tests.test_compute import expected_compute_resources
 from tests.test_data import expected_data_resources
 from tests.test_edge import expected_edge_resources
 from tests.test_foundation import expected_foundation_resources
+from tests.test_loop_stack import expected_loop_resources
 from tests.test_observability import expected_observability_resources
 
 # ``observability`` antes que ``compute``: crea los grupos de registro de sus tareas (TASK-149).
 ORDER = ("foundation", "data", "edge", "observability", "compute", "datasets")
+# ``vigia-loop`` (U-04, TASK-331) se registra en ``app.py`` después de las de U-02.
+LOOP = "loop"
+# Dependencias de ``vigia-loop``: las cuatro pilas que importa (U-04 deployment-architecture §3).
+LOOP_DEPENDENCIES = ("foundation", "data", "edge", "compute")
 
 # Tipos de recurso y cuántos de cada uno espera cada pila (sin ``AWS::CDK::Metadata``).
 EXPECTED_RESOURCES: dict[str, Counter[str]] = {key: Counter() for key in ORDER}
@@ -42,15 +49,18 @@ def test_stack_classes_follow_the_design_order() -> None:
     assert tuple(stack.key for stack in STACK_ORDER) == ORDER
 
 
-def test_pilot_registers_the_six_stacks_in_order(pilot: Synthesized) -> None:
-    assert pilot.stack_names == tuple(f"vigia-{key}" for key in ORDER)
+def test_pilot_registers_the_seven_stacks_in_order(pilot: Synthesized) -> None:
+    assert pilot.stack_names == tuple(f"vigia-{key}" for key in (*ORDER, LOOP))
 
 
 def test_dependencies_follow_the_design_table(deployment: Synthesized) -> None:
     config = deployment.config
     for name, dependencies in deployment.dependencies.items():
-        expected = {config.stack_name(key) for key in DEPENDENCIES[_short(name, config)]}
+        short = _short(name, config)
+        keys = LOOP_DEPENDENCIES if short == LOOP else DEPENDENCIES[short]
+        expected = {config.stack_name(key) for key in keys}
         assert set(dependencies) == expected, name
+    assert cdk_app.LOOP_DEPENDENCIES == LOOP_DEPENDENCIES
     assert DEPENDENCIES == {
         "foundation": (),
         "data": ("foundation",),
@@ -75,7 +85,13 @@ def _expected(key: str, config: EnvironmentConfig) -> Counter[str]:
         return expected_compute_resources(config)
     if key == "observability":
         return expected_observability_resources(config)
+    if key == LOOP:
+        return expected_loop_resources(config)
     return EXPECTED_RESOURCES[key]
+
+
+def _unit(name: str, config: EnvironmentConfig) -> str:
+    return "U-04" if _short(name, config) == LOOP else "U-02"
 
 
 def test_each_stack_has_its_expected_resources(deployment: Synthesized) -> None:
@@ -89,14 +105,15 @@ def test_stacks_are_in_us_east_1_with_the_vigia_qualifier(deployment: Synthesize
         assert deployment.regions[name] == "us-east-1"
         bootstrap = template["Parameters"]["BootstrapVersion"]["Default"]
         assert bootstrap == "/cdk-bootstrap/vigia/version", name
-        assert template["Description"].startswith(f"Vigia U-02 ({deployment.config.deployment}):")
+        unit = _unit(name, deployment.config)
+        assert template["Description"].startswith(f"Vigia {unit} ({deployment.config.deployment}):")
 
 
 def test_stacks_carry_the_global_tags(deployment: Synthesized) -> None:
     for name, tags in deployment.tags.items():
         assert tags == {
             "project": "vigia",
-            "unit": "U-02",
+            "unit": _unit(name, deployment.config),
             "managed_by": "cdk",
             "environment": deployment.config.environment,
         }, name

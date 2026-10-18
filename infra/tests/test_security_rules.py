@@ -301,7 +301,12 @@ def _evidence(stack: Stack, suffix: str) -> str:
         (["xray:PutTraceSegments", "s3:GetObject"], "*"),
         (["s3:GetObject"], "arn:aws:s3:::*"),
         (["s3:GetObject"], "arn:aws:s3:::vigia-evidence-123456789012-us-east-1/*"),
-        (["s3:PutObject"], "arn:aws:s3:::vigia-evidence-123456789012-us-east-1/org/*/export/*"),
+        # U-04 §9.1 declara ``org/*/export/*`` y ``org/*/monthly/*``, no otras formas.
+        (
+            ["s3:PutObject"],
+            "arn:aws:s3:::vigia-evidence-123456789012-us-east-1/org/*/plant/*/export/*",
+        ),
+        (["s3:PutObject"], "arn:aws:s3:::vigia-evidence-123456789012-us-east-1/org/*/exports/*"),
         (["secretsmanager:GetSecretValue"], "arn:aws:secretsmanager:us-east-1:1:secret:*"),
         (["logs:PutLogEvents"], "arn:aws:logs:us-east-1:1:log-group:*"),
     ],
@@ -352,6 +357,8 @@ def test_put_metric_data_needs_the_namespace_condition() -> None:
         (["s3:PutObject"], "/org/*/plant/*/zone/*/node/*"),
         (["s3:PutObject"], "/org/*/plant/*/documents/*"),
         (["s3:PutObject"], "/org/*/closure/*"),
+        (["s3:PutObject"], "/org/*/export/*"),
+        (["s3:GetObject"], "/org/*/monthly/*"),
     ],
 )
 def test_declared_evidence_prefixes_pass(actions: list[str], suffix: str) -> None:

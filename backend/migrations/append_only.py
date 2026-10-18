@@ -60,5 +60,8 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         "fleet.verification_clip",
         # fleet (TASK-221, gob_0024): marca del cierre huérfano de un evento de observabilidad
         "fleet.observability_orphan_close",
+        # loop (TASK-301, laz_0029): adjuntos de cierre y solicitudes al asistente
+        "loop.closure_attachment",
+        "loop.assistant_request",
     }
 )

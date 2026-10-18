@@ -242,10 +242,11 @@ class LoopActivityKind(enum.StrEnum):
 
 
 class SubjectKind(enum.StrEnum):
-    """``subject_kind``: el sujeto del lazo, un episodio o una detección confirmada (respuesta
-    2)."""
+    """``subject_kind``: el sujeto del lazo (DE §2.2): un hallazgo (su episodio, respuesta 2) o una
+    detección confirmada en la cola, que conserva ``detection``. Mismos valores que la
+    restricción ``*_subject_kind_values`` del esquema ``loop`` (``laz_0029``)."""
 
-    EPISODE = "episode"
+    FINDING = "finding"
     DETECTION = "detection"
 
 

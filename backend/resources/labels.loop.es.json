@@ -100,7 +100,7 @@
     "finding_closed": "cierre de un hallazgo"
   },
   "subject_kind": {
-    "episode": "episodio",
+    "finding": "hallazgo",
     "detection": "detección confirmada en revisión"
   },
   "effect_on_loop": {
