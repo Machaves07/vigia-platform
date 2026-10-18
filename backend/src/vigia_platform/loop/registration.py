@@ -35,14 +35,12 @@ from vigia_platform.accreditation.registration import (
     ACCREDITATION_CONSUMERS,
     ACCREDITATION_TASKS,
 )
-from vigia_platform.loop.adapters.attachments.grants import ClosureObjectStore
-from vigia_platform.loop.adapters.attachments.read import ClosureAttachmentReader
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
 )
-from vigia_platform.loop.application.attachments import ClosureAttachmentService
+from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
@@ -60,7 +58,6 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
-from vigia_platform.shared.ratelimit import RateLimiter
 
 if TYPE_CHECKING:
     from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -155,7 +152,7 @@ type FreeTextRegistrar = Callable[[FreeTextPolicyRegistry], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
 ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (attachment_router,)
-"""Fábricas de los enrutadores de ``/loop/*``; hoy ninguna ruta."""
+"""Fábricas de los enrutadores de ``/loop/*``: hoy, los adjuntos de cierre (SUP-U05-09 y 10)."""
 
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
@@ -170,15 +167,14 @@ FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = ()
 
 
 def _attachments_state(services: UnitServices) -> Mapping[str, object]:
-    storage = services.require_evidence()
+    """``ClosureAttachmentPort`` sobre ``vigia-evidence`` (prefijo ``closure/``, LC-LAZ-10)."""
     return {
-        ATTACHMENTS_STATE_KEY: ClosureAttachmentService(
+        ATTACHMENTS_STATE_KEY: build_attachment_service(
             repository=PostgresAttachmentRepository(services.database),
-            grants=ClosureObjectStore(storage),
-            reader=ClosureAttachmentReader(storage),
-            clock=services.clock,
+            storage=services.require_evidence(),
+            authorizer=services.authorizer,
             audit=services.audit,
-            limiter=RateLimiter(services.clock),
+            clock=services.clock,
         )
     }
 

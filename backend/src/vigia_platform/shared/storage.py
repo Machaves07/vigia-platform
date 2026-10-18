@@ -10,6 +10,9 @@ depósito (``vigia-evidence``, ``vigia-archive`` o ``vigia-edge``) y ofrece:
   (BR-NUC-66), fijada a una versión concreta del objeto si se indica;
 - ``get_object(key, version_id=...)``: los bytes, solo para la muestra diaria del worker
   (NFR-NUC-33), también de una versión concreta;
+- ``get_object_prefix`` y ``get_object_suffix`` (solo ``S3Storage``, fuera de ``StoragePort``):
+  a lo sumo ``MAX_RANGE_BYTES`` del principio o del final, para inspeccionar un adjunto de cierre
+  de U-04 sin descargarlo; ``presign_attachment_get``: su lectura de 15 minutos como descarga;
 - ``put_object(key, body, content_type)``: subida propia de la plataforma (archivado) con la
   suma SHA-256 y cifrado ``aws:kms`` con la clave indicada;
 - ``presign_put(key, content_type, checksum_sha256, required_headers, ttl)``: la URL de la
@@ -67,6 +70,7 @@ __all__ = [
     "CHECKSUM_HEADER",
     "CONNECT_TIMEOUT_SECONDS",
     "CONTENT_TYPE_HEADER",
+    "MAX_RANGE_BYTES",
     "PRESIGN_ATTACHMENT_GET_MAX_TTL",
     "PRESIGN_GET_MAX_TTL",
     "PRESIGN_PUT_MAX_TTL",
@@ -106,6 +110,8 @@ PRESIGN_ATTACHMENT_GET_MAX_TTL: Final = timedelta(minutes=15)
 """Vigencia máxima aislada de lectura para adjuntos de cierre (SUP-U05-10)."""
 PRESIGN_PUT_MAX_TTL: Final = timedelta(minutes=15)
 """Vigencia máxima de una URL de subida, entera o por partes (``ClipUploadGrant.expires_at``)."""
+MAX_RANGE_BYTES: Final = 256 * 1024
+"""Tope de una lectura por rango (``get_object_prefix`` y ``get_object_suffix``)."""
 
 CHECKSUM_HEADER: Final = "x-amz-checksum-sha256"
 CONTENT_TYPE_HEADER: Final = "content-type"
@@ -299,19 +305,7 @@ class StoragePort(Protocol):
         self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
     ) -> PresignedRequest: ...
 
-    async def presign_attachment_get(
-        self,
-        key: str,
-        ttl: timedelta = PRESIGN_ATTACHMENT_GET_MAX_TTL,
-        *,
-        version_id: str | None = None,
-    ) -> PresignedRequest: ...
-
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes: ...
-
-    async def get_object_range(
-        self, key: str, end: int, *, version_id: str | None = None
-    ) -> bytes: ...
 
     async def put_object(
         self,
@@ -584,7 +578,13 @@ class S3Storage:
         *,
         version_id: str | None = None,
     ) -> PresignedRequest:
-        """Firma una descarga de adjunto como archivo, sin relajar la lectura general de U-02."""
+        """Firma una descarga de adjunto como archivo, sin relajar la lectura general de U-02.
+
+        S3 solo deja sustituir algunas cabeceras de la respuesta (``response-*``): la URL fija
+        ``Content-Disposition: attachment`` y ``Content-Type: application/octet-stream``, para que
+        el navegador descargue y nunca interprete el contenido. ``X-Content-Type-Options`` no es
+        una de ellas: con un tipo opaco no hay nada que adivinar.
+        """
         _require_key(key)
         _require_version_id(version_id)
         seconds = _require_ttl(ttl, PRESIGN_ATTACHMENT_GET_MAX_TTL)
@@ -601,7 +601,7 @@ class S3Storage:
         return PresignedRequest(
             "GET",
             url,
-            {"x-content-type-options": "nosniff"},
+            {},
             issued_at + timedelta(seconds=seconds),
         )
 
@@ -624,30 +624,45 @@ class S3Storage:
 
         return await self._call("get_object", get)
 
-    async def get_object_range(self, key: str, end: int, *, version_id: str | None = None) -> bytes:
-        """Los bytes desde el inicio hasta ``end`` inclusive, sin materializar el objeto entero.
+    async def get_object_prefix(
+        self, key: str, length: int, *, version_id: str | None = None
+    ) -> bytes:
+        """Los primeros ``length`` bytes (o el objeto, si es más corto); nunca el objeto entero.
 
-        La inspección de firma de un adjunto de cierre solo consume este prefijo acotado; no es una
-        vía de lectura de evidencia ni una alternativa a las URL prefirmadas.
+        Solo para inspeccionar la firma y los metadatos de un adjunto de cierre (U-04): no es
+        una vía de lectura de evidencia ni sustituye a las URL prefirmadas.
         """
+        return await self._get_range(
+            "get_object_prefix", key, f"bytes=0-{length - 1}", length, version_id
+        )
+
+    async def get_object_suffix(
+        self, key: str, length: int, *, version_id: str | None = None
+    ) -> bytes:
+        """Los últimos ``length`` bytes (o el objeto, si es más corto); mismo uso que el prefijo."""
+        return await self._get_range(
+            "get_object_suffix", key, f"bytes=-{length}", length, version_id
+        )
+
+    async def _get_range(
+        self, operation: str, key: str, byte_range: str, length: int, version_id: str | None
+    ) -> bytes:
         _require_key(key)
         _require_version_id(version_id)
-        if type(end) is not int or not 0 <= end <= 65_535:
-            raise ValueError("end debe estar entre 0 y 65535")
-        params: dict[str, Any] = {
-            "Bucket": self._settings.bucket,
-            "Key": key,
-            "Range": f"bytes=0-{end}",
-        }
+        if type(length) is not int or not 1 <= length <= MAX_RANGE_BYTES:
+            raise ValueError(f"length debe estar entre 1 y {MAX_RANGE_BYTES}")
+        params: dict[str, Any] = {"Bucket": self._settings.bucket, "Key": key, "Range": byte_range}
         if version_id is not None:
             params["VersionId"] = version_id
 
         def get() -> bytes:
             response = self._client.get_object(**params)
-            body: bytes = response["Body"].read()
+            body: bytes = response["Body"].read(length + 1)
+            if len(body) > length:
+                raise ValueError("el almacén devolvió más bytes que el rango pedido")
             return body
 
-        return await self._call("get_object_range", get)
+        return await self._call(operation, get)
 
     # --- escritura propia --------------------------------------------------------------------
 
