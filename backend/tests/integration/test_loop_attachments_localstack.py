@@ -83,3 +83,25 @@ def test_presigned_put_rejects_missing_checksum(storage: S3Storage) -> None:
     }
     response = httpx.put(signed.url, content=body, headers=headers, timeout=30.0)
     assert response.status_code in (400, 403)
+
+
+@pytest.mark.integration
+def test_presigned_put_rejects_different_checksum(storage: S3Storage) -> None:
+    body = b"\x89PNG\r\n\x1a\nother-checksum"
+    grant = AttachmentUploadGrant.issue(
+        organization_id=uuid.uuid4(),
+        plant_id=uuid.uuid4(),
+        zone_id=uuid.uuid4(),
+        subject_id=uuid.uuid4(),
+        content_type="image/png",
+        size_bytes=len(body),
+        sha256=hashlib.sha256(body).hexdigest(),
+        issued_at=START,
+        clock=SimulatedClock(START),
+        random_bytes=lambda _: b"\2" * 16,
+    )
+    signed = asyncio.run(ClosureObjectStore(storage).grant(grant, START))
+    headers = dict(signed.headers)
+    headers["x-amz-checksum-sha256"] = "A" * 44
+    response = httpx.put(signed.url, content=body, headers=headers, timeout=30.0)
+    assert response.status_code in (400, 403)
