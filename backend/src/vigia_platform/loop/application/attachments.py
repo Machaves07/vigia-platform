@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import timedelta
 from typing import Protocol
 
 from vigia_platform.loop.adapters.attachments.grants import (
@@ -14,6 +14,7 @@ from vigia_platform.loop.adapters.attachments.grants import (
 )
 from vigia_platform.loop.adapters.attachments.read import ClosureAttachmentReader
 from vigia_platform.shared.clock import Clock
+from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.storage import PresignedRequest
 
 __all__ = ["AttachmentRepository", "ClosureAttachmentService", "IssuedAttachmentGrant"]
@@ -23,10 +24,12 @@ class AttachmentRepository(Protocol):
     """La proyección de acciones y adjuntos, siempre consultada bajo ScopeContext."""
 
     async def action_scope(
-        self, action_id: uuid.UUID
+        self, context: ScopeContext, action_id: uuid.UUID
     ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None: ...
 
-    async def attachment_key(self, attachment_id: uuid.UUID) -> str | None: ...
+    async def attachment_key(
+        self, context: ScopeContext, attachment_id: uuid.UUID
+    ) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,7 @@ class ClosureAttachmentService:
 
     async def grant_upload(
         self,
+        context: ScopeContext,
         action_id: uuid.UUID,
         *,
         content_type: object,
@@ -53,7 +57,7 @@ class ClosureAttachmentService:
         sha256: object,
         random_bytes: Callable[[int], bytes],
     ) -> IssuedAttachmentGrant:
-        scope = await self.repository.action_scope(action_id)
+        scope = await self.repository.action_scope(context, action_id)
         if scope is None:
             raise LookupError("acción no encontrada")
         organization_id, plant_id, zone_id = scope
@@ -72,8 +76,11 @@ class ClosureAttachmentService:
         upload = await self.grants.grant(grant, self.clock.now())
         return IssuedAttachmentGrant(grant, upload)
 
-    async def read_url(self, attachment_id: uuid.UUID, expires_at: datetime) -> str:
-        key = await self.repository.attachment_key(attachment_id)
+    async def read_url(
+        self, context: ScopeContext, attachment_id: uuid.UUID
+    ) -> str:
+        key = await self.repository.attachment_key(context, attachment_id)
         if key is None:
             raise LookupError("adjunto no encontrado")
-        return (await self.reader.read_url(key, self.clock.now(), expires_at)).url
+        now = self.clock.now()
+        return (await self.reader.read_url(key, now, now + timedelta(minutes=15))).url
