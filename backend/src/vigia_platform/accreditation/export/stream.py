@@ -17,7 +17,9 @@ El compositor (TASK-318; en las pruebas, el sintético determinista) abre un ``A
   **nada se escribe en disco** (ni en ``/tmp``): la memoria no crece con el paquete (NFR-LAZ-49).
 - **Volúmenes** de ``VOLUME_MAX_BYTES`` (2 GB): una entrada nunca se parte; si no cabe en el
   volumen en curso, abre el siguiente. ``vol-01.zip`` guarda sitio para el **manifiesto**, que
-  ``finish`` escribe en él al final (con ``canonical_bytes`` de U-02).
+  ``finish`` escribe en él al final (con ``canonical_bytes`` de U-02). Al abrir un volumen nuevo,
+  el anterior (salvo ``vol-01``) se **sella**: se cierra su ZIP y se sube su última parte, sin
+  completar la subida. En memoria quedan como mucho dos volúmenes abiertos, sean cuantos sean.
 - El documento portátil (``Artifact.document``) va dentro del paquete y, además, a su propio
   objeto ``document.pdf`` (la URL de SUP-U05-23 apunta a un objeto).
 - **Ningún objeto se publica antes de tiempo**: todas las subidas siguen abiertas hasta
@@ -41,6 +43,7 @@ las llamadas al almacén, en el suyo (``S3Storage``).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import re
@@ -350,9 +353,25 @@ class _Volume:
         self.directory = 0
         """Bytes que añadirá el directorio central de lo ya escrito."""
         self.entries = 0
+        self.entry: IO[bytes] | None = None
+        """La entrada que se está escribiendo (para soltarla si el paquete se abandona)."""
+        self.sealed = False
+        """ZIP cerrado y última parte subida: solo falta ``complete`` en ``finish``."""
 
     def room(self, limit: int) -> int:
         return limit - self.upload.size - self.directory - _END_OF_DIRECTORY
+
+    def release(self) -> None:
+        """Suelta la entrada abierta y el ZIP sin escribir nada más (paquete abandonado).
+
+        Sin esto, al recolectarlos ``ZipFile.__del__`` intenta cerrar con una entrada abierta y
+        Python avisa de una excepción no capturable. Con ``fp = None``, ``close`` no hace nada.
+        """
+        entry, self.entry = self.entry, None
+        if entry is not None:
+            with contextlib.suppress(Exception):
+                entry.close()
+        self.archive.fp = None
 
 
 class ArchiveWriter:
@@ -417,11 +436,15 @@ class ArchiveWriter:
                 await upload.abort()
             except Exception:  # noqa: S112 - se intenta con las demás; la retoma barre el resto
                 continue
+        for volume in self._volumes:
+            volume.release()
 
     async def _open_volume(self) -> _Volume:
         number = len(self._volumes) + 1
         if number > MAX_VOLUMES:
             raise ValueError("el paquete no cabe en 99 volúmenes")
+        if number > 2:
+            await self._seal(self._volumes[-1])
         upload = _Upload(
             self._store,
             self.location.volume_key(number),
@@ -435,6 +458,17 @@ class ArchiveWriter:
             # La subida que se guarda en ``ExportRequest`` para abortarla al retomar.
             await self._sink.upload_started(upload_id)
         return volume
+
+    async def _seal(self, volume: _Volume) -> None:
+        """Cierra el ZIP de un volumen lleno y sube su última parte: no guarda nada en memoria.
+
+        La subida sigue **sin completar** (el objeto no existe hasta ``finish``). ``vol-01`` nunca
+        se sella: espera al manifiesto. Así la memoria es la de dos volúmenes abiertos como
+        mucho, no la de todos (NFR-LAZ-49).
+        """
+        await self._run(volume.archive.close)
+        await volume.upload.drain(final=True)
+        volume.sealed = True
 
     async def _volume_for(self, artifact: Artifact) -> _Volume:
         """El volumen en curso si la entrada cabe entera; si no, uno nuevo (nunca se parte)."""
@@ -509,6 +543,7 @@ class ArchiveWriter:
         info.external_attr = _ZIP_FILE_MODE
         info.file_size = artifact.size_bytes
         entry = await self._run(functools.partial(volume.archive.open, info, mode="w"))
+        volume.entry = entry
         hasher = hashlib.sha256()
         document = self._document if artifact.document else None
         written = 0
@@ -535,6 +570,7 @@ class ArchiveWriter:
         if written != artifact.size_bytes:
             raise ValueError("el artefacto no llega a su tamaño declarado")
         await self._run(entry.close)
+        volume.entry = None
         await volume.upload.drain()
         volume.directory += _CENTRAL_HEADER + len(artifact.path.encode("ascii"))
         volume.entries += 1
@@ -573,7 +609,8 @@ class ArchiveWriter:
             await self._run(functools.partial(first.archive.writestr, info, data))
         volumes: list[Volume] = []
         for volume in self._volumes:
-            await self._run(volume.archive.close)
+            if not volume.sealed:
+                await self._run(volume.archive.close)
             head = await volume.upload.complete()
             volumes.append(
                 Volume(

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import json
 import uuid
@@ -214,6 +215,52 @@ def test_entries_are_never_split_and_oversized_ones_are_rejected() -> None:
     assert store.uploads == {}
 
 
+def test_full_volumes_are_sealed_so_memory_does_not_grow_with_the_volume_count() -> None:
+    """Al abrir un volumen nuevo, el anterior (salvo ``vol-01``) cierra su ZIP y sube su última
+    parte: no le queda nada pendiente en memoria y su objeto sigue sin existir."""
+    store = MemoryExportStore()
+    stream = ExportStream(store=store, settings=SMALL)
+    seen: list[list[int]] = []
+
+    async def scenario() -> None:
+        async with stream.writer(synthetic_job(), RecordingSink()) as writer:
+            for index in range(5):
+                await writer.add(
+                    Artifact(path=f"clips/{index}.mp4", kind="clip", size_bytes=300 * 1024),
+                    synthetic_chunks(str(index).encode(), 300 * 1024),
+                )
+                seen.append([len(volume.upload._pending) for volume in writer._volumes])
+            assert store.objects == {}
+            await writer.finish({"manifest_version": 1})
+
+    asyncio.run(scenario())
+    last = seen[-1]
+    assert len(last) == 5  # un clip por volumen
+    # vol-01 espera al manifiesto y el último sigue abierto; los del medio, sin nada pendiente.
+    assert last[1:-1] == [0, 0, 0]
+    assert len(store.objects) == 5 and store.uploads == {}
+    for key in store.objects:
+        with read_volume(store.latest(key)) as archive:
+            assert archive.testzip() is None
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_an_abandoned_entry_leaves_no_unraisable_exception() -> None:
+    """Una entrada que falla a mitad se suelta al abandonar: ``ZipFile.__del__`` no avisa."""
+    store = MemoryExportStore()
+    stream = ExportStream(store=store, settings=SMALL)
+
+    async def scenario() -> None:
+        async with stream.writer(synthetic_job(), RecordingSink()) as writer:
+            await writer.add(Artifact(path="a.json", kind="audit", size_bytes=1000), (b"x" * 1001,))
+
+    with pytest.raises(ValueError, match="tamaño declarado"):
+        asyncio.run(scenario())
+    gc.collect()
+    assert store.uploads == {}
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
 @pytest.mark.parametrize("delta", [-1, 1])
 def test_declared_size_is_exact(delta: int) -> None:
     store = MemoryExportStore()
