@@ -55,6 +55,7 @@ from vigia_platform.shared.outbox.registries import (
 from vigia_platform.shared.runtime.config import RegistrationIncomplete
 from vigia_platform.shared.runtime.units import (
     UnitServices,
+    free_text_registry,
     outbox_catalog,
     record_type_registry,
     registered_units,
@@ -78,7 +79,7 @@ def _services() -> UnitServices:
         audit=inert,
         outbox=inert,
         writer=inert,
-        free_text=inert,
+        free_text=free_text_registry(registered_units()),
         signing=inert,
         checkpoints=inert,
         kms=inert,
@@ -139,7 +140,8 @@ def test_the_u04_units_register_only_the_closure_attachment_routes_so_far() -> N
     for module in (registration, accreditation_registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
     assert registration.U04_TASKS == {} and registration.U04_CONSUMERS == {}
-    assert registration.FREE_TEXT_REGISTRARS == ()
+    # TASK-303: el único registrador de texto libre es el del vocabulario (TASK-340 añade otro).
+    assert (registration.register_blocked_vocabulary,) == registration.FREE_TEXT_REGISTRARS
 
 
 # --- manifiestos ----------------------------------------------------------------------------
