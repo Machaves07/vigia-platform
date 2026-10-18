@@ -4083,6 +4083,39 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/classifications":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Clasifica o reclasifica un hallazgo con motivo validado (registro nuevo)"
+      "operationId": "classify_loop_findings__finding_state_id__classifications_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ClassificationBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClassificationOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -5277,6 +5310,95 @@
         - "organization_id"
         - "checkpoints"
       "title": "CheckpointsOut"
+    "ClassificationBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "reason_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Category"
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+        "reinforced_reason":
+          "type": "boolean"
+          "title": "Reinforced Reason"
+          "default": false
+      "additionalProperties": false
+      "type": "object"
+      "title": "ClassificationBody"
+      "description": "La decisión: salida, categoría, motivo y, al reclasificar, el motivo reforzado."
+    "ClassificationOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "classification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Classification Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "sequence_in_subject":
+          "type": "integer"
+          "title": "Sequence In Subject"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "is_reclassification":
+          "type": "boolean"
+          "title": "Is Reclassification"
+        "reinforced_reason":
+          "type": "boolean"
+          "title": "Reinforced Reason"
+        "effect_on_loop":
+          "type": "string"
+          "title": "Effect On Loop"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "classification_count":
+          "type": "integer"
+          "title": "Classification Count"
+        "closed_with_later_different_classification":
+          "type": "boolean"
+          "title": "Closed With Later Different Classification"
+        "classified_at":
+          "type": "string"
+          "title": "Classified At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "classification_id"
+        - "record_id"
+        - "sequence_in_subject"
+        - "outcome"
+        - "reason_category"
+        - "is_reclassification"
+        - "reinforced_reason"
+        - "effect_on_loop"
+        - "lifecycle_state"
+        - "classification_count"
+        - "closed_with_later_different_classification"
+        - "classified_at"
+        - "time_aggregated"
+      "title": "ClassificationOut"
     "ClipUploadGrant":
       "properties":
         "clip_id":
