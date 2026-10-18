@@ -22,6 +22,7 @@ lista `cases`. Cada caso lleva:
 | `contact_data.yaml` | Correos, teléfonos y placas (A-45 punto 3), en claro y con evasiones Unicode |
 | `standard_injection.yaml` | Instrucciones incrustadas en el texto de un estándar |
 | `must_pass.yaml` | Límites que un falso positivo cruzaría: deben pasar |
+| `known_false_positives.yaml` | Textos legítimos que hoy caen por fallo cerrado (umbral de A-45 y patrón de documento); fijados para que un cambio de cota se vea |
 
 Los caracteres invisibles, los espacios no ASCII y los homoglifos se escriben como escapes
 `\uXXXX` dentro de comillas dobles, para que se vean al revisar. `test_laz_r5_corpus_validators.py`

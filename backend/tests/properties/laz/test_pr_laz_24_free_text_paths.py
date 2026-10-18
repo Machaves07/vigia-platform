@@ -19,7 +19,10 @@ TASK-340 (BR-LAZ-77 y 78; BLM §9; LC-LAZ-16). Extiende N-14 de U-02
   ``/added[*]/value`` y ``/removed[*]/value`` de ``vocabulary_list_changed``), donde los dos
   validadores dejan pasar el término y la política base sigue aplicando;
 - **mutación**: sin ``person_attribution`` (o sin ``blocked_vocabulary``) en la composición, la
-  metapropiedad encuentra rutas por las que el texto escapa.
+  metapropiedad encuentra rutas por las que el texto escapa;
+- **identificadores generados por máquina** (claves de almacenamiento de clip y de evidencia con
+  UUID aleatorios, UUID, sumas hexadecimales y versiones) pasan la política compuesta real en
+  **toda** ruta ``identifier``: un grupo de UUID como ``cc54-4333`` no es una cédula.
 
 Solo datos generados.
 """
@@ -28,11 +31,19 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import uuid
 from collections.abc import Iterable
 from typing import Final
 
 import pytest
+from hypothesis import assume, given
+from hypothesis import strategies as st
 
+from vigia_platform.ledger.evidence import (
+    EXTENSION_BY_CONTENT_TYPE,
+    StorageKey,
+    format_storage_key,
+)
 from vigia_platform.ledger.free_text import FreeTextField, FreeTextPolicyRegistry, FreeTextRejected
 from vigia_platform.loop.record_types import VALIDATOR_EXEMPT_PATHS
 from vigia_platform.loop.registration import U04_FREE_TEXT_VALIDATORS
@@ -148,7 +159,7 @@ def _expectations(kind: FieldKind) -> tuple[tuple[str, Expected], ...]:
         (VOCABULARY, BLOCKED_VOCABULARY_TERM),
         (EMAIL, attribution),
         (ROLE, attribution),
-        (DOCUMENT, attribution),
+        (DOCUMENT, None if kind is FieldKind.IDENTIFIER else attribution),
         (NAME, attribution if kind is FieldKind.PROSE else None),
         (PHONE, None if kind is FieldKind.IDENTIFIER else attribution),
     )
@@ -254,3 +265,68 @@ def test_without_one_validator_the_metaproperty_finds_escapes(name: str) -> None
     assert name not in policy.validator_names
     problems = escapes(policy, _real_fields())
     assert len(problems) >= len(_real_fields()) - len(EXEMPT)
+
+
+# --- Identificadores generados por máquina: nunca se rechazan (revisión de VIG-218) ---------------
+
+
+@functools.cache
+def _real_policy() -> FreeTextPolicyRegistry:
+    return free_text_registry(registered_units())
+
+
+def _identifier_fields() -> tuple[FreeTextField, ...]:
+    return tuple(field for field in _real_fields() if field_kind(field) is FieldKind.IDENTIFIER)
+
+
+def _group(size: int) -> st.SearchStrategy[str]:
+    hex_ = st.text(alphabet="0123456789abcdef", min_size=size, max_size=size)
+    digits = st.text(alphabet="0123456789", min_size=size - 2, max_size=size - 2)
+    letters = st.sampled_from(("cc", "dd", "ab", "fe", "ca"))
+    return st.one_of(hex_, st.tuples(letters, digits).map("".join))
+
+
+_UUIDS: Final = st.tuples(*(_group(size) for size in (8, 4, 4, 4, 12))).map(
+    lambda groups: uuid.UUID("-".join(groups))
+)
+"""UUID cuyos grupos son a menudo dos letras y cifras («cc54», «dd1234…»), como los que una
+expresión de documento («cc» + número) confundiría."""
+_HEX: Final = st.text(alphabet="0123456789abcdef", min_size=8, max_size=64)
+_MACHINE_VALUES: Final = st.one_of(
+    st.builds(
+        lambda o, p, z, n, c, ext: format_storage_key(StorageKey(o, p, z, n, c, ext)),
+        _UUIDS, _UUIDS, _UUIDS, _UUIDS, _UUIDS,
+        st.sampled_from(sorted(EXTENSION_BY_CONTENT_TYPE.values())),
+    ),
+    _UUIDS.map(str),
+    _HEX,
+    st.tuples(*(st.integers(0, 99_999),) * 3).map(lambda v: ".".join(map(str, v))),
+)  # fmt: skip
+"""Claves de almacenamiento de clip y de evidencia (``org/…/node/…/<clip>.<ext>``), UUID, sumas y
+versiones: lo que el nodo y la plataforma escriben, nunca una persona."""
+
+STORAGE_KEY_WITH_CC: Final = (
+    "org/7b6eb806-cc54-4333-8a2b-0c9a3f1e2d4c/plant/1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e"
+    "/zone/2a3b4c5d-6e7f-4801-9213-a4b5c6d7e8f9/node/3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f"
+    "/4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a.mp4"
+)
+"""Regresión de la revisión de VIG-218: «-cc54-4333» parecía una cédula (``identity_document``)."""
+
+
+@given(value=_MACHINE_VALUES, data=st.data())
+def test_machine_generated_identifiers_are_accepted_on_every_identifier_path(
+    value: str, data: st.DataObject
+) -> None:
+    field = data.draw(st.sampled_from(_identifier_fields()))
+    assume(field.min_length <= len(value) <= field.max_length)
+    assert _real_policy().apply(value, field) == value
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/cameras[*]/clips[*]/storage_key", "/evidence[*]/storage_key"],
+)
+def test_a_storage_key_with_a_cc_uuid_group_is_accepted(path: str) -> None:
+    for field in _identifier_fields():
+        if field.path == path:
+            assert _real_policy().apply(STORAGE_KEY_WITH_CC, field) == STORAGE_KEY_WITH_CC

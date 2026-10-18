@@ -41,7 +41,9 @@ espacio y los confusables de UTS #39 conservando la mayúscula: la je cirílica 
   resto sí (un correo en un nombre se rechaza, N-14);
 - ``identifier``: licencias profesionales, versiones, claves de almacenamiento y de firma, zona
   horaria, fuente del reloj, nombres de archivo y referencias de concepto legal. No se aplican
-  ``proper_name``, ``phone`` ni ``vehicle_plate`` (sus cifras y códigos no son de una persona);
+  ``proper_name``, ``phone``, ``vehicle_plate`` ni ``identity_document``: sus cifras y códigos no
+  son de una persona, y un grupo de UUID como ``cc54-4333`` parecería una cédula (el correo y los
+  cargos con verbo sí se aplican);
 - ``prose``: todo lo demás, con **todos** los patrones. Una ruta nueva sin declarar es ``prose``.
 
 Las rutas exentas de §2.12 (``/added[*]/value`` y ``/removed[*]/value`` de
@@ -139,7 +141,13 @@ _SKIPPED: Final[Mapping[FieldKind, frozenset[AttributionPattern]]] = {
     FieldKind.PROSE: frozenset(),
     FieldKind.NAME: frozenset({AttributionPattern.PROPER_NAME}),
     FieldKind.IDENTIFIER: frozenset(
-        {AttributionPattern.PROPER_NAME, AttributionPattern.PHONE, AttributionPattern.VEHICLE_PLATE}
+        {
+            AttributionPattern.PROPER_NAME,
+            AttributionPattern.PHONE,
+            AttributionPattern.VEHICLE_PLATE,
+            # Un grupo de UUID como «cc54-4333…» parece «cc» y un número: rechazaría hallazgos.
+            AttributionPattern.IDENTITY_DOCUMENT,
+        }
     ),
 }
 
