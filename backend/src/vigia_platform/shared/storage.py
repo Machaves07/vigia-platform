@@ -67,6 +67,7 @@ __all__ = [
     "CHECKSUM_HEADER",
     "CONNECT_TIMEOUT_SECONDS",
     "CONTENT_TYPE_HEADER",
+    "PRESIGN_ATTACHMENT_GET_MAX_TTL",
     "PRESIGN_GET_MAX_TTL",
     "PRESIGN_PUT_MAX_TTL",
     "READ_TIMEOUT_SECONDS",
@@ -101,6 +102,8 @@ RETRY_AFTER_SECONDS: Final = 5
 
 PRESIGN_GET_MAX_TTL: Final = timedelta(minutes=5)
 """Vigencia máxima de una URL de lectura (BR-NUC-66)."""
+PRESIGN_ATTACHMENT_GET_MAX_TTL: Final = timedelta(minutes=15)
+"""Vigencia máxima aislada de lectura para adjuntos de cierre (SUP-U05-10)."""
 PRESIGN_PUT_MAX_TTL: Final = timedelta(minutes=15)
 """Vigencia máxima de una URL de subida, entera o por partes (``ClipUploadGrant.expires_at``)."""
 
@@ -296,7 +299,19 @@ class StoragePort(Protocol):
         self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
     ) -> PresignedRequest: ...
 
+    async def presign_attachment_get(
+        self,
+        key: str,
+        ttl: timedelta = PRESIGN_ATTACHMENT_GET_MAX_TTL,
+        *,
+        version_id: str | None = None,
+    ) -> PresignedRequest: ...
+
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes: ...
+
+    async def get_object_range(
+        self, key: str, end: int, *, version_id: str | None = None
+    ) -> bytes: ...
 
     async def put_object(
         self,
@@ -562,6 +577,34 @@ class S3Storage:
         url = await self._presign("presign_get", "get_object", params, seconds)
         return PresignedRequest("GET", url, {}, issued_at + timedelta(seconds=seconds))
 
+    async def presign_attachment_get(
+        self,
+        key: str,
+        ttl: timedelta = PRESIGN_ATTACHMENT_GET_MAX_TTL,
+        *,
+        version_id: str | None = None,
+    ) -> PresignedRequest:
+        """Firma una descarga de adjunto como archivo, sin relajar la lectura general de U-02."""
+        _require_key(key)
+        _require_version_id(version_id)
+        seconds = _require_ttl(ttl, PRESIGN_ATTACHMENT_GET_MAX_TTL)
+        issued_at = self._clock.now()
+        params: dict[str, Any] = {
+            "Bucket": self._settings.bucket,
+            "Key": key,
+            "ResponseContentDisposition": "attachment",
+            "ResponseContentType": "application/octet-stream",
+        }
+        if version_id is not None:
+            params["VersionId"] = version_id
+        url = await self._presign("presign_attachment_get", "get_object", params, seconds)
+        return PresignedRequest(
+            "GET",
+            url,
+            {"x-content-type-options": "nosniff"},
+            issued_at + timedelta(seconds=seconds),
+        )
+
     async def get_object(self, key: str, *, version_id: str | None = None) -> bytes:
         """Los bytes del objeto (o de ``version_id``); boto3 valida la suma de la respuesta."""
         _require_key(key)
@@ -580,6 +623,31 @@ class S3Storage:
             return body
 
         return await self._call("get_object", get)
+
+    async def get_object_range(self, key: str, end: int, *, version_id: str | None = None) -> bytes:
+        """Los bytes desde el inicio hasta ``end`` inclusive, sin materializar el objeto entero.
+
+        La inspección de firma de un adjunto de cierre solo consume este prefijo acotado; no es una
+        vía de lectura de evidencia ni una alternativa a las URL prefirmadas.
+        """
+        _require_key(key)
+        _require_version_id(version_id)
+        if type(end) is not int or not 0 <= end <= 65_535:
+            raise ValueError("end debe estar entre 0 y 65535")
+        params: dict[str, Any] = {
+            "Bucket": self._settings.bucket,
+            "Key": key,
+            "Range": f"bytes=0-{end}",
+        }
+        if version_id is not None:
+            params["VersionId"] = version_id
+
+        def get() -> bytes:
+            response = self._client.get_object(**params)
+            body: bytes = response["Body"].read()
+            return body
+
+        return await self._call("get_object_range", get)
 
     # --- escritura propia --------------------------------------------------------------------
 
