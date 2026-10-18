@@ -4,8 +4,9 @@ Mismo patrón que ``test_u03_startup_checks.py``: ``vigia-api``, ``vigia-worker`
 ``vigia-admin`` construidos con la raíz real (``compose_*_runtime`` con las unidades del
 registro), quitando **una sola cosa** cada vez:
 
-- **cada uno de los 17 tipos y de los 25 eventos** de U-04 (y cada tarea de ``U04_TASKS``, cada
-  consumidor de ``U04_CONSUMERS``, hoy vacíos, y cada validador de texto libre de
+- **cada uno de los 17 tipos y de los 25 eventos** de U-04 y el trabajo interno
+  ``export_requested`` (y cada tarea de ``U04_TASKS``, hoy vacío, cada consumidor de
+  ``U04_CONSUMERS``: ``export_worker`` desde TASK-317, y cada validador de texto libre de
   ``U04_FREE_TEXT_VALIDATORS``: ``blocked_vocabulary``, TASK-303): la composición no termina
   (``RegistrationIncomplete`` nombra exactamente lo que falta) y el proceso sale con
   ``STARTUP_FAILURE_EXIT_CODE`` y la línea ``registration_missing`` que lo nombra;
@@ -63,7 +64,7 @@ from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE, AppConfig, 
 from vigia_platform.shared.api.errors import ApiStartupError
 from vigia_platform.shared.api.labels import DEFAULT_LOOP_LABELS_PATH
 from vigia_platform.shared.context import ActorUnit
-from vigia_platform.shared.outbox.registries import ConsumerRegistry
+from vigia_platform.shared.outbox.registries import ConsumerRegistry, OutboxStartupError
 from vigia_platform.shared.runtime.admin import compose_admin_runtime
 from vigia_platform.shared.runtime.api import compose_api_runtime
 from vigia_platform.shared.runtime.config import RegistrationIncomplete, RuntimeConfig
@@ -87,8 +88,11 @@ MISSING: Final[tuple[tuple[str, str], ...]] = (
     *(("consumer", name) for name in sorted(U04_CONSUMERS)),
     *(("free_text_validator", name) for name in sorted(U04_FREE_TEXT_VALIDATORS)),
 )
-"""Cada una de las 17 + 25 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` +
+"""Cada una de las 17 + 26 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` +
 ``len(U04_FREE_TEXT_VALIDATORS)`` cosas que U-04 exige."""
+
+SUBSCRIBED: Final = frozenset({"export_requested"})
+"""Eventos de U-04 a los que se suscribe un consumidor de U-04 (``export_worker``, TASK-317)."""
 
 ONE_OF_EACH: Final = (
     ("record_type", "closure"),
@@ -195,6 +199,13 @@ def test_composition_fails_naming_exactly_what_is_missing(
     units = _without(kind, name)
     runtime = _runtime(tmp_path)
     for compose in (_compose_worker, _compose_api, _compose_admin):
+        if kind == "event_type" and name in SUBSCRIBED:
+            # Un evento al que se suscribe un consumidor registrado: el catálogo ya se niega a
+            # componerse antes del manifiesto (también fallo cerrado), y nombra los dos.
+            with pytest.raises(OutboxStartupError) as refused:
+                compose(runtime, units)
+            assert name in str(refused.value) and "export_worker" in str(refused.value)
+            continue
         with pytest.raises(RegistrationIncomplete) as raised:
             compose(runtime, units)
         assert raised.value.missing == ((kind, name),)

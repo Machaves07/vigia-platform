@@ -144,6 +144,9 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # fleet.application (VIG-187): cuenta las alarmas abiertas por clase solo por
         # ``FleetAlarmStore.open_alarm_counts`` (``@repository``) y fija el medidor.
         "vigia_platform.fleet.application.fleet_alarms.publish_open_alarms",
+        # accreditation.export (TASK-317): lee la solicitud y su paquete solo por la
+        # ``Transaction`` dada (la abre ``ExportRequests.status``, registrado y guardado).
+        "vigia_platform.accreditation.export.request.read_status",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

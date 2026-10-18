@@ -13,7 +13,8 @@ manifiestos de U-04, escritos **a mano** (no derivados de los registros):
 
 - ``U04_RECORD_TYPES``: los 17 tipos de §5.1 (13 del lazo y 4 de la acreditación);
 - ``U04_EVENT_TYPES``: los 25 eventos de §11.3 (nota R14 de §7: 25, no 20; 21 del lazo y 4 de
-  la acreditación; ``user_invited`` no es de U-04, U04-H-13);
+  la acreditación; ``user_invited`` no es de U-04, U04-H-13) y el trabajo interno
+  ``export_requested`` del consumidor ``export_worker`` (TASK-317);
 - ``U04_TASKS``: las tareas periódicas con su cadencia e iteración, todas con ``unit = U-04``;
 - ``U04_CONSUMERS``: los consumidores con su concurrencia, todos con ``unit = U-04``;
 - ``U04_FREE_TEXT_VALIDATORS``: los validadores de texto libre (BLM §9: sin ellos U-04 **no
@@ -170,9 +171,12 @@ U04_EVENT_TYPES: Final = frozenset(
         "monthly_package_available",
         "commitments_recorded",
         "adoption_low",
+        # interno (TASK-317): el trabajo del consumidor export_worker, fuera de §11.3
+        "export_requested",
     }
 )
-"""Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7)."""
+"""Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y el trabajo interno
+``export_requested`` (TASK-317)."""
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
