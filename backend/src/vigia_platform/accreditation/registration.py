@@ -49,6 +49,7 @@ from vigia_platform.accreditation.export.worker import (
 )
 from vigia_platform.accreditation.record_types import register_accreditation_record_types
 from vigia_platform.loop.domain.enums import ACCREDITATION_LABEL_BINDINGS
+from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.shared.outbox.registries import (
     ConsumerRegistry,
     EventTypeRegistry,
@@ -157,8 +158,10 @@ def accreditation_tasks(registry: PeriodicTaskRegistry, services: UnitServices) 
 
 
 def accreditation_consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+    # Cada consumidor sale con su mamparo (LC-LAZ-40); el registrador no lo conoce.
+    bulkheaded = bulkheaded_registry(registry, services)
     for register in CONSUMER_REGISTRARS:
-        register(registry, services)
+        register(bulkheaded, services)
 
 
 def accreditation_api_state(services: UnitServices) -> Mapping[str, object]:

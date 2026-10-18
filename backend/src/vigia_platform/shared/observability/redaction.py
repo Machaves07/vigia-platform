@@ -112,6 +112,11 @@ IDENTIFIER_KEYS: Final = frozenset(
         "actor_id",
         "record_id",
         "event_id",
+        # U-04 (TASK-349, LC-LAZ-38): el trabajo largo y el término que rechazó un texto. Del
+        # término sale su ``term_id``, **nunca su valor** (NFR-LAZ-17).
+        "export_request_id",
+        "assistant_request_id",
+        "term_id",
     }
 )
 """Identificadores de plataforma (UUID). Nunca de sesión, invitación ni token (NFR-NUC-17)."""
@@ -216,6 +221,25 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         "rate_limited",
         "storage_unavailable",
     ),
+    # U-04 (TASK-349, LC-LAZ-38 a 40): fijas aquí porque varias (``rejected_blocked_vocabulary``,
+    # ``email_delivery_events``…) tienen forma de token y ``register`` las rechazaría. Son las
+    # dimensiones de ``loop.observability.metrics`` y los atributos del trabajo largo
+    # (NFR-LAZ-41 y 43); nunca texto libre ni identificador de usuario.
+    "assistant_state": ("pending", "ready", "unavailable", "rejected_by_validators"),
+    "token_direction": ("input", "output"),
+    "email_state": ("sent", "bounced", "complained", "digested", "degraded_app_only"),
+    "export_state": ("requested", "in_progress", "ready", "failed", "expired"),
+    "text_validator": ("blocked_vocabulary", "person_attribution"),
+    "verdict": ("accepted", "rejected_blocked_vocabulary", "rejected_person_attribution"),
+    "egress_component": ("assistant_provider", "email_sender"),
+    "effort": ("low", "medium", "high", "xhigh", "max"),
+    "stop_reason": ("end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"),
+    # Se amplían al arrancar con constantes del código (U-04: la ruta de código de la fábrica de
+    # clientes, el modelo configurado y los artefactos y pasos del trabajo largo).
+    "code_path": (),
+    "model": (),
+    "artifact": (),
+    "step": (),
     # Se amplían al arrancar (rutas por la fábrica de la aplicación, tipos por su registro…).
     "route": (),
     "code": (),
@@ -223,7 +247,16 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
     "reason": (),
     "record_type": (),
     "event_type": (),
-    "consumer": (),
+    # Los seis consumidores de U-04 (LC-LAZ-40), fijos: ``email_delivery_events`` tiene forma de
+    # token. Los demás los registra el despachador al arrancar.
+    "consumer": (
+        "notification_engine",
+        "loop_projection",
+        "review_queue",
+        "assistant_worker",
+        "export_worker",
+        "email_delivery_events",
+    ),
     "audit_operation": (),
     "table": (),
     "app_version": ("unknown",),
@@ -258,6 +291,9 @@ INTEGER_KEYS: Final[Mapping[str, tuple[int, int]]] = {
     "http.response.status_code": (100, 599),
     "partition": (0, 100_000),
     "attempt": (0, 1_000),
+    # Fichas de una llamada al asistente (U-04, NFR-LAZ-43) `[tope propio]`.
+    "input_tokens": (0, 10_000_000),
+    "output_tokens": (0, 10_000_000),
 }
 """Enteros permitidos con su rango cerrado."""
 

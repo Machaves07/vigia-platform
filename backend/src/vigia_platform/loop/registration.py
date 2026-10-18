@@ -25,6 +25,15 @@ Si falta uno, o una tarea cambió de cadencia, unidad o iteración, ``vigia-api`
 ``vigia-worker`` y ``vigia-admin`` no arrancan y la salida nombra lo que falta
 (``RegistrationIncomplete``). Las enumeraciones con etiqueta las comprueba el arranque de
 ``vigia-api`` contra ``labels.loop.es.json`` (``PlatformUnit.labels``, NFR-LAZ-52).
+
+**Transversales** (TASK-349), que las tareas de servicio usan sin construirlos por su cuenta:
+
+- ``loop_consumers`` (y los de ``accreditation`` y ``notifications``) entregan a sus registradores
+  ``bulkheaded_registry``: cada consumidor de U-04 sale con su mamparo (LC-LAZ-40), que el
+  despachador comprueba antes del bloqueo de la partición;
+- ``loop_http_client_factory(services)``: la fábrica única de clientes de salida con los dos
+  destinos de la configuración (LC-LAZ-39);
+- ``loop_metrics()``: los instrumentos de ``loop.observability.metrics`` (LC-LAZ-38).
 """
 
 from __future__ import annotations
@@ -49,6 +58,8 @@ from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
+from vigia_platform.loop.http.client_factory import HttpClientFactory
+from vigia_platform.loop.observability.metrics import LoopMetrics, get_loop_metrics
 from vigia_platform.loop.record_types import register_loop_record_types
 from vigia_platform.loop.validators.cache import VocabularyCache
 from vigia_platform.loop.validators.vocabulary import (
@@ -56,6 +67,7 @@ from vigia_platform.loop.validators.vocabulary import (
     BlockedVocabularyValidator,
     initial_vocabulary,
 )
+from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.notifications.registration import (
     NOTIFICATIONS_CONSUMERS,
     NOTIFICATIONS_TASKS,
@@ -95,6 +107,8 @@ __all__ = [
     "loop_consumers",
     "loop_event_types",
     "loop_free_text",
+    "loop_http_client_factory",
+    "loop_metrics",
     "loop_record_types",
     "loop_routers",
     "loop_tasks",
@@ -312,8 +326,21 @@ def loop_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
 
 
 def loop_consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+    # Cada consumidor sale con su mamparo (LC-LAZ-40); el registrador no lo conoce.
+    bulkheaded = bulkheaded_registry(registry, services)
     for register in CONSUMER_REGISTRARS:
-        register(registry, services)
+        register(bulkheaded, services)
+
+
+def loop_http_client_factory(services: UnitServices) -> HttpClientFactory:
+    """La fábrica única de clientes de salida de U-04 (LC-LAZ-39), con los destinos de
+    ``services.config`` (los del diseño si no hay configuración)."""
+    return HttpClientFactory.from_config(services.config)
+
+
+def loop_metrics() -> LoopMetrics:
+    """Los instrumentos de U-04 sobre el medidor de la plataforma (LC-LAZ-38)."""
+    return get_loop_metrics()
 
 
 def loop_api_state(services: UnitServices) -> Mapping[str, object]:
