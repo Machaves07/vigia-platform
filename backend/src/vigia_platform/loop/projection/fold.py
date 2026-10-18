@@ -633,7 +633,9 @@ def _classification(finding: FindingStateRow, item: ProjectionInput) -> tuple[Fi
         "last_classified_at": at,
     }
     transition_id = accepted.transition.transition_id
-    if transition_id == "T19":
+    if transition_id in ("T19", "T20"):
+        # El cierre (T19) o la declaración (T20) quedan intactos; se marca que después llegó
+        # una clasificación con otra salida (respuesta 5, BR-LAZ-25).
         changes["closed_with_later_different_classification"] = (
             finding.closed_with_later_different_classification
             or outcome is not ClassificationOutcome.CONFIRMED
