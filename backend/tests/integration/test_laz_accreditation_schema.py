@@ -50,6 +50,32 @@ def test_all_accreditation_tables_have_forced_rls(database: MigratedDatabase) ->
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in rows)
 
 
+def test_all_accreditation_tables_have_restrictive_provider_policy(
+    database: MigratedDatabase,
+) -> None:
+    async def query() -> list[object]:
+        connection = await database.connect()
+        try:
+            return await connection.fetch(
+                "SELECT tablename, policyname, permissive FROM pg_policies"
+                " WHERE schemaname = 'accreditation'"
+            )
+        finally:
+            await connection.close()
+
+    policies: dict[str, dict[str, str]] = {}
+    for row in asyncio.run(query()):
+        policies.setdefault(str(row["tablename"]), {})[str(row["policyname"])] = str(
+            row["permissive"]
+        )
+    assert set(policies) == TABLES
+    for table in TABLES:
+        assert policies[table] == {
+            "organization_isolation": "PERMISSIVE",
+            "provider_concession_scope": "RESTRICTIVE",
+        }
+
+
 def test_adoption_counter_has_no_user_column(database: MigratedDatabase) -> None:
     async def query() -> set[str]:
         connection = await database.connect()
