@@ -428,6 +428,7 @@ class _Row:
     attempt_count: int = 0
 
 
+@repository
 @dataclass
 class InMemoryExportLeaseStore:
     """Las mismas condiciones que ``SqlExportLeaseStore`` (adquisición, renovación y
@@ -440,7 +441,7 @@ class InMemoryExportLeaseStore:
         self.rows[export_id] = _Row(organization_id)
 
     async def acquire(
-        self, context: ScopeContext | None, export_id: uuid.UUID, owner: str, now: datetime
+        self, context: ScopeContext, export_id: uuid.UUID, owner: str, now: datetime
     ) -> Acquisition:
         _check_owner(owner)
         row = self.rows.get(export_id)
@@ -492,7 +493,7 @@ class InMemoryExportLeaseStore:
         return row
 
     async def renew(
-        self, context: ScopeContext | None, lease: ExportLease, now: datetime
+        self, context: ScopeContext, lease: ExportLease, now: datetime
     ) -> ExportLease | None:
         row = self._held(lease, now)
         if row is None:
@@ -500,7 +501,7 @@ class InMemoryExportLeaseStore:
         row.lease_until = now + self.settings.duration
         return replace(lease, until=row.lease_until)
 
-    async def release(self, context: ScopeContext | None, lease: ExportLease) -> bool:
+    async def release(self, context: ScopeContext, lease: ExportLease) -> bool:
         row = self.rows.get(lease.export_id)
         if row is None or row.lease_owner != lease.owner:
             return False

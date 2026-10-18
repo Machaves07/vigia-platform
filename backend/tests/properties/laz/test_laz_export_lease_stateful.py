@@ -52,6 +52,7 @@ from hypothesis.stateful import (
 
 from tests.conftest import _seeds_for_profile
 from tests.export_support import ExportStack, export_stack
+from tests.factories import make_context
 from tests.integration.conftest import PostgresEndpoint
 from tests.ledger_database import DatabaseLoop
 from vigia_platform.accreditation.export.composer_port import ExportPackage
@@ -146,13 +147,17 @@ class MemoryBackend:
     async def acquire(
         self, organization: uuid.UUID, export_id: uuid.UUID, owner: str, now: datetime
     ) -> Acquisition:
-        return await self.store.acquire(None, export_id, owner, now)
+        return await self.store.acquire(
+            make_context(organization_id=organization), export_id, owner, now
+        )
 
     async def renew(self, lease: ExportLease, now: datetime) -> ExportLease | None:
-        return await self.store.renew(None, lease, now)
+        return await self.store.renew(
+            make_context(organization_id=lease.organization_id), lease, now
+        )
 
     async def release(self, lease: ExportLease) -> bool:
-        return await self.store.release(None, lease)
+        return await self.store.release(make_context(organization_id=lease.organization_id), lease)
 
     async def finish(self, lease: ExportLease, state: ExportState, now: datetime) -> bool:
         return await self.store.finish(lease, state, now)

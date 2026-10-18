@@ -70,7 +70,7 @@ from vigia_platform.accreditation.export.lease import (
 from vigia_platform.accreditation.export.state import DOWNLOAD_VALIDITY
 from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain, CheckpointResult
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ActorUnit, ScopeContext
+from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import METER_NAME
@@ -183,6 +183,7 @@ class _Settings:
     tick_seconds: float = DEFAULT_TICK_SECONDS
 
 
+@repository
 class ExportWorker:
     """El manejador de ``export_worker`` (un intento por entrega)."""
 
