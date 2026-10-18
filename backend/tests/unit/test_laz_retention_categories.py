@@ -45,6 +45,7 @@ def _load(name: str) -> Any:
 
 
 MIGRATION: Final = _load("laz_0029_loop_schema.py")
+ACCREDITATION_MIGRATION: Final = _load("laz_0030_accreditation_schema.py")
 
 
 # --- La comprobación pura -----
@@ -101,6 +102,16 @@ def test_the_migration_classifies_each_loop_table_once() -> None:
     assert MIGRATION.RETENTION["finding_state"] == "ledger_projection"
 
 
+def test_the_migration_classifies_each_accreditation_table_once() -> None:
+    assert set(ACCREDITATION_MIGRATION.RETENTION) == set(ACCREDITATION_MIGRATION.TABLES)
+    assert set(ACCREDITATION_MIGRATION.RETENTION.values()) <= set(RETENTION_CATEGORIES)
+    assert ACCREDITATION_MIGRATION.RETENTION["export_request"] == (
+        "operational_state_with_retention"
+    )
+    assert ACCREDITATION_MIGRATION.RETENTION["adoption_counter"] == "operational_state"
+    assert ACCREDITATION_MIGRATION.RETENTION["monthly_package"] == "ledger_projection"
+
+
 # --- Contra la base migrada -----
 
 
@@ -145,6 +156,9 @@ def test_every_u04_table_declares_exactly_one_category(database: MigratedDatabas
     # No pasa por un esquema vacío: las 19 de loop están, también las particionadas.
     assert {name for name in comments if name.startswith("loop.")} == {
         f"loop.{table}" for table in MIGRATION.TABLES
+    }
+    assert {name for name in comments if name.startswith("accreditation.")} == {
+        f"accreditation.{table}" for table in ACCREDITATION_MIGRATION.TABLES
     }
     assert retention_violations(comments) == []
 
