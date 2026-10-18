@@ -5,8 +5,9 @@ Mismo patrón que ``test_u03_startup_checks.py``: ``vigia-api``, ``vigia-worker`
 registro), quitando **una sola cosa** cada vez:
 
 - **cada uno de los 17 tipos y de los 25 eventos** de U-04 y el trabajo interno
-  ``export_requested`` (y cada tarea de ``U04_TASKS``, hoy vacío, y cada consumidor de
-  ``U04_CONSUMERS``: ``export_worker`` desde TASK-317): la composición no termina
+  ``export_requested`` (y cada tarea de ``U04_TASKS``, hoy vacío, cada consumidor de
+  ``U04_CONSUMERS``: ``export_worker`` desde TASK-317, y cada validador de texto libre de
+  ``U04_FREE_TEXT_VALIDATORS``: ``blocked_vocabulary``, TASK-303): la composición no termina
   (``RegistrationIncomplete`` nombra exactamente lo que falta) y el proceso sale con
   ``STARTUP_FAILURE_EXIT_CODE`` y la línea ``registration_missing`` que lo nombra;
 - **cada enumeración con etiqueta** de U-04: sin la etiqueta de uno de sus valores en
@@ -15,7 +16,8 @@ registro), quitando **una sola cosa** cada vez:
   el worker y ``vigia-admin`` no las cargan.
 
 Con todo registrado, los tres procesos componen y listan los 17 tipos y los 25 eventos de U-04
-además de los de U-02 y U-03. Reloj simulado; solo datos generados.
+además de los de U-02 y U-03, y la política de texto libre lista ``blocked_vocabulary`` junto al
+validador mínimo de U-03. Reloj simulado; solo datos generados.
 """
 
 from __future__ import annotations
@@ -44,12 +46,15 @@ from tests.integration.test_u03_startup_checks import _strip as _strip_u03
 from tests.runtime_support import FakeReader
 from tests.unit.test_runtime_units import PROVIDER_ID, _admin_config
 from vigia_platform.accreditation.registration import ACCREDITATION_LABELS
+from vigia_platform.catalog.application.free_text_validator import U03_FREE_TEXT_VALIDATOR
 from vigia_platform.fleet.registration import U03_EVENT_TYPES
+from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.registry import ChainLevel
 from vigia_platform.loop.registration import (
     LOOP_LABELS,
     U04_CONSUMERS,
     U04_EVENT_TYPES,
+    U04_FREE_TEXT_VALIDATORS,
     U04_RECORD_TYPES,
     U04_TASKS,
 )
@@ -66,6 +71,7 @@ from vigia_platform.shared.runtime.config import RegistrationIncomplete, Runtime
 from vigia_platform.shared.runtime.units import (
     PlatformUnit,
     UnitServices,
+    free_text_registry,
     record_type_registry,
     registered_units,
 )
@@ -80,8 +86,10 @@ MISSING: Final[tuple[tuple[str, str], ...]] = (
     *(("event_type", name) for name in sorted(U04_EVENT_TYPES)),
     *(("periodic_task", name) for name in sorted(U04_TASKS)),
     *(("consumer", name) for name in sorted(U04_CONSUMERS)),
+    *(("free_text_validator", name) for name in sorted(U04_FREE_TEXT_VALIDATORS)),
 )
-"""Cada una de las 17 + 26 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` cosas que U-04 exige."""
+"""Cada una de las 17 + 26 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` +
+``len(U04_FREE_TEXT_VALIDATORS)`` cosas que U-04 exige."""
 
 SUBSCRIBED: Final = frozenset({"export_requested"})
 """Eventos de U-04 a los que se suscribe un consumidor de U-04 (``export_worker``, TASK-317)."""
@@ -91,6 +99,7 @@ ONE_OF_EACH: Final = (
     ("record_type", "vocabulary_list_changed"),
     ("event_type", "finding_closed"),
     ("event_type", "adoption_low"),
+    ("free_text_validator", "blocked_vocabulary"),
 )
 
 U04_BINDINGS: Final = {**LOOP_LABELS, **ACCREDITATION_LABELS, **NOTIFICATIONS_LABELS}
@@ -101,7 +110,10 @@ LABELLED: Final[tuple[tuple[str, str], ...]] = tuple(
 
 
 def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
-    """``unit`` igual, salvo que no registra ``name`` (también consumidores, que U-03 no tiene)."""
+    """``unit`` igual, salvo que no registra ``name`` (también consumidores y validadores de texto
+    libre, que U-03 no exige)."""
+    if kind == "free_text_validator":
+        return _strip_free_text(unit, name)
     if kind != "consumer":
         return _strip_u03(unit, kind, name)
     original = unit.consumers
@@ -114,6 +126,24 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
                 registry.register(consumer)
 
     return dataclasses.replace(unit, consumers=consumers)
+
+
+def _strip_free_text(unit: PlatformUnit, name: str) -> PlatformUnit:
+    """``unit`` sin el validador de texto libre ``name`` (ni su preparador)."""
+    original = unit.free_text
+
+    def free_text(registry: FreeTextPolicyRegistry) -> None:
+        full = FreeTextPolicyRegistry()
+        original(full)
+        for validator_name, validator in full._validators.items():
+            if validator_name == name:
+                continue
+            registry.register(validator_name, validator)
+            preparer = full._preparers.get(validator_name)
+            if preparer is not None:
+                registry.register_preparer(validator_name, preparer)
+
+    return dataclasses.replace(unit, free_text=free_text)
 
 
 def _without(kind: str, name: str) -> tuple[PlatformUnit, ...]:
@@ -153,6 +183,10 @@ def test_the_three_processes_compose_and_list_u04_besides_u02_and_u03(tmp_path: 
     }
     assert published == U04_EVENT_TYPES
     assert set(worker.catalog.event_types.event_names()) >= U03_EVENT_TYPES | U04_EVENT_TYPES
+    assert free_text_registry(units).validator_names == (
+        U03_FREE_TEXT_VALIDATOR,
+        *sorted(U04_FREE_TEXT_VALIDATORS),
+    )
 
 
 # --- sin una pieza --------------------------------------------------------------------------------

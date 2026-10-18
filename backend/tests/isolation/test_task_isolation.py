@@ -74,7 +74,11 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
-from vigia_platform.shared.runtime.units import UnitServices, registered_units
+from vigia_platform.shared.runtime.units import (
+    UnitServices,
+    free_text_registry,
+    registered_units,
+)
 from vigia_platform.shared.signing.keys import to_millisecond
 from vigia_platform.shared.worker.scheduler import OrganizationReads
 
@@ -155,7 +159,7 @@ def composed_tasks(services: UnitServices | None = None) -> PeriodicTaskRegistry
             audit=inert,
             outbox=inert,
             writer=inert,
-            free_text=inert,
+            free_text=free_text_registry(registered_units()),
             signing=inert,
             checkpoints=inert,
             kms=inert,
@@ -254,7 +258,7 @@ def world(postgres_endpoint: PostgresEndpoint) -> Iterator[TaskWorld]:
             audit=sessions.audit,
             outbox=cast(Any, stack.outbox),
             writer=stack.writer,
-            free_text=inert,
+            free_text=free_text_registry(registered_units()),
             signing=inert,
             checkpoints=inert,
             kms=inert,

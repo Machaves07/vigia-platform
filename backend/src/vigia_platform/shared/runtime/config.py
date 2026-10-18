@@ -102,12 +102,13 @@ class RuntimeConfigInvalid(ValueError):
 
 class RegistrationIncomplete(Exception):
     """A la composición le falta algo que una unidad declara obligatorio (NFR-GOB-20, BR-NUC-52):
-    un tipo de registro, un evento, una tarea periódica o un consumidor (el manifiesto de U-04,
-    ``loop.registration.missing_u04_registrations``; TASK-317 registra el primero). ``missing``
-    son pares (clase, nombre), constantes del código; el proceso no arranca."""
+    un tipo de registro, un evento, una tarea periódica, un consumidor o un validador de texto
+    libre (el manifiesto de U-04, ``loop.registration.missing_u04_registrations``, NFR-LAZ-14;
+    TASK-317 registra el primer consumidor). ``missing`` son pares (clase, nombre), constantes
+    del código; el proceso no arranca."""
 
     KINDS: ClassVar[frozenset[str]] = frozenset(
-        {"record_type", "event_type", "periodic_task", "consumer"}
+        {"record_type", "event_type", "periodic_task", "consumer", "free_text_validator"}
     )
 
     def __init__(self, missing: Sequence[tuple[str, str]]) -> None:
