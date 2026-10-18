@@ -407,11 +407,14 @@ class LoopProjectionStore:
         scope: RecordScope | None = None,
         events: Sequence[NewEvent] = (),
         occurred_at: datetime | None = None,
+        record_id: uuid.UUID | None = None,
     ) -> tuple[Receipt | LedgerRejection, Step]:
         """Escribe el registro en ``transaction`` y aplica su proyección, **en ese orden**.
 
         Es la forma de escribir de las operaciones de U-04: fija el orden de candados del
-        módulo (cadena de la planta, después el control). Un rechazo no toca la proyección."""
+        módulo (cadena de la planta, después el control). Un rechazo no toca la proyección.
+        ``record_id`` es el del registro si se escribe (para citarlo en la carga de sus eventos);
+        sin él, lo genera el escritor."""
         receipt = await writer.write(
             context,
             record_type,
@@ -420,6 +423,7 @@ class LoopProjectionStore:
             events=events,
             occurred_at=occurred_at,
             transaction=transaction,
+            record_id=record_id,
         )
         if isinstance(receipt, LedgerRejection):
             return receipt, Step(None, None, False)
