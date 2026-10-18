@@ -328,9 +328,9 @@ def test_new_partitions_are_protected_and_not_granted_to_the_application(
 ) -> None:
     now = datetime(2041, 6, 1, tzinfo=UTC)
     report = environment.create(now)
-    # Nueve tablas (tres de U-02, tres de fleet de gob_0018 y tres de loop de laz_0029), el mes
-    # en curso y tres más.
-    assert len(report.created) == len(PartitionedTable) * 4 == 9 * 4
+    # Doce tablas (tres de U-02, tres de fleet de gob_0018, tres de loop de laz_0029 y tres de
+    # notifications de laz_0030), el mes en curso y tres más.
+    assert len(report.created) == len(PartitionedTable) * 4 == 12 * 4
     for result in report.created:
         rows = environment.fetch(
             "SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = $1::regclass"

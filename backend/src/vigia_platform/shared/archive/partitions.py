@@ -81,6 +81,23 @@ PARTITION_MONTHS_AHEAD: Final = 3
 MAX_MONTHS_PER_CALL: Final = 120
 """Tope de meses por llamada de ``shared.vigia_create_month_partitions`` (nuc_0016)."""
 
+SERIALIZE_LOCK_WAIT_MS: Final = 20_000
+"""Espera máxima del candado que serializa las llamadas concurrentes (la tarea y la orden
+administrativa), por debajo de los 30 s de ``statement_timeout`` del worker."""
+_SERIALIZE: Final = (
+    text(f"SET LOCAL lock_timeout = {SERIALIZE_LOCK_WAIT_MS}"),
+    text(
+        "SELECT pg_catalog.pg_advisory_xact_lock("
+        "pg_catalog.hashtextextended('vigia_create_month_partitions', 0))"
+    ),
+    text("SET LOCAL lock_timeout TO DEFAULT"),
+)
+"""El candado de las funciones de creación, tomado antes de llamarlas. Cada función lo toma con
+``lock_timeout`` de 5 s, y la espera de una llamada concurrente es lo que tarda la otra en crear
+todas sus particiones: con las doce tablas de U-02 a U-04, pasa de 5 s en un servidor cargado
+(TASK-339). Con el candado ya tomado, la función no espera. La espera vuelve después al
+``lock_timeout`` de la conexión. Las funciones no cambian, así que la imagen N-1 sigue igual."""
+
 _CREATE: Final = text(
     "SELECT parent, partition, month, created, blocked"
     " FROM shared.vigia_create_month_partitions(:first_month, :last_month)"
@@ -218,6 +235,8 @@ class PartitionMaintenance:
             raise ValueError("until no puede ser anterior al mes en curso")
         if add_months(first, MAX_MONTHS_PER_CALL - 1) < last:
             raise ValueError(f"a lo sumo {MAX_MONTHS_PER_CALL} meses por llamada")
+        for statement in _SERIALIZE:
+            await transaction.execute(statement)
         rows = (
             await transaction.execute(_CREATE, {"first_month": first, "last_month": last})
         ).all()
