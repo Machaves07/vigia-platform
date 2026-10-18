@@ -3,8 +3,8 @@
 - **Tres unidades** en ``REGISTERED_UNITS`` (``loop``, ``accreditation`` y ``notifications``),
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (25) coinciden con lo
-  que registra el código; ``U04_TASKS``, ``U04_CONSUMERS`` y los ``ROUTERS`` de los tres módulos,
-  hoy vacíos.
+  que registra el código; ``U04_TASKS`` y ``U04_CONSUMERS``, hoy vacíos, y los ``ROUTERS``:
+  solo las dos rutas de la configuración del lazo (VIG-205).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -29,6 +29,7 @@ from vigia_platform.accreditation.events import ACCREDITATION_EVENT_TYPES
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
+from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.events import LOOP_EVENT_TYPES
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
 from vigia_platform.notifications import registration as notifications_registration
@@ -98,19 +99,34 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
     assert notifications.event_types is notifications_registration.notifications_event_types
 
 
-def test_the_u04_units_have_no_routes_tasks_consumers_nor_state_yet() -> None:
+def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     units = {unit.name: unit for unit in registered_units()}
     tasks = PeriodicTaskRegistry()
     consumers = ConsumerRegistry()
     for name in U04_UNITS:
         unit = units[name]
-        assert unit.routers() == ()
-        assert unit.api_state(_services()) == {}
         unit.periodic_tasks(tasks, _services())
         unit.consumers(consumers, _services())
     assert tasks.tasks() == () and consumers.consumers() == ()
-    for module in (registration, accreditation_registration, notifications_registration):
+    # VIG-205 (TASK-304): las dos rutas de la configuración y LoopHttp en app.state.
+    routes = {
+        (method, route.path)
+        for router in units["loop"].routers()
+        for route in router.routes
+        for method in getattr(route, "methods", ())
+    }
+    assert routes == {
+        ("GET", "/loop/plants/{plant_id}/configuration"),
+        ("PUT", "/loop/plants/{plant_id}/configuration"),
+    }
+    state = units["loop"].api_state(_services())
+    assert set(state) == {LOOP_STATE_KEY} and isinstance(state[LOOP_STATE_KEY], LoopHttp)
+    for name in ("accreditation", "notifications"):
+        assert units[name].routers() == ()
+        assert units[name].api_state(_services()) == {}
+    for module in (accreditation_registration, notifications_registration):
         assert module.ROUTERS == ()
+    for module in (registration, accreditation_registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
     assert registration.U04_TASKS == {} and registration.U04_CONSUMERS == {}
     assert registration.FREE_TEXT_REGISTRARS == ()

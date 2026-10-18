@@ -98,11 +98,13 @@ def chain_units() -> tuple[UnitRegistration, ...]:
     ``test_fleet_node_identity.py`` y el aislamiento de ``tests/isolation``. Tampoco las de
     ``node_api``: desde TASK-223 publica el latido y el catálogo por zona, y este arnés declara sus
     propias rutas del contrato con ``HarnessNodeGate`` (las reales las prueban
-    ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``)."""
+    ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``). Ni las de ``loop`` (desde
+    VIG-205): sus cuerpos, servicios reales y aislamiento los prueban
+    ``test_loop_configuration_routes.py`` y ``tests/isolation``."""
     return tuple(
         unit
         for unit in platform_units()
-        if unit.name not in ("identity", "ledger", "catalog", "fleet", "node_api")
+        if unit.name not in ("identity", "ledger", "catalog", "fleet", "node_api", "loop")
     )
 
 
