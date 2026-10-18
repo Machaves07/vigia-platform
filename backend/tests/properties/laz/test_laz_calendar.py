@@ -66,6 +66,7 @@ from vigia_platform.shared.clock import SimulatedClock
 
 ONE_DAY: Final = timedelta(days=1)
 TICK: Final = timedelta(microseconds=1)
+SANTIAGO: Final = "America/Santiago"
 PROCESS_ZONES: Final = ("Pacific/Kiritimati", "America/Adak", "Asia/Kathmandu", "UTC")
 """Husos del proceso con los que se repite el cálculo (UTC+14, UTC-10 con verano, UTC+5:45)."""
 
@@ -291,6 +292,17 @@ def test_periods_and_zones_borders() -> None:
             plant_zone(zone)
     with pytest.raises(TypeError):
         local_date(datetime(2026, 1, 1), "UTC")  # noqa: DTZ001
+    # Al borde del calendario representable: CalendarInvalid, nunca OverflowError.
+    weekdays = BusinessCalendar.default()
+    late = datetime(9999, 12, 30, 12, tzinfo=UTC)
+    for call in (
+        lambda: month_bounds("Etc/GMT-14", "0001-01"),
+        lambda: add_business_days(date(9999, 12, 30), 3, weekdays),
+        lambda: business_deadline(late, 1, weekdays, "UTC"),
+        lambda: business_deadline(late, 1, weekdays, "Etc/GMT+12"),
+    ):
+        with pytest.raises(CalendarInvalid):
+            call()
 
 
 def test_the_zone_comes_from_the_tzdata_package(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,8 +311,8 @@ def test_the_zone_comes_from_the_tzdata_package(monkeypatch: pytest.MonkeyPatch)
     plant_zone.cache_clear()
     # Sin datos del sistema: la zona sigue disponible porque se lee del paquete.
     monkeypatch.setattr(zoneinfo, "TZPATH", ())
-    zone = plant_zone("America/Santiago")
-    assert zone.key == "America/Santiago"
+    zone = plant_zone(SANTIAGO)
+    assert str(zone) == SANTIAGO
     assert month_bounds(zone, "2026-01")[0] == datetime(2026, 1, 1, 3, tzinfo=UTC)
     plant_zone.cache_clear()
 

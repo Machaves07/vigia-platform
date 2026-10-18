@@ -185,10 +185,13 @@ def add_business_days(start: date, n: int, calendar: BusinessCalendar) -> date:
     day = start
     remaining = n
     # Termina: hay al menos un día laborable por semana y la lista declarada es finita.
-    while remaining:
-        day += _ONE_DAY
-        if is_business_day(day, calendar):
-            remaining -= 1
+    try:
+        while remaining:
+            day += _ONE_DAY
+            if is_business_day(day, calendar):
+                remaining -= 1
+    except OverflowError:
+        raise CalendarInvalid("el plazo sale del calendario representable") from None
     return day
 
 
@@ -223,7 +226,10 @@ def _local_midnight_utc(day: date, zone: ZoneInfo) -> datetime:
     Si la medianoche local no existe (adelanto de hora a las 00:00), ``fold = 0`` toma el
     desplazamiento anterior al cambio, que da el instante del salto: el primero del día local.
     """
-    return datetime(day.year, day.month, day.day, tzinfo=zone).astimezone(UTC)
+    try:
+        return datetime(day.year, day.month, day.day, tzinfo=zone).astimezone(UTC)
+    except OverflowError:
+        raise CalendarInvalid("el instante sale del calendario representable") from None
 
 
 def local_date(instant: datetime, zone: ZoneInfo | str) -> date:
@@ -242,7 +248,11 @@ def business_deadline(
     """Fin exclusivo, en UTC, del día ``n`` hábil posterior a la fecha local de ``instant``."""
     tz = _zone(zone)
     last = add_business_days(local_date(instant, tz), n, calendar)
-    return _local_midnight_utc(last + _ONE_DAY, tz)
+    try:
+        following = last + _ONE_DAY
+    except OverflowError:
+        raise CalendarInvalid("el plazo sale del calendario representable") from None
+    return _local_midnight_utc(following, tz)
 
 
 def _period(period: object) -> tuple[int, int]:
