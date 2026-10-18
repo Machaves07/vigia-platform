@@ -38,6 +38,7 @@ from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.clock import Clock
@@ -79,7 +80,8 @@ class LazServices:
     free_text: FreeTextPolicyRegistry
 
 
-def _configuration(services: LazServices) -> Mapping[str, object]:
+def _loop(services: LazServices) -> Mapping[str, object]:
+    """``LoopHttp`` con un servicio por grupo de rutas de ``/loop/*`` (una sola clave de estado)."""
     database: Any = services.database
     return {
         LOOP_STATE_KEY: LoopHttp(
@@ -89,6 +91,12 @@ def _configuration(services: LazServices) -> Mapping[str, object]:
                 writer=services.writer,
                 authorizer=services.authorizer,
                 free_text=services.free_text,
+                clock=services.clock,
+            ),
+            classification=ClassificationService(  # TASK-308
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
                 clock=services.clock,
             ),
         ),
@@ -110,7 +118,7 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
 
 
 LAZ_STATE: tuple[Callable[[LazServices], Mapping[str, object]], ...] = (
-    _configuration,  # TASK-304
+    _loop,  # TASK-304 y TASK-308
     _accreditation,  # TASK-317
 )
 """Constructores del ``app.state`` de las rutas de U-04 en la aplicación de la prueba."""
@@ -153,6 +161,23 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 json={
                     "review_deadline_business_days": 7,
                     "reason": "Ajuste acordado en el comité de seguridad",
+                },
+            ),
+        ),
+    ),
+    # VIG-212 (TASK-308): clasificar un hallazgo de B responde igual que uno inexistente
+    # (not_found, nunca transition_not_allowed ni un detail_code); nada se escribe en B.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/classifications",
+                json={
+                    "outcome": "confirmed",
+                    "reason_category": "real_coexistence",
+                    "reason_text": "Motivo sintético de la clasificación del hallazgo en la zona",
                 },
             ),
         ),

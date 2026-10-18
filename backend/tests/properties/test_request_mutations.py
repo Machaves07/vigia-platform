@@ -97,6 +97,11 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "review_deadline_business_days": 7,
         "reason": "Ajuste acordado en el comité de seguridad",
     },
+    ("POST", "/loop/findings/{finding_state_id}/classifications"): {
+        "outcome": "confirmed",
+        "reason_category": "real_coexistence",
+        "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -116,6 +121,7 @@ def _url(path: str, user_id: str | None = None) -> str:
         .replace("{zone_id}", str(uuid.uuid4()))
         .replace("{action_id}", str(uuid.uuid4()))
         .replace("{plant_id}", str(uuid.uuid4()))
+        .replace("{finding_state_id}", str(uuid.uuid4()))
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -153,18 +159,21 @@ class _NoZones:
 
 
 _ROLE_HEADERS: dict[str, str] = {}
-"""Sesión de coordinación SST: ``actions.manage`` y ``export.create`` no están en la columna del
-administrador, y sin la clave la ruta responde ``not_found`` antes de validar el cuerpo (TASK-310
-y TASK-317)."""
+"""Sesión de coordinación SST: ``actions.manage``, ``findings.classify`` y ``export.create`` no
+están en la columna del administrador, y sin la clave la ruta responde ``not_found`` antes de
+validar el cuerpo (TASK-310, TASK-308 y TASK-317)."""
 ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
+        ("POST", "/loop/findings/{finding_state_id}/classifications"),
         ("POST", "/accreditation/exports"),
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
-    # Cuerpo válido: llega al servicio, que no encuentra la acción ni las zonas sintéticas.
+    # Cuerpo válido: llega al servicio, que no encuentra la acción, el hallazgo (TASK-308,
+    # ``ClassificationDouble``) ni las zonas sintéticas.
     ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
+    ("POST", "/loop/findings/{finding_state_id}/classifications"): 404,
     ("POST", "/accreditation/exports"): 404,
 }
 
@@ -259,6 +268,9 @@ def _mutated(
         elif "{plant_id}" in path:
             bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
             url = path.replace("{plant_id}", bad)
+        elif "{finding_state_id}" in path:
+            bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
+            url = path.replace("{finding_state_id}", bad)
         elif "plant_id" in body:
             body["plant_id"] = data.draw(st.sampled_from(["no-es-uuid", "", "0" * 31]))
         else:

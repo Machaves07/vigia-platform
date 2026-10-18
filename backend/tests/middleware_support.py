@@ -31,7 +31,7 @@ from tests.api_support import World
 from tests.attachment_support import attachment_world
 from tests.signing_support import START
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCookie
-from vigia_platform.identity.authz.authorize import Resource
+from vigia_platform.identity.authz.authorize import Resource, ResourceNotFound
 from vigia_platform.identity.authz.context import (
     ConcessionRow,
     ScopeContexts,
@@ -41,6 +41,7 @@ from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.application import classification as classification_module
 from vigia_platform.loop.config.parameters import (
     INITIAL_DEFAULTS_REASON,
     LoopSettings,
@@ -179,11 +180,37 @@ class LoopConfigurationDouble:
         return self._configuration(context, plant_id, settings, 2)
 
 
+class ClassificationDouble:
+    """Doble de ``ClassificationService`` para el arnés, sin base (TASK-308).
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código (salida,
+    categoría de su lista y motivo); un cuerpo válido no encuentra ningún hallazgo sintético
+    (``ResourceNotFound``), como el puerto de adjuntos con la acción."""
+
+    async def classify(
+        self,
+        context: ScopeContext,
+        finding_state_id: uuid.UUID,
+        *,
+        outcome: object,
+        reason_category: object,
+        reason_text: object,
+        reinforced_reason: bool,
+    ) -> Any:
+        chosen = classification_module._outcome(outcome)
+        classification_module._reason(chosen, reason_category, reason_text)
+        raise ResourceNotFound()
+
+
 def loop_state(clock: Any) -> dict[str, Any]:
-    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos y configuración)."""
+    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración y
+    clasificación)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
-        LOOP_STATE_KEY: LoopHttp(configuration=cast(Any, LoopConfigurationDouble(clock))),
+        LOOP_STATE_KEY: LoopHttp(
+            configuration=cast(Any, LoopConfigurationDouble(clock)),
+            classification=cast(Any, ClassificationDouble()),
+        ),
     }
 
 
