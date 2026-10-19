@@ -48,6 +48,7 @@ from vigia_platform.loop.adapters.http.configuration_routes import configuration
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.events import LOOP_EVENT_TYPES
+from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
 from vigia_platform.notifications import registration as notifications_registration
 from vigia_platform.notifications.events import NOTIFICATIONS_EVENT_TYPES
@@ -167,8 +168,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
     assert tasks.tasks() == ()
+    # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
-        ("export_worker", ActorUnit.U04, ("export_requested",))
+        ("export_worker", ActorUnit.U04, ("export_requested",)),
+        ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
     ]
     assert (
         attachment_router,
@@ -178,10 +181,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
-        assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
+        assert module.TASK_REGISTRARS == ()
+    assert notifications_registration.CONSUMER_REGISTRARS == ()
+    assert len(registration.CONSUMER_REGISTRARS) == 1
     assert accreditation_registration.TASK_REGISTRARS == ()
     assert registration.U04_TASKS == {}
-    assert registration.U04_CONSUMERS == {"export_worker": 1}
+    assert registration.U04_CONSUMERS == {"export_worker": 1, "loop_projection": 4}
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
     assert (
         registration.register_blocked_vocabulary,
