@@ -22,6 +22,7 @@ negativo con un flujo sintético que la incumple.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -242,7 +243,17 @@ def test_the_integration_groups_of_ci_cover_every_directory_exactly_once() -> No
 
 
 def test_each_integration_group_has_a_bounded_timeout() -> None:
-    assert _jobs()[MATRIX]["timeout-minutes"] <= 60
+    assert _jobs()[MATRIX]["timeout-minutes"] <= 30
+
+
+def test_the_integration_groups_read_measured_durations_and_do_not_store_them() -> None:
+    """Los tiempos están en el repositorio; guardarlos en cada PR los reescribiría sin uso."""
+    call, _ = _job_call(_jobs()[MATRIX])
+    assert call is not None
+    assert "--store-durations" not in call.options
+    durations = json.loads((TESTS.parent / DURATIONS).read_text(encoding="utf-8"))
+    assert len(durations) > 1000
+    assert not any(test.startswith(f"{LOAD_DIRECTORY}/") for test in durations)
 
 
 def test_the_unit_groups_use_the_pr_profile_in_pull_requests() -> None:

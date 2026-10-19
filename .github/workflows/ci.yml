@@ -218,7 +218,8 @@ jobs:
   # camino crítico del CI). Como «backend-pruebas»: pytest-split con backend/.test_durations_integracion,
   # algoritmo least_duration, sobre `-m integration` de toda la suite salvo tests/load (va en «backend (carga
   # ci)»). Una prueba que no está en el archivo cuenta con la media y cae en algún grupo igual; la unión la
-  # comprueban tools/check_test_split.py --collect y tests/unit/test_ci_split.py.
+  # comprueban tools/check_test_split.py --collect y tests/unit/test_ci_split.py. Tiempos medidos en el CI del
+  # PR #157 (2026-10-19, perfil pr, run 39243995513): 3539 pruebas, ~83 min de pruebas, ~21 por grupo.
   # Para renovar los tiempos (necesita Docker): o bien en local, desde backend/,
   #   uv run pytest -p no:cacheprovider --hypothesis-profile=pr -m integration --ignore=tests/load \
   #     --store-durations --clean-durations --durations-path=.test_durations_integracion
@@ -231,7 +232,7 @@ jobs:
     name: backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -264,7 +265,7 @@ jobs:
         env:
           GRUPO: ${{ matrix.grupo }}
           PERFIL: ${{ github.event_name == 'pull_request' && 'pr' || 'ci' }}
-        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile="$PERFIL" -m integration --ignore=tests/load --splits=4 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_integracion --store-durations --clean-durations
+        run: uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile="$PERFIL" -m integration --ignore=tests/load --splits=4 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_integracion
       - name: datos de cobertura
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -273,15 +274,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
-      - name: tiempos medidos del grupo
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: tiempos-integracion-${{ matrix.grupo }}
-          path: backend/.test_durations_integracion
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
 
   # Los dos checks de la integración de siempre: la sesión de control los exige por nombre. Corren aunque
   # falle la matriz (always()): un check «omitido» cuenta como superado, así que tienen que fallar.
