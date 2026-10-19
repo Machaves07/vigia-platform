@@ -43,10 +43,12 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
+from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -158,6 +160,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 clock=services.clock,
             ),
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
+            review_queue=ReviewQueueService(  # TASK-309
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                repository=ReviewQueueRepository(database),
+                clock=services.clock,
+            ),
         ),
     }
 
@@ -251,6 +260,28 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "outcome": "confirmed",
                     "reason_category": "real_coexistence",
                     "reason_text": "Motivo sintético de la clasificación del hallazgo en la zona",
+                },
+            ),
+        ),
+    ),
+    # VIG-213 (TASK-309): la cola de revisión es ``own`` (sin identificador: nunca muestra ni
+    # toca la de B) y resolver una detección de B responde igual que un identificador inexistente
+    # (not_found, nunca transition_not_allowed ni un detail_code); nada se escribe en B.
+    (
+        ("GET", "/loop/review-queue"),
+        Case(Kind.OWN, lambda i: Call("GET", "/loop/review-queue")),
+    ),
+    (
+        ("POST", "/loop/review-queue/{detection_id}/resolution"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/review-queue/{i.record}/resolution",
+                json={
+                    "outcome": "review_confirmed",
+                    "reason_category": "real_coexistence",
+                    "reason_text": "Motivo sintético de la resolución de la detección en la zona",
                 },
             ),
         ),

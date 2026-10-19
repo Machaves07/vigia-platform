@@ -18,10 +18,12 @@ from fastapi import Request
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
+from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -66,6 +68,8 @@ class LoopHttp:
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
     inbox: InboxService | None = None
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
+    review_queue: ReviewQueueService | None = None
+    """``GET /loop/review-queue`` y ``POST .../resolution`` (LC-LAZ-08, VIG-213)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -142,6 +146,13 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),
+        review_queue=ReviewQueueService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            repository=ReviewQueueRepository(services.database),
+            clock=services.clock,
+        ),
     )
 
 

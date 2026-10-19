@@ -4,9 +4,10 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de
-  adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la de la
-  clasificación (TASK-308) y las de la acción y su evidencia (TASK-311) de ``loop`` y las dos de
+  ``U04_TASKS`` con ``review_reminders`` (TASK-309), ``U04_CONSUMERS`` con ``export_worker`` y
+  ``review_queue``; en ``ROUTERS``, las dos rutas de adjuntos de cierre (TASK-310), las dos de la
+  configuración del lazo (TASK-304), la de la clasificación (TASK-308), las dos de la cola de
+  revisión (TASK-309) y las de la acción y su evidencia (TASK-311) de ``loop`` y las dos de
   exportación de ``accreditation`` (TASK-317).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
@@ -51,6 +52,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
@@ -154,6 +156,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/plants/{plant_id}/configuration"),
                 ("PUT", "/loop/plants/{plant_id}/configuration"),
                 ("POST", "/loop/findings/{finding_state_id}/classifications"),
+                ("GET", "/loop/review-queue"),  # TASK-309: SUP-U05-05
+                ("POST", "/loop/review-queue/{detection_id}/resolution"),  # TASK-309: SUP-U05-06
                 ("POST", "/loop/findings/{finding_state_id}/actions"),
                 ("POST", "/loop/actions/{action_id}/evidence"),
                 ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
@@ -169,6 +173,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
             assert state[LOOP_STATE_KEY].inbox is not None
+            assert state[LOOP_STATE_KEY].review_queue is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -191,12 +196,17 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert routes == [] and state == {}
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
-    assert tasks.tasks() == ()
-    # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
+    # TASK-309: review_reminders, horaria, por organización.
+    assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+    ]
+    # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02;
+    # TASK-309: review_queue, sobre detection_for_review_received.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
         ("export_worker", ActorUnit.U04, ("export_requested",)),
         ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
+        ("review_queue", ActorUnit.U04, ("detection_for_review_received",)),
     ]
     # TASK-316: el asistente declara su dependencia externa (cortacircuito de U-02).
     assistant = consumers.get("assistant_worker")
@@ -205,22 +215,26 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         attachment_router,
         configuration_router,
         classification_router,
+        review_queue_router,
         actions_router,
         root_cause_router,
         assistant_router,
         findings_router,
     ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
-    for module in (registration, notifications_registration):
-        assert module.TASK_REGISTRARS == ()
+    assert notifications_registration.TASK_REGISTRARS == ()
+    assert len(registration.TASK_REGISTRARS) == 1  # review_reminders (TASK-309)
     assert notifications_registration.CONSUMER_REGISTRARS == ()
-    assert len(registration.CONSUMER_REGISTRARS) == 2
+    assert len(registration.CONSUMER_REGISTRARS) == 3
     assert accreditation_registration.TASK_REGISTRARS == ()
-    assert registration.U04_TASKS == {}
+    assert {
+        "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+    } == registration.U04_TASKS
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
         "loop_projection": 4,
         "assistant_worker": 2,
+        "review_queue": 2,
     }
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
     assert (
@@ -296,8 +310,10 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
         for compiled in full.event_types.compiled_types():
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
-        # Los consumidores de la raíz (export_worker, TASK-317): solo falta el evento.
+        # Los consumidores y las tareas de la raíz (export_worker, TASK-317; review_reminders,
+        # TASK-309): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
+        unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced
 
 

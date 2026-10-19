@@ -74,6 +74,8 @@ from vigia_platform.ledger.domain.coverage import (
     CoverageStatus,
 )
 from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
+from vigia_platform.loop.application.review_queue import ReviewQueueConsumer
 from vigia_platform.loop.config.parameters import LoopSettings
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.events import register_loop_event_types
@@ -851,6 +853,62 @@ class LoopWorld:
             correlation_id=uuid.UUID(str(row["correlation_id"])),
             created_at=row["created_at"],
         )
+
+    def review_queue_event(self, subject: IngestedSubject) -> OutboxEvent:
+        """El ``detection_for_review_received`` que la ingesta publicó para ``subject``."""
+        (row,) = self.stack.fetch(
+            "SELECT event_id, organization_id, plant_id, event_name, partition_key,"
+            " ledger_sequence, payload::text AS payload, correlation_id, created_at"
+            " FROM shared.outbox_event WHERE organization_id = $1 AND event_name = $2"
+            " AND payload->>'platform_record_id' = $3",
+            subject.organization.organization_id,
+            "detection_for_review_received",
+            str(subject.record_id),
+        )
+        return OutboxEvent(
+            event_id=uuid.UUID(str(row["event_id"])),
+            organization_id=uuid.UUID(str(row["organization_id"])),
+            plant_id=uuid.UUID(str(row["plant_id"])),
+            event_name=str(row["event_name"]),
+            partition_key=str(row["partition_key"]),
+            ledger_sequence=row["ledger_sequence"],
+            payload=json.loads(row["payload"]),
+            correlation_id=uuid.UUID(str(row["correlation_id"])),
+            created_at=row["created_at"],
+        )
+
+    def review_queue_consumer(
+        self, *, database: Any | None = None
+    ) -> tuple[ReviewQueueConsumer, ReviewQueueRepository]:
+        """``review_queue`` como lo compone ``loop.registration`` (TASK-309)."""
+        database = database if database is not None else self.stack.primary.database
+        sessions = self.stack.authz.sessions
+        repository = ReviewQueueRepository(database)
+        consumer = ReviewQueueConsumer(
+            store=self.store,
+            reader=LectorExpediente(database=database, audit=sessions.audit, clock=sessions.clock),
+            repository=repository,
+            configuration=PostgresLoopConfigurationRepository(database),
+        )
+        return consumer, repository
+
+    def deliver_review_queue(
+        self,
+        consumer: ReviewQueueConsumer,
+        event: OutboxEvent,
+        *,
+        database: Any | None = None,
+    ) -> bool:
+        """Una entrega de ``event`` al consumidor ``review_queue``, en su propia transacción."""
+        database = database if database is not None else self.stack.primary.database
+        context = unit_context(event.organization_id, ActorUnit.U04, kind=ActorKind.SYSTEM)
+
+        async def run() -> bool:
+            async with database.transaction(context) as transaction:
+                return await consumer.consume(event, transaction)
+
+        inserted: bool = self.stack.run(run())
+        return inserted
 
     def synthetic_event(
         self,
