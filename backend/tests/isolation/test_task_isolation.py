@@ -124,6 +124,14 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
     REVOCATION_LIST: TaskCase(
         TaskKind.GLOBAL, "lista global de vigia-node-ca: excepción D-7 (nota T-07)"
     ),
+    # --- U-04 ---
+    "monthly_package": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización (TASK-342 a 344); su aislamiento entre organizaciones es"
+        " de accreditation, no de U-03: tests/properties/laz/test_pr_laz_04_rls_two_organizations"
+        ".py (monthly_package y monthly_package_lease, con mutación DROP POLICY/DISABLE RLS) y el"
+        " sellado exactamente una vez en tests/integration/test_monthly_package_task.py",
+    ),
     # --- U-02 ---
     **{
         name: TaskCase(TaskKind.INHERITED, _U02_WHY)

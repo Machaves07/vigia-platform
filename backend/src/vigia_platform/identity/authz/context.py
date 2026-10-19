@@ -929,6 +929,20 @@ class ScopeContexts:
             context.correlation_id,
         )
 
+    def checkpoint_writer(self, context: ScopeContext) -> ScopeContext:
+        """La organización de ``context`` con el actor de sistema de U-02 y su misma correlación,
+        para ``CheckpointService.write_checkpoints_now`` (``writer_context``, LC-NUC-14).
+
+        El registro ``checkpoint`` es siempre de U-02; esto es lo que traduce el contexto del
+        llamador (U-04, antes de cada exportación o paquete mensual) al contexto de sistema de
+        U-02 de la misma organización que exige ``_require_u02``."""
+        return self._system(
+            context.organization_id,
+            ContextOrigin.OUTBOX_EVENT,
+            ActorUnit.U02,
+            context.correlation_id,
+        )
+
     def for_user(
         self,
         organization_id: uuid.UUID,

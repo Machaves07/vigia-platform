@@ -206,9 +206,11 @@ def test_every_u04_table_declares_exactly_one_category(database: MigratedDatabas
     assert {name for name in comments if name.startswith("notifications.")} == {
         f"notifications.{table}" for table in NOTIFICATIONS.TABLES
     }
+    # monthly_package_lease (laz_0035, VIG-239) no es de laz_0031: una migración aditiva solo
+    # añade, nunca quita de lo que laz_0031 ya dejó (BR-CTR-23).
     assert {name for name in comments if name.startswith("accreditation.")} == {
         f"accreditation.{table}" for table in ACCREDITATION.TABLES
-    }
+    } | {"accreditation.monthly_package_lease"}
     assert retention_violations(comments) == []
     # La categoría de la base es la que declara la migración, con su plazo.
     for schema, migration in (("notifications", NOTIFICATIONS), ("accreditation", ACCREDITATION)):
