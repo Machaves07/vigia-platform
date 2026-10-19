@@ -11,7 +11,7 @@ def test_integer_survives_text_round_trip(value: int) -> None:
     assert int(str(value)) == value
 
 
-def test_active_profile_is_ci_or_nightly() -> None:
+def test_active_profile_is_ci_pr_or_nightly() -> None:
     profile = settings.get_current_profile_name()
-    assert profile in {"ci", "nightly"}
-    assert settings().max_examples == {"ci": 200, "nightly": 2000}[profile]
+    assert profile in {"ci", "pr", "nightly"}
+    assert settings().max_examples == {"ci": 200, "pr": 50, "nightly": 2000}[profile]

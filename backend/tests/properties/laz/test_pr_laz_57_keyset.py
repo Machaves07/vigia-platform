@@ -34,7 +34,7 @@ from vigia_platform.loop.application.inbox import MAX_INBOX_PAGE, InboxPage
 
 pytestmark = pytest.mark.integration
 
-BUDGET: Final = {"ci": 25, "nightly": 200}
+BUDGET: Final = {"ci": 25, "pr": 25, "nightly": 200}
 """Ejemplos por perfil: cada uno siembra y recorre una zona sobre la base real."""
 EXAMPLES: Final = BUDGET.get(settings.get_current_profile_name(), BUDGET["nightly"])
 BASE: Final = datetime(2026, 10, 5, tzinfo=UTC)
