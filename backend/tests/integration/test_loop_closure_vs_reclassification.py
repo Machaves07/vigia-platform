@@ -24,6 +24,19 @@ PostgreSQL detecta el interbloqueo: una de las dos operaciones falla. La prueba 
 el orden correcto (en verde); la inversión se verificó a mano, fuera de la suite, y su salida en
 rojo queda citada en ``Evidence`` del PR.
 
+El entrelazado del segundo candado lo fuerza ``_between_locks`` (gancho de ``ClosureService.close``
+y ``ActionService.assign``, entre su primer candado y su segundo): cada operación avisa que ya
+tiene el primero y, si la otra no ha avisado todavía, sigue en cuanto la ve esperando un candado
+cualquiera en ``pg_locks`` (nunca al revés: si esperara siempre al aviso de la otra, con el orden
+correcto —las dos comparten el mismo primer candado, ``finding``— la que pierde esa carrera nunca
+llegaría a avisar porque sigue bloqueada en la sentencia SQL de su primer candado, y la prueba
+colgaría hasta el tope). Con el orden correcto esto reproduce exactamente lo que ya pasaba sin el
+gancho (quien pierde el primer candado se queda esperando, la otra seguro). Con el orden invertido
+(mutación, solo en memoria para esta verificación), los dos primeros candados de cada operación son
+distintos (``finding`` para una, ``corrective_actions`` para la otra), así que las dos lo consiguen
+sin esperar, las dos avisan casi a la vez y las dos piden su segundo candado también casi a la vez:
+el entrelazado queda forzado y el interbloqueo es repetible, no de suerte (AGENTS.md).
+
 Solo datos generados. Topes de las esperas: 60 s (retro 15).
 """
 
@@ -46,6 +59,7 @@ from vigia_platform.loop.application.actions import (
 from vigia_platform.loop.application.classification import (
     ClassificationRejected,
     ClassificationResult,
+    ClassificationService,
     ClassificationUnavailable,
 )
 from vigia_platform.loop.application.closure import (
@@ -98,19 +112,55 @@ def test_the_declared_order_is_finding_then_actions_then_chain() -> None:
 # --- cierre vs reclasificación: un solo candado compartido, coherencia sin interbloqueo -----
 
 
+class _HoldsFinding:
+    """Con el candado del hallazgo tomado y la transición ya comprobada, espera a que la otra
+    operación esté esperando ese mismo candado antes de seguir y escribir (como
+    ``test_loop_locks_order.py``, TASK-311): fuerza el mismo entrelazado en cada corrida, sin
+    depender de la suerte del planificador."""
+
+    stack: ActionsStack
+    holding: asyncio.Event
+
+    async def _checked(self, transaction: Transaction) -> None:
+        self.holding.set()
+        async with asyncio.timeout(LOCK_WAIT_SECONDS):
+            while await _waiting_locks(self.stack) == 0:
+                await asyncio.sleep(0.05)
+
+
+class _FirstClassification(_HoldsFinding, ClassificationService):
+    pass
+
+
+class _FirstClosureForReclassification(_HoldsFinding, ClosureService):
+    pass
+
+
+@pytest.mark.parametrize("first", ["close", "reclassify"])
 @pytest.mark.parametrize("round_", range(3))
 def test_close_and_reclassify_race_without_deadlock_or_unavailable(
-    stack: ActionsStack, round_: int
+    stack: ActionsStack, round_: int, first: str
 ) -> None:
     coordinator: Who = stack.member(stack.world.a)
     assignee = stack.user(stack.world.a)
     finding, action_id = stack.with_evidence(coordinator, assignee)
     fsid = stack.finding_state_id(finding)
     context = stack.context(coordinator)
+    holding = asyncio.Event()
+    closure: Any = stack.service_like(
+        _FirstClosureForReclassification if first == "close" else ClosureService
+    )
+    classification: Any = stack.service_like(
+        _FirstClassification if first == "reclassify" else ClassificationService
+    )
+    for service in (closure, classification):
+        service.stack, service.holding = stack, holding
 
     async def close() -> Any:
+        if first != "close":
+            await holding.wait()
         try:
-            return await stack.closure.close(
+            return await closure.close(
                 context,
                 fsid,
                 closure_description=stack.closure_body()["closure_description"],
@@ -121,8 +171,10 @@ def test_close_and_reclassify_race_without_deadlock_or_unavailable(
             return error
 
     async def reclassify() -> Any:
+        if first != "reclassify":
+            await holding.wait()
         try:
-            return await stack.classification.classify(
+            return await classification.classify(
                 context,
                 fsid,
                 outcome="false_positive",
@@ -167,48 +219,64 @@ def test_close_and_reclassify_race_without_deadlock_or_unavailable(
 # --- la mutación: cierre y reasignación comparten ``finding`` y ``corrective_actions`` -------
 
 
-class _HoldsFirst:
-    """Con sus candados tomados, espera a que la otra operación esté esperando un candado."""
+class _SynchronizedFirstLock:
+    """Entre el primer candado y el segundo (``_between_locks``): avisa el propio y, si la otra
+    operación no ha avisado el suyo todavía, sigue en cuanto la ve esperando cualquier candado en
+    ``pg_locks`` (así nunca espera a quien sigue bloqueado en la sentencia SQL de su propio primer
+    candado). Fuerza el mismo entrelazado del segundo candado en cada corrida."""
 
     stack: ActionsStack
-    holding: asyncio.Event
+    own_ready: asyncio.Event
+    other_ready: asyncio.Event
 
-    async def _checked(self, transaction: Transaction) -> None:
-        self.holding.set()
+    async def _between_locks(self, transaction: Transaction) -> None:
+        self.own_ready.set()
         async with asyncio.timeout(LOCK_WAIT_SECONDS):
-            while await _waiting_locks(self.stack) == 0:
-                await asyncio.sleep(0.05)
+            while not self.other_ready.is_set():
+                if await _waiting_locks(self.stack) > 0:
+                    return
+                await asyncio.sleep(0.02)
 
 
-class _FirstActions(_HoldsFirst, ActionService):
+class _FirstActions(_SynchronizedFirstLock, ActionService):
     pass
 
 
-class _FirstClosure(_HoldsFirst, ClosureService):
+class _FirstClosure(_SynchronizedFirstLock, ClosureService):
     pass
 
 
-def test_close_and_reassign_at_once_share_the_declared_lock_order(stack: ActionsStack) -> None:
+@pytest.mark.parametrize("round_", range(3))
+def test_close_and_reassign_at_once_share_the_declared_lock_order(
+    stack: ActionsStack, round_: int
+) -> None:
     """Cierre y reasignación comparten ``finding`` y ``corrective_actions`` (pasos 1 y 2): con el
     orden declarado, ninguna de las dos se interbloquea ni recibe ``TemporarilyUnavailable``.
 
     Esta es la prueba cruzada real del orden de candados para esta pareja (las dos toman los
     mismos dos candados, en el mismo orden). La mutación de la tabla de garantías del PR —
-    invertir, solo en ``ClosureService.close``, el orden de ``lock_finding`` y ``lock_actions``—
-    se verificó a mano contra esta misma prueba: con la inversión, PostgreSQL detecta el
-    interbloqueo y una de las dos operaciones falla (ver ``Evidence`` del PR); se repuso el orden
-    correcto y esta prueba queda en verde, tal como se la ve aquí."""
+    invertir, solo en ``ClosureService.close``, el orden de ``lock_finding`` y ``lock_actions``,
+    moviendo ``_between_locks`` para que siga entre el primero y el segundo— se verificó a mano
+    contra esta misma prueba (las 3 corridas): con la inversión, PostgreSQL detecta el
+    interbloqueo todas las veces (``TemporarilyUnavailable`` en una de las dos operaciones, ver
+    ``Evidence`` del PR); se repuso el orden correcto y esta prueba queda en verde las 3 veces,
+    tal como se la ve aquí."""
     world = stack.world
     coordinator = stack.member(world.a)
     finding, action_id = stack.with_evidence(coordinator, stack.user(world.a))
     fsid = stack.finding_state_id(finding)
     context = stack.context(coordinator)
     replacement = stack.user(world.a)
-    holding = asyncio.Event()
+    closure_ready = asyncio.Event()
+    reassign_ready = asyncio.Event()
     closure: Any = stack.service_like(_FirstClosure)
     reassign_service: Any = stack.service_like(_FirstActions)
-    closure.stack, closure.holding = stack, holding
-    reassign_service.stack, reassign_service.holding = stack, holding
+    closure.stack, closure.own_ready, closure.other_ready = stack, closure_ready, reassign_ready
+    reassign_service.stack, reassign_service.own_ready, reassign_service.other_ready = (
+        stack,
+        reassign_ready,
+        closure_ready,
+    )
 
     async def close() -> Any:
         try:

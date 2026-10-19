@@ -222,6 +222,7 @@ class ClosureService:
         writer_context = with_unit(authorized, ActorUnit.U04)
         async with self._database.transaction(writer_context) as transaction:
             await lock_finding(transaction, place.organization_id, place.subject_id)
+            await self._between_locks(transaction)
             actions = action_rows(
                 await lock_actions(
                     transaction, place.organization_id, place.plant_id, place.subject_id
@@ -244,6 +245,11 @@ class ClosureService:
             return await self._write(
                 transaction, writer_context, current, actions, description, note, license_
             )
+
+    async def _between_locks(self, transaction: Transaction) -> None:
+        """Entre ``lock_finding`` y ``lock_actions`` (pasos 1 y 2 de ``locks.LOCK_ORDER``), antes de
+        leer nada más: no-op en producción; gancho de la prueba cruzada del orden de candados
+        (``test_loop_closure_vs_reclassification.py``)."""
 
     async def _checked(self, transaction: Transaction) -> None:
         """Con los candados tomados y la transición ya comprobada, antes de escribir (gancho de

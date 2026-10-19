@@ -111,6 +111,11 @@ _LATEST_DECLARATION: Final = text(
     " AND ledger.vigia_bytes_to_jsonb(content) ->> 'subject_id' = :subject_id"
     " ORDER BY chain_sequence DESC LIMIT 1"
 )
+_CLOSURE_ID_OF_RECORD: Final = text(
+    "SELECT ledger.vigia_bytes_to_jsonb(content) ->> 'closure_id' AS closure_id"
+    " FROM ledger.ledger_record"
+    " WHERE organization_id = :organization_id AND record_id = :record_id"
+)
 
 
 class ReopeningRejected(Exception):
@@ -358,7 +363,26 @@ class ReopeningService:
                     },
                 )
             ).first()
-            closure_id = None if row is None else row._mapping["closure_record_id"]
+            closure_record_id = None if row is None else row._mapping["closure_record_id"]
+            if closure_record_id is None:
+                return None, None
+            # ``closure_record_id`` de la proyección es el ``record_id`` del expediente (P4); el
+            # ``previous_closure_id`` que escribimos aquí es el ``closure_id`` de DE §2.6 (el que
+            # también devuelve ``POST /closure``), así que lo leemos del contenido del registro.
+            closure_row = (
+                await transaction.execute(
+                    _CLOSURE_ID_OF_RECORD,
+                    {
+                        "organization_id": current.organization_id,
+                        "record_id": closure_record_id,
+                    },
+                )
+            ).first()
+            closure_id = (
+                None
+                if closure_row is None or closure_row.closure_id is None
+                else closure_row.closure_id
+            )
             return (None if closure_id is None else uuid.UUID(str(closure_id))), None
         row = (
             await transaction.execute(

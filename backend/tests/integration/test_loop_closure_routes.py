@@ -100,14 +100,17 @@ def test_close_without_license_rejects_with_signer_license_missing(
 def test_close_with_attachment_store_down_still_succeeds(
     stack: ActionsStack, coordinator: Who, assignee: uuid.UUID
 ) -> None:
-    """FS-LAZ-03, NFR-LAZ-37: el cierre no sube ni verifica ningún adjunto."""
+    """FS-LAZ-03, NFR-LAZ-37: el cierre no sube ni verifica adjuntos, y ``ready`` no cambia."""
     finding, _action_id = stack.with_evidence(coordinator, assignee)
     stack.store.down = True
     try:
         before_calls = list(stack.store.calls)
+        ready_before = stack.run(stack.client.get("/health/ready")).status_code
         response = stack.close(coordinator, finding, stack.closure_body())
         assert response.status_code == 201, response.text
         assert stack.store.calls == before_calls, "el cierre no debe tocar el almacén de adjuntos"
+        ready_after = stack.run(stack.client.get("/health/ready")).status_code
+        assert ready_after == ready_before, "el cierre no debe cambiar la salud profunda"
     finally:
         stack.store.down = False
 
@@ -172,6 +175,14 @@ def _in_state(
             return finding
         case "suspended_by_reclassification":
             return _suspended_by_reclassification(stack, coordinator, assignee)
+        case "action_assigned":
+            finding, _action_id = stack.assigned(coordinator, assignee)
+            return finding
+        case "overdue":
+            finding, action_id = stack.assigned(coordinator, assignee)
+            (action,) = [a for a in stack.action_rows(finding) if a["action_id"] == action_id]
+            stack.write_overdue(finding, action)
+            return finding
     raise AssertionError(state)  # pragma: no cover - parametrización cerrada
 
 
@@ -220,7 +231,11 @@ def test_reopening_from_closed_keeps_the_closure_record_byte_for_byte(
     assert closure_after == closure_before, "el cierre anterior se editó (viola P4 y BR-LAZ-50)"
 
     (reopening_record,) = stack.records_of(finding, "reopening")
-    assert reopening_record["content"]["previous_closure_id"] == str(closure_before["record_id"])
+    assert (
+        reopening_record["content"]["previous_closure_id"]
+        == closure_before["content"]["closure_id"]
+    ), "previous_closure_id debe ser el closure_id del contenido (DE §2.6), no el record_id"
+    assert body["previous_closure_id"] == closure_before["content"]["closure_id"]
     assert "previous_declaration_id" not in reopening_record["content"]
     assert stack.events(finding.organization, reopening_record["record_id"]) == ["finding_reopened"]
     (new_action_record,) = [
@@ -242,6 +257,33 @@ def test_reopening_from_closed_keeps_the_closure_record_byte_for_byte(
     )
     assert row["closure_record_id"] is None
     assert row["closed_at"] is None
+
+
+def test_reopening_can_change_the_action_type(
+    stack: ActionsStack, coordinator: Who, assignee: uuid.UUID
+) -> None:
+    """BR-LAZ-51: el tipo es fijo solo en una reasignación; la reapertura sí puede cambiarlo
+    («para cambiarlo se cierra o se reabre»)."""
+    finding, first_action_id = stack.closed(coordinator, assignee)
+    (first_action,) = [a for a in stack.action_rows(finding) if a["action_id"] == first_action_id]
+    assert first_action["action_type"] == "engineering"
+
+    response = stack.reopen(
+        coordinator, finding, stack.reopening_body(assignee, action_type="process")
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    new_action_id = uuid.UUID(body["action_id"])
+
+    (new_action_record,) = [
+        r
+        for r in stack.records_of(finding, "action_assigned")
+        if r["content"]["action_id"] == str(new_action_id)
+    ]
+    assert new_action_record["content"]["action_type"] == "process"
+    assert stack.events(finding.organization, new_action_record["record_id"]) == ["action_assigned"]
+    states = {str(a["action_id"]): a["state"] for a in stack.action_rows(finding)}
+    assert states == {str(first_action_id): "superseded", str(new_action_id): "assigned"}
 
 
 def test_reopening_from_unclosable_cites_the_declaration_and_has_no_previous_action(
@@ -289,7 +331,15 @@ def test_reopening_without_reason_is_rejected_without_side_effects(
 
 @pytest.mark.parametrize(
     "state",
-    ["received", "in_review", "open", "discarded", "suspended_by_reclassification"],
+    [
+        "received",
+        "in_review",
+        "open",
+        "discarded",
+        "suspended_by_reclassification",
+        "action_assigned",
+        "overdue",
+    ],
 )
 def test_reopening_from_any_state_other_than_closed_or_unclosable_is_not_allowed(
     stack: ActionsStack, coordinator: Who, assignee: uuid.UUID, state: str
