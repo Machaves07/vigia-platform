@@ -243,7 +243,7 @@ def test_the_integration_groups_of_ci_cover_every_directory_exactly_once() -> No
 
 
 def test_each_integration_group_has_a_bounded_timeout() -> None:
-    # 45 min (dueño, 19-10): los grupos tardan 19-23 min con el perfil pr; en main corre ci, más lento.
+    # 45 min (dueño, 19-10): 19-23 min con el perfil pr; en main corre ci, más lento.
     assert _jobs()[MATRIX]["timeout-minutes"] <= 45
 
 
