@@ -36,7 +36,14 @@ domain-entities.md de U-04 §2.14 y §9; BR-LAZ-146 a 148 y 156; DR-LAZ-01 y 02)
    planta (``LoopProjectionStore.apply_in_transaction`` toma el mismo candado). Si mientras tanto
    llegaron registros nuevos (``last_applied_ledger_sequence`` del punto de control por delante de
    lo que vio la fase 2), se pliegan ahora, bajo este mismo candado, antes de intercambiar: ningún
-   hecho aceptado durante la reconstrucción se pierde (P5, BR-LAZ-148). Después, una sola
+   hecho aceptado durante la reconstrucción se pierde (P5, BR-LAZ-148). Lo mismo si
+   ``last_applied_event_id`` cambió sin un registro nuevo (``LoopProjectionStore.
+   update_enrichment``, la vía de eventos de U-03 como ``gate_state_changed``, que avanza el punto
+   de control sin tocar ``last_applied_ledger_sequence``, ronda 2 de revisión): no hay forma de
+   saber qué sujeto tocó, así que se re-enriquecen **todas** las filas de la sombra bajo este mismo
+   candado, con el estado externo ya al día, antes de intercambiar — de lo contrario el
+   intercambio sobrescribiría una columna enriquecida ya actualizada (p. ej.
+   ``zone_agreement_revoked``) con el valor, ya viejo, que calculó la fase 2. Después, una sola
    sentencia por tabla (``INSERT … SELECT … FROM *_shadow ON CONFLICT (…) DO UPDATE SET <columnas
    mutables>``), atómica y sin ``DELETE`` (P4: ``vigia_app`` nunca borra ``episode`` ni
    ``finding_state``, nota de ``laz_0029`` sobre tabla sombra e intercambio). Un lector entre las
@@ -169,9 +176,13 @@ _RENEW_LEASE: Final = text(
     " RETURNING 1"
 )
 _LOCK_CHECKPOINT_FOR_SWAP: Final = text(
-    "SELECT last_applied_ledger_sequence, rebuild_owner"
+    "SELECT last_applied_ledger_sequence, last_applied_event_id, rebuild_owner"
     " FROM loop.loop_projection_checkpoint"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id FOR UPDATE"
+)
+_CHECKPOINT_EVENT: Final = text(
+    "SELECT last_applied_event_id FROM loop.loop_projection_checkpoint"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
 )
 _FINISH: Final = text(
     "UPDATE loop.loop_projection_checkpoint SET state = 'healthy', rebuilt_at = :rebuilt_at,"
@@ -291,6 +302,10 @@ class RebuildResult:
 
 def _uuid(value: Any) -> uuid.UUID:
     return uuid.UUID(str(value))
+
+
+def _optional_uuid(value: Any) -> uuid.UUID | None:
+    return None if value is None else _uuid(value)
 
 
 def _episode_values(row: EpisodeRow) -> dict[str, Any]:
@@ -466,6 +481,18 @@ class ProjectionRebuilder:
             if top is not None:
                 await self._fold_batches(transaction, context, plant_id, projection, int(top))
             await self._enrich_and_stage(transaction, context, plant_id, projection, owner=owner)
+            # Marca de referencia para la fase 3 (BR-LAZ-148, ronda 2 de revisión): el último evento
+            # de enriquecimiento (``update_enrichment``, p. ej. ``gate_state_changed``) que el plant
+            # ya había visto cuando terminó el cómputo. No corresponde a ningún ``chain_sequence``
+            # del expediente para esta partición, así que ``last_applied_ledger_sequence`` no lo
+            # refleja: se compara aparte en el intercambio.
+            baseline = (
+                await transaction.execute(
+                    _CHECKPOINT_EVENT,
+                    {"organization_id": context.organization_id, "plant_id": plant_id},
+                )
+            ).one()
+            projection.last_applied_event_id = _optional_uuid(baseline.last_applied_event_id)
         await self._renew(context, plant_id, owner)
         return projection
 
@@ -545,12 +572,27 @@ class ProjectionRebuilder:
             if _uuid(checkpoint.rebuild_owner) != owner:
                 raise LeaseLost(plant_id)
             current_sequence = int(checkpoint.last_applied_ledger_sequence)
+            current_event_id = _optional_uuid(checkpoint.last_applied_event_id)
+            touched: set[uuid.UUID] = set()
             if current_sequence > projection.last_applied_ledger_sequence:
                 # Excedente: escrituras incrementales aceptadas mientras computaba la fase 2. Se
                 # pliegan ahora, bajo el mismo candado de `store.py` (control de la planta antes
                 # que las filas), así que ninguna queda fuera del intercambio (P5, BR-LAZ-148).
-                await self._fold_surplus(
+                touched |= await self._fold_surplus(
                     transaction, context, plant_id, projection, current_sequence
+                )
+            if current_event_id != projection.last_applied_event_id:
+                # Un evento de enriquecimiento (``update_enrichment``, p. ej.
+                # ``gate_state_changed``) se aplicó entre el fin del cómputo y el intercambio
+                # (hallazgo bloqueante de la ronda 2 de revisión): no corresponde a ningún registro
+                # del expediente de esta partición, así que no hay forma de saber qué sujeto tocó
+                # — se re-enriquecen todas las filas de la sombra bajo este mismo candado, con el
+                # estado externo ya al día.
+                touched |= set(projection.findings)
+                projection.last_applied_event_id = current_event_id
+            if touched:
+                await self._enrich_and_stage_subset(
+                    transaction, context, plant_id, projection, touched
                 )
             digest = _partition_digest(projection)
             await transaction.execute(_SWAP_EPISODE, partition)
@@ -582,7 +624,7 @@ class ProjectionRebuilder:
         plant_id: uuid.UUID,
         projection: PlantProjection,
         current_sequence: int,
-    ) -> None:
+    ) -> set[uuid.UUID]:
         first = projection.last_applied_ledger_sequence + 1
         rows = (
             await transaction.execute(
@@ -603,7 +645,7 @@ class ProjectionRebuilder:
             projection.apply(item)
             if subject is not None:
                 touched.add(subject)
-        await self._enrich_and_stage_subset(transaction, context, plant_id, projection, touched)
+        return touched
 
     async def _enrich_and_stage_subset(
         self,

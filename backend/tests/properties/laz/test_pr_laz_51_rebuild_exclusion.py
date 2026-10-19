@@ -22,6 +22,7 @@ repositorio); ver la nota «Evidence» del PR con la salida real en rojo y la re
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Final
@@ -112,10 +113,22 @@ def test_pr_laz_51_second_rebuild_waits_out_the_whole_compute_phase(world: LoopW
     async def race() -> tuple[Any, Any]:
         task_a = asyncio.ensure_future(rebuilder_a.rebuild_plant(context, organization.plant_id))
         await reached.wait()
+        task_b = asyncio.ensure_future(rebuilder_b.rebuild_plant(context, organization.plant_id))
         try:
-            result_b: Any = await rebuilder_b.rebuild_plant(context, organization.plant_id)
+            # Tope generoso (30 s, no un «tope corto»: retro 14 de AGENTS.md), no para el
+            # comportamiento normal (B ve ``AlreadyRebuilding`` casi de inmediato por `_claim`),
+            # sino para que la mutación manual de la tabla de garantías (quitar la condición del
+            # `WHERE` de `_CLAIM_LEASE`) termine en un rojo legible en vez de colgar el proceso:
+            # sin la exclusión, B reclama el arrendamiento de A y las dos quedan escribiendo la
+            # misma sombra, lo que puede bloquearse en un candado de fila de PostgreSQL en lugar
+            # de fallar rápido (hallazgo menor de la ronda 2 de revisión).
+            result_b: Any = await asyncio.wait_for(task_b, timeout=30.0)
         except AlreadyRebuilding as error:
             result_b = error
+        except TimeoutError as error:
+            result_b = error
+            with contextlib.suppress(BaseException):
+                await task_b
         resume.set()
         result_a = await task_a
         return result_a, result_b
