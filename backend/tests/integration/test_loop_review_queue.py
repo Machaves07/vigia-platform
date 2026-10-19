@@ -314,6 +314,33 @@ def test_two_concurrent_reminder_runs_send_only_one(stack: ReviewQueueStack) -> 
     assert (row["reminders_sent"], row["state"]) == (1, "pending")
 
 
+def test_the_reminder_task_only_touches_its_own_organization(stack: ReviewQueueStack) -> None:
+    """``review_reminders`` es ``PER_ORGANIZATION``: la transacción del planificador trae la
+    organización de ``context.organization_id`` (``tests/isolation/test_task_isolation.py::
+    TASK_CASES``, caso ``INHERITED``: su aislamiento se prueba aquí, no con el arnés de
+    fingerprinting de U-03, igual patrón que las tareas de U-02). ``due_candidates`` y
+    ``_SEND_REMINDERS`` filtran por ``organization_id`` en el SQL, pero la garantía real es la
+    RLS que fuerza el ``ScopeContext`` de la transacción (BR-NUC-02): quitar el filtro explícito
+    de ``organization_id`` del ``WHERE`` no vuelve la prueba en rojo (comprobado y revertido),
+    porque RLS ya descarta las filas de B antes de que el filtro se evalúe."""
+    own = stack.in_review(stack.world.a)
+    foreign = stack.in_review(stack.world.b)
+    _make_overdue(stack, own)
+    _make_overdue(stack, foreign)
+    reminder = _reminder(stack)
+
+    sent = stack.run(_remind(stack, reminder, stack.world.a))
+
+    assert {event.detection_id for event in sent} == {own.subject_id}
+    own_row = stack.queue_row(own)
+    assert own_row is not None
+    assert own_row["reminders_sent"] == 1
+    foreign_row = stack.queue_row(foreign)
+    assert foreign_row is not None
+    assert foreign_row["reminders_sent"] == 0
+    assert stack.overdue_events(stack.world.b, foreign.subject_id) == []
+
+
 # --- SUP-U05-05: listar --------------------------------------------------------------------------
 
 

@@ -129,6 +129,11 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "period": {"from": "2026-09-01T00:00:00.000Z", "to": "2026-10-01T00:00:00.000Z"},
         "package_form": "without_clips",
     },
+    ("POST", "/loop/review-queue/{detection_id}/resolution"): {
+        "outcome": "review_confirmed",
+        "reason_category": "real_coexistence",
+        "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
+    },
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -144,6 +149,7 @@ def _url(path: str, user_id: str | None = None) -> str:
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
         .replace("{analysis_id}", str(uuid.uuid4()))
+        .replace("{detection_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
@@ -194,12 +200,13 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         ("POST", "/accreditation/exports"),
+        ("POST", "/loop/review-queue/{detection_id}/resolution"),
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     # Cuerpo válido: llega al servicio, que no encuentra la acción, el hallazgo (TASK-308,
     # ``ClassificationDouble``; TASK-311, ``ActionsDouble``), el análisis (TASK-315,
-    # ``RootCauseDouble``) ni las zonas sintéticas.
+    # ``RootCauseDouble``), la detección (TASK-309, ``ReviewQueueDouble``) ni las zonas sintéticas.
     ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
     ("POST", "/loop/findings/{finding_state_id}/classifications"): 404,
     ("POST", "/loop/findings/{finding_state_id}/actions"): 404,
@@ -207,6 +214,7 @@ ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"): 404,
     ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"): 404,
     ("POST", "/accreditation/exports"): 404,
+    ("POST", "/loop/review-queue/{detection_id}/resolution"): 404,
 }
 
 

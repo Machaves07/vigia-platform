@@ -43,6 +43,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STAT
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application import actions as actions_module
 from vigia_platform.loop.application import classification as classification_module
+from vigia_platform.loop.application import review_queue as review_queue_module
 from vigia_platform.loop.application import root_cause as root_cause_module
 from vigia_platform.loop.config.parameters import (
     INITIAL_DEFAULTS_REASON,
@@ -301,9 +302,30 @@ class RootCauseDouble:
         raise ResourceNotFound()
 
 
+class ReviewQueueDouble:
+    """Doble de ``ReviewQueueService`` para el arnés, sin base (TASK-309).
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código (salida y
+    motivo de su lista); un cuerpo válido no encuentra ninguna detección sintética
+    (``ResourceNotFound``), como los demás dobles de ``loop``."""
+
+    async def resolve(
+        self,
+        context: ScopeContext,
+        detection_id: uuid.UUID,
+        *,
+        outcome: object,
+        reason_category: object,
+        reason_text: object,
+    ) -> Any:
+        chosen = review_queue_module._outcome(outcome)
+        review_queue_module._reason(chosen, reason_category, reason_text)
+        raise ResourceNotFound()
+
+
 def loop_state(clock: Any) -> dict[str, Any]:
     """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración,
-    clasificación, acciones y evidencia, y causa raíz)."""
+    clasificación, acciones y evidencia, causa raíz y cola de revisión)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
         LOOP_STATE_KEY: LoopHttp(
@@ -312,6 +334,7 @@ def loop_state(clock: Any) -> dict[str, Any]:
             actions=cast(Any, ActionsDouble()),
             evidence=cast(Any, ActionsDouble()),
             root_cause=cast(Any, RootCauseDouble()),
+            review_queue=cast(Any, ReviewQueueDouble()),
         ),
     }
 
