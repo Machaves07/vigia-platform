@@ -86,7 +86,12 @@ from vigia_platform.catalog.domain.ports import GateQueryPort, PlantPolicyState
 from vigia_platform.identity.authz.authorize import Authorizer, ResourceNotFound
 from vigia_platform.identity.authz.context import with_unit
 from vigia_platform.identity.authz.matrix import PermissionKey
-from vigia_platform.ledger.application.writer import EscritorExpediente, LedgerDatabase
+from vigia_platform.ledger.application.writer import (
+    EscritorExpediente,
+    LedgerDatabase,
+    LedgerRejection,
+    Receipt,
+)
 from vigia_platform.ledger.free_text import (
     FreeTextField,
     FreeTextRejected,
@@ -94,6 +99,7 @@ from vigia_platform.ledger.free_text import (
 )
 from vigia_platform.loop.application.actions import (
     ActionRejected,
+    ActionRequestInvalid,
     ActionService,
     ActionUnavailable,
     AssignmentRequest,
@@ -420,7 +426,7 @@ class DeclarationRow:
     state: str
     declared_at: datetime
     policy_id: uuid.UUID
-    policy_version: str
+    policy_version: int
     policy_document_sha256: str
 
 
@@ -438,7 +444,9 @@ def declaration_row(row: Any) -> DeclarationRow:
         state=str(data["state"]),
         declared_at=data["declared_at"],
         policy_id=uuid.UUID(str(data["policy_id"])),
-        policy_version=str(data["policy_version"]),
+        # La columna es texto (``plant_policy.version`` cabe en 32) y el registro de la revisión
+        # cita la versión como entero (``PolicyVersion`` de §5.2): se convierte aquí.
+        policy_version=int(data["policy_version"]),
         policy_document_sha256=str(data["policy_document_sha256"]),
     )
 
@@ -715,7 +723,7 @@ class UnclosableService:
             occurred_at=at,
             record_id=record_id,
         )
-        receipt = written(result, UnclosableUnavailable)
+        receipt = _written(result)
         finding = step.finding
         if (
             not step.applied
@@ -897,7 +905,7 @@ class UnclosableService:
             occurred_at=at,
             record_id=record_id,
         )
-        receipt = written(result, UnclosableUnavailable)
+        receipt = _written(result)
         finding = step.finding
         if (
             not step.applied
@@ -1154,6 +1162,20 @@ class UnclosableService:
         if status is PolicyStatus.REVOKED:
             raise UnclosableRejected(LoopDetailCode.UNCLOSABLE_POLICY_REVOKED)
         return _LoadedPolicy.of(state)
+
+
+def _written(result: Receipt | LedgerRejection) -> Receipt:
+    """El recibo de la escritura o el rechazo traducido al vocabulario del incerrable.
+
+    Los dos textos libres de §5.1 y la licencia del firmante los comprueba el expediente al
+    escribir: un rechazo de texto libre conserva su ``detail_code`` (los dos validadores de U-04)
+    y una cadena que no se pudo tomar a tiempo sale como ``UnclosableUnavailable`` (503)."""
+    try:
+        return written(result, UnclosableUnavailable)
+    except ActionRejected as rejected:
+        raise UnclosableRejected(rejected.detail_code) from None
+    except ActionRequestInvalid:
+        raise UnclosableRequestInvalid("texto libre rechazado por el expediente") from None
 
 
 def _signer_snapshot(context: ScopeContext, license_value: str | None) -> dict[str, Any]:

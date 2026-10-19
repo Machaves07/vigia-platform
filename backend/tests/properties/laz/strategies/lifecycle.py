@@ -18,13 +18,21 @@
   (asignar, reasignar, añadir evidencia, cambiar la configuración del lazo de la planta y avanzar
   el reloj). TASK-343, 312 y 313 la amplían con cierre, reapertura, incerrable y plazos para la
   prueba con estado de TASK-314; los comandos son valores puros, sin base ni reloj.
+- ``plant_policies`` y ``unclosable_*`` (TASK-312; PR-LAZ-12): la política de planta tal como la
+  puede devolver ``GateQueryPort.plant_policy`` (cargada y completa, sin firmar, revocada o
+  cargada **a medias**, que el servicio resuelve cerrada) y lo que lleva una declaración de
+  incerrable (cuántos de los cinco campos van, la política, la fecha de revisión en meses y si la
+  firma lleva licencia) y una revisión (su salida, la fecha nueva y la licencia). Son valores
+  puros: el ``PlantPolicyState`` de cada uno lo construye ``PlantPolicy.state``.
 
 Solo datos generados: los cargos, equipos y zonas son sintéticos y de uso corriente.
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Final, Literal
 
 from hypothesis import strategies as st
@@ -35,6 +43,7 @@ from tests.properties.laz.strategies.texts import (
     QUALIFIERS,
     person_attribution_texts,
 )
+from vigia_platform.catalog.domain.ports import PlantPolicyState
 
 __all__ = [
     "ACTION_TYPES",
@@ -42,15 +51,26 @@ __all__ = [
     "AddEvidence",
     "Assign",
     "ChangeDeadlineRange",
+    "DeclarationAttempt",
+    "DeclareUnclosable",
     "LifecycleCommand",
     "NeutralAction",
+    "PlantPolicy",
+    "PlantPolicyKind",
     "Reassign",
+    "ReviewAttempt",
+    "ReviewUnclosable",
+    "RevokedPolicyState",
     "Tick",
     "action_texts",
     "deadline_ranges",
+    "declaration_attempts",
     "lifecycle_command_sequences",
     "neutral_action_texts",
     "not_an_action_type",
+    "plant_policies",
+    "review_attempts",
+    "unclosable_texts",
 ]
 
 ACTION_TYPES: Final = ("engineering", "process")
@@ -95,7 +115,14 @@ _COMPLEMENTS: Final = (
     " en la zona de carga", " por el cruce en el pasillo", " antes del siguiente turno",
 )  # fmt: skip
 _MIN_CHARS: Final = 20
-"""Mínimo de ``action_description`` (DE §2.5)."""
+"""Mínimo de ``action_description`` (DE §2.5) y de los textos libres de §2.7."""
+_LONG_TEXT_MAX: Final = 2000
+"""Máximo de ``LongText`` (DE §2.7)."""
+_UTC: Final = UTC
+_SIGNED_FROM: Final = datetime(2026, 1, 1, tzinfo=UTC)
+_SIGNED_TO: Final = datetime(2026, 12, 31, tzinfo=UTC)
+_REVIEW_MONTHS: Final = (-3, -1, 0, 1, 3, 6, 11, 12, 13, 18)
+"""Meses de la fecha de revisión: en rango son ``(0, unclosable_review_max_months]`` (1 a 12)."""
 _CONFUSABLES: Final = {
     "a": chr(0x0430),
     "o": chr(0x043E),
@@ -242,7 +269,143 @@ def not_an_action_type(draw: st.DrawFn) -> str:
     return value if value not in ACTION_TYPES else value + "_x"
 
 
+# --- la política de planta y el incerrable (TASK-312; PR-LAZ-12) ---------------------------------
+
+
+PlantPolicyKind = Literal["loaded", "not_signed", "revoked", "partial"]
+"""Las cuatro formas con las que el puerto puede contestar: cargada y completa (``loaded``), sin
+política firmada (``not_signed``), revocada (``revoked``) y cargada **a medias** (``partial``:
+``loaded = true`` pero sin alguno de los cuatro datos que el registro copia, que el servicio
+resuelve **cerrada** como si el puerto no hubiera contestado)."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RevokedPolicyState(PlantPolicyState):
+    """Una política revocada: la forma de §1.2 de las interfaces de U-03 más la marca de
+    revocación, que el puerto de hoy no expone y que ``loop.application.unclosable.policy_status``
+    honra si aparece (BR-LAZ-56: no se declaran nuevos incerrables)."""
+
+    revoked: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PlantPolicy:
+    """Lo que ``GateQueryPort.plant_policy`` puede devolver (interfaces §1.2) y su estado."""
+
+    kind: PlantPolicyKind
+    policy_id: uuid.UUID
+    version: int
+    signed_at: datetime
+    document_sha256: str
+
+    def state(self) -> PlantPolicyState:
+        """El valor del puerto: ``loaded = false`` sin los demás campos (§1.2)."""
+        if self.kind == "not_signed":
+            return PlantPolicyState(loaded=False)
+        if self.kind == "revoked":
+            return RevokedPolicyState(
+                loaded=True,
+                policy_id=self.policy_id,
+                version=self.version,
+                signed_at=self.signed_at,
+                document_sha256=self.document_sha256,
+            )
+        missing = {
+            "partial": ("document_sha256",),
+        }.get(self.kind, ())
+        return PlantPolicyState(
+            loaded=True,
+            policy_id=None if "policy_id" in missing else self.policy_id,
+            version=None if "version" in missing else self.version,
+            signed_at=None if "signed_at" in missing else self.signed_at,
+            document_sha256=None if "document_sha256" in missing else self.document_sha256,
+        )
+
+
+@st.composite
+def plant_policies(draw: st.DrawFn) -> PlantPolicy:
+    """La política de la planta en cualquiera de sus cuatro formas (BR-LAZ-53 a 56)."""
+    kind: PlantPolicyKind = draw(st.sampled_from(("loaded", "not_signed", "revoked", "partial")))
+    return PlantPolicy(
+        kind=kind,
+        policy_id=draw(st.uuids(version=4)),
+        version=draw(st.integers(1, 2**30)),
+        signed_at=draw(
+            st.datetimes(timezones=st.just(_UTC), min_value=_SIGNED_FROM, max_value=_SIGNED_TO)
+        ),
+        document_sha256=draw(st.from_regex(r"[0-9a-f]{64}", fullmatch=True)),
+    )
+
+
+@st.composite
+def unclosable_texts(draw: st.DrawFn) -> str:
+    """Un texto libre de §2.7 (20 a 2000 caracteres) sobre la zona, del vocabulario permitido."""
+    text = draw(neutral_action_texts()).text
+    while len(text) < _MIN_CHARS:
+        text = f"{text} de la zona de carga"
+    return text[:_LONG_TEXT_MAX]
+
+
+@st.composite
+def declaration_attempts(draw: st.DrawFn) -> DeclarationAttempt:
+    """Una declaración de incerrable: los cinco campos, la política, la fecha y la firma."""
+    return DeclarationAttempt(
+        fields=draw(st.integers(0, 5)),
+        policy=draw(plant_policies()),
+        review_months=draw(st.one_of(st.none(), st.sampled_from(_REVIEW_MONTHS))),
+        license=draw(st.booleans()),
+    )
+
+
+@st.composite
+def review_attempts(draw: st.DrawFn) -> ReviewAttempt:
+    """Una revisión de incerrable: la salida, la fecha nueva y la firma."""
+    return ReviewAttempt(
+        outcome=draw(st.sampled_from(("renewed", "converted_to_action"))),
+        review_months=draw(st.one_of(st.none(), st.sampled_from(_REVIEW_MONTHS))),
+        license=draw(st.booleans()),
+    )
+
+
 # --- secuencias de comandos (base de PR-LAZ-10) --------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DeclarationAttempt:
+    """Lo que lleva una declaración de incerrable, sin base ni reloj.
+
+    ``fields`` es cuántos de los cinco campos van (5: los cinco); ``policy``, lo que devuelve el
+    puerto; ``review_months``, los meses de la fecha de revisión respecto al instante de la
+    declaración (``None``: la fecha por defecto de la planta); ``license``, si la firma lleva
+    licencia profesional."""
+
+    fields: int
+    policy: PlantPolicy
+    review_months: int | None
+    license: bool
+
+
+@dataclass(frozen=True)
+class ReviewAttempt:
+    """Lo que lleva una revisión de incerrable: ``renewed`` o ``converted_to_action``."""
+
+    outcome: str
+    review_months: int | None
+    license: bool
+
+
+@dataclass(frozen=True)
+class DeclareUnclosable:
+    """Declarar SIN ALTERNATIVA SEGURA DISPONIBLE (T10) con los cinco campos y la política."""
+
+    attempt: DeclarationAttempt
+
+
+@dataclass(frozen=True)
+class ReviewUnclosable:
+    """Revisar una declaración vigente: renovarla (T11) o convertirla en acción (T12)."""
+
+    attempt: ReviewAttempt
 
 
 @dataclass(frozen=True)
@@ -282,7 +445,15 @@ class Tick:
     seconds: int
 
 
-type LifecycleCommand = Assign | Reassign | AddEvidence | ChangeDeadlineRange | Tick
+type LifecycleCommand = (
+    Assign
+    | Reassign
+    | AddEvidence
+    | ChangeDeadlineRange
+    | Tick
+    | DeclareUnclosable
+    | ReviewUnclosable
+)
 """Los comandos de la base; las tareas siguientes añaden los suyos a esta unión."""
 
 
@@ -306,6 +477,8 @@ def _commands() -> st.SearchStrategy[LifecycleCommand]:
         st.just(AddEvidence()),
         deadline_ranges(),
         st.builds(Tick, st.integers(1, 3 * 24 * 3600)),
+        st.builds(DeclareUnclosable, declaration_attempts()),
+        st.builds(ReviewUnclosable, review_attempts()),
     )
 
 

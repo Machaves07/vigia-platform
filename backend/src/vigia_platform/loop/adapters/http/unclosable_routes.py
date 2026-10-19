@@ -92,7 +92,7 @@ Services = Annotated[LoopHttp, Depends(loop_http)]
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class UnclosableDeclarationBody(_Strict):
