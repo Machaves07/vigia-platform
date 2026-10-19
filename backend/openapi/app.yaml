@@ -4554,6 +4554,44 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications":
+    "get":
+      "tags":
+        - "notificaciones"
+      "summary": "Las notificaciones propias, de la más reciente a la más antigua, por clave"
+      "operationId": "list_notifications_notifications_get"
+      "parameters":
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "AcceptanceStatus":
@@ -7269,6 +7307,21 @@
         - "predicate"
       "title": "DeclaredStandard"
       "description": "Estándar de seguridad tal como la planta lo declaró (domain-entities.md §3.2). Viaja dentro de `ZoneCatalog.standards`. Cada cambio de texto, predicado o parámetro produce una versión nueva; una versión emitida nunca se edita. `declared_text` es el único texto libre del contrato escrito por la planta. El predicado sigue la gramática booleana cerrada de §3.2.1 y su forma depende de `family`: el esquema empareja cada familia con su plantilla (`oneOf`), así que un predicado con la forma de otra familia es inválido. La gramática no puede expresar, por construcción, ausencia de personas ni negación de presencia (P2), disyunciones, comparaciones o conteos de personas, velocidades, tiempos de ciclo ni ninguna magnitud de productividad (P7)."
+    "DeepLinkOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+      "title": "DeepLinkOut"
     "DocumentContentType":
       "type": "string"
       "enum":
@@ -10310,6 +10363,70 @@
         - "text"
         - "pending_legal_text"
       "title": "NoticeView"
+    "NotificationOut":
+      "properties":
+        "notification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Notification Id"
+        "event_name":
+          "type": "string"
+          "title": "Event Name"
+        "urgency":
+          "type": "string"
+          "title": "Urgency"
+        "title_es":
+          "type": "string"
+          "title": "Title Es"
+        "body_es":
+          "type": "string"
+          "title": "Body Es"
+        "deep_link_ref":
+          "$ref": "#/components/schemas/DeepLinkOut"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "read_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read At"
+        "email_status":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Email Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "notification_id"
+        - "event_name"
+        - "urgency"
+        - "title_es"
+        - "body_es"
+        - "deep_link_ref"
+        - "created_at"
+        - "read_at"
+        - "email_status"
+      "title": "NotificationOut"
+    "NotificationPageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/NotificationOut"
+          "type": "array"
+          "title": "Items"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_after"
+      "title": "NotificationPageOut"
     "OcclusionSummaryOut":
       "properties":
         "camera_id":

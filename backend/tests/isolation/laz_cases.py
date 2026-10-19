@@ -51,6 +51,11 @@ from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
+from vigia_platform.notifications.adapters.http.services import (
+    NOTIFICATIONS_STATE_KEY,
+    NotificationsHttp,
+)
+from vigia_platform.notifications.reader import NotificationReader
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.db import Transaction
@@ -190,9 +195,25 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
     }
 
 
+def _notifications(services: LazServices) -> Mapping[str, object]:
+    """``NotificationsHttp`` (TASK-324). ``LazServices`` no lleva la proveedora y
+    ``test_route_isolation.py`` no se edita: se toma la del ``Authorizer`` de la prueba."""
+    provider: uuid.UUID = services.authorizer._provider_organization_id
+    return {
+        NOTIFICATIONS_STATE_KEY: NotificationsHttp(
+            reader=NotificationReader(
+                database=services.database,  # type: ignore[arg-type]
+                authorizer=services.authorizer,
+                provider_organization_id=provider,
+            )
+        )
+    }
+
+
 LAZ_STATE: tuple[Callable[[LazServices], Mapping[str, object]], ...] = (
     _loop,  # TASK-304, TASK-308 y TASK-315
     _accreditation,  # TASK-317
+    _notifications,  # TASK-324
 )
 """Constructores del ``app.state`` de las rutas de U-04 en la aplicación de la prueba."""
 
@@ -387,10 +408,18 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call("POST", f"/accreditation/exports/{i.event}/download-url"),
         ),
     ),
+    # VIG-217 (TASK-324): la lista propia (SUP-U05-33, forma mínima) nunca muestra un aviso de B
+    # ni de otro usuario; ``notifications.read`` la tienen los siete roles (lista propia, OWN).
+    (("GET", "/notifications"), Case(Kind.OWN, lambda i: Call("GET", "/notifications"))),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
-    {("GET", _CONFIGURATION)}
+    {
+        ("GET", _CONFIGURATION),
+        # VIG-217 (TASK-324): el proveedor no entra al lazo (BR-LAZ-142) ni tiene avisos en el
+        # cliente; ``notifications.read`` la tienen los siete roles, también el instalador.
+        ("GET", "/notifications"),
+    }
 )
 """Rutas de U-04 con la clave en la columna que el servicio deniega bajo concesión."""
