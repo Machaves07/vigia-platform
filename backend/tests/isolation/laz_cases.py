@@ -39,6 +39,7 @@ from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.clock import Clock
@@ -99,6 +100,7 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 clock=services.clock,
             ),
+            inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
         ),
     }
 
@@ -180,6 +182,14 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "reason_text": "Motivo sintético de la clasificación del hallazgo en la zona",
                 },
             ),
+        ),
+    ),
+    # VIG-222 (TASK-307): la bandeja con una zona de B en la consulta responde igual que con una
+    # inexistente (not_found, nunca forbidden ni una página vacía con avisos de B).
+    (
+        ("GET", "/loop/findings"),
+        Case(
+            Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).

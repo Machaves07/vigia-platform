@@ -143,8 +143,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/plants/{plant_id}/configuration"),
                 ("PUT", "/loop/plants/{plant_id}/configuration"),
                 ("POST", "/loop/findings/{finding_state_id}/classifications"),
+                ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
             ]
             assert state[LOOP_STATE_KEY].classification is not None
+            assert state[LOOP_STATE_KEY].inbox is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import Request
 
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -46,6 +47,8 @@ class LoopHttp:
     """``GET`` y ``PUT /loop/plants/{plant_id}/configuration`` (LC-LAZ-19, VIG-205)."""
     classification: ClassificationService | None = None
     """``POST /loop/findings/{finding_state_id}/classifications`` (LC-LAZ-07, VIG-212)."""
+    inbox: InboxService | None = None
+    """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -82,6 +85,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             authorizer=services.authorizer,
             clock=services.clock,
         ),
+        inbox=InboxService(database=services.database, authorizer=services.authorizer),
     )
 
 

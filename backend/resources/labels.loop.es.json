@@ -124,6 +124,21 @@
     "derived": "mínimo irreductible del producto",
     "customer_added": "añadido por la organización"
   },
+  "inbox_zone_notice": {
+    "coverage_unavailable": "cobertura no disponible en la bandeja: consulte la cobertura del periodo",
+    "not_observed": "no se observó: el nodo de la zona no comunica",
+    "no_node_assigned": "no se observó: la zona no tiene nodo asignado"
+  },
+  "inbox_partition_notice": {
+    "projection_rebuilding": "la bandeja de esta planta se está reconstruyendo desde el expediente",
+    "projection_diverged": "la bandeja de esta planta difiere del expediente; el expediente manda"
+  },
+  "inbox_finding_notice": {
+    "agreement_revoked": "acuerdo de uso revocado",
+    "walk_test_regression_pending": "acta no vigente",
+    "evidence_flagged": "la verificación diferida de esta evidencia no pasó; el hallazgo se conserva y se declara",
+    "missing_segments_declared": "faltan tramos de este episodio"
+  },
   "export_state": {
     "requested": "solicitada",
     "in_progress": "en curso",

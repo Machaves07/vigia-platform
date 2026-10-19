@@ -4116,6 +4116,105 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Bandeja del lazo por zona, desde la proyección, por páginas de hasta 200"
+      "operationId": "list_findings_loop_findings_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "family"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/PredicateFamily"
+              - "type": "null"
+            "title": "Family"
+        - "name": "tier"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/EvidenceTier"
+              - "type": "null"
+            "title": "Tier"
+        - "name": "lifecycle_state"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+              - "type": "null"
+            "title": "Lifecycle State"
+        - "name": "from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "To"
+        - "name": "order"
+          "in": "query"
+          "required": false
+          "schema":
+            "$ref": "#/components/schemas/InboxOrder"
+            "default": "newest_first"
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/InboxPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -6914,6 +7013,13 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "EvidenceTier":
+      "type": "string"
+      "enum":
+        - "tier_1"
+        - "tier_2"
+      "title": "EvidenceTier"
+      "description": "Nivel de evidencia de un hallazgo."
     "ExportRequestBody":
       "properties":
         "plant_id":
@@ -7115,6 +7221,41 @@
         - "accepted_by"
         - "accepted_at"
       "title": "FalseAlarmAcceptanceOut"
+    "FindingLifecycleState":
+      "type": "string"
+      "enum":
+        - "received"
+        - "in_review"
+        - "discarded"
+        - "open"
+        - "action_assigned"
+        - "overdue"
+        - "closed"
+        - "unclosable"
+        - "suspended_by_reclassification"
+      "title": "FindingLifecycleState"
+      "description": "``finding_lifecycle_state``: el estado del hallazgo en el lazo (RF-PLA-02, respuesta 6).\n\nNo existe un estado «sin hallazgos» ni «seguro» (P2)."
+    "FindingNoticeOut":
+      "properties":
+        "code":
+          "$ref": "#/components/schemas/InboxFindingNotice"
+        "since":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Since"
+        "cause":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Cause"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "since"
+        - "cause"
+      "title": "FindingNoticeOut"
     "FleetAlarmKind":
       "type": "string"
       "enum":
@@ -7555,6 +7696,172 @@
         - "plants"
         - "nodes"
       "title": "HierarchyView"
+    "InboxFindingNotice":
+      "type": "string"
+      "enum":
+        - "agreement_revoked"
+        - "walk_test_regression_pending"
+        - "evidence_flagged"
+        - "missing_segments_declared"
+      "title": "InboxFindingNotice"
+      "description": "``inbox_finding_notice``: los avisos de un elemento, desde las columnas enriquecidas de\n``FindingState`` (TASK-307; BR-LAZ-10, 11, 150 y 155)."
+    "InboxItemOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "standard":
+          "$ref": "#/components/schemas/InboxStandardOut"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "classification_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Classification Outcome"
+        "classification_count":
+          "type": "integer"
+          "title": "Classification Count"
+        "age_days":
+          "type": "integer"
+          "title": "Age Days"
+        "observability_state_at_event":
+          "type": "string"
+          "title": "Observability State At Event"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Due At"
+        "overdue_days":
+          "type": "integer"
+          "title": "Overdue Days"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "aggregation_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Aggregation Window Minutes"
+        "evidence_flagged":
+          "type": "boolean"
+          "title": "Evidence Flagged"
+        "notices":
+          "items":
+            "$ref": "#/components/schemas/FindingNoticeOut"
+          "type": "array"
+          "title": "Notices"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "subject_kind"
+        - "plant_id"
+        - "zone_id"
+        - "family"
+        - "tier"
+        - "standard"
+        - "lifecycle_state"
+        - "classification_outcome"
+        - "classification_count"
+        - "age_days"
+        - "observability_state_at_event"
+        - "occurred_at"
+        - "due_at"
+        - "overdue_days"
+        - "time_aggregated"
+        - "aggregation_window_minutes"
+        - "evidence_flagged"
+        - "notices"
+      "title": "InboxItemOut"
+    "InboxOrder":
+      "type": "string"
+      "enum":
+        - "newest_first"
+        - "oldest_first"
+      "title": "InboxOrder"
+    "InboxPageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/InboxItemOut"
+          "type": "array"
+          "title": "Items"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/ZoneOut"
+          "type": "array"
+          "title": "Zones"
+        "partitions":
+          "items":
+            "$ref": "#/components/schemas/PartitionOut"
+          "type": "array"
+          "title": "Partitions"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "zones"
+        - "partitions"
+        - "next_cursor"
+      "title": "InboxPageOut"
+    "InboxPartitionNotice":
+      "type": "string"
+      "enum":
+        - "projection_rebuilding"
+        - "projection_diverged"
+      "title": "InboxPartitionNotice"
+      "description": "``inbox_partition_notice``: la proyección de una planta que no se puede leer como el\nexpediente (TASK-307; BR-LAZ-156); la bandeja lo declara en vez de inventar un estado."
+    "InboxStandardOut":
+      "properties":
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "version":
+          "type": "integer"
+          "title": "Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+      "title": "InboxStandardOut"
+    "InboxZoneNotice":
+      "type": "string"
+      "enum":
+        - "coverage_unavailable"
+        - "not_observed"
+        - "no_node_assigned"
+      "title": "InboxZoneNotice"
+      "description": "``inbox_zone_notice``: lo que la bandeja declara de cada zona (TASK-307; BR-LAZ-04, 149 y\n153; P2). **Ninguno afirma que la zona estuviera observada** ni que no ocurriera nada: la\nbandeja no lee la cobertura del periodo (cero llamadas, NFR-LAZ-03)."
     "InstallerMeasurementsBody":
       "properties":
         "beacon_latency_ms_p95":
@@ -9110,6 +9417,20 @@
         - "without_clips"
       "title": "PackageForm"
       "description": "``package_form`` de la exportación (nota U04-H-03)."
+    "PartitionOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "notice":
+          "$ref": "#/components/schemas/InboxPartitionNotice"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "notice"
+      "title": "PartitionOut"
     "PassBody":
       "properties":
         "row_id":
@@ -11436,6 +11757,44 @@
         - "productive"
       "title": "ZoneMode"
       "description": "Modo de operación de una zona, derivado de sus compuertas."
+    "ZoneOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "notice":
+          "$ref": "#/components/schemas/InboxZoneNotice"
+        "node_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Node Id"
+        "node_code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Node Code"
+        "communication_state":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Communication State"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "zone_id"
+        - "notice"
+        - "node_id"
+        - "node_code"
+        - "communication_state"
+      "title": "ZoneOut"
     "ZoneParametersBody":
       "properties":
         "cameras":
