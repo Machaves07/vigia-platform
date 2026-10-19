@@ -92,8 +92,9 @@ U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
 U03_TASKS: Final = 7
 """Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
-U04_TASKS: Final = 1
-"""``monthly_package`` (TASK-342 a 344, VIG-239): la primera tarea periódica de U-04."""
+U04_TASKS: Final = 2
+"""``monthly_package`` (TASK-342 a 344, VIG-239) y ``verify_loop_projection`` (TASK-306,
+VIG-221): las dos tareas periódicas de U-04."""
 UNREACHABLE_HOST: Final = "192.0.2.1"  # TEST-NET-1 (RFC 5737): nunca responde
 BOOTSTRAP: Final = (
     "bootstrap",

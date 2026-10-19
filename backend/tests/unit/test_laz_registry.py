@@ -217,15 +217,15 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         unit.consumers(consumers, services)
     # TASK-306: verify_loop_projection, diaria por organización; rebuild_loop_projection (LC-LAZ-03)
     # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
-    # TASK-342 a 344: monthly_package, en orden de REGISTERED_UNITS (loop, accreditation).
+    # TASK-342 a 344: monthly_package, en el orden real de registered_units (accreditation, loop).
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (
             registration.VERIFY_LOOP_PROJECTION,
             ActorUnit.U04,
             registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
             TaskIteration.PER_ORGANIZATION,
         ),
-        (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
