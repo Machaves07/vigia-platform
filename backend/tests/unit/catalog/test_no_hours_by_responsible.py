@@ -4,8 +4,10 @@ La prohibición es estructural, no una omisión (DE §2.12, NFR-GOB-41). Esta pr
 
 1. alguna ruta de la aplicación (``iter_declared_routes`` sobre ``build_openapi_app``) acepta un
    parámetro de ruta, consulta, cabecera o cookie que nombre al responsable, o un cuerpo con
-   ``responsible_user_id`` fuera de la apertura de un paso (donde es el dato del paso, no un
-   filtro);
+   ``responsible_user_id`` fuera de las dos formas que el diseño declara: la apertura de un paso
+   del walk-test de U-03 (donde es el dato del paso) y la declaración de incerrable de U-04
+   (``SUP-U05-12``, el campo 3 de ``domain-entities.md`` §2.7: quién responde de la decisión).
+   En las dos es el **sujeto** de un registro, nunca un filtro ni una agregación de horas;
 2. alguna respuesta devuelve horas agregadas junto a un responsable o un resumen de horas con un
    usuario (un modelo con un campo de total, horas o resumen no lleva campos de responsable, y
    los elementos de un resumen no llevan ningún usuario);
@@ -53,7 +55,12 @@ INDEX_ON_RESPONSIBLE: Final = re.compile(
     r"create\s+(unique\s+)?index\b[^;]*?\bresponsible_user_id\b", re.IGNORECASE | re.DOTALL
 )
 STEP_OPENING: Final = ("POST", "/walk-tests/{session_id}/steps")
-"""La única ruta cuyo cuerpo lleva ``responsible_user_id``: es el dato del paso (DE §2.12)."""
+"""La apertura de un paso del walk-test: ``responsible_user_id`` es el dato del paso (DE §2.12)."""
+UNCLOSABLE_DECLARATION: Final = ("POST", "/loop/findings/{finding_state_id}/unclosable")
+"""La declaración de incerrable de U-04 (``SUP-U05-12``, TASK-312): ``responsible_user_id`` es el
+campo 3 de DE §2.7 —quién responde de la decisión—, el sujeto de la declaración, no un filtro."""
+RESPONSIBLE_BODIES: Final = frozenset({STEP_OPENING, UNCLOSABLE_DECLARATION})
+"""Las dos únicas rutas cuyo cuerpo lleva ``responsible_user_id``, por diseño."""
 
 
 # --- 1 y 2. Rutas ---------------------------------------------------------------------------------
@@ -115,7 +122,7 @@ def _parameter_violations(key: tuple[str, str], route: APIRoute) -> list[str]:
             for model in _reachable(list(_models(body.field_info.annotation))):
                 for name in model.model_fields:
                     if RESPONSIBLE.search(name) and not (
-                        key == STEP_OPENING and name == "responsible_user_id"
+                        key in RESPONSIBLE_BODIES and name == "responsible_user_id"
                     ):
                         violations.append(f"{key}: cuerpo {model.__name__}.{name}")
     return violations
@@ -153,7 +160,8 @@ def test_no_route_filters_orders_or_aggregates_hours_by_responsible() -> None:
     assert violations == []
 
 
-def test_the_step_opening_body_is_the_only_place_a_route_receives_the_responsible() -> None:
+def test_only_the_two_documented_bodies_receive_the_responsible() -> None:
+    """Ni una ruta más: la apertura del paso (U-03) y la declaración de incerrable (U-04)."""
     receiving = sorted(
         key
         for key, route in _routes()
@@ -162,7 +170,7 @@ def test_the_step_opening_body_is_the_only_place_a_route_receives_the_responsibl
         for model in _reachable(list(_models(body.field_info.annotation)))
         if "responsible_user_id" in model.model_fields
     )
-    assert receiving == [STEP_OPENING]
+    assert receiving == sorted(RESPONSIBLE_BODIES)
 
 
 # --- 3. Puertos y servicio ------------------------------------------------------------------------
