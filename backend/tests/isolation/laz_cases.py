@@ -48,6 +48,7 @@ from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
@@ -78,6 +79,18 @@ _ANALYSIS_SIGNATURE: Final = {
     "root_cause_category": "engineering",
     "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
     "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
+}
+_UNCLOSABLE_DECLARATION: Final = {
+    "evaluated_alternative": "Reubicar la estación de carga al costado norte de la zona",
+    "rejection_reason": "La reubicación deja el pasillo peatonal sin salida de emergencia",
+    "decision_date": "2026-10-01",
+    "compensatory_measure": "Vigilancia peatonal permanente durante el turno de carga",
+    "professional_license": "LIC-SST-0001",
+}
+_UNCLOSABLE_REVIEW: Final = {
+    "outcome": "renewed",
+    "review_note": "La alternativa sigue descartada por el trazado de la zona",
+    "professional_license": "LIC-SST-0001",
 }
 
 
@@ -158,6 +171,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 clock=services.clock,
             ),
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
+            unclosable=UnclosableService(  # TASK-312
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+                gates=catalog_query_ports(database).gates,
+            ),
         ),
     }
 
@@ -337,6 +357,29 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/findings"),
         Case(
             Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
+        ),
+    ),
+    # VIG-228 (TASK-312): declarar el incerrable de un hallazgo de B y revisar una declaración de B
+    # responden igual que con un identificador inexistente (not_found, nunca forbidden ni un
+    # detail_code de la política); nada se escribe en B y el puerto de la política no se consulta.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/unclosable"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/unclosable",
+                json={**_UNCLOSABLE_DECLARATION, "responsible_user_id": str(i.user)},
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/unclosable/{declaration_id}/reviews"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST", f"/loop/unclosable/{i.record}/reviews", json=_UNCLOSABLE_REVIEW
+            ),
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).

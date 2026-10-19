@@ -48,6 +48,7 @@ import dataclasses
 import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
 
@@ -84,6 +85,7 @@ __all__ = [
     "Enrich",
     "LoopProjectionStore",
     "ProjectionRecordMissing",
+    "ReviewDueRow",
     "RowChange",
     "projection_input",
 ]
@@ -212,8 +214,42 @@ _ADVANCE_EVENT: Final = text(
 )
 
 
+_UNCLOSABLE_DUE_PLANTS: Final = text(
+    "SELECT DISTINCT plant_id FROM loop.finding_state"
+    " WHERE organization_id = :organization_id AND lifecycle_state = 'unclosable'"
+    " AND unclosable_pending_review = false AND unclosable_review_due_at <= :at"
+    " ORDER BY plant_id"
+)
+_UNCLOSABLE_DUE: Final = text(
+    "SELECT * FROM loop.finding_state"
+    " WHERE organization_id = :organization_id AND lifecycle_state = 'unclosable'"
+    " AND unclosable_pending_review = false AND unclosable_review_due_at <= :at"
+    " ORDER BY plant_id, finding_state_id FOR UPDATE"
+)
+_MARK_PENDING_REVIEW: Final = text(
+    "UPDATE loop.finding_state SET unclosable_pending_review = true,"
+    " projection_digest = :projection_digest"
+    " WHERE organization_id = :organization_id AND finding_state_id = :finding_state_id"
+    " AND occurred_at_bucket = :occurred_at_bucket AND unclosable_pending_review = false"
+)
+
+
 class ProjectionRecordMissing(LookupError):
     """El registro del recibo no está en el expediente visible para la transacción."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReviewDueRow:
+    """Una fila ``unclosable`` marcada ``pending_review`` (la tarea ``unclosable_review_due``)."""
+
+    finding_state_id: uuid.UUID
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    subject_kind: str
+    subject_id: uuid.UUID
+    unclosable_since: datetime
+    """``declared_at`` de su declaración vigente: con él se localiza la declaración."""
+    unclosable_review_due_at: datetime
 
 
 def projection_input(view: LedgerRecordView, event_id: uuid.UUID | None = None) -> ProjectionInput:
@@ -548,6 +584,83 @@ class LoopProjectionStore:
                 },
             )
         return len(after)
+
+    async def mark_unclosable_pending_review(
+        self, transaction: Transaction, *, at: datetime
+    ) -> tuple[ReviewDueRow, ...]:
+        """Marca ``unclosable_pending_review`` en las declaraciones vencidas de la organización.
+
+        La tarea ``unclosable_review_due`` (TASK-312; BR-LAZ-58) declara un **hecho de plazo**, no
+        un registro: la marca vive en la proyección y el expediente no cambia. Devuelve las filas
+        marcadas (con la declaración vigente localizable por ``unclosable_since`` y su fecha de
+        revisión) y **no** publica ningún evento: eso lo hace quien la llama.
+
+        Orden de candados (``loop.application.locks``, en el orden documentado): el control de
+        cada planta (``plant_id`` ascendente) y después **todas** las filas de una vez
+        (``plant_id, finding_state_id``); luego se escribe. La condición ``unclosable_pending_review
+        = false`` de la lectura y del ``UPDATE`` es la garantía de «una sola vez»: la segunda
+        ejecución (u otra que venciera su arrendamiento) no encuentra filas. El resumen de la fila
+        y el de su partición se recalculan, porque la marca es un campo de estado (§9): sin eso la
+        reconstrucción de TASK-306 la vería como divergencia."""
+        organization_id = transaction.context.organization_id
+        parameters: dict[str, Any] = {"organization_id": organization_id, "at": at}
+        plants = [
+            _uuid(row.plant_id)
+            for row in (await transaction.execute(_UNCLOSABLE_DUE_PLANTS, parameters)).all()
+        ]
+        digests: dict[uuid.UUID, str] = {}
+        sequences: dict[uuid.UUID, int] = {}
+        for plant_id in plants:
+            partition = {"organization_id": organization_id, "plant_id": plant_id}
+            await transaction.execute(_ENSURE_CHECKPOINT, partition)
+            checkpoint = (await transaction.execute(_LOCK_CHECKPOINT, partition)).one()
+            digests[plant_id] = checkpoint.projection_digest or EMPTY_PARTITION_DIGEST
+            sequences[plant_id] = int(checkpoint.last_applied_ledger_sequence)
+        rows = (await transaction.execute(_UNCLOSABLE_DUE, parameters)).all()
+        marked: list[ReviewDueRow] = []
+        for row in rows:
+            before = _finding(row)
+            changed = dataclasses.replace(before, unclosable_pending_review=True)
+            after = dataclasses.replace(changed, projection_digest=changed.computed_digest())
+            await transaction.execute(
+                _MARK_PENDING_REVIEW,
+                {
+                    "organization_id": organization_id,
+                    "finding_state_id": before.finding_state_id,
+                    "occurred_at_bucket": before.occurred_at_bucket,
+                    "projection_digest": after.projection_digest,
+                },
+            )
+            digests[before.plant_id] = replace_term(
+                digests[before.plant_id], finding_term(before), finding_term(after)
+            )
+            since = before.unclosable_since
+            due = before.unclosable_review_due_at
+            if since is None or due is None:  # pragma: no cover - el pliegue los fija con T10
+                raise ValueError("una fila unclosable sin su declaración ni su fecha de revisión")
+            marked.append(
+                ReviewDueRow(
+                    finding_state_id=before.finding_state_id,
+                    plant_id=before.plant_id,
+                    zone_id=before.zone_id,
+                    subject_kind=before.subject_kind,
+                    subject_id=before.subject_id,
+                    unclosable_since=since,
+                    unclosable_review_due_at=due,
+                )
+            )
+        for plant_id in plants:
+            await transaction.execute(
+                _ADVANCE_CHECKPOINT,
+                {
+                    "organization_id": organization_id,
+                    "plant_id": plant_id,
+                    "sequence": sequences[plant_id],
+                    "event_id": None,
+                    "projection_digest": digests[plant_id],
+                },
+            )
+        return tuple(marked)
 
     @staticmethod
     async def _episode(

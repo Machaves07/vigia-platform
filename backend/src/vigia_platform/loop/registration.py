@@ -66,9 +66,20 @@ from vigia_platform.loop.adapters.http.configuration_routes import configuration
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
+from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.application.unclosable import (
+    SCHEDULE as UNCLOSABLE_SCHEDULE,
+)
+from vigia_platform.loop.application.unclosable import (
+    TASK_NAME as UNCLOSABLE_REVIEW_DUE,
+)
+from vigia_platform.loop.application.unclosable import (
+    UnclosableService,
+    register_unclosable_review_due,
+)
 from vigia_platform.loop.assistant.consumer import (
     ASSISTANT_WORKER,
     ASSISTANT_WORKER_CONCURRENCY,
@@ -231,12 +242,34 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307)
+    unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
 
-LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
+
+def _register_unclosable_review_due(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``unclosable_review_due`` (TASK-312) con la bandeja de salida real y el puerto de la
+    política de planta de U-03. Declara hechos de plazo: no escribe el expediente."""
+    register_unclosable_review_due(
+        registry,
+        UnclosableService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            gates=catalog_query_ports(services.database).gates,
+            outbox=services.outbox,
+        ),
+    )
+
+
+LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-312
+}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_unclosable_review_due,  # TASK-312
+)
 
 
 class _NoEvidenceReads:
@@ -403,7 +436,8 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04 (hoy ninguna; TASK-326 verifica las diez)."""
+"""Todas las tareas periódicas de U-04 (la primera, ``unclosable_review_due`` de TASK-312;
+TASK-326 verifica las diez)."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,

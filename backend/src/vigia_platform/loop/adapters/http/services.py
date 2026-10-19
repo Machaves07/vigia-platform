@@ -23,6 +23,7 @@ from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
@@ -66,6 +67,9 @@ class LoopHttp:
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
     inbox: InboxService | None = None
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
+    unclosable: UnclosableService | None = None
+    """``POST /loop/findings/{finding_state_id}/unclosable`` y
+    ``POST /loop/unclosable/{declaration_id}/reviews`` (LC-LAZ-09, VIG-228)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -87,6 +91,12 @@ def loop_http(request: Request) -> LoopHttp:
 
 def build_loop_http(services: UnitServices) -> LoopHttp:
     """``LoopHttp`` sobre la infraestructura común de la raíz."""
+    actions = ActionService(
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        clock=services.clock,
+    )
     return LoopHttp(
         configuration=LoopConfigurationService(
             repository=PostgresLoopConfigurationRepository(services.database),
@@ -102,12 +112,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             authorizer=services.authorizer,
             clock=services.clock,
         ),
-        actions=ActionService(
-            database=services.database,
-            writer=services.writer,
-            authorizer=services.authorizer,
-            clock=services.clock,
-        ),
+        actions=actions,
         evidence=EvidenceService(
             database=services.database,
             writer=services.writer,
@@ -142,6 +147,14 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),
+        unclosable=UnclosableService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            gates=catalog_query_ports(services.database).gates,
+            actions=actions,
+        ),
     )
 
 

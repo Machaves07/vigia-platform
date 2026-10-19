@@ -4436,6 +4436,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/unclosable":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Declara SIN ALTERNATIVA SEGURA DISPONIBLE con los cinco campos y la política"
+      "operationId": "declare_loop_findings__finding_state_id__unclosable_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UnclosableDeclarationBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/UnclosableDeclarationOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/unclosable/{declaration_id}/reviews":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Revisa una declaración de incerrable: la renueva o la convierte en acción"
+      "operationId": "review_loop_unclosable__declaration_id__reviews_post"
+      "parameters":
+        - "name": "declaration_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Declaration Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UnclosableReviewBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/UnclosableReviewOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -11365,6 +11431,40 @@
         - "reason_es"
         - "effective_from"
       "title": "RetirementBody"
+    "ReviewActionBody":
+      "properties":
+        "action_type":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Action Type"
+        "action_description":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 2000
+            - "type": "null"
+          "title": "Action Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+            - "type": "null"
+          "title": "Expected Outcome"
+        "assignee_user_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Assignee User Id"
+        "deadline_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Deadline Days"
+      "additionalProperties": false
+      "type": "object"
+      "title": "ReviewActionBody"
+      "description": "La acción nueva de la conversión (T12): el cuerpo de una asignación de TASK-311."
     "RevocationBody":
       "properties":
         "reason_es":
@@ -12425,6 +12525,181 @@
       "minLength": 36
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       "title": "UUIDv7"
+    "UnclosableDeclarationBody":
+      "properties":
+        "evaluated_alternative":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Evaluated Alternative"
+        "rejection_reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Rejection Reason"
+        "responsible_user_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Responsible User Id"
+        "decision_date":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Decision Date"
+        "compensatory_measure":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Compensatory Measure"
+        "review_due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Review Due At"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Professional License"
+      "additionalProperties": false
+      "type": "object"
+      "title": "UnclosableDeclarationBody"
+      "description": "Los cinco campos, la fecha de revisión y la licencia del firmante (SUP-U05-12)."
+    "UnclosableDeclarationOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "declaration_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Declaration Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "review_due_at":
+          "type": "string"
+          "title": "Review Due At"
+        "policy_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Policy Id"
+        "policy_version":
+          "type": "integer"
+          "title": "Policy Version"
+        "policy_document_sha256":
+          "type": "string"
+          "title": "Policy Document Sha256"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "declared_at":
+          "type": "string"
+          "title": "Declared At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "declaration_id"
+        - "record_id"
+        - "review_due_at"
+        - "policy_id"
+        - "policy_version"
+        - "policy_document_sha256"
+        - "lifecycle_state"
+        - "declared_at"
+        - "time_aggregated"
+      "title": "UnclosableDeclarationOut"
+    "UnclosableReviewBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "review_note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Review Note"
+        "new_review_due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "New Review Due At"
+        "action":
+          "anyOf":
+            - "$ref": "#/components/schemas/ReviewActionBody"
+            - "type": "null"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Professional License"
+      "additionalProperties": false
+      "type": "object"
+      "title": "UnclosableReviewBody"
+      "description": "La revisión: renovar la declaración (T11) o convertirla en acción (T12)."
+    "UnclosableReviewOut":
+      "properties":
+        "declaration_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Declaration Id"
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "review_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Review Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "new_review_due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "New Review Due At"
+        "new_action_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "New Action Id"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "reviewed_at":
+          "type": "string"
+          "title": "Reviewed At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "declaration_id"
+        - "finding_state_id"
+        - "review_id"
+        - "record_id"
+        - "outcome"
+        - "new_review_due_at"
+        - "new_action_id"
+        - "lifecycle_state"
+        - "reviewed_at"
+        - "time_aggregated"
+      "title": "UnclosableReviewOut"
     "UploadGrantRequest":
       "properties":
         "content_type":
