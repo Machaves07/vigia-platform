@@ -1,0 +1,7 @@
+{
+  "artifact": "checkpoints/checkpoints.json",
+  "pointer": "/checkpoints/0",
+  "reason": "bad_signature",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}

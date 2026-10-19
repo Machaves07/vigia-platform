@@ -16,8 +16,8 @@ adjunto con su declaración, la línea de tiempo de cobertura, la auditoría, lo
 y las claves; y el manifiesto declara la organización, la planta y el periodo, el hash de **cada**
 artefacto (que coincide con sus bytes), los avisos fijos, la revocación, la regresión, el acuerdo
 sustituido, el documento portátil (presente desde TASK-319; aquí con el generador falso y rápido
-de ``tests/export_contents_support.py``, no con WeasyPrint) y el verificador **ausente con su
-motivo** (TASK-346). Ningún dato de la otra organización. La forma ``without_clips`` lleva lo
+de ``tests/export_contents_support.py``, no con WeasyPrint) y el verificador ``vigia_verify.py``
+con su versión (TASK-346). Ningún dato de la otra organización. La forma ``without_clips`` lleva lo
 mismo salvo los bytes de los clips, que se listan con su hash, su duración y su zona bajo el
 aviso fijo.
 
@@ -46,9 +46,13 @@ from vigia_platform.accreditation.manifest.model import (
     COVERAGE_NOTICE_ES,
     REGRESSION_NOTICE_ES,
     REVOCATION_NOTICE_ES,
-    VERIFIER_ABSENT_ES,
     WITH_CLIPS_NOTICE_ES,
     WITHOUT_CLIPS_NOTICE_ES,
+)
+from vigia_platform.accreditation.verifier_bundle import (
+    VERIFIER_PATH,
+    VERIFIER_VERSION,
+    load_verifier_bundle,
 )
 from vigia_platform.fleet.ports import ZoneAssignmentPeriod
 from vigia_platform.ledger.application.evidence_read import MarkerResult, MarkerVerification
@@ -561,18 +565,25 @@ def test_single_occupancy_zone_is_aggregated_and_says_why(
     assert all("content" not in record for record in finding["records"])
 
 
-def test_document_is_written_and_only_the_verifier_is_declared_absent(
+def test_document_and_verifier_are_written_and_nothing_is_declared_absent(
     package: tuple[ExportWorld, Composed],
 ) -> None:
-    """Desde TASK-319 el documento portátil ya no falta: solo el verificador (TASK-346) sigue
-    declarado ausente, con su motivo, nunca en silencio."""
+    """Desde TASK-319 el documento portátil ya no falta, y desde TASK-346 tampoco el verificador:
+    los dos viajan, con su hash, y ninguna entrada se declara ausente."""
     _, composed = package
     manifest = composed.manifest
-    assert manifest["absent_entries"] == [{"kind": "verifier", "reason_es": VERIFIER_ABSENT_ES}]
-    assert manifest["verifier_version"] == "absent"
-    assert {item["kind"] for item in manifest["artifacts"]} >= {"document"}
+    assert manifest["absent_entries"] == []
+    assert {item["kind"] for item in manifest["artifacts"]} >= {"document", "verifier"}
     assert composed.package.document_sha256 != EMPTY_SHA256
     assert composed.package.stored.document is not None
+    # TASK-346: el verificador viaja con su hash y su versión declarada (NFR-LAZ-53).
+    bundle = load_verifier_bundle()
+    assert composed.artifacts[VERIFIER_PATH] == bundle.data
+    (entry,) = [item for item in manifest["artifacts"] if item["kind"] == "verifier"]
+    assert entry["path"] == VERIFIER_PATH
+    assert entry["sha256"] == bundle.sha256
+    assert manifest["verifier_version"] == VERIFIER_VERSION == bundle.version
+    assert composed.package.verifier_version == VERIFIER_VERSION
 
 
 def test_checkpoints_and_both_public_keys_travel_inside(

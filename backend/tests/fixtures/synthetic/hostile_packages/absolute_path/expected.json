@@ -1,0 +1,7 @@
+{
+  "artifact": "/etc/vigia-evil",
+  "pointer": null,
+  "reason": "absolute_path",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}

@@ -134,6 +134,7 @@ def _export_composer(services: UnitServices, stream: ExportStream) -> ExportComp
             places=SqlExportPlaces(database),
             blobs=StorageBlobs(database, evidence),
             episodes=SqlEpisodeHistory(database),
+            signer=services.signing,
         ),
     )
 

@@ -40,6 +40,7 @@ __all__ = [
     "DOCUMENT_NAME",
     "MANIFEST_NAME",
     "MANIFEST_RESERVE_BYTES",
+    "MANIFEST_SIGNATURE_NAME",
     "MAX_VOLUMES",
     "MIN_PART_SIZE",
     "PART_SIZE",
@@ -65,6 +66,8 @@ MAX_VOLUMES: Final = 99
 """``vol-01`` a ``vol-99``: 20 GB estimados caben en 10 volúmenes."""
 
 MANIFEST_NAME: Final = "manifest.json"
+MANIFEST_SIGNATURE_NAME: Final = "manifest.signature.json"
+"""La firma del SHA-256 del manifiesto, junto a él en ``vol-01`` (TASK-346)."""
 DOCUMENT_NAME: Final = "document.pdf"
 VOLUME_CONTENT_TYPE: Final = "application/zip"
 DOCUMENT_CONTENT_TYPE: Final = "application/pdf"

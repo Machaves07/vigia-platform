@@ -1,0 +1,7 @@
+{
+  "artifact": "manifest.signature.json",
+  "pointer": null,
+  "reason": "manifest_signature_mismatch",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}
