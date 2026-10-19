@@ -8,7 +8,7 @@ rutas lo toman en cada petición: sin él, ``internal_error`` (fallo cerrado, nu
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from fastapi import Request
 
@@ -16,6 +16,9 @@ from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
+
+if TYPE_CHECKING:
+    from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
 
 __all__ = ["ACCREDITATION_STATE_KEY", "AccreditationHttp", "accreditation_http", "installed"]
 
@@ -33,6 +36,8 @@ class AccreditationHttp:
     downloads: ExportDownloads | None = None
     """``GET /accreditation/exports/{export_id}/download`` y ``POST …/download-url`` (TASK-345);
     sin depósito de evidencias, ``None`` y las dos responden ``internal_error``."""
+    monthly_packages: MonthlyPackageReads | None = None
+    """Las tres rutas de ``/accreditation/monthly-packages*`` (TASK-344)."""
 
 
 def installed[T](service: T | None) -> T:

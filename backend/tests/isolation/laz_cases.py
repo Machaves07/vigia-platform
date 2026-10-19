@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 from tests.isolation.route_cases import Call, Case, Kind
+from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
 from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
@@ -35,6 +36,7 @@ from vigia_platform.accreditation.adapters.http.services import (
 from vigia_platform.accreditation.events import register_accreditation_event_types
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.authz.authorize import Authorizer
@@ -190,6 +192,13 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 audit=services.audit,
                 storage=_NoSigner(),
                 clock=services.clock,
+            ),
+            monthly_packages=MonthlyPackageReads(  # TASK-344
+                database=services.database,
+                repository=MonthlyPackageRepository(database=services.database),
+                authorizer=services.authorizer,
+                audit=services.audit,
+                storage=_NoSigner(),
             ),
         )
     }
@@ -411,6 +420,34 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     # VIG-217 (TASK-324): la lista propia (SUP-U05-33, forma mínima) nunca muestra un aviso de B
     # ni de otro usuario; ``notifications.read`` la tienen los siete roles (lista propia, OWN).
     (("GET", "/notifications"), Case(Kind.OWN, lambda i: Call("GET", "/notifications"))),
+    # TASK-344 (SUP-U05-24, 25 y 41): el paquete mensual, su muestra y la descarga por planta de
+    # una zona de B responden igual que un identificador inexistente (not_found, nunca forbidden
+    # ni el 409 de "no sellado"); nada se firma ni se audita en B.
+    (
+        ("GET", "/accreditation/monthly-packages"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "GET",
+                "/accreditation/monthly-packages",
+                params={"zone_id": str(i.zone), "period": "2026-01"},
+            ),
+        ),
+    ),
+    (
+        ("GET", "/accreditation/monthly-packages/{package_id}/sample"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.record}/sample"),
+        ),
+    ),
+    (
+        ("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.plant}/2026-01/download"),
+        ),
+    ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
 
