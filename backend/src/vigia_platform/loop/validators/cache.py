@@ -24,6 +24,14 @@ patrón inválido), se conserva la anterior y se registra el fallo, sin el patr�
 
 Sin red y sin base: las lecturas las hace el ``VocabularyStore`` con el lector de filas de la
 escritura (``FreeTextPreparation.rows``); el reloj es el del escritor.
+
+``DeclaredNamesCache`` (TASK-340) guarda igual, por organización, el **vocabulario declarado** que
+exime al patrón de nombre propio de ``person_attribution`` (los nombres de sus plantas y zonas;
+TASK-350 añadirá equipos y máquinas): ``refresh`` es el preparador de ese validador, que relee los
+nombres al abrir una escritura si la entrada tiene más de ``TTL_SECONDS``; ``names_for`` es lo que
+usa el validador, solo memoria. Sin entrada se valida sin vocabulario declarado
+(``NO_DECLARED_NAMES``), lo más estricto. Un nombre nuevo tarda como mucho ``TTL_SECONDS`` en
+eximir: hasta entonces un texto que lo cite se rechaza (fallo cerrado), nunca al revés.
 """
 
 from __future__ import annotations
@@ -35,6 +43,11 @@ from dataclasses import dataclass
 from typing import Final, Protocol
 
 from vigia_platform.ledger.free_text import FreeTextPreparation, RowReader
+from vigia_platform.loop.validators.attribution import (
+    NO_DECLARED_NAMES,
+    DeclaredNames,
+    declared_names,
+)
 from vigia_platform.loop.validators.vocabulary import (
     CompiledVocabulary,
     VocabularyCompileError,
@@ -46,6 +59,8 @@ from vigia_platform.shared.observability.logging import get_logger
 
 __all__ = [
     "TTL_SECONDS",
+    "DeclaredNamesCache",
+    "DeclaredNamesStore",
     "ListHead",
     "VocabularyCache",
     "VocabularyStore",
@@ -145,3 +160,50 @@ class VocabularyCache:
         current = self._entries.get(organization)
         if current is None or compiled.list_version >= current.compiled.list_version:
             self._entries[organization] = _Entry(compiled, now)
+
+
+class DeclaredNamesStore(Protocol):
+    """Lectura del vocabulario declarado; la hace el adaptador de PostgreSQL con el lector de la
+    escritura."""
+
+    async def names(self, organization_id: uuid.UUID, rows: RowReader) -> tuple[str, ...]:
+        """Los nombres de las plantas y zonas de la organización que ve la escritura."""
+        ...
+
+
+@dataclass(frozen=True)
+class _NamesEntry:
+    names: DeclaredNames
+    loaded_at: float
+
+
+class DeclaredNamesCache:
+    """Vocabulario declarado por organización, en memoria del proceso (``person_attribution``)."""
+
+    def __init__(self, store: DeclaredNamesStore, *, ttl_seconds: float = TTL_SECONDS) -> None:
+        if not ttl_seconds > 0:
+            raise ValueError("ttl_seconds debe ser positivo")
+        self._store = store
+        self._ttl = ttl_seconds
+        self._entries: dict[uuid.UUID, _NamesEntry] = {}
+
+    def names_for(self, organization_id: uuid.UUID | None) -> DeclaredNames:
+        """El vocabulario con el que se valida ahora: solo memoria, nunca red ni base."""
+        entry = None if organization_id is None else self._entries.get(organization_id)
+        return NO_DECLARED_NAMES if entry is None else entry.names
+
+    def invalidate(self, organization_id: uuid.UUID) -> None:
+        """La próxima escritura de la organización relee sus nombres."""
+        self._entries.pop(organization_id, None)
+
+    async def refresh(self, preparation: FreeTextPreparation) -> None:
+        """Relee los nombres al abrir la escritura si la entrada caducó (el preparador)."""
+        organization = preparation.organization_id
+        now = preparation.clock.monotonic()
+        entry = self._entries.get(organization)
+        if entry is not None and now - entry.loaded_at < self._ttl:
+            return
+        names = declared_names(await self._store.names(organization, preparation.rows))
+        current = self._entries.get(organization)
+        if current is None or now >= current.loaded_at:
+            self._entries[organization] = _NamesEntry(names, now)

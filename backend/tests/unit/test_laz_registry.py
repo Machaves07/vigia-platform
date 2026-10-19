@@ -169,8 +169,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     assert accreditation_registration.TASK_REGISTRARS == ()
     assert registration.U04_TASKS == {}
     assert registration.U04_CONSUMERS == {"export_worker": 1}
-    # TASK-303: el único registrador de texto libre es el del vocabulario (TASK-340 añade otro).
-    assert (registration.register_blocked_vocabulary,) == registration.FREE_TEXT_REGISTRARS
+    # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
+    assert (
+        registration.register_blocked_vocabulary,
+        registration.register_person_attribution,
+    ) == registration.FREE_TEXT_REGISTRARS
 
 
 # --- manifiestos ----------------------------------------------------------------------------

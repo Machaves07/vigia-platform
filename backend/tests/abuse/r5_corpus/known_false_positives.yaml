@@ -1,0 +1,43 @@
+# Corpus R5 · falsos positivos conocidos (revisión de VIG-218). Textos legítimos que hoy se
+# rechazan por fallo cerrado, conforme al umbral de 7 dígitos de A-45 punto 3 y al patrón de
+# documento de §14.5. Se fijan aquí para que un cambio de cota sea visible; la cota la decide el
+# dueño o la retoma VIG-220 (vocabulario declarado). Solo datos generados.
+version: 1
+description: "Órdenes de trabajo, activos, planos, numerales y códigos de equipo que hoy caen como teléfono o documento."
+cases:
+  - id: R5-FPC-01
+    text: "Se generó la OT 2026-001234 para la guarda."
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Falso positivo conocido: una orden de trabajo de 10 cifras parece un teléfono."
+  - id: R5-FPC-02
+    text: "Activo fijo 1000234 en la zona norte."
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Falso positivo conocido: un número de activo de 7 cifras."
+  - id: R5-FPC-03
+    text: "Según el plano E-1023456 de la celda."
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Falso positivo conocido: número de plano de 7 cifras."
+  - id: R5-FPC-04
+    text: "Conforme al punto 4.2.1.3.5.6.7 del procedimiento."
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Falso positivo conocido: un numeral con siete niveles separados por puntos."
+  - id: R5-FPC-05
+    text: "Ver el documento 12345 del SGSST."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Falso positivo conocido: «documento» y cinco cifras, aunque sea un documento del sistema de gestión."
+  - id: R5-FPC-06
+    text: "Código de equipo CC-10234 revisado."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Falso positivo conocido: un código de equipo que empieza por «CC» seguido de cifras."

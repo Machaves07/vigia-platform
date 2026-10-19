@@ -9,14 +9,27 @@ persiste (BR-LAZ-80).
 - ``vocabulary``: el validador ``blocked_vocabulary`` (lemas y patrones, D-9);
 - ``initial_list``: la lista derivada de BLM §14.1 a §14.4 (versión 1, ``origin = derived``);
 - ``lexicon``: lemas y flexiones de la tabla propia ``resources/vocabulary/inflections.es.json``;
-- ``cache``: la lista compilada de cada organización en memoria del proceso (PAT-LAZ-REN-02).
+- ``attribution``: el validador ``person_attribution`` (BLM §14.5 y A-45 punto 3: cargos,
+  culpa, documentos, nombres propios, correos, teléfonos y placas), TASK-340;
+- ``cache``: la lista compilada y el vocabulario declarado de cada organización en memoria del
+  proceso (PAT-LAZ-REN-02).
 
-El validador ``person_attribution`` (BLM §14.5) llega con TASK-340 sobre el mismo plegado. El
-registro está en ``loop.registration`` (``FREE_TEXT_REGISTRARS``). **Módulo crítico**: se importa
+El registro está en ``loop.registration`` (``FREE_TEXT_REGISTRARS``). **Módulo crítico**: se importa
 sin FastAPI ni SQLAlchemy.
 """
 
-from vigia_platform.loop.validators.cache import TTL_SECONDS, ListHead, VocabularyCache
+from vigia_platform.loop.validators.attribution import (
+    PERSON_ATTRIBUTION,
+    PersonAttributionRejected,
+    PersonAttributionValidator,
+    PersonAttributionVerdict,
+)
+from vigia_platform.loop.validators.cache import (
+    TTL_SECONDS,
+    DeclaredNamesCache,
+    ListHead,
+    VocabularyCache,
+)
 from vigia_platform.loop.validators.folding import validation_form
 from vigia_platform.loop.validators.vocabulary import (
     BLOCKED_VOCABULARY,
@@ -28,12 +41,17 @@ from vigia_platform.loop.validators.vocabulary import (
 
 __all__ = [
     "BLOCKED_VOCABULARY",
+    "PERSON_ATTRIBUTION",
     "TTL_SECONDS",
     "BlockedVocabularyRejected",
     "BlockedVocabularyValidator",
     "BlockedVocabularyVerdict",
     "CompiledVocabulary",
+    "DeclaredNamesCache",
     "ListHead",
+    "PersonAttributionRejected",
+    "PersonAttributionValidator",
+    "PersonAttributionVerdict",
     "VocabularyCache",
     "validation_form",
 ]
