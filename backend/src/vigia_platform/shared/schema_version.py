@@ -32,8 +32,14 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 26
-"""Versión mínima del esquema que exige el código de esta imagen: ``gob_0026`` (la tabla
+MINIMUM_SCHEMA_VERSION: Final = 33
+"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0033`` (el tipo
+``organization`` de ``notifications.notification.deep_link_ref`` que escribe
+``notification_engine``, TASK-324), que incluye ``laz_0032`` (la columna
+``accreditation.export_package.stored_objects`` que el consumidor de exportación escribe al cerrar
+el paquete y las rutas de descarga leen, TASK-345), que incluye ``laz_0029`` a ``laz_0031`` (los
+esquemas ``loop``, ``notifications`` y ``accreditation`` de U-04), que incluye ``gob_0028`` y
+``gob_0027``, que incluye ``gob_0026`` (la tabla
 ``fleet.fleet_alarm_evaluation`` con la histéresis que ``evaluate_fleet_alarms`` lee y escribe,
 VIG-161), que incluye ``gob_0025`` (el ``crl_number`` de ``fleet.revocation_list_state``, que
 reserva y firma ``regenerate_revocation_list``, TASK-220), que incluye ``gob_0024`` (la proyección
