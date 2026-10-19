@@ -32,7 +32,13 @@ from vigia_platform.loop.domain.enums import (
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.outbox.registries import EventType, EventTypeRegistry, PayloadModel
 
-__all__ = ["LOOP_EVENT_TYPES", "register_loop_event_types"]
+__all__ = [
+    "ASSISTANT_REQUESTED",
+    "LOOP_EVENT_TYPES",
+    "LOOP_INTERNAL_EVENT_TYPES",
+    "AssistantRequested",
+    "register_loop_event_types",
+]
 
 Count = Annotated[StrictInt, Field(ge=0, le=10_000_000)]
 Days = Annotated[StrictInt, Field(ge=0, le=3_660)]
@@ -282,8 +288,30 @@ LOOP_EVENT_TYPES: Final[tuple[EventType, ...]] = tuple(
 )
 """Los veintiún eventos del lazo, en el orden de §11.3."""
 
+ASSISTANT_REQUESTED: Final = "assistant_requested"
+
+
+class AssistantRequested(PayloadModel):
+    """Trabajo del consumidor ``assistant_worker`` (interno, TASK-316): solo identificadores; el
+    contexto se recompone en el worker desde el análisis, nunca viaja en la carga."""
+
+    request_id: UUIDv7
+    analysis_id: UUIDv7
+    zone_id: UUID
+
+
+LOOP_INTERNAL_EVENT_TYPES: Final[tuple[EventType, ...]] = (
+    EventType(
+        event_name=ASSISTANT_REQUESTED,
+        publisher_unit=ActorUnit.U04,
+        payload_model=AssistantRequested,
+        description_es="Se admitió una solicitud al asistente; el worker la atiende",
+    ),
+)
+"""El trabajo del asistente (TASK-316): interno, fuera de los 25 de §11.3."""
+
 
 def register_loop_event_types(registry: EventTypeRegistry) -> None:
-    """Registra los veintiún eventos del lazo al arrancar."""
-    for event_type in LOOP_EVENT_TYPES:
+    """Registra los veintiún eventos del lazo y el trabajo interno del asistente al arrancar."""
+    for event_type in (*LOOP_EVENT_TYPES, *LOOP_INTERNAL_EVENT_TYPES):
         registry.register(event_type)

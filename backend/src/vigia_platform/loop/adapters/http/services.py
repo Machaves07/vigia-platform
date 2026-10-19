@@ -23,6 +23,7 @@ from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -60,6 +61,9 @@ class LoopHttp:
     evidence: EvidenceService | None = None
     """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
     verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
+    assistant: AssistantService | None = None
+    """Las dos rutas del asistente de causa raíz (LC-LAZ-13, VIG-224); ningún adaptador del
+    proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
     inbox: InboxService | None = None
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
 
@@ -129,6 +133,12 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
                 clock=services.clock,
                 metrics=services.metrics,
             ),
+            clock=services.clock,
+        ),
+        assistant=AssistantService(
+            database=services.database,
+            authorizer=services.authorizer,
+            outbox=services.outbox,
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),

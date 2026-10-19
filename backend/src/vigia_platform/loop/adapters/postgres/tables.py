@@ -400,9 +400,18 @@ ASSISTANT_REQUEST: Final = Table(
     _uuid("outbox_event_id"),
     _integer("attempt_count"),
     _text("context_digest"),
+    Column("input_tokens", BigInteger, nullable=False),
+    Column("output_tokens", BigInteger, nullable=False),
+    Column("cache_read_tokens", BigInteger, nullable=False),
+    Column("provider_duration_ms", BigInteger, nullable=False),
+    _text("response_model", nullable=True),
+    _text("inference_geo", nullable=True),
+    _text("stop_reason", nullable=True),
+    _text("provider_request_id", nullable=True),
 )
 """§2.11 ``AssistantRequest`` ⛓ (solo organización, A-69); el límite exacto se cuenta sobre
-``(organization_id, user_id, requested_at)``."""
+``(organization_id, user_id, requested_at)``. El uso por solicitud (fichas, duración, modelo de
+la respuesta, región y motivo de parada) es de ``laz_0033`` (TASK-316, NFR-LAZ-31)."""
 
 ASSISTANT_DRAFT: Final = Table(
     "assistant_draft",
@@ -420,8 +429,10 @@ ASSISTANT_DRAFT: Final = Table(
     _boolean("accepted_by_human"),
     _boolean("edited_by_human"),
     _instant("created_at"),
+    _text("proposed_cause_category", nullable=True),
 )
-"""§2.11 ``AssistantDraft`` (solo organización, A-69)."""
+"""§2.11 ``AssistantDraft`` (solo organización, A-69); ``proposed_cause_category`` es de
+``laz_0033`` (TASK-316)."""
 
 BLOCKED_VOCABULARY_LIST: Final = Table(
     "blocked_vocabulary_list",

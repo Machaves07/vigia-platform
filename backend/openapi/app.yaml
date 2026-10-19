@@ -4283,6 +4283,60 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/root-cause-analyses/{analysis_id}/assistant-requests":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Pide al asistente un borrador de hipótesis para el análisis (asíncrono)"
+      "operationId": "request_assistant_loop_root_cause_analyses__analysis_id__assistant_requests_post"
+      "parameters":
+        - "name": "analysis_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Analysis Id"
+      "responses":
+        "202":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AssistantRequestOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/assistant-requests/{request_id}":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Estado de una solicitud al asistente y, si está lista, su borrador con citas"
+      "operationId": "assistant_status_loop_assistant_requests__request_id__get"
+      "parameters":
+        - "name": "request_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Request Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AssistantRequestOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings":
     "get":
       "tags":
@@ -5088,6 +5142,55 @@
         - "scope_level"
         - "scope_id"
       "title": "AssignmentView"
+    "AssistantRequestOut":
+      "properties":
+        "request_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Request Id"
+        "analysis_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Analysis Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "assistant_state":
+          "type": "string"
+          "title": "Assistant State"
+        "unavailable_cause":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Unavailable Cause"
+        "requested_at":
+          "type": "string"
+          "title": "Requested At"
+        "resolved_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Resolved At"
+        "attempt_count":
+          "type": "integer"
+          "title": "Attempt Count"
+        "draft":
+          "anyOf":
+            - "$ref": "#/components/schemas/DraftOut"
+            - "type": "null"
+      "type": "object"
+      "required":
+        - "request_id"
+        - "analysis_id"
+        - "zone_id"
+        - "assistant_state"
+        - "unavailable_cause"
+        - "requested_at"
+        - "resolved_at"
+        - "attempt_count"
+        - "draft"
+      "title": "AssistantRequestOut"
     "AuditCursorOut":
       "properties":
         "occurred_at":
@@ -5856,6 +5959,30 @@
         - "organization_id"
         - "checkpoints"
       "title": "CheckpointsOut"
+    "CitationOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "title": "Id"
+        "quoted_fact_es":
+          "type": "string"
+          "title": "Quoted Fact Es"
+        "reference_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Reference Id"
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+        - "quoted_fact_es"
+        - "reference_id"
+      "title": "CitationOut"
     "ClassificationBody":
       "properties":
         "outcome":
@@ -7255,6 +7382,48 @@
         - "required_headers"
         - "expires_at"
       "title": "DocumentUploadOut"
+    "DraftOut":
+      "properties":
+        "is_draft":
+          "type": "boolean"
+          "title": "Is Draft"
+        "draft_text":
+          "type": "string"
+          "title": "Draft Text"
+        "citations":
+          "items":
+            "$ref": "#/components/schemas/CitationOut"
+          "type": "array"
+          "title": "Citations"
+        "insufficient_evidence_declared":
+          "type": "boolean"
+          "title": "Insufficient Evidence Declared"
+        "proposed_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Proposed Cause Category"
+        "model":
+          "type": "string"
+          "title": "Model"
+        "model_version":
+          "type": "string"
+          "title": "Model Version"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+      "type": "object"
+      "required":
+        - "is_draft"
+        - "draft_text"
+        - "citations"
+        - "insufficient_evidence_declared"
+        - "proposed_cause_category"
+        - "model"
+        - "model_version"
+        - "created_at"
+      "title": "DraftOut"
+      "description": "El borrador del asistente: una propuesta, nunca una decisión (P8)."
     "DwellPredicate":
       "properties":
         "all_of":
