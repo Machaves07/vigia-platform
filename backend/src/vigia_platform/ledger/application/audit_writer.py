@@ -114,6 +114,11 @@ class AuditOperation(enum.StrEnum):
     URL en la transacción que la emite, con ``resource`` ``export`` y ``filters`` ``{artifact,
     sha256, records = access_grant_not_download, expires_at}``: registra la concesión de acceso,
     no la descarga efectiva."""
+    MONTHLY_PACKAGE_DOWNLOAD_GRANTED = "monthly_package_download_granted"
+    """U-04 (TASK-344; SUP-U05-41; PAT-LAZ-SEG-04): una URL de descarga de 15 min del paquete
+    mensual sellado de una zona, una entrada por URL en la transacción que la emite, con
+    ``resource`` ``monthly_package`` y ``filters`` ``{artifact, expires_at}``: registra la
+    concesión de acceso, no la descarga efectiva."""
     INTEGRITY_VERIFICATION = "integrity_verification"
     CHECKPOINT = "checkpoint"
     KEY_ROTATED = "key_rotated"

@@ -456,8 +456,8 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04 (``verify_loop_projection`` desde TASK-306; TASK-326
-verifica las diez)."""
+"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344) y
+``verify_loop_projection`` (TASK-306; TASK-326 verifica las diez)."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,

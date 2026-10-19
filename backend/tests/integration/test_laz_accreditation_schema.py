@@ -201,9 +201,11 @@ async def test_upgrade_head_applies_laz_0031(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'accreditation' AND c.relkind IN ('r', 'p')"
     )
-    # Las nueve entidades de DE §3.1 a §3.6.
-    assert {row["relname"] for row in rows} == set(ACCREDITATION_TABLES) == set(MIGRATION.TABLES)
-    assert len(ACCREDITATION_TABLES) == 9
+    # Las nueve entidades de DE §3.1 a §3.6, más monthly_package_lease (laz_0035, VIG-239): una
+    # migración aditiva solo añade, nunca quita de lo que laz_0031 ya dejó (BR-CTR-23).
+    assert {row["relname"] for row in rows} == set(ACCREDITATION_TABLES)
+    assert set(MIGRATION.TABLES) <= set(ACCREDITATION_TABLES)
+    assert len(ACCREDITATION_TABLES) == 10
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in rows), rows
     assert {row["owner"] for row in rows} == {"vigia_migrate"}
 
@@ -278,7 +280,9 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         "record_id",
     }
     assert granted["adoption_counter"] == {"activity_counts", "session_count", "last_activity_at"}
-    assert granted == {
+    # monthly_package_lease (laz_0035, VIG-239): no es de laz_0031, MIGRATION no lo conoce.
+    assert granted["monthly_package_lease"] == {"lease_owner", "lease_until", "attempt_count"}
+    assert {k: v for k, v in granted.items() if k != "monthly_package_lease"} == {
         table: set(MIGRATION.app_updatable_columns(table))
         for table in ACCREDITATION_TABLES
         if MIGRATION.app_updatable_columns(table)
@@ -441,7 +445,11 @@ async def test_the_period_keys_are_unique_indexes(superuser: Any) -> None:
         for row in rows
         if row["is_unique"] and row["columns"] == ["organization_id", "zone_id", "period"]
     }
-    assert unique == set(PERIOD_KEY_TABLES)
+    # monthly_package_lease (laz_0035, VIG-239) también tiene esa clave única como su primaria,
+    # pero no es un "sello" en el sentido de PERIOD_KEY_TABLES: su ON CONFLICT DO UPDATE renueva
+    # el arrendamiento a propósito (quien lo tenga vencido puede volver a tomarlo), nunca rechaza
+    # un segundo intento como hace claim/_CLAIM sobre monthly_package.
+    assert unique == set(PERIOD_KEY_TABLES) | {"monthly_package_lease"}
     # PAT-LAZ-ESC-02: el índice del límite exacto, en ese orden.
     rate = [row for row in rows if row["index_name"] == "export_request_rate"]
     assert [(row["table_name"], row["columns"]) for row in rate] == [
@@ -880,4 +888,5 @@ async def test_rows_hang_from_their_own_plant_zone_and_organization(
 
 
 def test_every_table_has_a_row_builder() -> None:
-    assert tuple(ROW_BUILDERS) == ACCREDITATION_TABLES == MIGRATION.TABLES
+    assert tuple(ROW_BUILDERS) == ACCREDITATION_TABLES
+    assert set(MIGRATION.TABLES) <= set(ACCREDITATION_TABLES)
