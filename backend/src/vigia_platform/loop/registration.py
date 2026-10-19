@@ -65,11 +65,23 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.application.review_queue import (
+    REVIEW_QUEUE_CONSUMER,
+    REVIEW_QUEUE_CONSUMER_CONCURRENCY,
+    REVIEW_REMINDERS_SCHEDULE,
+    REVIEW_REMINDERS_TASK,
+    ReviewQueueConsumer,
+    ReviewQueueReminder,
+    register_review_queue,
+    register_review_reminders,
+)
 from vigia_platform.loop.assistant.consumer import (
     ASSISTANT_WORKER,
     ASSISTANT_WORKER_CONCURRENCY,
@@ -236,6 +248,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     attachment_router,  # SUP-U05-09 y 10 (TASK-310)
     configuration_router,  # SUP-U05-38 y 39 (TASK-304)
     classification_router,  # SUP-U05-03 (TASK-308)
+    review_queue_router,  # SUP-U05-05 y 06 (TASK-309)
     actions_router,  # SUP-U05-07 y 08 (TASK-311)
     closure_router,  # SUP-U05-11 y 14 (TASK-343, VIG-233)
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
@@ -243,6 +256,19 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     findings_router,  # SUP-U05-01 (TASK-307)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
+
+
+def _register_review_reminders(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``review_reminders`` (TASK-309): un recordatorio por ventana, sin sacar nada de la cola."""
+    register_review_reminders(
+        registry,
+        ReviewQueueReminder(
+            repository=ReviewQueueRepository(services.database),
+            configuration=PostgresLoopConfigurationRepository(services.database),
+            outbox=services.outbox,
+            clock=services.clock,
+        ),
+    )
 
 
 class _NoEvidenceReads:
@@ -335,11 +361,15 @@ def _register_verify_loop_projection(
 
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     VERIFY_LOOP_PROJECTION: (VERIFY_LOOP_PROJECTION_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+    REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
 }
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``.
 
 ``rebuild_loop_projection`` (LC-LAZ-03) no está aquí: corre a demanda, sin cadencia (U04-H-14)."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (_register_verify_loop_projection,)
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_verify_loop_projection,
+    _register_review_reminders,  # review_reminders (TASK-309)
+)
 
 
 class AssistantProviderOnFirstUse:
@@ -386,14 +416,31 @@ def _register_assistant_worker(registry: ConsumerRegistry, services: UnitService
     )
 
 
+def _register_review_queue(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``review_queue`` (TASK-309): sin dependencia externa, lee del expediente en proceso."""
+    register_review_queue(
+        registry,
+        ReviewQueueConsumer(
+            store=LoopProjectionStore(),
+            reader=LectorExpediente(
+                database=services.database, audit=services.audit, clock=services.clock
+            ),
+            repository=ReviewQueueRepository(services.database),
+            configuration=PostgresLoopConfigurationRepository(services.database),
+        ),
+    )
+
+
 LOOP_CONSUMERS: Final[Mapping[str, int]] = {
     LOOP_PROJECTION: LOOP_PROJECTION_CONCURRENCY,  # TASK-341
     ASSISTANT_WORKER: ASSISTANT_WORKER_CONCURRENCY,  # TASK-316
+    REVIEW_QUEUE_CONSUMER: REVIEW_QUEUE_CONSUMER_CONCURRENCY,  # TASK-309
 }
 """Consumidores del lazo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
     _register_loop_projection,  # loop_projection (TASK-341)
     _register_assistant_worker,  # assistant_worker (TASK-316)
+    _register_review_queue,  # review_queue (TASK-309)
 )
 
 

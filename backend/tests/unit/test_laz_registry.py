@@ -5,10 +5,11 @@
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
   ``U04_TASKS`` con ``verify_loop_projection`` (TASK-306, diaria por organización;
-  ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí) y
-  ``monthly_package`` (TASK-342 a 344), ``U04_CONSUMERS`` con ``export_worker``
-  y ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre
-  (TASK-310), las dos de la configuración del lazo (TASK-304), la de la clasificación (TASK-308),
+  ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí),
+  ``review_reminders`` (TASK-309) y ``monthly_package`` (TASK-342 a 344), ``U04_CONSUMERS`` con
+  ``export_worker``, ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las
+  dos rutas de adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la
+  de la clasificación (TASK-308), las dos de la cola de revisión (TASK-309),
   las de la acción y su evidencia (TASK-311) y las del cierre firmado y la reapertura (TASK-343,
   VIG-233) de ``loop``, las dos de exportación y las tres del paquete mensual de
   ``accreditation`` (TASK-317 y TASK-342 a 344) y ``GET /notifications`` (TASK-324).
@@ -57,6 +58,7 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
@@ -167,6 +169,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/plants/{plant_id}/configuration"),
                 ("PUT", "/loop/plants/{plant_id}/configuration"),
                 ("POST", "/loop/findings/{finding_state_id}/classifications"),
+                ("GET", "/loop/review-queue"),  # TASK-309: SUP-U05-05
+                ("POST", "/loop/review-queue/{detection_id}/resolution"),  # TASK-309: SUP-U05-06
                 ("POST", "/loop/findings/{finding_state_id}/actions"),
                 ("POST", "/loop/actions/{action_id}/evidence"),
                 ("POST", "/loop/findings/{finding_state_id}/closure"),
@@ -186,6 +190,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].inbox is not None
             assert state[LOOP_STATE_KEY].closure is not None
             assert state[LOOP_STATE_KEY].reopening is not None
+            assert state[LOOP_STATE_KEY].review_queue is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -217,9 +222,13 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         unit.consumers(consumers, services)
     # TASK-306: verify_loop_projection, diaria por organización; rebuild_loop_projection (LC-LAZ-03)
     # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
-    # TASK-342 a 344: monthly_package, en el orden real de registered_units (accreditation, loop).
+    # TASK-342 a 344: monthly_package, mensual, por organización (accreditation);
+    # TASK-309: review_reminders, horaria, por organización (loop). ``tasks()`` ordena por
+    # nombre, no por orden de registro: "monthly_package" < "review_reminders" <
+    # "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         (
             registration.VERIFY_LOOP_PROJECTION,
             ActorUnit.U04,
@@ -227,12 +236,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             TaskIteration.PER_ORGANIZATION,
         ),
     ]
-    # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
+    # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02;
+    # TASK-309: review_queue, sobre detection_for_review_received.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
         ("export_worker", ActorUnit.U04, ("export_requested",)),
         ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
         ("notification_engine", ActorUnit.U04, subscribed_events()),
+        ("review_queue", ActorUnit.U04, ("detection_for_review_received",)),
     ]
     # TASK-316: el asistente declara su dependencia externa (cortacircuito de U-02).
     assistant = consumers.get("assistant_worker")
@@ -241,6 +252,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         attachment_router,
         configuration_router,
         classification_router,
+        review_queue_router,
         actions_router,
         closure_router,
         root_cause_router,
@@ -248,23 +260,28 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         findings_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
-    # TASK-306: registration.TASK_REGISTRARS ya no está vacío (verify_loop_projection).
-    assert len(registration.TASK_REGISTRARS) == 1
     assert notifications_registration.TASK_REGISTRARS == ()
+    # TASK-306 y TASK-309: verify_loop_projection y review_reminders.
+    assert len(registration.TASK_REGISTRARS) == 2
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 1
-    assert len(registration.CONSUMER_REGISTRARS) == 2
+    assert len(registration.CONSUMER_REGISTRARS) == 3
     assert len(accreditation_registration.TASK_REGISTRARS) == 1
-    assert registration.U04_TASKS == {
+    assert accreditation_registration.ACCREDITATION_TASKS == {
+        MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
+    }
+    assert {
         registration.VERIFY_LOOP_PROJECTION: (
             registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
             TaskIteration.PER_ORGANIZATION,
         ),
+        "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
-    }
+    } == registration.U04_TASKS
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
         "loop_projection": 4,
         "assistant_worker": 2,
+        "review_queue": 2,
         "notification_engine": 4,
     }
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
@@ -342,7 +359,8 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
         # Los consumidores y las tareas periódicas de la raíz (export_worker, TASK-317;
-        # verify_loop_projection, TASK-306; monthly_package, TASK-342 a 344): solo falta el evento.
+        # verify_loop_projection, TASK-306; review_reminders, TASK-309; monthly_package,
+        # TASK-342 a 344): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
         unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced

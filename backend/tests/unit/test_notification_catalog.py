@@ -80,7 +80,7 @@ EXPECTED: Final[dict[str, Row]] = {
     "loop_resumed": _row("U-04", N, False, (C,)),
     "review_confirmed": _row("U-04", N, False, (C,)),
     "review_discarded": _row("U-04", N, False, (C,)),
-    "review_overdue": _row("U-04", IM, True, (C,)),
+    "review_overdue": _row("U-04", N, True, (C,)),
     "action_assigned": _row("U-04", N, True, (C,), (ASSIGNEE,)),
     "action_evidence_added": _row("U-04", N, False, (C,)),
     "finding_closed": _row("U-04", N, True, (C, PM)),
@@ -195,9 +195,16 @@ def test_the_conditional_urgencies_follow_the_table() -> None:
         expected = NotificationUrgency.IMMEDIATE if kind.value in immediate else N
         assert alarm.urgency_for({"alarm_kind": kind.value}) == expected, kind
     assert alarm.urgency_for({"alarm_kind": "node_mute_"}) is NotificationUrgency.NORMAL
+    # U04-H-07 (TASK-309): solo el primer aviso de review_overdue es immediate.
+    overdue = CATALOG["review_overdue"]
+    assert overdue.urgency_for({"phase": "first"}) is NotificationUrgency.IMMEDIATE
+    for phase in ("repeat", "", "firstly"):
+        assert overdue.urgency_for({"phase": phase}) is NotificationUrgency.NORMAL
+    assert overdue.urgency_for({}) is NotificationUrgency.NORMAL
     assert {name for name, entry in CATALOG.items() if entry.immediate_when is not None} == {
         "gate_state_changed",
         "fleet_alarm_raised",
+        "review_overdue",
     }
 
 
@@ -212,6 +219,8 @@ def test_immediate_is_never_silenceable() -> None:
         assert entry.silenceable({}) is not immediate, entry.event_name
     assert CATALOG["gate_state_changed"].silenceable({"status": "revoked"}) is False
     assert CATALOG["gate_state_changed"].silenceable({"status": "approved"}) is True
+    assert CATALOG["review_overdue"].silenceable({"phase": "first"}) is False
+    assert CATALOG["review_overdue"].silenceable({"phase": "repeat"}) is True
 
 
 def test_only_integrity_compromised_bypasses_the_email_circuit() -> None:
