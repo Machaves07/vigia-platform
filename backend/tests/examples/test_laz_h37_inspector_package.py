@@ -15,9 +15,11 @@ El paquete ``with_clips`` lleva, leído de vuelta de sus volúmenes ZIP: los hal
 adjunto con su declaración, la línea de tiempo de cobertura, la auditoría, los puntos de control
 y las claves; y el manifiesto declara la organización, la planta y el periodo, el hash de **cada**
 artefacto (que coincide con sus bytes), los avisos fijos, la revocación, la regresión, el acuerdo
-sustituido, y el documento y el verificador **ausentes con su motivo** (TASK-319 y TASK-346).
-Ningún dato de la otra organización. La forma ``without_clips`` lleva lo mismo salvo los bytes de
-los clips, que se listan con su hash, su duración y su zona bajo el aviso fijo.
+sustituido, el documento portátil (presente desde TASK-319; aquí con el generador falso y rápido
+de ``tests/export_contents_support.py``, no con WeasyPrint) y el verificador ``vigia_verify.py``
+con su versión (TASK-346). Ningún dato de la otra organización. La forma ``without_clips`` lleva lo
+mismo salvo los bytes de los clips, que se listan con su hash, su duración y su zona bajo el
+aviso fijo.
 
 Solo datos generados.
 """
@@ -42,7 +44,6 @@ from vigia_platform.accreditation.manifest.model import (
     AGGREGATION_NOTICE_ES,
     ANONYMIZATION_STATEMENT_ES,
     COVERAGE_NOTICE_ES,
-    DOCUMENT_ABSENT_ES,
     REGRESSION_NOTICE_ES,
     REVOCATION_NOTICE_ES,
     WITH_CLIPS_NOTICE_ES,
@@ -564,14 +565,17 @@ def test_single_occupancy_zone_is_aggregated_and_says_why(
     assert all("content" not in record for record in finding["records"])
 
 
-def test_document_is_declared_absent_and_the_verifier_travels(
+def test_document_and_verifier_are_written_and_nothing_is_declared_absent(
     package: tuple[ExportWorld, Composed],
 ) -> None:
+    """Desde TASK-319 el documento portátil ya no falta, y desde TASK-346 tampoco el verificador:
+    los dos viajan, con su hash, y ninguna entrada se declara ausente."""
     _, composed = package
     manifest = composed.manifest
-    assert manifest["absent_entries"] == [{"kind": "document", "reason_es": DOCUMENT_ABSENT_ES}]
-    assert composed.package.document_sha256 == EMPTY_SHA256
-    assert composed.package.stored.document is None
+    assert manifest["absent_entries"] == []
+    assert {item["kind"] for item in manifest["artifacts"]} >= {"document", "verifier"}
+    assert composed.package.document_sha256 != EMPTY_SHA256
+    assert composed.package.stored.document is not None
     # TASK-346: el verificador viaja con su hash y su versión declarada (NFR-LAZ-53).
     bundle = load_verifier_bundle()
     assert composed.artifacts[VERIFIER_PATH] == bundle.data

@@ -97,7 +97,12 @@ pytestmark = pytest.mark.integration
 
 KIB: Final = 1024
 SETTINGS: Final = ExportStreamSettings(
-    part_size=5 * 1024 * KIB, volume_max_bytes=256 * KIB, manifest_reserve_bytes=128 * KIB
+    # 256 KiB no bastaba desde que el compositor real escribe el documento portátil (TASK-319,
+    # VIG-236): con las dos fuentes Noto Sans completas (``full_fonts=True``, determinismo del
+    # documento), el PDF ronda los 500 KiB él solo.
+    part_size=5 * 1024 * KIB,
+    volume_max_bytes=4 * 1024 * KIB,
+    manifest_reserve_bytes=128 * KIB,
 )
 
 
