@@ -43,6 +43,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
 )
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.events import LOOP_EVENT_TYPES
@@ -116,7 +117,8 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
 
 
 def test_the_u04_units_register_only_what_their_tasks_added() -> None:
-    # TASK-310: los adjuntos de cierre en loop; TASK-304 y TASK-308: configuración y clasificación;
+    # TASK-310: los adjuntos de cierre en loop; TASK-304, TASK-308 y TASK-315: configuración,
+    # clasificación y causa raíz;
     # TASK-317: la exportación (dos rutas, export_worker con concurrencia 1 y su app.state) en
     # accreditation. Nada más todavía.
     units = {unit.name: unit for unit in registered_units()}
@@ -135,15 +137,20 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         state = unit.api_state(services)
         if name == "loop":
             # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``;
-            # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03.
+            # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03;
+            # TASK-315: SUP-U05-16 a 18.
             assert routes == [
                 ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
                 ("POST", "/loop/attachments/{attachment_id}/read-url"),
                 ("GET", "/loop/plants/{plant_id}/configuration"),
                 ("PUT", "/loop/plants/{plant_id}/configuration"),
                 ("POST", "/loop/findings/{finding_state_id}/classifications"),
+                ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+                ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
+                ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
             ]
             assert state[LOOP_STATE_KEY].classification is not None
+            assert state[LOOP_STATE_KEY].root_cause is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -162,7 +169,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("export_worker", ActorUnit.U04, ("export_requested",))
     ]
-    assert (attachment_router, configuration_router, classification_router) == registration.ROUTERS
+    assert (
+        attachment_router,
+        configuration_router,
+        classification_router,
+        root_cause_router,
+    ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()
