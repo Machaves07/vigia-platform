@@ -155,6 +155,17 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         "vigia_platform.notifications.recipients.event_scope",
         "vigia_platform.notifications.recipients.client_recipients",
         "vigia_platform.notifications.recipients.provider_recipients",
+        # loop.assistant (TASK-316): lee la solicitud y su borrador solo por la ``Transaction``
+        # dada (la abre ``AssistantService.status``, registrado y guardado).
+        "vigia_platform.loop.assistant.service.read_request",
+        # loop.assistant (TASK-316): la admisión y el presupuesto de fichas cuentan solo por la
+        # ``Transaction`` dada (la abren ``AssistantService.request`` y ``AssistantWorker``).
+        "vigia_platform.loop.assistant.budget.admit",
+        "vigia_platform.loop.assistant.budget.token_budget",
+        # accreditation.export (TASK-318): sin consultas propias; pide cada tramo de 31 días a
+        # ``CoveragePort.linea_de_tiempo`` (``CoverageService``, que pone la guarda) con el
+        # contexto que recibe.
+        "vigia_platform.accreditation.export.timeline.zone_timeline",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

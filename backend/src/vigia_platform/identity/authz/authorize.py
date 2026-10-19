@@ -269,6 +269,11 @@ class Authorizer:
         self._audit = audit
         self._provider_organization_id = provider_organization_id
 
+    @property
+    def provider_organization_id(self) -> uuid.UUID:
+        """La organización proveedora (para ``narrowed`` con las mismas reglas que aquí)."""
+        return self._provider_organization_id
+
     async def authorize(
         self, context: ScopeContext, key: PermissionKey | str, resource: Resource
     ) -> ScopeContext:

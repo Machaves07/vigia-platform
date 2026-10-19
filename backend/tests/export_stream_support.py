@@ -21,6 +21,7 @@ Solo datos generados.
 from __future__ import annotations
 
 import base64
+import dataclasses
 import hashlib
 import io
 import json
@@ -55,6 +56,7 @@ __all__ = [
     "job_from_json",
     "job_to_json",
     "read_volume",
+    "real_job",
     "scope_from_json",
     "scope_to_json",
     "synthetic_chunks",
@@ -138,6 +140,20 @@ def job_from_json(value: Mapping[str, Any]) -> ExportJob:
         plant_id=uuid.UUID(value["plant_id"]),
         export_id=uuid.UUID(value["export_id"]),
         attempt=int(value["attempt"]),
+    )
+
+
+def real_job(job: ExportJob, spec: Mapping[str, Any]) -> ExportJob:
+    """El trabajo del compositor real (TASK-318) sobre ``synthetic_job``: ``spec["zones"]`` zonas
+    derivadas de la organización, la forma ``spec["form"]`` y el contexto de la entrega."""
+    from tests.properties.laz.strategies.export import world_context
+
+    zones = tuple(uuid.uuid5(job.organization_id, f"zone{index}") for index in range(spec["zones"]))
+    return dataclasses.replace(
+        job,
+        zone_ids=zones,
+        package_form=PackageForm(spec["form"]),
+        context=world_context(job.organization_id),
     )
 
 

@@ -43,8 +43,12 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.notifications.adapters.http.services import (
@@ -122,6 +126,18 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 clock=services.clock,
             ),
+            actions=ActionService(  # TASK-311
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            evidence=EvidenceService(  # TASK-311
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
             root_cause=RootCauseService(  # TASK-315
                 database=database,
                 writer=services.writer,
@@ -140,6 +156,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 ),
                 clock=services.clock,
             ),
+            assistant=AssistantService(  # TASK-316
+                database=database,
+                authorizer=services.authorizer,
+                outbox=services.outbox,
+                clock=services.clock,
+            ),
+            inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
         ),
     }
 
@@ -253,6 +276,39 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             ),
         ),
     ),
+    # VIG-223 (TASK-311): asignar la acción de un hallazgo de B y añadir evidencia a una acción
+    # de B responden igual que con un identificador inexistente (not_found, nunca
+    # transition_not_allowed ni un detail_code); nada se escribe en B.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/actions"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/actions",
+                json={
+                    "action_type": "engineering",
+                    "action_description": "Instalar un resguardo fijo en el acceso a la zona",
+                    "assignee_user_id": str(i.user),
+                },
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/actions/{action_id}/evidence"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/actions/{i.record}/evidence",
+                json={
+                    "description": "Resguardo fijo instalado y anclado al piso en el acceso",
+                    "performed_at": "2026-10-01T10:00:00.000Z",
+                    "performed_by_role": "Técnico de mantenimiento",
+                },
+            ),
+        ),
+    ),
     # VIG-214 (TASK-315): el análisis de causa raíz de un hallazgo o de un análisis de B responde
     # igual que uno inexistente (not_found, nunca un detail_code); nada se escribe en B.
     (
@@ -280,6 +336,28 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 f"/loop/root-cause-analyses/{i.record}/signature",
                 json=_ANALYSIS_SIGNATURE,
             ),
+        ),
+    ),
+    # VIG-224 (TASK-316): pedir el asistente sobre un análisis de B o leer una solicitud de B
+    # responde igual que con un identificador inexistente (not_found, nunca un detail_code ni el
+    # 503 del circuito); nada se encola ni se escribe en B.
+    (
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("POST", f"/loop/root-cause-analyses/{i.record}/assistant-requests"),
+        ),
+    ),
+    (
+        ("GET", "/loop/assistant-requests/{request_id}"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/assistant-requests/{i.record}")),
+    ),
+    # VIG-222 (TASK-307): la bandeja con una zona de B en la consulta responde igual que con una
+    # inexistente (not_found, nunca forbidden ni una página vacía con avisos de B).
+    (
+        ("GET", "/loop/findings"),
+        Case(
+            Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).

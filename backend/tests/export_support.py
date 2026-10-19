@@ -43,7 +43,7 @@ from tests.factories import uuid7
 from tests.integration.conftest import PostgresEndpoint
 from tests.ledger_database import set_organization
 from tests.outbox_support import app_database
-from tests.writer_support import unit_context
+from tests.writer_support import save_record_types, unit_context
 from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
@@ -63,6 +63,7 @@ from vigia_platform.accreditation.export.worker import (
     ExportWorker,
     register_export_worker,
 )
+from vigia_platform.accreditation.record_types import register_accreditation_record_types
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
 from vigia_platform.ledger.application.writer import EscritorExpediente
@@ -298,6 +299,8 @@ class ExportStack:
     worker: ExportWorker | None = None
     """El manejador que el consumidor registrado invoca (lo fija cada prueba)."""
     extra_databases: list[Database] = field(default_factory=list)
+    writer: EscritorExpediente | None = None
+    """El escritor de la pila, con los tipos de U-02 y de la acreditación (TASK-318)."""
 
     def run(self, awaitable: Any) -> Any:
         return self.authz.run(awaitable)
@@ -529,6 +532,8 @@ def export_stack(
         registry = RecordTypeRegistry()
         for definition in U02_RECORD_TYPES:
             registry.register(definition)
+        # TASK-318: el cierre escribe ``export_produced`` (y ``export_available``).
+        register_accreditation_record_types(registry)
         catalog = OutboxCatalog()
         register_u02_event_types(catalog.event_types)
         register_accreditation_event_types(catalog.event_types)
@@ -542,6 +547,7 @@ def export_stack(
         async def synchronize() -> None:
             system = unit_context(uuid.uuid4(), ActorUnit.U02, kind=ActorKind.SYSTEM)
             async with sessions.database.transaction(system) as transaction:
+                await save_record_types(transaction, registry)
                 await catalog.synchronize(SqlOutboxCatalogStore(transaction), sessions.clock)
 
         authz.run(synchronize())
@@ -596,6 +602,7 @@ def export_stack(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=60.0
         )
         stack = ExportStack(authz, database, catalog, outbox, exports, app, client)
+        stack.writer = writer
         stack_ref.append(stack)
         try:
             yield stack

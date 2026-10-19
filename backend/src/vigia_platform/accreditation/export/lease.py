@@ -36,21 +36,29 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Final, Protocol
 
+from pydantic import BaseModel
 from sqlalchemy import text
 
 from vigia_platform.accreditation.export.composer_port import ExportPackage
+from vigia_platform.ledger.application.writer import LedgerRejection, Receipt, RecordScope
 from vigia_platform.loop.domain.enums import ExportState, PackageForm
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
+from vigia_platform.shared.ids import uuid7_at
+from vigia_platform.shared.outbox.publish import NewEvent
+from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.worker.leases import LeaseLost
 
 __all__ = [
+    "EXPORT_AVAILABLE",
+    "EXPORT_PRODUCED",
     "LEASE_DURATION",
     "PROGRESS_EVERY",
     "RENEW_EVERY",
@@ -59,10 +67,15 @@ __all__ = [
     "ExportLease",
     "ExportLeasePort",
     "ExportLeaseSettings",
+    "ExportRecordRejected",
     "InMemoryExportLeaseStore",
     "LeaseLost",
+    "RecordWriter",
     "SqlExportLeaseStore",
 ]
+
+EXPORT_PRODUCED: Final = "export_produced"
+EXPORT_AVAILABLE: Final = "export_available"
 
 LEASE_DURATION: Final = timedelta(seconds=60)
 """Vence a los 60 s (PAT-LAZ-RES-01 = PAT-NUC-RES-05)."""
@@ -212,7 +225,7 @@ _READY: Final = text(
     "UPDATE accreditation.export_request SET state = 'ready', progress_percent = 100,"
     " progress_updated_at = :now, current_artifact = NULL, completed_at = :now,"
     " expires_at = :expires_at, multipart_upload_id = NULL, lease_owner = NULL,"
-    " lease_until = NULL"
+    " lease_until = NULL, record_id = CAST(:record_id AS uuid)"
     " WHERE export_id = :export_id AND lease_owner = :owner AND lease_until >= :now"
     " RETURNING export_id"
 )
@@ -222,6 +235,31 @@ _FAILED: Final = text(
     " WHERE export_id = :export_id AND lease_owner = :owner AND lease_until >= :now"
     " RETURNING export_id"
 )
+
+
+class ExportRecordRejected(Exception):
+    """El expediente rechazó ``export_produced``: no hay paquete (fallo no declarado, se retoma)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(f"export_produced rechazado: {code}")
+        self.code = code
+
+
+class RecordWriter(Protocol):
+    """``EscritorExpediente.write`` en la transacción del cierre."""
+
+    async def write(
+        self,
+        context: ScopeContext | None,
+        record_type: str,
+        content: Mapping[str, Any] | BaseModel,
+        *,
+        scope: RecordScope | None = None,
+        events: Sequence[NewEvent] = (),
+        occurred_at: datetime | None = None,
+        transaction: Transaction | None = None,
+        record_id: uuid.UUID | None = None,
+    ) -> Receipt | LedgerRejection: ...
 
 
 class TransactionSource(Protocol):
@@ -241,10 +279,15 @@ class SqlExportLeaseStore:
     """
 
     def __init__(
-        self, *, database: TransactionSource, settings: ExportLeaseSettings | None = None
+        self,
+        *,
+        database: TransactionSource,
+        settings: ExportLeaseSettings | None = None,
+        writer: RecordWriter | None = None,
     ) -> None:
         self._database = database
         self.settings = settings if settings is not None else ExportLeaseSettings()
+        self._writer = writer
 
     async def acquire(
         self, context: ScopeContext, export_id: uuid.UUID, owner: str, now: datetime
@@ -348,9 +391,15 @@ class SqlExportLeaseStore:
         now: datetime,
         expires_at: datetime,
     ) -> None:
-        """El paquete y ``ready`` en **una** transacción: nunca uno sin el otro."""
+        """El paquete y ``ready`` en **una** transacción: nunca uno sin el otro.
+
+        Con el escritor y un paquete del compositor real (con sus conteos), en la misma
+        transacción y **antes** que nada (la cadena de la planta primero, como toda escritura de
+        U-04) se escribe ``export_produced`` con su evento ``export_available`` (BR-LAZ-100); su
+        ``record_id`` queda en la solicitud. Si la valla no confirma, se deshace también."""
         checkpoint_ids = lease.checkpoint_record_ids or ()
         async with self._database.transaction(context) as transaction:
+            record_id = await self._produced(transaction, context, lease, package, now, expires_at)
             await transaction.execute(
                 _INSERT_PACKAGE,
                 {
@@ -368,10 +417,76 @@ class SqlExportLeaseStore:
                 },
             )
             row = (
-                await transaction.execute(_READY, {**_fence(lease, now), "expires_at": expires_at})
+                await transaction.execute(
+                    _READY,
+                    {
+                        **_fence(lease, now),
+                        "expires_at": expires_at,
+                        "record_id": None if record_id is None else str(record_id),
+                    },
+                )
             ).first()
             if row is None:
                 raise LeaseLost()
+
+    async def _produced(
+        self,
+        transaction: Transaction,
+        context: ScopeContext,
+        lease: ExportLease,
+        package: ExportPackage,
+        now: datetime,
+        expires_at: datetime,
+    ) -> uuid.UUID | None:
+        """El registro ``export_produced`` y su ``export_available`` (TASK-318)."""
+        if self._writer is None or not package.finding_counts:
+            return None
+        if package.manifest_sha256 is None or lease.generated_at is None:
+            raise ValueError("un paquete real lleva el hash de su manifiesto y su generated_at")
+        record_id = uuid7_at(now, os.urandom(10))
+        zone_ids = [str(zone) for zone in lease.zone_ids]
+        content = {
+            "export_id": str(lease.export_id),
+            "zone_ids": zone_ids,
+            "period": {
+                "starts_at": format_timestamp(lease.period_from),
+                "ends_at": format_timestamp(lease.period_to),
+            },
+            "package_form": lease.package_form.value,
+            **{key: int(value) for key, value in package.finding_counts.items()},
+            "document_sha256": package.document_sha256,
+            "archive_sha256": package.archive_sha256,
+            "manifest_sha256": package.manifest_sha256,
+            "artifact_count": package.artifact_count,
+            "checkpoint_record_ids": [str(value) for value in lease.checkpoint_record_ids or ()],
+            "verifier_version": package.verifier_version,
+            "requested_by": dict(lease.requested_by),
+            "generated_at": format_timestamp(lease.generated_at),
+        }
+        written = await self._writer.write(
+            context,
+            EXPORT_PRODUCED,
+            content,
+            scope=RecordScope(plant_id=lease.plant_id),
+            events=(
+                NewEvent(
+                    event_name=EXPORT_AVAILABLE,
+                    payload={
+                        "export_id": str(lease.export_id),
+                        "record_id": str(record_id),
+                        "zone_ids": zone_ids,
+                        "package_form": lease.package_form.value,
+                        "expires_at": format_timestamp(expires_at),
+                    },
+                ),
+            ),
+            occurred_at=now,
+            transaction=transaction,
+            record_id=record_id,
+        )
+        if isinstance(written, LedgerRejection):
+            raise ExportRecordRejected(written.code.value)
+        return written.record_id
 
     async def finish_failed(
         self, context: ScopeContext, lease: ExportLease, failure_code: str, now: datetime

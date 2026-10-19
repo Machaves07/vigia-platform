@@ -1,6 +1,6 @@
 """``deep_link_ref`` de un aviso de toda la organización (TASK-324; LC-LAZ-30 y 31; BR-LAZ-128).
 
-Revisión laz_0033, tras ``laz_0032`` (objetos de la exportación). ``laz_0030`` cerró
+Revisión laz_0034, tras ``laz_0033`` (uso del asistente). ``laz_0030`` cerró
 ``notification.deep_link_ref`` a los seis tipos de ``domain-entities.md`` §6.2 (``finding``,
 ``queue_item``, ``export``, ``package``, ``zone``, ``node``), pero el catálogo de §7.2 tiene
 eventos que no nombran ninguno de esos objetos: los de usuarios y roles, concesiones, alertas de la
@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "laz_0033"
-down_revision: str | None = "laz_0032"
+revision: str = "laz_0034"
+down_revision: str | None = "laz_0033"
 branch_labels: None = None
 depends_on: None = None
 

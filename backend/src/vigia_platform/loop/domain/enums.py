@@ -48,6 +48,9 @@ __all__ = [
     "ExportState",
     "ExposureStatus",
     "FindingLifecycleState",
+    "InboxFindingNotice",
+    "InboxPartitionNotice",
+    "InboxZoneNotice",
     "LoopActivityKind",
     "MetricKey",
     "MetricStatus",
@@ -180,12 +183,16 @@ class AssistantRequestState(enum.StrEnum):
 
 
 class AssistantUnavailableCause(enum.StrEnum):
-    """``assistant_unavailable_cause`` (RNF-RES-11, respuesta 9; nota de NFR Requirements)."""
+    """``assistant_unavailable_cause`` (RNF-RES-11, respuesta 9; nota de NFR Requirements).
+
+    ``budget_exceeded`` es de TASK-316 (``laz_0033``): el tope mensual de fichas de la
+    organización (NFR-LAZ-35) agotado, sin construir el contexto."""
 
     NO_API_KEY = "no_api_key"
     CIRCUIT_OPEN = "circuit_open"
     TIMEOUT = "timeout"
     PROVIDER_ERROR = "provider_error"
+    BUDGET_EXCEEDED = "budget_exceeded"
 
 
 class UnclosableReviewOutcome(enum.StrEnum):
@@ -261,6 +268,37 @@ class SubjectKind(enum.StrEnum):
 
     FINDING = "finding"
     DETECTION = "detection"
+
+
+class InboxZoneNotice(enum.StrEnum):
+    """``inbox_zone_notice``: lo que la bandeja declara de cada zona (TASK-307; BR-LAZ-04, 149 y
+    153; P2). **Ninguno afirma que la zona estuviera observada** ni que no ocurriera nada: la
+    bandeja no lee la cobertura del periodo (cero llamadas, NFR-LAZ-03)."""
+
+    COVERAGE_UNAVAILABLE = "coverage_unavailable"
+    """El nodo asignado comunica; la cobertura del periodo no está en la bandeja."""
+    NOT_OBSERVED = "not_observed"
+    """El nodo asignado está mudo o sin estado conocido: no se observó."""
+    NO_NODE_ASSIGNED = "no_node_assigned"
+    """La zona no tiene nodo asignado: no se observó."""
+
+
+class InboxPartitionNotice(enum.StrEnum):
+    """``inbox_partition_notice``: la proyección de una planta que no se puede leer como el
+    expediente (TASK-307; BR-LAZ-156); la bandeja lo declara en vez de inventar un estado."""
+
+    PROJECTION_REBUILDING = "projection_rebuilding"
+    PROJECTION_DIVERGED = "projection_diverged"
+
+
+class InboxFindingNotice(enum.StrEnum):
+    """``inbox_finding_notice``: los avisos de un elemento, desde las columnas enriquecidas de
+    ``FindingState`` (TASK-307; BR-LAZ-10, 11, 150 y 155)."""
+
+    AGREEMENT_REVOKED = "agreement_revoked"
+    WALK_TEST_REGRESSION_PENDING = "walk_test_regression_pending"
+    EVIDENCE_FLAGGED = "evidence_flagged"
+    MISSING_SEGMENTS_DECLARED = "missing_segments_declared"
 
 
 class EffectOnLoop(enum.StrEnum):
@@ -439,6 +477,9 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "escalation_level": EscalationLevel,
     "evidence_ref_kind": EvidenceRefKind,
     "blocked_term_origin": BlockedTermOrigin,
+    "inbox_zone_notice": InboxZoneNotice,
+    "inbox_partition_notice": InboxPartitionNotice,
+    "inbox_finding_notice": InboxFindingNotice,
 }
 """Enumeraciones del lazo con etiqueta en ``labels.loop.es.json`` (NFR-LAZ-52)."""
 

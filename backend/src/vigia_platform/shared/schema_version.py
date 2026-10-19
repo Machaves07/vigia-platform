@@ -32,10 +32,13 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 33
-"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0033`` (el tipo
+MINIMUM_SCHEMA_VERSION: Final = 34
+"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0034`` (el tipo
 ``organization`` de ``notifications.notification.deep_link_ref`` que escribe
-``notification_engine``, TASK-324), que incluye ``laz_0032`` (la columna
+``notification_engine``, TASK-324), que incluye ``laz_0033`` (el uso por
+solicitud del asistente en ``loop.assistant_request``, la causa ``budget_exceeded`` y el borrador
+sin citas que declara evidencia insuficiente, que escriben las rutas y el consumidor del
+asistente, TASK-316), que incluye ``laz_0032`` (la columna
 ``accreditation.export_package.stored_objects`` que el consumidor de exportación escribe al cerrar
 el paquete y las rutas de descarga leen, TASK-345), que incluye ``laz_0029`` a ``laz_0031`` (los
 esquemas ``loop``, ``notifications`` y ``accreditation`` de U-04), que incluye ``gob_0028`` y

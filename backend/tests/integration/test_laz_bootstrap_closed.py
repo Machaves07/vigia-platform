@@ -90,13 +90,18 @@ MISSING: Final[tuple[tuple[str, str], ...]] = (
     *(("consumer", name) for name in sorted(U04_CONSUMERS)),
     *(("free_text_validator", name) for name in sorted(U04_FREE_TEXT_VALIDATORS)),
 )
-"""Cada una de las 17 + 26 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` +
+"""Cada una de las 17 + 27 + ``len(U04_TASKS)`` + ``len(U04_CONSUMERS)`` +
 ``len(U04_FREE_TEXT_VALIDATORS)`` cosas que U-04 exige."""
 
-SUBSCRIBED: Final = frozenset({"export_requested"})
-"""Evento de U-04 cuya suscripción se conserva al quitarlo (``export_worker``, TASK-317): el
-catálogo se niega a componerse con la suscripción huérfana. De los demás eventos de U-04 también
-se quita la suscripción de ``notification_engine`` (TASK-324)."""
+SUBSCRIBERS: Final = {
+    "export_requested": "export_worker",
+    "assistant_requested": "assistant_worker",
+}
+"""Eventos de U-04 cuya suscripción se conserva al quitarlos (``export_worker``, TASK-317, y
+``assistant_worker``, TASK-316), con su consumidor: el catálogo se niega a componerse con la
+suscripción huérfana. De los demás eventos de U-04 también se quita la suscripción de
+``notification_engine`` (TASK-324)."""
+SUBSCRIBED: Final = frozenset(SUBSCRIBERS)
 
 ONE_OF_EACH: Final = (
     ("record_type", "closure"),
@@ -229,7 +234,7 @@ def test_composition_fails_naming_exactly_what_is_missing(
             # componerse antes del manifiesto (también fallo cerrado), y nombra los dos.
             with pytest.raises(OutboxStartupError) as refused:
                 compose(runtime, units)
-            assert name in str(refused.value) and "export_worker" in str(refused.value)
+            assert name in str(refused.value) and SUBSCRIBERS[name] in str(refused.value)
             continue
         with pytest.raises(RegistrationIncomplete) as raised:
             compose(runtime, units)

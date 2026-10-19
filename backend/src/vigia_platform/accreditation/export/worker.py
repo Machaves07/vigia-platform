@@ -319,6 +319,7 @@ class _Run:
             attempt=lease.attempt_count,
             generated_at=lease.generated_at,
             checkpoint_record_ids=lease.checkpoint_record_ids,
+            context=self._context,
         )
         composing = asyncio.create_task(self._worker._composer.compose(job, self))
         keeper = asyncio.create_task(self._keep_alive(composing))

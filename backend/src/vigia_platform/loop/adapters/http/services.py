@@ -18,8 +18,12 @@ from fastapi import Request
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -52,6 +56,16 @@ class LoopHttp:
     """``POST /loop/findings/{finding_state_id}/classifications`` (LC-LAZ-07, VIG-212)."""
     root_cause: RootCauseService | None = None
     """Las tres rutas del análisis de causa raíz guiado (LC-LAZ-12, VIG-214)."""
+    actions: ActionService | None = None
+    """``POST /loop/findings/{finding_state_id}/actions`` (LC-LAZ-09, VIG-223)."""
+    evidence: EvidenceService | None = None
+    """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
+    verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
+    assistant: AssistantService | None = None
+    """Las dos rutas del asistente de causa raíz (LC-LAZ-13, VIG-224); ningún adaptador del
+    proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
+    inbox: InboxService | None = None
+    """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -88,6 +102,18 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             authorizer=services.authorizer,
             clock=services.clock,
         ),
+        actions=ActionService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        evidence=EvidenceService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
         root_cause=RootCauseService(
             database=services.database,
             writer=services.writer,
@@ -109,6 +135,13 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             ),
             clock=services.clock,
         ),
+        assistant=AssistantService(
+            database=services.database,
+            authorizer=services.authorizer,
+            outbox=services.outbox,
+            clock=services.clock,
+        ),
+        inbox=InboxService(database=services.database, authorizer=services.authorizer),
     )
 
 

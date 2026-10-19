@@ -9,8 +9,9 @@ cómo se escriben sus bytes. Lo recibe por puerto:
   determinista: con el mismo ``ExportJob`` devuelve el mismo paquete (PR-LAZ-49, que TASK-345 y
   TASK-318 comprueban sobre bytes reales). Si falta un insumo obligatorio lanza
   ``ExportInputUnavailable`` con su código, y la solicitud pasa a ``failed`` **sin paquete**
-  (BR-LAZ-101). El compositor real es de TASK-318; hasta entonces la raíz instala
-  ``MissingPackageComposer``, que falla sin publicar nada (nunca un paquete inventado).
+  (BR-LAZ-101). El compositor real es ``export.contents.ExportComposer`` (TASK-318), que lee con
+  ``ExportJob.context``; un proceso sin depósito de evidencias instala ``MissingPackageComposer``,
+  que falla sin publicar nada (nunca un paquete inventado).
 - ``ExportSink``: lo que el compositor cuenta mientras trabaja: la subida por partes que abrió
   (``upload_started``, para poder abortarla al retomar), el artefacto en curso y cada artefacto
   terminado (el progreso, publicado al terminar cada uno, NFR-LAZ-12).
@@ -36,8 +37,10 @@ from vigia_platform.accreditation.detail_codes import AccreditationDetailCode
 from vigia_platform.accreditation.export.volumes import ExportLocation, StoredObjects
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain.enums import PackageForm
+from vigia_platform.shared.context import ScopeContext
 
 __all__ = [
+    "CHECKPOINT_UNAVAILABLE",
     "DECLARED_FAILURE_CODES",
     "ExportInputUnavailable",
     "ExportJob",
@@ -51,14 +54,21 @@ __all__ = [
     "UploadPortMissing",
 ]
 
+CHECKPOINT_UNAVAILABLE: Final = "checkpoint_unavailable"
+"""Falta un punto de control fijado o la clave pública de su firma (BR-LAZ-91; ``CheckpointPort``
+de U-02 falla cerrado). No es un ``detail_code`` de U-04 (la lista cerrada de 44 no lo tiene): es
+el código de fallo del puerto de U-02 que la solicitud guarda en ``failure_code``."""
+
 DECLARED_FAILURE_CODES: Final = frozenset(
     {
         AccreditationDetailCode.COVERAGE_UNAVAILABLE.value,
         LoopDetailCode.STANDARD_TEXT_UNAVAILABLE.value,
         LoopDetailCode.GATE_STATE_UNAVAILABLE.value,
+        CHECKPOINT_UNAVAILABLE,
     }
 )
-"""Insumos obligatorios cuya falta declara la exportación ``failed`` (BR-LAZ-101; SUP-U05-23)."""
+"""Insumos obligatorios cuya falta declara la exportación ``failed`` (BR-LAZ-91 y 101;
+SUP-U05-23)."""
 
 
 class ExportInputUnavailable(Exception):
@@ -90,6 +100,9 @@ class ExportJob:
     """``generated_at`` del manifiesto, fijado en el primer intento."""
     checkpoint_record_ids: tuple[uuid.UUID, ...]
     """Puntos de control previos, tomados en el primer intento."""
+    context: ScopeContext | None = field(default=None, compare=False, repr=False)
+    """El contexto de la entrega (la organización del evento) con el que el compositor lee; no
+    forma parte del paquete. ``None`` en los compositores que no leen nada (el sintético)."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -105,6 +118,11 @@ class ExportPackage:
     stored: StoredObjects = field(default_factory=StoredObjects)
     """Los volúmenes y el documento escritos (``ArchiveResult.stored``): lo que la descarga sirve.
     Vacío si el compositor no escribió bytes (el sintético de TASK-317)."""
+    manifest_sha256: str | None = None
+    """SHA-256 de los bytes canónicos del manifiesto, que ``export_produced`` copia (TASK-318)."""
+    finding_counts: Mapping[str, int] = field(default_factory=dict)
+    """Los conteos por estado del manifiesto que ``export_produced`` copia (TASK-318). Vacío en el
+    compositor sintético, que no escribe el registro."""
 
 
 class ExportSink(Protocol):
