@@ -39,6 +39,7 @@ Si falta uno, o una tarea cambió de cadencia, unidad o iteración, ``vigia-api`
 from __future__ import annotations
 
 import enum
+import importlib
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Final
@@ -55,6 +56,7 @@ from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.http.actions_routes import actions_router
+from vigia_platform.loop.adapters.http.assistant_routes import assistant_router
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
@@ -67,6 +69,14 @@ from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.assistant.consumer import (
+    ASSISTANT_WORKER,
+    ASSISTANT_WORKER_CONCURRENCY,
+    AssistantWorker,
+    register_assistant_worker,
+)
+from vigia_platform.loop.assistant.context import AssistantContext
+from vigia_platform.loop.assistant.port import AssistantOutcome, AssistantProviderPort
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
@@ -201,10 +211,12 @@ U04_EVENT_TYPES: Final = frozenset(
         "adoption_low",
         # interno (TASK-317): el trabajo del consumidor export_worker, fuera de §11.3
         "export_requested",
+        # interno (TASK-316): el trabajo del consumidor assistant_worker, fuera de §11.3
+        "assistant_requested",
     }
 )
-"""Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y el trabajo interno
-``export_requested`` (TASK-317)."""
+"""Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y los trabajos internos
+``export_requested`` (TASK-317) y ``assistant_requested`` (TASK-316)."""
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
@@ -217,6 +229,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     classification_router,  # SUP-U05-03 (TASK-308)
     actions_router,  # SUP-U05-07 y 08 (TASK-311)
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
+    assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
@@ -276,12 +289,58 @@ def _register_loop_projection(registry: ConsumerRegistry, services: UnitServices
     )
 
 
+class AssistantProviderOnFirstUse:
+    """El adaptador del asistente, elegido y construido en la **primera entrega**.
+
+    Solo ``vigia-worker`` entrega eventos: ``vigia-api`` compone el consumidor con el resto del
+    catálogo pero **nunca importa ni construye un adaptador** del proveedor (NFR-LAZ-26, LC-LAZ-14).
+    Sin clave del proveedor, ``FakeAssistantProvider.unconfigured()``: el consumidor responde
+    ``no_api_key`` sin llamar (BR-LAZ-74). El adaptador real con clave es de TASK-344.
+    """
+
+    def __init__(self) -> None:
+        self._provider: AssistantProviderPort | None = None
+
+    def _resolved(self) -> AssistantProviderPort:
+        if self._provider is None:
+            fake = importlib.import_module("vigia_platform.loop.adapters.assistant.fake")
+            self._provider = fake.FakeAssistantProvider.unconfigured()
+        return self._provider
+
+    @property
+    def resolved(self) -> bool:
+        """Si ya se eligió el adaptador (``False`` en ``vigia-api``)."""
+        return self._provider is not None
+
+    @property
+    def configured(self) -> bool:
+        return self._resolved().configured
+
+    async def complete(self, context: AssistantContext, *, timeout: timedelta) -> AssistantOutcome:
+        return await self._resolved().complete(context, timeout=timeout)
+
+
+def _register_assistant_worker(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``assistant_worker`` (TASK-316) con los dos validadores de la política sellada."""
+    register_assistant_worker(
+        registry,
+        AssistantWorker(
+            database=services.database,
+            provider=AssistantProviderOnFirstUse(),
+            free_text=services.free_text,
+            clock=services.clock,
+        ),
+    )
+
+
 LOOP_CONSUMERS: Final[Mapping[str, int]] = {
     LOOP_PROJECTION: LOOP_PROJECTION_CONCURRENCY,  # TASK-341
+    ASSISTANT_WORKER: ASSISTANT_WORKER_CONCURRENCY,  # TASK-316
 }
 """Consumidores del lazo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
     _register_loop_projection,  # loop_projection (TASK-341)
+    _register_assistant_worker,  # assistant_worker (TASK-316)
 )
 
 

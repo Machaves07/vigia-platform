@@ -20,7 +20,7 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -28,7 +28,7 @@ import httpx
 
 from tests.api_support import World
 from tests.integration.conftest import PostgresEndpoint
-from tests.laz_support import IngestedSubject, LoopOrganization, loop_world
+from tests.laz_support import IngestedSubject, LoopOrganization, loop_world, register_u04
 from tests.loop_classification_support import (
     CONCESSION_HEADER,
     SAME_ORIGIN,
@@ -45,10 +45,13 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.shared.api.middleware import ContextAuthorizer
+from vigia_platform.shared.outbox.registries import OutboxCatalog
 
 __all__ = [
     "CONCLUSION",
@@ -106,6 +109,8 @@ class RootCauseStack(ClassificationStack):
     free_text: FreeTextPolicyRegistry
     ports: dict[str, Any]
     """``catalog``, ``fleet`` y ``coverage``: los puertos reales del servicio."""
+    assistant: AssistantService | None = None
+    """``AssistantService`` (TASK-316) si la pila se pidió con ``assistant=True``."""
 
     def root_cause_like(self, **changes: Any) -> RootCauseService:
         """Otro servicio de causa raíz sobre la misma base (p. ej. una subclase de prueba)."""
@@ -243,9 +248,17 @@ def _declare_standard(stack: RootCauseStack, organization: LoopOrganization) -> 
 
 @contextlib.contextmanager
 def root_cause_stack(
-    endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8
+    endpoint: PostgresEndpoint,
+    prefix: str,
+    *,
+    pool: int = 8,
+    register: Callable[[RecordTypeRegistry, OutboxCatalog], None] = register_u04,
+    assistant: bool = False,
 ) -> Iterator[RootCauseStack]:
-    with loop_world(endpoint, prefix) as world:
+    """``register`` añade al catálogo lo que la prueba necesite antes de sellar (p. ej. el
+    consumidor ``assistant_worker``); ``assistant`` instala ``AssistantService`` (TASK-316) en
+    ``LoopHttp`` con la bandeja del mundo."""
+    with loop_world(endpoint, prefix, register=register) as world:
         stack = world.stack
         authz = stack.authz
         clock = authz.sessions.clock
@@ -284,6 +297,13 @@ def root_cause_stack(
             clock=clock,
             **ports,
         )
+        assistant_service = (
+            AssistantService(
+                database=database, authorizer=authz.authorizer, outbox=stack.outbox, clock=clock
+            )
+            if assistant
+            else None
+        )
         app = World(clock=clock).app(
             runtime={
                 "sessions": authz.contexts,
@@ -294,7 +314,11 @@ def root_cause_stack(
                     clock=clock,
                 ),
                 "state": {
-                    LOOP_STATE_KEY: LoopHttp(classification=classification, root_cause=root_cause)
+                    LOOP_STATE_KEY: LoopHttp(
+                        classification=classification,
+                        root_cause=root_cause,
+                        assistant=assistant_service,
+                    )
                 },
             },
         )
@@ -302,7 +326,15 @@ def root_cause_stack(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=60.0
         )
         built = RootCauseStack(
-            world, database, writer, classification, client, root_cause, free_text, ports
+            world,
+            database,
+            writer,
+            classification,
+            client,
+            root_cause,
+            free_text,
+            ports,
+            assistant_service,
         )
         for organization in (world.a, world.b):
             _declare_standard(built, organization)

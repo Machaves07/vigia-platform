@@ -71,7 +71,8 @@
     "no_api_key": "sin clave del proveedor del asistente",
     "circuit_open": "cortacircuito abierto",
     "timeout": "tiempo de espera agotado",
-    "provider_error": "error del proveedor del asistente"
+    "provider_error": "error del proveedor del asistente",
+    "budget_exceeded": "presupuesto mensual de fichas agotado"
   },
   "unclosable_review_outcome": {
     "renewed": "declaración renovada",
