@@ -44,8 +44,9 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
 2. **Escribir** con ``ExportStream`` (TASK-345), en orden fijo: un ``findings_json`` y un
    ``coverage`` por zona, la auditoría, los puntos de control, las claves, los clips (solo en la
    forma ``with_clips``: los bytes verificados contra su SHA-256) y los adjuntos de cierre con su
-   declaración; el manifiesto (``accreditation.manifest``) al final, en ``vol-01``. El documento
-   portátil (TASK-319) y el verificador (TASK-346) se **declaran ausentes** con su motivo.
+   declaración, el documento portátil (``accreditation.document``, TASK-319); el manifiesto
+   (``accreditation.manifest``) al final, en ``vol-01``. El verificador (TASK-346) sigue
+   **declarado ausente** con su motivo.
 
 **Zonas unipersonales** (BR-LAZ-99): las marcas de los hallazgos se presentan agregadas a su
 ventana y sus registros se listan por sus hashes, sin contenido (el expediente conserva la marca
@@ -57,6 +58,7 @@ Todo es determinista con el mismo ``ExportJob``: el mismo paquete en cualquier i
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import itertools
 import uuid
@@ -72,6 +74,7 @@ from vigia_platform.accreditation.export.composer_port import (
     ExportPackage,
     ExportSink,
 )
+from vigia_platform.accreditation.export.document import generate_document
 from vigia_platform.accreditation.export.stream import Artifact, ExportStream
 from vigia_platform.accreditation.export.timeline import (
     TimelineCoverage,
@@ -80,6 +83,7 @@ from vigia_platform.accreditation.export.timeline import (
     timeline_json,
     zone_timeline,
 )
+from vigia_platform.accreditation.export.volumes import DOCUMENT_NAME
 from vigia_platform.accreditation.manifest.build import (
     ABSENT_REASONS,
     build_manifest,
@@ -182,8 +186,10 @@ __all__ = [
 ]
 
 EMPTY_SHA256: Final = hashlib.sha256(b"").hexdigest()
-"""``document_sha256`` mientras el documento se declara ausente (TASK-319): la suma de cero
-bytes, que nadie puede confundir con la de un documento."""
+"""``document_sha256`` de un paquete que no escribió el documento portátil (compositores
+sintéticos de antes de TASK-319, o cualquiera sin ``Artifact(document=True)``): la suma de cero
+bytes, que nadie puede confundir con la de un documento real. El compositor real siempre escribe
+el documento, así que nunca cae en este valor."""
 
 LOOP_RECORD_TYPES: Final = tuple(sorted(U03_RECORD_TYPES | U04_RECORD_TYPES))
 """Los tipos que se leen de cada zona para sus hallazgos (los 2 de U-03 y los 17 de U-04)."""
@@ -783,6 +789,16 @@ class ExportComposer:
                 else:
                     await writer.add_canonical(path, kind, payload)
                 await sink.artifact_finished(kind, done, total)
+            await sink.artifact_started("document")
+            document_inputs = _manifest_inputs(job, contents, writer.artifacts, with_clips)
+            pdf_bytes = await asyncio.to_thread(generate_document, document_inputs)
+            await writer.add_bytes(
+                Artifact(
+                    path=DOCUMENT_NAME, kind="document", size_bytes=len(pdf_bytes), document=True
+                ),
+                pdf_bytes,
+            )
+            await sink.artifact_finished("document", total + 1, total + 1)
             manifest = build_manifest(_manifest_inputs(job, contents, writer.artifacts, with_clips))
             document = manifest_json(manifest)
             result = await writer.finish(document)
@@ -1367,7 +1383,9 @@ def _manifest_inputs(
             for item in written
         ),
         absent=tuple(
-            AbsentEntry(kind=kind, reason_es=ABSENT_REASONS[kind]) for kind in ABSENT_KINDS
+            AbsentEntry(kind=kind, reason_es=ABSENT_REASONS[kind])
+            for kind in ABSENT_KINDS
+            if kind not in {item.kind for item in written}
         ),
         checkpoints=tuple(_checkpoint_entry(item) for item in contents.checkpoints),
         checkpoint_public_keys=tuple(key.to_json() for key in contents.public_keys),

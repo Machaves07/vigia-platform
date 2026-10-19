@@ -258,7 +258,13 @@ def test_pr_laz_49_killed_worker_resumes_to_the_same_package(
 
 REAL_SETTINGS: Final = {
     "part_size": 5 * 1024 * KIB,
-    "volume_max_bytes": 48 * KIB,
+    # 48 KiB bastaba mientras el documento se declaraba ausente (hasta TASK-319, VIG-236): con
+    # el documento real (``full_fonts=True`` por el determinismo del PR-LAZ-49, NFR-LAZ-54), un
+    # solo artefacto no comprimido ronda los 500 KiB, más que cualquier volumen pequeño que no lo
+    # contenga entero. 530 KiB sigue siendo un volumen pequeño: cabe el documento solo, pero no
+    # junto al resto del contenido del primer volumen y la reserva del manifiesto, así que el
+    # paquete real del escenario sigue ocupando varios.
+    "volume_max_bytes": 530 * KIB,
     "manifest_reserve_bytes": 40 * KIB,
 }
 """Volúmenes pequeños: el paquete real del escenario ocupa varios."""
@@ -278,10 +284,11 @@ def test_pr_laz_49_with_real_content_resumes_to_the_same_package(
     kill_percent: int,
     form: str,
 ) -> None:
-    """TASK-318: con el compositor **real** (hallazgos, cobertura, auditoría, puntos de control,
-    claves, clips y manifiesto), matar el proceso al 40 % y al 80 % y retomar desde cero da el
-    mismo ``archive_sha256``, el mismo ``document_sha256`` (el de la entrada declarada ausente,
-    hasta TASK-319), los mismos volúmenes y el mismo manifiesto que sin interrupción."""
+    """TASK-318 y TASK-319: con el compositor **real** (hallazgos, cobertura, auditoría, puntos
+    de control, claves, clips, documento portátil y manifiesto), matar el proceso al 40 % y al
+    80 % y retomar desde cero da el mismo ``archive_sha256``, el mismo ``document_sha256`` real
+    (el documento es determinista: PR-LAZ-49 también para él), los mismos volúmenes y el mismo
+    manifiesto que sin interrupción."""
     endpoint, name = bucket
     real = {"zones": 2, "form": form, "findings": 6}
     job = real_job(synthetic_job(), real)
@@ -293,7 +300,7 @@ def test_pr_laz_49_with_real_content_resumes_to_the_same_package(
         ).compose(job, RecordingSink())
     )
     assert len(reference.stored.volumes) > 1
-    assert reference.document_sha256 == EMPTY_SHA256
+    assert reference.document_sha256 != EMPTY_SHA256
     storage = _storage(endpoint, name)
     process = _spawn(
         {
@@ -338,10 +345,8 @@ def test_pr_laz_49_with_real_content_resumes_to_the_same_package(
     assert [(v.sha256, v.size_bytes) for v in package.stored.volumes] == [
         (v.sha256, v.size_bytes) for v in reference.stored.volumes
     ]
-    assert {entry["kind"] for entry in package.manifest["absent_entries"]} == {
-        "document",
-        "verifier",
-    }
+    assert {entry["kind"] for entry in package.manifest["absent_entries"]} == {"verifier"}
+    assert {entry["kind"] for entry in package.manifest["artifacts"]} >= {"document"}
     assert asyncio.run(storage.pending_multipart_uploads(location.prefix)) == ()
 
 
