@@ -232,7 +232,8 @@ jobs:
     name: backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 45 min: los tiempos se midieron con el perfil pr (19-23 min); en main corre ci (200 ejemplos), aún sin medir.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
