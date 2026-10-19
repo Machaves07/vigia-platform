@@ -222,6 +222,7 @@ from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.replay import DeadLetterReplay
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.outbox.u02_events import register_u02_event_types
+from vigia_platform.shared.ratelimit import RateLimiter
 from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.storage import ObjectHead, PresignedRequest
 
@@ -1279,6 +1280,26 @@ class RejectingPasswords(UnusedPasswords):
         return VerifyResult(ok=False, needs_rehash=False)
 
 
+class _LimiterClock:
+    """El reloj del limitador de tasa de esta aplicación: el simulado, 50 veces más rápido.
+
+    ``send`` avanza 1 ms por petición, así que el cubo de 1 200 por origen (20 fichas por
+    segundo) no se rellenaba nunca y el módulo, que ya pasa de 1 200 peticiones autenticadas
+    desde el mismo origen, acababa en ``rate_limited`` en sus últimas pruebas (VIG-222). A 50
+    veces, cada petición repone una ficha: el limitador sigue en la cadena, pero esta prueba de
+    aislamiento no depende de cuántas rutas haya. Los límites se prueban en sus propias pruebas.
+    """
+
+    def __init__(self, clock: Any) -> None:
+        self._clock = clock
+
+    def now(self) -> Any:
+        return self._clock.now()
+
+    def monotonic(self) -> float:
+        return float(self._clock.monotonic()) * 50
+
+
 @dataclass
 class Organization:
     site: Site
@@ -1991,6 +2012,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             units=None,
             permissions=None,
             runtime={
+                "rate_limiter": RateLimiter(_LimiterClock(sessions.clock)),
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
                     audit=authz.audit,
