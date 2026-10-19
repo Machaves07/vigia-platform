@@ -43,7 +43,9 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -113,6 +115,18 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 clock=services.clock,
             ),
             classification=ClassificationService(  # TASK-308
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            actions=ActionService(  # TASK-311
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            evidence=EvidenceService(  # TASK-311
                 database=database,
                 writer=services.writer,
                 authorizer=services.authorizer,
@@ -230,6 +244,39 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "outcome": "confirmed",
                     "reason_category": "real_coexistence",
                     "reason_text": "Motivo sintético de la clasificación del hallazgo en la zona",
+                },
+            ),
+        ),
+    ),
+    # VIG-223 (TASK-311): asignar la acción de un hallazgo de B y añadir evidencia a una acción
+    # de B responden igual que con un identificador inexistente (not_found, nunca
+    # transition_not_allowed ni un detail_code); nada se escribe en B.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/actions"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/actions",
+                json={
+                    "action_type": "engineering",
+                    "action_description": "Instalar un resguardo fijo en el acceso a la zona",
+                    "assignee_user_id": str(i.user),
+                },
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/actions/{action_id}/evidence"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/actions/{i.record}/evidence",
+                json={
+                    "description": "Resguardo fijo instalado y anclado al piso en el acceso",
+                    "performed_at": "2026-10-01T10:00:00.000Z",
+                    "performed_by_role": "Técnico de mantenimiento",
                 },
             ),
         ),

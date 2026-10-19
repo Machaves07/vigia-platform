@@ -144,11 +144,15 @@ SIGNER_FIELDS: Final = frozenset(
             "display_name",
         ),
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature", "response", "display_name"),
+        # La declaración de privacidad de un adjunto de evidencia (VIG-223, TASK-310): afirma que
+        # **ninguna** persona identificable aparece; es la guarda de P3, no un dato de persona.
+        ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),
     }
 )
 """Excepciones nombradas una a una: el **firmante** de un cambio (P8) es un usuario de la
-plataforma que decide, nunca una persona observada (DE §2.2, ``assignee_user_id``). La bandeja no
-tiene ninguna; VIG-242 decide sobre el catálogo completo."""
+plataforma que decide, nunca una persona observada (DE §2.2, ``assignee_user_id``), y la
+declaración de que un adjunto no muestra a nadie es la guarda de P3. La bandeja no tiene ninguna;
+VIG-242 decide sobre el catálogo completo."""
 
 
 def violations(routes: Iterable[Any]) -> list[str]:
