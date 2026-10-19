@@ -78,6 +78,16 @@ BODIES: dict[str, dict[str, Any]] = {
         "performed_at": "2026-10-01T10:00:00.000Z",
         "performed_by_role": "Técnico de mantenimiento",
     },
+    "/loop/findings/{finding_state_id}/closure": {
+        "closure_description": "Resguardo fijo verificado y anclado en el acceso de la zona",
+        "professional_license": "LIC-SST-0001",
+    },
+    "/loop/findings/{finding_state_id}/reopening": {
+        "reason_text": "El resguardo se retiró durante el mantenimiento mayor",
+        "action_type": "engineering",
+        "action_description": "Reinstalar el resguardo fijo en el acceso de la zona",
+        "assignee_user_id": str(uuid.uuid4()),
+    },
     "/loop/findings/{finding_state_id}/root-cause-analyses": {},
     "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}": {
         "statement": "La carretilla cruzó el pasillo peatonal con la estación de carga energizada",
@@ -163,6 +173,9 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         # Acción correctiva y su evidencia de U-04 (TASK-311).
         ("POST", "/loop/findings/{finding_state_id}/actions"),
         ("POST", "/loop/actions/{action_id}/evidence"),
+        # Cierre firmado y reapertura de un hallazgo de U-04 (TASK-343, VIG-233).
+        ("POST", "/loop/findings/{finding_state_id}/closure"),
+        ("POST", "/loop/findings/{finding_state_id}/reopening"),
         # Análisis de causa raíz guiado de U-04 (TASK-315).
         ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
