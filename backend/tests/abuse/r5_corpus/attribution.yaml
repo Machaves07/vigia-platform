@@ -1,0 +1,117 @@
+# Corpus R5 · atribución de causa a una persona en todas sus formas (TASK-340, BLM §14.5).
+# Solo datos generados: los nombres y números son sintéticos.
+version: 1
+description: "Cargo con verbo, cargo como causa, error humano, nombres propios, documentos y culpa."
+cases:
+  - id: R5-ATR-01
+    text: "El operario omitió el bloqueo de energía antes de intervenir la prensa."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_action
+    reason: "Un cargo como sujeto de una omisión causal (§14.5, primera fila)."
+  - id: R5-ATR-02
+    text: "La supervisora de turno no verificó la guarda."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_action
+    reason: "Cargo femenino con complemento («de turno») y omisión con «no»."
+  - id: R5-ATR-03
+    text: "Los operarios se saltaron el enclavamiento de la puerta."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_action
+    reason: "Cargo en plural con verbo pronominal («se saltaron»)."
+  - id: R5-ATR-04
+    text: "El técnico nuevo desactivó el sensor de la cortina."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_action
+    reason: "Una palabra entre el cargo y el verbo de acción."
+  - id: R5-ATR-05
+    text: "Causa raíz: el operario."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_as_cause
+    reason: "Un cargo declarado como causa (§14.5, segunda fila)."
+  - id: R5-ATR-06
+    text: "La causa fue el contratista de mantenimiento."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_as_cause
+    reason: "Cargo como causa con verbo copulativo."
+  - id: R5-ATR-07
+    text: "Hallazgo atribuible al auxiliar del turno noche."
+    expected: reject
+    code: person_attribution_detected
+    pattern: role_as_cause
+    reason: "Atribución explícita a un cargo sin la palabra «causa»."
+  - id: R5-ATR-08
+    text: "Falta de atención durante el cambio de turno."
+    expected: reject
+    code: person_attribution_detected
+    pattern: human_error
+    reason: "Fórmula de error humano como causa (§14.5, tercera fila)."
+  - id: R5-ATR-09
+    text: "Error humano en la operación de la grúa."
+    expected: reject
+    code: person_attribution_detected
+    pattern: human_error
+    reason: "«Error humano» como explicación del evento."
+  - id: R5-ATR-10
+    text: "Falla del operador al ajustar la guarda."
+    expected: reject
+    code: person_attribution_detected
+    pattern: human_error
+    reason: "La falla se atribuye a un cargo."
+  - id: R5-ATR-11
+    text: "Juan Pérez estaba en la zona de la prensa sin arnés."
+    expected: reject
+    code: person_attribution_detected
+    pattern: proper_name
+    reason: "Nombre propio de persona fuera del vocabulario declarado (§14.5, quinta fila)."
+  - id: R5-ATR-12
+    text: "Se observó a MARÍA GÓMEZ junto a la banda transportadora."
+    expected: reject
+    code: person_attribution_detected
+    pattern: proper_name
+    reason: "Nombre propio escrito todo en mayúsculas."
+  - id: R5-ATR-13
+    text: "\u0408u\u0430n Pérez en la zona norte."
+    expected: reject
+    code: person_attribution_detected
+    pattern: proper_name
+    reason: "Nombre propio con homoglifos cirílicos (J y a) que una comparación ASCII no vería."
+  - id: R5-ATR-14
+    text: "Cédula 1.020.304.050 registrada en la portería."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Documento de identidad con su número (§14.5, cuarta fila)."
+  - id: R5-ATR-15
+    text: "C.C. 79123456 del contratista."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Documento abreviado «C.C.»."
+  - id: R5-ATR-16
+    text: "Cédula\u00a01020304050 en la planilla."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Documento con NBSP entre la palabra y el número (A-45)."
+  - id: R5-ATR-17
+    text: "documento n° ７９１２３４５６ del visitante."
+    expected: reject
+    code: person_attribution_detected
+    pattern: identity_document
+    reason: "Documento con dígitos de ancho completo (A-45)."
+  - id: R5-ATR-18
+    text: "Por culpa del operario la guarda quedó abierta."
+    expected: reject
+    code: blocked_vocabulary_term
+    reason: "La fórmula de culpa de §14.4 cae primero en el vocabulario bloqueado."
+  - id: R5-ATR-19
+    text: "Fue una omisión voluntaria del personal."
+    expected: reject
+    code: blocked_vocabulary_term
+    reason: "Atribución de intención (§14.4): el vocabulario bloqueado la rechaza."

@@ -1,0 +1,87 @@
+# Corpus R5 · datos de contacto de una persona con evasiones Unicode (TASK-340, A-45 punto 3).
+# Solo datos generados: dominios .test y dígitos sintéticos.
+version: 1
+description: "Correos, teléfonos y placas, en claro y con homoglifos, NBSP, U+3000, ancho completo e invisibles."
+cases:
+  - id: R5-CON-01
+    text: "Contacto: juan.perez@example.test"
+    expected: reject
+    code: person_attribution_detected
+    pattern: email
+    reason: "Correo electrónico en claro."
+  - id: R5-CON-02
+    text: "Escribir a ana arroba correo punto test"
+    expected: reject
+    code: person_attribution_detected
+    pattern: email
+    reason: "Correo escrito con «arroba» y «punto»."
+  - id: R5-CON-03
+    text: "Correo ＪＵＡＮ＠ＥＸＡＭＰＬＥ．ＴＥＳＴ"
+    expected: reject
+    code: person_attribution_detected
+    pattern: email
+    reason: "Correo en letras y signos de ancho completo."
+  - id: R5-CON-04
+    text: "Contacto ju\u0430n.p\u0435r\u0435z@example.test"
+    expected: reject
+    code: person_attribution_detected
+    pattern: email
+    reason: "Correo con a y e cirílicas."
+  - id: R5-CON-05
+    text: "Llamar al +57 300 123 4567"
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Teléfono con prefijo de país y espacios."
+  - id: R5-CON-06
+    text: "Llamar al ３００１２３４５６７"
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Teléfono con dígitos de ancho completo."
+  - id: R5-CON-07
+    text: "Llamar al 300\u00a0123\u00a04567"
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Teléfono separado con NBSP."
+  - id: R5-CON-08
+    text: "Turno noche: 300\u3000123\u30004567"
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Teléfono separado con el espacio ideográfico U+3000."
+  - id: R5-CON-09
+    text: "Teléfono (601) 234-5678"
+    expected: reject
+    code: person_attribution_detected
+    pattern: phone
+    reason: "Teléfono fijo con paréntesis y guion."
+  - id: R5-CON-10
+    text: "Llamar al 300\u200b123 4567"
+    expected: reject
+    code: invisible_character
+    reason: "Un espacio de anchura cero parte el número; la política base de U-02 lo rechaza antes."
+  - id: R5-CON-11
+    text: "El carro de placa ABC-123 quedó en el muelle."
+    expected: reject
+    code: person_attribution_detected
+    pattern: vehicle_plate
+    reason: "Placa de vehículo junto a «placa»."
+  - id: R5-CON-12
+    text: "Vehículo con placa \u0425\u0423Z 987 en el patio."
+    expected: reject
+    code: person_attribution_detected
+    pattern: vehicle_plate
+    reason: "Placa con X e Y cirílicas."
+  - id: R5-CON-13
+    text: "la moto ＫＬＭ ４５Ｄ en el patio"
+    expected: reject
+    code: person_attribution_detected
+    pattern: vehicle_plate
+    reason: "Placa de moto en ancho completo."
+  - id: R5-CON-14
+    text: "Correo juan\u200b.perez@example.test"
+    expected: reject
+    code: invisible_character
+    reason: "Invisible dentro del correo; la política base de U-02 lo rechaza antes."

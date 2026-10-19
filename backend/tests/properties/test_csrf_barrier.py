@@ -63,6 +63,11 @@ BODIES: dict[str, dict[str, Any]] = {
         "review_deadline_business_days": 7,
         "reason": "Ajuste acordado en el comité de seguridad",
     },
+    "/loop/findings/{finding_state_id}/classifications": {
+        "outcome": "confirmed",
+        "reason_category": "real_coexistence",
+        "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -102,6 +107,7 @@ def _url(path: str) -> str:
         .replace("{attachment_id}", str(uuid.uuid4()))
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{export_id}", str(uuid.uuid4()))
+        .replace("{finding_state_id}", str(uuid.uuid4()))
     )
 
 
@@ -129,6 +135,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/attachments/{attachment_id}/read-url"),
         # Configuración del lazo de U-04 (TASK-304).
         ("PUT", "/loop/plants/{plant_id}/configuration"),
+        # Clasificación de un hallazgo de U-04 (TASK-308).
+        ("POST", "/loop/findings/{finding_state_id}/classifications"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).

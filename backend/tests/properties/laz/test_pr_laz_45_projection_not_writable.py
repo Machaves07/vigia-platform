@@ -60,9 +60,12 @@ BOOKKEEPING: Final = frozenset(
     {"last_event_id", "last_record_id", "projection_updated_at", "projection_digest"}
 )
 ADDRESSING: Final = frozenset(
-    {"organization_id", "plant_id", "zone_id", "subject_kind", "subject_id"}
+    {"organization_id", "plant_id", "zone_id", "subject_kind", "subject_id", "finding_state_id"}
 )
-"""Lo que localiza al sujeto: una operación lo recibe para decir **sobre qué** actúa."""
+"""Lo que localiza al sujeto: una operación lo recibe para decir **sobre qué** actúa.
+``finding_state_id`` es el identificador de la fila de la bandeja en la ruta de todas las
+operaciones sobre un hallazgo (LC-LAZ §6.3, p. ej. la clasificación de TASK-308): localiza al
+sujeto, no escribe ningún campo de estado."""
 RECORD_INPUTS: Final = frozenset({"assignee_user_id"})
 """Datos que una operación recibe para escribir **su registro** (``action_assigned``) y que la
 proyección copia de ese registro: no se escriben en la fila sino en el expediente."""
