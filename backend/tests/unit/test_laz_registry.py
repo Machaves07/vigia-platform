@@ -49,6 +49,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
 )
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
+from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
@@ -157,11 +158,13 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
                 ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
+                ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
             ]
             assert state[LOOP_STATE_KEY].classification is not None
             assert state[LOOP_STATE_KEY].actions is not None
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
+            assert state[LOOP_STATE_KEY].inbox is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -196,6 +199,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         classification_router,
         actions_router,
         root_cause_router,
+        findings_router,
     ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
