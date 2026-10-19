@@ -306,6 +306,31 @@ def test_filters_are_zone_family_tier_state_and_period(stack: InboxStack) -> Non
     ) == {str(rows["late"])}
 
 
+def test_the_period_compares_the_mark_that_is_shown(stack: InboxStack) -> None:
+    # Sonda de la revisión: exacta a las 10:45 (cubo de 10:00). En zona no unipersonal se muestra
+    # la exacta, así que el periodo la compara a ella; en zona unipersonal, el cubo (nunca se
+    # abre un oráculo de la hora exacta).
+    organization = stack.world.organization()
+    who = stack.member(organization)
+    finding = stack.finding(organization)
+    exact = datetime(2026, 10, 6, 10, 45, tzinfo=UTC)
+    bucket = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
+    common: dict[str, Any] = {"occurred_at_exact": exact, "occurred_at_bucket": bucket}
+    plain = str(stack.row(finding, single_occupancy_zone=False, **common))
+    single = str(stack.row(finding, single_occupancy_zone=True, **common))
+
+    def ids(start: datetime, end: datetime) -> set[str]:
+        return set(stack.ids(who, {"from": format_timestamp(start), "to": format_timestamp(end)}))
+
+    half = datetime(2026, 10, 6, 10, 30, tzinfo=UTC)
+    eleven = datetime(2026, 10, 6, 11, 0, tzinfo=UTC)
+    assert ids(half, eleven) & {plain, single} == {plain}
+    assert ids(bucket, half) & {plain, single} == {single}
+    # Bordes de la exacta: [10:45, …) la incluye; [… , 10:45) no.
+    assert plain in ids(exact, eleven)
+    assert plain not in ids(bucket, exact)
+
+
 @pytest.mark.parametrize(
     "params",
     [

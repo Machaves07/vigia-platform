@@ -36,6 +36,7 @@ from typing import Any, Final
 from sqlalchemy import text
 
 from vigia_platform.loop.domain.enums import FindingLifecycleState
+from vigia_platform.loop.domain.time_aggregation import MAX_WINDOW_MINUTES
 from vigia_platform.shared.context import repository
 from vigia_platform.shared.db import Transaction
 
@@ -61,6 +62,10 @@ INBOX_STATES: Final = (
 """Los siete estados activos del índice parcial ``finding_state_inbox`` (laz_0029)."""
 
 _STATES_SQL: Final = ", ".join(f"'{state.value}'" for state in INBOX_STATES)
+_MARGIN_SQL: Final = f"interval '{MAX_WINDOW_MINUTES} minutes'"
+"""Prefiltro por cubo del borde inferior del periodo: el cubo nunca está más de una ventana por
+detrás de la marca exacta (``occurred_at_bucket <= occurred_at_exact``, laz_0029), así que la
+poda de particiones y el índice siguen sirviendo cuando el periodo se compara con la exacta."""
 
 _TEMPLATE: Final = """
 WITH zones AS (
@@ -93,9 +98,13 @@ page AS (
       AND (CAST(:family AS text) IS NULL OR f.family = CAST(:family AS text))
       AND (CAST(:tier AS text) IS NULL OR f.tier = CAST(:tier AS text))
       AND (CAST(:period_from AS timestamptz) IS NULL
-           OR f.occurred_at_bucket >= CAST(:period_from AS timestamptz))
+           OR (f.occurred_at_bucket >= CAST(:period_from AS timestamptz) - @MARGIN@
+               AND CASE WHEN f.single_occupancy_zone THEN f.occurred_at_bucket
+                        ELSE f.occurred_at_exact END >= CAST(:period_from AS timestamptz)))
       AND (CAST(:period_to AS timestamptz) IS NULL
-           OR f.occurred_at_bucket < CAST(:period_to AS timestamptz))
+           OR (f.occurred_at_bucket < CAST(:period_to AS timestamptz)
+               AND CASE WHEN f.single_occupancy_zone THEN f.occurred_at_bucket
+                        ELSE f.occurred_at_exact END < CAST(:period_to AS timestamptz)))
       AND (CAST(:after_bucket AS timestamptz) IS NULL
            OR (f.occurred_at_bucket, f.finding_state_id)
               @CMP@ (CAST(:after_bucket AS timestamptz), CAST(:after_id AS uuid)))
@@ -135,6 +144,7 @@ def inbox_statement(*, newest_first: bool) -> str:
     direction, comparison = ("DESC", "<") if newest_first else ("ASC", ">")
     return (
         _TEMPLATE.replace("@STATES@", _STATES_SQL)
+        .replace("@MARGIN@", _MARGIN_SQL)
         .replace("@CMP@", comparison)
         .replace("@DIR@", direction)
     )
