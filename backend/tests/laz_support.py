@@ -231,6 +231,12 @@ class InstrumentedPorts:
         self, context: ScopeContext, zone_id: uuid.UUID, start: datetime, end: datetime
     ) -> tuple[GateInterval, ...]:
         self._count("gate_history")
+        if self.wrapped is not None:
+            # TASK-318: la exportación lee la historia real (o la del doble que envuelve).
+            history: tuple[GateInterval, ...] = await self.wrapped.gates.gate_history(
+                context, zone_id, start, end
+            )
+            return history
         return tuple(
             interval
             for gate in (GateKind.MOUNTING, GateKind.USAGE)
@@ -272,8 +278,14 @@ class InstrumentedPorts:
         async def other(*args: Any, **kwargs: Any) -> Any:
             self._count(name)
             if self.wrapped is not None:
-                for port in (self.wrapped.catalog, self.wrapped.gates, self.wrapped.coverage):
-                    if hasattr(port, name):
+                ports = (
+                    self.wrapped.catalog,
+                    self.wrapped.gates,
+                    self.wrapped.coverage,
+                    getattr(self.wrapped, "fleet", None),
+                )
+                for port in ports:
+                    if port is not None and hasattr(port, name):
                         return await getattr(port, name)(*args, **kwargs)
             raise NotImplementedError(name)
 
@@ -287,6 +299,8 @@ class RealPorts:
     catalog: Any
     gates: Any
     coverage: Any
+    fleet: Any = None
+    """``FleetQueryPort`` (TASK-318: ``assignment_history`` de la exportación)."""
 
 
 # --- dobles sin base para el consumidor (TASK-341) --------------------------------------------

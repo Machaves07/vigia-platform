@@ -2,8 +2,8 @@
 
 ``identity.auth``, ``identity.authz``, ``ledger.chain``, ``shared.signing`` y ``shared.crypto``,
 y los módulos sin marco de U-04 (``loop.domain.lifecycle``, ``loop.projection.fold`` y
-``loop.projection.digest``, PAT-LAZ-SEG-09), deben importarse sin FastAPI ni SQLAlchemy. Este
-guion lo demuestra en un intérprete nuevo:
+``loop.projection.digest``, PAT-LAZ-SEG-09, y ``accreditation.manifest``, LC-LAZ-24), deben
+importarse sin FastAPI ni SQLAlchemy. Este guion lo demuestra en un intérprete nuevo:
 
 1. Instala en ``sys.meta_path[0]`` un buscador que hace fallar con ``ImportError`` cualquier
    importación de los paquetes bloqueados y de sus submódulos (``fastapi``, ``starlette``,
@@ -42,6 +42,7 @@ CRITICAL_MODULES: tuple[str, ...] = (
     "vigia_platform.loop.domain.lifecycle",
     "vigia_platform.loop.projection.fold",
     "vigia_platform.loop.projection.digest",
+    "vigia_platform.accreditation.manifest",
 )
 BLOCKED_PACKAGES: tuple[str, ...] = ("fastapi", "starlette", "sqlalchemy", "asyncpg", "alembic")
 

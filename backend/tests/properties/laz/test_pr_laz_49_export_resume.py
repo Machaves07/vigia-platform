@@ -28,6 +28,7 @@ generados.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
@@ -52,10 +53,14 @@ from tests.export_stream_support import (
     SyntheticArtifact,
     SyntheticScope,
     job_to_json,
+    real_job,
     scope_to_json,
     synthetic_job,
 )
 from tests.integration.conftest import LocalStackEndpoint, versioned_bucket
+from tests.properties.laz.strategies.export import WorldPorts, job_world
+from vigia_platform.accreditation.export.composer_port import ExportJob
+from vigia_platform.accreditation.export.contents import EMPTY_SHA256, ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
 from vigia_platform.accreditation.export.volumes import ExportLocation
 from vigia_platform.shared.clock import SystemClock
@@ -249,6 +254,95 @@ def test_pr_laz_49_killed_worker_resumes_to_the_same_package(
 ) -> None:
     endpoint, name = bucket
     _check_resume(endpoint, name, scope, kill_percent, tmp_path_factory.mktemp("tmp"))
+
+
+REAL_SETTINGS: Final = {
+    "part_size": 5 * 1024 * KIB,
+    "volume_max_bytes": 48 * KIB,
+    "manifest_reserve_bytes": 40 * KIB,
+}
+"""Volúmenes pequeños: el paquete real del escenario ocupa varios."""
+
+
+def _real_composer(stream: ExportStream, job: ExportJob, findings: int) -> ExportComposer:
+    return ExportComposer(
+        stream=stream, ports=WorldPorts(job_world(job, findings_per_zone=findings)).ports()
+    )
+
+
+@pytest.mark.parametrize("form", ["with_clips", "without_clips"])
+@pytest.mark.parametrize("kill_percent", [40, 80])
+def test_pr_laz_49_with_real_content_resumes_to_the_same_package(
+    bucket: tuple[LocalStackEndpoint, str],
+    tmp_path: Path,
+    kill_percent: int,
+    form: str,
+) -> None:
+    """TASK-318: con el compositor **real** (hallazgos, cobertura, auditoría, puntos de control,
+    claves, clips y manifiesto), matar el proceso al 40 % y al 80 % y retomar desde cero da el
+    mismo ``archive_sha256``, el mismo ``document_sha256`` (el de la entrada declarada ausente,
+    hasta TASK-319), los mismos volúmenes y el mismo manifiesto que sin interrupción."""
+    endpoint, name = bucket
+    real = {"zones": 2, "form": form, "findings": 6}
+    job = real_job(synthetic_job(), real)
+    location = ExportLocation(job.organization_id, job.plant_id, job.export_id)
+    settings_ = ExportStreamSettings(**REAL_SETTINGS)
+    reference = asyncio.run(
+        _real_composer(
+            ExportStream(store=MemoryExportStore(), settings=settings_), job, real["findings"]
+        ).compose(job, RecordingSink())
+    )
+    assert len(reference.stored.volumes) > 1
+    assert reference.document_sha256 == EMPTY_SHA256
+    storage = _storage(endpoint, name)
+    process = _spawn(
+        {
+            "endpoint": endpoint.url,
+            "bucket": name,
+            "settings": REAL_SETTINGS,
+            "job": job_to_json(job),
+            "real": real,
+            "kill_percent": kill_percent,
+        },
+        tmp_path,
+    )
+    try:
+        message = _line(process)
+        while "paused" not in message:
+            assert "progress" in message, message
+            message = _line(process)
+        assert message["paused"] >= kill_percent
+        stored_upload = message["upload_id"]
+        for number in range(1, len(reference.stored.volumes) + 2):
+            assert asyncio.run(storage.head_object(location.volume_key(number))) is None
+        process.send_signal(signal.SIGKILL)
+        assert process.wait(timeout=60) == -signal.SIGKILL
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=60)
+        for stream in (process.stdin, process.stderr):
+            if stream is not None:
+                stream.close()
+    resumed = ExportStream(store=storage, settings=settings_)
+    asyncio.run(resumed.abort_previous_upload(location, stored_upload))
+    assert asyncio.run(storage.pending_multipart_uploads(location.prefix)) == ()
+    retaken = dataclasses.replace(job, attempt=2)
+    package = asyncio.run(
+        _real_composer(resumed, retaken, real["findings"]).compose(retaken, RecordingSink())
+    )
+    assert package.archive_sha256 == reference.archive_sha256
+    assert package.document_sha256 == reference.document_sha256
+    assert package.manifest == reference.manifest
+    assert package.manifest_sha256 == reference.manifest_sha256
+    assert [(v.sha256, v.size_bytes) for v in package.stored.volumes] == [
+        (v.sha256, v.size_bytes) for v in reference.stored.volumes
+    ]
+    assert {entry["kind"] for entry in package.manifest["absent_entries"]} == {
+        "document",
+        "verifier",
+    }
+    assert asyncio.run(storage.pending_multipart_uploads(location.prefix)) == ()
 
 
 def test_the_child_pauses_with_two_volumes_open_at_40_and_80_percent(

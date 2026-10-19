@@ -29,6 +29,12 @@ from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
 )
+from vigia_platform.accreditation.adapters.postgres.export_reads import (
+    SqlCheckpointLookup,
+    SqlEpisodeHistory,
+    SqlExportPlaces,
+    StorageBlobs,
+)
 from vigia_platform.accreditation.detail_codes import (
     ACCREDITATION_DETAIL_CODE_LABEL_BINDINGS,
     AccreditationDetailCode,
@@ -37,8 +43,10 @@ from vigia_platform.accreditation.events import register_accreditation_event_typ
 from vigia_platform.accreditation.export.composer_port import (
     MissingPackageComposer,
     MissingUploadPort,
+    PackageComposer,
     UploadPort,
 )
+from vigia_platform.accreditation.export.contents import ExportComposer, ExportPorts
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.lease import SqlExportLeaseStore
 from vigia_platform.accreditation.export.request import ExportRequests
@@ -51,6 +59,11 @@ from vigia_platform.accreditation.export.worker import (
     register_export_worker,
 )
 from vigia_platform.accreditation.record_types import register_accreditation_record_types
+from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.inventory_read import FleetInventory
+from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.ledger.application.evidence_read import EvidenceService
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.domain.enums import ACCREDITATION_LABEL_BINDINGS
 from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.shared.outbox.registries import (
@@ -87,19 +100,64 @@ type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
 
+def _export_composer(services: UnitServices, stream: ExportStream) -> ExportComposer:
+    """El compositor real (TASK-318) con los puertos de U-02 y U-03 en proceso."""
+    evidence = services.require_evidence()
+    database = services.database
+    ports = catalog_query_ports(database)
+    return ExportComposer(
+        stream=stream,
+        ports=ExportPorts(
+            reader=LectorExpediente(
+                database=database,
+                audit=services.audit,
+                clock=services.clock,
+                metrics=services.metrics,
+            ),
+            catalog=ports.catalog,
+            gates=ports.gates,
+            fleet=FleetInventory(
+                database=database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+                provider_organization_id=services.provider_organization_id,
+            ),
+            coverage=CoverageService(
+                database=database,
+                audit=services.audit,
+                clock=services.clock,
+                metrics=services.metrics,
+            ),
+            markers=EvidenceService(database=database, audit=services.audit, storage=evidence),
+            checkpoints=SqlCheckpointLookup(database, services.checkpoints),
+            places=SqlExportPlaces(database),
+            blobs=StorageBlobs(database, evidence),
+            episodes=SqlEpisodeHistory(database),
+        ),
+    )
+
+
 def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) -> None:
-    """``export_worker`` (TASK-317) con el flujo de bytes sobre ``vigia-evidence`` (TASK-345). El
-    compositor real es de TASK-318; hasta entonces, uno que falla sin publicar nada (nunca un
-    paquete inventado). Sin depósito de evidencias, el flujo tampoco existe."""
+    """``export_worker`` (TASK-317) con el flujo de bytes sobre ``vigia-evidence`` (TASK-345) y el
+    compositor real (TASK-318), que escribe ``export_produced`` al cerrar. Sin depósito de
+    evidencias no hay flujo ni compositor: uno que falla sin publicar nada (nunca un paquete
+    inventado)."""
     evidence = services.evidence
-    uploads: UploadPort = MissingUploadPort() if evidence is None else ExportStream(store=evidence)
+    uploads: UploadPort
+    composer: PackageComposer
+    if evidence is None:
+        uploads, composer = MissingUploadPort(), MissingPackageComposer()
+    else:
+        stream = ExportStream(store=evidence)
+        uploads, composer = stream, _export_composer(services, stream)
     register_export_worker(
         registry,
         ExportWorker(
-            leases=SqlExportLeaseStore(database=services.database),
+            leases=SqlExportLeaseStore(database=services.database, writer=services.writer),
             checkpoints=services.checkpoints,
             uploads=uploads,
-            composer=MissingPackageComposer(),
+            composer=composer,
             alarm=LoggingExportAlarm(),
             clock=services.clock,
         ),
