@@ -197,7 +197,7 @@ de un intento anterior sin sellar que se retoma con su propia identidad) en vez 
 recibió: el llamador adopta ese identificador para todo lo que sigue. ``coverage_summary`` queda
 ``{}`` de reserva (objeto vacío, como exige ``monthly_package_coverage``); ``seal`` la rellena."""
 
-_SEAL: Final = text(
+_SEAL_PACKAGE: Final = text(
     "UPDATE accreditation.monthly_package SET state = 'sealed',"
     " findings_summary = CAST(:findings_summary AS jsonb),"
     " recurrence_summary = CAST(:recurrence_summary AS jsonb),"
@@ -469,7 +469,7 @@ class MonthlyPackageRepository:
         """Sella ``package_id``; ``False`` si otra composición ya se lo llevó entre medias."""
         row = (
             await transaction.execute(
-                _SEAL,
+                _SEAL_PACKAGE,
                 {
                     "package_id": package_id,
                     "organization_id": transaction.context.organization_id,

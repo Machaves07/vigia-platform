@@ -4,11 +4,12 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker`` y ``notification_engine``
-  (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre (TASK-310), las dos de la
-  configuración del lazo (TASK-304), la de la clasificación (TASK-308) y las de la acción y su
-  evidencia (TASK-311) de ``loop``, las dos de exportación de ``accreditation`` (TASK-317) y
-  ``GET /notifications`` (TASK-324).
+  ``U04_TASKS`` con ``monthly_package`` (TASK-342 a 344), ``U04_CONSUMERS`` con ``export_worker``
+  y ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre
+  (TASK-310), las dos de la configuración del lazo (TASK-304), la de la clasificación (TASK-308) y
+  las de la acción y su evidencia (TASK-311) de ``loop``, las dos de exportación y las tres del
+  paquete mensual de ``accreditation`` (TASK-317 y TASK-342 a 344) y ``GET /notifications``
+  (TASK-324).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -40,6 +41,7 @@ from vigia_platform.accreditation.events import (
     ACCREDITATION_INTERNAL_EVENT_TYPES,
 )
 from vigia_platform.accreditation.export.download import ExportDownloads
+from vigia_platform.accreditation.monthly.task import MONTHLY_PACKAGE, MONTHLY_PACKAGE_SCHEDULE
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
@@ -181,12 +183,16 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
         elif name == "accreditation":
             # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker;
-            # TASK-345: SUP-U05-40 y 23 (las descargas, con el depósito de evidencias).
+            # TASK-345: SUP-U05-40 y 23 (las descargas, con el depósito de evidencias);
+            # TASK-342 a 344: el paquete mensual, su muestra y la descarga por planta.
             assert routes == [
                 ("POST", "/accreditation/exports"),
                 ("GET", "/accreditation/exports/{export_id}"),
                 ("GET", "/accreditation/exports/{export_id}/download"),
                 ("POST", "/accreditation/exports/{export_id}/download-url"),
+                ("GET", "/accreditation/monthly-packages"),
+                ("GET", "/accreditation/monthly-packages/{package_id}/sample"),
+                ("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
             http = state[ACCREDITATION_STATE_KEY]
@@ -201,7 +207,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(state[NOTIFICATIONS_STATE_KEY], NotificationsHttp)
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
-    assert tasks.tasks() == ()
+    # TASK-342 a 344: monthly_package, la única tarea periódica de U-04 hasta ahora.
+    assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
+    ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
@@ -226,8 +235,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         assert module.TASK_REGISTRARS == ()
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 1
     assert len(registration.CONSUMER_REGISTRARS) == 2
-    assert accreditation_registration.TASK_REGISTRARS == ()
-    assert registration.U04_TASKS == {}
+    assert len(accreditation_registration.TASK_REGISTRARS) == 1
+    assert registration.U04_TASKS == {
+        MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
+    }
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
         "loop_projection": 4,
@@ -308,8 +319,10 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
         for compiled in full.event_types.compiled_types():
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
-        # Los consumidores de la raíz (export_worker, TASK-317): solo falta el evento.
+        # Los consumidores y las tareas periódicas de la raíz (export_worker, TASK-317;
+        # monthly_package, TASK-342 a 344): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
+        unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced
 
 

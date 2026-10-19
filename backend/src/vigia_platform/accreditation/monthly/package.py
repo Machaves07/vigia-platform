@@ -1026,6 +1026,12 @@ class MonthlyPackageComposer:
             "evidence_flagged_count": 0,
             "state_counts": state_counts,
             "generated_at": format_timestamp(generated_at),
+            # P6/BR-LAZ-115: declaradas no calculables también en el manifiesto firmado, no solo
+            # en el contenido del expediente (``content`` de ``_insert_sample``/``_seal_and_write``
+            # más abajo) — el paquete mensual no integra ``CoverageService`` ni ``ExposureService``.
+            "metrics": _metrics_not_computable(),
+            "exposure": _exposure_not_computable(),
+            "coverage_summary": dict(_COVERAGE_NOT_COMPUTABLE),
             "artifacts": artifacts,
             "manifest_signature": dict(MANIFEST_SIGNATURE_DECLARATION),
         }

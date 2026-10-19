@@ -31,6 +31,7 @@ __all__ = [
     "EXPOSURE_INDICATOR",
     "METADATA",
     "MONTHLY_PACKAGE",
+    "MONTHLY_PACKAGE_LEASE",
     "PROGRAM_METRIC_SNAPSHOT",
     "SCHEMA",
 ]
@@ -144,6 +145,20 @@ MONTHLY_PACKAGE: Final = Table(
     _uuid("sealed_checkpoint_record_id", nullable=True),
     _uuid("record_id", nullable=True),
 )
+
+MONTHLY_PACKAGE_LEASE: Final = Table(
+    "monthly_package_lease",
+    METADATA,
+    _uuid("organization_id", primary_key=True),
+    _uuid("plant_id"),
+    _uuid("zone_id", primary_key=True),
+    _date("period", primary_key=True),
+    _text("lease_owner", nullable=True),
+    _instant("lease_until", nullable=True),
+    _integer("attempt_count"),
+)
+"""``laz_0035`` (VIG-239): el arrendamiento de la composición de ``monthly_package`` por
+``(zone_id, period)`` (PAT-LAZ-RES-05)."""
 
 AUDIT_SAMPLE: Final = Table(
     "audit_sample",

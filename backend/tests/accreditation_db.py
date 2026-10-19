@@ -31,6 +31,7 @@ ACCREDITATION_TABLES: Final = (
     "export_request",
     "export_package",
     "monthly_package",
+    "monthly_package_lease",
     "audit_sample",
     "audit_sample_item",
     "commitment",
@@ -38,7 +39,8 @@ ACCREDITATION_TABLES: Final = (
     "exposure_indicator",
     "adoption_counter",
 )
-"""Las nueve tablas de ``accreditation`` (``laz_0031``), todas con planta."""
+"""Las nueve tablas de ``accreditation`` (``laz_0031``) y ``monthly_package_lease`` (``laz_0035``,
+VIG-239), todas con planta."""
 
 PERIOD_KEY_TABLES: Final = ("monthly_package", "program_metric_snapshot", "exposure_indicator")
 """Las de clave ``(organization_id, zone_id, period)``."""
@@ -158,6 +160,26 @@ def monthly_package(
             "recurrence_summary": "[]",
             "coverage_summary": json.dumps({"observable_percent": 100}),
             "commitments_from_previous_period": "[]",
+        },
+    )
+
+
+def monthly_package_lease(
+    scope: AccreditationScope,
+    at: dt.datetime = BASE_TIME,
+    *,
+    period: dt.date | None = None,
+) -> Statement:
+    return insert(
+        "monthly_package_lease",
+        {
+            "organization_id": scope.organization_id,
+            "plant_id": scope.plant_id,
+            "zone_id": scope.zone_id,
+            "period": period or next_month(),
+            "lease_owner": "vigia-worker-synthetic",
+            "lease_until": at + dt.timedelta(minutes=10),
+            "attempt_count": 1,
         },
     )
 
@@ -294,6 +316,7 @@ ROW_BUILDERS: Final[dict[str, Builder]] = {
     "export_request": export_request,
     "export_package": export_package,
     "monthly_package": monthly_package,
+    "monthly_package_lease": monthly_package_lease,
     "audit_sample": audit_sample,
     "audit_sample_item": audit_sample_item,
     "commitment": commitment,

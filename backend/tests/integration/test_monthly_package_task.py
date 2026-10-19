@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import uuid
+import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -58,7 +60,7 @@ from vigia_platform.ledger.chain.checkpoints import CheckpointService
 from vigia_platform.loop.calendar import local_date, month_bounds, today
 from vigia_platform.loop.config.parameters import LoopSettings, PlantLoopConfiguration
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
-from vigia_platform.shared.clock import SimulatedClock
+from vigia_platform.shared.clock import Clock, SimulatedClock
 from vigia_platform.shared.storage import S3Storage
 
 pytestmark = pytest.mark.integration
@@ -99,18 +101,19 @@ class World:
         clock: SimulatedClock = self.loop.stack.authz.sessions.clock
         return clock
 
-    def composer(self) -> MonthlyPackageComposer:
+    def composer(self, *, clock: Clock | None = None) -> MonthlyPackageComposer:
         sessions = self.loop.stack.authz.sessions
+        composer_clock = sessions.clock if clock is None else clock
         return MonthlyPackageComposer(
             database=self.database,
             reader=LectorExpediente(
-                database=self.database, audit=sessions.audit, clock=sessions.clock
+                database=self.database, audit=sessions.audit, clock=composer_clock
             ),
             repository=self.repository,
             evidence=self.evidence,
             checkpoints=self.checkpoints,
             writer=self.loop.stack.primary.writer,
-            clock=sessions.clock,
+            clock=composer_clock,
             signer=self.signer,
         )  # fmt: skip
 
@@ -367,11 +370,34 @@ def test_catchup_seals_every_due_month_oldest_first(world: World) -> None:
 # --- 3. concurrencia: nunca sellado dos veces -------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _SkewedClock:
+    """Adelanta ``base`` una desviación fija: dos composidores con el mismo ``base`` pero
+    desviaciones distintas producen un ``generated_at`` (y por tanto un zip) distinguible, sin
+    que ninguno de los dos pierda la hora real que ``world.clock`` gobierna (``advance``/``set``
+    del reloj subyacente los mueve a los dos por igual, ronda 2 del PR #161: la carrera antes
+    producía bytes idénticos porque ambos compositores leían el mismo reloj simulado sin mover
+    la hora entre ellos, y la comparación de SHA-256 del objeto subido nunca podía distinguir al
+    ganador de una perdedora que hubiera subido después)."""
+
+    base: Clock
+    offset: timedelta
+
+    def now(self) -> datetime:
+        return self.base.now() + self.offset
+
+    def monotonic(self) -> float:
+        return self.base.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        self.base.sleep(seconds)
+
+
 async def _race(
     world: World, context: Any, zone: ZoneRef, period: str
 ) -> list[ComposeOutcome | BaseException | None]:
     first = world.composer()
-    second = world.composer()
+    second = world.composer(clock=_SkewedClock(world.clock, timedelta(seconds=5)))
     kwargs = dict(sample_percent=_SAMPLE_PERCENT, sample_min=_SAMPLE_MIN, sample_max=_SAMPLE_MAX)
     outcomes = await asyncio.gather(
         first.compose_and_seal(context, zone, period, BOGOTA, **kwargs),
@@ -424,6 +450,17 @@ def test_concurrent_compose_never_seals_twice(world: World) -> None:
         assert len(sealed) == 1, rows
         assert sealed[0]["package_id"] == winners[0].package_id
         assert world.produced_periods(zone.zone_id) == [period]
+
+        # Ronda 2: el objeto en vigia-evidence es el del ganador, nunca uno distinguible de una
+        # perdedora (los dos compositores de _race ya no comparten el mismo generated_at).
+        key = object_key(
+            organization_id=zone.organization_id,
+            plant_id=zone.plant_id,
+            zone_id=zone.zone_id,
+            period=period,
+        )
+        package_bytes = world.loop.stack.run(world.evidence.get_object(key))
+        assert hashlib.sha256(package_bytes).hexdigest() == winners[0].package_sha256
 
 
 def test_expired_lease_lets_a_second_composer_take_over_without_double_sealing(
@@ -657,3 +694,20 @@ def test_sealed_package_verifies_intact_with_the_embedded_verifier(world: World)
     assert document["anchored_by"] == ["manifest_signature"], document
     assert document["artifacts_verified"] == 6, document
     assert document["checkpoints_verified"] == 1, document
+
+    # Ronda 2: AC #4 exige metrics/exposure/coverage_summary declarados no calculables también en
+    # el manifiesto firmado (no solo en el contenido del expediente, que ya lo hacía).
+    with zipfile.ZipFile(io.BytesIO(package_bytes)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+    assert manifest["metrics"] and all(
+        item["status"] == "not_computable" and item["value"] is None for item in manifest["metrics"]
+    ), manifest["metrics"]
+    assert manifest["exposure"] == {
+        "status": "not_computable",
+        "confirmed_minutes": None,
+        "pending_classification_minutes": None,
+        "observable_coverage_percent": None,
+    }, manifest["exposure"]
+    assert manifest["coverage_summary"] == {"status": "not_computable"}, manifest[
+        "coverage_summary"
+    ]

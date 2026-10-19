@@ -53,7 +53,8 @@ _STATEMENTS = (
     )
     """,
     *row_security(SCHEMA, TABLE, plant_column="plant_id", organization_only=False),
-    f"GRANT SELECT, INSERT, UPDATE ON {SCHEMA}.{TABLE} TO vigia_app",
+    f"GRANT SELECT, INSERT ON {SCHEMA}.{TABLE} TO vigia_app",
+    f"GRANT UPDATE (lease_owner, lease_until, attempt_count) ON {SCHEMA}.{TABLE} TO vigia_app",
     f"COMMENT ON TABLE {SCHEMA}.{TABLE} IS 'Arrendamiento de la composición de un paquete"
     " mensual por (zone_id, period) (PAT-LAZ-RES-05, VIG-239): solo quien lo tiene vigente"
     " sube el zip y sella; seguridad a nivel de fila forzada por organización y concesión de"
