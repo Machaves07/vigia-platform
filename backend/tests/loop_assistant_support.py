@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Any, Final
 
 import httpx
+from sqlalchemy import text
 
 from tests.attribution_support import both_policy
 from tests.integration.conftest import PostgresEndpoint
@@ -41,6 +42,7 @@ from vigia_platform.loop.adapters.assistant.fake import FakeAssistantProvider, S
 from vigia_platform.loop.assistant.consumer import AssistantWorker, register_assistant_worker
 from vigia_platform.loop.assistant.port import AssistantProviderPort
 from vigia_platform.loop.assistant.service import ASSISTANT_WORKER, AssistantService
+from vigia_platform.loop.registration import loop_free_text
 from vigia_platform.shared.context import ActorUnit, Role
 from vigia_platform.shared.db import Database, Transaction
 from vigia_platform.shared.outbox.dispatcher import Dispatcher, DispatchReport
@@ -165,6 +167,15 @@ class AssistantStack:
         self.worker = worker
         return worker
 
+    @staticmethod
+    def production_policy() -> FreeTextPolicyRegistry:
+        """La política que registra U-04 al arrancar: los dos validadores con sus cachés y sus
+        **preparadores** sobre PostgreSQL (``loop_free_text``)."""
+        registry = FreeTextPolicyRegistry()
+        loop_free_text(registry)
+        registry.seal()
+        return registry
+
     def event_of(self, request_id: str | uuid.UUID) -> OutboxEvent:
         (row,) = self.fetch(
             "SELECT event_id, organization_id, plant_id, event_name, partition_key,"
@@ -191,14 +202,23 @@ class AssistantStack:
         *,
         worker: AssistantWorker | None = None,
         database: Database | None = None,
+        idle_limit_ms: int | None = None,
     ) -> None:
-        """Una entrega de ``event`` (``event_of``), como la haría el despachador."""
+        """Una entrega de ``event`` (``event_of``), como la haría el despachador.
+
+        ``idle_limit_ms`` fija en la transacción de la entrega el tope de inactividad de la base
+        antes de llamar al manejador (el ``idle_in_transaction_session_timeout`` de RDS)."""
         handler = worker or self.worker
         assert handler is not None
         context = self.base.world.stack.authz.contexts.context_from_event(
             _EventRef(event.organization_id, event.correlation_id), unit=ActorUnit.U04
         )
         async with (database or self.base.database).transaction(context) as transaction:
+            if idle_limit_ms is not None:
+                await transaction.execute(
+                    text("SELECT set_config('idle_in_transaction_session_timeout', :ms, true)"),
+                    {"ms": str(idle_limit_ms)},
+                )
             await handler(event, transaction)
 
     def deliver(self, request_id: str | uuid.UUID, **changes: Any) -> None:

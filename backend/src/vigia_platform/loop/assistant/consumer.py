@@ -8,7 +8,12 @@ y, para la solicitud ``pending``, en este orden:
    (``loop.assistant_request|<solicitud>``). Si otra entrega del mismo evento ya la tiene, esta
    termina sin hacer nada; si la solicitud ya no está ``pending`` (entrega repetida tras una
    caída), tampoco: idempotente por ``event_id`` y por el estado de ``AssistantRequest``. El
-   candado vive lo que la entrega: si el proceso muere, la bandeja la vuelve a entregar.
+   candado vive lo que la entrega: si el proceso muere, la bandeja la vuelve a entregar. Esa
+   transacción queda inactiva mientras se espera al proveedor, así que fija su propio tope de
+   inactividad (``DELIVERY_IDLE_TIMEOUT``, 180 s) por encima del de RDS (60 s): si no, la base la
+   cerraría a mitad de una llamada, soltaría el candado y otra entrega volvería a llamar. Nada más
+   se lee ni se escribe por ella después de los intentos (los preparadores de los validadores y
+   las escrituras van en transacciones propias y cortas).
 2. **Sin llamada ni espera** (BR-LAZ-74): sin clave del proveedor, ``unavailable`` con
    ``no_api_key``; pasado el **tope duro de 120 s** desde ``requested_at``, ``timeout``; con el
    **tope mensual de fichas** agotado, ``budget_exceeded`` **antes de construir el contexto**
@@ -101,6 +106,7 @@ __all__ = [
     "ASSISTANT_WORKER",
     "ASSISTANT_WORKER_CONCURRENCY",
     "ATTEMPT_TIMEOUT",
+    "DELIVERY_IDLE_TIMEOUT",
     "HARD_DEADLINE",
     "MAX_CALLS",
     "RETRY_BACKOFFS",
@@ -134,7 +140,16 @@ QUOTED_FACT_FIELD: Final = FreeTextField(
 PROVIDER: Final = "anthropic"
 """``AssistantDraft.provider`` (constante del diseño, DE §2.11)."""
 
+DELIVERY_IDLE_TIMEOUT: Final = HARD_DEADLINE + timedelta(seconds=60)
+"""Tope de inactividad de la transacción de la entrega (180 s): por encima de los 120 s del tope
+duro más la holgura del último intento, y por encima de los 60 s de RDS (``infra/stacks/data.py``),
+que la cerrarían a mitad de una llamada y soltarían el candado de la solicitud."""
+
 _LOCK: Final = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))")
+_IDLE_TIMEOUT: Final = text(
+    "SELECT set_config('idle_in_transaction_session_timeout', "
+    f"'{int(DELIVERY_IDLE_TIMEOUT.total_seconds() * 1000)}', true)"
+)
 _REQUEST: Final = text(
     "SELECT r.request_id, r.analysis_id, r.state, r.requested_at, r.context_digest,"
     " a.zone_context, a.plant_id, a.zone_id, a.subject_id"
@@ -317,6 +332,9 @@ class AssistantWorker:
         ).scalar_one()
         if not locked:
             return  # otra entrega del mismo evento la está atendiendo
+        # La transacción de la entrega guarda el candado mientras se espera al proveedor: que el
+        # tope de inactividad de la base (60 s en RDS) no la cierre y suelte el candado.
+        await transaction.execute(_IDLE_TIMEOUT)
         pending = await self._pending(transaction, request_id)
         if pending is None:
             return  # ya resuelta (o inexistente): idempotente
@@ -349,15 +367,10 @@ class AssistantWorker:
         if built.digest != pending.context_digest:
             _log.error("el contexto recompuesto no coincide con el admitido: no sale nada")
             return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
-        return await self._attempts(transaction, context, pending, built, deadline)
+        return await self._attempts(context, pending, built, deadline)
 
     async def _attempts(
-        self,
-        transaction: Transaction,
-        context: ScopeContext,
-        pending: _Pending,
-        built: BuiltContext,
-        deadline: datetime,
+        self, context: ScopeContext, pending: _Pending, built: BuiltContext, deadline: datetime
     ) -> tuple[_Resolution, bool]:
         unavailable = AssistantRequestState.UNAVAILABLE
         last: FailureKind = FailureKind.TIMEOUT
@@ -370,7 +383,7 @@ class AssistantWorker:
             if isinstance(outcome, AssistantCompletion):
                 failure = completion_failure(outcome)
                 if failure is None:
-                    return await self._assessed(transaction, context, built, outcome), False
+                    return await self._assessed(context, built, outcome), False
                 return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
             if outcome.kind not in (FailureKind.TRANSIENT, FailureKind.TIMEOUT):
                 return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
@@ -427,13 +440,9 @@ class AssistantWorker:
         return outcome
 
     async def _assessed(
-        self,
-        transaction: Transaction,
-        context: ScopeContext,
-        built: BuiltContext,
-        completion: AssistantCompletion,
+        self, context: ScopeContext, built: BuiltContext, completion: AssistantCompletion
     ) -> _Resolution:
-        await self._prepare(transaction)
+        await self._prepare(context)
         verdict = assess_output(
             completion.content_json, built, self._free_text, context.organization_id
         )
@@ -480,19 +489,22 @@ class AssistantWorker:
             anchor_record_id=None if anchor is None else uuid.UUID(str(anchor.anchor_record_id)),
         )
 
-    async def _prepare(self, transaction: Transaction) -> None:
-        """Los preparadores de los validadores (la versión de la lista de la organización)."""
+    async def _prepare(self, context: ScopeContext) -> None:
+        """Los preparadores de los validadores (la versión de la lista de la organización), en
+        una transacción propia y corta: la de la entrega lleva hasta 120 s esperando al
+        proveedor y no se usa para nada más que el candado."""
         if not self._free_text.has_preparers:
             return
+        async with self._database.transaction(context) as transaction:
 
-        async def rows(statement: Any, parameters: Mapping[str, Any]) -> Sequence[Any]:
-            return (await transaction.execute(statement, parameters)).all()
+            async def rows(statement: Any, parameters: Mapping[str, Any]) -> Sequence[Any]:
+                return (await transaction.execute(statement, parameters)).all()
 
-        await self._free_text.prepare(
-            FreeTextPreparation(
-                organization_id=transaction.context.organization_id, rows=rows, clock=self._clock
+            await self._free_text.prepare(
+                FreeTextPreparation(
+                    organization_id=context.organization_id, rows=rows, clock=self._clock
+                )
             )
-        )
 
     @staticmethod
     def _keys(context: ScopeContext, pending: _Pending) -> dict[str, Any]:

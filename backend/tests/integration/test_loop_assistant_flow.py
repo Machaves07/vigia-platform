@@ -59,6 +59,7 @@ from vigia_platform.loop.assistant import consumer as consumer_module
 from vigia_platform.loop.assistant.budget import MONTHLY_INPUT_TOKENS, MONTHLY_OUTPUT_TOKENS
 from vigia_platform.loop.assistant.consumer import AssistantProviderDown
 from vigia_platform.loop.assistant.context import build_context, canonical_json, context_digest
+from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.outbox.dispatcher import Outcome
 from vigia_platform.shared.outbox.publish import OutboxEvent
 
@@ -513,6 +514,49 @@ def test_two_simultaneous_deliveries_make_a_single_provider_call(
         assert len(stack.drafts(request_id)) == 1
 
 
+IDLE_LIMIT_MS: Final = 2_000
+"""El tope de inactividad de la base en la prueba (en RDS, 60 s): el proveedor espera más."""
+WALL_CALL: Final = timedelta(seconds=6)
+"""Lo que tarda de verdad la llamada del doble (pared), con márgenes de segundos sobre el tope."""
+
+
+async def _idle_limit_scenario(
+    stack: AssistantStack, event: OutboxEvent, other: Any, provider: FakeAssistantProvider
+) -> list[Any]:
+    """La primera entrega llama y espera en la pared más que el tope de inactividad; pasado el
+    tope, llega una segunda entrega del mismo evento por otra conexión."""
+    async with asyncio.timeout(LOCK_WAIT_SECONDS):
+        first = asyncio.ensure_future(stack.deliver_now(event, idle_limit_ms=IDLE_LIMIT_MS))
+        while provider.call_count == 0 and not first.done():
+            await asyncio.sleep(0.05)
+        # Márgenes de segundos: sin el tope propio de la entrega, la base ya la habría cerrado.
+        await asyncio.sleep(IDLE_LIMIT_MS / 1000 + 2)
+        second = asyncio.ensure_future(
+            stack.deliver_now(event, database=other, idle_limit_ms=IDLE_LIMIT_MS)
+        )
+        return await asyncio.gather(first, second, return_exceptions=True)
+
+
+def test_a_call_longer_than_the_database_idle_limit_still_ends_ready_once(
+    stack: AssistantStack, coordinator: Who
+) -> None:
+    """Hallazgo de la revisión (ronda 1): con ``idle_in_transaction_session_timeout`` de RDS, la
+    transacción de la entrega moría a mitad de la llamada, soltaba el candado y una segunda
+    entrega volvía a llamar; con los preparadores reales la respuesta se perdía."""
+    provider = FakeAssistantProvider(clock=stack.clock, sleep=asyncio.sleep, latency=WALL_CALL)
+    stack.use(provider, free_text=stack.production_policy())
+    request_id = stack.requested(coordinator)
+    event = stack.event_of(request_id)
+    other = stack.database()
+    results = stack.run(_idle_limit_scenario(stack, event, other, provider))
+    stack.run(other.dispose())
+    assert [r for r in results if isinstance(r, BaseException)] == [], results
+    assert provider.call_count == 1
+    row = stack.request_row(request_id)
+    assert (row["state"], row["attempt_count"]) == ("ready", 1)
+    assert len(stack.drafts(request_id)) == 1
+
+
 def test_a_repeated_delivery_after_resolution_does_nothing(
     stack: AssistantStack, coordinator: Who
 ) -> None:
@@ -542,3 +586,37 @@ def test_another_organization_sees_nothing(stack: AssistantStack, coordinator: W
         assert response.json()["code"] == "not_found"
         assert response.json().get("detail_code") is None
     assert len(stack.requests_of(stack.base.world.a.organization_id)) == before
+
+
+def test_a_coordinator_of_another_zone_sees_nothing(
+    stack: AssistantStack, coordinator: Who
+) -> None:
+    """Guarda de alcance por zona: un coordinador SST con alcance en **otra zona** de la misma
+    organización responde como con un identificador inexistente y no escribe nada."""
+    site = stack.organization("a").site
+    outsiders = (
+        stack.base.member(
+            stack.organization("a"), Role.COORDINATOR_SST, ScopeLevel.ZONE, site.other_zone_id
+        ),
+        stack.base.member(stack.organization("a"), Role.LINE_MANAGER),
+    )
+    analysis_id = stack.analysis(coordinator)
+    request_id = stack.requested(coordinator, analysis_id)
+    organization = stack.organization("a").organization_id
+    before = (len(stack.requests_of(organization)), _events(stack))
+    missing = (stack.post(coordinator, uuid.uuid4()), stack.get(coordinator, uuid.uuid4()))
+    for who in outsiders:
+        for response, reference in zip(
+            (stack.post(who, analysis_id), stack.get(who, request_id)), missing, strict=True
+        ):
+            assert response.status_code == reference.status_code == 404, response.text
+            assert response.json()["code"] == reference.json()["code"] == "not_found"
+            assert response.json().get("detail_code") is None
+    assert (len(stack.requests_of(organization)), _events(stack)) == before
+
+
+def _events(stack: AssistantStack) -> int:
+    (row,) = stack.fetch(
+        "SELECT count(*) AS n FROM shared.outbox_event WHERE event_name = 'assistant_requested'"
+    )
+    return int(row["n"])
