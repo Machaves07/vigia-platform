@@ -44,8 +44,10 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
 2. **Escribir** con ``ExportStream`` (TASK-345), en orden fijo: un ``findings_json`` y un
    ``coverage`` por zona, la auditoría, los puntos de control, las claves, los clips (solo en la
    forma ``with_clips``: los bytes verificados contra su SHA-256) y los adjuntos de cierre con su
-   declaración; el manifiesto (``accreditation.manifest``) al final, en ``vol-01``. El documento
-   portátil (TASK-319) y el verificador (TASK-346) se **declaran ausentes** con su motivo.
+   declaración, y el verificador endurecido ``vigia_verify.py`` (TASK-346,
+   ``accreditation.verifier_bundle``, con su versión en ``verifier_version``); el manifiesto
+   (``accreditation.manifest``) al final, en ``vol-01``. El documento portátil (TASK-319) se
+   **declara ausente** con su motivo.
 
 **Zonas unipersonales** (BR-LAZ-99): las marcas de los hallazgos se presentan agregadas a su
 ventana y sus registros se listan por sus hashes, sin contenido (el expediente conserva la marca
@@ -88,7 +90,6 @@ from vigia_platform.accreditation.manifest.build import (
 )
 from vigia_platform.accreditation.manifest.model import (
     ABSENT_KINDS,
-    VERIFIER_VERSION_ABSENT,
     AbsentEntry,
     ActorSnapshot,
     AgreementEntry,
@@ -108,6 +109,11 @@ from vigia_platform.accreditation.manifest.model import (
     StandardCited,
     StateCounts,
     ZoneEntry,
+)
+from vigia_platform.accreditation.verifier_bundle import (
+    VERIFIER_KIND,
+    VerifierBundle,
+    load_verifier_bundle,
 )
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
@@ -467,10 +473,13 @@ class ExportComposer:
         stream: ExportStream,
         ports: ExportPorts,
         default_window_minutes: int = DEFAULT_AGGREGATION_WINDOW_MINUTES,
+        verifier: VerifierBundle | None = None,
     ) -> None:
         self._stream = stream
         self._ports = ports
         self._default_window = default_window_minutes
+        # Al construir, no al componer: sin el verificador de esta versión el worker no arranca.
+        self._verifier = verifier if verifier is not None else load_verifier_bundle()
 
     # --- fase 1: recoger ----------------------------------------------------------------------
 
@@ -771,7 +780,7 @@ class ExportComposer:
         contents = await self.collect(context, job)
         with_clips = job.package_form is PackageForm.WITH_CLIPS
         plan = _plan(contents, with_clips)
-        total = len(plan)
+        total = len(plan) + 1
         async with self._stream.writer(job, sink) as writer:
             for done, (path, kind, payload) in enumerate(plan, start=1):
                 await sink.artifact_started(kind)
@@ -783,7 +792,15 @@ class ExportComposer:
                 else:
                     await writer.add_canonical(path, kind, payload)
                 await sink.artifact_finished(kind, done, total)
-            manifest = build_manifest(_manifest_inputs(job, contents, writer.artifacts, with_clips))
+            # El verificador al final: lo último que el paquete lleva antes del manifiesto.
+            await sink.artifact_started(VERIFIER_KIND)
+            await self._verifier.include(writer)
+            await sink.artifact_finished(VERIFIER_KIND, total, total)
+            manifest = build_manifest(
+                _manifest_inputs(
+                    job, contents, writer.artifacts, with_clips, self._verifier.version
+                )
+            )
             document = manifest_json(manifest)
             result = await writer.finish(document)
         counts = contents.counts
@@ -793,7 +810,7 @@ class ExportComposer:
             manifest=document,
             size_bytes=result.size_bytes,
             artifact_count=len(result.artifacts),
-            verifier_version=VERIFIER_VERSION_ABSENT,
+            verifier_version=self._verifier.version,
             stored=result.stored,
             manifest_sha256=result.manifest_sha256,
             finding_counts={
@@ -1329,6 +1346,7 @@ def _manifest_inputs(
     contents: PackageContents,
     written: Sequence[Any],
     with_clips: bool,
+    verifier_version: str,
 ) -> ManifestInputs:
     requested = job.requested_by
     attachments: dict[str, DeclaredAttachment] = {}
@@ -1366,9 +1384,13 @@ def _manifest_inputs(
             )
             for item in written
         ),
+        # El verificador viaja (TASK-346); el documento portátil aún se declara ausente.
         absent=tuple(
-            AbsentEntry(kind=kind, reason_es=ABSENT_REASONS[kind]) for kind in ABSENT_KINDS
+            AbsentEntry(kind=kind, reason_es=ABSENT_REASONS[kind])
+            for kind in ABSENT_KINDS
+            if kind != VERIFIER_KIND
         ),
         checkpoints=tuple(_checkpoint_entry(item) for item in contents.checkpoints),
         checkpoint_public_keys=tuple(key.to_json() for key in contents.public_keys),
+        verifier_version=verifier_version,
     )

@@ -63,6 +63,7 @@ from vigia_platform.accreditation.export.composer_port import ExportJob
 from vigia_platform.accreditation.export.contents import EMPTY_SHA256, ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
 from vigia_platform.accreditation.export.volumes import ExportLocation
+from vigia_platform.accreditation.verifier_bundle import VERIFIER_VERSION
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.storage import S3Storage
 
@@ -258,10 +259,11 @@ def test_pr_laz_49_killed_worker_resumes_to_the_same_package(
 
 REAL_SETTINGS: Final = {
     "part_size": 5 * 1024 * KIB,
-    "volume_max_bytes": 48 * KIB,
+    "volume_max_bytes": 160 * KIB,
     "manifest_reserve_bytes": 40 * KIB,
 }
-"""Volúmenes pequeños: el paquete real del escenario ocupa varios."""
+"""Volúmenes pequeños: el paquete real del escenario ocupa varios (el verificador, unos 125 KB
+desde TASK-346, no cabe en lo que ``vol-01`` deja libre)."""
 
 
 def _real_composer(stream: ExportStream, job: ExportJob, findings: int) -> ExportComposer:
@@ -338,10 +340,9 @@ def test_pr_laz_49_with_real_content_resumes_to_the_same_package(
     assert [(v.sha256, v.size_bytes) for v in package.stored.volumes] == [
         (v.sha256, v.size_bytes) for v in reference.stored.volumes
     ]
-    assert {entry["kind"] for entry in package.manifest["absent_entries"]} == {
-        "document",
-        "verifier",
-    }
+    # El verificador viaja desde TASK-346; el documento portátil sigue declarado ausente.
+    assert {entry["kind"] for entry in package.manifest["absent_entries"]} == {"document"}
+    assert package.manifest["verifier_version"] == VERIFIER_VERSION
     assert asyncio.run(storage.pending_multipart_uploads(location.prefix)) == ()
 
 

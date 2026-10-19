@@ -41,9 +41,11 @@ __all__ = [
 
 KIB: Final = 1024
 SMALL_VOLUMES: Final = ExportStreamSettings(
-    part_size=5 * 1024 * KIB, volume_max_bytes=48 * KIB, manifest_reserve_bytes=40 * KIB
+    part_size=5 * 1024 * KIB, volume_max_bytes=160 * KIB, manifest_reserve_bytes=40 * KIB
 )
-"""Volúmenes pequeños: un paquete generado ocupa a menudo más de uno."""
+"""Volúmenes pequeños: un paquete generado ocupa a menudo más de uno. El verificador del paquete
+(``vigia_verify.py``, unos 125 KB, TASK-346) no cabe en lo que ``vol-01`` deja libre (120 KiB), así
+que va siempre a otro volumen."""
 
 
 @dataclass(frozen=True)

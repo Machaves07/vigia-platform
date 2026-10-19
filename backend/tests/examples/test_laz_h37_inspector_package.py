@@ -45,9 +45,13 @@ from vigia_platform.accreditation.manifest.model import (
     DOCUMENT_ABSENT_ES,
     REGRESSION_NOTICE_ES,
     REVOCATION_NOTICE_ES,
-    VERIFIER_ABSENT_ES,
     WITH_CLIPS_NOTICE_ES,
     WITHOUT_CLIPS_NOTICE_ES,
+)
+from vigia_platform.accreditation.verifier_bundle import (
+    VERIFIER_PATH,
+    VERIFIER_VERSION,
+    load_verifier_bundle,
 )
 from vigia_platform.fleet.ports import ZoneAssignmentPeriod
 from vigia_platform.ledger.application.evidence_read import MarkerResult, MarkerVerification
@@ -560,18 +564,22 @@ def test_single_occupancy_zone_is_aggregated_and_says_why(
     assert all("content" not in record for record in finding["records"])
 
 
-def test_document_and_verifier_are_declared_absent_never_silent(
+def test_document_is_declared_absent_and_the_verifier_travels(
     package: tuple[ExportWorld, Composed],
 ) -> None:
     _, composed = package
     manifest = composed.manifest
-    assert manifest["absent_entries"] == [
-        {"kind": "document", "reason_es": DOCUMENT_ABSENT_ES},
-        {"kind": "verifier", "reason_es": VERIFIER_ABSENT_ES},
-    ]
-    assert manifest["verifier_version"] == "absent"
+    assert manifest["absent_entries"] == [{"kind": "document", "reason_es": DOCUMENT_ABSENT_ES}]
     assert composed.package.document_sha256 == EMPTY_SHA256
     assert composed.package.stored.document is None
+    # TASK-346: el verificador viaja con su hash y su versión declarada (NFR-LAZ-53).
+    bundle = load_verifier_bundle()
+    assert composed.artifacts[VERIFIER_PATH] == bundle.data
+    (entry,) = [item for item in manifest["artifacts"] if item["kind"] == "verifier"]
+    assert entry["path"] == VERIFIER_PATH
+    assert entry["sha256"] == bundle.sha256
+    assert manifest["verifier_version"] == VERIFIER_VERSION == bundle.version
+    assert composed.package.verifier_version == VERIFIER_VERSION
 
 
 def test_checkpoints_and_both_public_keys_travel_inside(
