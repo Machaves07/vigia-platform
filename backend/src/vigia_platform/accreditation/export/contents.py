@@ -155,7 +155,7 @@ from vigia_platform.loop.projection.fold import (
     step,
     subject_id_of,
 )
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.signing.keys import format_timestamp
 
@@ -457,6 +457,7 @@ def _subject_of(record: LedgerRecordView, document: Mapping[str, Any]) -> uuid.U
 # --- el compositor ------------------------------------------------------------------------------
 
 
+@repository
 class ExportComposer:
     """El ``PackageComposer`` real (TASK-318)."""
 
