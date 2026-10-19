@@ -66,8 +66,10 @@ from vigia_platform.shared.node_ca import NodeCaError
 from vigia_platform.shared.outbox.dispatcher import Dispatcher
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import (
+    ConsumerRegistry,
     EventTypeRegistry,
     OutboxCatalog,
+    OutboxStartupError,
     PeriodicTaskRegistry,
     Schedule,
 )
@@ -122,6 +124,7 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
         return dataclasses.replace(unit, record_types=record_types)
     if kind == "event_type":
         original_events = unit.event_types
+        original_consumers = unit.consumers
 
         def event_types(registry: EventTypeRegistry) -> None:
             full = EventTypeRegistry()
@@ -130,7 +133,23 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
                 if compiled.event_name != name:
                     registry.register(compiled.definition)
 
-        return dataclasses.replace(unit, event_types=event_types)
+        def consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+            # Un consumidor de otra unidad suscrito al evento (``loop_projection``, TASK-341) haría
+            # caer antes ``OutboxCatalog.check``: aquí se quita solo la suscripción, para
+            # que la comprobación de U-03 nombre lo que falta. La caída por la suscripción la fija
+            # ``test_a_subscription_to_a_missing_u03_event_stops_the_composition``.
+            full = ConsumerRegistry()
+            original_consumers(full, services)
+            for consumer in full.consumers():
+                events = tuple(event for event in consumer.subscribed_events if event != name)
+                if events:
+                    registry.register(dataclasses.replace(consumer, subscribed_events=events))
+
+        if name not in U03_EVENT_TYPES:
+            # Un evento de otra unidad (``export_requested`` en ``test_laz_bootstrap_closed``):
+            # se conserva la suscripción y el catálogo se niega a componerse, como allí se espera.
+            return dataclasses.replace(unit, event_types=event_types)
+        return dataclasses.replace(unit, event_types=event_types, consumers=consumers)
     original_tasks = unit.periodic_tasks
 
     def periodic_tasks(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
@@ -216,6 +235,28 @@ def test_composition_fails_naming_exactly_what_is_missing(
             compose(runtime, units)
         assert raised.value.missing == ((kind, name),)
         assert name in str(raised.value)
+
+
+def _without_event_only(name: str) -> tuple[PlatformUnit, ...]:
+    """Las unidades reales sin el evento ``name``, conservando todas las suscripciones."""
+    units = []
+    for unit in registered_units():
+        stripped = _strip(unit, "event_type", name)
+        units.append(dataclasses.replace(stripped, consumers=unit.consumers))
+    return tuple(units)
+
+
+@pytest.mark.parametrize("name", ["finding_received", "gate_state_changed", "regression_marked"])
+def test_a_subscription_to_a_missing_u03_event_stops_the_composition(
+    name: str, tmp_path: Path
+) -> None:
+    """Sin el evento de U-03 al que ``loop_projection`` (TASK-341) está suscrito, la composición
+    tampoco arranca: ``OutboxCatalog.check`` nombra la suscripción huérfana."""
+    runtime = _runtime(tmp_path)
+    for compose in (_compose_worker, _compose_api):
+        with pytest.raises(OutboxStartupError) as raised:
+            compose(runtime, _without_event_only(name))
+        assert "loop_projection" in str(raised.value) and name in str(raised.value)
 
 
 def test_a_u03_task_with_another_cadence_is_missing(tmp_path: Path) -> None:

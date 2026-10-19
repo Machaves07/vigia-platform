@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable, Mapping
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter
@@ -48,6 +49,10 @@ from vigia_platform.accreditation.registration import (
     ACCREDITATION_CONSUMERS,
     ACCREDITATION_TASKS,
 )
+from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.ledger.application.evidence_read import EvidenceService
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
@@ -60,11 +65,20 @@ from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
 from vigia_platform.loop.events import register_loop_event_types
 from vigia_platform.loop.http.client_factory import HttpClientFactory
 from vigia_platform.loop.observability.metrics import LoopMetrics, get_loop_metrics
+from vigia_platform.loop.projection.consumer import (
+    LOOP_PROJECTION,
+    LOOP_PROJECTION_CONCURRENCY,
+    LoopProjectionConsumer,
+    register_loop_projection,
+)
+from vigia_platform.loop.projection.enrichment import ProjectionEnrichment
+from vigia_platform.loop.projection.store import LoopProjectionStore
 from vigia_platform.loop.record_types import register_loop_record_types
 from vigia_platform.loop.validators.attribution import (
     PERSON_ATTRIBUTION,
@@ -92,6 +106,7 @@ from vigia_platform.shared.outbox.registries import (
     TaskIteration,
 )
 from vigia_platform.shared.runtime.config import RegistrationIncomplete
+from vigia_platform.shared.storage import PRESIGN_GET_MAX_TTL, ObjectHead, PresignedRequest
 
 if TYPE_CHECKING:
     from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
@@ -206,9 +221,64 @@ LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
 
-LOOP_CONSUMERS: Final[Mapping[str, int]] = {}
+
+class _NoEvidenceReads:
+    """``vigia-worker`` sin depósito de evidencias: ``loop_projection`` solo usa
+    ``resultados_marca``, que lee la base; una lectura de clip aquí es un defecto."""
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        raise RuntimeError("loop_projection no lee clips")
+
+    async def presign_get(
+        self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
+    ) -> PresignedRequest:
+        raise RuntimeError("loop_projection no lee clips")
+
+
+def _register_loop_projection(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``loop_projection`` (TASK-341) con los puertos de U-03 y de U-02 en proceso."""
+    ports = catalog_query_ports(services.database)
+    reader = LectorExpediente(
+        database=services.database,
+        audit=services.audit,
+        clock=services.clock,
+        metrics=services.metrics,
+    )
+    enrichment = ProjectionEnrichment(
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        markers=EvidenceService(
+            database=services.database,
+            audit=services.audit,
+            storage=services.evidence if services.evidence is not None else _NoEvidenceReads(),
+        ),
+        settings=PostgresLoopConfigurationRepository(services.database),
+    )
+    register_loop_projection(
+        registry,
+        LoopProjectionConsumer(
+            store=LoopProjectionStore(),
+            reader=reader,
+            enrichment=enrichment,
+            writer=services.writer,
+            clock=services.clock,
+        ),
+    )
+
+
+LOOP_CONSUMERS: Final[Mapping[str, int]] = {
+    LOOP_PROJECTION: LOOP_PROJECTION_CONCURRENCY,  # TASK-341
+}
 """Consumidores del lazo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
-CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = ()
+CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
+    _register_loop_projection,  # loop_projection (TASK-341)
+)
 
 
 def register_blocked_vocabulary(registry: FreeTextPolicyRegistry) -> None:
@@ -277,7 +347,7 @@ U04_CONSUMERS: Final[Mapping[str, int]] = {
     **ACCREDITATION_CONSUMERS,
     **NOTIFICATIONS_CONSUMERS,
 }
-"""Todos los consumidores de U-04 con su concurrencia (hoy ninguno)."""
+"""Todos los consumidores de U-04 con su concurrencia."""
 
 LOOP_LABELS: Final[Mapping[str, type[enum.Enum]]] = {
     **LOOP_LABEL_BINDINGS,
