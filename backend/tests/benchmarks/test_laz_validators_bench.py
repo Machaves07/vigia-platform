@@ -1,11 +1,14 @@
-"""NFR-LAZ-04: banco de los validadores de texto de U-04 sobre 1 000 caracteres (TASK-303).
+"""NFR-LAZ-04: banco de los dos validadores de texto de U-04 sobre 1 000 caracteres (TASK-340).
 
 ``laz_validators_1000_chars`` mide la validación de un texto **permitido** de 1 000 caracteres
-(el peor caso: ningún término corta la búsqueda) por ``FreeTextPolicyRegistry.apply`` con
-``blocked_vocabulary`` y la lista de una organización ya en la caché por proceso: la política base
-de U-02, la forma canónica, el plegado de A-45 y la búsqueda de lemas y patrones. Sin red ni base:
-la caché ya se cargó antes de medir (PAT-LAZ-REN-02). El validador ``person_attribution``
-(TASK-340) se añadirá a la misma medida.
+(el peor caso: ningún término ni patrón corta la búsqueda) por ``FreeTextPolicyRegistry.apply``
+con los **dos validadores encadenados** en el orden de ``loop.registration``:
+``blocked_vocabulary`` con la lista de una organización ya en la caché por proceso y
+``person_attribution`` con su vocabulario declarado ya en la suya. Cubre la política base de U-02,
+la forma canónica, el plegado de A-45, la búsqueda de lemas y patrones, los patrones de §14.5 y de
+A-45 punto 3, la forma con mayúsculas y el patrón de nombre propio. Sin red ni base: las dos
+cachés se cargan antes de medir (PAT-LAZ-REN-02). El texto cita equipos con mayúsculas, cifras,
+fechas y un equipo con marca declarada, para que el patrón de nombre propio recorra pares.
 
 El objetivo, **p95 ≤ 20 ms**, es ``[objetivo propio]`` (NFR-LAZ-04): el informe dice si se cumple
 y nunca decide el resultado. En el perfil ``ci`` el banco es **informativo** (no compara con la
@@ -27,8 +30,12 @@ from hypothesis import settings
 from tests.benchmarks.conftest import Measure
 from tests.conftest import NIGHTLY_PROFILE
 from tests.vocabulary_support import FIELD, MemoryStore, customer_term
-from vigia_platform.ledger.free_text import FreeTextPolicyRegistry, FreeTextPreparation
-from vigia_platform.loop.validators.cache import VocabularyCache
+from vigia_platform.ledger.free_text import FreeTextPolicyRegistry, FreeTextPreparation, RowReader
+from vigia_platform.loop.validators.attribution import (
+    PERSON_ATTRIBUTION,
+    PersonAttributionValidator,
+)
+from vigia_platform.loop.validators.cache import DeclaredNamesCache, VocabularyCache
 from vigia_platform.loop.validators.vocabulary import (
     BLOCKED_VOCABULARY,
     BlockedVocabularyValidator,
@@ -39,8 +46,9 @@ from vigia_platform.shared.clock import SimulatedClock
 TEXT_CHARS: Final = 1_000
 OBJECTIVE_MS: Final = 20.0
 SENTENCE: Final = (
-    "Revisión de la guarda norte y de la barrera de la prensa durante el turno de mantenimiento; "
-    "la señal del sensor y la baliza quedaron verificadas con el acta de calibración. "
+    "Revisión de la guarda de la Prensa Norte y de la barrera de la Prensa Schuler Kompakt"
+    " durante el turno de mantenimiento del 2026-10-18; la señal del sensor y la baliza quedaron"
+    " verificadas con el acta de calibración PRO-001 y un costo de 1.500.000 pesos. "
 )
 
 
@@ -49,25 +57,30 @@ def _text() -> str:
     return text.rstrip() + "x" * (TEXT_CHARS - len(text.rstrip()))
 
 
+class _Names:
+    async def names(self, organization_id: uuid.UUID, rows: RowReader) -> tuple[str, ...]:
+        return ("Prensa Schuler Kompakt", "Planta Principal", "Zona de Prensas")
+
+
 def test_laz_validators_1000_chars(measure: Measure) -> None:
     organization = uuid.uuid4()
     vocabulary = VocabularyList(
         version=2, terms=(customer_term("montacargas"), customer_term("umbral"))
     )
-    cache = VocabularyCache(MemoryStore({organization: vocabulary}))
+    vocabulary_cache = VocabularyCache(MemoryStore({organization: vocabulary}))
+    names_cache = DeclaredNamesCache(_Names())
 
     async def rows(*_: object) -> list[object]:
         raise AssertionError("el banco no lee la base")
 
-    asyncio.run(
-        cache.refresh(
-            FreeTextPreparation(
-                organization, rows, SimulatedClock(datetime(2026, 10, 18, tzinfo=UTC))
-            )
-        )
+    preparation = FreeTextPreparation(
+        organization, rows, SimulatedClock(datetime(2026, 10, 18, tzinfo=UTC))
     )
+    asyncio.run(vocabulary_cache.refresh(preparation))
+    asyncio.run(names_cache.refresh(preparation))
     registry = FreeTextPolicyRegistry()
-    registry.register(BLOCKED_VOCABULARY, BlockedVocabularyValidator(cache.compiled_for))
+    registry.register(BLOCKED_VOCABULARY, BlockedVocabularyValidator(vocabulary_cache.compiled_for))
+    registry.register(PERSON_ATTRIBUTION, PersonAttributionValidator(names_cache.names_for))
     registry.seal()
     text = _text()
     assert len(text) == TEXT_CHARS
@@ -75,10 +88,11 @@ def test_laz_validators_1000_chars(measure: Measure) -> None:
 
     result = measure(
         "laz_validators_1000_chars",
-        "Validadores de texto de U-04 (blocked_vocabulary) sobre 1 000 caracteres",
+        "Validadores de texto de U-04 (blocked_vocabulary y person_attribution) sobre 1 000"
+        " caracteres",
         lambda: registry.apply(text, FIELD, organization_id=organization),
         objective_ms=OBJECTIVE_MS,
-        details={"chars": TEXT_CHARS, "validators": [BLOCKED_VOCABULARY]},
+        details={"chars": TEXT_CHARS, "validators": [BLOCKED_VOCABULARY, PERSON_ATTRIBUTION]},
         informative=settings.get_current_profile_name() != NIGHTLY_PROFILE,
     )
     assert result.samples == 100

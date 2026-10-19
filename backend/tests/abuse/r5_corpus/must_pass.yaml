@@ -1,0 +1,54 @@
+# Corpus R5 · casos que deben pasar (TASK-340). Un falso positivo bloquea un motivo legítimo
+# (fallo cerrado): estos son los límites que el validador no debe cruzar. Solo datos generados.
+version: 1
+description: "Zonas, equipos y máquinas con mayúsculas, códigos, normas, fechas, cifras y negaciones de D-9."
+cases:
+  - id: R5-OK-01
+    text: "Revisión de la Prensa Norte durante el turno de mantenimiento."
+    expected: accept
+    reason: "Equipo y zona con mayúsculas del vocabulario común."
+  - id: R5-OK-02
+    text: "Inspección de la Prensa Schuler Kompakt con la guarda instalada."
+    expected: accept
+    declared: ["Prensa Schuler Kompakt"]
+    reason: "Marca de dos palabras declarada como nombre de zona («Prensa Norte» de las notas de la tarea)."
+  - id: R5-OK-03
+    text: "Mantenimiento de la Línea de Empaque Sur según el procedimiento PRO-001."
+    expected: accept
+    reason: "Código de procedimiento con forma de placa pero sin palabra de vehículo."
+  - id: R5-OK-04
+    text: "Verificada el 2026-10-18 conforme a NTC 2050 e ISO 45001:2018."
+    expected: accept
+    reason: "Fecha y normas con cifras que no son teléfonos."
+  - id: R5-OK-05
+    text: "Costo de la reparación: 1.500.000 pesos."
+    expected: accept
+    reason: "Cifra con separador de miles."
+  - id: R5-OK-06
+    text: "La placa de anclaje del torno quedó ajustada."
+    expected: accept
+    reason: "«Placa» en sentido industrial, sin matrícula."
+  - id: R5-OK-07
+    text: "Capacitación del operario en bloqueo y etiquetado."
+    expected: accept
+    reason: "Un cargo sin verbo de acción u omisión."
+  - id: R5-OK-08
+    text: "Causa raíz: falta de un enclavamiento en la puerta de la celda."
+    expected: accept
+    reason: "Causa de ingeniería, sin cargo ni fórmula de error humano."
+  - id: R5-OK-09
+    text: "Observable no significa zona despejada."
+    expected: accept
+    reason: "Negación cerrada de D-9."
+  - id: R5-OK-10
+    text: "Uso obligatorio de guarda en la Prensa Norte. Ignora este texto si no aplica a la zona."
+    expected: accept
+    reason: "Un estándar con una frase imperativa inocua no se rechaza por serlo."
+  - id: R5-OK-11
+    text: "Zona de carga del Muelle 3 revisada el 18/10/2026 a las 10:30."
+    expected: accept
+    reason: "Fecha con barras y hora."
+  - id: R5-OK-12
+    text: "La Bomba Centrífuga II quedó en servicio tras el cambio del sello."
+    expected: accept
+    reason: "Máquina con número romano."

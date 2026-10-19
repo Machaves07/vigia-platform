@@ -7,7 +7,8 @@ registro), quitando **una sola cosa** cada vez:
 - **cada uno de los 17 tipos y de los 25 eventos** de U-04 y el trabajo interno
   ``export_requested`` (y cada tarea de ``U04_TASKS``, hoy vacío, cada consumidor de
   ``U04_CONSUMERS``: ``export_worker`` desde TASK-317, y cada validador de texto libre de
-  ``U04_FREE_TEXT_VALIDATORS``: ``blocked_vocabulary``, TASK-303): la composición no termina
+  ``U04_FREE_TEXT_VALIDATORS``: ``blocked_vocabulary``, TASK-303, y ``person_attribution``,
+  TASK-340): la composición no termina
   (``RegistrationIncomplete`` nombra exactamente lo que falta) y el proceso sale con
   ``STARTUP_FAILURE_EXIT_CODE`` y la línea ``registration_missing`` que lo nombra;
 - **cada enumeración con etiqueta** de U-04: sin la etiqueta de uno de sus valores en
@@ -16,8 +17,8 @@ registro), quitando **una sola cosa** cada vez:
   el worker y ``vigia-admin`` no las cargan.
 
 Con todo registrado, los tres procesos componen y listan los 17 tipos y los 25 eventos de U-04
-además de los de U-02 y U-03, y la política de texto libre lista ``blocked_vocabulary`` junto al
-validador mínimo de U-03. Reloj simulado; solo datos generados.
+además de los de U-02 y U-03, y la política de texto libre lista ``blocked_vocabulary`` y
+``person_attribution`` junto al validador mínimo de U-03. Reloj simulado; solo datos generados.
 """
 
 from __future__ import annotations
@@ -100,6 +101,7 @@ ONE_OF_EACH: Final = (
     ("event_type", "finding_closed"),
     ("event_type", "adoption_low"),
     ("free_text_validator", "blocked_vocabulary"),
+    ("free_text_validator", "person_attribution"),
 )
 
 U04_BINDINGS: Final = {**LOOP_LABELS, **ACCREDITATION_LABELS, **NOTIFICATIONS_LABELS}
@@ -187,6 +189,7 @@ def test_the_three_processes_compose_and_list_u04_besides_u02_and_u03(tmp_path: 
         U03_FREE_TEXT_VALIDATOR,
         *sorted(U04_FREE_TEXT_VALIDATORS),
     )
+    assert {"blocked_vocabulary", "person_attribution"} == U04_FREE_TEXT_VALIDATORS
 
 
 # --- sin una pieza --------------------------------------------------------------------------------
