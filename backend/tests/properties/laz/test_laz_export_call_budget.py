@@ -76,6 +76,7 @@ def _calls(job: ExportJob, findings: int, standards: int) -> Counter[str]:
         checkpoints=doubles,
         places=doubles,
         blobs=doubles,
+        episodes=doubles,
     )
     composer = ExportComposer(stream=ExportStream(store=MemoryExportStore()), ports=ports)
     package = asyncio.run(composer.compose(job, RecordingSink()))

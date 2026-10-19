@@ -22,10 +22,12 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
      ella es un defecto de datos: alarma ``export-assignment-overlap`` y se declara tal cual.
    - **Hallazgos** (BR-LAZ-89): por zona, ``LectorExpediente.list`` con los tipos del lazo y la
      ventana ``[period_from, generated_at)``. Un sujeto (episodio o detección) es **del periodo**
-     si su primer registro de U-03 tiene ``received_at`` en ``[period_from, period_to)``. El de un
-     episodio que empezó antes del periodo se reconoce sin leer hacia atrás: su primer tramo en la
-     ventana cita en ``previous_segment_record_id`` un registro que no está en ella (el contrato
-     lo exige en todo tramo con índice > 0). Su estado sale de **plegar** sus registros con el
+     si su primer registro de U-03 tiene ``received_at`` en ``[period_from, period_to)``. Si un
+     episodio ya tenía un tramo recibido antes del periodo lo dice el expediente, con **una**
+     consulta por lote de los episodios de la ventana (``EpisodeHistory``). No sirve
+     ``previous_segment_record_id``: es el identificador del nodo. Un episodio cuyo tramo 0 falta
+     o llega tarde sigue siendo del periodo, y su primer tramo recibido lo ancla, como en la
+     proyección. Su estado sale de **plegar** sus registros con el
      pliegue puro de la proyección (``loop.projection.fold.step``), así que el paquete lleva
      **todos** los estados, también los descartados y suspendidos. Leer hasta ``generated_at`` y
      no hasta «ahora» hace que una retoma lea lo mismo (PR-LAZ-49).
@@ -36,7 +38,8 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
    - **Acuerdos, regresiones y revocaciones** (BR-LAZ-96 y 97): los registros
      ``use_agreement_signed`` y ``walk_test_regression_*`` de la zona hasta ``generated_at`` y los
      intervalos de ``gate_history``.
-   - **Auditoría del periodo** de la planta (``LectorExpediente.list_audit``).
+   - **Auditoría del periodo** de las zonas pedidas (``LectorExpediente.list_audit`` por zona):
+     ``export.create`` se autoriza por zona, así que nada de otras zonas ni de la planta sin zona.
 
 2. **Escribir** con ``ExportStream`` (TASK-345), en orden fijo: un ``findings_json`` y un
    ``coverage`` por zona, la auditoría, los puntos de control, las claves, los clips (solo en la
@@ -163,6 +166,7 @@ __all__ = [
     "LOOP_RECORD_TYPES",
     "BlobSource",
     "CheckpointLookup",
+    "EpisodeHistory",
     "ExportCatalog",
     "ExportComposer",
     "ExportFleet",
@@ -202,6 +206,8 @@ _NOT_FINDINGS: Final = frozenset(
         "loop_configuration_changed",
     }
 )
+_EPISODE_BATCH: Final = 1000
+"""Episodios como mucho por consulta a la historia de la zona."""
 _FACT_INSTANTS: Final = 3
 """Rondas de ``standards_at_many`` como mucho: el instante del hecho y los dos extremos."""
 _GATE_UNAVAILABLE: Final = LoopDetailCode.GATE_STATE_UNAVAILABLE.value
@@ -277,6 +283,20 @@ class CheckpointLookup(Protocol):
     def checkpoint_public_keys(self) -> tuple[CheckpointPublicKey, ...]: ...
 
 
+class EpisodeHistory(Protocol):
+    """Qué episodios de la ventana ya tenían un tramo (``finding_received``) en el expediente de
+    la zona antes de ``before``: una consulta por lote, nunca una por episodio."""
+
+    async def episodes_received_before(
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        episode_ids: Sequence[uuid.UUID],
+        before: datetime,
+    ) -> frozenset[uuid.UUID]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class Places:
     """La organización, la planta y el código y el nombre de cada zona pedida."""
@@ -313,6 +333,7 @@ class ExportPorts:
     checkpoints: CheckpointLookup
     places: PlaceLookup
     blobs: BlobSource
+    episodes: EpisodeHistory
 
 
 # --- Contenido recogido -------------------------------------------------------------------------
@@ -477,7 +498,14 @@ class ExportComposer:
                 context, job.plant_id, zone_id, GOVERNANCE_RECORD_TYPES, None, job.generated_at
             )
             single, window = occupancy[zone_id]
-            findings = _fold_findings(loop_records, job.period_from, job.period_to)
+            by_subject = _by_subject(loop_records)
+            started_before = await self._started_before(
+                context,
+                job,
+                zone_id,
+                _candidate_episodes(by_subject, job.period_from, job.period_to),
+            )
+            findings = _fold_findings(by_subject, job.period_from, job.period_to, started_before)
             flagged = await self._flagged(context, findings, job.generated_at)
             timeline = await zone_timeline(
                 ports.coverage, context, zone_id, job.period_from, job.period_to, job.generated_at
@@ -499,7 +527,7 @@ class ExportComposer:
                 )
             )
         standards = await self._standards(context, collected)
-        audit = await self._audit(context, job.plant_id, job.period_from, observed_until)
+        audit = await self._audit(context, job, job.period_from, observed_until)
         return PackageContents(
             places=places,
             zones=tuple(draft.contents(job) for draft in collected),
@@ -689,24 +717,47 @@ class ExportComposer:
             )
         )
 
+    async def _started_before(
+        self,
+        context: ScopeContext,
+        job: ExportJob,
+        zone_id: uuid.UUID,
+        episode_ids: Sequence[uuid.UUID],
+    ) -> frozenset[uuid.UUID]:
+        """Los episodios con algún tramo recibido antes de ``period_from`` (por lotes de 1000)."""
+        found: set[uuid.UUID] = set()
+        for start in range(0, len(episode_ids), _EPISODE_BATCH):
+            batch = episode_ids[start : start + _EPISODE_BATCH]
+            found |= await self._ports.episodes.episodes_received_before(
+                context, job.plant_id, zone_id, batch, job.period_from
+            )
+        return frozenset(found)
+
     async def _audit(
-        self, context: ScopeContext, plant_id: uuid.UUID, start: datetime, end: datetime
+        self, context: ScopeContext, job: ExportJob, start: datetime, end: datetime
     ) -> tuple[AuditEntryView, ...]:
-        """El registro de auditoría de la planta en ``[start, end)``."""
+        """El registro de auditoría del periodo **de las zonas pedidas** en ``[start, end)``.
+
+        ``export.create`` se autoriza por zona: el paquete no lleva entradas de otras zonas de la
+        planta ni las de la planta sin zona, que quien pide podría no tener derecho a leer
+        (fuera de alcance = no existe)."""
         if end <= start:
             return ()
-        filters = AuditFilters(plant_id=plant_id, occurred_from=start, occurred_before=end)
         found: dict[uuid.UUID, AuditEntryView] = {}
-        cursor: AuditCursor | None = None
-        while True:
-            page = await self._ports.reader.list_audit(
-                context, filters, AuditPageRequest(size=MAX_PAGE_SIZE, after=cursor)
+        for zone_id in job.zone_ids:
+            filters = AuditFilters(
+                plant_id=job.plant_id, zone_id=zone_id, occurred_from=start, occurred_before=end
             )
-            for entry in page.items:
-                found[entry.entry_id] = entry
-            if page.next_cursor is None or not page.items:
-                break
-            cursor = page.next_cursor
+            cursor: AuditCursor | None = None
+            while True:
+                page = await self._ports.reader.list_audit(
+                    context, filters, AuditPageRequest(size=MAX_PAGE_SIZE, after=cursor)
+                )
+                for entry in page.items:
+                    found[entry.entry_id] = entry
+                if page.next_cursor is None or not page.items:
+                    break
+                cursor = page.next_cursor
         return tuple(sorted(found.values(), key=lambda entry: entry.chain_sequence))
 
     # --- fase 2: escribir ---------------------------------------------------------------------
@@ -763,28 +814,62 @@ class _FoldedFinding:
     records: tuple[LedgerRecordView, ...]
 
 
-def _fold_findings(
-    records: Sequence[LedgerRecordView], period_from: datetime, period_to: datetime
-) -> tuple[_FoldedFinding, ...]:
-    """Los hallazgos del periodo de una zona y su estado, plegando sus registros en orden."""
-    in_window = {record.record_id for record in records}
-    by_subject: dict[uuid.UUID, list[tuple[LedgerRecordView, Mapping[str, Any]]]] = {}
+type _Subjects = dict[uuid.UUID, list[tuple[LedgerRecordView, Mapping[str, Any]]]]
+
+
+def _by_subject(records: Sequence[LedgerRecordView]) -> _Subjects:
+    """Los registros de la ventana agrupados por sujeto del lazo, en orden de cadena."""
+    by_subject: _Subjects = {}
     for record in records:
         document = record.document()
         subject = _subject_of(record, document)
         if subject is not None:
             by_subject.setdefault(subject, []).append((record, document))
+    return by_subject
+
+
+def _first_u03(
+    items: Sequence[tuple[LedgerRecordView, Mapping[str, Any]]],
+) -> LedgerRecordView | None:
+    return next((record for record, _ in items if record.record_type in U03_RECORD_TYPES), None)
+
+
+def _candidate_episodes(
+    by_subject: _Subjects, period_from: datetime, period_to: datetime
+) -> tuple[uuid.UUID, ...]:
+    """Los episodios cuyo primer tramo **de la ventana** cae en el periodo: de ellos hay que saber
+    si ya había un tramo recibido antes de ``period_from`` (empezaron antes)."""
+    found: list[uuid.UUID] = []
+    for subject, items in by_subject.items():
+        first = _first_u03(items)
+        if (
+            first is not None
+            and first.record_type == "finding_received"
+            and period_from <= first.received_at < period_to
+        ):
+            found.append(subject)
+    return tuple(sorted(found, key=str))
+
+
+def _fold_findings(
+    by_subject: _Subjects,
+    period_from: datetime,
+    period_to: datetime,
+    started_before: frozenset[uuid.UUID],
+) -> tuple[_FoldedFinding, ...]:
+    """Los hallazgos del periodo de una zona y su estado, plegando sus registros en orden.
+
+    Un sujeto es del periodo si su **primer** registro de U-03 tiene ``received_at`` en
+    ``[period_from, period_to)``: el primero de la ventana, salvo que el episodio ya tuviera un
+    tramo recibido antes (``started_before``, consultado al expediente por lote). Un episodio
+    cuyo tramo 0 falta o llega tarde sigue siendo del periodo: su primer tramo recibido lo ancla."""
     findings: list[_FoldedFinding] = []
-    for items in by_subject.values():
-        anchors = [(r, d) for r, d in items if r.record_type in U03_RECORD_TYPES]
-        if not anchors:
+    for subject, items in by_subject.items():
+        first = _first_u03(items)
+        if first is None:
             continue  # sujeto de antes de la ventana: solo hay registros de U-04
-        first, first_document = anchors[0]
-        if not period_from <= first.received_at < period_to:
+        if not period_from <= first.received_at < period_to or subject in started_before:
             continue
-        previous = (first_document.get("episode") or {}).get("previous_segment_record_id")
-        if previous is not None and _uuid(previous) not in in_window:
-            continue  # episodio que empezó antes del periodo
         episode: EpisodeRow | None = None
         row: FindingStateRow | None = None
         applied: list[LedgerRecordView] = []

@@ -45,12 +45,19 @@ from tests.export_support import (
     export_stack,
 )
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, versioned_bucket
-from tests.laz_support import InstrumentedPorts, LoopWorld, loop_world, register_u04_and_catalog
+from tests.laz_support import (
+    IngestedSubject,
+    InstrumentedPorts,
+    LoopWorld,
+    loop_world,
+    register_u04_and_catalog,
+)
 from tests.properties.laz.strategies.export import WorldPorts, job_world
 from tests.signing_support import bootstrapped_world
 from tests.writer_support import unit_context
 from vigia_platform.accreditation.adapters.postgres.export_reads import (
     SqlCheckpointLookup,
+    SqlEpisodeHistory,
     SqlExportPlaces,
 )
 from vigia_platform.accreditation.export.composer_port import (
@@ -68,6 +75,7 @@ from vigia_platform.accreditation.export.lease import LeaseLost, SqlExportLeaseS
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
 from vigia_platform.accreditation.export.volumes import MANIFEST_NAME, ExportLocation
 from vigia_platform.accreditation.export.worker import ExportWorker
+from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.ledger.adapters.checkpoint_store import SqlCheckpointStore
 from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.reader import (
@@ -329,6 +337,33 @@ def world(postgres_endpoint: PostgresEndpoint) -> Iterator[LoopWorld]:
         yield built
 
 
+def _ledger_now(world: LoopWorld) -> Any:
+    """El reloj con que la base sella ``received_at`` (el periodo se compara con él), un
+    milisegundo por delante de lo ya recibido."""
+    (row,) = world.stack.fetch("SELECT clock_timestamp() AS now")
+    return to_millisecond(row["now"]) + timedelta(milliseconds=1)
+
+
+def _segment(
+    world: LoopWorld, organization: Any, previous: IngestedSubject | None, index: int
+) -> dict[str, Any]:
+    """Un tramo ``index`` de un episodio: el de ``previous`` (cita su ``finding_id``, como el
+    nodo) o, sin él, uno nuevo cuyo tramo anterior no llega nunca."""
+    document = world.stack.finding(organization.site)
+    if previous is not None:
+        episode_id = previous.document["episode"]["episode_id"]
+        previous_id = previous.document["finding_id"]
+    else:
+        episode_id, previous_id = str(world.stack.uuid7()), str(world.stack.uuid7())
+    document["episode"] = {
+        **document["episode"],
+        "episode_id": episode_id,
+        "segment_index": index,
+        "previous_segment_record_id": previous_id,
+    }
+    return document
+
+
 def _all_records(world: LoopWorld, organization: Any) -> list[ProjectionInput]:
     """Todo el expediente de la organización, página a página por ``LectorExpediente``."""
     database = world.stack.primary.database
@@ -381,7 +416,10 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
         ),
         world.stack.now() - timedelta(days=400),
     )
-    start = world.stack.now()
+    # Un episodio que empezó antes del periodo: su tramo 0 llega antes y su tramo 1, dentro.
+    earlier = world.ingest_finding(a)
+    world.stack.tick(5)
+    start = _ledger_now(world)
     world.stack.tick(5)
     # Expediente de las dos organizaciones en el mismo intervalo.
     confirmed = world.ingest_finding(a)
@@ -389,7 +427,10 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
     pending = world.ingest_finding(a)
     detection = world.ingest_detection(a)
     foreign = world.ingest_finding(b)
-    for subject in (confirmed, discarded, pending, detection, foreign):
+    continued = world._ingest(a, IngestKind.FINDING, _segment(world, a, earlier, 1))
+    # Un episodio cuyo tramo 0 no llega nunca: su tramo 1 lo ancla en el periodo.
+    orphan = world._ingest(a, IngestKind.FINDING, _segment(world, a, None, 1))
+    for subject in (earlier, confirmed, discarded, pending, detection, foreign, continued, orphan):
         world.project(subject)
     world.write(a, "classification", world.classification_content(confirmed))
     world.write(
@@ -403,7 +444,7 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
         ),
     )
     world.stack.tick(5)
-    end = world.stack.now()
+    end = _ledger_now(world)
     # Puntos de control de verdad (U-02) y su búsqueda por identificador.
     database = world.stack.primary.database
     sessions = world.stack.authz.sessions
@@ -458,6 +499,7 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
         checkpoints=SqlCheckpointLookup(database, checkpoints),
         places=SqlExportPlaces(database),
         blobs=doubles,
+        episodes=SqlEpisodeHistory(database),
     )
     store = MemoryExportStore()
     composer = ExportComposer(stream=ExportStream(store=store, settings=SETTINGS), ports=ports)
@@ -483,12 +525,13 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
     }
     assert {f["subject_id"]: f["lifecycle_state"] for f in found} == expected
     assert set(expected) == {
-        str(subject.subject_id) for subject in (confirmed, discarded, pending, detection)
+        str(subject.subject_id) for subject in (confirmed, discarded, pending, detection, orphan)
     }
+    assert str(earlier.subject_id) not in expected  # empezó antes del periodo
     assert expected[str(confirmed.subject_id)] == "open"
     assert expected[str(discarded.subject_id)] == "discarded"
     assert str(foreign.subject_id) not in {f["subject_id"] for f in found}
-    assert manifest["finding_count"] == 4
+    assert manifest["finding_count"] == 5
     assert manifest["organization"]["organization_id"] == str(a.organization_id)
     assert {c["entry_id"] for c in manifest["checkpoints"]} == {str(i) for i in ids}
     assert manifest["checkpoint_public_keys"]

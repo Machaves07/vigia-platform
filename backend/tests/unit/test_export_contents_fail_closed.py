@@ -29,6 +29,7 @@ from tests.properties.laz.strategies.export import (
     job_world,
     world_context,
 )
+from vigia_platform.accreditation.export import contents
 from vigia_platform.accreditation.export.composer_port import (
     CHECKPOINT_UNAVAILABLE,
     ExportInputUnavailable,
@@ -36,6 +37,7 @@ from vigia_platform.accreditation.export.composer_port import (
 )
 from vigia_platform.accreditation.export.contents import ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream
+from vigia_platform.fleet.ports import ZoneAssignmentPeriod
 from vigia_platform.loop.domain.enums import PackageForm
 
 
@@ -140,3 +142,57 @@ def test_without_the_assignment_history_it_is_declared_absent() -> None:
     for zone in package.manifest["zones"]:
         assert zone["node_assignments"] is None
         assert zone["node_assignments_absent_reason_es"]
+
+
+class _RecordingLog:
+    def __init__(self) -> None:
+        self.errors: list[tuple[str, dict[str, Any]]] = []
+
+    def error(self, event: str, **fields: Any) -> None:
+        self.errors.append((event, fields))
+
+
+@pytest.mark.parametrize("overlapping", [True, False])
+def test_an_overlap_in_the_assignment_history_raises_the_alarm_and_is_declared_as_is(
+    monkeypatch: pytest.MonkeyPatch, overlapping: bool
+) -> None:
+    """Un solape en ``assignment_history`` es un defecto de datos: alarma
+    ``export-assignment-overlap`` (una por zona, sin texto libre) y la historia se declara tal
+    cual, sin desambiguar; sin solape, ninguna alarma."""
+    log = _RecordingLog()
+    monkeypatch.setattr(contents, "_log", log)
+    world = job_world(_job())
+    zone = world.job.zone_ids[0]
+    node_a, node_b = uuid.uuid4(), uuid.uuid4()
+    second_start = BASE + timedelta(days=5 if overlapping else 10)
+    world.assignments[zone] = [
+        ZoneAssignmentPeriod(
+            node_id=node_a,
+            assigned_at=BASE - timedelta(days=30),
+            unassigned_at=BASE + timedelta(days=10),
+            replaces_node_id=None,
+        ),
+        ZoneAssignmentPeriod(
+            node_id=node_b, assigned_at=second_start, unassigned_at=None, replaces_node_id=node_a
+        ),
+    ]
+    package, _ = _compose(world)
+    (declared,) = [z for z in package.manifest["zones"] if z["zone_id"] == str(zone)]
+    assert [entry["node_id"] for entry in declared["node_assignments"]] == [
+        str(node_a),
+        str(node_b),
+    ]
+    if overlapping:
+        assert log.errors == [
+            (
+                contents.ASSIGNMENT_OVERLAP_ALARM,
+                {
+                    "organization_id": str(world.job.organization_id),
+                    "plant_id": str(world.job.plant_id),
+                    "zone_id": str(zone),
+                    "export_request_id": str(world.job.export_id),
+                },
+            )
+        ]
+    else:
+        assert log.errors == []

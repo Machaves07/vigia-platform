@@ -31,6 +31,7 @@ from vigia_platform.accreditation.adapters.http.services import (
 )
 from vigia_platform.accreditation.adapters.postgres.export_reads import (
     SqlCheckpointLookup,
+    SqlEpisodeHistory,
     SqlExportPlaces,
     StorageBlobs,
 )
@@ -132,6 +133,7 @@ def _export_composer(services: UnitServices, stream: ExportStream) -> ExportComp
             checkpoints=SqlCheckpointLookup(database, services.checkpoints),
             places=SqlExportPlaces(database),
             blobs=StorageBlobs(database, evidence),
+            episodes=SqlEpisodeHistory(database),
         ),
     )
 

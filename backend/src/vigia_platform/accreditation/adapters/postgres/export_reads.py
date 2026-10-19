@@ -10,6 +10,9 @@ Lo que ``accreditation.export.contents`` necesita y no es un puerto de U-02 ni d
   las claves públicas ``checkpoint`` de ``CheckpointService`` (vigentes y retiradas, BR-NUC-55).
   Leer por identificador, y no el último punto de control de cada cadena, hace que una retoma
   incruste exactamente los mismos (U04-H-08).
+- ``SqlEpisodeHistory``: qué episodios de la ventana ya tenían un tramo recibido antes del
+  periodo (una sentencia por lote): así un episodio empezado antes no se cuenta como del periodo,
+  y uno cuyo tramo 0 falta o llega tarde sí.
 - ``StorageBlobs``: los bytes de un clip (su clave en ``ledger.evidence``) o de un adjunto de
   cierre (la clave de BR-LAZ-44), leídos del depósito de evidencias. El compositor los compara
   con el SHA-256 declarado antes de escribirlos.
@@ -22,6 +25,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Final, Protocol
 
 from sqlalchemy import text
@@ -39,7 +43,7 @@ from vigia_platform.ledger.chain.checkpoints import (
 )
 from vigia_platform.shared.context import ScopeContext, repository
 
-__all__ = ["SqlCheckpointLookup", "SqlExportPlaces", "StorageBlobs"]
+__all__ = ["SqlCheckpointLookup", "SqlEpisodeHistory", "SqlExportPlaces", "StorageBlobs"]
 
 _PLACES: Final = text(
     "SELECT o.code AS organization_code, o.name AS organization_name, p.code AS plant_code,"
@@ -60,6 +64,14 @@ _AUDIT_CHECKPOINTS: Final = text(
     "SELECT entry_id, chain_sequence, entry_hash, filters AS content FROM shared.audit_entry"
     " WHERE organization_id = :organization_id AND operation = 'checkpoint'"
     " AND entry_id = ANY(CAST(:ids AS uuid[]))"
+)
+_EPISODES_BEFORE: Final = text(
+    "SELECT DISTINCT r.content_json -> 'episode' ->> 'episode_id' AS episode_id"
+    " FROM ledger.ledger_record AS r"
+    " WHERE r.organization_id = :organization_id AND r.plant_id = :plant_id"
+    " AND r.scope_zone_id = :zone_id AND r.received_at < :before"
+    " AND r.record_type = 'finding_received'"
+    " AND r.content_json -> 'episode' ->> 'episode_id' = ANY(CAST(:episode_ids AS text[]))"
 )
 _EVIDENCE_KEY: Final = text(
     "SELECT storage_key FROM ledger.evidence"
@@ -108,6 +120,38 @@ class SqlExportPlaces:
             ),
             zones={_uuid(row.zone_id): (str(row.zone_code), str(row.zone_name)) for row in rows},
         )
+
+
+@repository
+class SqlEpisodeHistory:
+    """``EpisodeHistory``: una sentencia por lote sobre ``ledger.ledger_record`` (índice por
+    organización, planta, zona y recepción; ``content_json`` es la columna generada)."""
+
+    def __init__(self, database: LedgerDatabase) -> None:
+        self._database = database
+
+    async def episodes_received_before(
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        episode_ids: Sequence[uuid.UUID],
+        before: datetime,
+    ) -> frozenset[uuid.UUID]:
+        if not episode_ids:
+            return frozenset()
+        rows = await self._database.read(
+            context,
+            _EPISODES_BEFORE,
+            {
+                "organization_id": context.organization_id,
+                "plant_id": plant_id,
+                "zone_id": zone_id,
+                "before": before,
+                "episode_ids": [str(value) for value in episode_ids],
+            },
+        )
+        return frozenset(_uuid(row.episode_id) for row in rows)
 
 
 class PublicKeySource(Protocol):

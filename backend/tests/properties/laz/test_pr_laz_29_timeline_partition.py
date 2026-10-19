@@ -61,7 +61,7 @@ def _overlaps(start: datetime, end: datetime | None, period: tuple[datetime, dat
     return start < period[1] and (end is None or end > period[0])
 
 
-@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(world=exported_packages())
 def test_pr_laz_29_the_timeline_never_omits_a_stretch(world: ExportWorld) -> None:
     job = world.job
@@ -84,7 +84,7 @@ def test_pr_laz_29_the_timeline_never_omits_a_stretch(world: ExportWorld) -> Non
         assert summaries[str(zone)]["interval_count"] == len(intervals)
 
 
-@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(world=exported_packages())
 def test_pr_laz_29_regressions_and_revocations_are_declared(world: ExportWorld) -> None:
     job = world.job
@@ -116,7 +116,7 @@ def test_pr_laz_29_regressions_and_revocations_are_declared(world: ExportWorld) 
     assert {zone["zone_id"] for zone in manifest["zones"]} == {str(z) for z in job.zone_ids}
 
 
-@settings(max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(world=exported_packages())
 def test_pr_laz_29_every_phrase_of_the_package_is_a_closed_fixed_text(world: ExportWorld) -> None:
     composed = compose_world(world)

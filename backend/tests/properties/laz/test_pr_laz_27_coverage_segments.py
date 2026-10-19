@@ -93,7 +93,7 @@ def _timeline(scenario: LongPeriod, port: SegmentedCoverage, generated_at: Any =
     )
 
 
-@settings(max_examples=150, deadline=None)
+@settings(deadline=None)
 @given(scenario=long_periods())
 def test_pr_laz_27_segments_compose_to_the_single_query(scenario: LongPeriod) -> None:
     port = SegmentedCoverage(scenario.inputs)
@@ -154,7 +154,7 @@ def test_an_empty_period_has_no_segment() -> None:
     assert segments(BASE, BASE) == ()
 
 
-@settings(max_examples=60, deadline=None)
+@settings(deadline=None)
 @given(scenario=long_periods(min_days=32, max_days=120))
 def test_a_period_ending_after_generated_at_closes_with_period_not_elapsed(
     scenario: LongPeriod,
@@ -177,7 +177,7 @@ def test_a_period_ending_after_generated_at_closes_with_period_not_elapsed(
     assert max(piece.end for piece in port.periods) == generated_at
 
 
-@settings(max_examples=10, deadline=None)
+@settings(deadline=None)
 @given(scenario=long_periods(min_days=32, max_days=70))
 def test_without_coverage_the_export_fails_declared(scenario: LongPeriod) -> None:
     with pytest.raises(ExportInputUnavailable) as failure:

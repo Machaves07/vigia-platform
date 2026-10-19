@@ -28,15 +28,24 @@ from typing import Any
 from hypothesis import HealthCheck, given, settings
 
 from tests.export_contents_support import compose_world, oracle_findings
-from tests.properties.laz.strategies.export import ExportWorld, exported_packages
+from tests.properties.laz.strategies.export import (
+    BASE,
+    ExportWorld,
+    _Builder,
+    exported_packages,
+    job_world,
+    stamp,
+    world_context,
+)
+from tests.properties.laz.strategies.projection import _Ids
+from vigia_platform.accreditation.export.composer_port import ExportJob
 from vigia_platform.ledger.application.evidence_read import MarkerResult
-from vigia_platform.loop.domain.enums import FindingLifecycleState
+from vigia_platform.loop.domain.enums import FindingLifecycleState, PackageForm
+from vigia_platform.loop.projection.fold import ProjectionInput
 
 S = FindingLifecycleState
 
-_SETTINGS: Any = settings(
-    max_examples=60, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
+_SETTINGS: Any = settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 
 def _package_findings(composed: Any) -> dict[uuid.UUID, dict[str, Any]]:
@@ -133,7 +142,7 @@ def _with_period(world: ExportWorld, **changes: Any) -> ExportWorld:
     return dataclasses.replace(world, job=world.job_with(**changes))
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(world=exported_packages())
 def test_the_period_is_half_open_on_the_anchor_record(world: ExportWorld) -> None:
     """Un hallazgo cuyo primer registro de U-03 cae justo en ``period_from`` entra; justo en
@@ -158,7 +167,7 @@ def test_the_period_is_half_open_on_the_anchor_record(world: ExportWorld) -> Non
         assert set(_package_findings(compose_world(candidate))) == set(expected)
 
 
-@settings(max_examples=5, deadline=None)
+@settings(deadline=None)
 @given(world=exported_packages(max_steps=0))
 def test_a_period_without_findings_is_still_a_package_with_zero_counts(world: ExportWorld) -> None:
     composed = compose_world(world)
@@ -166,3 +175,103 @@ def test_a_period_without_findings_is_still_a_package_with_zero_counts(world: Ex
     assert manifest["finding_count"] == 0
     assert all(value == 0 for value in manifest["state_counts"].values())
     assert manifest["coverage_summary"], "la cobertura del periodo va igual"
+
+
+@_SETTINGS
+@given(world=exported_packages())
+def test_the_audit_log_holds_only_the_requested_zones(world: ExportWorld) -> None:
+    """``export.create`` se autoriza por zona: la auditoría del paquete son exactamente las
+    entradas del periodo de las zonas pedidas; ni las de otras zonas de la planta ni las de la
+    planta sin zona, ni nada de la otra organización."""
+    job = world.job
+    end = min(job.period_to, job.generated_at)
+    expected = {
+        str(entry.entry_id)
+        for entry in world.audit
+        if entry.scope_plant_id == job.plant_id
+        and entry.scope_zone_id in set(job.zone_ids)
+        and job.period_from <= entry.occurred_at < end
+    }
+    found = compose_world(world).json("audit/audit-log.json")["entries"]
+    assert {entry["entry_id"] for entry in found} == expected
+    assert all(uuid.UUID(entry["scope_zone_id"]) in set(job.zone_ids) for entry in found)
+
+
+def _episode_world(segments: list[tuple[int, int]]) -> tuple[ExportWorld, uuid.UUID]:
+    """Un mundo con un solo episodio cuyos tramos ``(índice, horas desde BASE)`` llegan en ese
+    orden; el periodo es ``[BASE + 10 h, BASE + 100 h)``."""
+    organization = uuid.uuid5(uuid.UUID(int=0x26), "organization")
+    job = ExportJob(
+        export_id=uuid.uuid5(organization, "export"),
+        organization_id=organization,
+        plant_id=uuid.uuid5(organization, "plant"),
+        zone_ids=(uuid.uuid5(organization, "zone"),),
+        period_from=BASE + timedelta(hours=10),
+        period_to=BASE + timedelta(hours=100),
+        package_form=PackageForm.WITHOUT_CLIPS,
+        requested_by={"user_id": str(uuid.UUID(int=1)), "display_name": "P", "role_in_use": None},
+        correlation_id=uuid.UUID(int=2),
+        attempt=1,
+        generated_at=BASE + timedelta(hours=200),
+        checkpoint_record_ids=(uuid.uuid5(organization, "checkpoint"),),
+        context=world_context(organization),
+    )
+    world = job_world(job, findings_per_zone=0)
+    episode = uuid.uuid5(job.export_id, "episode")
+    ids = _Ids(episode)
+    builder = _Builder(ids)
+    zone = job.zone_ids[0]
+    for index, hours in segments:
+        at = BASE + timedelta(hours=hours)
+        document = {
+            "plant_id": str(job.plant_id),
+            "zone_id": str(zone),
+            "family": "coexistence",
+            "tier": "tier_1",
+            "standard": {"standard_id": str(uuid.UUID(int=7)), "version": 1},
+            "node_time": {"started_at": stamp(at), "ended_at": stamp(at)},
+            "observability_state": "observable",
+            "max_confidence": 0.5,
+            "episode_duration_ms": 0,
+            "condition_duration_ms": 0,
+            "cameras": [],
+            "episode": {
+                "episode_id": str(episode),
+                "segment_index": index,
+                "continues": True,
+                # El finding_id del nodo del tramo anterior: nunca un record_id del expediente.
+                **({"previous_segment_record_id": str(ids.next())} if index else {}),
+            },
+        }
+        item = ProjectionInput(
+            ids.next(), job.organization_id, job.plant_id, 0, "finding_received", at, document
+        )
+        builder.add(job.organization_id, job.plant_id, zone, item)
+        world.standards[(zone, uuid.UUID(int=7), at)] = 1
+    world.records = builder.build(world.markers, world.blobs)
+    return world, episode
+
+
+def _subjects(world: ExportWorld) -> set[uuid.UUID]:
+    return set(_package_findings(compose_world(world)))
+
+
+def test_an_episode_whose_segment_0_never_arrives_is_still_of_the_period() -> None:
+    world, episode = _episode_world([(1, 20), (2, 30)])
+    assert _subjects(world) == {episode} == set(oracle_findings(world, world.job))
+
+
+def test_an_episode_whose_segment_0_arrives_late_is_of_the_period_once() -> None:
+    world, episode = _episode_world([(1, 20), (0, 25)])
+    assert _subjects(world) == {episode} == set(oracle_findings(world, world.job))
+
+
+def test_an_episode_that_started_before_the_period_is_not_of_the_period() -> None:
+    world, _ = _episode_world([(0, 5), (1, 20)])
+    assert _subjects(world) == set() == set(oracle_findings(world, world.job))
+
+
+def test_an_episode_whose_late_segment_0_arrived_before_the_period_is_not_of_it() -> None:
+    """El tramo 1 llegó antes del periodo y el 0 dentro: el episodio empezó antes."""
+    world, _ = _episode_world([(1, 5), (0, 20)])
+    assert _subjects(world) == set() == set(oracle_findings(world, world.job))

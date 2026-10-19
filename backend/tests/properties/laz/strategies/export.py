@@ -439,10 +439,12 @@ def _zone_records(
 
 
 def _contractual(items: Sequence[ProjectionInput]) -> list[ProjectionInput]:
-    """Lo que el contrato garantiza y el generador del pliegue no escribe: cada tramo cita el
-    tramo anterior **ya recibido** del episodio (``previous_segment_record_id``) y todos los tramos
-    de un episodio citan la misma versión del estándar que el primero."""
-    last: dict[str, uuid.UUID] = {}
+    """Lo que el contrato garantiza y el generador del pliegue no escribe: todos los tramos de un
+    episodio citan la misma versión del estándar que el primero.
+
+    ``previous_segment_record_id`` no se escribe: según el contrato es el ``finding_id`` del nodo
+    del tramo anterior, no el ``record_id`` del expediente, y el compositor no lo usa. Los tramos
+    llegan con huecos (el tramo 0 puede no llegar nunca) y en desorden, como en la ingesta."""
     version: dict[str, int] = {}
     result: list[ProjectionInput] = []
     for item in items:
@@ -450,12 +452,8 @@ def _contractual(items: Sequence[ProjectionInput]) -> list[ProjectionInput]:
             result.append(item)
             continue
         document = json.loads(json.dumps(item.document))
-        episode = document["episode"]
-        key = episode["episode_id"]
-        if key in last:
-            episode["previous_segment_record_id"] = str(last[key])
+        key = document["episode"]["episode_id"]
         document["standard"]["version"] = version.setdefault(key, document["standard"]["version"])
-        last[key] = item.record_id
         result.append(dataclasses.replace(item, document=document))
     return result
 
@@ -716,7 +714,8 @@ def exported_packages(
             actor=_actor("user"),
             operation="ledger_read",
             scope_plant_id=plants[organization],
-            scope_zone_id=None,
+            # De cualquier zona de la planta (pedida o no) o de la planta sin zona.
+            scope_zone_id=draw(st.sampled_from([None, *zones[organization]])),
             resource_kind=None,
             resource_id=None,
             filters={"zone_id": str(zones[organization][0])},
@@ -728,7 +727,7 @@ def exported_packages(
             entry_hash=hashlib.sha256(f"a{index}".encode()).hexdigest(),
         )
         for organization in organizations
-        for index in range(draw(st.integers(0, 4)))
+        for index in range(draw(st.integers(0, 8)))
     ]
     organization = organizations[0]
     job = ExportJob(
@@ -799,6 +798,7 @@ class WorldPorts:
             checkpoints=self,
             places=self,
             blobs=self,
+            episodes=self,
         )
 
     def _zone(self, context: ScopeContext, zone_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
@@ -831,6 +831,28 @@ class WorldPorts:
         more = len(selected) > page.size
         return Page(items, items[-1].cursor if more and items else None)
 
+    async def episodes_received_before(
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        episode_ids: Sequence[uuid.UUID],
+        before: datetime,
+    ) -> frozenset[uuid.UUID]:
+        """``EpisodeHistory`` sobre el expediente generado (una llamada por lote)."""
+        self.calls["episodes_received_before"] += 1
+        wanted = {str(value) for value in episode_ids}
+        return frozenset(
+            uuid.UUID(record.document()["episode"]["episode_id"])
+            for record in self.world.records
+            if record.organization_id == context.organization_id
+            and record.plant_id == plant_id
+            and record.scope_zone_id == zone_id
+            and record.record_type == "finding_received"
+            and record.received_at < before
+            and record.document()["episode"]["episode_id"] in wanted
+        )
+
     async def list_audit(
         self, context: ScopeContext, filters: AuditFilters, page: AuditPageRequest
     ) -> Page[AuditEntryView, AuditCursor]:
@@ -841,6 +863,7 @@ class WorldPorts:
             for entry in self.world.audit
             if entry.scope_plant_id == plant
             and (filters.plant_id is None or entry.scope_plant_id == filters.plant_id)
+            and (filters.zone_id is None or entry.scope_zone_id == filters.zone_id)
             and (filters.occurred_from is None or entry.occurred_at >= filters.occurred_from)
             and (filters.occurred_before is None or entry.occurred_at < filters.occurred_before)
         ]
