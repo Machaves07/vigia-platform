@@ -2,7 +2,8 @@
 
 Las 28 enumeraciones de §1 más ``package_form`` (nota U04-H-03) y las seis listas que los tipos
 de registro de §5.2 cierran (``subject_kind``, ``effect_on_loop``, ``escalation_level``,
-``metric_unit``, ``evidence_ref_kind`` y ``blocked_term_origin``). Dentro de una versión mayor
+``metric_unit``, ``evidence_ref_kind`` y ``blocked_term_origin``), más ``analysis_missing_item``
+(TASK-315: lo que ``pending_information`` enumera, BR-LAZ-64). Dentro de una versión mayor
 solo se **añaden** valores; ninguna se reduce (P4: un registro antiguo debe poder presentarse
 siempre). Cada valor tiene su etiqueta en español en ``backend/resources/labels.loop.es.json``
 (NFR-LAZ-52) y el arranque falla si falta una (``LOOP_LABEL_BINDINGS``,
@@ -30,6 +31,7 @@ __all__ = [
     "LOOP_LABEL_BINDINGS",
     "NOTIFICATIONS_LABEL_BINDINGS",
     "ActionType",
+    "AnalysisMissingItem",
     "AssistantRequestState",
     "AssistantUnavailableCause",
     "AttachmentContentType",
@@ -155,6 +157,17 @@ class RootCauseAnalysisState(enum.StrEnum):
     DRAFT = "draft"
     PENDING_INFORMATION = "pending_information"
     SIGNED = "signed"
+
+
+class AnalysisMissingItem(enum.StrEnum):
+    """Lo que le falta a un análisis para poder firmarse (``pending_information``, BR-LAZ-64).
+
+    Cada valor es el nombre del campo del registro ``root_cause_analysis`` (DE §5.2) que falta."""
+
+    WHY_STEPS = "why_steps"
+    ROOT_CAUSE_CATEGORY = "root_cause_category"
+    ROOT_CAUSE_STATEMENT = "root_cause_statement"
+    CONCLUSION = "conclusion"
 
 
 class AssistantRequestState(enum.StrEnum):
@@ -412,6 +425,7 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "action_type": ActionType,
     "cause_category": CauseCategory,
     "root_cause_analysis_state": RootCauseAnalysisState,
+    "analysis_missing_item": AnalysisMissingItem,
     "assistant_request_state": AssistantRequestState,
     "assistant_unavailable_cause": AssistantUnavailableCause,
     "unclosable_review_outcome": UnclosableReviewOutcome,
