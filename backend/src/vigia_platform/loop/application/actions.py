@@ -220,9 +220,12 @@ _PERSONS: Final = (
     r"|contratistas?|jef[ea]s?|encargad[oa]s?|mecanic[oa]s?|electricistas?"
     r"|soldador(?:a|es|as)?|montacarguistas?|conductor(?:a|es|as)?|aprendiz|aprendices"
     r"|practicantes?|obrer[oa]s?|personas?|personal|gente|cuadrillas?|brigadistas?"
-    r"|ayudantes?|vigilantes?|peon|peones)"
+    r"|ayudantes?|vigilantes?|peon|peones|responsables?|quien|quienes|usuari[oa]s?"
+    r"|peaton|peatones|transeuntes?|visitantes?|infractor(?:a|es|as)?|culpables?"
+    r"|causantes?|involucrad[oa]s?|implicad[oa]s?|individu[oa]s?|sujetos?)"
 )
-"""Personas o grupos de personas: los cargos del validador de atribución y sus colectivos."""
+"""Personas o grupos de personas: los cargos del validador de atribución, sus colectivos, quien
+cruza o usa la zona y las formas de señalar a alguien («el responsable», «a quien cruzó»)."""
 
 _TOWARD_PERSON: Final = (
     r"(?:re)?(?:entren\w*|capacit\w*|form(?:ar|e|en|acion(?:es)?)|instru(?:ir|ya|yan)"
@@ -233,13 +236,16 @@ _TOWARD_PERSON: Final = (
 )
 """Intervenciones sobre una persona: formarla, entrenarla, amonestarla, sancionarla, evaluarla…"""
 
-_OBJECT: Final = (
-    r"(?:a|al|de|del|para|sobre)(?: (?:todo|toda|todos|todas|cada))?"
+_DETERMINERS: Final = (
+    r"(?: (?:todo|toda|todos|todas|cada))?"
     r"(?: (?:el|la|los|las|un|una|unos|unas|este|esta|estos|estas|ese|esa|esos|esas|su|sus"
-    r"|nuestro|nuestra|nuestros|nuestras|dicho|dicha))?(?: (?:nuevo|nueva|nuevos|nuevas))?"
+    r"|nuestro|nuestra|nuestros|nuestras|dicho|dicha|aquel|aquella|aquellos|aquellas))?"
+    r"(?: (?:nuevo|nueva|nuevos|nuevas))?"
 )
-"""Lo que hace de la persona el **objeto** de la intervención: «al personal», «de los operarios».
-Sin él, «evaluar con el técnico el resguardo» no es una acción sobre el técnico."""
+_OBJECT: Final = rf"(?:a|al|de|del|para|sobre|contra|hacia|ante|en contra del?){_DETERMINERS}"
+"""Lo que hace de la persona el **objeto** de la intervención: «al personal», «de los operarios»,
+«contra el operario». Sin él, «evaluar con el técnico el resguardo» no es una acción sobre el
+técnico."""
 
 _PARTICIPLES: Final = (
     r"(?:re)?(?:entrenad[oa]s?|capacitad[oa]s?|formad[oa]s?|instruid[oa]s?|amonestad[oa]s?"
@@ -257,24 +263,36 @@ _PERSON_DIRECTED: Final = (
         rf"{_B}{_PERSONS}{_WORDS} (?:sea|sean|ser|sera|seran|es|son|fue|fueron|quede|queden"
         rf"|este|esten) {_PARTICIPLES}{_E}"
     ),
+    # «medidas disciplinarias contra el operario», «proceso en contra del conductor».
+    re.compile(rf"{_B}(?:contra|en contra del?){_DETERMINERS} {_PERSONS}{_E}"),
 )
 """Los patrones de una acción sobre una persona, sobre la forma plegada (``_folded``)."""
 _NON_WORD: Final = re.compile(r"[\W_]+")
+_WORD_BREAK: Final = re.compile(r"(?<=[^\W\d_])[-\u2010-\u2015.\u00b7_]+\s*(?=[^\W\d_])")
+"""Un corte dentro de una palabra («opera-rios», «ope.ra.rio»): guiones, puntos o subrayados entre
+dos letras, con espacios después (el corte de línea)."""
 
 
-def _folded(value: str) -> str:
-    """La forma de validación de U-04 (canónica de U-02, ``casefold`` y confusables de UTS #39:
-    sin tildes, homoglifos ni anchos raros) con cada signo como un espacio. Solo para buscar."""
+def _folded_forms(value: str) -> tuple[str, ...]:
+    """Las formas en que se busca, sobre la forma de validación de U-04 (canónica de U-02,
+    ``casefold`` y confusables de UTS #39: sin tildes, homoglifos ni anchos raros): con cada signo
+    como un espacio y, además, con las palabras cortadas unidas. Se buscan **las dos**: unir los
+    cortes no puede tapar «capacitar-al-operario». Solo para buscar."""
     folded = fold_text(canonical_form(unicodedata.normalize("NFC", value)))
-    return " ".join(_NON_WORD.split(folded)).strip()
+    spaced = " ".join(_NON_WORD.split(folded)).strip()
+    joined = " ".join(_NON_WORD.split(_WORD_BREAK.sub("", folded))).strip()
+    return (spaced,) if joined == spaced else (spaced, joined)
 
 
 def person_directed(value: str) -> bool:
     """¿La acción recae sobre una persona (formarla, entrenarla, amonestarla…) y no sobre la zona?
 
     Sin red, sin base y sin reloj; nunca devuelve ni repite el texto (P3)."""
-    folded = _folded(value)
-    return any(pattern.search(folded) is not None for pattern in _PERSON_DIRECTED)
+    return any(
+        pattern.search(form) is not None
+        for form in _folded_forms(value)
+        for pattern in _PERSON_DIRECTED
+    )
 
 
 def screen_action_text(value: str) -> None:

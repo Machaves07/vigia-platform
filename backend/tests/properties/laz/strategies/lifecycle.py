@@ -62,8 +62,14 @@ _PERSONS: Final = (
     "operario", "operaria", "operarios", "trabajador", "trabajadores", "empleado", "empleados",
     "personal", "auxiliar", "auxiliares", "técnico", "técnicos", "supervisor", "supervisora",
     "montacarguista", "montacarguistas", "conductor", "conductores", "contratista", "aprendiz",
-    "colaboradores", "cuadrilla", "persona", "personas",
+    "colaboradores", "cuadrilla", "persona", "personas", "responsable", "responsables",
+    "usuarios", "usuarias", "peatones", "peatón", "visitantes", "infractor", "causante",
 )  # fmt: skip
+_SANCTIONS: Final = (
+    "Tomar medidas disciplinarias contra", "Abrir un proceso disciplinario contra",
+    "Iniciar acciones en contra de", "Aplicar una sanción contra",
+)  # fmt: skip
+"""Formas nominales con la persona tras «contra» (revisión de VIG-223, ronda 1)."""
 _DETERMINERS: Final = ("", "el ", "la ", "los ", "las ", "todo el ", "cada ", "los nuevos ")
 _VERBS: Final = (
     "Capacitar", "Recapacitar", "Entrenar", "Reentrenar", "Formar", "Instruir", "Amonestar",
@@ -127,8 +133,23 @@ class NeutralAction:
     """Los nombres de equipo declarados que el texto cita (vocabulario declarado)."""
 
 
+def _cut(draw: st.DrawFn, text: str) -> str:
+    """Una palabra larga cortada con guion, punto o guion y espacio («opera-rios»)."""
+    words = text.split(" ")
+    long = [index for index, word in enumerate(words) if len(word) >= 6 and word.isalpha()]
+    if not long:
+        return text
+    index = draw(st.sampled_from(long))
+    word = words[index]
+    at = draw(st.integers(2, len(word) - 2))
+    words[index] = word[:at] + draw(st.sampled_from(("-", ".", "- "))) + word[at:]
+    return " ".join(words)
+
+
 def _disguised(draw: st.DrawFn, text: str) -> str:
-    match draw(st.sampled_from(("plain", "upper", "confusable", "no_accents"))):
+    match draw(st.sampled_from(("plain", "upper", "confusable", "no_accents", "cut"))):
+        case "cut":
+            return _cut(draw, text)
         case "upper":
             return text.upper()
         case "confusable":
@@ -145,7 +166,12 @@ def _on_person(draw: st.DrawFn) -> str:
     person = draw(st.sampled_from(_PERSONS))
     determiner = draw(st.sampled_from(_DETERMINERS))
     complement = draw(st.sampled_from(_COMPLEMENTS))
-    match draw(st.sampled_from(("verb", "verb_bare", "noun", "passive"))):
+    match draw(st.sampled_from(("verb", "verb_bare", "noun", "passive", "against", "whoever"))):
+        case "against":
+            text = f"{draw(st.sampled_from(_SANCTIONS))} {determiner or 'el '}{person}{complement}"
+        case "whoever":
+            verb = draw(st.sampled_from(_VERBS))
+            text = f"{verb} a {draw(st.sampled_from(('quien', 'quienes')))} cruzó la zona"
         case "verb":
             verb = draw(st.sampled_from(_VERBS))
             preposition = "al " if determiner == "el " else "a "

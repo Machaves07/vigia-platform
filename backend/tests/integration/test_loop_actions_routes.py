@@ -695,13 +695,19 @@ def test_a_deactivated_assignee_keeps_the_action_alive_and_reassigning_supersede
     finding = stack.opened()
     first = _assigned(stack, coordinator, finding, responsible)
     stack.deactivate(responsible)
-    # TASK-341 marca assignee_inactive al consumir user_deactivated; aquí se simula esa marca.
-    stack.execute(
-        "UPDATE loop.finding_state SET assignee_inactive = true"
-        " WHERE organization_id = $1 AND subject_id = $2",
-        finding.organization.organization_id,
-        finding.subject_id,
+    # El consumidor real de loop_projection (TASK-341) aplica user_deactivated de U-02.
+    consumer, _ports = world.projection_consumer()
+    event = world.synthetic_event(
+        world.a,
+        "user_deactivated",
+        {
+            "user_id": str(responsible),
+            "deactivated_by": str(world.stack.authz.operator_id),
+            "deactivated_at": world.stack.now().isoformat(),
+        },
+        plant=False,
     )
+    assert world.deliver(consumer, event) == 1
     row = stack.world.finding_state(finding)
     assert row is not None
     assert (row["lifecycle_state"], row["assignee_inactive"]) == ("action_assigned", True)

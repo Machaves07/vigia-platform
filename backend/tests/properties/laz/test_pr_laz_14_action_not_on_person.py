@@ -119,6 +119,18 @@ def test_every_action_on_the_zone_is_accepted(action: NeutralAction) -> None:
         "Sancionar operarios reincidentes en la zona de carga",
         f"{chr(0x0421)}apacitar al {chr(0x043E)}perario de la prensa",  # homoglifos cirílicos
         "CAPACITACIÓN DE LOS MONTACARGUISTAS DE LA ZONA",
+        # Revisión automática de VIG-223, ronda 1: formas corrientes que pasaban.
+        "Amonestar al responsable del cruce en el pasillo",
+        "Sancionar a quien cruzó la zona de carga sin permiso",
+        "Evaluar al responsable de la zona por el incidente",
+        "Tomar medidas disciplinarias contra el operario del turno",
+        "Reentrenar a los peatones que cruzan el pasillo norte",
+        "Capacitar a los usuarios del montacargas de la zona",
+        "Capacitar a los opera-rios en el uso del resguardo",
+        # Unir los cortes no tapa la forma separada.
+        "Capacitar-al-operario en el uso del resguardo",
+        "Abrir un proceso en contra del conductor del montacargas",
+        "Retroalimentar hacia los colaboradores del área de carga",
     ],
 )
 def test_borders_of_an_action_on_a_person(text: str) -> None:
@@ -135,6 +147,9 @@ def test_borders_of_an_action_on_a_person(text: str) -> None:
         "Formar una barrera física con vallas en el pasillo de carga",
         "Señalizar el pasillo para peatones y conductores de la planta",
         "Evaluar el riesgo de la operación de la zona norte con el comité",
+        "Instalar barandas contra caídas en la plataforma de carga",
+        "Evaluar las guardas de la zona con el responsable de mantenimiento",
+        "Reemplazar el sensor según el procedimiento PRO-001 de la línea",
     ],
 )
 def test_a_person_mentioned_without_being_the_target_is_accepted(text: str) -> None:
