@@ -62,7 +62,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
 )
 
-from tests.conftest import CI_PROFILE, _active_profile, _seeds_for_profile
+from tests.conftest import CI_PROFILES, _active_profile, _seeds_for_profile
 from tests.fleet_credentials_support import MemoryKms, root_bundle_for
 from tests.fleet_http_support import FleetStack, fleet_stack
 from tests.fleet_inventory_support import InventoryWorld, NodeState
@@ -110,7 +110,7 @@ PER_ORGANIZATION: Final = tuple(
 )
 MUTE_AGE_MS: Final = 3_600_000
 LOCK_TIMEOUT_MS: Final = 60_000
-PROFILE_BUDGET: Final = {CI_PROFILE: (12, 12)}
+PROFILE_BUDGET: Final = dict.fromkeys(CI_PROFILES, (12, 12))
 """(ejemplos, pasos) por perfil; cualquier otro (``nightly``), ``NIGHTLY_BUDGET``."""
 NIGHTLY_BUDGET: Final = (60, 25)
 EXPECTED_ALARMS: Final = ("certificate_expiring", "node_mute", "queue_over_threshold")

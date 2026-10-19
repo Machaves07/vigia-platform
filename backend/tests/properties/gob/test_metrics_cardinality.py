@@ -123,7 +123,7 @@ SERIES_CEILING: Final = 20_000
 BURST: Final = 6
 """Latidos seguidos sin avanzar el reloj: el cubo (4 por minuto) limita los últimos."""
 ORPHAN_AFTER: Final = timedelta(hours=25)
-BUDGET: Final[Mapping[str, int]] = {"ci": 2, "nightly": 6}
+BUDGET: Final[Mapping[str, int]] = {"ci": 2, "pr": 2, "nightly": 6}
 """Ejemplos por semilla: cada uno levanta organizaciones y zonas por las rutas reales."""
 PROBE: Final = "probe_node_latency_ms"
 ALL_SPECS: Final[tuple[MetricSpec | LoopMetricSpec, ...]] = (*CATALOG, *LOOP_CATALOG)

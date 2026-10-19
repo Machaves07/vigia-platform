@@ -2,9 +2,12 @@
 
 - ``ci`` (por defecto): 200 ejemplos por propiedad; cada propiedad corre dos veces, con la
   semilla fija ``CI_FIXED_SEED`` y con una semilla aleatoria de la sesión.
+- ``pr``: el de los pull_request en ``ci.yml`` (main sigue con ``ci``): igual que ``ci`` (las dos
+  semillas, los mismos identificadores y, por tanto, los mismos grupos y tiempos de pytest-split)
+  pero con 50 ejemplos por propiedad.
 - ``nightly``: 2 000 ejemplos por propiedad con la semilla aleatoria de la sesión.
 
-El perfil se elige con ``--hypothesis-profile=ci|nightly``. Las semillas se imprimen en la
+El perfil se elige con ``--hypothesis-profile=ci|pr|nightly``. Las semillas se imprimen en la
 cabecera y en el resumen; un fallo se reproduce con ``--hypothesis-seed=<semilla>``.
 
 Las pruebas marcadas ``nightly`` se omiten salvo con ``--hypothesis-profile=nightly``: el mismo
@@ -41,12 +44,16 @@ localstack_endpoint = pytest.fixture(scope="session", name="localstack_endpoint"
 )
 
 CI_PROFILE = "ci"
+PR_PROFILE = "pr"
 NIGHTLY_PROFILE = "nightly"
+CI_PROFILES = frozenset({CI_PROFILE, PR_PROFILE})
+"""Perfiles de CI: semilla fija y semilla de la sesión, y presupuestos de ``ci`` en las pruebas."""
 CI_FIXED_SEED = 20260929
 SESSION_SEED_ID = "seed=sesion"
 """Identificador estable de la parametrización con la semilla de la sesión (VIG-198)."""
 
 settings.register_profile(CI_PROFILE, max_examples=200, deadline=None, print_blob=True)
+settings.register_profile(PR_PROFILE, max_examples=50, deadline=None, print_blob=True)
 settings.register_profile(NIGHTLY_PROFILE, max_examples=2000, deadline=None, print_blob=True)
 
 _MISSING = object()
@@ -85,14 +92,14 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def _seeds_for_profile() -> list[Hashable]:
-    if _active_profile() == CI_PROFILE:
+    if _active_profile() in CI_PROFILES:
         return [CI_FIXED_SEED, _session_seed]
     return [_session_seed]
 
 
 def _seed_banner() -> str:
     profile = _active_profile()
-    if profile == CI_PROFILE:
+    if profile in CI_PROFILES:
         return (
             f"hypothesis perfil {profile!r}: semilla fija {CI_FIXED_SEED}, "
             f"semilla aleatoria {_session_seed} (reproducir: --hypothesis-seed={_session_seed})"

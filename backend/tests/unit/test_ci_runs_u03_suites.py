@@ -197,8 +197,9 @@ def test_ci_yml_runs_every_u03_suite_in_the_backend_jobs() -> None:
 
 def test_the_checker_reads_the_backend_jobs_and_their_pytest_commands() -> None:
     commands = _backend_commands(CI.read_text(encoding="utf-8"))
-    # Los cuatro trabajos «backend»: sin integración, las dos mitades y la carga.
-    assert len(commands) >= 4
+    # Los tres trabajos «backend» con pytest: los grupos sin integración, los de integración y la
+    # carga (los agregadores no corren pytest).
+    assert len(commands) >= 3
     assert {c.marker for c in commands} >= {"not integration", "integration"}
     assert any(c.profile == "ci" for c in commands)
     assert any(c.selects(LOAD_SUITE) for c in commands)
