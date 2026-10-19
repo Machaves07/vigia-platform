@@ -46,6 +46,7 @@ from vigia_platform.loop.adapters.attachments.repository import PostgresAttachme
 from vigia_platform.loop.adapters.attachments.rules import attachment_storage_key
 from vigia_platform.loop.adapters.http.actions_routes import ACTIONS_PATH, EVIDENCE_PATH
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
+from vigia_platform.loop.adapters.http.closure_routes import CLOSURE_PATH, REOPENING_PATH
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.attachments import (
@@ -53,7 +54,9 @@ from vigia_platform.loop.application.attachments import (
     build_attachment_service,
 )
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.loop.domain.enums import AttachmentContentType
@@ -64,8 +67,11 @@ from vigia_platform.shared.db import Database
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "CLOSURE_DESCRIPTION",
     "DESCRIPTION",
     "EVIDENCE",
+    "LICENSE",
+    "REOPENING_REASON",
     "ROLE",
     "ActionsStack",
     "Who",
@@ -81,6 +87,9 @@ EVIDENCE: Final = "Resguardo fijo instalado y anclado al piso en el acceso de la
 ROLE: Final = "Técnico de mantenimiento"
 VERIFICATION: Final = "Se comprobó el anclaje y la señalización en la ronda de cierre"
 REASON: Final = "Coexistencia observada entre la carretilla y el peatón en el pasillo"
+CLOSURE_DESCRIPTION: Final = "Resguardo fijo verificado y anclado en el acceso de la zona"
+LICENSE: Final = "LIC-SST-0001"
+REOPENING_REASON: Final = "El resguardo se retiró durante el mantenimiento mayor"
 
 Who = tuple[SessionCookie, uuid.UUID | None]
 
@@ -101,6 +110,8 @@ class ActionsStack:
     writer: EscritorExpediente
     actions: ActionService
     evidence: EvidenceService
+    closure: ClosureService
+    reopening: ReopeningService
     classification: ClassificationService
     configuration: LoopConfigurationService
     attachments: ClosureAttachmentService
@@ -232,6 +243,42 @@ class ActionsStack:
         self.classify(finding)
         return finding
 
+    def assigned(
+        self,
+        coordinator: Who,
+        assignee: uuid.UUID,
+        organization: LoopOrganization | None = None,
+    ) -> tuple[IngestedSubject, uuid.UUID]:
+        """Un hallazgo con una acción vigente (``action_assigned``, T07) y su ``action_id``."""
+        finding = self.opened(organization)
+        response = self.assign(coordinator, finding, self.action_body(assignee))
+        assert response.status_code == 201, response.text
+        return finding, uuid.UUID(response.json()["action_id"])
+
+    def with_evidence(
+        self,
+        coordinator: Who,
+        assignee: uuid.UUID,
+        organization: LoopOrganization | None = None,
+    ) -> tuple[IngestedSubject, uuid.UUID]:
+        """Un hallazgo ``action_assigned`` con al menos una entrada de evidencia (H-25)."""
+        finding, action_id = self.assigned(coordinator, assignee, organization)
+        response = self.add_evidence(coordinator, action_id, self.evidence_body())
+        assert response.status_code == 201, response.text
+        return finding, action_id
+
+    def closed(
+        self,
+        coordinator: Who,
+        assignee: uuid.UUID,
+        organization: LoopOrganization | None = None,
+    ) -> tuple[IngestedSubject, uuid.UUID]:
+        """Un hallazgo cerrado (``closed``, T09) por la ruta real; su ``action_id``."""
+        finding, action_id = self.with_evidence(coordinator, assignee, organization)
+        response = self.close(coordinator, finding, self.closure_body())
+        assert response.status_code == 201, response.text
+        return finding, action_id
+
     # --- peticiones ---------------------------------------------------------------------------
 
     def post(self, who: Who, path: str, body: Any) -> httpx.Response:
@@ -273,6 +320,37 @@ class ActionsStack:
         self, who: Who, action_id: uuid.UUID | str, body: Mapping[str, Any]
     ) -> httpx.Response:
         return self.post(who, EVIDENCE_PATH.format(action_id=action_id), dict(body))
+
+    def closure_body(self, **changes: Any) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "closure_description": CLOSURE_DESCRIPTION,
+            "verification_note": VERIFICATION,
+            "professional_license": LICENSE,
+        }
+        body.update(changes)
+        return {key: value for key, value in body.items() if value is not None}
+
+    def close(
+        self, who: Who, subject: IngestedSubject | uuid.UUID, body: Mapping[str, Any]
+    ) -> httpx.Response:
+        fsid = subject if isinstance(subject, uuid.UUID) else self.finding_state_id(subject)
+        return self.post(who, CLOSURE_PATH.format(finding_state_id=fsid), dict(body))
+
+    def reopening_body(self, assignee: uuid.UUID, **changes: Any) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "reason_text": REOPENING_REASON,
+            "action_type": "engineering",
+            "action_description": DESCRIPTION,
+            "assignee_user_id": str(assignee),
+        }
+        body.update(changes)
+        return {key: value for key, value in body.items() if value is not None}
+
+    def reopen(
+        self, who: Who, subject: IngestedSubject | uuid.UUID, body: Mapping[str, Any]
+    ) -> httpx.Response:
+        fsid = subject if isinstance(subject, uuid.UUID) else self.finding_state_id(subject)
+        return self.post(who, REOPENING_PATH.format(finding_state_id=fsid), dict(body))
 
     def uploaded(
         self, subject: IngestedSubject, *, data: bytes | None = None, **changes: Any
@@ -337,6 +415,45 @@ class ActionsStack:
                 "signed_at": format_timestamp(stack.now()),
             },
         )
+
+    def write_unclosable(
+        self, subject: IngestedSubject, *, declaration_id: uuid.UUID | None = None
+    ) -> uuid.UUID:
+        """``unclosable_state_declared`` (T10) firmado con licencia (VIG-228 aún no la despacha:
+        esta operación solo consume el tipo de registro para dejar el hallazgo en
+        ``unclosable``, sin implementar la ruta de declaración)."""
+        stack = self.world.stack
+        chosen = declaration_id if declaration_id is not None else stack.uuid7()
+        self.write_record(
+            subject,
+            "unclosable_state_declared",
+            {
+                "declaration_id": str(chosen),
+                "subject_kind": subject.subject_kind,
+                "subject_id": str(subject.subject_id),
+                "anchor_record_id": str(subject.record_id),
+                "evaluated_alternative": "Se evaluó aislar la zona con una barrera temporal",
+                "rejection_reason": "No hay espacio para una barrera sin bloquear el paso",
+                "responsible_user_id": str(stack.authz.operator_id),
+                "responsible_display_name": "Coordinación SST sintética",
+                "decision_date": stack.now().date().isoformat(),
+                "compensatory_measure": "Vigilancia permanente de un auxiliar en el acceso",
+                "review_due_at": format_timestamp(stack.now() + timedelta(days=30)),
+                "policy": {
+                    "policy_id": str(stack.uuid7()),
+                    "version": 1,
+                    "signed_at": format_timestamp(stack.now() - timedelta(days=1)),
+                    "document_sha256": "a" * 64,
+                },
+                "signer": {
+                    "user_id": str(stack.authz.operator_id),
+                    "display_name": "Coordinación SST sintética",
+                    "professional_license": "LIC-SST-0001",
+                },
+                "declared_at": format_timestamp(stack.now()),
+            },
+        )
+        return chosen
 
     def write_overdue(self, subject: IngestedSubject, action: Mapping[str, Any]) -> None:
         """``action_overdue`` (T08) de la acción vigente, como la tarea de plazos (TASK-313)."""
@@ -464,6 +581,8 @@ def actions_stack(
         }
         actions = ActionService(**common)
         evidence = EvidenceService(**common)
+        closure = ClosureService(**common)
+        reopening = ReopeningService(actions=actions, **common)
         classification = ClassificationService(**common)
         configuration = LoopConfigurationService(
             repository=PostgresLoopConfigurationRepository(database),
@@ -493,6 +612,8 @@ def actions_stack(
                         classification=classification,
                         actions=actions,
                         evidence=evidence,
+                        closure=closure,
+                        reopening=reopening,
                     ),
                     ATTACHMENTS_STATE_KEY: attachments,
                 },
@@ -507,6 +628,8 @@ def actions_stack(
             writer,
             actions,
             evidence,
+            closure,
+            reopening,
             classification,
             configuration,
             attachments,

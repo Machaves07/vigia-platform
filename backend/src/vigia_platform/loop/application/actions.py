@@ -634,6 +634,7 @@ class ActionService:
         writer_context = with_unit(authorized, ActorUnit.U04)
         async with self._database.transaction(writer_context) as transaction:
             await lock_finding(transaction, place.organization_id, place.subject_id)
+            await self._between_locks(transaction)
             actions = action_rows(
                 await lock_actions(
                     transaction, place.organization_id, place.plant_id, place.subject_id
@@ -645,6 +646,11 @@ class ActionService:
             return await self.assign_in_transaction(
                 transaction, writer_context, current, actions, request
             )
+
+    async def _between_locks(self, transaction: Transaction) -> None:
+        """Entre ``lock_finding`` y ``lock_actions`` (pasos 1 y 2 de ``locks.LOCK_ORDER``), antes de
+        leer nada más: no-op en producción; gancho de la prueba cruzada del orden de candados
+        (``test_loop_closure_vs_reclassification.py``)."""
 
     async def _checked(self, transaction: Transaction) -> None:
         """Con los candados tomados y la transición, el responsable y el plazo ya comprobados,
@@ -666,7 +672,14 @@ class ActionService:
         dejó vigente (T12, T13, T14): el registro la completa sin otra transición."""
         superseded = self._superseded(current, actions, request, pending_action_id)
         chosen = parse_action_type(request.action_type)
-        if superseded is not None and chosen is not superseded.action_type:
+        # BR-LAZ-51: el tipo es fijo solo en una reasignación (``supersedes_action_id`` sin
+        # ``pending_action_id``); la revisión de un incerrable y la reapertura (T12 a T14) sí
+        # pueden cambiarlo ("para cambiarlo se cierra o se reabre").
+        if (
+            pending_action_id is None
+            and superseded is not None
+            and chosen is not superseded.action_type
+        ):
             raise ActionRejected(LoopDetailCode.ACTION_TYPE_NOT_ALLOWED)
         description = action_text(request.action_description, DESCRIPTION_FIELD, required=True)
         expected = action_text(request.expected_outcome, EXPECTED_OUTCOME_FIELD, required=False)

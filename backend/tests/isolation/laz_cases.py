@@ -47,8 +47,10 @@ from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
+from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -112,6 +114,12 @@ class LazServices:
 def _loop(services: LazServices) -> Mapping[str, object]:
     """``LoopHttp`` con un servicio por grupo de rutas de ``/loop/*`` (una sola clave de estado)."""
     database: Any = services.database
+    actions = ActionService(  # TASK-311
+        database=database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        clock=services.clock,
+    )
     return {
         LOOP_STATE_KEY: LoopHttp(
             configuration=LoopConfigurationService(
@@ -128,17 +136,25 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 clock=services.clock,
             ),
-            actions=ActionService(  # TASK-311
-                database=database,
-                writer=services.writer,
-                authorizer=services.authorizer,
-                clock=services.clock,
-            ),
+            actions=actions,
             evidence=EvidenceService(  # TASK-311
                 database=database,
                 writer=services.writer,
                 authorizer=services.authorizer,
                 clock=services.clock,
+            ),
+            closure=ClosureService(  # VIG-233
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            reopening=ReopeningService(  # VIG-233
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+                actions=actions,
             ),
             root_cause=RootCauseService(  # TASK-315
                 database=database,
@@ -314,6 +330,40 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "description": "Resguardo fijo instalado y anclado al piso en el acceso",
                     "performed_at": "2026-10-01T10:00:00.000Z",
                     "performed_by_role": "Técnico de mantenimiento",
+                },
+            ),
+        ),
+    ),
+    # VIG-233 (TASK-343): cerrar o reabrir un hallazgo de B responde igual que uno inexistente
+    # (not_found, nunca transition_not_allowed ni un detail_code); nada se escribe en B.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/closure"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/closure",
+                json={
+                    "closure_description": (
+                        "Resguardo fijo verificado y anclado en el acceso de la zona"
+                    ),
+                    "professional_license": "LIC-SST-0001",
+                },
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/findings/{finding_state_id}/reopening"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/findings/{i.record}/reopening",
+                json={
+                    "reason_text": "El resguardo se retiró durante el mantenimiento mayor",
+                    "action_type": "engineering",
+                    "action_description": "Reinstalar el resguardo fijo en el acceso de la zona",
+                    "assignee_user_id": str(i.user),
                 },
             ),
         ),
