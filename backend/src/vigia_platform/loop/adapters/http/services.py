@@ -15,9 +15,13 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import Request
 
+from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.inventory_read import FleetInventory
+from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -48,6 +52,8 @@ class LoopHttp:
     """``GET`` y ``PUT /loop/plants/{plant_id}/configuration`` (LC-LAZ-19, VIG-205)."""
     classification: ClassificationService | None = None
     """``POST /loop/findings/{finding_state_id}/classifications`` (LC-LAZ-07, VIG-212)."""
+    root_cause: RootCauseService | None = None
+    """Las tres rutas del análisis de causa raíz guiado (LC-LAZ-12, VIG-214)."""
     actions: ActionService | None = None
     """``POST /loop/findings/{finding_state_id}/actions`` (LC-LAZ-09, VIG-223)."""
     evidence: EvidenceService | None = None
@@ -99,6 +105,27 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             database=services.database,
             writer=services.writer,
             authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        root_cause=RootCauseService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            free_text=services.free_text,
+            catalog=catalog_query_ports(services.database).catalog,
+            fleet=FleetInventory(
+                database=services.database,
+                authorizer=services.authorizer,
+                audit=services.audit,
+                clock=services.clock,
+                provider_organization_id=services.provider_organization_id,
+            ),
+            coverage=CoverageService(
+                database=services.database,
+                audit=services.audit,
+                clock=services.clock,
+                metrics=services.metrics,
+            ),
             clock=services.clock,
         ),
     )

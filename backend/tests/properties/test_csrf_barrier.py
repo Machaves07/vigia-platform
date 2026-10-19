@@ -78,6 +78,16 @@ BODIES: dict[str, dict[str, Any]] = {
         "performed_at": "2026-10-01T10:00:00.000Z",
         "performed_by_role": "Técnico de mantenimiento",
     },
+    "/loop/findings/{finding_state_id}/root-cause-analyses": {},
+    "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}": {
+        "statement": "La carretilla cruzó el pasillo peatonal con la estación de carga energizada",
+    },
+    "/loop/root-cause-analyses/{analysis_id}/signature": {
+        "professional_license": "LIC-SST-0001",
+        "root_cause_category": "engineering",
+        "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
+        "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -116,6 +126,8 @@ def _url(path: str) -> str:
         .replace("{attachment_id}", str(uuid.uuid4()))
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
+        .replace("{analysis_id}", str(uuid.uuid4()))
+        .replace("{step_index}", "1")
     )
 
 
@@ -148,6 +160,10 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         # Acción correctiva y su evidencia de U-04 (TASK-311).
         ("POST", "/loop/findings/{finding_state_id}/actions"),
         ("POST", "/loop/actions/{action_id}/evidence"),
+        # Análisis de causa raíz guiado de U-04 (TASK-315).
+        ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+        ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         ("POST", "/users"),
