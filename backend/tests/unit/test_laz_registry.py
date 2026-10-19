@@ -43,6 +43,7 @@ from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
 from vigia_platform.loop.adapters.http.actions_routes import actions_router
+from vigia_platform.loop.adapters.http.assistant_routes import assistant_router
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
@@ -52,7 +53,7 @@ from vigia_platform.loop.adapters.http.configuration_routes import configuration
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
-from vigia_platform.loop.events import LOOP_EVENT_TYPES
+from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYPES
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
 from vigia_platform.notifications import registration as notifications_registration
@@ -145,7 +146,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         if name == "loop":
             # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``;
             # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03;
-            # TASK-311: SUP-U05-07 y 08; TASK-315: SUP-U05-16 a 18.
+            # TASK-311: SUP-U05-07 y 08; TASK-315: SUP-U05-16 a 18; TASK-316: SUP-U05-19 y 20.
             assert routes == [
                 ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
                 ("POST", "/loop/attachments/{attachment_id}/read-url"),
@@ -157,8 +158,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
                 ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
+                ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+                ("GET", "/loop/assistant-requests/{request_id}"),
             ]
             assert state[LOOP_STATE_KEY].classification is not None
+            assert state[LOOP_STATE_KEY].assistant is not None
             assert state[LOOP_STATE_KEY].actions is not None
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
@@ -187,24 +191,33 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     assert tasks.tasks() == ()
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
+        ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
         ("export_worker", ActorUnit.U04, ("export_requested",)),
         ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
     ]
+    # TASK-316: el asistente declara su dependencia externa (cortacircuito de U-02).
+    assistant = consumers.get("assistant_worker")
+    assert assistant is not None and assistant.has_external_dependency
     assert (
         attachment_router,
         configuration_router,
         classification_router,
         actions_router,
         root_cause_router,
+        assistant_router,
     ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
         assert module.TASK_REGISTRARS == ()
     assert notifications_registration.CONSUMER_REGISTRARS == ()
-    assert len(registration.CONSUMER_REGISTRARS) == 1
+    assert len(registration.CONSUMER_REGISTRARS) == 2
     assert accreditation_registration.TASK_REGISTRARS == ()
     assert registration.U04_TASKS == {}
-    assert registration.U04_CONSUMERS == {"export_worker": 1, "loop_projection": 4}
+    assert registration.U04_CONSUMERS == {
+        "export_worker": 1,
+        "loop_projection": 4,
+        "assistant_worker": 2,
+    }
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
     assert (
         registration.register_blocked_vocabulary,
@@ -216,13 +229,15 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
 
 
 def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
-    # 25 eventos de §11.3 más el trabajo interno export_requested (TASK-317).
-    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 26
+    # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317) y
+    # assistant_requested (TASK-316).
+    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 27
     assert len(LOOP_RECORD_TYPES) == 13 and len(ACCREDITATION_RECORD_TYPES) == 4
     assert len(LOOP_EVENT_TYPES) == 21 and len(ACCREDITATION_EVENT_TYPES) == 4
     assert [event.event_name for event in ACCREDITATION_INTERNAL_EVENT_TYPES] == [
         "export_requested"
     ]
+    assert [event.event_name for event in LOOP_INTERNAL_EVENT_TYPES] == ["assistant_requested"]
     assert NOTIFICATIONS_EVENT_TYPES == ()
     assert {
         definition.record_type for definition in (*LOOP_RECORD_TYPES, *ACCREDITATION_RECORD_TYPES)
@@ -233,6 +248,7 @@ def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
             *LOOP_EVENT_TYPES,
             *ACCREDITATION_EVENT_TYPES,
             *ACCREDITATION_INTERNAL_EVENT_TYPES,
+            *LOOP_INTERNAL_EVENT_TYPES,
         )
     } == registration.U04_EVENT_TYPES
     assert set(u04_registry().record_types()) == registration.U04_RECORD_TYPES

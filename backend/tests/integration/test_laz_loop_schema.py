@@ -80,6 +80,8 @@ def _load(name: str) -> Any:
 
 
 MIGRATION = _load("laz_0029_loop_schema.py")
+USAGE = _load("laz_0033_assistant_usage.py")
+"""laz_0033 (TASK-316): las columnas de uso de ``assistant_request``, de trabajo del guardián."""
 
 
 @dataclass(frozen=True)
@@ -262,6 +264,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         for table in LOOP_TABLES
         if MIGRATION.app_updatable_columns(table)
     }
+    expected["assistant_request"] |= set(USAGE.USAGE_COLUMNS)
     assert granted == expected
     # Las decisiones no cambian: ninguna columna actualizable.
     for table in (
@@ -282,6 +285,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         "resolved_at",
         "unavailable_cause",
         "attempt_count",
+        *USAGE.USAGE_COLUMNS,
     }
     assert granted["closure_attachment"] == {"verified_at"}
 

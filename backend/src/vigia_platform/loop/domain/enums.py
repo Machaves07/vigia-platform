@@ -180,12 +180,16 @@ class AssistantRequestState(enum.StrEnum):
 
 
 class AssistantUnavailableCause(enum.StrEnum):
-    """``assistant_unavailable_cause`` (RNF-RES-11, respuesta 9; nota de NFR Requirements)."""
+    """``assistant_unavailable_cause`` (RNF-RES-11, respuesta 9; nota de NFR Requirements).
+
+    ``budget_exceeded`` es de TASK-316 (``laz_0033``): el tope mensual de fichas de la
+    organización (NFR-LAZ-35) agotado, sin construir el contexto."""
 
     NO_API_KEY = "no_api_key"
     CIRCUIT_OPEN = "circuit_open"
     TIMEOUT = "timeout"
     PROVIDER_ERROR = "provider_error"
+    BUDGET_EXCEEDED = "budget_exceeded"
 
 
 class UnclosableReviewOutcome(enum.StrEnum):

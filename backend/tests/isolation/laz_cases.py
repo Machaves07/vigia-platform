@@ -47,6 +47,7 @@ from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.clock import Clock
@@ -147,6 +148,12 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 coverage=CoverageService(
                     database=database, audit=services.audit, clock=services.clock
                 ),
+                clock=services.clock,
+            ),
+            assistant=AssistantService(  # TASK-316
+                database=database,
+                authorizer=services.authorizer,
+                outbox=services.outbox,
                 clock=services.clock,
             ),
         ),
@@ -307,6 +314,20 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 json=_ANALYSIS_SIGNATURE,
             ),
         ),
+    ),
+    # VIG-224 (TASK-316): pedir el asistente sobre un análisis de B o leer una solicitud de B
+    # responde igual que con un identificador inexistente (not_found, nunca un detail_code ni el
+    # 503 del circuito); nada se encola ni se escribe en B.
+    (
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("POST", f"/loop/root-cause-analyses/{i.record}/assistant-requests"),
+        ),
+    ),
+    (
+        ("GET", "/loop/assistant-requests/{request_id}"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/assistant-requests/{i.record}")),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
     (

@@ -21,6 +21,7 @@ from __future__ import annotations
 import functools
 import inspect
 import logging
+import os
 import secrets
 from collections.abc import Hashable, Iterator
 from typing import Any
@@ -30,6 +31,7 @@ from _pytest.logging import LogCaptureHandler
 from hypothesis import is_hypothesis_test, seed, settings
 
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
+from vigia_platform.loop.assistant.port import provider_credentials_present
 
 postgres_endpoint = pytest.fixture(scope="session", name="postgres_endpoint")(
     postgres_endpoint_session
@@ -57,7 +59,18 @@ def _active_profile() -> str:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Carga ``ci`` si no se pidió perfil y fija la semilla aleatoria de la sesión."""
+    """Carga ``ci`` si no se pidió perfil y fija la semilla aleatoria de la sesión.
+
+    Antes que nada, la prueba de arranque de NFR-LAZ-47 (TASK-316): con una credencial del
+    proveedor del asistente en el entorno, la suite **no arranca** (ninguna prueba usa una clave
+    real ni llama a la interfaz del proveedor; el doble ``FakeAssistantProvider`` es el valor por
+    omisión)."""
+    present = provider_credentials_present(os.environ)
+    if present:
+        raise pytest.UsageError(
+            "credencial real del proveedor del asistente en la configuración de pruebas"
+            f" ({', '.join(present)}): ninguna prueba la usa (NFR-LAZ-47); quítala del entorno"
+        )
     global _session_seed
     if not config.getoption("hypothesis_profile"):
         settings.load_profile(CI_PROFILE)
