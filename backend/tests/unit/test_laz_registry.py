@@ -4,7 +4,9 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker`` y ``notification_engine``
+  ``U04_TASKS`` con ``verify_loop_projection`` (TASK-306, diaria por organización;
+  ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí),
+  ``U04_CONSUMERS`` con ``export_worker`` y ``notification_engine``
   (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre (TASK-310), las dos de la
   configuración del lazo (TASK-304), la de la clasificación (TASK-308), las de la acción y su
   evidencia (TASK-311) y las del cierre firmado y la reapertura (TASK-343, VIG-233) de ``loop``,
@@ -207,7 +209,16 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(state[NOTIFICATIONS_STATE_KEY], NotificationsHttp)
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
-    assert tasks.tasks() == ()
+    # TASK-306: verify_loop_projection, diaria por organización; rebuild_loop_projection (LC-LAZ-03)
+    # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
+    assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (
+            registration.VERIFY_LOOP_PROJECTION,
+            ActorUnit.U04,
+            registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
+            TaskIteration.PER_ORGANIZATION,
+        )
+    ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
@@ -229,12 +240,18 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         findings_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
-    for module in (registration, notifications_registration):
-        assert module.TASK_REGISTRARS == ()
+    # TASK-306: registration.TASK_REGISTRARS ya no está vacío (verify_loop_projection).
+    assert len(registration.TASK_REGISTRARS) == 1
+    assert notifications_registration.TASK_REGISTRARS == ()
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 1
     assert len(registration.CONSUMER_REGISTRARS) == 2
     assert accreditation_registration.TASK_REGISTRARS == ()
-    assert registration.U04_TASKS == {}
+    assert registration.U04_TASKS == {
+        registration.VERIFY_LOOP_PROJECTION: (
+            registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
+            TaskIteration.PER_ORGANIZATION,
+        )
+    }
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
         "loop_projection": 4,
@@ -315,8 +332,10 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
         for compiled in full.event_types.compiled_types():
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
-        # Los consumidores de la raíz (export_worker, TASK-317): solo falta el evento.
+        # Los consumidores y las tareas de la raíz (export_worker, TASK-317; verify_loop_projection,
+        # TASK-306): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
+        unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced
 
 

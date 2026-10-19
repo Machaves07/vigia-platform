@@ -3,38 +3,50 @@ domain-entities.md de U-04 §2.14 y §9; BR-LAZ-146 a 148 y 156; DR-LAZ-01 y 02)
 
 ``ProjectionRebuilder.rebuild_plant(context, plant_id)`` reconstruye la partición
 ``(organization_id, plant_id)`` desde el expediente, a demanda (sin cadencia: U04-H-14; la expone
-``vigia-admin rebuild-loop-projection`` en VIG-241, fuera de esta tarea). Tres fases, cada una su
-propia transacción:
+``vigia-admin rebuild-loop-projection`` en VIG-241, fuera de esta tarea). Tres fases:
 
-1. **Reclamo** (corta): ``pg_try_advisory_xact_lock(hash("loop_rebuild", organization_id,
-   plant_id))`` (PAT-NUC-ESC-05) es el **único** mecanismo de exclusión entre dos
-   reconstrucciones de la misma planta; no se consigue si otra ya tiene el candado, y entonces se
-   devuelve ``AlreadyRebuilding`` sin tocar nada (PR-LAZ-51). Si se gana, ``state = rebuilding`` se
-   confirma aquí: queda visible para cualquier lector **durante toda la reconstrucción**, que es
-   como la bandeja la declara (BR-LAZ-156, DR-LAZ-01) sin necesitar el candado todo ese tiempo. Una
-   reconstrucción previa que murió a medias (``state`` colgado en ``rebuilding``, sin nadie
-   sosteniendo ya el candado) no bloquea la siguiente: el candado se obtiene igual y ``state`` se
-   vuelve a confirmar.
-2. **Cómputo** (puede ser larga): ``LectorExpediente`` en lotes de 10 000 ``[objetivo propio]``
-   por ``chain_sequence``, plegados con ``fold.step`` (puro) y enriquecidos después, por lote de
-   hasta 50 zonas (NFR-LAZ-03 y 05), con el mismo procedimiento que un hallazgo nuevo
-   (``ProjectionEnrichment.finding_facts``, ``new=True``): el pliegue no depende del reloj, y el
-   enriquecimiento consulta los mismos puertos que la vía incremental, así que con el mismo
-   estado externo (catálogo, compuertas, cobertura) produce el mismo valor (PR-LAZ-44). Una
-   detección (``subject_kind = detection``) nunca se enriquece, igual que la vía incremental.
-   El resultado se escribe en la tabla sombra (``*_rebuild_shadow``), sin tocar las tablas en
-   servicio: ningún lector ve nada de esto.
-3. **Intercambio** (corta): una sola sentencia por tabla, ``INSERT … SELECT … FROM *_shadow WHERE
-   plant_id = :plant_id ON CONFLICT (…) DO UPDATE SET <columnas mutables>``, atómica y sin
-   ``DELETE`` (P4: ``vigia_app`` nunca borra ``episode`` ni ``finding_state``, nota de ``laz_0029``
-   sobre tabla sombra e intercambio). Un lector entre las fases 2 y 3 sigue viendo la fila vieja
-   completa; tras el ``COMMIT`` de la fase 3, la nueva completa (PR-LAZ-59: nunca una mezcla).
-   Cierra con ``state = healthy``, ``rebuilt_at`` y el ``projection_digest`` recalculado, y vacía
-   la sombra de esa planta.
+1. **Reclamo** (una transacción corta): un **arrendamiento** sobre
+   ``loop_projection_checkpoint`` (``rebuild_owner``, ``rebuild_lease_until``; PAT-NUC-RES-05,
+   como ``shared.worker.leases``), tomado con **una sola actualización condicional**
+   (``WHERE rebuild_owner IS NULL OR rebuild_lease_until < ahora``): atómica por el bloqueo de
+   fila de PostgreSQL, dos reclamos a la vez para la misma planta nunca ganan los dos (PR-LAZ-51).
+   Si se gana, ``state = rebuilding`` se confirma en esa misma actualización: queda visible para
+   cualquier lector **durante toda la reconstrucción** (BR-LAZ-156, DR-LAZ-01). El arrendamiento
+   se **renueva** varias veces mientras dura el cómputo; si otra reconstrucción lo retoma (porque
+   venció), ``LeaseLost`` interrumpe esta reconstrucción sin tocar las tablas en servicio.
+   Un arrendamiento vencido sin que nadie lo sostenga ya (el proceso murió a medias) no bloquea la
+   siguiente reconstrucción: se retoma igual.
 
-Si la fase 1 o 2 fallan (``TemporarilyUnavailable`` u otro error), ninguna transacción ha tocado
-las tablas en servicio: la partición sigue como estaba (a lo sumo, ``rebuilding`` colgado, que una
-reconstrucción posterior puede repetir con el mismo candado).
+   (Ronda 1 de revisión: ``pg_try_advisory_xact_lock`` quedó descartado porque solo cubre la
+   transacción del reclamo, no el cómputo ni el intercambio: dos reconstrucciones de la misma
+   planta podían entrar a la vez en cuanto la primera confirmaba el reclamo. El arrendamiento con
+   vencimiento cubre la reconstrucción entera, no solo su primer paso.)
+
+2. **Cómputo** (puede ser largo, una transacción): ``ledger.ledger_record`` en lotes de 10 000
+   ``[objetivo propio]`` por ``chain_sequence``, plegados con ``fold.step`` (puro) y enriquecidos
+   después con el mismo procedimiento que un hallazgo nuevo (``ProjectionEnrichment.finding_facts``,
+   ``new=True``): el pliegue no depende del reloj, y el enriquecimiento consulta los mismos
+   puertos que la vía incremental, así que con el mismo estado externo (catálogo, compuertas,
+   cobertura) produce el mismo valor (PR-LAZ-44). Una detección (``subject_kind = detection``)
+   nunca se enriquece, igual que la vía incremental. El resultado se escribe en la tabla sombra
+   (``*_rebuild_shadow``), sin tocar las tablas en servicio: ningún lector ve nada de esto.
+3. **Intercambio** (una transacción corta): toma primero el control de la planta
+   (``SELECT … FOR UPDATE`` sobre ``loop_projection_checkpoint``, el mismo orden que ``store.py``),
+   lo que serializa esta fase frente a cualquier escritura incremental concurrente de la misma
+   planta (``LoopProjectionStore.apply_in_transaction`` toma el mismo candado). Si mientras tanto
+   llegaron registros nuevos (``last_applied_ledger_sequence`` del punto de control por delante de
+   lo que vio la fase 2), se pliegan ahora, bajo este mismo candado, antes de intercambiar: ningún
+   hecho aceptado durante la reconstrucción se pierde (P5, BR-LAZ-148). Después, una sola
+   sentencia por tabla (``INSERT … SELECT … FROM *_shadow ON CONFLICT (…) DO UPDATE SET <columnas
+   mutables>``), atómica y sin ``DELETE`` (P4: ``vigia_app`` nunca borra ``episode`` ni
+   ``finding_state``, nota de ``laz_0029`` sobre tabla sombra e intercambio). Un lector entre las
+   fases 2 y 3 sigue viendo la fila vieja completa; tras el ``COMMIT`` de la fase 3, la nueva
+   completa (PR-LAZ-59: nunca una mezcla). Cierra con ``state = healthy``, ``rebuilt_at``, el
+   ``projection_digest`` recalculado y el arrendamiento liberado, y vacía la sombra de esa planta.
+
+Si la fase 1 o 2 fallan (``TemporarilyUnavailable``, ``LeaseLost`` u otro error), ninguna
+transacción ha tocado las tablas en servicio: la partición sigue declarada ``rebuilding`` hasta
+que venza el arrendamiento o una reconstrucción posterior la retome.
 """
 
 from __future__ import annotations
@@ -42,9 +54,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 from sqlalchemy import text
@@ -70,6 +82,7 @@ from vigia_platform.loop.projection.fold import (
     ProjectionInput,
     episode_term,
     finding_term,
+    subject_id_of,
 )
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext, repository
@@ -77,16 +90,24 @@ from vigia_platform.shared.db import Transaction
 
 __all__ = [
     "BATCH_SIZE",
+    "FINDINGS_PER_RENEWAL",
+    "LEASE_DURATION",
     "AlreadyRebuilding",
+    "LeaseLost",
     "ProjectionRebuilder",
     "RebuildResult",
     "enrich_finding",
     "evidence_ids_for",
-    "rebuild_lock_key",
 ]
 
 BATCH_SIZE: Final = 10_000
 """Registros por lote de lectura del expediente ``[objetivo propio]`` (PAT-LAZ-RES-03)."""
+
+LEASE_DURATION: Final = timedelta(minutes=5)
+"""Vigencia del arrendamiento de la reconstrucción ``[objetivo propio]`` (PAT-NUC-RES-05); se
+renueva mientras dura el cómputo (``RENEW_EVERY`` de ``shared.worker.leases`` es la misma idea)."""
+FINDINGS_PER_RENEWAL: Final = 200
+"""Cada cuántas filas enriquecidas se renueva el arrendamiento durante el cómputo."""
 
 _EPISODE_COLUMNS: Final = tuple(field.name for field in dataclasses.fields(EpisodeRow))
 _EPISODE_MUTABLE: Final = (
@@ -130,19 +151,32 @@ _FINDING_STATE_MUTABLE: Final = tuple(
     name for name in _FINDING_STATE_COLUMNS if name not in _FINDING_STATE_FIXED
 )
 
-_LOCK: Final = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0)) AS acquired")
 _ENSURE_CHECKPOINT: Final = text(
     "INSERT INTO loop.loop_projection_checkpoint (organization_id, plant_id)"
     " VALUES (:organization_id, :plant_id) ON CONFLICT (organization_id, plant_id) DO NOTHING"
 )
-_CLAIM: Final = text(
-    "UPDATE loop.loop_projection_checkpoint SET state = 'rebuilding'"
+_CLAIM_LEASE: Final = text(
+    "UPDATE loop.loop_projection_checkpoint SET state = 'rebuilding', rebuild_owner = :owner,"
+    " rebuild_lease_until = :until"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    " AND (rebuild_owner IS NULL OR rebuild_lease_until < :now)"
+    " RETURNING 1"
+)
+_RENEW_LEASE: Final = text(
+    "UPDATE loop.loop_projection_checkpoint SET rebuild_lease_until = :until"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    " AND rebuild_owner = :owner"
+    " RETURNING 1"
+)
+_LOCK_CHECKPOINT_FOR_SWAP: Final = text(
+    "SELECT last_applied_ledger_sequence, rebuild_owner"
+    " FROM loop.loop_projection_checkpoint"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id FOR UPDATE"
 )
 _FINISH: Final = text(
     "UPDATE loop.loop_projection_checkpoint SET state = 'healthy', rebuilt_at = :rebuilt_at,"
     " last_applied_ledger_sequence = :sequence, last_applied_event_id = :event_id,"
-    " projection_digest = :projection_digest"
+    " projection_digest = :projection_digest, rebuild_owner = NULL, rebuild_lease_until = NULL"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
 )
 _LEDGER_BATCH: Final = text(
@@ -185,15 +219,29 @@ _episode_conflict_update = ", ".join(f"{name} = EXCLUDED.{name}" for name in _EP
 _finding_state_conflict_update = ", ".join(
     f"{name} = EXCLUDED.{name}" for name in _FINDING_STATE_MUTABLE
 )
+_episode_shadow_update = ", ".join(
+    f"{name} = EXCLUDED.{name}"
+    for name in _EPISODE_COLUMNS
+    if name not in ("plant_id", "episode_id")
+)
+_finding_state_shadow_update = ", ".join(
+    f"{name} = EXCLUDED.{name}"
+    for name in _FINDING_STATE_COLUMNS
+    if name not in ("plant_id", "finding_state_id")
+)
 
+# Las dos sentencias a la sombra son un `UPSERT` (y no un `INSERT` liso): la fase 3 puede volver a
+# escribir una fila ya en la sombra (el pliegue del excedente de la fase 2, más abajo).
 _INSERT_EPISODE_SHADOW_SQL = (
     f"INSERT INTO loop.episode_rebuild_shadow ({_episode_columns_csv})"  # noqa: S608
     f" VALUES ({_episode_placeholders_csv})"
+    f" ON CONFLICT (plant_id, episode_id) DO UPDATE SET {_episode_shadow_update}"
 )
 _INSERT_EPISODE_SHADOW: Final = text(_INSERT_EPISODE_SHADOW_SQL)
 _INSERT_FINDING_STATE_SHADOW_SQL = (
     f"INSERT INTO loop.finding_state_rebuild_shadow ({_finding_state_columns_csv})"  # noqa: S608
     f" VALUES ({_finding_state_placeholders_csv})"
+    f" ON CONFLICT (plant_id, finding_state_id) DO UPDATE SET {_finding_state_shadow_update}"
 )
 _INSERT_FINDING_STATE_SHADOW: Final = text(_INSERT_FINDING_STATE_SHADOW_SQL)
 _SWAP_EPISODE_SQL = (
@@ -213,16 +261,20 @@ _SWAP_FINDING_STATE_SQL = (
 _SWAP_FINDING_STATE: Final = text(_SWAP_FINDING_STATE_SQL)
 
 
-def rebuild_lock_key(organization_id: uuid.UUID, plant_id: uuid.UUID) -> str:
-    """La clave del candado consultivo de ``(organization_id, plant_id)`` (PAT-NUC-ESC-05)."""
-    return f"loop_rebuild|{organization_id}|{plant_id}"
-
-
 class AlreadyRebuilding(RuntimeError):
     """Otra reconstrucción de la misma planta ya está en curso (PR-LAZ-51): no se hizo nada."""
 
     def __init__(self, plant_id: uuid.UUID) -> None:
         super().__init__(f"la planta {plant_id} ya se está reconstruyendo")
+        self.plant_id = plant_id
+
+
+class LeaseLost(RuntimeError):
+    """El arrendamiento de la reconstrucción venció y otro proceso lo retomó: esta reconstrucción
+    se interrumpe sin tocar las tablas en servicio."""
+
+    def __init__(self, plant_id: uuid.UUID) -> None:
+        super().__init__(f"se perdió el arrendamiento de la reconstrucción de {plant_id}")
         self.plant_id = plant_id
 
 
@@ -322,6 +374,8 @@ class ProjectionRebuilder:
         settings: SettingsSource,
         clock: Clock,
         batch_size: int = BATCH_SIZE,
+        on_compute_started: Callable[[], Awaitable[None]] | None = None,
+        on_swap_started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._database = database
         self._enrichment = ProjectionEnrichment(
@@ -329,6 +383,13 @@ class ProjectionRebuilder:
         )
         self._clock = clock
         self._batch_size = batch_size
+        self._on_compute_started = on_compute_started
+        """Gancho de prueba (PR-LAZ-51): se invoca al entrar a la fase 2, antes de tocar nada; una
+        prueba lo usa para pausar el cómputo y lanzar una segunda reconstrucción."""
+        self._on_swap_started = on_swap_started
+        """Gancho de prueba (PR-LAZ-59 y BR-LAZ-148): se invoca al entrar a la fase 3, justo antes
+        de tomar el control de la planta; una prueba lo usa para intercalar una escritura
+        incremental entre el fin del cómputo y el intercambio (el «excedente»)."""
 
     @property
     def enrichment(self) -> ProjectionEnrichment:
@@ -338,30 +399,53 @@ class ProjectionRebuilder:
 
     async def rebuild_plant(self, context: ScopeContext, plant_id: uuid.UUID) -> RebuildResult:
         """Reconstruye ``(context.organization_id, plant_id)``; ``AlreadyRebuilding`` si otra
-        reconstrucción de la misma planta ya está en curso.
+        reconstrucción de la misma planta ya está en curso, ``LeaseLost`` si el arrendamiento se
+        perdió mientras computaba.
 
-        Si la fase 2 falla, la partición queda declarada ``rebuilding`` (DR-LAZ-01): una
-        reconstrucción posterior la repite con el mismo candado; no se inventa un estado
+        Si una fase falla, la partición queda declarada ``rebuilding`` (DR-LAZ-01): una
+        reconstrucción posterior la repite cuando el arrendamiento venza; no se inventa un estado
         ``healthy`` (P5)."""
-        await self._claim(context, plant_id)
-        projection = await self._compute(context, plant_id)
-        return await self._swap(context, plant_id, projection)
+        owner = await self._claim(context, plant_id)
+        projection = await self._compute(context, plant_id, owner)
+        return await self._swap(context, plant_id, projection, owner)
 
     # --- fase 1: reclamo --------------------------------------------------------------------
 
-    async def _claim(self, context: ScopeContext, plant_id: uuid.UUID) -> None:
-        key = rebuild_lock_key(context.organization_id, plant_id)
+    async def _claim(self, context: ScopeContext, plant_id: uuid.UUID) -> uuid.UUID:
+        owner = uuid.uuid4()
+        now = self._clock.now()
         partition = {"organization_id": context.organization_id, "plant_id": plant_id}
         async with self._database.transaction(context) as transaction:
-            acquired = (await transaction.execute(_LOCK, {"key": key})).one().acquired
-            if not acquired:
-                raise AlreadyRebuilding(plant_id)
             await transaction.execute(_ENSURE_CHECKPOINT, partition)
-            await transaction.execute(_CLAIM, partition)
+            claimed = (
+                await transaction.execute(
+                    _CLAIM_LEASE,
+                    {**partition, "owner": owner, "until": now + LEASE_DURATION, "now": now},
+                )
+            ).first()
+            if claimed is None:
+                raise AlreadyRebuilding(plant_id)
+        return owner
+
+    async def _renew(self, context: ScopeContext, plant_id: uuid.UUID, owner: uuid.UUID) -> None:
+        now = self._clock.now()
+        partition = {"organization_id": context.organization_id, "plant_id": plant_id}
+        async with self._database.transaction(context) as transaction:
+            renewed = (
+                await transaction.execute(
+                    _RENEW_LEASE, {**partition, "owner": owner, "until": now + LEASE_DURATION}
+                )
+            ).first()
+        if renewed is None:
+            raise LeaseLost(plant_id)
 
     # --- fase 2: cómputo ----------------------------------------------------------------------
 
-    async def _compute(self, context: ScopeContext, plant_id: uuid.UUID) -> PlantProjection:
+    async def _compute(
+        self, context: ScopeContext, plant_id: uuid.UUID, owner: uuid.UUID
+    ) -> PlantProjection:
+        if self._on_compute_started is not None:
+            await self._on_compute_started()
         projection = PlantProjection(context.organization_id, plant_id)
         async with self._database.transaction(context) as transaction:
             await transaction.execute(
@@ -381,7 +465,8 @@ class ProjectionRebuilder:
             top = last.last_sequence
             if top is not None:
                 await self._fold_batches(transaction, context, plant_id, projection, int(top))
-            await self._enrich_and_stage(transaction, context, plant_id, projection)
+            await self._enrich_and_stage(transaction, context, plant_id, projection, owner=owner)
+        await self._renew(context, plant_id, owner)
         return projection
 
     async def _fold_batches(
@@ -417,11 +502,15 @@ class ProjectionRebuilder:
         context: ScopeContext,
         plant_id: uuid.UUID,
         projection: PlantProjection,
+        *,
+        owner: uuid.UUID | None = None,
     ) -> None:
         now = self._clock.now()
         for episode in projection.episodes.values():
             await transaction.execute(_INSERT_EPISODE_SHADOW, _episode_values(episode))
-        for finding in projection.findings.values():
+        for index, finding in enumerate(tuple(projection.findings.values())):
+            if owner is not None and index and index % FINDINGS_PER_RENEWAL == 0:
+                await self._renew(context, plant_id, owner)
             segments = (
                 projection.episodes[finding.subject_id].segment_record_ids
                 if finding.subject_kind == SubjectKind.FINDING
@@ -442,11 +531,28 @@ class ProjectionRebuilder:
     # --- fase 3: intercambio ------------------------------------------------------------------
 
     async def _swap(
-        self, context: ScopeContext, plant_id: uuid.UUID, projection: PlantProjection
+        self,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        projection: PlantProjection,
+        owner: uuid.UUID,
     ) -> RebuildResult:
+        if self._on_swap_started is not None:
+            await self._on_swap_started()
         partition = {"organization_id": context.organization_id, "plant_id": plant_id}
-        digest = _partition_digest(projection)
         async with self._database.transaction(context) as transaction:
+            checkpoint = (await transaction.execute(_LOCK_CHECKPOINT_FOR_SWAP, partition)).one()
+            if _uuid(checkpoint.rebuild_owner) != owner:
+                raise LeaseLost(plant_id)
+            current_sequence = int(checkpoint.last_applied_ledger_sequence)
+            if current_sequence > projection.last_applied_ledger_sequence:
+                # Excedente: escrituras incrementales aceptadas mientras computaba la fase 2. Se
+                # pliegan ahora, bajo el mismo candado de `store.py` (control de la planta antes
+                # que las filas), así que ninguna queda fuera del intercambio (P5, BR-LAZ-148).
+                await self._fold_surplus(
+                    transaction, context, plant_id, projection, current_sequence
+                )
+            digest = _partition_digest(projection)
             await transaction.execute(_SWAP_EPISODE, partition)
             await transaction.execute(_SWAP_FINDING_STATE, partition)
             await transaction.execute(
@@ -468,6 +574,69 @@ class ProjectionRebuilder:
             last_sequence=projection.last_applied_ledger_sequence,
             projection_digest=digest,
         )
+
+    async def _fold_surplus(
+        self,
+        transaction: Transaction,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        projection: PlantProjection,
+        current_sequence: int,
+    ) -> None:
+        first = projection.last_applied_ledger_sequence + 1
+        rows = (
+            await transaction.execute(
+                _LEDGER_BATCH,
+                {
+                    "organization_id": context.organization_id,
+                    "plant_id": plant_id,
+                    "record_types": list(PROJECTED_RECORD_TYPES),
+                    "first": first,
+                    "last": current_sequence,
+                },
+            )
+        ).all()
+        touched: set[uuid.UUID] = set()
+        for row in rows:
+            item = _projection_input(row)
+            subject = subject_id_of(item)
+            projection.apply(item)
+            if subject is not None:
+                touched.add(subject)
+        await self._enrich_and_stage_subset(transaction, context, plant_id, projection, touched)
+
+    async def _enrich_and_stage_subset(
+        self,
+        transaction: Transaction,
+        context: ScopeContext,
+        plant_id: uuid.UUID,
+        projection: PlantProjection,
+        subjects: set[uuid.UUID],
+    ) -> None:
+        now = self._clock.now()
+        for subject_id in subjects:
+            episode = projection.episodes.get(subject_id)
+            if episode is not None:
+                await transaction.execute(_INSERT_EPISODE_SHADOW, _episode_values(episode))
+            finding = projection.findings.get(subject_id)
+            if finding is None:
+                continue
+            segments = (
+                episode.segment_record_ids
+                if episode is not None and finding.subject_kind == SubjectKind.FINDING
+                else ()
+            )
+            enriched = await enrich_finding(
+                self._enrichment,
+                transaction,
+                context=context,
+                plant_id=plant_id,
+                finding=finding,
+                segment_record_ids=segments,
+                now=now,
+            )
+            await transaction.execute(_INSERT_FINDING_STATE_SHADOW, _finding_values(enriched))
+            projection.findings[subject_id] = enriched
 
 
 def _partition_digest(projection: PlantProjection) -> str:

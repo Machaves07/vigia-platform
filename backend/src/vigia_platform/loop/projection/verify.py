@@ -37,6 +37,7 @@ from sqlalchemy.engine import Row
 
 from vigia_platform.ledger.application.writer import LedgerDatabase
 from vigia_platform.loop.domain.enums import SubjectKind
+from vigia_platform.loop.observability.metrics import LoopMetricName, LoopMetrics, get_loop_metrics
 from vigia_platform.loop.projection.fold import (
     PROJECTED_RECORD_TYPES,
     FindingStateRow,
@@ -212,11 +213,12 @@ _EPISODE_SEGMENTS: Final = text(
     " WHERE organization_id = :organization_id AND episode_id = :episode_id"
 )
 _CHECKPOINT: Final = text(
-    "SELECT divergence_count, last_divergence_at FROM loop.loop_projection_checkpoint"
+    "SELECT state, divergence_count, last_divergence_at FROM loop.loop_projection_checkpoint"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
 )
 _MARK_DIVERGED: Final = text(
-    "UPDATE loop.loop_projection_checkpoint SET state = 'diverged',"
+    "UPDATE loop.loop_projection_checkpoint SET"
+    " state = CASE WHEN state = 'rebuilding' THEN state ELSE 'diverged' END,"
     " divergence_count = :divergence_count, last_divergence_at = :at"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
 )
@@ -300,12 +302,14 @@ class ProjectionVerifier:
         rebuilder: ProjectionRebuilder,
         outbox: OutboxPort,
         clock: Clock,
+        metrics: LoopMetrics | None = None,
         random_bytes: Callable[[int], bytes] = os.urandom,
     ) -> None:
         self._database = database
         self._rebuilder = rebuilder
         self._outbox = outbox
         self._clock = clock
+        self._metrics = metrics if metrics is not None else get_loop_metrics()
         self._random_bytes = random_bytes
 
     async def verify_organization(
@@ -486,6 +490,9 @@ class ProjectionVerifier:
             },
         )
         rebuild_triggered = count <= ESCALATION_THRESHOLD
+        self._metrics.counter(LoopMetricName.LOOP_PROJECTION_DIVERGENCES_TOTAL).add(
+            1, {"organization_id": str(context.organization_id)}
+        )
         await self._outbox.publish(
             transaction,
             NewEvent(

@@ -20,7 +20,14 @@ Seguridad a nivel de fila igual que ``loop_projection_checkpoint`` (A-69, ``laz_
 solo organización, con las dos políticas RESTRICTIVE (concesión de proveedor y contexto de
 proveedor denegado), porque ninguna de las tres es un dato de cliente, es control interno de la
 propia proyección.
-"""
+
+**Arrendamiento de la reconstrucción** (PAT-NUC-RES-05, como ``shared.periodic_task``):
+``loop_projection_checkpoint`` gana ``rebuild_owner`` y ``rebuild_lease_until``. El reclamo es una
+sola actualización condicional (``WHERE rebuild_owner IS NULL OR rebuild_lease_until < ahora``),
+atómica por el bloqueo de fila de PostgreSQL: dos reclamos a la vez para la misma planta nunca
+ganan los dos (la revisión de ronda 1 encontró que ``pg_try_advisory_xact_lock`` solo exigía la
+transacción corta del reclamo y no cubría el cómputo ni el intercambio). Un arrendamiento vencido
+(el proceso murió a medias) se retoma sin bloquear para siempre."""
 
 from __future__ import annotations
 
@@ -124,6 +131,14 @@ CREATE TABLE loop.finding_state_rebuild_shadow (
 )
 """
 
+_CHECKPOINT_LEASE_COLUMNS = """
+ALTER TABLE loop.loop_projection_checkpoint
+    ADD COLUMN rebuild_owner uuid,
+    ADD COLUMN rebuild_lease_until timestamptz,
+    ADD CONSTRAINT loop_projection_checkpoint_lease_pair
+        CHECK ((rebuild_owner IS NULL) = (rebuild_lease_until IS NULL))
+"""
+
 _SAMPLE_RUN = f"""
 CREATE TABLE loop.loop_projection_sample_run (
     organization_id uuid NOT NULL,
@@ -180,13 +195,23 @@ _APPEND_ONLY_SAMPLE_RUN = (
 def _grants() -> list[str]:
     statements = []
     for table in (*_SHADOW_TABLES, "loop_projection_sample_run"):
-        statements.append(f"GRANT SELECT, INSERT, DELETE ON loop.{table} TO vigia_app")
+        statements.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON loop.{table} TO vigia_app")
+    statements.append(
+        "GRANT UPDATE (rebuild_owner, rebuild_lease_until)"
+        " ON loop.loop_projection_checkpoint TO vigia_app"
+    )
     return statements
 
 
 def upgrade() -> None:
     op.execute("SET LOCAL ROLE vigia_migrate")
-    statements = [_EPISODE_SHADOW, _FINDING_STATE_SHADOW, _SAMPLE_RUN, *_COMMENTS]
+    statements = [
+        _EPISODE_SHADOW,
+        _FINDING_STATE_SHADOW,
+        _CHECKPOINT_LEASE_COLUMNS,
+        _SAMPLE_RUN,
+        *_COMMENTS,
+    ]
     for table in _SHADOW_TABLES:
         statements += row_security("loop", table, plant_column="plant_id", organization_only=True)
     statements += row_security(

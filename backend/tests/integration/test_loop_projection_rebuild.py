@@ -179,6 +179,37 @@ def test_bandeja_declares_rebuilding(world: LoopWorld) -> None:
     assert all(partition.plant_id != organization.plant_id for partition in after.partitions)
 
 
+def test_rebuild_plant_is_idempotent_when_retried(world: LoopWorld) -> None:
+    """Un reintento de ``rebuild_plant`` (el arrendamiento liberado tras terminar permite
+    retomarla) produce el mismo estado, sin filas duplicadas ni digest distinto."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    rebuilder = _rebuilder(world, ports)
+    context = world.context(organization)
+
+    first = world.stack.run(rebuilder.rebuild_plant(context, organization.plant_id))
+    first_row = world.finding_state(subject)
+    assert first_row is not None
+
+    second = world.stack.run(rebuilder.rebuild_plant(context, organization.plant_id))
+    second_row = world.finding_state(subject)
+    assert second_row is not None
+
+    assert first.projection_digest == second.projection_digest
+    assert first_row["projection_digest"] == second_row["projection_digest"]
+    assert first.findings_written == second.findings_written == 1
+    rows = world.stack.fetch(
+        "SELECT count(*) AS n FROM loop.finding_state WHERE organization_id = $1 AND plant_id = $2",
+        organization.organization_id,
+        organization.plant_id,
+    )
+    assert rows[0]["n"] == 1
+
+
 def test_verify_loop_projection_registered_without_rebuild() -> None:
     schedule, iteration = U04_TASKS[VERIFY_LOOP_PROJECTION]
     assert schedule == VERIFY_LOOP_PROJECTION_SCHEDULE

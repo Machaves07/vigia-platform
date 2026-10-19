@@ -9,15 +9,22 @@ para ensanchar la ventana con más viajes a la base por planta): en **cada** mue
 están en el mismo lado (las dos con el resumen mutado, o las dos con el corregido), nunca una de
 cada.
 
+También: una escritura incremental aceptada **entre el fin del cómputo y el intercambio** (el
+«excedente» de BR-LAZ-148, el hallazgo de la ronda 1 de revisión) no se pierde — la reconstrucción
+la pliega bajo el mismo candado de ``store.py`` antes de intercambiar.
+
 **Mutación** (la tabla sombra se omite y la reconstrucción escribe fila a fila directamente en
-``loop.finding_state``): el muestreador ve una mezcla al menos una vez.
+``loop.finding_state``): el muestreador ve una mezcla al menos una vez. Ejecutada manualmente
+contra el archivo (no queda como prueba permanente: mutar `_swap` en una prueba de regresión no es
+el patrón de este repositorio); ver la nota «Evidence» del PR con la salida real en rojo y la
+restauración.
 """
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from typing import Final
+from typing import Any, Final
 
 import pytest
 from sqlalchemy import text
@@ -31,6 +38,7 @@ from tests.laz_support import (
     loop_world,
 )
 from vigia_platform.ledger.application.evidence_read import EvidenceService
+from vigia_platform.ledger.application.writer import RecordScope
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.projection.fold import FindingStateRow
 from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
@@ -54,7 +62,11 @@ def world(postgres_endpoint: PostgresEndpoint) -> Iterator[LoopWorld]:
 
 
 def _rebuilder(
-    world: LoopWorld, ports: InstrumentedPorts, *, batch_size: int = 1
+    world: LoopWorld,
+    ports: InstrumentedPorts,
+    *,
+    batch_size: int = 1,
+    on_swap_started: Any = None,
 ) -> ProjectionRebuilder:
     database = world.stack.primary.database
     sessions = world.stack.authz.sessions
@@ -69,6 +81,7 @@ def _rebuilder(
         settings=PostgresLoopConfigurationRepository(database),
         clock=sessions.clock,
         batch_size=batch_size,
+        on_swap_started=on_swap_started,
     )
 
 
@@ -158,3 +171,53 @@ def test_pr_laz_59_no_reader_ever_sees_a_mix(world: LoopWorld) -> None:
             assert set(sample) <= mutated or set(sample) <= correct, (sample, mutated, correct)
         # Al menos la última muestra, tras terminar, debe ser la corregida.
         assert set(samples[-1]) <= correct
+
+
+def test_pr_laz_59_surplus_during_compute_is_not_lost(world: LoopWorld) -> None:
+    """Una clasificación aceptada **mientras computa** la fase 2 no desaparece: la fase 3 la
+    pliega como excedente antes de intercambiar (BR-LAZ-148, hallazgo de la ronda 1 de revisión)."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    reached = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def pause() -> None:
+        reached.set()
+        await resume.wait()
+
+    rebuilder = _rebuilder(world, ports, batch_size=1, on_swap_started=pause)
+    context = world.context(organization)
+
+    async def classify() -> None:
+        # Como `LoopWorld.write`, pero sin su envoltorio síncrono (ya estamos dentro del bucle).
+        database = world.stack.primary.database
+        scope = RecordScope(plant_id=organization.plant_id, zone_id=organization.zone_id)
+        async with database.transaction(context) as transaction:
+            _receipt, step = await world.store.write_and_apply(
+                transaction,
+                world.stack.primary.writer,
+                context,
+                "classification",
+                world.classification_content(subject),
+                scope=scope,
+            )
+        assert step is not None and step.applied
+
+    async def run() -> Any:
+        task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
+        await reached.wait()
+        world.stack.tick()
+        await classify()
+        resume.set()
+        return await task
+
+    world.stack.run(run())
+    final = world.finding_state(subject)
+    assert final is not None
+    assert final["lifecycle_state"] == "open"
+    assert final["current_classification_outcome"] == "confirmed"
+    assert final["classification_count"] == 1
