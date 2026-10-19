@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.laz_policies import row_security
+from migrations.laz_policies import retention_tag, row_security
 
 revision: str = "laz_0035"
 down_revision: str | None = "laz_0034"
@@ -58,7 +58,8 @@ _STATEMENTS = (
     f"COMMENT ON TABLE {SCHEMA}.{TABLE} IS 'Arrendamiento de la composición de un paquete"
     " mensual por (zone_id, period) (PAT-LAZ-RES-05, VIG-239): solo quien lo tiene vigente"
     " sube el zip y sella; seguridad a nivel de fila forzada por organización y concesión de"
-    " proveedor por planta; sin retención propia, vive mientras viva monthly_package'",
+    " proveedor por planta; retención: sin retención propia, vive mientras viva"
+    f" monthly_package; {retention_tag('operational_state')}'",
 )
 
 
