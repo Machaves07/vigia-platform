@@ -79,7 +79,7 @@ class DraftOut(BaseModel):
     citations: list[CitationOut]
     insufficient_evidence_declared: bool
     proposed_cause_category: str | None
-    model_name: str
+    model: str
     """El modelo que produjo la respuesta (puede no ser el configurado)."""
     model_version: str
     created_at: str
@@ -124,7 +124,7 @@ def view(result: AssistantRequestView) -> AssistantRequestOut:
                     if draft.proposed_cause_category is None
                     else draft.proposed_cause_category.value
                 ),
-                model_name=draft.model_name,
+                model=draft.model_name,
                 model_version=draft.model_version,
                 created_at=format_timestamp(draft.created_at),
             )

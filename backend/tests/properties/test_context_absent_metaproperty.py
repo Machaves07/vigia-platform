@@ -147,6 +147,13 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # accreditation.export (TASK-317): lee la solicitud y su paquete solo por la
         # ``Transaction`` dada (la abre ``ExportRequests.status``, registrado y guardado).
         "vigia_platform.accreditation.export.request.read_status",
+        # loop.assistant (TASK-316): lee la solicitud y su borrador solo por la ``Transaction``
+        # dada (la abre ``AssistantService.status``, registrado y guardado).
+        "vigia_platform.loop.assistant.service.read_request",
+        # loop.assistant (TASK-316): la admisión y el presupuesto de fichas cuentan solo por la
+        # ``Transaction`` dada (la abren ``AssistantService.request`` y ``AssistantWorker``).
+        "vigia_platform.loop.assistant.budget.admit",
+        "vigia_platform.loop.assistant.budget.token_budget",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

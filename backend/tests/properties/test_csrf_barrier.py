@@ -88,6 +88,7 @@ BODIES: dict[str, dict[str, Any]] = {
         "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
         "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
     },
+    "/loop/root-cause-analyses/{analysis_id}/assistant-requests": {},
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -166,6 +167,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
+        # Solicitud al asistente de causa raíz de U-04 (TASK-316).
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).

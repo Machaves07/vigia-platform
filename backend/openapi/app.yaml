@@ -7403,9 +7403,9 @@
             - "type": "string"
             - "type": "null"
           "title": "Proposed Cause Category"
-        "model_name":
+        "model":
           "type": "string"
-          "title": "Model Name"
+          "title": "Model"
         "model_version":
           "type": "string"
           "title": "Model Version"
@@ -7419,7 +7419,7 @@
         - "citations"
         - "insufficient_evidence_declared"
         - "proposed_cause_category"
-        - "model_name"
+        - "model"
         - "model_version"
         - "created_at"
       "title": "DraftOut"

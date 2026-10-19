@@ -199,7 +199,7 @@ def test_a_valid_draft_with_citations_is_ready_outside_the_ledger(
     body = _status(stack, coordinator, request_id)
     assert body["assistant_state"] == "ready"
     assert body["draft"]["is_draft"] is True
-    assert body["draft"]["model_name"] == FAKE_MODEL
+    assert body["draft"]["model"] == FAKE_MODEL
     assert body["draft"]["citations"][0]["reference_id"] == citation["reference_id"]
 
 
