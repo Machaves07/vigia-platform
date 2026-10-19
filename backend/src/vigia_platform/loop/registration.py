@@ -61,6 +61,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
+from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -78,7 +79,12 @@ from vigia_platform.loop.projection.consumer import (
 from vigia_platform.loop.projection.enrichment import ProjectionEnrichment
 from vigia_platform.loop.projection.store import LoopProjectionStore
 from vigia_platform.loop.record_types import register_loop_record_types
-from vigia_platform.loop.validators.cache import VocabularyCache
+from vigia_platform.loop.validators.attribution import (
+    PERSON_ATTRIBUTION,
+    PersonAttributionValidator,
+    common_words,
+)
+from vigia_platform.loop.validators.cache import DeclaredNamesCache, VocabularyCache
 from vigia_platform.loop.validators.vocabulary import (
     BLOCKED_VOCABULARY,
     BlockedVocabularyValidator,
@@ -133,6 +139,7 @@ __all__ = [
     "missing_free_text_validators",
     "missing_u04_registrations",
     "register_blocked_vocabulary",
+    "register_person_attribution",
 ]
 
 U04_RECORD_TYPES: Final = frozenset(
@@ -285,11 +292,26 @@ def register_blocked_vocabulary(registry: FreeTextPolicyRegistry) -> None:
     registry.register_preparer(BLOCKED_VOCABULARY, cache.refresh)
 
 
-FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = (register_blocked_vocabulary,)
-"""Los validadores de texto libre de U-04 (``blocked_vocabulary``; ``person_attribution`` llega
-con TASK-340)."""
+def register_person_attribution(registry: FreeTextPolicyRegistry) -> None:
+    """``person_attribution`` (TASK-340) con la caché del vocabulario declarado y su preparador.
 
-U04_FREE_TEXT_VALIDATORS: Final = frozenset({BLOCKED_VOCABULARY})
+    El preparador relee los nombres de plantas y zonas de la organización al abrir la escritura
+    (fuera de la ruta de validación); el validador solo lee la caché. Las palabras comunes se
+    cargan aquí, al arrancar: un archivo roto detiene el arranque, no la primera escritura.
+    """
+    common_words()
+    cache = DeclaredNamesCache(PostgresDeclaredNamesStore())
+    registry.register(PERSON_ATTRIBUTION, PersonAttributionValidator(cache.names_for))
+    registry.register_preparer(PERSON_ATTRIBUTION, cache.refresh)
+
+
+FREE_TEXT_REGISTRARS: Final[tuple[FreeTextRegistrar, ...]] = (
+    register_blocked_vocabulary,  # TASK-303
+    register_person_attribution,  # TASK-340
+)
+"""Los validadores de texto libre de U-04, en este orden."""
+
+U04_FREE_TEXT_VALIDATORS: Final = frozenset({BLOCKED_VOCABULARY, PERSON_ATTRIBUTION})
 """Los validadores que U-04 exige en la política sellada (BLM §9; NFR-LAZ-14)."""
 
 

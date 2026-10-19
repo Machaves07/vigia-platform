@@ -11,13 +11,26 @@
   homoglifos cirílicos, espacios no ASCII (NBSP, U+3000, U+2009), dígitos y letras de ancho
   completo o invisibles (``UnicodeVariant.kind``).
 
-Solo datos generados: ninguna persona, ningún nombre, ningún texto real.
+Para ``person_attribution`` (TASK-340; PR-LAZ-25; A-45 punto 3):
+
+- ``person_attribution_texts``: un cargo con verbo de acción u omisión, un cargo como causa, una
+  fórmula de error humano, un documento de identidad, un nombre propio, un correo, un teléfono o
+  una placa, entre palabras permitidas en minúsculas; devuelve el patrón que debe caer;
+- ``attribution_unicode_texts``: uno de esos textos y su variante con las mismas evasiones
+  Unicode que ``unicode_texts``;
+- ``zone_equipment_texts``: textos de control que deben pasar: zonas, equipos y máquinas con
+  mayúsculas, códigos de procedimiento, normas, fechas y cifras; los equipos con marca citan su
+  nombre declarado (``ZoneText.declared``).
+
+Solo datos generados: los nombres de persona son sintéticos y de uso corriente (``FIRST_NAMES`` y
+``SURNAMES``), y los correos y teléfonos son de dominios ``.test`` o dígitos al azar.
 """
 
 from __future__ import annotations
 
 import functools
 import json
+import unicodedata
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -31,13 +44,24 @@ from vigia_platform.loop.validators.initial_list import INITIAL_TERMS, InitialTe
 
 __all__ = [
     "ALLOWED_WORDS",
+    "ATTRIBUTION_KINDS",
+    "DECLARED_BRANDS",
+    "FIRST_NAMES",
     "PATTERN_INSTANCES",
+    "SURNAMES",
+    "AttributionText",
+    "AttributionVariant",
     "BlockedText",
     "UnicodeVariant",
+    "ZoneText",
     "allowed_texts",
+    "attribution_unicode_texts",
     "blocked_vocabulary_texts",
     "inflections",
+    "person_attribution_texts",
     "unicode_texts",
+    "zone_equipment_texts",
+    "zone_equipment_unicode_texts",
 ]
 
 ALLOWED_WORDS: Final = (
@@ -238,9 +262,14 @@ def unicode_texts(draw: st.DrawFn, kinds: tuple[Kind, ...] | None = None) -> Uni
     kind: Kind = draw(
         st.sampled_from(kinds or ("homoglyph", "space", "fullwidth", "invisible", "mixed"))
     )
+    return UnicodeVariant(blocked=blocked, text=_disguise(draw, blocked.text, kind), kind=kind)
+
+
+def _disguise(draw: st.DrawFn, text: str, kind: Kind) -> str:
+    """``text`` con homoglifos, espacios no ASCII, ancho completo o invisibles (``kind``)."""
     out: list[str] = []
     changed = False
-    for index, char in enumerate(blocked.text):
+    for index, char in enumerate(text):
         replacement = char
         mode = (
             kind if kind != "mixed" else draw(st.sampled_from(("homoglyph", "space", "fullwidth")))
@@ -257,4 +286,228 @@ def unicode_texts(draw: st.DrawFn, kinds: tuple[Kind, ...] | None = None) -> Uni
         out.append(replacement)
     if not changed and kind == "invisible":
         out.insert(1, _INVISIBLES[0])
-    return UnicodeVariant(blocked=blocked, text="".join(out), kind=kind)
+    return "".join(out)
+
+
+# --- person_attribution (TASK-340; PR-LAZ-25; A-45 punto 3) ---------------------------------------
+
+FIRST_NAMES: Final = (
+    "Juan", "María", "Carlos", "Ana", "Luis", "Diana", "Jorge", "Paola", "Andrés", "Camila",
+    "Felipe", "Laura", "Sergio", "Natalia", "Óscar", "Lucía",
+)  # fmt: skip
+SURNAMES: Final = (
+    "Pérez", "Gómez", "Rodríguez", "Martínez", "López", "Ramírez", "Torres", "Castro", "Vargas",
+    "Moreno", "Rojas", "Herrera", "Jiménez", "Muñoz", "Díaz", "Ortiz",
+)  # fmt: skip
+"""Nombres y apellidos sintéticos de uso corriente: ninguna persona real ni ningún registro."""
+
+_ROLES: Final = (
+    "el operario", "la operaria", "el operador", "el trabajador", "el técnico", "la supervisora",
+    "el auxiliar", "el contratista", "el jefe de turno", "el mecánico", "la electricista",
+    "los operarios", "el operario nuevo", "la técnica de mantenimiento",
+)  # fmt: skip
+_ACTIONS: Final = (
+    "omitió el bloqueo", "olvidó la guarda", "no usó el arnés", "no verificó la barrera",
+    "ingresó a la zona", "decidió continuar", "falló en la parada", "incumplió el procedimiento",
+    "violó la norma", "se saltó el enclavamiento", "ignoró la señal", "desactivó el sensor",
+)  # fmt: skip
+_CAUSES: Final = (
+    "causa raíz: {role}", "Causa: {role}", "la causa fue {role}", "causa principal {role}",
+    "atribuible a {role}", "responsabilidad de {role}",
+)  # fmt: skip
+_HUMAN_ERRORS: Final = (
+    "falta de atención", "falla humana", "error humano", "fallo humano", "errores humanos",
+    "falta de cuidado", "error del operario", "falla de la supervisora", "error del técnico",
+)  # fmt: skip
+_DOCUMENTS: Final = (
+    "cédula {n}", "C.C. {n}", "documento n° {n}", "identificación número {n}", "carnet {n}",
+    "cédula de ciudadanía No. {n}", "CC {n}", "pasaporte {n}",
+)  # fmt: skip
+_EMAILS: Final = ("{u}@example.test", "{u}@correo.test", "{u} arroba example punto test",
+                  "{u}(at)example(dot)test", "{u} @ correo.test")  # fmt: skip
+_PHONES: Final = ("{a} {b} {c}", "{a}{b}{c}", "+57 {a} {b} {c}", "({a}) {b}-{c}",
+                  "{a}-{b}-{c}", "{a}.{b}.{c}", "{b} {c}")  # fmt: skip
+_PLATES: Final = ("placa {p}", "carro de placas {p}", "vehículo con placa {p}", "la moto {p}",
+                  "camión {p}", "matrícula {p}")  # fmt: skip
+
+AttributionKind = Literal[
+    "role_action",
+    "role_as_cause",
+    "human_error",
+    "identity_document",
+    "proper_name",
+    "email",
+    "phone",
+    "vehicle_plate",
+]
+
+
+@dataclass(frozen=True)
+class AttributionText:
+    text: str
+    pattern: AttributionKind
+    """El patrón de ``AttributionPattern`` que el rechazo debe nombrar."""
+
+
+_DIGITS: Final = st.text(alphabet="0123456789", min_size=1, max_size=1)
+
+
+def _digits(count: int) -> st.SearchStrategy[str]:
+    return st.lists(_DIGITS, min_size=count, max_size=count).map("".join)
+
+
+def _plate() -> st.SearchStrategy[str]:
+    letters = st.lists(st.sampled_from("ABCDEFGHJKLMNPRSTUVWXYZ"), min_size=3, max_size=3).map(
+        "".join
+    )
+    return st.tuples(
+        letters,
+        st.sampled_from(("", " ", "-")),
+        st.one_of(_digits(3), st.tuples(_digits(2), st.sampled_from("ABCDEFZ")).map("".join)),
+    ).map("".join)
+
+
+@st.composite
+def _instance(draw: st.DrawFn, pattern: AttributionKind) -> str:
+    if pattern == "role_action":
+        role, action = draw(st.sampled_from(_ROLES)), draw(st.sampled_from(_ACTIONS))
+        return f"{role} {action}"
+    if pattern == "role_as_cause":
+        return draw(st.sampled_from(_CAUSES)).format(role=draw(st.sampled_from(_ROLES)))
+    if pattern == "human_error":
+        return draw(st.sampled_from(_HUMAN_ERRORS))
+    if pattern == "identity_document":
+        number = draw(st.integers(min_value=5, max_value=10).flatmap(_digits))
+        if draw(st.booleans()) and len(number) > 6:
+            number = f"{number[:-6]}.{number[-6:-3]}.{number[-3:]}"
+        return draw(st.sampled_from(_DOCUMENTS)).format(n=number)
+    if pattern == "proper_name":
+        first, last = draw(st.sampled_from(FIRST_NAMES)), draw(st.sampled_from(SURNAMES))
+        name = f"{first} {last}"
+        return name.upper() if draw(st.booleans()) else name
+    if pattern == "email":
+        user = draw(st.sampled_from(FIRST_NAMES)) + draw(st.sampled_from((".", "_", "")))
+        user = ascii_lower(user + draw(st.sampled_from(SURNAMES)) + draw(_digits(2)))
+        return draw(st.sampled_from(_EMAILS)).format(u=user)
+    if pattern == "phone":
+        return draw(st.sampled_from(_PHONES)).format(
+            a=draw(_digits(3)), b=draw(_digits(3)), c=draw(_digits(4))
+        )
+    return draw(st.sampled_from(_PLATES)).format(p=draw(_plate()))
+
+
+def ascii_lower(word: str) -> str:
+    """``word`` en minúsculas ASCII sin tildes (la parte local de un correo sintético)."""
+    decomposed = unicodedata.normalize("NFD", word.lower())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+ATTRIBUTION_KINDS: Final[tuple[AttributionKind, ...]] = (
+    "role_action",
+    "role_as_cause",
+    "human_error",
+    "identity_document",
+    "proper_name",
+    "email",
+    "phone",
+    "vehicle_plate",
+)
+
+
+@st.composite
+def _lower_phrase(draw: st.DrawFn, max_words: int = 5) -> str:
+    """Palabras del vocabulario permitido en minúsculas: no forman ningún patrón."""
+    return " ".join(draw(st.lists(st.sampled_from(ALLOWED_WORDS), max_size=max_words)))
+
+
+@st.composite
+def person_attribution_texts(
+    draw: st.DrawFn, kinds: tuple[AttributionKind, ...] = ATTRIBUTION_KINDS
+) -> AttributionText:
+    """Una atribución a persona o un dato de contacto (``kinds``) entre palabras permitidas."""
+    pattern = draw(st.sampled_from(kinds))
+    instance = draw(_instance(pattern))
+    if pattern != "proper_name" and draw(st.booleans()):
+        instance = instance.capitalize()
+    before, after = draw(_lower_phrase()), draw(_lower_phrase())
+    text = " ".join(part for part in (before, instance, after) if part)
+    return AttributionText(text=text, pattern=pattern)
+
+
+@dataclass(frozen=True)
+class AttributionVariant:
+    original: AttributionText
+    text: str
+    kind: Kind
+
+
+@st.composite
+def attribution_unicode_texts(
+    draw: st.DrawFn, kinds: tuple[Kind, ...] | None = None
+) -> AttributionVariant:
+    """Una atribución y su variante con homoglifos, espacios, ancho completo o invisibles."""
+    original = draw(person_attribution_texts())
+    kind: Kind = draw(
+        st.sampled_from(kinds or ("homoglyph", "space", "fullwidth", "invisible", "mixed"))
+    )
+    return AttributionVariant(original, _disguise(draw, original.text, kind), kind)
+
+
+EQUIPMENT: Final = (
+    "Prensa", "Torno", "Compresor", "Caldera", "Montacargas", "Banda Transportadora", "Robot",
+    "Molino", "Horno", "Grúa", "Tablero Eléctrico", "Línea de Empaque", "Bomba", "Mezclador",
+)  # fmt: skip
+QUALIFIERS: Final = ("Norte", "Sur", "Principal", "Central", "Oriente", "Occidente", "II", "III")
+DECLARED_BRANDS: Final = (
+    "Schuler Kompakt", "Krones Modulfill", "Atlas Copco", "Kaeser Sigma", "Haas Okuma",
+    "Fanuc Vulcano",
+)  # fmt: skip
+"""Nombres de equipo de dos palabras poco comunes: solo pasan si la organización los declaró."""
+_CONTROL_TAILS: Final = (
+    "revisada durante el turno", "con la guarda instalada", "verificada el 2026-10-18",
+    "según el procedimiento PRO-001", "conforme a NTC 2050 e ISO 45001:2018",
+    "con un costo de 1.500.000 pesos", "y la placa de anclaje ajustada",
+    "tras la capacitación del operario", "en la Zona Norte de la Planta Principal",
+    "sin novedad en el registro", "del 18/10/2026 a las 10:30",
+)  # fmt: skip
+
+
+@dataclass(frozen=True)
+class ZoneText:
+    text: str
+    declared: tuple[str, ...]
+    """Los nombres de plantas y zonas declarados que el texto cita (vocabulario declarado)."""
+
+
+@st.composite
+def zone_equipment_texts(draw: st.DrawFn) -> ZoneText:
+    """Un texto de control con zonas, equipos y máquinas (con mayúsculas) que debe aceptarse.
+
+    Los equipos con marca de dos palabras (``DECLARED_BRANDS``) se citan con su nombre declarado.
+    """
+    parts: list[str] = []
+    declared: list[str] = []
+    for _ in range(draw(st.integers(min_value=1, max_value=3))):
+        equipment = draw(st.sampled_from(EQUIPMENT))
+        if draw(st.booleans()):
+            brand = draw(st.sampled_from(DECLARED_BRANDS))
+            name = f"{equipment} {brand}"
+            declared.append(name)
+        else:
+            name = f"{equipment} {draw(st.sampled_from(QUALIFIERS))}"
+        if draw(st.booleans()):
+            name = name.upper()
+        parts.append(f"{draw(st.sampled_from(('la', 'el', 'en la zona de la')))} {name}")
+    head = draw(st.sampled_from(("Revisión de", "Mantenimiento de", "Inspección de")))
+    tail = draw(st.sampled_from(_CONTROL_TAILS))
+    return ZoneText(text=f"{head} {' y '.join(parts)} {tail}", declared=tuple(declared))
+
+
+@st.composite
+def zone_equipment_unicode_texts(
+    draw: st.DrawFn, kinds: tuple[Kind, ...] = ("homoglyph", "space", "fullwidth", "mixed")
+) -> ZoneText:
+    """Un texto de control con homoglifos, espacios no ASCII o ancho completo: debe pasar igual."""
+    control = draw(zone_equipment_texts())
+    text = _disguise(draw, control.text, draw(st.sampled_from(kinds)))
+    return ZoneText(text=text, declared=control.declared)
