@@ -22,6 +22,7 @@ roles, también el instalador, y la configuración del lazo no es de la puesta e
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
@@ -34,12 +35,16 @@ from vigia_platform.accreditation.adapters.http.services import (
 from vigia_platform.accreditation.events import register_accreditation_event_types
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.ledger.application.audit_writer import AuditWriter
+from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.clock import Clock
@@ -58,6 +63,18 @@ __all__ = [
 ]
 
 _CONFIGURATION: Final = "/loop/plants/{plant_id}/configuration"
+_NO_PROVIDER: Final = uuid.UUID("00000000-0000-4000-8000-000000000315")
+"""``FleetQueryPort.nodes_by_zone`` (lo único que usa el análisis) no mira la organización del
+proveedor; la de esta prueba no se usa."""
+_ANALYSIS_STEP: Final = {
+    "statement": "La carretilla cruzó el pasillo peatonal con la estación de carga energizada"
+}
+_ANALYSIS_SIGNATURE: Final = {
+    "professional_license": "LIC-SST-0001",
+    "root_cause_category": "engineering",
+    "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
+    "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
+}
 
 
 class _Database(Protocol):
@@ -100,6 +117,24 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 clock=services.clock,
             ),
+            root_cause=RootCauseService(  # TASK-315
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                free_text=services.free_text,
+                catalog=catalog_query_ports(database).catalog,
+                fleet=FleetInventory(
+                    database=database,
+                    authorizer=services.authorizer,
+                    audit=services.audit,
+                    clock=services.clock,
+                    provider_organization_id=_NO_PROVIDER,
+                ),
+                coverage=CoverageService(
+                    database=database, audit=services.audit, clock=services.clock
+                ),
+                clock=services.clock,
+            ),
         ),
     }
 
@@ -133,7 +168,7 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
 
 
 LAZ_STATE: tuple[Callable[[LazServices], Mapping[str, object]], ...] = (
-    _loop,  # TASK-304 y TASK-308
+    _loop,  # TASK-304, TASK-308 y TASK-315
     _accreditation,  # TASK-317
 )
 """Constructores del ``app.state`` de las rutas de U-04 en la aplicación de la prueba."""
@@ -194,6 +229,35 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                     "reason_category": "real_coexistence",
                     "reason_text": "Motivo sintético de la clasificación del hallazgo en la zona",
                 },
+            ),
+        ),
+    ),
+    # VIG-214 (TASK-315): el análisis de causa raíz de un hallazgo o de un análisis de B responde
+    # igual que uno inexistente (not_found, nunca un detail_code); nada se escribe en B.
+    (
+        ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("POST", f"/loop/findings/{i.record}/root-cause-analyses"),
+        ),
+    ),
+    (
+        ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "PUT", f"/loop/root-cause-analyses/{i.record}/steps/1", json=_ANALYSIS_STEP
+            ),
+        ),
+    ),
+    (
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/loop/root-cause-analyses/{i.record}/signature",
+                json=_ANALYSIS_SIGNATURE,
             ),
         ),
     ),

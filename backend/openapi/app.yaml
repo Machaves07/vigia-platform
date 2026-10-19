@@ -4116,6 +4116,107 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/root-cause-analyses":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Inicia el análisis de causa raíz guiado con el contexto objetivo de la zona"
+      "operationId": "start_loop_findings__finding_state_id__root_cause_analyses_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AnalysisOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}":
+    "put":
+      "tags":
+        - "lazo"
+      "summary": "Escribe un porqué del análisis (el siguiente o uno ya completo)"
+      "operationId": "put_step_loop_root_cause_analyses__analysis_id__steps__step_index__put"
+      "parameters":
+        - "name": "analysis_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Analysis Id"
+        - "name": "step_index"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "integer"
+            "maximum": 5
+            "minimum": 1
+            "title": "Step Index"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AnalysisStepBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AnalysisOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/root-cause-analyses/{analysis_id}/signature":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Firma el análisis con nombre y licencia, o lo deja pendiente de información"
+      "operationId": "signature_loop_root_cause_analyses__analysis_id__signature_post"
+      "parameters":
+        - "name": "analysis_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Analysis Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AnalysisSignatureBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AnalysisOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -4506,6 +4607,173 @@
         - "cleared"
       "title": "AlarmStatus"
       "description": "Filtro de ``GET /fleet/alarms``: abiertas o ya cerradas."
+    "AnalysisOut":
+      "properties":
+        "analysis_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Analysis Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "subject_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Subject Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "state":
+          "type": "string"
+          "title": "State"
+        "zone_context":
+          "$ref": "#/components/schemas/ZoneContextOut"
+        "why_steps":
+          "items":
+            "$ref": "#/components/schemas/WhyStepOut"
+          "type": "array"
+          "title": "Why Steps"
+        "next_step_index":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Next Step Index"
+        "next_question_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Question Es"
+        "cause_effect_branches":
+          "items":
+            "$ref": "#/components/schemas/BranchOut"
+          "type": "array"
+          "title": "Cause Effect Branches"
+        "root_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Category"
+        "root_cause_statement":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Statement"
+        "conclusion":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Conclusion"
+        "pending_information":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Pending Information"
+        "missing_information":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Missing Information"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+        "signer":
+          "anyOf":
+            - "$ref": "#/components/schemas/SignerOut"
+            - "type": "null"
+        "signed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Signed At"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "updated_at":
+          "type": "string"
+          "title": "Updated At"
+      "type": "object"
+      "required":
+        - "analysis_id"
+        - "subject_kind"
+        - "subject_id"
+        - "zone_id"
+        - "state"
+        - "zone_context"
+        - "why_steps"
+        - "next_step_index"
+        - "next_question_es"
+        - "cause_effect_branches"
+        - "root_cause_category"
+        - "root_cause_statement"
+        - "conclusion"
+        - "pending_information"
+        - "missing_information"
+        - "record_id"
+        - "signer"
+        - "signed_at"
+        - "created_at"
+        - "updated_at"
+      "title": "AnalysisOut"
+    "AnalysisSignatureBody":
+      "properties":
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Professional License"
+        "root_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Category"
+        "root_cause_statement":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Statement"
+        "conclusion":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Conclusion"
+        "cause_effect_branches":
+          "items":
+            "$ref": "#/components/schemas/BranchBody"
+          "type": "array"
+          "maxItems": 6
+          "title": "Cause Effect Branches"
+          "default": []
+      "additionalProperties": false
+      "type": "object"
+      "title": "AnalysisSignatureBody"
+      "description": "El texto final que el humano acepta y su licencia profesional."
+    "AnalysisStepBody":
+      "properties":
+        "statement":
+          "type": "string"
+          "title": "Statement"
+        "evidence_refs":
+          "items":
+            "$ref": "#/components/schemas/EvidenceRefBody"
+          "type": "array"
+          "maxItems": 32
+          "title": "Evidence Refs"
+          "default": []
+        "category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Category"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "statement"
+      "title": "AnalysisStepBody"
+      "description": "Un porqué: enunciado, referencias de evidencia y, si lo declara, su categoría."
     "AnswersBody":
       "properties":
         "standard":
@@ -4824,6 +5092,40 @@
       "type": "object"
       "title": "BlurVerificationBody"
       "description": "Parte declarada del difuminado (D-2). Los dos campos son opcionales en la forma para que\nsu ausencia responda ``catalog_blur_not_verified``, no ``invalid_request``."
+    "BranchBody":
+      "properties":
+        "branch_category":
+          "type": "string"
+          "title": "Branch Category"
+        "factors":
+          "items":
+            "$ref": "#/components/schemas/FactorBody"
+          "type": "array"
+          "maxItems": 16
+          "minItems": 1
+          "title": "Factors"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "branch_category"
+        - "factors"
+      "title": "BranchBody"
+      "description": "Una rama del diagrama de causa y efecto."
+    "BranchOut":
+      "properties":
+        "branch_category":
+          "type": "string"
+          "title": "Branch Category"
+        "factors":
+          "items":
+            "$ref": "#/components/schemas/FactorOut"
+          "type": "array"
+          "title": "Factors"
+      "type": "object"
+      "required":
+        - "branch_category"
+        - "factors"
+      "title": "BranchOut"
     "BusinessCalendarBody":
       "properties":
         "working_weekdays":
@@ -5219,6 +5521,19 @@
         - "superseded_at"
       "title": "CatalogVersionSummary"
       "description": "Una entrada del historial: qué cambió, por qué, quién y cuándo (H-44)."
+    "CauseCountOut":
+      "properties":
+        "category":
+          "type": "string"
+          "title": "Category"
+        "count":
+          "type": "integer"
+          "title": "Count"
+      "type": "object"
+      "required":
+        - "category"
+        - "count"
+      "title": "CauseCountOut"
     "CertificateChainPem":
       "type": "string"
       "maxLength": 32768
@@ -6277,6 +6592,35 @@
         - "clock_basis"
         - "source_record_ids"
       "title": "CoverageStatusOut"
+    "CoverageSummaryOut":
+      "properties":
+        "observable_ms":
+          "type": "integer"
+          "title": "Observable Ms"
+        "degraded_ms":
+          "type": "integer"
+          "title": "Degraded Ms"
+        "not_observable_ms":
+          "type": "integer"
+          "title": "Not Observable Ms"
+        "no_communication_ms":
+          "type": "integer"
+          "title": "No Communication Ms"
+        "never_reported_ms":
+          "type": "integer"
+          "title": "Never Reported Ms"
+        "zone_not_active_ms":
+          "type": "integer"
+          "title": "Zone Not Active Ms"
+      "type": "object"
+      "required":
+        - "observable_ms"
+        - "degraded_ms"
+        - "not_observable_ms"
+        - "no_communication_ms"
+        - "never_reported_ms"
+        - "zone_not_active_ms"
+      "title": "CoverageSummaryOut"
     "CoverageTimelineOut":
       "properties":
         "organization_id":
@@ -6877,6 +7221,23 @@
       "additionalProperties": false
       "type": "object"
       "title": "EpisodeBody"
+    "EpisodeDurationsOut":
+      "properties":
+        "episode_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Episode Ms"
+        "condition_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Condition Ms"
+      "type": "object"
+      "required":
+        - "episode_ms"
+        - "condition_ms"
+      "title": "EpisodeDurationsOut"
     "EpisodeParameters":
       "properties":
         "grouping_window_ms":
@@ -6980,6 +7341,36 @@
         - "expires_at"
       "title": "EvidenceReadUrlResponse"
       "description": "``EvidenceReadGrant`` (domain-entities §3.5): no se persiste."
+    "EvidenceRefBody":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+      "title": "EvidenceRefBody"
+      "description": "Una referencia a un hecho de la zona: nunca su contenido (§2.9)."
+    "EvidenceRefOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Id"
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+      "title": "EvidenceRefOut"
     "ExportConflictOut":
       "properties":
         "code":
@@ -7223,6 +7614,38 @@
         - "displayed_at"
         - "recorded_at"
       "title": "ExposureSampleOut"
+    "FactorBody":
+      "properties":
+        "text":
+          "type": "string"
+          "title": "Text"
+        "evidence_refs":
+          "items":
+            "$ref": "#/components/schemas/EvidenceRefBody"
+          "type": "array"
+          "maxItems": 32
+          "title": "Evidence Refs"
+          "default": []
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "text"
+      "title": "FactorBody"
+    "FactorOut":
+      "properties":
+        "text":
+          "type": "string"
+          "title": "Text"
+        "evidence_refs":
+          "items":
+            "$ref": "#/components/schemas/EvidenceRefOut"
+          "type": "array"
+          "title": "Evidence Refs"
+      "type": "object"
+      "required":
+        - "text"
+        - "evidence_refs"
+      "title": "FactorOut"
     "FalseAlarmAcceptanceBody":
       "properties":
         "reason_es":
@@ -7252,6 +7675,19 @@
         - "accepted_by"
         - "accepted_at"
       "title": "FalseAlarmAcceptanceOut"
+    "FamilyCountOut":
+      "properties":
+        "family":
+          "type": "string"
+          "title": "Family"
+        "count":
+          "type": "integer"
+          "title": "Count"
+      "type": "object"
+      "required":
+        - "family"
+        - "count"
+      "title": "FamilyCountOut"
     "FleetAlarmKind":
       "type": "string"
       "enum":
@@ -9011,6 +9447,21 @@
         - "status"
         - "revoked_at"
       "title": "NodeRevocationView"
+    "NodeStateOut":
+      "properties":
+        "communication_state":
+          "type": "string"
+          "title": "Communication State"
+        "last_heartbeat_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Last Heartbeat At"
+      "type": "object"
+      "required":
+        - "communication_state"
+        - "last_heartbeat_at"
+      "title": "NodeStateOut"
     "NodeView":
       "properties":
         "node_id":
@@ -9367,6 +9818,19 @@
         - "to"
       "title": "PeriodBody"
       "description": "``{from, to}``: ``from`` es palabra reservada de Python, de ahí el alias."
+    "PeriodOut":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "PeriodOut"
     "PeriodView":
       "properties":
         "from":
@@ -9574,6 +10038,29 @@
         - "presence"
       "title": "PresenceCondition"
       "description": "Condición de presencia en la zona. Solo admite `true`: la gramática no puede afirmar ausencia (P2)."
+    "PreviousActionOut":
+      "properties":
+        "action_type":
+          "type": "string"
+          "title": "Action Type"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "closed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed At"
+        "recurrence_after_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Recurrence After Days"
+      "type": "object"
+      "required":
+        - "action_type"
+        - "outcome"
+      "title": "PreviousActionOut"
     "ProfileBody":
       "properties":
         "display_name":
@@ -10393,6 +10880,23 @@
         - "low"
       "title": "SignalLevel"
       "description": "Nivel físico de una señal."
+    "SignalOut":
+      "properties":
+        "role":
+          "type": "string"
+          "title": "Role"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "valid":
+          "type": "boolean"
+          "title": "Valid"
+      "type": "object"
+      "required":
+        - "role"
+        - "value"
+        - "valid"
+      "title": "SignalOut"
     "SignalReaderView":
       "properties":
         "available":
@@ -10592,6 +11096,24 @@
     "SignedZoneCatalog":
       "$ref": "#/components/schemas/vigia_contracts__models__zone_catalog__SignedEnvelope"
       "title": "SignedZoneCatalog"
+    "SignerOut":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "professional_license":
+          "type": "string"
+          "title": "Professional License"
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "professional_license"
+      "title": "SignerOut"
     "SigningPurpose":
       "type": "string"
       "enum":
@@ -11559,6 +12081,35 @@
         - "incomplete"
         - "reopened"
       "title": "WalkTestStatus"
+    "WhyStepOut":
+      "properties":
+        "step_index":
+          "type": "integer"
+          "title": "Step Index"
+        "question_es":
+          "type": "string"
+          "title": "Question Es"
+        "statement":
+          "type": "string"
+          "title": "Statement"
+        "evidence_refs":
+          "items":
+            "$ref": "#/components/schemas/EvidenceRefOut"
+          "type": "array"
+          "title": "Evidence Refs"
+        "category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Category"
+      "type": "object"
+      "required":
+        - "step_index"
+        - "question_es"
+        - "statement"
+        - "evidence_refs"
+        - "category"
+      "title": "WhyStepOut"
     "WindowsBody":
       "properties":
         "clip_window":
@@ -11595,6 +12146,89 @@
         - "code"
         - "name"
       "title": "ZoneBody"
+    "ZoneContextOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "standard_version":
+          "type": "integer"
+          "title": "Standard Version"
+        "standard_title_es":
+          "type": "string"
+          "title": "Standard Title Es"
+        "standard_text":
+          "type": "string"
+          "title": "Standard Text"
+        "observability_state_at_event":
+          "type": "string"
+          "title": "Observability State At Event"
+        "period":
+          "$ref": "#/components/schemas/PeriodOut"
+        "coverage_summary_period":
+          "$ref": "#/components/schemas/CoverageSummaryOut"
+        "node_state":
+          "items":
+            "$ref": "#/components/schemas/NodeStateOut"
+          "type": "array"
+          "title": "Node State"
+        "signals_by_role":
+          "items":
+            "$ref": "#/components/schemas/SignalOut"
+          "type": "array"
+          "title": "Signals By Role"
+        "episode_durations":
+          "$ref": "#/components/schemas/EpisodeDurationsOut"
+        "finding_counts_by_family_in_period":
+          "items":
+            "$ref": "#/components/schemas/FamilyCountOut"
+          "type": "array"
+          "title": "Finding Counts By Family In Period"
+        "recurrences_in_period":
+          "type": "integer"
+          "title": "Recurrences In Period"
+        "previous_actions":
+          "items":
+            "$ref": "#/components/schemas/PreviousActionOut"
+          "type": "array"
+          "title": "Previous Actions"
+        "previous_cause_categories":
+          "items":
+            "$ref": "#/components/schemas/CauseCountOut"
+          "type": "array"
+          "title": "Previous Cause Categories"
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "family"
+        - "tier"
+        - "standard_id"
+        - "standard_version"
+        - "standard_title_es"
+        - "standard_text"
+        - "observability_state_at_event"
+        - "period"
+        - "coverage_summary_period"
+        - "node_state"
+        - "signals_by_role"
+        - "episode_durations"
+        - "finding_counts_by_family_in_period"
+        - "recurrences_in_period"
+        - "previous_actions"
+        - "previous_cause_categories"
+      "title": "ZoneContextOut"
+      "description": "``ZoneObjectiveContext`` (DE §2.10): solo hechos medidos de la zona (BR-LAZ-63)."
     "ZoneMode":
       "type": "string"
       "enum":

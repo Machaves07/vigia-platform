@@ -55,6 +55,12 @@
     "pending_information": "pendiente de información",
     "signed": "firmado"
   },
+  "analysis_missing_item": {
+    "why_steps": "al menos el primer porqué completo",
+    "root_cause_category": "la categoría de la causa raíz",
+    "root_cause_statement": "el enunciado de la causa raíz",
+    "conclusion": "la conclusión del análisis"
+  },
   "assistant_request_state": {
     "pending": "pendiente",
     "ready": "listo",

@@ -1,7 +1,8 @@
 """Etiquetas en español de U-04 (TASK-302; NFR-LAZ-52; DE §1 y §11.1).
 
 - ``labels.loop.es.json`` tiene **exactamente** las enumeraciones de U-04 (las de DE §1, más
-  ``package_form`` y las listas que cierran los tipos de registro, más los tres ``detail_code``),
+  ``package_form`` y las listas que cierran los tipos de registro, más los tres ``detail_code`` y
+  ``analysis_missing_item`` de TASK-315),
   y cada una **exactamente** los valores de su lista del código: igualdad de conjuntos, ninguna
   etiqueta falta ni sobra.
 - ``attachment_content_type``: cada tipo MIME tiene su clave de etiqueta.
@@ -90,11 +91,16 @@ RECORD_ENUMERATIONS: Final = frozenset(
 DETAIL_CODE_ENUMERATIONS: Final = frozenset(
     {"loop_detail_code", "accreditation_detail_code", "notifications_detail_code"}
 )
+RESPONSE_ENUMERATIONS: Final = frozenset({"analysis_missing_item"})
+"""Listas cerradas que una respuesta muestra a una persona: ``pending_information`` del análisis
+de causa raíz (TASK-315, BR-LAZ-64)."""
 
 
 def test_the_loop_file_has_exactly_the_u04_enumerations() -> None:
     assert len(DESIGN_ENUMERATIONS) == 28
-    expected = DESIGN_ENUMERATIONS | RECORD_ENUMERATIONS | DETAIL_CODE_ENUMERATIONS
+    expected = (
+        DESIGN_ENUMERATIONS | RECORD_ENUMERATIONS | DETAIL_CODE_ENUMERATIONS | RESPONSE_ENUMERATIONS
+    )
     assert set(U04_BINDINGS) == expected
     assert set(LOOP_FILE) == expected
 

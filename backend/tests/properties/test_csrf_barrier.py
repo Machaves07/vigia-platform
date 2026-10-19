@@ -68,6 +68,16 @@ BODIES: dict[str, dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    "/loop/findings/{finding_state_id}/root-cause-analyses": {},
+    "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}": {
+        "statement": "La carretilla cruzó el pasillo peatonal con la estación de carga energizada",
+    },
+    "/loop/root-cause-analyses/{analysis_id}/signature": {
+        "professional_license": "LIC-SST-0001",
+        "root_cause_category": "engineering",
+        "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
+        "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -108,6 +118,8 @@ def _url(path: str) -> str:
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{export_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
+        .replace("{analysis_id}", str(uuid.uuid4()))
+        .replace("{step_index}", "1")
     )
 
 
@@ -137,6 +149,10 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("PUT", "/loop/plants/{plant_id}/configuration"),
         # Clasificación de un hallazgo de U-04 (TASK-308).
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        # Análisis de causa raíz guiado de U-04 (TASK-315).
+        ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+        ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).

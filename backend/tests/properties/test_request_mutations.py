@@ -102,6 +102,17 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    # TASK-315: los campos opcionales que no cambian el resultado (referencias, categoría del paso,
+    # ramas) quedan fuera, para que quitar o anular cualquiera de estos sea un rechazo.
+    ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"): {
+        "statement": "La carretilla cruzó el pasillo peatonal con la estación de carga energizada",
+    },
+    ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"): {
+        "professional_license": "LIC-SST-0001",
+        "root_cause_category": "engineering",
+        "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
+        "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -122,6 +133,8 @@ def _url(path: str, user_id: str | None = None) -> str:
         .replace("{action_id}", str(uuid.uuid4()))
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
+        .replace("{analysis_id}", str(uuid.uuid4()))
+        .replace("{step_index}", "1")
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -166,14 +179,19 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         ("POST", "/accreditation/exports"),
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     # Cuerpo válido: llega al servicio, que no encuentra la acción, el hallazgo (TASK-308,
-    # ``ClassificationDouble``) ni las zonas sintéticas.
+    # ``ClassificationDouble``), el análisis (TASK-315, ``RootCauseDouble``) ni las zonas
+    # sintéticas.
     ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
     ("POST", "/loop/findings/{finding_state_id}/classifications"): 404,
+    ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"): 404,
+    ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"): 404,
     ("POST", "/accreditation/exports"): 404,
 }
 
@@ -271,6 +289,9 @@ def _mutated(
         elif "{finding_state_id}" in path:
             bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
             url = path.replace("{finding_state_id}", bad)
+        elif "{analysis_id}" in path:
+            bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
+            url = _url(path.replace("{analysis_id}", bad))
         elif "plant_id" in body:
             body["plant_id"] = data.draw(st.sampled_from(["no-es-uuid", "", "0" * 31]))
         else:
