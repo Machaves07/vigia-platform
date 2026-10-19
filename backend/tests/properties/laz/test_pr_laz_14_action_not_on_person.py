@@ -131,6 +131,20 @@ def test_every_action_on_the_zone_is_accepted(action: NeutralAction) -> None:
         "Capacitar-al-operario en el uso del resguardo",
         "Abrir un proceso en contra del conductor del montacargas",
         "Retroalimentar hacia los colaboradores del área de carga",
+        # Revisión automática de VIG-223, ronda 2: pronombre pegado, relativo, compañero, P7.
+        "Sancionarlo por cruzar la zona de carga",
+        "Hablar con el operario y sancionarlo",
+        "Capacitarlos en el uso del resguardo de la prensa",
+        "Amonestar a los que cruzaron la zona de carga",
+        "Sancionar al que cruzó la zona sin permiso",
+        "Sancionar al compañero que cruzó la zona",
+        "Medir la productividad del operario de la línea",
+        "Retirar al operario de la zona de carga",
+        "Registrar falta grave del montacarguista del turno",
+        "Capacitar a los ope rarios en el uso del resguardo",
+        "Capacitar a los o p e r a r i o s del turno",
+        # Apartar «paso de peatones» no aparta a los operarios de una zona.
+        "Capacitar en la zona de los operarios del turno",
     ],
 )
 def test_borders_of_an_action_on_a_person(text: str) -> None:
@@ -150,6 +164,15 @@ def test_borders_of_an_action_on_a_person(text: str) -> None:
         "Instalar barandas contra caídas en la plataforma de carga",
         "Evaluar las guardas de la zona con el responsable de mantenimiento",
         "Reemplazar el sensor según el procedimiento PRO-001 de la línea",
+        # Ronda 2: elementos de la zona nombrados por quien los usa y pronombres de cosas.
+        "Evaluar el paso de peatones del pasillo norte",
+        "Formar una senda para peatones en el pasillo",
+        "Evaluar la señalización para visitantes en la entrada",
+        "Revisar la guarda de la prensa y evaluarla con mantenimiento",
+        "Detener la operación de la banda y suspenderla durante el ajuste",
+        "Retirar el resguardo dañado y reemplazarlo por uno fijo",
+        "Medir el rendimiento de la bomba de la línea de agua",
+        "Evaluar las guardas de las que dispone la zona norte",
     ],
 )
 def test_a_person_mentioned_without_being_the_target_is_accepted(text: str) -> None:

@@ -64,7 +64,13 @@ _PERSONS: Final = (
     "montacarguista", "montacarguistas", "conductor", "conductores", "contratista", "aprendiz",
     "colaboradores", "cuadrilla", "persona", "personas", "responsable", "responsables",
     "usuarios", "usuarias", "peatones", "peatón", "visitantes", "infractor", "causante",
+    "compañero", "compañera", "compañeros",
 )  # fmt: skip
+_ENCLITIC: Final = (
+    "Sancionarlo", "Sancionarlos", "Amonestarla", "Amonestarle", "Capacitarlos", "Reentrenarlas",
+    "Despedirlo", "Multarlo", "Sensibilizarlos", "Reprenderlo", "Instruirlos",
+)  # fmt: skip
+"""Verbos que solo se aplican a personas con el pronombre pegado (revisión, ronda 2)."""
 _SANCTIONS: Final = (
     "Tomar medidas disciplinarias contra", "Abrir un proceso disciplinario contra",
     "Iniciar acciones en contra de", "Aplicar una sanción contra",
@@ -166,7 +172,14 @@ def _on_person(draw: st.DrawFn) -> str:
     person = draw(st.sampled_from(_PERSONS))
     determiner = draw(st.sampled_from(_DETERMINERS))
     complement = draw(st.sampled_from(_COMPLEMENTS))
-    match draw(st.sampled_from(("verb", "verb_bare", "noun", "passive", "against", "whoever"))):
+    kinds = ("verb", "verb_bare", "noun", "passive", "against", "whoever", "enclitic", "those")
+    match draw(st.sampled_from(kinds)):
+        case "enclitic":
+            text = f"{draw(st.sampled_from(_ENCLITIC))} por el cruce en la zona de carga"
+        case "those":
+            verb = draw(st.sampled_from(_VERBS))
+            those = draw(st.sampled_from(("al que", "a los que", "a las que", "a la que")))
+            text = f"{verb} {those} cruzaron la zona de carga"
         case "against":
             text = f"{draw(st.sampled_from(_SANCTIONS))} {determiner or 'el '}{person}{complement}"
         case "whoever":

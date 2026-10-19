@@ -222,7 +222,7 @@ _PERSONS: Final = (
     r"|practicantes?|obrer[oa]s?|personas?|personal|gente|cuadrillas?|brigadistas?"
     r"|ayudantes?|vigilantes?|peon|peones|responsables?|quien|quienes|usuari[oa]s?"
     r"|peaton|peatones|transeuntes?|visitantes?|infractor(?:a|es|as)?|culpables?"
-    r"|causantes?|involucrad[oa]s?|implicad[oa]s?|individu[oa]s?|sujetos?)"
+    r"|causantes?|involucrad[oa]s?|implicad[oa]s?|individu[oa]s?|sujetos?|companer[oa]s?)"
 )
 """Personas o grupos de personas: los cargos del validador de atribución, sus colectivos, quien
 cruza o usa la zona y las formas de señalar a alguien («el responsable», «a quien cruzó»)."""
@@ -232,9 +232,27 @@ _TOWARD_PERSON: Final = (
     r"|amonest\w*|sancion\w*|evalu\w*|reprend\w*|reprimend\w*|desped\w*|despid\w*"
     r"|suspend\w*|disciplin\w*|mult(?:a|as|ar|e|en)|sensibiliz\w*|concien(?:ci|ti)z\w*"
     r"|induc(?:ir|cion(?:es)?)|charlas?|retroaliment\w*|llamad[oa]s? de atencion"
-    r"|llamar la atencion)"
+    r"|llamar la atencion|retir\w*)"
 )
-"""Intervenciones sobre una persona: formarla, entrenarla, amonestarla, sancionarla, evaluarla…"""
+"""Intervenciones sobre una persona: formarla, entrenarla, amonestarla, sancionarla, evaluarla,
+retirarla de la zona…"""
+
+_ONLY_ON_PERSONS: Final = (
+    r"(?:re)?(?:amonest|sancion|reprend|reprimend|desped|despid|mult|capacit|entren|instru"
+    r"|sensibiliz|concien(?:ci|ti)z|disciplin|retroaliment)"
+)
+"""Las raíces de los verbos que solo se aplican a personas: con un pronombre pegado («sancionarlo»,
+«capacitarlos») la acción recae sobre alguien. Fuera, a propósito, los que también se dicen de una
+cosa («evaluarla», «suspenderla», «formarla», «retirarlo»)."""
+
+_INFRASTRUCTURE: Final = (
+    r"(?:paso|pasos|cruce|cruces|senda|sendas|ruta|rutas|acceso|accesos|zona|zonas|area|areas"
+    r"|senalizacion|senal|senales|transito|circulacion|via|vias|pasillo|pasillos|corredor"
+    r"|corredores|franja|franjas|demarcacion|puerta|puertas|entrada|entradas|salida|salidas"
+    r"|refugio|refugios|baranda|barandas)"
+)
+"""Elementos de la zona que se nombran por quien los usa («paso de peatones», «senda para
+visitantes»): no son una persona, y se apartan antes de buscar."""
 
 _DETERMINERS: Final = (
     r"(?: (?:todo|toda|todos|todas|cada))?"
@@ -265,12 +283,54 @@ _PERSON_DIRECTED: Final = (
     ),
     # «medidas disciplinarias contra el operario», «proceso en contra del conductor».
     re.compile(rf"{_B}(?:contra|en contra del?){_DETERMINERS} {_PERSONS}{_E}"),
+    # El pronombre pegado: «sancionarlo», «capacitarlos», «amonestandole».
+    re.compile(rf"{_B}{_ONLY_ON_PERSONS}(?:ar|er|ir|ando|iendo|yendo)(?:se)?(?:lo|la|le)s?{_E}"),
+    # El relativo que señala a alguien: «a los que cruzaron», «al que», «contra quienes».
+    re.compile(
+        rf"{_B}{_TOWARD_PERSON}{_WORDS} (?:al|a (?:el|la|los|las)|para (?:el|la|los|las)"
+        rf"|contra (?:el|la|los|las)|hacia (?:el|la|los|las)) que{_E}"
+    ),
+    # P7: la productividad, el desempeño o la falta de una persona.
+    re.compile(
+        rf"{_B}(?:productividad|desempeno|rendimiento|faltas?(?: (?:grave|graves|leve|leves))?)"
+        rf" (?:de|del|de la|de los|de las){_DETERMINERS} {_PERSONS}{_E}"
+    ),
 )
-"""Los patrones de una acción sobre una persona, sobre la forma plegada (``_folded``)."""
+"""Los patrones de una acción sobre una persona, sobre las formas plegadas (``_folded_forms``)."""
+_INFRASTRUCTURE_PHRASE: Final = re.compile(
+    rf"{_B}{_INFRASTRUCTURE}(?: (?:peatonal|peatonales))? (?:de|del|para){_DETERMINERS}"
+    r" (?:peaton|peatones|visitantes?|usuari[oa]s?|transeuntes?|conductor(?:a|es|as)?)"
+    rf"{_E}"
+)
+"""Solo quienes **usan** la zona: «la zona de los operarios» no se aparta."""
+_SPELLED: Final = re.compile(r"(?<![^\W\d_])(?:[^\W\d_] ){2,}[^\W\d_](?![^\W\d_])")
+"""Una palabra deletreada con espacios («o p e r a r i o s»)."""
 _NON_WORD: Final = re.compile(r"[\W_]+")
 _WORD_BREAK: Final = re.compile(r"(?<=[^\W\d_])[-\u2010-\u2015.\u00b7_]+\s*(?=[^\W\d_])")
 """Un corte dentro de una palabra («opera-rios», «ope.ra.rio»): guiones, puntos o subrayados entre
 dos letras, con espacios después (el corte de línea)."""
+
+
+_PERSON_WORD: Final = re.compile(_PERSONS)
+
+
+def _rejoined(form: str) -> str:
+    """Une dos piezas seguidas que juntas son una persona y por separado no («ope rarios»)."""
+    words = form.split(" ")
+    out: list[str] = []
+    index = 0
+    while index < len(words):
+        if index + 1 < len(words):
+            pair = words[index] + words[index + 1]
+            if _PERSON_WORD.fullmatch(pair) and not (
+                _PERSON_WORD.fullmatch(words[index]) or _PERSON_WORD.fullmatch(words[index + 1])
+            ):
+                out.append(pair)
+                index += 2
+                continue
+        out.append(words[index])
+        index += 1
+    return " ".join(out)
 
 
 def _folded_forms(value: str) -> tuple[str, ...]:
@@ -281,7 +341,10 @@ def _folded_forms(value: str) -> tuple[str, ...]:
     folded = fold_text(canonical_form(unicodedata.normalize("NFC", value)))
     spaced = " ".join(_NON_WORD.split(folded)).strip()
     joined = " ".join(_NON_WORD.split(_WORD_BREAK.sub("", folded))).strip()
-    return (spaced,) if joined == spaced else (spaced, joined)
+    joined = _rejoined(_SPELLED.sub(lambda found: found.group().replace(" ", ""), joined))
+    forms = (spaced,) if joined == spaced else (spaced, joined)
+    # «paso de peatones» es un elemento de la zona, no una persona.
+    return tuple(_INFRASTRUCTURE_PHRASE.sub("infraestructura", form) for form in forms)
 
 
 def person_directed(value: str) -> bool:
