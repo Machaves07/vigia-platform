@@ -25,6 +25,10 @@ from typing import TYPE_CHECKING, Final
 from fastapi import APIRouter
 
 from vigia_platform.accreditation.adapters.http.export_routes import export_router
+from vigia_platform.accreditation.adapters.http.monthly_routes import (
+    MonthlyPackageReads,
+    monthly_router,
+)
 from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
@@ -58,12 +62,27 @@ from vigia_platform.accreditation.export.worker import (
     LoggingExportAlarm,
     register_export_worker,
 )
+from vigia_platform.accreditation.monthly.package import (
+    EvidencePort,
+    MissingEvidence,
+    MonthlyPackageComposer,
+)
+from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
+from vigia_platform.accreditation.monthly.task import (
+    MONTHLY_PACKAGE,
+    MONTHLY_PACKAGE_SCHEDULE,
+    MonthlyPackageTask,
+    register_monthly_package,
+)
 from vigia_platform.accreditation.record_types import register_accreditation_record_types
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
+from vigia_platform.ledger.adapters.checkpoint_store import SqlCheckpointStore
 from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.reader import LectorExpediente
+from vigia_platform.ledger.chain.checkpoints import CheckpointService
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.domain.enums import ACCREDITATION_LABEL_BINDINGS
 from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.shared.outbox.registries import (
@@ -165,8 +184,61 @@ def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) 
     )
 
 
-def _export_state(services: UnitServices) -> Mapping[str, object]:
+def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``monthly_package`` (TASK-342 a 344): registrada **siempre**, también en procesos sin
+    depósito de evidencias (``vigia-api``, que no lo necesita para estas rutas pero sí comparte el
+    registro de tareas). Sin él, el compositor degrada con ``MissingEvidence`` y falla recién al
+    intentar subir el paquete, nunca al arrancar ni al registrar la tarea (mismo patrón que
+    ``_register_export_worker`` con ``MissingUploadPort``/``MissingPackageComposer``)."""
+    monthly_repository = MonthlyPackageRepository(database=services.database)
+    evidence: EvidencePort = MissingEvidence() if services.evidence is None else services.evidence
+    # ``services.checkpoints`` no sirve aquí: su ``writer_context`` por defecto espera ya recibir
+    # un contexto de U-02 (``_require_u02``), y el de la tarea periódica es de U-04. El paquete
+    # mensual necesita su propio ``CheckpointService``, con el mismo almacén y firmante, pero con
+    # ``writer_context=services.contexts.checkpoint_writer``: lo traduce al contexto de sistema de
+    # U-02 de la misma organización (checkpoints.py documenta a U-04 como invocador legítimo
+    # «antes de cada exportación o paquete mensual»).
+    checkpoints = CheckpointService(
+        store=SqlCheckpointStore(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+        ),
+        signer=services.signing,
+        clock=services.clock,
+        writer_context=services.contexts.checkpoint_writer,
+    )
+    composer = MonthlyPackageComposer(
+        database=services.database,
+        reader=LectorExpediente(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        repository=monthly_repository,
+        evidence=evidence,
+        checkpoints=checkpoints,
+        writer=services.writer,
+        clock=services.clock,
+        signer=services.signing,
+    )
+    task = MonthlyPackageTask(
+        config=PostgresLoopConfigurationRepository(services.database),
+        repository=monthly_repository,
+        composer=composer,
+        clock=services.clock,
+    )
+    register_monthly_package(registry, task)
+
+
+def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
+    """El único ``AccreditationHttp`` del módulo: las tres tareas de servicio (TASK-317, 345 y
+    344) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
+    exige una sola aparición de ``ACCREDITATION_STATE_KEY``)."""
     evidence = services.evidence
+    monthly_repository = MonthlyPackageRepository(database=services.database)
     return {
         ACCREDITATION_STATE_KEY: AccreditationHttp(
             exports=ExportRequests(
@@ -188,16 +260,30 @@ def _export_state(services: UnitServices) -> Mapping[str, object]:
                     clock=services.clock,
                 )
             ),
+            # TASK-344: SUP-U05-24, 25 y 41; la descarga por zona firma sobre vigia-evidence.
+            monthly_packages=(
+                None
+                if evidence is None
+                else MonthlyPackageReads(
+                    database=services.database,
+                    repository=monthly_repository,
+                    authorizer=services.authorizer,
+                    audit=services.audit,
+                    storage=evidence,
+                )
+            ),
         )
     }
 
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (export_router,)
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (export_router, monthly_router)
 """Fábricas de los enrutadores de ``/accreditation/*``."""
 
-ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
+ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+}
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (_register_monthly_package,)
 
 ACCREDITATION_CONSUMERS: Final[Mapping[str, int]] = {
     EXPORT_WORKER: EXPORT_WORKER_CONCURRENCY,
@@ -205,7 +291,7 @@ ACCREDITATION_CONSUMERS: Final[Mapping[str, int]] = {
 """Consumidores del módulo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (_register_export_worker,)
 
-API_STATE: Final[tuple[StateBuilder, ...]] = (_export_state,)
+API_STATE: Final[tuple[StateBuilder, ...]] = (_accreditation_state,)
 
 ACCREDITATION_LABELS: Final[Mapping[str, type[enum.Enum]]] = {
     **ACCREDITATION_LABEL_BINDINGS,
