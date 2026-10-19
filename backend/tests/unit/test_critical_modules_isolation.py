@@ -28,6 +28,8 @@ CRITICAL_MODULES = (
     "vigia_platform.loop.domain.lifecycle",
     "vigia_platform.loop.projection.fold",
     "vigia_platform.loop.projection.digest",
+    # El manifiesto del paquete exportado (LC-LAZ-24, TASK-318).
+    "vigia_platform.accreditation.manifest",
 )
 
 
