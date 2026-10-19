@@ -14,9 +14,11 @@ cómo se escriben sus bytes. Lo recibe por puerto:
 - ``ExportSink``: lo que el compositor cuenta mientras trabaja: la subida por partes que abrió
   (``upload_started``, para poder abortarla al retomar), el artefacto en curso y cada artefacto
   terminado (el progreso, publicado al terminar cada uno, NFR-LAZ-12).
-- ``UploadPort.abort_previous_upload(multipart_upload_id)``: abandona la subida por partes de un
-  intento anterior antes de componer de nuevo, para que no queden fragmentos pagándose (lo
-  implementa el flujo de TASK-345; ``MissingUploadPort`` hasta entonces).
+- ``UploadPort.abort_previous_upload(location, multipart_upload_id)``: abandona la subida por
+  partes de un intento anterior (la guardada, por su identificador, y las demás sin terminar de
+  esa exportación) antes de componer de nuevo, para que no queden fragmentos pagándose. Lo
+  implementa ``export.stream.ExportStream`` (TASK-345); ``MissingUploadPort`` queda para los
+  procesos sin depósito de evidencias.
 
 Ninguno de estos puertos publica un objeto como paquete: el paquete existe solo cuando el
 consumidor escribe ``export_package`` y pasa la solicitud a ``ready`` en la misma transacción.
@@ -31,6 +33,7 @@ from datetime import datetime
 from typing import Any, Final, Protocol
 
 from vigia_platform.accreditation.detail_codes import AccreditationDetailCode
+from vigia_platform.accreditation.export.volumes import ExportLocation, StoredObjects
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain.enums import PackageForm
 
@@ -99,6 +102,9 @@ class ExportPackage:
     size_bytes: int
     artifact_count: int
     verifier_version: str
+    stored: StoredObjects = field(default_factory=StoredObjects)
+    """Los volúmenes y el documento escritos (``ArchiveResult.stored``): lo que la descarga sirve.
+    Vacío si el compositor no escribió bytes (el sintético de TASK-317)."""
 
 
 class ExportSink(Protocol):
@@ -126,7 +132,9 @@ class PackageComposer(Protocol):
 class UploadPort(Protocol):
     """Lo que el consumidor pide al flujo de bytes (TASK-345) al retomar."""
 
-    async def abort_previous_upload(self, multipart_upload_id: str) -> None: ...
+    async def abort_previous_upload(
+        self, location: ExportLocation, multipart_upload_id: str | None
+    ) -> None: ...
 
 
 class PackageComposerMissing(Exception):
@@ -136,7 +144,7 @@ class PackageComposerMissing(Exception):
 
 
 class UploadPortMissing(Exception):
-    """La raíz no tiene el flujo de bytes todavía (TASK-345)."""
+    """El proceso no tiene el flujo de bytes (sin depósito de evidencias)."""
 
     code: Final = "upload_port_missing"
 
@@ -149,7 +157,9 @@ class MissingPackageComposer:
 
 
 class MissingUploadPort:
-    """El flujo de la raíz hasta TASK-345: nada abre una subida, así que nada hay que abortar."""
+    """El flujo de un proceso sin depósito de evidencias: falla sin tocar nada."""
 
-    async def abort_previous_upload(self, multipart_upload_id: str) -> None:
+    async def abort_previous_upload(
+        self, location: ExportLocation, multipart_upload_id: str | None
+    ) -> None:
         raise UploadPortMissing()
