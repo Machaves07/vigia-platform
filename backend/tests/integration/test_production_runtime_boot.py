@@ -92,6 +92,8 @@ U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
 U03_TASKS: Final = 7
 """Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
+U04_TASKS: Final = 1
+"""``review_reminders`` (TASK-309): la primera tarea periódica de U-04."""
 UNREACHABLE_HOST: Final = "192.0.2.1"  # TEST-NET-1 (RFC 5737): nunca responde
 BOOTSTRAP: Final = (
     "bootstrap",
@@ -501,5 +503,5 @@ def test_a_test_unit_reaches_the_database_at_startup(
     assert PROBE_EVENT in rows["event_type"]
     assert PROBE_CONSUMER in rows["consumer"]
     assert PROBE_TASK in rows["periodic_task"]
-    assert len(rows["periodic_task"]) == U02_TASKS + U03_TASKS + 1
+    assert len(rows["periodic_task"]) == U02_TASKS + U03_TASKS + U04_TASKS + 1
     assert reader.reads == 1
