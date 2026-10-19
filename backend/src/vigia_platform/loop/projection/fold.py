@@ -670,6 +670,17 @@ def _action_assigned(
     if pending:
         # Segunda mitad de T12, T13 o T14: la revisión o la reapertura ya movió el estado.
         return dataclasses.replace(finding, **fields), None
+    supersedes = _optional_uuid(document.get("supersedes_action_id"))
+    if (
+        supersedes is not None
+        and finding.state in (S.ACTION_ASSIGNED, S.OVERDUE)
+        and finding.current_action_id == supersedes
+        and action_id != supersedes
+    ):
+        # Reasignación de la acción vigente (BR-LAZ-49 y 154, TASK-311): no es una transición y
+        # el estado no cambia; un vencimiento ya declarado sigue declarado (P5).
+        kept = {"overdue_since": finding.overdue_since, "overdue_days": finding.overdue_days}
+        return dataclasses.replace(finding, **{**fields, **kept}), None
     accepted = _expect(item, _snapshot(finding), AssignAction())
     return _moved(finding, accepted, **fields), accepted.transition.transition_id
 
