@@ -8,8 +8,11 @@ organización (la RLS lo asegura además), del más reciente al más antiguo, **
 declara el estado de su entrega por correo (``degraded_app_only`` se ve, BR-LAZ-130).
 
 La clave es ``notifications.read`` (la tienen los siete roles): basta con que alguna asignación
-del contexto la tenga (``narrowed``); la propiedad la da el filtro por el actor. TASK-348 completa
-la ruta (filtros de estado y periodo, archivado a los 60 días con su filtro, marcar leída).
+del contexto la tenga (``narrowed``); la propiedad la da el filtro por el actor. **Bajo concesión**
+se deniega (``Authorizer.deny``: ``authorization_denied`` en la auditoría del cliente y
+``not_found``): el proveedor no entra al lazo (BR-LAZ-142) y no tiene avisos en el cliente.
+TASK-348 completa la ruta (filtros de estado y periodo, archivado a los 60 días con su filtro,
+marcar leída).
 """
 
 from __future__ import annotations
@@ -23,7 +26,12 @@ from typing import Any, Final, Protocol
 from sqlalchemy import and_, or_, select, tuple_
 from sqlalchemy.sql import Executable
 
-from vigia_platform.identity.authz.authorize import ResourceNotFound, narrowed
+from vigia_platform.identity.authz.authorize import (
+    Authorizer,
+    Resource,
+    ResourceNotFound,
+    narrowed,
+)
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.loop.domain.enums import NotificationChannel
 from vigia_platform.notifications.adapters.postgres.tables import (
@@ -91,8 +99,15 @@ _EMAIL: Final = NOTIFICATION_DELIVERY.alias("email_delivery")
 class NotificationReader:
     """``listar_notificaciones`` (SUP-U05-33), forma mínima."""
 
-    def __init__(self, *, database: _Database, provider_organization_id: uuid.UUID) -> None:
+    def __init__(
+        self,
+        *,
+        database: _Database,
+        authorizer: Authorizer,
+        provider_organization_id: uuid.UUID,
+    ) -> None:
         self._database = database
+        self._authorizer = authorizer
         self._provider_organization_id = provider_organization_id
 
     def __repr__(self) -> str:
@@ -108,14 +123,12 @@ class NotificationReader:
         """Una página de los avisos del actor, del más reciente al más antiguo."""
         if type(limit) is not int or not 1 <= limit <= MAX_PAGE:
             raise ValueError("limit debe estar entre 1 y 200")
-        if (
-            narrowed(
-                context,
-                PermissionKey.NOTIFICATIONS_READ,
-                provider_organization_id=self._provider_organization_id,
+        key = PermissionKey.NOTIFICATIONS_READ
+        if context.concession_id is not None:
+            await self._authorizer.deny(
+                context, key, Resource.organization(context.organization_id)
             )
-            is None
-        ):
+        if narrowed(context, key, provider_organization_id=self._provider_organization_id) is None:
             raise ResourceNotFound()
         n = NOTIFICATION
         conditions = [

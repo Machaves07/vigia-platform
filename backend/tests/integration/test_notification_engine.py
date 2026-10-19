@@ -39,7 +39,7 @@ from tests.notification_support import (
     StubSender,
     notification_world,
 )
-from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.identity.authz.authorize import Authorizer, ResourceNotFound
 from vigia_platform.notifications.delivery import (
     CONCESSION_CONTEXT,
     EMAIL_CIRCUIT_OPEN,
@@ -564,8 +564,33 @@ def test_the_bounded_query_returns_only_user_and_role(world: NotificationWorld) 
 # --- lista propia (SUP-U05-33, forma mínima) ---
 
 
-def _reader(world: NotificationWorld) -> NotificationReader:
-    return NotificationReader(database=world.database, provider_organization_id=world.provider_id)
+class _DenialAudit:
+    """``AuthorizationAudit`` que guarda las denegaciones."""
+
+    def __init__(self) -> None:
+        self.denied: list[tuple[uuid.UUID, str]] = []
+
+    async def authorization_denied(self, context: Any, key: Any, resource: Any) -> None:
+        self.denied.append((context.organization_id, str(key)))
+
+
+def _reader(world: NotificationWorld, audit: _DenialAudit | None = None) -> NotificationReader:
+    return NotificationReader(
+        database=world.database,
+        authorizer=Authorizer(
+            audit=audit or _DenialAudit(), provider_organization_id=world.provider_id
+        ),
+        provider_organization_id=world.provider_id,
+    )
+
+
+def test_under_a_concession_the_list_is_denied_and_audited(world: NotificationWorld) -> None:
+    site = Site(world)
+    concession = world.plant_concession(site.organization, site.plant)
+    audit = _DenialAudit()
+    with pytest.raises(ResourceNotFound):
+        world.run(_reader(world, audit).list_own(concession))
+    assert audit.denied == [(site.organization, "notifications.read")]
 
 
 def _session(world: NotificationWorld, member: Member) -> ScopeContext:

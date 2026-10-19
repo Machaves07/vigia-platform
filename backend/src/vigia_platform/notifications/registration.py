@@ -138,6 +138,7 @@ def _notifications_state(services: UnitServices) -> Mapping[str, object]:
         NOTIFICATIONS_STATE_KEY: NotificationsHttp(
             reader=NotificationReader(
                 database=services.database,
+                authorizer=services.authorizer,
                 provider_organization_id=services.provider_organization_id,
             )
         )

@@ -165,6 +165,7 @@ def _notifications(services: LazServices) -> Mapping[str, object]:
         NOTIFICATIONS_STATE_KEY: NotificationsHttp(
             reader=NotificationReader(
                 database=services.database,  # type: ignore[arg-type]
+                authorizer=services.authorizer,
                 provider_organization_id=provider,
             )
         )
@@ -307,6 +308,11 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
-    {("GET", _CONFIGURATION)}
+    {
+        ("GET", _CONFIGURATION),
+        # VIG-217 (TASK-324): el proveedor no entra al lazo (BR-LAZ-142) ni tiene avisos en el
+        # cliente; ``notifications.read`` la tienen los siete roles, también el instalador.
+        ("GET", "/notifications"),
+    }
 )
 """Rutas de U-04 con la clave en la columna que el servicio deniega bajo concesión."""
