@@ -226,10 +226,13 @@ U04_EVENT_TYPES: Final = frozenset(
         "export_requested",
         # interno (TASK-316): el trabajo del consumidor assistant_worker, fuera de §11.3
         "assistant_requested",
+        # interno (TASK-325): el pulso que dispara email_delivery_events, fuera de §11.3
+        "email_delivery_events_poll",
     }
 )
 """Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y los trabajos internos
-``export_requested`` (TASK-317) y ``assistant_requested`` (TASK-316)."""
+``export_requested`` (TASK-317), ``assistant_requested`` (TASK-316) y
+``email_delivery_events_poll`` (TASK-325)."""
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]

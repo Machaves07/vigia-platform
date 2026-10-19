@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
+import boto3  # type: ignore[import-untyped]
+from botocore.config import Config  # type: ignore[import-untyped]
 from fastapi import APIRouter
 
 from vigia_platform.identity.application.common import IdentityDependencies
@@ -25,12 +27,25 @@ from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.application.invitations import EmailSenderRegistry
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.domain.enums import NOTIFICATIONS_LABEL_BINDINGS
+from vigia_platform.loop.http.client_factory import DEFAULT_REGION, HttpClientFactory
 from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
 from vigia_platform.notifications.adapters.http.routes import notifications_router
 from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
     NotificationsHttp,
 )
+from vigia_platform.notifications.adapters.ses.delivery_events import (
+    EMAIL_DELIVERY_EVENTS,
+    EMAIL_DELIVERY_EVENTS_POLL,
+    POLL_SCHEDULE,
+    RECEIVE_WAIT_SECONDS,
+    EmailDeliveryEventsConsumer,
+    EmailDeliveryEventsPollTrigger,
+    register_email_delivery_events,
+    register_email_delivery_events_poll,
+)
+from vigia_platform.notifications.adapters.ses.fake import FakeEmailSender
+from vigia_platform.notifications.adapters.ses.sender import SesEmailSender
 from vigia_platform.notifications.detail_codes import (
     NOTIFICATIONS_DETAIL_CODE_LABEL_BINDINGS,
     NotificationsDetailCode,
@@ -53,6 +68,10 @@ from vigia_platform.shared.outbox.registries import (
 
 if TYPE_CHECKING:
     from vigia_platform.shared.runtime.units import UnitServices
+
+_PILOT_ENVIRONMENT: Final = "pilot"
+_SQS_CONNECT_TIMEOUT_SECONDS: Final = 5
+_SQS_READ_TIMEOUT_SECONDS: Final = RECEIVE_WAIT_SECONDS + 10
 
 __all__ = [
     "API_STATE",
@@ -79,10 +98,6 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     notifications_router,  # SUP-U05-33, forma mínima (TASK-324)
 )
 """Fábricas de los enrutadores de ``/notifications/*``."""
-
-NOTIFICATIONS_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
-"""Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
 
 EMAIL_SENDERS: Final = EmailSenderRegistry()
 """La ranura del ``EmailSenderPort`` del proceso (a lo sumo uno; TASK-325 registra SES)."""
@@ -124,12 +139,93 @@ def _register_notification_engine(registry: ConsumerRegistry, services: UnitServ
     )
 
 
+def _register_email_sender(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``SesEmailSender`` solo en ``pilot`` con el dominio verificado configurado; en cualquier
+    otro entorno (o sin configurarlo), ``FakeEmailSender`` (TASK-325; LC-LAZ-33). Idempotente:
+    ``EMAIL_SENDERS`` es la ranura de todo el proceso (``api.py`` y ``admin.py`` la leen también),
+    así que una segunda composición en el mismo proceso no vuelve a registrar."""
+    del registry
+    if EMAIL_SENDERS.sender is not None:
+        return
+    config = services.config
+    if (
+        config is not None
+        and config.environment == _PILOT_ENVIRONMENT
+        and config.email_sender_domain is not None
+    ):
+        EMAIL_SENDERS.register(
+            SesEmailSender(
+                database=services.database,
+                http_clients=HttpClientFactory.from_config(config),
+                region_name=config.aws_region,
+                sender_email=f"no-responder@mail.{config.email_sender_domain}",
+                configuration_set_name=f"vigia-email-{config.environment}",
+                clock=services.clock,
+            )
+        )
+        return
+    EMAIL_SENDERS.register(FakeEmailSender(clock=services.clock))
+
+
+def _email_events_sqs_client(services: UnitServices) -> tuple[Any, str | None]:
+    config = services.config
+    region_name = config.aws_region if config is not None else DEFAULT_REGION
+    endpoint_url = config.aws_endpoint_url if config is not None else None
+    queue_url = config.email_events_queue_url if config is not None else None
+    client = boto3.client(
+        "sqs",
+        region_name=region_name,
+        endpoint_url=endpoint_url,
+        config=Config(
+            connect_timeout=_SQS_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=_SQS_READ_TIMEOUT_SECONDS,
+            retries={"max_attempts": 1},
+        ),
+    )
+    return client, queue_url
+
+
+def _register_email_delivery_events(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``email_delivery_events`` (TASK-325, LC-LAZ-34): sin ``VIGIA_EMAIL_EVENTS_QUEUE_URL`` (fuera
+    de ``pilot``, o mientras U-04 esté en pausa), queda registrado pero no sondea nada."""
+    sqs, queue_url = _email_events_sqs_client(services)
+    register_email_delivery_events(
+        registry,
+        EmailDeliveryEventsConsumer(
+            sqs=sqs,
+            queue_url=queue_url,
+            database=services.database,
+            provider_context=services.contexts.provider_audit_context(),
+            contexts=services.contexts,
+            clock=services.clock,
+        ),
+    )
+
+
+def _register_email_delivery_events_poll(
+    registry: PeriodicTaskRegistry, services: UnitServices
+) -> None:
+    """La tarea ``global`` que dispara el pulso de ``email_delivery_events`` (TASK-325)."""
+    register_email_delivery_events_poll(registry, EmailDeliveryEventsPollTrigger(services.outbox))
+
+
+NOTIFICATIONS_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),  # TASK-325, D-7
+}
+"""Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_email_delivery_events_poll,  # TASK-325
+)
+
 NOTIFICATIONS_CONSUMERS: Final[Mapping[str, int]] = {
     NOTIFICATION_ENGINE: NOTIFICATION_ENGINE_CONCURRENCY,  # TASK-324
+    EMAIL_DELIVERY_EVENTS: 2,  # TASK-325 (LC-LAZ-40)
 }
 """Consumidores del módulo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
     _register_notification_engine,  # notification_engine (TASK-324)
+    _register_email_sender,  # EMAIL_SENDERS (TASK-325); no registra ningún Consumer
+    _register_email_delivery_events,  # email_delivery_events (TASK-325)
 )
 
 
