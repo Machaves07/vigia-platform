@@ -102,6 +102,16 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    ("POST", "/loop/findings/{finding_state_id}/actions"): {
+        "action_type": "engineering",
+        "action_description": "Instalar un resguardo fijo en el acceso a la zona",
+        "assignee_user_id": str(uuid.uuid4()),
+    },
+    ("POST", "/loop/actions/{action_id}/evidence"): {
+        "description": "Resguardo fijo instalado y anclado al piso en el acceso",
+        "performed_at": "2026-10-01T10:00:00.000Z",
+        "performed_by_role": "Técnico de mantenimiento",
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -161,19 +171,23 @@ class _NoZones:
 _ROLE_HEADERS: dict[str, str] = {}
 """Sesión de coordinación SST: ``actions.manage``, ``findings.classify`` y ``export.create`` no
 están en la columna del administrador, y sin la clave la ruta responde ``not_found`` antes de
-validar el cuerpo (TASK-310, TASK-308 y TASK-317)."""
+validar el cuerpo (TASK-310, TASK-308, TASK-311 y TASK-317)."""
 ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        ("POST", "/loop/findings/{finding_state_id}/actions"),
+        ("POST", "/loop/actions/{action_id}/evidence"),
         ("POST", "/accreditation/exports"),
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     # Cuerpo válido: llega al servicio, que no encuentra la acción, el hallazgo (TASK-308,
-    # ``ClassificationDouble``) ni las zonas sintéticas.
+    # ``ClassificationDouble``; TASK-311, ``ActionsDouble``) ni las zonas sintéticas.
     ("POST", "/loop/actions/{action_id}/attachments/upload-grant"): 404,
     ("POST", "/loop/findings/{finding_state_id}/classifications"): 404,
+    ("POST", "/loop/findings/{finding_state_id}/actions"): 404,
+    ("POST", "/loop/actions/{action_id}/evidence"): 404,
     ("POST", "/accreditation/exports"): 404,
 }
 

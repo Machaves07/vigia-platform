@@ -35,12 +35,14 @@ siguiente. Con el lazo abierto lo suspende (T15) y al volver a confirmado lo rea
 cerrado (T19) o un incerrable (T20) el cierre o la declaración quedan intactos y la proyección
 marca ``closed_with_later_different_classification`` (BR-LAZ-25).
 
-**Orden de candados** (el de TASK-311: el hallazgo, después la cadena de la planta; AGENTS.md):
+**Orden de candados** (el único del lazo, ``loop.application.locks``; AGENTS.md):
 
-1. la exclusión del sujeto (``pg_advisory_xact_lock`` sobre
+1. la exclusión del hallazgo (``locks.lock_finding``: ``pg_advisory_xact_lock`` sobre
    ``loop_subject|<organización>|<sujeto>``), antes de leer su estado;
 2. la cadena de la planta (la toma el disparador del expediente al anexar);
 3. el control de la proyección de la planta y las filas del sujeto (``LoopProjectionStore``).
+
+La clasificación no toca ``loop.corrective_action``: no toma el paso 2 de ``locks.LOCK_ORDER``.
 
 Toda operación de U-04 que escriba sobre un sujeto toma la exclusión del sujeto **primero**; la vía
 de eventos (sin persona) solo toma 3, después de nadie, así que no hay ciclo. Dos clasificaciones
@@ -82,6 +84,7 @@ from vigia_platform.ledger.free_text import (
     FreeTextRejection,
     apply_base_policy,
 )
+from vigia_platform.loop.application.locks import lock_finding
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain.enums import (
     ClassificationOutcome,
@@ -161,10 +164,6 @@ EFFECT_BY_TRANSITION: Final[Mapping[str, EffectOnLoop]] = MappingProxyType(
 )
 """``effect_on_loop`` de cada transición de una clasificación (BLM §1, paso 5)."""
 
-_LOCK_SUBJECT: Final = text(
-    "SELECT pg_advisory_xact_lock("
-    "hashtextextended('loop_subject|' || :organization_id || '|' || :subject_id, 0))"
-)
 _SUBJECT: Final = text(
     "SELECT finding_state_id, organization_id, plant_id, zone_id, subject_kind, subject_id,"
     " anchor_record_id, family, standard_id, standard_version, lifecycle_state,"
@@ -390,13 +389,7 @@ class ClassificationService:
         chosen = _outcome(outcome)
         writer_context = with_unit(authorized, ActorUnit.U04)
         async with self._database.transaction(writer_context) as transaction:
-            await transaction.execute(
-                _LOCK_SUBJECT,
-                {
-                    "organization_id": str(subject.organization_id),
-                    "subject_id": str(subject.subject_id),
-                },
-            )
+            await lock_finding(transaction, subject.organization_id, subject.subject_id)
             current = await self._current(transaction, finding_state_id)
             if current is None or current.subject_id != subject.subject_id:
                 raise ResourceNotFound()  # pragma: no cover - la proyección no borra filas

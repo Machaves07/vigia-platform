@@ -4116,6 +4116,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/actions":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Asigna (o reasigna) la acción correctiva de un hallazgo con plazo congelado"
+      "operationId": "assign_loop_findings__finding_state_id__actions_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CorrectiveActionBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CorrectiveActionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/actions/{action_id}/evidence":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Añade una entrada de evidencia (descripción estructurada y adjuntos verificados)"
+      "operationId": "add_evidence_loop_actions__action_id__evidence_post"
+      "parameters":
+        - "name": "action_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Action Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/EvidenceEntryBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EvidenceEntryOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -6171,6 +6237,103 @@
         - "corrected_by"
         - "corrected_at"
       "title": "CorrectionOut"
+    "CorrectiveActionBody":
+      "properties":
+        "action_type":
+          "type": "string"
+          "maxLength": 64
+          "title": "Action Type"
+        "action_description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Action Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Expected Outcome"
+        "assignee_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignee User Id"
+        "deadline_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Deadline Days"
+        "supersedes_action_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Supersedes Action Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "action_type"
+        - "action_description"
+        - "assignee_user_id"
+      "title": "CorrectiveActionBody"
+      "description": "La acción: tipo, descripción, resultado esperado, responsable y plazo."
+    "CorrectiveActionOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "action_type":
+          "type": "string"
+          "title": "Action Type"
+        "assignee_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignee User Id"
+        "deadline_days":
+          "type": "integer"
+          "title": "Deadline Days"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "supersedes_action_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Supersedes Action Id"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "assigned_at":
+          "type": "string"
+          "title": "Assigned At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "action_id"
+        - "record_id"
+        - "action_type"
+        - "assignee_user_id"
+        - "deadline_days"
+        - "due_at"
+        - "supersedes_action_id"
+        - "lifecycle_state"
+        - "assigned_at"
+        - "time_aggregated"
+      "title": "CorrectiveActionOut"
     "CoverageStatusOut":
       "properties":
         "zone_id":
@@ -6830,6 +6993,130 @@
         - "max_segment_ms"
       "title": "EpisodeParameters"
       "description": "Agrupación de observaciones en episodios de zona y tope de duración de cada tramo (BR-CTR-33, BR-CTR-34)."
+    "EvidenceAttachmentBody":
+      "properties":
+        "attachment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Attachment Id"
+        "content_type":
+          "type": "string"
+          "maxLength": 255
+          "minLength": 1
+          "title": "Content Type"
+        "size_bytes":
+          "type": "integer"
+          "minimum": 1.0
+          "title": "Size Bytes"
+        "sha256":
+          "type": "string"
+          "pattern": "^[0-9a-f]{64}$"
+          "title": "Sha256"
+        "filename":
+          "type": "string"
+          "maxLength": 128
+          "minLength": 1
+          "title": "Filename"
+        "no_identifiable_person_declared":
+          "type": "boolean"
+          "title": "No Identifiable Person Declared"
+          "default": false
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "attachment_id"
+        - "content_type"
+        - "size_bytes"
+        - "sha256"
+        - "filename"
+      "title": "EvidenceAttachmentBody"
+      "description": "Un adjunto ya subido; el tipo, el tamaño, la suma y la declaración se verifican después."
+    "EvidenceEntryBody":
+      "properties":
+        "description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Description"
+        "performed_at":
+          "type": "string"
+          "maxLength": 24
+          "minLength": 24
+          "title": "Performed At"
+        "performed_by_role":
+          "type": "string"
+          "maxLength": 64
+          "minLength": 1
+          "title": "Performed By Role"
+        "verification_note":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Verification Note"
+        "attachments":
+          "items":
+            "$ref": "#/components/schemas/EvidenceAttachmentBody"
+          "type": "array"
+          "maxItems": 20
+          "title": "Attachments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "description"
+        - "performed_at"
+        - "performed_by_role"
+      "title": "EvidenceEntryBody"
+      "description": "La descripción estructurada (obligatoria) y los adjuntos (opcionales)."
+    "EvidenceEntryOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "evidence_entry_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Evidence Entry Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "attachment_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Attachment Ids"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "added_at":
+          "type": "string"
+          "title": "Added At"
+        "performed_at":
+          "type": "string"
+          "title": "Performed At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "action_id"
+        - "evidence_entry_id"
+        - "record_id"
+        - "attachment_ids"
+        - "lifecycle_state"
+        - "added_at"
+        - "performed_at"
+        - "time_aggregated"
+      "title": "EvidenceEntryOut"
     "EvidenceOut":
       "properties":
         "evidence_id":

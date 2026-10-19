@@ -5,8 +5,9 @@
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
   ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de
-  adjuntos de cierre (TASK-310) y las dos de la configuración del lazo (TASK-304) de ``loop`` y
-  las dos de exportación de ``accreditation`` (TASK-317).
+  adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la de la
+  clasificación (TASK-308) y las de la acción y su evidencia (TASK-311) de ``loop`` y las dos de
+  exportación de ``accreditation`` (TASK-317).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -37,6 +38,7 @@ from vigia_platform.accreditation.events import (
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
+from vigia_platform.loop.adapters.http.actions_routes import actions_router
 from vigia_platform.loop.adapters.http.attachment_routes import (
     ATTACHMENTS_STATE_KEY,
     attachment_router,
@@ -117,6 +119,7 @@ def test_the_three_u04_units_are_registered_after_u02_and_u03() -> None:
 
 def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # TASK-310: los adjuntos de cierre en loop; TASK-304 y TASK-308: configuración y clasificación;
+    # TASK-311: la acción correctiva y su evidencia;
     # TASK-317: la exportación (dos rutas, export_worker con concurrencia 1 y su app.state) en
     # accreditation. Nada más todavía.
     units = {unit.name: unit for unit in registered_units()}
@@ -135,15 +138,20 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         state = unit.api_state(services)
         if name == "loop":
             # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``;
-            # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03.
+            # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03;
+            # TASK-311: SUP-U05-07 y 08.
             assert routes == [
                 ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
                 ("POST", "/loop/attachments/{attachment_id}/read-url"),
                 ("GET", "/loop/plants/{plant_id}/configuration"),
                 ("PUT", "/loop/plants/{plant_id}/configuration"),
                 ("POST", "/loop/findings/{finding_state_id}/classifications"),
+                ("POST", "/loop/findings/{finding_state_id}/actions"),
+                ("POST", "/loop/actions/{action_id}/evidence"),
             ]
             assert state[LOOP_STATE_KEY].classification is not None
+            assert state[LOOP_STATE_KEY].actions is not None
+            assert state[LOOP_STATE_KEY].evidence is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -162,7 +170,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("export_worker", ActorUnit.U04, ("export_requested",))
     ]
-    assert (attachment_router, configuration_router, classification_router) == registration.ROUTERS
+    assert (
+        attachment_router,
+        configuration_router,
+        classification_router,
+        actions_router,
+    ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
     for module in (registration, notifications_registration):
         assert module.TASK_REGISTRARS == () and module.CONSUMER_REGISTRARS == ()

@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import Request
 
+from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -46,6 +48,11 @@ class LoopHttp:
     """``GET`` y ``PUT /loop/plants/{plant_id}/configuration`` (LC-LAZ-19, VIG-205)."""
     classification: ClassificationService | None = None
     """``POST /loop/findings/{finding_state_id}/classifications`` (LC-LAZ-07, VIG-212)."""
+    actions: ActionService | None = None
+    """``POST /loop/findings/{finding_state_id}/actions`` (LC-LAZ-09, VIG-223)."""
+    evidence: EvidenceService | None = None
+    """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
+    verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -77,6 +84,18 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         classification=ClassificationService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        actions=ActionService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        evidence=EvidenceService(
             database=services.database,
             writer=services.writer,
             authorizer=services.authorizer,

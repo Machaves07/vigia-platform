@@ -41,6 +41,7 @@ from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.application import actions as actions_module
 from vigia_platform.loop.application import classification as classification_module
 from vigia_platform.loop.config.parameters import (
     INITIAL_DEFAULTS_REASON,
@@ -202,14 +203,36 @@ class ClassificationDouble:
         raise ResourceNotFound()
 
 
+class ActionsDouble:
+    """Doble de ``ActionService`` y ``EvidenceService`` para el arnés, sin base (TASK-311).
+
+    Hace las comprobaciones que no miran la base, con el mismo código (tipo de la lista, textos
+    sin acción sobre una persona); un cuerpo válido no encuentra ningún hallazgo ni acción
+    sintéticos (``ResourceNotFound``)."""
+
+    async def assign(
+        self, context: ScopeContext, finding_state_id: uuid.UUID, **request: Any
+    ) -> Any:
+        actions_module.parse_action_type(request["action_type"])
+        actions_module.action_text(
+            request["action_description"], actions_module.DESCRIPTION_FIELD, required=True
+        )
+        raise ResourceNotFound()
+
+    async def add(self, context: ScopeContext, action_id: uuid.UUID, **request: Any) -> Any:
+        raise ResourceNotFound()
+
+
 def loop_state(clock: Any) -> dict[str, Any]:
-    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración y
-    clasificación)."""
+    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración,
+    clasificación, acciones y evidencia)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
         LOOP_STATE_KEY: LoopHttp(
             configuration=cast(Any, LoopConfigurationDouble(clock)),
             classification=cast(Any, ClassificationDouble()),
+            actions=cast(Any, ActionsDouble()),
+            evidence=cast(Any, ActionsDouble()),
         ),
     }
 

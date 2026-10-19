@@ -68,6 +68,16 @@ BODIES: dict[str, dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    "/loop/findings/{finding_state_id}/actions": {
+        "action_type": "engineering",
+        "action_description": "Instalar un resguardo fijo en el acceso a la zona",
+        "assignee_user_id": str(uuid.uuid4()),
+    },
+    "/loop/actions/{action_id}/evidence": {
+        "description": "Resguardo fijo instalado y anclado al piso en el acceso",
+        "performed_at": "2026-10-01T10:00:00.000Z",
+        "performed_by_role": "Técnico de mantenimiento",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -135,6 +145,9 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("PUT", "/loop/plants/{plant_id}/configuration"),
         # Clasificación de un hallazgo de U-04 (TASK-308).
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        # Acción correctiva y su evidencia de U-04 (TASK-311).
+        ("POST", "/loop/findings/{finding_state_id}/actions"),
+        ("POST", "/loop/actions/{action_id}/evidence"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         ("POST", "/users"),
