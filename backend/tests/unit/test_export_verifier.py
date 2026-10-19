@@ -14,7 +14,9 @@ caso a caso, y sobre las comprobaciones de cada entrada con ``ZipInfo`` construi
   repiten o cambian de tamaño;
 - contenido: claves, puntos de control (clave desconocida, vigencia en sus bordes semiabiertos,
   cobertura), enlaces, ``content_hash``, ``entry_hash``, declaraciones del manifiesto;
-- la línea de órdenes: códigos 0, 1 y 2 y la extracción;
+- el ancla del manifiesto: firma (forma, declaración, clave, vigencia) y `unanchored` sin ella;
+- rutas que chocan al extraer (prefijo de directorio y mayúsculas) y fallos de escritura;
+- la línea de órdenes: códigos 0, 1, 2 y 3 y la extracción;
 - las listas cerradas del módulo puro frente a las de la plataforma.
 
 Se compara por motivo y posición estructurada, nunca por el texto (VIG-194). Solo datos
@@ -221,7 +223,7 @@ def test_end_of_directory_record(tail: bytes, result: int | str) -> None:
 
 def test_entry_limits_per_volume_and_in_total(tmp_path: Path) -> None:
     directory = _write(control_package(), tmp_path / "p")
-    entries = 6  # cinco artefactos y el manifiesto
+    entries = 7  # cinco artefactos, el manifiesto y su firma
     assert _reason(directory, limits=ExportLimits(max_entries=entries)) is None
     assert _reason(directory, limits=ExportLimits(max_entries=entries - 1)) == "too_many_entries"
     assert _reason(directory, limits=ExportLimits(max_volume_entries=entries)) is None
@@ -541,7 +543,7 @@ def _record(index: int, **values: Any) -> Callable[[Any], None]:
             "/keys/0",
         ),
         (
-            _document(KEYS, lambda d: d["keys"].pop()),
+            _document(KEYS, lambda d: d["keys"].pop(0)),
             "manifest_mismatch",
             "manifest.json",
             "/checkpoint_public_keys",
@@ -661,3 +663,158 @@ def test_closed_lists_match_the_platform() -> None:
         covered_sequence=1, covered_hash="0" * 64, taken_at="x", key_id="k", signature="s"
     )
     assert set(content.to_json()) == CHECKPOINT_CONTENT_KEYS
+
+
+# --- ancla del manifiesto (ronda 1: decisión del dueño A2 y B1) --------------------------------
+
+
+def test_without_signature_or_registered_sha_the_package_is_never_intact(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = control_package()
+    package.unsign()
+    directory = _write(package, tmp_path / "p")
+    report = verify_export(directory, extract_to=tmp_path / "x")
+    assert (report.status, report.failure, report.anchored_by) == ("unanchored", None, [])
+    assert not report.intact
+    assert not (tmp_path / "x").exists()
+    out = tmp_path / "r.json"
+    assert export_main([str(directory), "--out", str(out), "--extract", str(tmp_path / "y")]) == 3
+    document = json.loads(out.read_text("utf-8"))
+    assert (document["status"], document["anchored_by"], document["extracted_to"]) == (
+        "unanchored",
+        [],
+        None,
+    )
+    assert not (tmp_path / "y").exists()
+    # Con el SHA-256 registrado por la plataforma, el mismo paquete sí queda anclado.
+    digest = report.manifest_sha256
+    assert digest is not None
+    anchored = verify_export(directory, manifest_sha256=digest)
+    assert (anchored.status, anchored.anchored_by) == ("intact", ["manifest_sha256"])
+    capsys.readouterr()
+
+
+def _declaration(value: Any) -> Callable[[Package], None]:
+    def change(package: Package) -> None:
+        package.manifest["manifest_signature"] = value
+
+    return change
+
+
+@pytest.mark.parametrize(
+    ("change", "reason", "artifact"),
+    [
+        (lambda p: p.manifest.update(generated_at="2026-05-02T00:00:00.000Z"), None, None),
+        (_declaration(None), "manifest_signature_invalid", "manifest.json"),
+        (_declaration({"path": "otra.json"}), "manifest_signature_invalid", "manifest.json"),
+        (
+            lambda p: setattr(p, "frozen_signature", b'{"payload": {}}'),
+            "manifest_signature_invalid",
+            "manifest.signature.json",
+        ),
+        (
+            lambda p: setattr(p, "frozen_signature", b"no es json"),
+            "manifest_signature_invalid",
+            "manifest.signature.json",
+        ),
+        (
+            lambda p: setattr(p, "signer", (SEEDS[ACTIVE_KEY], "otra-clave")),
+            "unknown_key",
+            "manifest.signature.json",
+        ),
+    ],
+)
+def test_manifest_signature_shapes(
+    change: Callable[[Package], None], reason: str | None, artifact: str | None, tmp_path: Path
+) -> None:
+    directory = _write(_changed(change), tmp_path / "p")
+    report = verify_export(directory)
+    if reason is None:
+        assert (report.status, report.anchored_by) == ("intact", ["manifest_signature"])
+        return
+    assert report.failure is not None
+    assert (report.failure.reason, report.failure.position.artifact) == (reason, artifact)
+
+
+def test_a_declared_signature_that_is_missing_breaks_the_package(tmp_path: Path) -> None:
+    package = control_package()
+    package.signer = None  # sin firma, pero el manifiesto la sigue declarando
+    report = verify_export(_write(package, tmp_path / "p"))
+    assert report.failure is not None
+    assert report.failure.reason == "manifest_signature_invalid"
+
+
+@pytest.mark.parametrize(
+    ("generated_at", "reason"),
+    [
+        ("2026-01-01T00:00:00.000Z", None),
+        ("2025-12-31T23:59:59.999Z", "key_not_valid_at_signing"),
+        ("2027-06-01T00:00:00.000Z", "key_not_valid_at_signing"),
+    ],
+)
+def test_signature_key_validity_is_half_open(
+    generated_at: str, reason: str | None, tmp_path: Path
+) -> None:
+    directory = _write(
+        _changed(lambda p: p.manifest.update(generated_at=generated_at)), tmp_path / "p"
+    )
+    assert _reason(directory) == reason
+
+
+# --- rutas que chocan al extraer y fallos de escritura -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("names", "reason"),
+    [
+        (("x", "x/y"), "path_not_allowed"),
+        (("x/y", "x"), "path_not_allowed"),
+        (("Ab", "ab"), "duplicate_entry"),
+        (("dir/Ab.json", "DIR/ab.json"), "duplicate_entry"),
+        (("Dir/a", "dir"), "path_not_allowed"),
+    ],
+)
+def test_paths_that_collide_on_extraction_are_rejected(
+    names: tuple[str, str], reason: str, tmp_path: Path
+) -> None:
+    package = control_package()
+    for name in names:
+        package.entries.append(Entry(name, b"x", kind="coverage"))
+        package.manifest["artifacts"].append(
+            {
+                "path": name,
+                "kind": "coverage",
+                "sha256": hashlib.sha256(b"x").hexdigest(),
+                "size_bytes": 1,
+                "volume": 1,
+            }
+        )
+    out = tmp_path / "r.json"
+    destination = tmp_path / "x"
+    code = export_main(
+        [str(_write(package, tmp_path / "p")), "--out", str(out), "--extract", str(destination)]
+    )
+    assert code == 1
+    broken = json.loads(out.read_text("utf-8"))["broken"]
+    assert (broken["reason"], broken["artifact"]) == (reason, names[1])
+    assert not destination.exists()
+
+
+def test_an_os_error_while_extracting_is_extract_failed_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = _write(control_package(), tmp_path / "p")
+    real_open = Path.open
+
+    def failing_open(self: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if mode == "xb" and self.name.endswith(".json") and "audit" in self.parts:
+            raise OSError(28, "No queda espacio en el dispositivo")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    destination = tmp_path / "x"
+    report = verify_export(directory, extract_to=destination)
+    assert report.failure is not None
+    assert (report.failure.reason, report.failure.position.artifact) == ("extract_failed", AUDIT)
+    assert not destination.exists()

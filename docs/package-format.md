@@ -180,21 +180,38 @@ y claves públicas. Cada paquete lleva su verificador, `vigia_verify.py`, como a
   con `vigia_platform.accreditation.export_verifier` en `backend/resources/verifier/vigia_verify.py`
   (un solo archivo, Python 3.10, solo biblioteca estándar). `--check` cubre los dos archivos;
   `tools/vigia_verify.py` no cambia.
+- **Ancla** (decisión del dueño A2 y B1, 2026-10-19): en `vol-01`, detrás del manifiesto, viaja
+  `manifest.signature.json` = `{payload, key_id, signature}`. `payload` es
+  `{kind: "vigia.export.manifest", export_id, organization_id, plant_id, manifest_sha256,
+  generated_at}`, con el SHA-256 de los bytes de `manifest.json`, y `signature` es su firma
+  Ed25519 (base64 del canónico RFC 8785) con la clave `checkpoint` de `SigningService`: la misma
+  clave y el mismo conjunto de claves públicas que los puntos de control. El manifiesto declara la
+  firma en `manifest_signature` = `{path: "manifest.signature.json", algorithm: "Ed25519",
+  key_purpose: "checkpoint", payload_kind: "vigia.export.manifest"}`; la firma no es un artefacto
+  del manifiesto (lo firma). Como el manifiesto lista el hash de cada artefacto, la firma ata al
+  expediente todo lo que el paquete lleva. El mensaje usa `generated_at` y no la hora de la firma:
+  Ed25519 es determinista y una retoma con la misma clave produce los mismos bytes (PR-LAZ-49).
 - **Uso**: `python vigia_verify.py <directorio de los volúmenes | vol-01.zip>
-  [--manifest-sha256 HEX] [--extract DIRECTORIO] [--out resultado.json]`. Códigos 0, 1 y 2 como
-  en §6.
+  [--manifest-sha256 HEX] [--extract DIRECTORIO] [--out resultado.json]`. Códigos 0 (íntegro y
+  anclado), 1 (roto o ilegible), 2 (orden incorrecta) y **3 (`unanchored`)**: coherente, pero sin
+  firma válida del manifiesto ni `--manifest-sha256`. Sin ancla el resultado **nunca** es
+  `intact` y no se extrae nada.
 - **Orden de comprobación** (el primer fallo fija el motivo):
   1. volúmenes seguidos, ninguno enlace simbólico; registro final del ZIP sin ZIP64 ni varios
      discos y con un número de entradas acotado (`too_many_entries`), antes de leer el directorio
      central;
-  2. cada entrada, sin leer sus datos: `path_traversal`, `absolute_path`, `path_not_allowed`,
-     `symlink`, `special_file`, `compression_not_allowed`, `expansion_ratio` (más de 100 veces el
-     tamaño comprimido), `entry_too_large` (más de 2 GB), `duplicate_entry`;
+  2. cada entrada, sin leer sus datos: `path_traversal`, `absolute_path`, `path_not_allowed`
+     (también un archivo que es a la vez directorio de otro), `symlink`, `special_file`,
+     `compression_not_allowed`, `expansion_ratio` (más de 100 veces el tamaño comprimido),
+     `entry_too_large` (más de 2 GB), `duplicate_entry` (también sin distinguir mayúsculas);
   3. el manifiesto (`manifest_missing`, `manifest_invalid`) y, con `--manifest-sha256` (el que
      registra `export_produced`), su hash (`manifest_hash_mismatch`);
-  4. **los hashes del manifiesto antes de extraer nada**: `artifact_missing`,
+  4. el ancla: las claves públicas incluidas (leídas y hasheadas antes que el resto) y la firma
+     (`manifest_signature_invalid`, `manifest_signature_mismatch`, `unknown_key`,
+     `key_not_valid_at_signing` en `generated_at`, `bad_signature`);
+  5. **los hashes del manifiesto antes de extraer nada**: `artifact_missing`,
      `artifact_size_mismatch`, `unlisted_entry`, `artifact_unreadable`, `artifact_hash_mismatch`;
-  5. el contenido: claves (`key_invalid`), puntos de control (`checkpoint_invalid`,
+  6. el contenido: claves (`key_invalid`), puntos de control (`checkpoint_invalid`,
      `unknown_key`, `key_not_valid_at_signing` —vigencia semiabierta `[valid_from,
      valid_until)`—, `bad_signature`), auditoría recalculada con su sobre (`entry_hash_mismatch`),
      `content_hash` de cada registro con contenido (`content_not_canonical`,
@@ -202,15 +219,20 @@ y claves públicas. Cada paquete lleva su verificador, `vigia_verify.py`, como a
      `record_conflict`) y con lo que cubre cada punto de control (`checkpoint_mismatch`), y las
      declaraciones del manifiesto frente al contenido (`manifest_mismatch`: conteos por estado,
      clips, adjuntos, entradas ausentes, `verifier_version`);
-  6. solo si todo está íntegro, `--extract` escribe en un directorio vacío, volviendo a comprobar
-     cada hash (`extract_failed` borra lo escrito).
-- **Límite declarado**: el paquete exportado lleva cada registro del expediente sin su actor ni su
-  alcance, así que el `record_hash` de un registro no se recalcula fuera; sí su `content_hash`,
-  sus enlaces con los vecinos que viajan y su igualdad con lo que cubre un punto de control
-  firmado. Las entradas de auditoría se recalculan enteras.
-- **Salida**: el JSON de `--out` lleva `status`, `volumes`, `manifest_sha256`,
-  `declared_verifier_version`, los recuentos verificados y `broken` con `reason`, `message`,
-  `volume`, `artifact`, `offset` (byte de la cabecera local del artefacto en su volumen) y
-  `pointer` (puntero JSON dentro del artefacto).
+  7. solo si todo está íntegro **y anclado**, `--extract` escribe en un directorio vacío,
+     volviendo a comprobar cada hash; cualquier fallo de escritura es `extract_failed` y borra lo
+     escrito.
+- **Qué prueba cada cosa**: sin ancla, los pasos 5 y 6 solo prueban la coherencia interna. El
+  paquete lleva cada registro sin su actor ni su alcance (su `record_hash` no se recalcula fuera)
+  y solo una parte de la cadena, así que quien re-hashea el manifiesto puede cambiar el
+  **contenido**, las marcas o el **estado** de un hallazgo de forma coherente: por eso sin ancla
+  el resultado es `unanchored`. Con la firma (o el SHA registrado), cualquier cambio de ese tipo
+  rompe el paquete. La firma se comprueba con las claves que viajan en el paquete: quien
+  desconfíe de ellas las compara con las de `/.well-known/vigia-checkpoint-keys`.
+- **Salida**: el JSON de `--out` lleva `status` (`intact`, `broken` o `unanchored`), `volumes`,
+  `manifest_sha256`, `declared_verifier_version`, los recuentos verificados, `anchored_by`
+  (`manifest_signature` y/o `manifest_sha256`) y `broken` con `reason`, `message`, `volume`,
+  `artifact`, `offset` (byte de la cabecera local del artefacto en su volumen) y `pointer`
+  (puntero JSON dentro del artefacto).
 - **Corpus hostil**: `backend/tests/fixtures/synthetic/hostile_packages/` (generador
   `build_hostile_packages.py`, con `--check`).

@@ -34,8 +34,10 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, Final
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hypothesis import strategies as st
 from vigia_contracts.models.enumerations import GateStatus, PredicateFamily
 
@@ -81,6 +83,7 @@ from vigia_platform.ledger.application.reader import (
     RecordActor,
     RecordCursor,
 )
+from vigia_platform.ledger.canonical import canonical_bytes_sync
 from vigia_platform.ledger.chain.checkpoints import (
     ChainKind,
     CheckpointChain,
@@ -105,7 +108,7 @@ from vigia_platform.ledger.domain.coverage import (
 from vigia_platform.loop.domain.enums import PackageForm
 from vigia_platform.loop.projection.fold import ProjectionInput
 from vigia_platform.shared.context import ActorKind, ActorUnit, ScopeContext
-from vigia_platform.shared.signing.keys import KeyStatus, format_timestamp
+from vigia_platform.shared.signing.keys import KeyStatus, SigningPurpose, format_timestamp
 
 __all__ = [
     "BASE",
@@ -128,6 +131,14 @@ STANDARD_ID: Final = uuid.UUID(int=7)
 """El estándar de ``strategies.projection``."""
 _ZONE: Final = Subject("zone")
 _NODE: Final = uuid.UUID(int=0xA1)
+
+WORLD_SIGNING_SEEDS: Final = {
+    "checkpoint-2026-01": bytes(range(32)),
+    "checkpoint-2026-02": bytes(range(100, 132)),
+}
+"""Semillas fijas de las claves ``checkpoint`` del mundo (TASK-346): la activa firma el manifiesto
+y ``tests.verifier_bundle_support.seal_world`` publica sus claves públicas reales."""
+WORLD_ACTIVE_KEY: Final = "checkpoint-2026-02"
 
 
 def stamp(moment: datetime) -> str:
@@ -799,6 +810,7 @@ class WorldPorts:
             places=self,
             blobs=self,
             episodes=self,
+            signer=self,
         )
 
     def _zone(self, context: ScopeContext, zone_id: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
@@ -1028,6 +1040,20 @@ class WorldPorts:
             item
             for item in self.world.checkpoints.get(context.organization_id, ())
             if item.entry_id in wanted
+        )
+
+    # SigningService.sign (clave checkpoint): firma el SHA-256 del manifiesto (TASK-346) -------
+
+    def sign(self, purpose: SigningPurpose, payload: Any) -> SimpleNamespace:
+        self.calls["sign"] += 1
+        if purpose is not SigningPurpose.CHECKPOINT:
+            raise ValueError("el mundo solo firma con la clave checkpoint")
+        if "signer" in self.fail:
+            raise RuntimeError("sin clave checkpoint activa")
+        private = Ed25519PrivateKey.from_private_bytes(WORLD_SIGNING_SEEDS[WORLD_ACTIVE_KEY])
+        signature = private.sign(canonical_bytes_sync(payload))
+        return SimpleNamespace(
+            key_id=WORLD_ACTIVE_KEY, signature=base64.b64encode(signature).decode("ascii")
         )
 
     def checkpoint_public_keys(self) -> tuple[CheckpointPublicKey, ...]:

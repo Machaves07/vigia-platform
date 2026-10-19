@@ -17,6 +17,13 @@ regresión.
 | ``artifact_bit_flip`` | hashes del manifiesto antes de extraer | ``artifact_hash_mismatch`` |
 | ``forged_checkpoint`` | firma del punto de control con las claves incluidas | ``bad_signature`` |
 | ``retired_key_after_retirement`` | vigencia de la clave al firmar | ``key_not_valid_at_signing`` |
+| ``manifest_stale_signature`` | firma del manifiesto | ``manifest_signature_mismatch`` |
+| ``manifest_resigned_by_stranger`` | firma con una clave ajena | ``bad_signature`` |
+| ``manifest_signed_with_retired_key`` | clave retirada | ``key_not_valid_at_signing`` |
+| ``unsigned`` | sin firma ni ``--manifest-sha256`` | ``unanchored`` (código 3) |
+
+El control y todos los paquetes llevan ``manifest.signature.json``, la firma del SHA-256 del
+manifiesto con la clave activa (decisión del dueño A2), salvo ``unsigned``.
 
 Los hashes y las firmas salen del código de la plataforma (``ledger.canonical`` y
 ``cryptography``), no de los módulos puros del verificador. Las claves de firma salen de semillas
@@ -73,6 +80,15 @@ KEY_WINDOWS: Final = {
 }
 TAKEN_AT: Final = "2026-05-01T00:00:00.000Z"
 AFTER_RETIREMENT: Final = "2026-03-01T00:00:00.000Z"
+GENERATED_AT: Final = "2026-05-01T00:05:00.000Z"
+FINDINGS_PATH: Final = f"findings/zone-{ZONE}.json"
+SIGNATURE_PATH: Final = "manifest.signature.json"
+SIGNATURE_DECLARATION: Final = {
+    "path": SIGNATURE_PATH,
+    "algorithm": "Ed25519",
+    "key_purpose": "checkpoint",
+    "payload_kind": "vigia.export.manifest",
+}
 DATE_TIME: Final = (1980, 1, 1, 0, 0, 0)
 STATES: Final = (
     "received",
@@ -125,6 +141,36 @@ class Package:
     entries: list[Entry] = field(default_factory=list)
     manifest: dict[str, Any] = field(default_factory=dict)
     documents: dict[str, Any] = field(default_factory=dict)
+    signer: tuple[bytes, str] | None = (SEEDS[ACTIVE_KEY], ACTIVE_KEY)
+    """Semilla y ``key_id`` que firman el SHA-256 del manifiesto; ``None``: sin firma."""
+    frozen_signature: bytes | None = None
+    """Una firma ya hecha (la de antes de alterar el manifiesto), en vez de firmar de nuevo."""
+
+    def freeze_signature(self) -> None:
+        """Guarda la firma del manifiesto actual: lo que se altere después ya no la cuadra."""
+        self.frozen_signature = self.signature(_canonical(self.manifest))
+
+    def unsign(self) -> None:
+        """Quita la firma y su declaración: el paquete queda sin ancla."""
+        self.signer, self.frozen_signature = None, None
+        self.manifest.pop("manifest_signature", None)
+
+    def signature(self, manifest: bytes) -> bytes | None:
+        if self.frozen_signature is not None:
+            return self.frozen_signature
+        if self.signer is None:
+            return None
+        seed, key_id = self.signer
+        payload = {
+            "kind": "vigia.export.manifest",
+            "export_id": self.manifest["export_id"],
+            "organization_id": self.manifest["organization"]["organization_id"],
+            "plant_id": self.manifest["plant"]["plant_id"],
+            "manifest_sha256": _sha256(manifest),
+            "generated_at": self.manifest["generated_at"],
+        }
+        signature = base64.b64encode(_key(seed).sign(_canonical(payload))).decode("ascii")
+        return _canonical({"payload": payload, "key_id": key_id, "signature": signature})
 
     def set_document(self, name: str, document: Any) -> None:
         """Sustituye un artefacto JSON y re-hashea el manifiesto (como haría quien lo altera)."""
@@ -140,8 +186,13 @@ class Package:
 
     def volume(self) -> bytes:
         output = io.BytesIO()
+        manifest = _canonical(self.manifest)
+        tail = [Entry("manifest.json", manifest, True)]
+        signature = self.signature(manifest)
+        if signature is not None:
+            tail.append(Entry("manifest.signature.json", signature, True))
         with zipfile.ZipFile(output, mode="w", allowZip64=False) as archive:
-            for entry in [*self.entries, Entry("manifest.json", _canonical(self.manifest), True)]:
+            for entry in [*self.entries, *tail]:
                 info = zipfile.ZipInfo(entry.name, date_time=DATE_TIME)
                 info.compress_type = zipfile.ZIP_DEFLATED if entry.deflate else zipfile.ZIP_STORED
                 info.create_system = 3
@@ -359,8 +410,43 @@ def control_package() -> Package:
         "checkpoints": checkpoints,
         "checkpoint_public_keys": keys,
         "verifier_version": "absent",
+        "generated_at": GENERATED_AT,
+        "manifest_signature": dict(SIGNATURE_DECLARATION),
     }
     return package
+
+
+def close_open_finding(package: Package) -> None:
+    """Cierra el hallazgo abierto y ajusta los conteos y el hash: una falsificación coherente."""
+    findings = json.loads(json.dumps(package.documents[FINDINGS_PATH]))
+    findings["findings"][0]["lifecycle_state"] = "closed"
+    package.set_document(FINDINGS_PATH, findings)
+    package.manifest["state_counts"].update(open=0, closed=1)
+    package.manifest.update(open_finding_count=0, closed_finding_count=1)
+
+
+def rewrite_record_content(package: Package) -> None:
+    """Cambia el contenido del registro 1 y recalcula su ``content_hash``."""
+    findings = json.loads(json.dumps(package.documents[FINDINGS_PATH]))
+    record = findings["findings"][0]["records"][0]
+    record["content"] = {"episode": "reescrito", "n": 1}
+    record["content_hash"] = _sha256(_canonical(record["content"]))
+    package.set_document(FINDINGS_PATH, findings)
+
+
+def move_received_at(package: Package) -> None:
+    """Cambia el ``received_at`` del registro 2 (fuera de su contenido)."""
+    findings = json.loads(json.dumps(package.documents[FINDINGS_PATH]))
+    findings["findings"][0]["records"][1]["received_at"] = "2026-04-09T10:00:00.000Z"
+    package.set_document(FINDINGS_PATH, findings)
+
+
+FORGERIES: Final = {
+    "record_content": rewrite_record_content,
+    "received_at": move_received_at,
+    "closed_finding": close_open_finding,
+}
+"""Las tres sondas del revisor (ronda 1): falsificaciones coherentes que solo el ancla delata."""
 
 
 # --- los casos ----------------------------------------------------------------------------------
@@ -453,6 +539,35 @@ def _retired_key_after_retirement() -> Package:
     return _replace_ledger_checkpoint(late)
 
 
+def _stale_signature() -> Package:
+    # La firma de la plataforma se conserva, pero el hallazgo abierto se cierra después.
+    package = control_package()
+    package.freeze_signature()
+    close_open_finding(package)
+    return package
+
+
+def _resigned_by_stranger() -> Package:
+    # El mismo cierre, firmado con una clave ajena bajo el key_id de la clave activa.
+    package = control_package()
+    close_open_finding(package)
+    package.signer = (FORGER_SEED, ACTIVE_KEY)
+    return package
+
+
+def _signed_with_retired_key() -> Package:
+    # Firma válida de la clave retirada sobre un manifiesto generado después de su retiro.
+    package = control_package()
+    package.signer = (SEEDS[RETIRED_KEY], RETIRED_KEY)
+    return package
+
+
+def _unsigned() -> Package:
+    package = control_package()
+    package.unsign()
+    return package
+
+
 CASES: Final = (
     Case("control", control_package, {"status": "intact", "reason": None}),
     Case(
@@ -495,8 +610,27 @@ CASES: Final = (
         _retired_key_after_retirement,
         _broken("key_not_valid_at_signing", "checkpoints/checkpoints.json", "/checkpoints/0"),
     ),
+    Case(
+        "manifest_stale_signature",
+        _stale_signature,
+        _broken("manifest_signature_mismatch", SIGNATURE_PATH),
+    ),
+    Case(
+        "manifest_resigned_by_stranger",
+        _resigned_by_stranger,
+        _broken("bad_signature", SIGNATURE_PATH),
+    ),
+    Case(
+        "manifest_signed_with_retired_key",
+        _signed_with_retired_key,
+        _broken("key_not_valid_at_signing", SIGNATURE_PATH),
+    ),
+    Case("unsigned", _unsigned, {"status": "unanchored", "reason": None}),
 )
-"""El control y los ocho paquetes hostiles (los siete de TASK-346 más la ruta absoluta)."""
+"""El control, los siete paquetes hostiles de TASK-346, la ruta absoluta y los cuatro del ancla
+del manifiesto (ronda 1: decisión del dueño A2 y B1). Salvo en estos cuatro, el generador vuelve a
+firmar el manifiesto con la clave activa después de alterarlo: así cada caso prueba **su**
+defensa, la de debajo de la firma, y no la firma."""
 
 
 def _expected_text(case: Case) -> str:

@@ -502,6 +502,7 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
         places=SqlExportPlaces(database),
         blobs=doubles,
         episodes=SqlEpisodeHistory(database),
+        signer=doubles,
     )
     store = MemoryExportStore()
     composer = ExportComposer(stream=ExportStream(store=store, settings=SETTINGS), ports=ports)

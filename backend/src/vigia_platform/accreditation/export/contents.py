@@ -46,8 +46,10 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
    forma ``with_clips``: los bytes verificados contra su SHA-256) y los adjuntos de cierre con su
    declaración, y el verificador endurecido ``vigia_verify.py`` (TASK-346,
    ``accreditation.verifier_bundle``, con su versión en ``verifier_version``); el manifiesto
-   (``accreditation.manifest``) al final, en ``vol-01``. El documento portátil (TASK-319) se
-   **declara ausente** con su motivo.
+   (``accreditation.manifest``, que declara ``manifest_signature``) al final, en ``vol-01``, y
+   detrás de él ``manifest.signature.json``: la firma de su SHA-256 con la clave ``checkpoint``
+   (``verifier_bundle.sign_manifest``; ancla del paquete, decisión del dueño A2). El documento
+   portátil (TASK-319) se **declara ausente** con su motivo.
 
 **Zonas unipersonales** (BR-LAZ-99): las marcas de los hallazgos se presentan agregadas a su
 ventana y sus registros se listan por sus hashes, sin contenido (el expediente conserva la marca
@@ -111,9 +113,12 @@ from vigia_platform.accreditation.manifest.model import (
     ZoneEntry,
 )
 from vigia_platform.accreditation.verifier_bundle import (
+    MANIFEST_SIGNATURE_DECLARATION,
     VERIFIER_KIND,
+    ManifestSigner,
     VerifierBundle,
     load_verifier_bundle,
+    sign_manifest,
 )
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
@@ -340,6 +345,8 @@ class ExportPorts:
     places: PlaceLookup
     blobs: BlobSource
     episodes: EpisodeHistory
+    signer: ManifestSigner
+    """La clave ``checkpoint`` que firma el SHA-256 del manifiesto (TASK-346, ancla A2)."""
 
 
 # --- Contenido recogido -------------------------------------------------------------------------
@@ -801,8 +808,14 @@ class ExportComposer:
                     job, contents, writer.artifacts, with_clips, self._verifier.version
                 )
             )
-            document = manifest_json(manifest)
-            result = await writer.finish(document)
+            document = {
+                **manifest_json(manifest),
+                "manifest_signature": dict(MANIFEST_SIGNATURE_DECLARATION),
+            }
+            signer = self._ports.signer
+            result = await writer.finish(
+                document, sign=lambda data: sign_manifest(signer, document, data)
+            )
         counts = contents.counts
         return ExportPackage(
             document_sha256=result.document_sha256 or EMPTY_SHA256,

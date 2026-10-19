@@ -82,7 +82,21 @@ def test_the_corpus_has_the_seven_hostile_packages_and_is_reproducible() -> None
     assert build_hostile_packages.main(["--check"]) == 0
 
 
-@pytest.mark.parametrize("case", sorted(set(CASES) - {"control"}))
+ANCHOR_CASES: Final = frozenset(
+    {
+        "manifest_stale_signature",
+        "manifest_resigned_by_stranger",
+        "manifest_signed_with_retired_key",
+        "unsigned",
+    }
+)
+
+
+def test_the_corpus_has_the_anchor_cases() -> None:
+    assert set(CASES) >= ANCHOR_CASES
+
+
+@pytest.mark.parametrize("case", sorted(set(CASES) - {"control", "unsigned"}))
 def test_each_hostile_package_is_rejected_with_its_reason_and_nothing_is_extracted(
     case: str, tmp_path: Path
 ) -> None:
@@ -115,7 +129,62 @@ def test_the_control_package_is_intact_and_extracted_with_the_manifest_hashes(
         data = (extracted / artifact["path"]).read_bytes()
         assert hashlib.sha256(data).hexdigest() == artifact["sha256"]
     files = sorted(p.relative_to(extracted).as_posix() for p in extracted.rglob("*") if p.is_file())
-    assert files == sorted(["manifest.json", *(a["path"] for a in manifest["artifacts"])])
+    assert files == sorted(
+        ["manifest.json", "manifest.signature.json", *(a["path"] for a in manifest["artifacts"])]
+    )
+    assert document["anchored_by"] == ["manifest_signature"]
+
+
+def test_an_unsigned_package_is_unanchored_never_intact_and_nothing_is_extracted(
+    tmp_path: Path,
+) -> None:
+    completed, work, document = _run("unsigned", tmp_path)
+    assert completed.returncode == 3, completed.stdout + completed.stderr
+    assert (document["status"], document["broken"], document["anchored_by"]) == (
+        "unanchored",
+        None,
+        [],
+    )
+    assert document["extracted_to"] is None
+    assert list(work.iterdir()) == []
+
+
+def _forged(tmp_path: Path, forgery: str, *, keep_signature: bool) -> Path:
+    package = build_hostile_packages.control_package()
+    original = hashlib.sha256(build_hostile_packages._canonical(package.manifest)).hexdigest()
+    if keep_signature:
+        package.freeze_signature()
+    else:
+        package.unsign()
+    build_hostile_packages.FORGERIES[forgery](package)
+    directory = tmp_path / forgery
+    directory.mkdir(parents=True)
+    (directory / "vol-01.zip").write_bytes(package.volume())
+    (directory / "registered.sha256").write_text(original)
+    return directory
+
+
+@pytest.mark.parametrize("forgery", sorted(build_hostile_packages.FORGERIES))
+def test_the_reviewer_forgeries_are_broken_with_the_signature_and_unanchored_without_it(
+    forgery: str, tmp_path: Path
+) -> None:
+    """Las tres sondas del revisor (ronda 1): contenido del registro 1 con su ``content_hash``
+    recalculado, ``received_at`` del registro 2, y un hallazgo abierto cerrado con los conteos
+    ajustados; todas con el manifiesto re-hasheado. Antes respondían ``intact``."""
+    signed = verify_export(_forged(tmp_path / "firmado", forgery, keep_signature=True))
+    assert signed.failure is not None
+    assert (signed.failure.reason, signed.failure.position.artifact) == (
+        "manifest_signature_mismatch",
+        "manifest.signature.json",
+    )
+    unsigned_directory = _forged(tmp_path / "sin_firma", forgery, keep_signature=False)
+    unsigned = verify_export(unsigned_directory)
+    assert (unsigned.status, unsigned.failure) == ("unanchored", None)
+    # Sin firma, el SHA-256 que registró la plataforma (export_produced) también la delata.
+    registered = (unsigned_directory / "registered.sha256").read_text()
+    with_sha = verify_export(unsigned_directory, manifest_sha256=registered)
+    assert with_sha.failure is not None
+    assert with_sha.failure.reason == "manifest_hash_mismatch"
 
 
 @pytest.mark.parametrize(

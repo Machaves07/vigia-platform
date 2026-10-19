@@ -12,6 +12,15 @@ NFR-LAZ-23 y 53).
 - ``VerifierBundle.include(writer)``: escribe la entrada ``vigia_verify.py`` (tipo ``verifier``)
   en el paquete; el manifiesto la lista con su hash como cualquier otro artefacto, y la entrada
   ausente «verifier» que TASK-318 dejaba declarada deja de existir.
+- ``sign_manifest(signer, document, data)``: el **ancla** del paquete (decisión del dueño A2,
+  2026-10-19). Firma con la clave ``checkpoint`` de ``SigningService`` (la misma y el mismo
+  conjunto de claves que los puntos de control) el mensaje
+  ``{kind: "vigia.export.manifest", export_id, organization_id, plant_id, manifest_sha256,
+  generated_at}``, con el SHA-256 de los bytes canónicos del manifiesto, y devuelve el contenido de
+  ``manifest.signature.json`` (``{payload, key_id, signature}``). El manifiesto lo declara en
+  ``manifest_signature``. Como el manifiesto lista el hash de cada artefacto, la firma ata todo el
+  paquete. El mensaje no lleva la hora de la firma sino ``generated_at``: Ed25519 es
+  determinista y una retoma con la misma clave produce los mismos bytes (PR-LAZ-49).
 """
 
 from __future__ import annotations
@@ -19,26 +28,69 @@ from __future__ import annotations
 import ast
 import functools
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, Protocol
 
 from vigia_platform.accreditation.export.stream import ArchiveWriter, Artifact, WrittenArtifact
 from vigia_platform.accreditation.export_verifier import (
     EXPORT_VERIFIER_NAME,
     EXPORT_VERIFIER_VERSION,
+    MANIFEST_SIGNATURE_DECLARATION,
+    MANIFEST_SIGNATURE_KIND,
 )
+from vigia_platform.ledger.canonical import canonical_bytes_sync
+from vigia_platform.shared.signing.keys import SigningPurpose
 
 __all__ = [
+    "MANIFEST_SIGNATURE_DECLARATION",
     "VERIFIER_FILE",
     "VERIFIER_KIND",
     "VERIFIER_PATH",
     "VERIFIER_VERSION",
+    "ManifestSigner",
     "VerifierBundle",
     "VerifierBundleError",
     "embedded_version",
     "load_verifier_bundle",
+    "manifest_signature_payload",
+    "sign_manifest",
 ]
+
+
+class ManifestSigner(Protocol):
+    """``SigningService.sign`` (la clave ``checkpoint``): devuelve un sobre con ``key_id`` y
+    ``signature`` (Ed25519 en base64 del canónico RFC 8785 de ``payload``)."""
+
+    def sign(self, purpose: SigningPurpose, payload: Any) -> Any: ...
+
+
+def manifest_signature_payload(document: Mapping[str, Any], data: bytes) -> dict[str, Any]:
+    """El mensaje firmado del manifiesto ``document`` cuyos bytes canónicos son ``data``."""
+    return {
+        "kind": MANIFEST_SIGNATURE_KIND,
+        "export_id": document["export_id"],
+        "organization_id": document["organization"]["organization_id"],
+        "plant_id": document["plant"]["plant_id"],
+        "manifest_sha256": hashlib.sha256(data).hexdigest(),
+        "generated_at": document["generated_at"],
+    }
+
+
+def sign_manifest(signer: ManifestSigner, document: Mapping[str, Any], data: bytes) -> bytes:
+    """El contenido de ``manifest.signature.json`` (decisión A2): ``{payload, key_id, signature}``.
+
+    Falla cerrado: sin clave ``checkpoint`` activa, ``sign`` lanza y el paquete no se publica.
+    """
+    if document.get("manifest_signature") != MANIFEST_SIGNATURE_DECLARATION:
+        raise ValueError("el manifiesto debe declarar la firma que lo acompaña")
+    payload = manifest_signature_payload(document, data)
+    envelope = signer.sign(SigningPurpose.CHECKPOINT, payload)
+    return canonical_bytes_sync(
+        {"payload": payload, "key_id": envelope.key_id, "signature": envelope.signature}
+    )
+
 
 VERIFIER_PATH: Final = EXPORT_VERIFIER_NAME
 """Ruta de la entrada dentro del paquete (en la raíz de ``vol-NN.zip``)."""

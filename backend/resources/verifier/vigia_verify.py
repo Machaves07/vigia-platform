@@ -34,7 +34,7 @@ import struct
 import sys
 import zipfile
 import zlib
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from json.encoder import encode_basestring
 from pathlib import Path
@@ -1635,31 +1635,43 @@ control, y le añade la lectura del paquete exportado con estas defensas, en est
    (``special_file``); cifrada o con un método distinto de ``stored`` y ``deflate``
    (``compression_not_allowed``); tamaño descomprimido de más de **100 veces** el comprimido
    (``expansion_ratio``) o de más de **2 GB** (``entry_too_large``) ``[objetivos propios]``;
-   repetida (``duplicate_entry``).
+   repetida, también sin distinguir mayúsculas (``duplicate_entry``); un archivo que a la vez es
+   directorio de otro (``path_not_allowed``).
 3. **Manifiesto** (``manifest.json`` de ``vol-01``): JSON estricto y la forma que se usa; con
    ``--manifest-sha256``, su SHA-256 debe ser el que la plataforma registró al producirlo
-   (``export_produced``): es lo único que ancla el manifiesto fuera del paquete.
-4. **Hashes del manifiesto antes de extraer nada**: cada artefacto existe en su volumen con su
+   (``export_produced``).
+4. **Ancla del manifiesto** (decisión del dueño A2 y B1, 2026-10-19): ``manifest.signature.json``
+   de ``vol-01`` lleva la firma Ed25519, con la clave ``checkpoint`` de los puntos de control, de
+   ``{kind, export_id, organization_id, plant_id, manifest_sha256, generated_at}``. Se comprueba
+   con las claves públicas incluidas (leídas y hasheadas antes que el resto), su vigencia en
+   ``generated_at`` y que el SHA-256 firmado es el del manifiesto leído
+   (``manifest_signature_mismatch``). Como el manifiesto lista el hash de cada artefacto, la firma
+   ata al expediente todo lo que el paquete lleva. **Sin firma válida y sin ``--manifest-sha256``
+   el resultado nunca es ``intact``**: es ``unanchored`` (código 3), y no se extrae nada.
+5. **Hashes del manifiesto antes de extraer nada**: cada artefacto existe en su volumen con su
    tamaño y nada sobra; después se lee cada uno **en flujo**, sin escribir en disco, y su SHA-256
    debe ser el declarado.
-5. **Contenido**: claves públicas y puntos de control iguales en el manifiesto y en sus archivos;
+6. **Contenido**: claves públicas y puntos de control iguales en el manifiesto y en sus archivos;
    cada punto de control con forma y cobertura exactas, clave conocida, **vigente al firmar**
    (una clave retirada no firma después de su retiro) y firma Ed25519 válida; el
    ``content_hash`` de cada registro con contenido; el ``entry_hash`` de cada entrada de
    auditoría, recalculado entero con el sobre de U-02; los enlaces entre registros y entradas
    consecutivos y con lo que cubre cada punto de control; y los conteos por estado, los clips,
    los adjuntos y las entradas ausentes del manifiesto frente a lo que el paquete lleva.
-6. Solo si todo lo anterior está íntegro y se pide ``--extract``, se escriben los archivos en un
-   directorio vacío, volviendo a comprobar cada hash mientras se escriben.
+7. Solo si todo lo anterior está íntegro **y anclado** y se pide ``--extract``, se escriben los
+   archivos en un directorio vacío, volviendo a comprobar cada hash mientras se escriben.
 
-Límite declarado: el paquete exporta cada registro del expediente sin su actor ni su alcance, así
-que el ``record_hash`` de un registro no se puede recalcular aquí; sí su ``content_hash`` (cuando
-el contenido viaja), sus enlaces con los registros vecinos que viajan y su igualdad con el hash
-que cubre un punto de control firmado.
+Sin el ancla, las comprobaciones 5 y 6 solo prueban la coherencia interna: el paquete exporta cada
+registro sin su actor ni su alcance (no se recalcula su ``record_hash``) y solo una parte de la
+cadena, así que quien re-hashea el manifiesto puede cambiar el contenido o el estado de un
+hallazgo de forma coherente. Por eso sin ancla el resultado es ``unanchored``. La firma se
+comprueba con las claves que viajan en el paquete: quien desconfíe de ellas las compara con las
+que publica la plataforma (``/.well-known/vigia-checkpoint-keys``).
 
-Resultado: ``intact`` (código 0) o ``broken`` (código 1) con la **posición** del primer fallo
+Resultado: ``intact`` (código 0), ``broken`` (código 1) con la **posición** del primer fallo
 (volumen, artefacto, desplazamiento de su cabecera en el volumen y puntero JSON dentro del
-artefacto); 2 si la orden es incorrecta. Sin red, sin hora del sistema y sin secretos.
+artefacto) o ``unanchored`` (código 3); 2 si la orden es incorrecta. Sin red, sin hora del sistema
+y sin secretos.
 """
 
 
@@ -1670,6 +1682,23 @@ EXPORT_MANIFEST_VERSION: Final = 1
 EXPORT_MANIFEST_NAME: Final = "manifest.json"
 EXPORT_VERIFIER_NAME: Final = "vigia_verify.py"
 EXPORT_VERIFIER_ABSENT: Final = "absent"
+EXPORT_SIGNATURE_NAME: Final = "manifest.signature.json"
+"""La firma del SHA-256 del manifiesto, en ``vol-01`` junto a él (no se lista como artefacto)."""
+MANIFEST_SIGNATURE_KIND: Final = "vigia.export.manifest"
+"""``kind`` del mensaje firmado: separa esta firma de la de un punto de control."""
+MANIFEST_SIGNATURE_PAYLOAD_KEYS: Final = frozenset(
+    {"export_id", "generated_at", "kind", "manifest_sha256", "organization_id", "plant_id"}
+)
+MANIFEST_SIGNATURE_DECLARATION: Final = {
+    "path": EXPORT_SIGNATURE_NAME,
+    "algorithm": "Ed25519",
+    "key_purpose": "checkpoint",
+    "payload_kind": MANIFEST_SIGNATURE_KIND,
+}
+"""Lo que el manifiesto declara en ``manifest_signature`` cuando lleva firma."""
+EXIT_UNANCHORED: Final = 3
+"""Sin firma válida del manifiesto ni ``--manifest-sha256``: la integridad no está anclada."""
+MAX_SIGNATURE_BYTES: Final = 64 * 1024
 
 MAX_EXPANSION_RATIO: Final = 100
 """Una entrada no se descomprime a más de 100 veces su tamaño comprimido ``[objetivo propio]``."""
@@ -1774,7 +1803,9 @@ EXPORT_MESSAGES: Final = {
     "entry_hash_mismatch": "el hash de una entrada de auditoría no coincide con su sobre",
     "previous_hash_mismatch": "el enlace con el registro anterior no coincide",
     "record_conflict": "dos registros distintos ocupan la misma secuencia de la cadena",
-    "extract_failed": "un archivo cambió mientras se extraía",
+    "extract_failed": "no se pudo extraer un archivo tal como se verificó",
+    "manifest_signature_invalid": "la firma del manifiesto no tiene la forma esperada o falta",
+    "manifest_signature_mismatch": "la firma del manifiesto no corresponde a este manifiesto",
 }
 """Motivo de rotura → explicación en español (lista cerrada)."""
 
@@ -1839,14 +1870,19 @@ class ExportReport:
     records_checked: int = 0
     audit_entries_checked: int = 0
     extracted_to: str | None = None
+    anchored_by: list[str] = field(default_factory=list)
+    """``manifest_signature`` y/o ``manifest_sha256``: lo que ata el manifiesto a la plataforma."""
 
     @property
     def intact(self) -> bool:
-        return self.failure is None
+        """Íntegro **y anclado**: sin ancla nunca es ``intact`` (decisión B1)."""
+        return self.failure is None and bool(self.anchored_by)
 
     @property
     def status(self) -> str:
-        return "intact" if self.failure is None else "broken"
+        if self.failure is not None:
+            return "broken"
+        return "intact" if self.anchored_by else "unanchored"
 
 
 def _fail(
@@ -1992,6 +2028,8 @@ class _Package:
         self.limits = limits
         self.archives: dict[str, zipfile.ZipFile] = {}
         self.entries: dict[str, _Entry] = {}
+        self._files: set[str] = set()
+        self._directories: set[str] = set()
         try:
             self._open(volumes)
         except BaseException:
@@ -2030,11 +2068,26 @@ class _Package:
                 check_entry_name(entry)
                 check_entry_type(entry)
                 check_entry_expansion(entry, self.limits)
-                if entry.name in self.entries:
-                    raise _fail(
-                        "duplicate_entry", volume=volume, artifact=entry.name, offset=entry.offset
-                    )
+                self._check_collisions(entry)
                 self.entries[entry.name] = entry
+
+    def _check_collisions(self, entry: _Entry) -> None:
+        """Dos rutas que al extraer serían el mismo archivo (también en sistemas de archivos que
+        no distinguen mayúsculas), o un archivo que a la vez es directorio de otro."""
+        where: dict[str, Any] = {
+            "volume": entry.volume,
+            "artifact": entry.name,
+            "offset": entry.offset,
+        }
+        folded = entry.name.casefold()
+        if folded in self._files:
+            raise _fail("duplicate_entry", **where)
+        parts = folded.split("/")
+        prefixes = ["/".join(parts[:index]) for index in range(1, len(parts))]
+        if folded in self._directories or any(prefix in self._files for prefix in prefixes):
+            raise _fail("path_not_allowed", "un archivo es a la vez directorio de otro", **where)
+        self._files.add(folded)
+        self._directories.update(prefixes)
 
     def stream(self, entry: _Entry) -> Iterator[bytes]:
         """Los bytes descomprimidos de ``entry``, en trozos; nunca más de los declarados."""
@@ -2120,7 +2173,7 @@ def _artifacts(items: object) -> list[_Artifact]:
         if (
             not _matches(_ENTRY_PATH, path)
             or len(path) > _MAX_PATH
-            or path == EXPORT_MANIFEST_NAME
+            or path in (EXPORT_MANIFEST_NAME, EXPORT_SIGNATURE_NAME)
             or path in seen
         ):
             raise _manifest_error("ruta de artefacto no válida o repetida", pointer + "/path")
@@ -2212,6 +2265,9 @@ def verify_artifact_hashes(
 ) -> dict[str, Any]:
     """Cada artefacto existe con su tamaño y su SHA-256, y nada sobra; devuelve los JSON leídos."""
     listed = {EXPORT_MANIFEST_NAME}
+    signature = package.entries.get(EXPORT_SIGNATURE_NAME)
+    if signature is not None and signature.volume == "vol-01.zip":
+        listed.add(EXPORT_SIGNATURE_NAME)
     for artifact in manifest.artifacts:
         volume = f"vol-{artifact.volume:02d}.zip"
         entry = package.entries.get(artifact.path)
@@ -2261,6 +2317,156 @@ def verify_artifact_hashes(
                     offset=entry.offset,
                 ) from None
     return documents
+
+
+# --- Ancla del manifiesto -----------------------------------------------------------------------
+
+
+def _parse_key_items(
+    items: object, where: Callable[[str], dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Las claves públicas ``checkpoint`` incluidas, validadas, por ``key_id``."""
+    if not isinstance(items, list):
+        raise _fail("artifact_invalid", "keys no es una lista", **where("/keys"))
+    keys: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(items):
+        position = where(f"/keys/{index}")
+        if not isinstance(item, dict) or item.keys() != _KEY_KEYS_EXPORT:
+            raise _fail("key_invalid", "claves inesperadas", **position)
+        key_id, text = item["key_id"], item["public_key"]
+        if not _matches(_KEY_ID_FORM, key_id) or key_id in keys:
+            raise _fail("key_invalid", "key_id no válido o repetido", **position)
+        if item["algorithm"] != "Ed25519" or item["status"] not in KEY_STATUSES:
+            raise _fail("key_invalid", "algoritmo o estado no válido", **position)
+        valid_from, valid_until = item["valid_from"], item["valid_until"]
+        if not (
+            _matches(_STAMP_FORM, valid_from)
+            and _matches(_STAMP_FORM, valid_until)
+            and valid_from < valid_until
+        ):
+            raise _fail("key_invalid", "vigencia no válida", **position)
+        raw = _canonical_base64(text, _PUBLIC_KEY_FORM)
+        if raw is None or len(raw) != 32:
+            raise _fail("key_invalid", "clave pública no válida", **position)
+        keys[key_id] = {"raw": raw, "valid_from": valid_from, "valid_until": valid_until}
+    return keys
+
+
+def _included_keys(package: _Package, manifest: _Manifest) -> dict[str, dict[str, Any]]:
+    """Las claves del artefacto ``public_key``, leído y hasheado antes que el resto."""
+    found = [artifact for artifact in manifest.artifacts if artifact.kind == "public_key"]
+    if len(found) != 1:
+        raise _fail(
+            "manifest_signature_invalid",
+            "sin un artefacto de claves públicas no se puede comprobar la firma",
+            volume="vol-01.zip",
+            artifact=EXPORT_SIGNATURE_NAME,
+        )
+    artifact = found[0]
+    entry = package.entries.get(artifact.path)
+    volume = f"vol-{artifact.volume:02d}.zip"
+    if entry is None or entry.volume != volume:
+        raise _fail("artifact_missing", volume=volume, artifact=artifact.path)
+    if entry.info.file_size != artifact.size_bytes or (
+        artifact.size_bytes > package.limits.max_json_bytes
+    ):
+        raise _fail(
+            "artifact_size_mismatch", volume=volume, artifact=artifact.path, offset=entry.offset
+        )
+    data = b"".join(package.stream(entry))
+    check_artifact_hash(entry, artifact, hashlib.sha256(data).hexdigest())
+
+    def where(pointer: str) -> dict[str, Any]:
+        return {
+            "volume": entry.volume,
+            "artifact": artifact.path,
+            "offset": entry.offset,
+            "pointer": pointer,
+        }
+
+    try:
+        document = parse_json(data)
+    except ValueError as error:
+        raise _fail("artifact_invalid", str(error), **where("")) from None
+    if not isinstance(document, dict) or document.keys() != {"keys"}:
+        raise _fail("artifact_invalid", "se espera {keys}", **where(""))
+    return _parse_key_items(document["keys"], where)
+
+
+def verify_manifest_anchor(
+    package: _Package, manifest: _Manifest, digest: str, report: ExportReport
+) -> None:
+    """La firma del SHA-256 del manifiesto con las claves incluidas (decisión A2).
+
+    Sin ``manifest.signature.json`` el manifiesto queda sin firmar (``unanchored`` salvo
+    ``--manifest-sha256``); una firma que no corresponde, de una clave desconocida, no vigente o
+    que no verifica, rompe el paquete.
+    """
+    declared = manifest.document.get("manifest_signature")
+    entry = package.entries.get(EXPORT_SIGNATURE_NAME)
+    where: dict[str, Any] = {"volume": "vol-01.zip", "artifact": EXPORT_SIGNATURE_NAME}
+    if entry is None:
+        if declared is not None:
+            raise _fail(
+                "manifest_signature_invalid", "el manifiesto declara una firma que falta", **where
+            )
+        return
+    where["offset"] = entry.offset
+    if entry.volume != "vol-01.zip" or entry.info.file_size > MAX_SIGNATURE_BYTES:
+        raise _fail("manifest_signature_invalid", "fuera de vol-01 o demasiado grande", **where)
+    if declared != MANIFEST_SIGNATURE_DECLARATION:
+        raise _fail(
+            "manifest_signature_invalid",
+            "el manifiesto no declara la firma que viaja",
+            **{**where, "artifact": EXPORT_MANIFEST_NAME, "pointer": "/manifest_signature"},
+        )
+    keys = _included_keys(package, manifest)
+    try:
+        document = parse_json(b"".join(package.stream(entry)))
+    except ValueError as error:
+        raise _fail("manifest_signature_invalid", str(error), **where) from None
+    if not isinstance(document, dict) or document.keys() != {"key_id", "payload", "signature"}:
+        raise _fail("manifest_signature_invalid", "se espera {payload, key_id, signature}", **where)
+    payload, key_id = document["payload"], document["key_id"]
+    if (
+        not isinstance(payload, dict)
+        or payload.keys() != MANIFEST_SIGNATURE_PAYLOAD_KEYS
+        or payload["kind"] != MANIFEST_SIGNATURE_KIND
+        or not _matches(_STAMP_FORM, payload["generated_at"])
+        or not isinstance(key_id, str)
+    ):
+        raise _fail("manifest_signature_invalid", "mensaje firmado no válido", **where)
+    expected = {
+        "manifest_sha256": digest,
+        "export_id": manifest.document.get("export_id"),
+        "organization_id": manifest.organization_id,
+        "plant_id": manifest.plant_id,
+        "generated_at": manifest.document.get("generated_at"),
+    }
+    for field_name, value in expected.items():
+        if payload[field_name] != value:
+            raise _fail("manifest_signature_mismatch", f"{field_name} no coincide", **where)
+    key = keys.get(key_id)
+    if key is None:
+        raise _fail("unknown_key", f"key_id {key_id!r}", **where)
+    generated_at = payload["generated_at"]
+    if not key["valid_from"] <= generated_at < key["valid_until"]:
+        raise _fail(
+            "key_not_valid_at_signing",
+            f"key_id {key_id!r} vigente de {key['valid_from']} a {key['valid_until']},"
+            f" manifiesto de {generated_at}",
+            **where,
+        )
+    signature = _canonical_base64(document["signature"], _SIGNATURE_FORM)
+    if signature is None or len(signature) != 64:
+        raise _fail("manifest_signature_invalid", "firma en base64 no canónico", **where)
+    try:
+        message = canonicalize(payload)
+    except CanonicalizationError:
+        raise _fail("manifest_signature_invalid", "sin forma canónica", **where) from None
+    if not ed25519_verify(key["raw"], message, signature):
+        raise _fail("bad_signature", f"key_id {key_id!r}", **where)
+    report.anchored_by.append("manifest_signature")
 
 
 # --- Contenido ----------------------------------------------------------------------------------
@@ -2332,31 +2538,7 @@ class _Content:
             raise self._mismatch(
                 "las claves públicas difieren de su archivo", "/checkpoint_public_keys"
             )
-        if not isinstance(items, list):
-            raise self._invalid(artifact, "/keys")
-        keys: dict[str, dict[str, Any]] = {}
-        for index, item in enumerate(items):
-            pointer = f"/keys/{index}"
-            where = self._where(artifact, pointer)
-            if not isinstance(item, dict) or item.keys() != _KEY_KEYS_EXPORT:
-                raise _fail("key_invalid", "claves inesperadas", **where)
-            key_id, text = item["key_id"], item["public_key"]
-            if not _matches(_KEY_ID_FORM, key_id) or key_id in keys:
-                raise _fail("key_invalid", "key_id no válido o repetido", **where)
-            if item["algorithm"] != "Ed25519" or item["status"] not in KEY_STATUSES:
-                raise _fail("key_invalid", "algoritmo o estado no válido", **where)
-            valid_from, valid_until = item["valid_from"], item["valid_until"]
-            if not (
-                _matches(_STAMP_FORM, valid_from)
-                and _matches(_STAMP_FORM, valid_until)
-                and valid_from < valid_until
-            ):
-                raise _fail("key_invalid", "vigencia no válida", **where)
-            raw = _canonical_base64(text, _PUBLIC_KEY_FORM)
-            if raw is None or len(raw) != 32:
-                raise _fail("key_invalid", "clave pública no válida", **where)
-            keys[key_id] = {"raw": raw, "valid_from": valid_from, "valid_until": valid_until}
-        return keys
+        return _parse_key_items(items, lambda pointer: self._where(artifact, pointer))
 
     def checkpoints(self, keys: Mapping[str, dict[str, Any]]) -> list[dict[str, Any]]:
         artifact = self._single("checkpoint")
@@ -2727,20 +2909,31 @@ def _extract(package: _Package, manifest: _Manifest, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
     expected = {artifact.path: artifact.sha256 for artifact in manifest.artifacts}
+    names = [EXPORT_MANIFEST_NAME, *expected]
+    if EXPORT_SIGNATURE_NAME in package.entries:
+        names.insert(1, EXPORT_SIGNATURE_NAME)
     try:
-        for name in [EXPORT_MANIFEST_NAME, *expected]:
+        for name in names:
             entry = package.entries[name]
+            where: dict[str, Any] = {
+                "volume": entry.volume,
+                "artifact": name,
+                "offset": entry.offset,
+            }
             target = root.joinpath(*name.split("/"))
-            target.parent.mkdir(parents=True, exist_ok=True)
             hasher = hashlib.sha256()
-            with target.open("xb") as output:
-                for chunk in package.stream(entry):
-                    hasher.update(chunk)
-                    output.write(chunk)
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("xb") as output:
+                    for chunk in package.stream(entry):
+                        hasher.update(chunk)
+                        output.write(chunk)
+            except OSError as error:
+                # Nunca un traceback: una ruta que choca con otra o un disco lleno es un fallo
+                # declarado, y lo escrito se borra.
+                raise _fail("extract_failed", str(error), **where) from None
             if name in expected and hasher.hexdigest() != expected[name]:
-                raise _fail(
-                    "extract_failed", volume=entry.volume, artifact=name, offset=entry.offset
-                )
+                raise _fail("extract_failed", "el hash cambió al extraer", **where)
     except BaseException:
         if created:
             shutil.rmtree(root, ignore_errors=True)
@@ -2774,9 +2967,13 @@ def verify_export(
         manifest, digest = _read_manifest(package, manifest_sha256)
         report.manifest_sha256 = digest
         report.declared_verifier_version = manifest.verifier_version
+        if manifest_sha256 is not None:
+            report.anchored_by.append("manifest_sha256")
+        verify_manifest_anchor(package, manifest, digest, report)
         documents = verify_artifact_hashes(package, manifest, report)
         _Content(package, manifest, documents, report).run()
-        if extract_to is not None:
+        # Sin ancla no hay «íntegro» y no se extrae nada (decisión B1).
+        if extract_to is not None and report.anchored_by:
             _extract(package, manifest, extract_to)
             report.extracted_to = str(extract_to)
     except ExportBroken as broken:
@@ -2815,6 +3012,7 @@ def export_report_document(report: ExportReport) -> dict[str, Any]:
         "checkpoints_verified": report.checkpoints_verified,
         "records_checked": report.records_checked,
         "audit_entries_checked": report.audit_entries_checked,
+        "anchored_by": report.anchored_by,
         "broken": broken,
         "extracted_to": report.extracted_to,
     }
@@ -2858,9 +3056,23 @@ def render_export_summary(report: ExportReport) -> str:
         )
         lines.append(f"ROTO: {failure.message()}" + (f" [{where}]" if where else ""))
         lines.append("No se extrajo nada.")
-    elif report.extracted_to is not None:
-        lines.append(f"Extraído en: {report.extracted_to}")
-    lines.append("Resultado: ÍNTEGRO" if report.intact else "Resultado: ROTO")
+    elif not report.anchored_by:
+        lines.append(
+            "SIN ANCLA: el paquete no trae una firma válida del manifiesto y no se dio "
+            "--manifest-sha256. Las comprobaciones solo prueban que el paquete es coherente "
+            "consigo mismo, no que sea el que produjo la plataforma: quien rehaga el manifiesto "
+            "puede cambiar registros y estados sin que se note. No se extrajo nada."
+        )
+    else:
+        anchors = {
+            "manifest_signature": "firma del manifiesto con la clave de los puntos de control",
+            "manifest_sha256": "SHA-256 del manifiesto registrado por la plataforma",
+        }
+        lines.append("Anclado por: " + "; ".join(anchors[item] for item in report.anchored_by))
+        if report.extracted_to is not None:
+            lines.append(f"Extraído en: {report.extracted_to}")
+    results = {"intact": "ÍNTEGRO", "broken": "ROTO", "unanchored": "SIN ANCLA"}
+    lines.append(f"Resultado: {results[report.status]}")
     return "\n".join(lines) + "\n"
 
 
@@ -2873,8 +3085,9 @@ def _export_parser() -> argparse.ArgumentParser:
             "extraer nada, las firmas de los puntos de control y las cadenas."
         ),
         epilog=(
-            "Código de salida: 0 si el paquete está íntegro; 1 si está roto o no se puede leer; "
-            "2 si la orden es incorrecta."
+            "Código de salida: 0 si el paquete está íntegro y anclado; 1 si está roto o no se "
+            "puede leer; 2 si la orden es incorrecta; 3 si es coherente pero sin ancla (ni firma "
+            "del manifiesto ni --manifest-sha256)."
         ),
         formatter_class=_Formatter,
         add_help=False,
@@ -2918,7 +3131,7 @@ def _usage(message: str) -> int:
 
 
 def export_main(argv: Sequence[str] | None = None) -> int:
-    """Punto de entrada: 0 si íntegro, 1 si roto, 2 si la orden es incorrecta."""
+    """Punto de entrada: 0 íntegro y anclado, 1 roto, 2 orden incorrecta, 3 sin ancla."""
     arguments = _export_parser().parse_args(argv)
     package: Path = arguments.package
     if not package.exists() and not package.is_symlink():
@@ -2940,7 +3153,8 @@ def export_main(argv: Sequence[str] | None = None) -> int:
             arguments.out.write_text(text, encoding="utf-8")
         except OSError as error:
             return _usage(f"no se pudo escribir {str(arguments.out)!r}: {error}")
-    return EXIT_INTACT if report.intact else EXIT_BROKEN
+    codes = {"intact": EXIT_INTACT, "broken": EXIT_BROKEN, "unanchored": EXIT_UNANCHORED}
+    return codes[report.status]
 
 
 if __name__ == "__main__":

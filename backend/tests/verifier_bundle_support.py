@@ -12,8 +12,9 @@ el paquete real escrito en disco, sus volúmenes reescritos y las mutaciones ``p
 - ``rewrite_volume(data, replace)``: el volumen con el contenido de unas entradas cambiado y todo
   lo demás igual (orden, compresión, fecha y atributos); así una mutación cambia solo lo que dice.
 - ``package_mutations``: alterar un bit de un artefacto (manifiesto intacto), un bit del
-  manifiesto (con su SHA-256 registrado) o un bit de un registro o entrada de auditoría
-  **re-hasheando el manifiesto**, como haría quien altera el paquete.
+  manifiesto, o un bit de un registro o entrada de auditoría como una **falsificación coherente**
+  (ronda 1): el atacante rehace el ``content_hash`` o el ``entry_hash`` y re-hashea el
+  manifiesto, y con la firma del manifiesto la deja, la quita o firma con una clave ajena.
 
 Solo datos generados; las claves salen de semillas fijas.
 """
@@ -36,10 +37,21 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from hypothesis import strategies as st
 
 from tests.export_contents_support import Composed, compose_world
-from tests.properties.laz.strategies.export import ExportWorld, stamp
-from vigia_platform.accreditation.export.volumes import MANIFEST_NAME, ExportLocation
+from tests.properties.laz.strategies.export import (
+    WORLD_ACTIVE_KEY,
+    WORLD_SIGNING_SEEDS,
+    ExportWorld,
+    stamp,
+)
+from vigia_platform.accreditation.export.volumes import (
+    MANIFEST_NAME,
+    MANIFEST_SIGNATURE_NAME,
+    ExportLocation,
+)
+from vigia_platform.accreditation.verifier_bundle import manifest_signature_payload
 from vigia_platform.ledger.application.reader import AuditEntryView, LedgerRecordView
 from vigia_platform.ledger.canonical import (
+    CanonicalFormError,
     audit_envelope_canonical,
     canonical_bytes_sync,
     envelope_canonical,
@@ -53,6 +65,7 @@ from vigia_platform.ledger.chain.checkpoints import (
     StoredCheckpoint,
     signed_payload,
 )
+from vigia_platform.ledger.chain.pure_rfc8785 import CanonicalizationError, canonicalize
 from vigia_platform.shared.signing.keys import KeyStatus
 
 __all__ = [
@@ -73,8 +86,8 @@ __all__ = [
 ]
 
 RETIRED_KEY: Final = "checkpoint-2026-01"
-ACTIVE_KEY: Final = "checkpoint-2026-02"
-_SEEDS: Final = {RETIRED_KEY: bytes(range(32)), ACTIVE_KEY: bytes(range(100, 132))}
+ACTIVE_KEY: Final = WORLD_ACTIVE_KEY
+_SEEDS: Final = WORLD_SIGNING_SEEDS
 
 
 def private_key(key_id: str) -> Ed25519PrivateKey:
@@ -282,8 +295,9 @@ def read_volume_entries(data: bytes) -> list[tuple[zipfile.ZipInfo, bytes]]:
         return [(info, archive.read(info)) for info in archive.infolist()]
 
 
-def rewrite_volume(data: bytes, replace: Mapping[str, bytes]) -> bytes:
-    """El volumen con el contenido de ``replace`` en esas entradas; el resto, igual."""
+def rewrite_volume(data: bytes, replace: Mapping[str, bytes | None]) -> bytes:
+    """El volumen con el contenido de ``replace`` en esas entradas (``None``: la quita); el
+    resto, igual."""
     output = io.BytesIO()
     with zipfile.ZipFile(output, mode="w", allowZip64=False) as archive:
         for info, content in read_volume_entries(data):
@@ -291,7 +305,9 @@ def rewrite_volume(data: bytes, replace: Mapping[str, bytes]) -> bytes:
             copy.compress_type = info.compress_type
             copy.create_system = info.create_system
             copy.external_attr = info.external_attr
-            archive.writestr(copy, replace.get(info.filename, content))
+            new = replace.get(info.filename, content)
+            if new is not None:
+                archive.writestr(copy, new)
     return output.getvalue()
 
 
@@ -350,6 +366,10 @@ class Mutation:
     """En ``record_bit``: el valor alterado (``/findings/i/records/j/...`` o ``/entries/k/...``)."""
     record: str = ""
     """En ``record_bit``: el puntero del registro o de la entrada que contiene el valor."""
+    signature: str = "keep"
+    """En ``record_bit``, qué hace el atacante con la firma del manifiesto: ``keep`` (la deja),
+    ``drop`` (la quita con su declaración) o ``stranger`` (firma con una clave ajena bajo el
+    ``key_id`` de la activa)."""
 
 
 def _record_targets(composed: Composed) -> list[tuple[str, str, str]]:
@@ -390,13 +410,59 @@ def package_mutations(draw: st.DrawFn, composed: Composed) -> Mutation:
         size = len(canonical_bytes_sync(composed.manifest))
         return Mutation(kind, MANIFEST_NAME, draw(st.integers(0, 8 * size - 1)))
     path, record, pointer = draw(st.sampled_from(targets))
-    return Mutation(kind, path, draw(st.integers(0, 64)), pointer, record)
+    signature = draw(st.sampled_from(("keep", "drop", "stranger")))
+    return Mutation(kind, path, draw(st.integers(0, 64)), pointer, record, signature)
+
+
+def _audit_entry_hash(entry: Mapping[str, Any], organization_id: str) -> str:
+    """El ``entry_hash`` que recalcula quien conoce el sobre de U-02 (el atacante también)."""
+    filters = entry["filters"]
+    envelope = {
+        "actor": entry["actor"],
+        "chain_sequence": entry["chain_sequence"],
+        "correlation_id": entry["correlation_id"],
+        "entry_id": entry["entry_id"],
+        "filters_hash": None if filters is None else _sha256(canonicalize(filters)),
+        "occurred_at": entry["occurred_at"],
+        "operation": entry["operation"],
+        "organization_id": organization_id,
+        "outcome": entry["outcome"],
+        "resource_ref": (
+            None
+            if entry["resource_kind"] is None and entry["resource_id"] is None
+            else {"id": entry["resource_id"], "kind": entry["resource_kind"]}
+        ),
+        "result_count": entry["result_count"],
+        "scope": {"plant_id": entry["scope_plant_id"], "zone_id": entry["scope_zone_id"]},
+    }
+    return _sha256(canonicalize(envelope) + str(entry["previous_hash"]).encode())
+
+
+def _recompute(document: Any, mutation: Mutation, organization_id: str) -> None:
+    """Falsificación coherente: rehace el hash propio del registro o de la entrada alterados."""
+    target = document
+    for part in mutation.record.strip("/").split("/"):
+        target = target[int(part)] if isinstance(target, list) else target[part]
+    try:
+        if mutation.record.startswith("/entries/"):
+            target["entry_hash"] = _audit_entry_hash(target, organization_id)
+        elif not mutation.pointer.endswith("/content_hash"):
+            target["content_hash"] = _sha256(canonical_bytes_sync(target["content"]))
+    except (CanonicalizationError, CanonicalFormError, TypeError, ValueError):
+        pass  # un valor sin forma canónica: el atacante no puede rehacer el hash
+
+
+def _stranger_signature(manifest: Mapping[str, Any], data: bytes) -> bytes:
+    stranger = Ed25519PrivateKey.from_private_bytes(bytes(range(200, 232)))
+    payload = manifest_signature_payload(manifest, data)
+    signature = base64.b64encode(stranger.sign(canonical_bytes_sync(payload))).decode("ascii")
+    return canonical_bytes_sync({"payload": payload, "key_id": ACTIVE_KEY, "signature": signature})
 
 
 def apply_mutation(composed: Composed, directory: Path, mutation: Mutation) -> None:
     """Escribe en ``directory`` el paquete alterado por ``mutation``."""
     manifest_bytes = canonical_bytes_sync(composed.manifest)
-    changes: dict[str, bytes] = {}
+    changes: dict[str, bytes | None] = {}
     if mutation.kind == "artifact_bit":
         changes[mutation.path] = flip_bit(composed.artifacts[mutation.path], mutation.bit)
     elif mutation.kind == "manifest_bit":
@@ -407,6 +473,8 @@ def apply_mutation(composed: Composed, directory: Path, mutation: Mutation) -> N
         for part in mutation.pointer.strip("/").split("/"):
             current = current[int(part)] if isinstance(current, list) else current[part]
         _set(document, mutation.pointer, _one_bit(current, mutation.bit))
+        organization_id = composed.manifest["organization"]["organization_id"]
+        _recompute(document, mutation, organization_id)
         data = canonical_bytes_sync(document)
         changes[mutation.path] = data
         # Quien altera el paquete re-hashea el manifiesto: los hashes previos ya no lo delatan.
@@ -415,7 +483,13 @@ def apply_mutation(composed: Composed, directory: Path, mutation: Mutation) -> N
             if artifact["path"] == mutation.path:
                 artifact["sha256"] = _sha256(data)
                 artifact["size_bytes"] = len(data)
-        changes[MANIFEST_NAME] = canonical_bytes_sync(manifest)
+        if mutation.signature == "drop":
+            manifest.pop("manifest_signature", None)
+            changes[MANIFEST_SIGNATURE_NAME] = None
+        new_manifest = canonical_bytes_sync(manifest)
+        changes[MANIFEST_NAME] = new_manifest
+        if mutation.signature == "stranger":
+            changes[MANIFEST_SIGNATURE_NAME] = _stranger_signature(manifest, new_manifest)
     for volume in volume_paths(directory):
         data = volume.read_bytes()
         names = {info.filename for info, _ in read_volume_entries(data)}

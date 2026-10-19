@@ -28,7 +28,11 @@ from tests.properties.laz.strategies.export import ExportWorld, WorldPorts
 from vigia_platform.accreditation.export.composer_port import ExportJob, ExportPackage
 from vigia_platform.accreditation.export.contents import ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
-from vigia_platform.accreditation.export.volumes import MANIFEST_NAME, ExportLocation
+from vigia_platform.accreditation.export.volumes import (
+    MANIFEST_NAME,
+    MANIFEST_SIGNATURE_NAME,
+    ExportLocation,
+)
 from vigia_platform.loop.projection.fold import U03_RECORD_TYPES, FindingStateRow, fold
 
 __all__ = [
@@ -55,6 +59,8 @@ class Composed:
     artifacts: dict[str, bytes]
     store: MemoryExportStore
     sink: RecordingSink
+    signature: bytes | None = None
+    """``manifest.signature.json`` (TASK-346): la firma del manifiesto, que no es un artefacto."""
 
     def json(self, path: str) -> Any:
         return json.loads(self.artifacts[path])
@@ -83,7 +89,8 @@ def compose_world(
             assert name not in artifacts, f"entrada repetida entre volúmenes: {name}"
             artifacts[name] = archive.read(name)
     manifest = json.loads(artifacts.pop(MANIFEST_NAME))
-    return Composed(package, manifest, artifacts, store, sink)
+    signature = artifacts.pop(MANIFEST_SIGNATURE_NAME, None)
+    return Composed(package, manifest, artifacts, store, sink, signature)
 
 
 def oracle_findings(world: ExportWorld, job: ExportJob) -> dict[uuid.UUID, FindingStateRow]:

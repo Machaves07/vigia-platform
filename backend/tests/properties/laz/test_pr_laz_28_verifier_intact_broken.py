@@ -5,19 +5,21 @@ PR-NUC-19).
 **Propiedad** (``exported_packages`` con criptografía real, ``seal_world``): el paquete del
 compositor real (TASK-318) leído de sus volúmenes tiene cada artefacto del manifiesto con su hash
 (oráculo: los bytes de cada entrada ZIP) y el verificador responde ``intact``, con todos los
-artefactos hasheados, los tres puntos de control firmados verificados y la versión del
-verificador declarada igual a la embebida.
+artefactos hasheados, los tres puntos de control firmados verificados, la versión del
+verificador declarada igual a la embebida y el paquete **anclado por la firma de su manifiesto**
+(solo con lo que viaja en él, como un tercero sin acceso a la plataforma).
 
-**Mutaciones** (``package_mutations``), cada una sobre una copia del paquete en disco:
+**Mutaciones** (``package_mutations``), cada una sobre una copia del paquete en disco y
+verificada por un tercero (solo la firma) y con el SHA-256 registrado (``--manifest-sha256``):
 
 - un bit de cualquier artefacto, manifiesto intacto: ``artifact_hash_mismatch`` en **ese**
   artefacto, su volumen y el desplazamiento de su cabecera;
-- un bit del manifiesto, con su SHA-256 registrado (``--manifest-sha256``):
-  ``manifest_hash_mismatch``;
-- un bit de un registro con contenido o de una entrada de auditoría **re-hasheando el manifiesto**
-  (quien altera el paquete): el verificador lo detecta por el ``content_hash`` o el
-  ``entry_hash`` recalculado (o por la forma, si el bit rompe un identificador) y señala ese
-  registro con su puntero JSON.
+- un bit del manifiesto: roto para el tercero; ``manifest_hash_mismatch`` con el SHA registrado;
+- una **falsificación coherente** de un registro o de una entrada de auditoría (ronda 1, decisión
+  del dueño A2 y B1): el atacante cambia un bit, rehace el ``content_hash`` o el ``entry_hash`` y
+  re-hashea el manifiesto. Si deja la firma, ``manifest_signature_mismatch``; si firma con una
+  clave ajena bajo el ``key_id`` activo, ``bad_signature``; si la quita, nunca ``intact``
+  (``unanchored``); con el SHA registrado, ``manifest_hash_mismatch``.
 
 Se compara por el código de motivo y los campos estructurados de la posición, nunca por el texto
 (VIG-194). Solo datos generados.
@@ -45,13 +47,13 @@ from tests.verifier_bundle_support import (
     volume_paths,
 )
 from vigia_platform.accreditation.export_verifier import verify_export
-from vigia_platform.accreditation.verifier_bundle import VERIFIER_PATH, VERIFIER_VERSION
+from vigia_platform.accreditation.verifier_bundle import (
+    MANIFEST_SIGNATURE_DECLARATION,
+    VERIFIER_PATH,
+    VERIFIER_VERSION,
+)
 
 _SETTINGS: Any = settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
-
-RECORD_REASONS = frozenset(
-    {"content_hash_mismatch", "entry_hash_mismatch", "artifact_invalid", "content_not_canonical"}
-)
 
 
 def _entries(directory: Path) -> dict[str, tuple[str, int, bytes]]:
@@ -75,10 +77,16 @@ def test_pr_laz_28_intact_package_and_every_one_bit_mutation_is_broken_with_its_
         original = root / "original"
         composed = compose_to_directory(sealed, original)
         manifest = composed.manifest
+        registered = composed.package.manifest_sha256
 
         # Oráculo: cada artefacto del manifiesto existe en su volumen con su tamaño y su hash.
         entries = _entries(original)
-        assert set(entries) == {"manifest.json", *(a["path"] for a in manifest["artifacts"])}
+        assert set(entries) == {
+            "manifest.json",
+            "manifest.signature.json",
+            *(a["path"] for a in manifest["artifacts"]),
+        }
+        assert entries["manifest.signature.json"][0] == "vol-01.zip"
         for artifact in manifest["artifacts"]:
             volume, _, content = entries[artifact["path"]]
             assert volume == f"vol-{artifact['volume']:02d}.zip"
@@ -86,45 +94,65 @@ def test_pr_laz_28_intact_package_and_every_one_bit_mutation_is_broken_with_its_
             assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
         assert manifest["verifier_version"] == VERIFIER_VERSION
         assert any(a["path"] == VERIFIER_PATH for a in manifest["artifacts"])
+        assert manifest["manifest_signature"] == MANIFEST_SIGNATURE_DECLARATION
 
-        report = verify_export(original, manifest_sha256=composed.package.manifest_sha256)
+        # Un tercero sin acceso a la plataforma: solo la firma que viaja en el paquete.
+        report = verify_export(original)
         assert report.failure is None, report.failure
-        assert report.status == "intact"
+        assert (report.status, report.anchored_by) == ("intact", ["manifest_signature"])
         assert report.artifacts_verified == len(manifest["artifacts"])
         assert report.checkpoints_verified == len(manifest["checkpoints"]) == 3
         assert report.declared_verifier_version == VERIFIER_VERSION
-        assert report.manifest_sha256 == composed.package.manifest_sha256
+        assert report.manifest_sha256 == registered
+        both = verify_export(original, manifest_sha256=registered)
+        assert (both.status, both.anchored_by) == (
+            "intact",
+            ["manifest_sha256", "manifest_signature"],
+        )
 
         mutation = data.draw(package_mutations(composed), label="mutation")
         altered = root / "altered"
         shutil.copytree(original, altered)
         apply_mutation(composed, altered, mutation)
-        broken = verify_export(altered, manifest_sha256=composed.package.manifest_sha256)
-        failure = broken.failure
-        assert failure is not None, f"{mutation} no se detectó"
-        position = failure.position
+        third_party = verify_export(altered)
+        assert not third_party.intact, f"{mutation} no se detectó"
+        failure = third_party.failure
 
         if mutation.kind == "artifact_bit":
             volume, offset, _ = _entries(altered)[mutation.path]
+            assert failure is not None
             assert failure.reason == "artifact_hash_mismatch"
-            assert (position.volume, position.artifact, position.offset) == (
-                volume,
-                mutation.path,
-                offset,
-            )
+            assert (
+                failure.position.volume,
+                failure.position.artifact,
+                failure.position.offset,
+            ) == (volume, mutation.path, offset)
         elif mutation.kind == "manifest_bit":
-            assert failure.reason == "manifest_hash_mismatch"
-            assert (position.volume, position.artifact) == ("vol-01.zip", "manifest.json")
-        else:
-            # Sin el SHA-256 registrado, el manifiesto re-hasheado no delata nada: el registro sí.
-            unanchored = verify_export(altered).failure
-            assert unanchored is not None
-            assert unanchored.reason in RECORD_REASONS, unanchored
-            assert unanchored.position.artifact == mutation.path
-            assert unanchored.position.pointer is not None
-            assert unanchored.position.pointer.startswith(mutation.record), (
-                unanchored.position.pointer,
-                mutation,
+            # Cualquier bit del manifiesto lo rompe: forma, firma o los hashes que declara.
+            assert failure is not None, third_party.status
+        elif mutation.signature == "keep":
+            # Falsificación coherente (hash propio rehecho, manifiesto re-hasheado): la firma de la
+            # plataforma ya no corresponde al manifiesto.
+            assert failure is not None
+            assert (failure.reason, failure.position.artifact) == (
+                "manifest_signature_mismatch",
+                "manifest.signature.json",
             )
-            # Con el SHA-256 registrado, el manifiesto alterado cae antes que nada.
-            assert failure.reason == "manifest_hash_mismatch"
+        elif mutation.signature == "stranger":
+            assert failure is not None
+            assert (failure.reason, failure.position.artifact) == (
+                "bad_signature",
+                "manifest.signature.json",
+            )
+        else:
+            # Sin firma: nunca «íntegro» (decisión B1).
+            assert third_party.status in ("unanchored", "broken")
+
+        # Con el SHA-256 que registró la plataforma, toda alteración del manifiesto cae primero.
+        anchored = verify_export(altered, manifest_sha256=registered)
+        assert anchored.failure is not None
+        if mutation.kind != "artifact_bit":
+            assert (anchored.failure.reason, anchored.failure.position.artifact) == (
+                "manifest_hash_mismatch",
+                "manifest.json",
+            )
