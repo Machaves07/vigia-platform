@@ -147,9 +147,8 @@ que la cerrarían a mitad de una llamada y soltarían el candado de la solicitud
 
 _LOCK: Final = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))")
 _IDLE_TIMEOUT: Final = text(
-    "SELECT set_config('idle_in_transaction_session_timeout', "
-    f"'{int(DELIVERY_IDLE_TIMEOUT.total_seconds() * 1000)}', true)"
-)
+    "SELECT set_config('idle_in_transaction_session_timeout', :ms, true)"
+).bindparams(ms=str(int(DELIVERY_IDLE_TIMEOUT.total_seconds() * 1000)))
 _REQUEST: Final = text(
     "SELECT r.request_id, r.analysis_id, r.state, r.requested_at, r.context_digest,"
     " a.zone_context, a.plant_id, a.zone_id, a.subject_id"
