@@ -42,9 +42,11 @@ __all__ = [
     "AddEvidence",
     "Assign",
     "ChangeDeadlineRange",
+    "CloseFinding",
     "LifecycleCommand",
     "NeutralAction",
     "Reassign",
+    "ReopenFinding",
     "Tick",
     "action_texts",
     "deadline_ranges",
@@ -282,7 +284,22 @@ class Tick:
     seconds: int
 
 
-type LifecycleCommand = Assign | Reassign | AddEvidence | ChangeDeadlineRange | Tick
+@dataclass(frozen=True)
+class CloseFinding:
+    """``cerrar`` (T09, VIG-233): cerrar con la descripción y la licencia de la prueba."""
+
+
+@dataclass(frozen=True)
+class ReopenFinding:
+    """``reabrir`` (T13 o T14, VIG-233): reabrir con una acción correctiva nueva."""
+
+    action_type: str
+    deadline_days: int | None
+
+
+type LifecycleCommand = (
+    Assign | Reassign | AddEvidence | ChangeDeadlineRange | Tick | CloseFinding | ReopenFinding
+)
 """Los comandos de la base; las tareas siguientes añaden los suyos a esta unión."""
 
 
@@ -306,6 +323,8 @@ def _commands() -> st.SearchStrategy[LifecycleCommand]:
         st.just(AddEvidence()),
         deadline_ranges(),
         st.builds(Tick, st.integers(1, 3 * 24 * 3600)),
+        st.just(CloseFinding()),
+        st.builds(ReopenFinding, st.sampled_from(ACTION_TYPES), _deadline()),
     )
 
 

@@ -7,9 +7,9 @@
   ``U04_TASKS`` con ``review_reminders`` (TASK-309), ``U04_CONSUMERS`` con ``export_worker``,
   ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de
   adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la de la
-  clasificación (TASK-308), las dos de la cola de revisión (TASK-309) y las de la acción y su
-  evidencia (TASK-311) de ``loop``, las dos de exportación de ``accreditation`` (TASK-317) y
-  ``GET /notifications`` (TASK-324).
+  clasificación (TASK-308), las dos de la cola de revisión (TASK-309), las de la acción y su
+  evidencia (TASK-311) y las del cierre firmado y la reapertura (TASK-343, VIG-233) de ``loop``,
+  las dos de exportación de ``accreditation`` (TASK-317) y ``GET /notifications`` (TASK-324).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -51,6 +51,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
     attachment_router,
 )
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
+from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
@@ -156,7 +157,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         if name == "loop":
             # TASK-310: SUP-U05-09 y SUP-U05-10 y su puerto ``ClosureAttachmentPort``;
             # TASK-304: SUP-U05-38 y SUP-U05-39 y ``LoopHttp``; TASK-308: SUP-U05-03;
-            # TASK-311: SUP-U05-07 y 08; TASK-315: SUP-U05-16 a 18; TASK-316: SUP-U05-19 y 20.
+            # TASK-311: SUP-U05-07 y 08; TASK-315: SUP-U05-16 a 18; TASK-316: SUP-U05-19 y 20;
+            # TASK-343: SUP-U05-11 y 14 (VIG-233, cierre y reapertura).
             assert routes == [
                 ("POST", "/loop/actions/{action_id}/attachments/upload-grant"),
                 ("POST", "/loop/attachments/{attachment_id}/read-url"),
@@ -167,6 +169,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/review-queue/{detection_id}/resolution"),  # TASK-309: SUP-U05-06
                 ("POST", "/loop/findings/{finding_state_id}/actions"),
                 ("POST", "/loop/actions/{action_id}/evidence"),
+                ("POST", "/loop/findings/{finding_state_id}/closure"),
+                ("POST", "/loop/findings/{finding_state_id}/reopening"),
                 ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
                 ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
@@ -180,6 +184,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
             assert state[LOOP_STATE_KEY].inbox is not None
+            assert state[LOOP_STATE_KEY].closure is not None
+            assert state[LOOP_STATE_KEY].reopening is not None
             assert state[LOOP_STATE_KEY].review_queue is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
@@ -228,6 +234,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         classification_router,
         review_queue_router,
         actions_router,
+        closure_router,
         root_cause_router,
         assistant_router,
         findings_router,

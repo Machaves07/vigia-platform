@@ -21,8 +21,10 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
+from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
@@ -63,6 +65,10 @@ class LoopHttp:
     evidence: EvidenceService | None = None
     """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
     verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
+    closure: ClosureService | None = None
+    """``POST /loop/findings/{finding_state_id}/closure`` (LC-LAZ-09, VIG-233)."""
+    reopening: ReopeningService | None = None
+    """``POST /loop/findings/{finding_state_id}/reopening`` (LC-LAZ-09, VIG-233)."""
     assistant: AssistantService | None = None
     """Las dos rutas del asistente de causa raíz (LC-LAZ-13, VIG-224); ningún adaptador del
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
@@ -91,6 +97,12 @@ def loop_http(request: Request) -> LoopHttp:
 
 def build_loop_http(services: UnitServices) -> LoopHttp:
     """``LoopHttp`` sobre la infraestructura común de la raíz."""
+    actions = ActionService(
+        database=services.database,
+        writer=services.writer,
+        authorizer=services.authorizer,
+        clock=services.clock,
+    )
     return LoopHttp(
         configuration=LoopConfigurationService(
             repository=PostgresLoopConfigurationRepository(services.database),
@@ -106,17 +118,25 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             authorizer=services.authorizer,
             clock=services.clock,
         ),
-        actions=ActionService(
-            database=services.database,
-            writer=services.writer,
-            authorizer=services.authorizer,
-            clock=services.clock,
-        ),
+        actions=actions,
         evidence=EvidenceService(
             database=services.database,
             writer=services.writer,
             authorizer=services.authorizer,
             clock=services.clock,
+        ),
+        closure=ClosureService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        reopening=ReopeningService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            actions=actions,
         ),
         root_cause=RootCauseService(
             database=services.database,

@@ -398,9 +398,14 @@ class ClassificationService:
                 raise ClassificationRejected(LoopDetailCode.TRANSITION_NOT_ALLOWED)
             category, reason = _reason(chosen, reason_category, reason_text)
             accepted = self._accepted(current, chosen, reinforced_reason, at)
+            await self._checked(transaction)
             return await self._write(
                 transaction, writer_context, current, accepted, chosen, category, reason, at
             )
+
+    async def _checked(self, transaction: Transaction) -> None:
+        """Con el candado del hallazgo tomado y la transición ya comprobada, antes de escribir
+        (gancho de las pruebas de concurrencia, como ``closure.ClosureService``)."""
 
     # --- pasos -----------------------------------------------------------------------------------
 

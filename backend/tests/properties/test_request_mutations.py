@@ -123,6 +123,18 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "root_cause_statement": "El trazado de la zona mezcla los flujos de carga y de paso",
         "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
     },
+    # ``professional_license`` es opcional a nivel de esquema (la licencia que falta es
+    # ``signer_license_missing``, no ``invalid_request``): queda fuera, como ``verification_note``.
+    ("POST", "/loop/findings/{finding_state_id}/closure"): {
+        "closure_description": "Se verificó el resguardo fijo instalado en el acceso a la zona",
+    },
+    # ``reason_text`` es opcional a nivel de esquema (sin motivo es ``reopening_reason_required``,
+    # no ``invalid_request``): queda fuera, como ``expected_outcome`` y ``deadline_days``.
+    ("POST", "/loop/findings/{finding_state_id}/reopening"): {
+        "action_type": "engineering",
+        "action_description": "Ampliar el resguardo fijo para cubrir el acceso lateral",
+        "assignee_user_id": str(uuid.uuid4()),
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -199,6 +211,8 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/loop/actions/{action_id}/evidence"),
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
+        ("POST", "/loop/findings/{finding_state_id}/closure"),
+        ("POST", "/loop/findings/{finding_state_id}/reopening"),
         ("POST", "/accreditation/exports"),
         ("POST", "/loop/review-queue/{detection_id}/resolution"),
     }
@@ -213,6 +227,8 @@ ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     ("POST", "/loop/actions/{action_id}/evidence"): 404,
     ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"): 404,
     ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"): 404,
+    ("POST", "/loop/findings/{finding_state_id}/closure"): 404,
+    ("POST", "/loop/findings/{finding_state_id}/reopening"): 404,
     ("POST", "/accreditation/exports"): 404,
     ("POST", "/loop/review-queue/{detection_id}/resolution"): 404,
 }

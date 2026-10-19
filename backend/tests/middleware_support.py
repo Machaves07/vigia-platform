@@ -43,6 +43,8 @@ from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STAT
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application import actions as actions_module
 from vigia_platform.loop.application import classification as classification_module
+from vigia_platform.loop.application import closure as closure_module
+from vigia_platform.loop.application import reopening as reopening_module
 from vigia_platform.loop.application import review_queue as review_queue_module
 from vigia_platform.loop.application import root_cause as root_cause_module
 from vigia_platform.loop.config.parameters import (
@@ -228,6 +230,54 @@ class ActionsDouble:
         raise ResourceNotFound()
 
 
+class ClosureDouble:
+    """Doble de ``ClosureService`` para el arnés, sin base (VIG-233).
+
+    Hace las comprobaciones de forma que no miran la base (los textos y la licencia); un cuerpo
+    válido no encuentra ningún hallazgo sintético (``ResourceNotFound``)."""
+
+    async def close(
+        self,
+        context: ScopeContext,
+        finding_state_id: uuid.UUID,
+        *,
+        closure_description: object,
+        verification_note: object = None,
+        professional_license: object = None,
+    ) -> Any:
+        module = closure_module
+        module._text(closure_description, module._DESCRIPTION_FIELD, required=True)
+        module._text(verification_note, module._NOTE_FIELD, required=False)
+        module._license(professional_license)
+        raise ResourceNotFound()
+
+
+class ReopeningDouble:
+    """Doble de ``ReopeningService`` para el arnés, sin base (VIG-233).
+
+    Hace las comprobaciones de forma que no miran la base (el motivo y la acción nueva); un
+    cuerpo válido no encuentra ningún hallazgo sintético (``ResourceNotFound``)."""
+
+    async def reopen(
+        self,
+        context: ScopeContext,
+        finding_state_id: uuid.UUID,
+        *,
+        reason_text: object,
+        action_type: object,
+        action_description: object,
+        expected_outcome: object = None,
+        assignee_user_id: object,
+        deadline_days: object = None,
+    ) -> Any:
+        reopening_module._reason(reason_text)
+        actions_module.parse_action_type(action_type)
+        actions_module.action_text(
+            action_description, actions_module.DESCRIPTION_FIELD, required=True
+        )
+        raise ResourceNotFound()
+
+
 class RootCauseDouble:
     """Doble de ``RootCauseService`` para el arnés, sin base (TASK-315).
 
@@ -325,7 +375,7 @@ class ReviewQueueDouble:
 
 def loop_state(clock: Any) -> dict[str, Any]:
     """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración,
-    clasificación, acciones y evidencia, causa raíz y cola de revisión)."""
+    clasificación, acciones y evidencia, causa raíz, cierre y reapertura, y cola de revisión)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
         LOOP_STATE_KEY: LoopHttp(
@@ -334,6 +384,8 @@ def loop_state(clock: Any) -> dict[str, Any]:
             actions=cast(Any, ActionsDouble()),
             evidence=cast(Any, ActionsDouble()),
             root_cause=cast(Any, RootCauseDouble()),
+            closure=cast(Any, ClosureDouble()),
+            reopening=cast(Any, ReopeningDouble()),
             review_queue=cast(Any, ReviewQueueDouble()),
         ),
     }
