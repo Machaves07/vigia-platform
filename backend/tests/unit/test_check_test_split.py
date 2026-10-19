@@ -2,10 +2,10 @@
 reparten su colección.
 
 Criterios de aceptación de VIG-198 y VIG-199: la unión de los grupos de pytest-split es la
-colección completa de cada trabajo repartido (``-m "not integration"`` en ``ci.yml``;
-``-m "not integration" tests/properties`` y ``-m integration tests/properties`` en
-``nightly.yml``), sin pruebas fuera ni duplicadas, y la comprobación falla si un archivo queda
-fuera. Aquí se fijan:
+colección completa de cada trabajo repartido (``-m "not integration"`` y ``-m integration
+--ignore=tests/load`` en ``ci.yml``; ``-m "not integration" tests/properties`` y ``-m integration
+tests/properties`` en ``nightly.yml``), sin pruebas fuera ni duplicadas, y la comprobación falla si
+un archivo queda fuera. Aquí se fijan:
 
 - la comprobación estática sobre los flujos reales y, en negativo, sobre flujos sintéticos que
   sacan pruebas antes del reparto, nombran otras rutas o numeran mal la matriz;
@@ -29,6 +29,7 @@ from tests.conftest import CI_FIXED_SEED
 from tools.check_test_split import (
     BACKEND,
     CI,
+    CI_INTEGRATION_SPEC,
     NIGHTLY,
     NIGHTLY_INTEGRATION_SPEC,
     NIGHTLY_SUITE_SPEC,
@@ -47,6 +48,11 @@ _COMMAND = (
     'uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile=ci -m "not '
     'integration" --splits=4 --group="$GRUPO" --splitting-algorithm=least_duration '
     "--durations-path=.test_durations"
+)
+_INTEGRATION_COMMAND = (
+    'uv run --frozen coverage run -m pytest -q -p no:cacheprovider --hypothesis-profile="$PERFIL" '
+    '-m integration --ignore=tests/load --splits=4 --group="$GRUPO" '
+    "--splitting-algorithm=least_duration --durations-path=.test_durations_integracion"
 )
 _NIGHTLY_COMMAND = (
     "uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration "
@@ -78,6 +84,10 @@ def _nightly_workflow(command: str = _NIGHTLY_COMMAND, groups: str = "[1, 2, 3, 
     return _workflow(command, groups, job_id=NIGHTLY_INTEGRATION_SPEC.job_id)
 
 
+def _integration_workflow(command: str = _INTEGRATION_COMMAND) -> str:
+    return _workflow(command, job_id=CI_INTEGRATION_SPEC.job_id)
+
+
 # --- Los flujos del repositorio -----------------------------------------------------------------
 
 
@@ -87,6 +97,18 @@ def test_the_ci_workflow_splits_without_excluding_anything() -> None:
     assert job.groups == (1, 2, 3, 4)
     assert job.option("--splits") == "4"
     assert job.for_group(3)[job.arguments.index("--group=$GRUPO")] == "--group=3"
+
+
+def test_the_ci_integration_groups_split_everything_but_the_load_suite() -> None:
+    job = read_job(CI.read_text(encoding="utf-8"), CI_INTEGRATION_SPEC.job_id)
+    assert static_problems(job, CI_INTEGRATION_SPEC) == []
+    assert job.groups == (1, 2, 3, 4)
+    assert job.option("--ignore") == "tests/load"
+    assert job.option("--durations-path") == ".test_durations_integracion"
+    # El perfil de la orden es el de la variable del paso; la recolección lo sustituye.
+    assert job.option("--hypothesis-profile") == "$PERFIL"
+    assert "--hypothesis-profile=pr" in job.for_group(2, "pr")
+    assert "--group=2" in job.for_group(2, "pr")
 
 
 @pytest.mark.parametrize("spec", [NIGHTLY_SUITE_SPEC, NIGHTLY_INTEGRATION_SPEC])
@@ -100,9 +122,10 @@ def test_the_nightly_property_jobs_split_tests_properties_without_excluding_anyt
     assert (BACKEND / spec.durations).is_file()
 
 
-def test_the_three_split_jobs_are_checked() -> None:
+def test_the_four_split_jobs_are_checked() -> None:
     assert [(spec.workflow, spec.job_id) for spec in SPECS] == [
         (CI, "backend-pruebas"),
+        (CI, "backend-integracion-grupos"),
         (NIGHTLY, "propiedades-suite"),
         (NIGHTLY, "propiedades-integracion"),
     ]
@@ -230,6 +253,45 @@ def test_the_synthetic_nightly_workflow_passes() -> None:
 def test_a_broken_nightly_split_fails(command: str, expected: str) -> None:
     job = read_job(_nightly_workflow(command), NIGHTLY_INTEGRATION_SPEC.job_id)
     assert expected in static_problems(job, NIGHTLY_INTEGRATION_SPEC)
+
+
+def test_the_synthetic_integration_workflow_passes() -> None:
+    job = read_job(_integration_workflow(), CI_INTEGRATION_SPEC.job_id)
+    assert static_problems(job, CI_INTEGRATION_SPEC) == []
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (
+            _INTEGRATION_COMMAND.replace("--ignore=tests/load ", ""),
+            "la orden debe llevar exactamente --ignore=tests/load: []",
+        ),
+        (
+            f"{_INTEGRATION_COMMAND} --ignore=tests/properties",
+            "la orden saca pruebas antes del reparto: --ignore=tests/properties",
+        ),
+        (
+            f"{_INTEGRATION_COMMAND} tests/properties",
+            "la orden corre todo testpaths, sin rutas: tests/properties",
+        ),
+        (
+            _INTEGRATION_COMMAND.replace("-m integration", '-m "not integration"'),
+            "la orden debe seleccionar exactamente -m \"integration\": ['not integration']",
+        ),
+        (
+            _INTEGRATION_COMMAND.replace('"$PERFIL"', "nightly"),
+            'la orden debe pasar --hypothesis-profile=ci o --hypothesis-profile="$PERFIL"',
+        ),
+        (
+            _INTEGRATION_COMMAND.replace(".test_durations_integracion", ".test_durations"),
+            "la orden debe leer los tiempos de --durations-path=.test_durations_integracion",
+        ),
+    ],
+)
+def test_a_broken_integration_split_fails(command: str, expected: str) -> None:
+    job = read_job(_integration_workflow(command), CI_INTEGRATION_SPEC.job_id)
+    assert expected in static_problems(job, CI_INTEGRATION_SPEC)
 
 
 def test_main_checks_every_split_job_of_a_given_workflow(
@@ -386,6 +448,50 @@ def nightly_project(project: Path) -> Path:
     durations = {f"tests/properties/test_p.py::test_p{n}": 100.0 + n for n in range(2)}
     (project / ".test_durations_nightly").write_text(json.dumps(durations), encoding="utf-8")
     return project
+
+
+@pytest.fixture
+def integration_project(project: Path) -> Path:
+    """El proyecto sintético con pruebas de integración en varios directorios y un ``tests/load``
+    de integración que los grupos no deben correr (va en «backend (carga ci)»)."""
+    for directory in ("integration", "properties", "load"):
+        (project / "tests" / directory).mkdir()
+        for name in ("m", "n", "o"):
+            (project / "tests" / directory / f"test_{directory}_{name}.py").write_text(
+                "import pytest\n\n"
+                + "".join(
+                    f"@pytest.mark.integration\ndef test_{name}{n}():\n    pass\n\n"
+                    for n in range(2)
+                )
+                + f"def test_{name}_sin_base():\n    pass\n",
+                encoding="utf-8",
+            )
+    return project
+
+
+def test_the_integration_groups_are_a_partition_without_the_load_suite(
+    integration_project: Path,
+) -> None:
+    workflow = _integration_workflow()
+    assert check(workflow, collect=True, root=integration_project, spec=CI_INTEGRATION_SPEC) == []
+
+
+def test_a_file_dropped_from_the_integration_groups_is_detected(
+    integration_project: Path,
+) -> None:
+    """Mutación: un ``conftest`` saca ``tests/properties/test_properties_n.py`` del grupo que le
+    toca; la comprobación lo dice prueba a prueba."""
+    with (integration_project / "tests" / "conftest.py").open("a", encoding="utf-8") as conftest:
+        conftest.write(
+            "import pytest\n\n"
+            "@pytest.hookimpl(trylast=True)\n"
+            "def pytest_collection_modifyitems(config, items):\n"
+            "    if config.getoption('group', None):\n"
+            "        items[:] = [i for i in items if 'test_properties_n.py' not in i.nodeid]\n"
+        )
+    assert check(
+        _integration_workflow(), collect=True, root=integration_project, spec=CI_INTEGRATION_SPEC
+    ) == [f"ningún grupo corre tests/properties/test_properties_n.py::test_n{n}" for n in range(2)]
 
 
 def _nightly_ids(*names: str) -> list[str]:
