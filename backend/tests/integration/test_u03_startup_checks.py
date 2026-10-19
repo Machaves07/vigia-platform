@@ -145,6 +145,10 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
                 if events:
                     registry.register(dataclasses.replace(consumer, subscribed_events=events))
 
+        if name not in U03_EVENT_TYPES:
+            # Un evento de otra unidad (``export_requested`` en ``test_laz_bootstrap_closed``):
+            # se conserva la suscripción y el catálogo se niega a componerse, como allí se espera.
+            return dataclasses.replace(unit, event_types=event_types)
         return dataclasses.replace(unit, event_types=event_types, consumers=consumers)
     original_tasks = unit.periodic_tasks
 
