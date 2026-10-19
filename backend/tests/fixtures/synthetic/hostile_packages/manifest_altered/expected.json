@@ -1,0 +1,7 @@
+{
+  "artifact": "manifest.json",
+  "pointer": "/state_counts/open",
+  "reason": "manifest_mismatch",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}
