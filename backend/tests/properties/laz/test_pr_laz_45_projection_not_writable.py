@@ -10,8 +10,10 @@ solo en la proyección: todo campo de ``FindingState`` es función de los regist
    manejador vive en ``loop``, ``accreditation`` o ``notifications``, más los enrutadores de
    ``registration.py``) acepta en su ruta, su consulta, sus cabeceras o su cuerpo un campo con el
    nombre de un campo de estado. Hoy el catálogo está vacío salvo lo registrado; TASK-327 repite
-   la comprobación sobre las 41 operaciones. Dos canarios demuestran que la comprobación caza un
-   cuerpo con ``lifecycle_state`` y un parámetro ``overdue_days``.
+   la comprobación sobre las 41 operaciones. Los canarios demuestran que la comprobación caza un
+   cuerpo con ``lifecycle_state`` y un parámetro ``overdue_days``. Los filtros de lectura de la
+   bandeja (``READ_FILTERS``, BR-LAZ-02) se eximen solo en la consulta de un ``GET``: otros
+   canarios demuestran que siguen contando en un ``POST``, en la ruta y en una cabecera.
 3. **Escritura**: en ``src`` solo ``loop.projection.store`` escribe ``loop.finding_state`` y
    ``loop.episode`` (y ``tables.py`` los declara).
 4. **Propiedad**: sobre ``loop_projection_commands``, la fila de cada sujeto plegando **solo** sus
@@ -29,7 +31,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import pytest
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from hypothesis import given
@@ -72,6 +74,11 @@ proyección copia de ese registro: no se escriben en la fila sino en el expedien
 STATE_FIELDS: Final = (
     frozenset(FINDING_STATE_DIGEST_FIELDS) - ADDRESSING - RECORD_INPUTS | BOOKKEEPING
 )
+READ_FILTERS: Final = frozenset({"family", "tier", "lifecycle_state"})
+"""Los criterios de filtro de la bandeja (BR-LAZ-02, TASK-307): **leen** por esos campos, no los
+escriben. Se eximen **solo** como parámetros de consulta de rutas de solo lectura (``GET``); en
+cualquier otro método, en la ruta, en una cabecera o en un cuerpo siguen contando."""
+READ_ONLY_METHODS: Final = frozenset({"GET", "HEAD"})
 WRITERS: Final = {
     SRC / "loop" / "projection" / "store.py",
     SRC / "loop" / "adapters" / "postgres" / "tables.py",
@@ -126,6 +133,7 @@ def _reachable(models: Iterable[type[BaseModel]]) -> Iterator[type[BaseModel]]:
 def writable_state_fields(route: APIRoute) -> list[str]:
     """Los campos de estado que ``route`` acepta como entrada, con dónde."""
     found: list[str] = []
+    read_only = bool(route.methods) and set(route.methods) <= READ_ONLY_METHODS
     for dependant in _dependants(route.dependant):
         for kind, params in (
             ("ruta", dependant.path_params),
@@ -133,10 +141,11 @@ def writable_state_fields(route: APIRoute) -> list[str]:
             ("cabecera", dependant.header_params),
             ("cookie", dependant.cookie_params),
         ):
+            exempt = READ_FILTERS if read_only and kind == "consulta" else frozenset()
             found += [
                 f"{route.path}: {kind} {param.name}"
                 for param in params
-                if {param.name, str(param.alias)} & STATE_FIELDS
+                if {param.name, str(param.alias)} & (STATE_FIELDS - exempt)
             ]
         for body in dependant.body_params:
             if body.name in STATE_FIELDS:
@@ -194,6 +203,23 @@ def _canary_routes() -> list[APIRoute]:
     def clean(subject_id: uuid.UUID, assignee_user_id: uuid.UUID) -> None:  # pragma: no cover
         return None
 
+    # TASK-307: los filtros de lectura solo se eximen en la consulta de un GET.
+    @router.get("/canary/inbox")
+    def inbox(lifecycle_state: str = Query(), family: str = Query()) -> None:  # pragma: no cover
+        return None
+
+    @router.post("/canary/filter-post")
+    def filter_post(lifecycle_state: str = Query()) -> None:  # pragma: no cover
+        return None
+
+    @router.get("/canary/filter-header")
+    def filter_header(tier: str = Header()) -> None:  # pragma: no cover
+        return None
+
+    @router.get("/canary/filter-path/{lifecycle_state}")
+    def filter_path(lifecycle_state: str) -> None:  # pragma: no cover
+        return None
+
     return [route for route in router.routes if isinstance(route, APIRoute)]
 
 
@@ -203,6 +229,13 @@ def _canary_routes() -> list[APIRoute]:
         ("/canary/body", ["/canary/body: cuerpo _CanaryInner.lifecycle_state"]),
         ("/canary/query", ["/canary/query: consulta overdue_days"]),
         ("/canary/clean/{subject_id}", []),
+        ("/canary/inbox", []),
+        ("/canary/filter-post", ["/canary/filter-post: consulta lifecycle_state"]),
+        ("/canary/filter-header", ["/canary/filter-header: cabecera tier"]),
+        (
+            "/canary/filter-path/{lifecycle_state}",
+            ["/canary/filter-path/{lifecycle_state}: ruta lifecycle_state"],
+        ),
     ],
 )
 def test_the_check_catches_a_state_field_in_body_or_query(path: str, expected: list[str]) -> None:

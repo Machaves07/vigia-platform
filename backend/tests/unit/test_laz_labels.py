@@ -84,9 +84,14 @@ RECORD_ENUMERATIONS: Final = frozenset(
         "evidence_ref_kind",
         "blocked_term_origin",
         "metric_unit",
+        # TASK-307: los avisos cerrados de la bandeja (BR-LAZ-10, 11, 149 a 156).
+        "inbox_zone_notice",
+        "inbox_partition_notice",
+        "inbox_finding_notice",
     }
 )
-"""``package_form`` (U04-H-03) y las listas que cierran los tipos de registro (§2, §5.2)."""
+"""``package_form`` (U04-H-03), las listas que cierran los tipos de registro (§2, §5.2) y los
+avisos de la bandeja (TASK-307)."""
 
 DETAIL_CODE_ENUMERATIONS: Final = frozenset(
     {"loop_detail_code", "accreditation_detail_code", "notifications_detail_code"}

@@ -21,6 +21,7 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -63,6 +64,8 @@ class LoopHttp:
     assistant: AssistantService | None = None
     """Las dos rutas del asistente de causa raíz (LC-LAZ-13, VIG-224); ningún adaptador del
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
+    inbox: InboxService | None = None
+    """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -138,6 +141,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             outbox=services.outbox,
             clock=services.clock,
         ),
+        inbox=InboxService(database=services.database, authorizer=services.authorizer),
     )
 
 

@@ -46,6 +46,7 @@ from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
@@ -156,6 +157,7 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 outbox=services.outbox,
                 clock=services.clock,
             ),
+            inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
         ),
     }
 
@@ -328,6 +330,14 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     (
         ("GET", "/loop/assistant-requests/{request_id}"),
         Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/assistant-requests/{i.record}")),
+    ),
+    # VIG-222 (TASK-307): la bandeja con una zona de B en la consulta responde igual que con una
+    # inexistente (not_found, nunca forbidden ni una página vacía con avisos de B).
+    (
+        ("GET", "/loop/findings"),
+        Case(
+            Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
+        ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
     (
