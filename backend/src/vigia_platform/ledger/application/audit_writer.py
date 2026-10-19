@@ -108,6 +108,12 @@ class AuditOperation(enum.StrEnum):
     COVERAGE_READ = "coverage_read"
     AUDIT_READ = "audit_read"
     EXPORT_REQUESTED = "export_requested"
+    EXPORT_DOWNLOAD_GRANTED = "export_download_granted"
+    """U-04 (LC-LAZ-20, TASK-345; PAT-LAZ-SEG-04, PR-LAZ-60): una URL de descarga de 15 min de un
+    volumen (SUP-U05-40) o del documento portátil (SUP-U05-23) de una exportación, una entrada por
+    URL en la transacción que la emite, con ``resource`` ``export`` y ``filters`` ``{artifact,
+    sha256, records = access_grant_not_download, expires_at}``: registra la concesión de acceso,
+    no la descarga efectiva."""
     INTEGRITY_VERIFICATION = "integrity_verification"
     CHECKPOINT = "checkpoint"
     KEY_ROTATED = "key_rotated"

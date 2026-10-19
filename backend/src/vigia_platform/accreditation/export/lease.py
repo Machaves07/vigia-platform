@@ -202,10 +202,11 @@ _PROGRESS: Final = text(
 _INSERT_PACKAGE: Final = text(
     "INSERT INTO accreditation.export_package (export_id, organization_id, plant_id,"
     " document_sha256, archive_sha256, manifest, size_bytes, artifact_count,"
-    " checkpoint_record_ids, verifier_version)"
+    " checkpoint_record_ids, verifier_version, stored_objects)"
     " VALUES (:export_id, :organization_id, :plant_id, :document_sha256, :archive_sha256,"
     " CAST(:manifest AS jsonb), :size_bytes, :artifact_count,"
-    " CAST(:checkpoint_record_ids AS uuid[]), :verifier_version)"
+    " CAST(:checkpoint_record_ids AS uuid[]), :verifier_version,"
+    " CAST(:stored_objects AS jsonb))"
 )
 _READY: Final = text(
     "UPDATE accreditation.export_request SET state = 'ready', progress_percent = 100,"
@@ -363,6 +364,7 @@ class SqlExportLeaseStore:
                     "artifact_count": package.artifact_count,
                     "checkpoint_record_ids": [str(value) for value in checkpoint_ids],
                     "verifier_version": package.verifier_version,
+                    "stored_objects": json.dumps(package.stored.to_json()),
                 },
             )
             row = (

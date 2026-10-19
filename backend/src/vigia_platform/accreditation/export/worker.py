@@ -16,8 +16,9 @@ Un intento:
    partición de la organización (el despachador no solapa dos cabezas de una partición) y la
    adquisición exige que la organización no tenga otra en curso.
 2. **Retoma** (``attempt_count`` > 1): se **aborta la subida por partes** que dejó el intento
-   anterior por su ``multipart_upload_id`` guardado (``UploadPort``) antes de componer de nuevo
-   **desde cero**: la composición es determinista y no acumula estado parcial (NFR-LAZ-12).
+   anterior por su ``multipart_upload_id`` guardado, y las demás sin terminar de la exportación
+   (``UploadPort``, TASK-345), antes de componer de nuevo **desde cero**: la composición es
+   determinista y no acumula estado parcial (NFR-LAZ-12).
 3. **Primer intento** (U04-H-08): ``CheckpointPort.write_checkpoints_now`` sobre las cadenas
    cubiertas (expediente de la planta y de la organización, y auditoría; BR-LAZ-91) y
    ``generated_at``, que se **fijan** en la solicitud; una retoma los **reutiliza** y nunca vuelve
@@ -68,6 +69,7 @@ from vigia_platform.accreditation.export.lease import (
     SqlExportLeaseStore,
 )
 from vigia_platform.accreditation.export.state import DOWNLOAD_VALIDITY
+from vigia_platform.accreditation.export.volumes import ExportLocation
 from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain, CheckpointResult
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
@@ -254,9 +256,13 @@ class ExportWorker:
             raise
 
     async def _prepare(self, context: ScopeContext, lease: ExportLease) -> ExportLease:
-        if lease.retaken and lease.previous_upload_id is not None:
-            await self._uploads.abort_previous_upload(lease.previous_upload_id)
-            await self._leases.record_upload(context, lease, None, self._now())
+        if lease.retaken:
+            # Siempre al retomar, aunque no conste ninguna: el intento anterior pudo morir entre
+            # abrir la subida y guardarla (TASK-345 barre las del prefijo de la exportación).
+            location = ExportLocation(lease.organization_id, lease.plant_id, lease.export_id)
+            await self._uploads.abort_previous_upload(location, lease.previous_upload_id)
+            if lease.previous_upload_id is not None:
+                await self._leases.record_upload(context, lease, None, self._now())
         if lease.generated_at is None:
             results = await self._checkpoints.write_checkpoints_now(
                 context, covered_chains(lease.plant_id)

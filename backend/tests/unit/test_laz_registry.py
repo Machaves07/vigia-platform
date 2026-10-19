@@ -30,11 +30,15 @@ from fastapi.routing import APIRoute
 
 from tests.properties.laz.strategies.u04_records import u04_event_registry, u04_registry
 from vigia_platform.accreditation import registration as accreditation_registration
-from vigia_platform.accreditation.adapters.http.services import ACCREDITATION_STATE_KEY
+from vigia_platform.accreditation.adapters.http.services import (
+    ACCREDITATION_STATE_KEY,
+    AccreditationHttp,
+)
 from vigia_platform.accreditation.events import (
     ACCREDITATION_EVENT_TYPES,
     ACCREDITATION_INTERNAL_EVENT_TYPES,
 )
+from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
 from vigia_platform.loop import registration
@@ -162,12 +166,20 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
         elif name == "accreditation":
-            # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker.
+            # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker;
+            # TASK-345: SUP-U05-40 y 23 (las descargas, con el depósito de evidencias).
             assert routes == [
                 ("POST", "/accreditation/exports"),
                 ("GET", "/accreditation/exports/{export_id}"),
+                ("GET", "/accreditation/exports/{export_id}/download"),
+                ("POST", "/accreditation/exports/{export_id}/download-url"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
+            http = state[ACCREDITATION_STATE_KEY]
+            assert isinstance(http, AccreditationHttp)
+            assert isinstance(http.downloads, ExportDownloads)
+            bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
+            assert isinstance(bare, AccreditationHttp) and bare.downloads is None
         else:
             assert routes == [] and state == {}
         unit.periodic_tasks(tasks, services)

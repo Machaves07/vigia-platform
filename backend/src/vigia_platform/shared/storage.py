@@ -20,7 +20,11 @@ depósito (``vigia-evidence``, ``vigia-archive`` o ``vigia-edge``) y ofrece:
   contenido y cada cabecera de ``required_headers`` van **firmados**: un ``PUT`` sin ellos, o
   con otro valor, no pasa la firma, y unos bytes que no coinciden con la suma dan ``BadDigest``;
 - ``create_multipart``, ``presign_part``, ``complete_multipart`` y ``abort_multipart``: la
-  subida por partes de U-04, con la suma SHA-256 de cada parte firmada en su URL.
+  subida por partes de U-04, con la suma SHA-256 de cada parte firmada en su URL;
+- ``upload_part`` y ``pending_multipart_uploads`` (solo ``S3Storage``, fuera de
+  ``StoragePort``): la subida por partes que escribe el propio proceso de trabajo (el paquete
+  exportado de U-04, TASK-345) y las subidas sin terminar de un prefijo, para abortarlas al
+  retomar.
 
 No existe listado de objetos (BR-NUC-66): el puerto no lo ofrece.
 
@@ -845,3 +849,55 @@ class S3Storage:
             )
 
         await self._call("abort_multipart", abort)
+
+    async def upload_part(
+        self, key: str, upload_id: str, part_number: int, body: bytes
+    ) -> CompletedPart:
+        """Sube una parte desde el propio proceso (U-04, TASK-345) con su suma SHA-256.
+
+        La suma se calcula en el pool de hilos, con la llamada, y viaja en
+        ``x-amz-checksum-sha256``: el almacén rechaza la parte si los bytes no coinciden.
+        """
+        _require_key(key)
+        if not upload_id:
+            raise ValueError("upload_id es obligatorio")
+        if type(part_number) is not int or not 1 <= part_number <= _MAX_PART_NUMBER:
+            raise ValueError("part_number debe estar entre 1 y 10000")
+
+        def upload() -> CompletedPart:
+            digest = hashlib.sha256(body).digest()
+            response = self._client.upload_part(
+                Bucket=self._settings.bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=part_number,
+                Body=body,
+                ChecksumSHA256=base64.b64encode(digest).decode("ascii"),
+            )
+            return CompletedPart(part_number, str(response["ETag"]), digest.hex())
+
+        return await self._call("upload_part", upload)
+
+    async def pending_multipart_uploads(self, prefix: str) -> tuple[tuple[str, str], ...]:
+        """Subidas por partes **sin terminar** bajo ``prefix``: ``(clave, upload_id)``.
+
+        Es ``ListMultipartUploads`` (``s3:ListBucketMultipartUploads``, infraestructura de U-04
+        §9.1, para el abandono al retomar de PAT-LAZ-RES-01): devuelve subidas abiertas, **nunca
+        objetos**; no es un listado de objetos (BR-NUC-66). ``prefix`` es un prefijo de clave
+        completo terminado en ``/``. A lo sumo 1 000 subidas por llamada.
+        """
+        if not isinstance(prefix, str) or not prefix.endswith("/"):
+            raise ValueError("el prefijo termina en /")
+        _require_key(prefix.removesuffix("/"))
+
+        def pending() -> tuple[tuple[str, str], ...]:
+            response = self._client.list_multipart_uploads(
+                Bucket=self._settings.bucket, Prefix=prefix, MaxUploads=1000
+            )
+            return tuple(
+                (str(upload["Key"]), str(upload["UploadId"]))
+                for upload in response.get("Uploads", [])
+                if str(upload["Key"]).startswith(prefix)
+            )
+
+        return await self._call("pending_multipart_uploads", pending)

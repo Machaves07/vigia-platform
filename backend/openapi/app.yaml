@@ -4335,6 +4335,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exports/{export_id}/download":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Volúmenes de una exportación lista, con una URL de descarga de 15 min por volumen"
+      "operationId": "export_download_accreditation_exports__export_id__download_get"
+      "parameters":
+        - "name": "export_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Export Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportDownloadOut"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportConflictOut"
+          "description": "Conflict"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exports/{export_id}/download-url":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "URL de descarga de 15 min del documento portátil de una exportación lista"
+      "operationId": "export_document_url_accreditation_exports__export_id__download_url_post"
+      "parameters":
+        - "name": "export_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Export Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportDocumentUrlOut"
+        "409":
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExportConflictOut"
+          "description": "Conflict"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
 "components":
   "schemas":
     "AcceptanceStatus":
@@ -7592,6 +7658,77 @@
         - "kind"
         - "id"
       "title": "EvidenceRefOut"
+    "ExportConflictOut":
+      "properties":
+        "code":
+          "type": "string"
+          "title": "Code"
+        "message_es":
+          "type": "string"
+          "title": "Message Es"
+        "correlation_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Correlation Id"
+        "export_state":
+          "$ref": "#/components/schemas/ExportState"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "message_es"
+        - "correlation_id"
+        - "export_state"
+      "title": "ExportConflictOut"
+      "description": "409: el cuerpo de error común más el estado que se muestra de la exportación."
+    "ExportDocumentUrlOut":
+      "properties":
+        "export_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Export Id"
+        "document_sha256":
+          "type": "string"
+          "title": "Document Sha256"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "export_id"
+        - "document_sha256"
+        - "size_bytes"
+        - "url"
+        - "expires_at"
+      "title": "ExportDocumentUrlOut"
+    "ExportDownloadOut":
+      "properties":
+        "export_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Export Id"
+        "archive_sha256":
+          "type": "string"
+          "title": "Archive Sha256"
+        "volumes":
+          "items":
+            "$ref": "#/components/schemas/VolumeDownloadView"
+          "type": "array"
+          "title": "Volumes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "export_id"
+        - "archive_sha256"
+        - "volumes"
+      "title": "ExportDownloadOut"
     "ExportRequestBody":
       "properties":
         "plant_id":
@@ -12083,6 +12220,36 @@
         - "kind"
       "title": "VerifyRequest"
       "description": "La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o\n``audit`` (sin planta). Sin campos de más; ``plant_id`` es un UUID en texto."
+    "VolumeDownloadView":
+      "properties":
+        "volume":
+          "type": "integer"
+          "title": "Volume"
+        "name":
+          "type": "string"
+          "title": "Name"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "volume"
+        - "name"
+        - "size_bytes"
+        - "sha256"
+        - "url"
+        - "expires_at"
+      "title": "VolumeDownloadView"
     "WalkTestKind":
       "type": "string"
       "enum":
