@@ -322,7 +322,12 @@ def test_api_boots_with_the_production_root_and_becomes_ready(stack: Stack) -> N
 def test_worker_boots_registers_u02_and_stops_in_order(stack: Stack) -> None:
     # El arranque de bootstrap ya sincronizó el catálogo: se borra para que lo escriba el worker.
     stack.fetch("DELETE FROM shared.periodic_task")
-    stack.fetch("DELETE FROM shared.consumer")
+    # Los consumidores con entregas pendientes se quedan (la clave foránea de ``outbox_delivery``):
+    # ``notification_engine`` (TASK-324) está suscrito a eventos que el bootstrap ya publicó.
+    stack.fetch(
+        "DELETE FROM shared.consumer AS c WHERE NOT EXISTS"
+        " (SELECT 1 FROM shared.outbox_delivery AS d WHERE d.consumer_name = c.consumer_name)"
+    )
     port = _free_port()
     with stack.start("vigia-worker", VIGIA_WORKER_HEALTH_PORT=str(port)) as worker:
         worker.wait_for(lambda: "worker en marcha" in worker.output(), "worker en marcha")

@@ -75,6 +75,7 @@ from vigia_platform.accreditation.export.lease import LeaseLost, SqlExportLeaseS
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
 from vigia_platform.accreditation.export.volumes import MANIFEST_NAME, ExportLocation
 from vigia_platform.accreditation.export.worker import ExportWorker
+from vigia_platform.accreditation.verifier_bundle import VERIFIER_VERSION
 from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.ledger.adapters.checkpoint_store import SqlCheckpointStore
 from vigia_platform.ledger.application.evidence_read import EvidenceService
@@ -204,7 +205,8 @@ def test_the_real_composer_ends_ready_with_export_produced_and_export_available(
     assert content["document_sha256"] == package["document_sha256"]
     assert content["finding_count"] == manifest["finding_count"] == 6
     assert content["checkpoint_record_ids"] == [str(v) for v in row["checkpoint_record_ids"]]
-    assert content["verifier_version"] == "absent"
+    # TASK-346: el verificador viaja y su versión queda en el expediente (NFR-LAZ-53).
+    assert content["verifier_version"] == manifest["verifier_version"] == VERIFIER_VERSION
     (event,) = stack.fetch(
         "SELECT payload::text AS payload FROM shared.outbox_event WHERE organization_id = $1"
         " AND event_name = 'export_available'",
@@ -505,6 +507,7 @@ def test_pr_laz_26_on_the_real_ledger_with_the_brute_force_oracle(world: LoopWor
         places=SqlExportPlaces(database),
         blobs=doubles,
         episodes=SqlEpisodeHistory(database),
+        signer=doubles,
     )
     store = MemoryExportStore()
     composer = ExportComposer(stream=ExportStream(store=store, settings=SETTINGS), ports=ports)

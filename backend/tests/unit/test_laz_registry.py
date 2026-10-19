@@ -4,11 +4,12 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` con ``review_reminders`` (TASK-309), ``U04_CONSUMERS`` con ``export_worker`` y
-  ``review_queue``; en ``ROUTERS``, las dos rutas de adjuntos de cierre (TASK-310), las dos de la
-  configuración del lazo (TASK-304), la de la clasificación (TASK-308), las dos de la cola de
-  revisión (TASK-309) y las de la acción y su evidencia (TASK-311) de ``loop`` y las dos de
-  exportación de ``accreditation`` (TASK-317).
+  ``U04_TASKS`` con ``review_reminders`` (TASK-309), ``U04_CONSUMERS`` con ``export_worker``,
+  ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de
+  adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la de la
+  clasificación (TASK-308), las dos de la cola de revisión (TASK-309) y las de la acción y su
+  evidencia (TASK-311) de ``loop``, las dos de exportación de ``accreditation`` (TASK-317) y
+  ``GET /notifications`` (TASK-324).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -60,6 +61,12 @@ from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYP
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
 from vigia_platform.notifications import registration as notifications_registration
+from vigia_platform.notifications.adapters.http.routes import notifications_router
+from vigia_platform.notifications.adapters.http.services import (
+    NOTIFICATIONS_STATE_KEY,
+    NotificationsHttp,
+)
+from vigia_platform.notifications.catalog import subscribed_events
 from vigia_platform.notifications.events import NOTIFICATIONS_EVENT_TYPES
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.observability.metrics import get_metrics
@@ -131,7 +138,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # TASK-310: los adjuntos de cierre en loop; TASK-304, TASK-308 y TASK-315: configuración,
     # clasificación y causa raíz; TASK-311: la acción correctiva y su evidencia;
     # TASK-317: la exportación (dos rutas, export_worker con concurrencia 1 y su app.state) en
-    # accreditation. Nada más todavía.
+    # accreditation; TASK-324: GET /notifications y notification_engine en notifications.
     units = {unit.name: unit for unit in registered_units()}
     tasks = PeriodicTaskRegistry()
     consumers = ConsumerRegistry()
@@ -193,7 +200,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
             assert isinstance(bare, AccreditationHttp) and bare.downloads is None
         else:
-            assert routes == [] and state == {}
+            # TASK-324: SUP-U05-33 en su forma mínima, su app.state y notification_engine.
+            assert routes == [("GET", "/notifications")]
+            assert set(state) == {NOTIFICATIONS_STATE_KEY}
+            assert isinstance(state[NOTIFICATIONS_STATE_KEY], NotificationsHttp)
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
     # TASK-309: review_reminders, horaria, por organización.
@@ -206,6 +216,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
         ("export_worker", ActorUnit.U04, ("export_requested",)),
         ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
+        ("notification_engine", ActorUnit.U04, subscribed_events()),
         ("review_queue", ActorUnit.U04, ("detection_for_review_received",)),
     ]
     # TASK-316: el asistente declara su dependencia externa (cortacircuito de U-02).
@@ -221,10 +232,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         assistant_router,
         findings_router,
     ) == registration.ROUTERS
-    assert notifications_registration.ROUTERS == ()
+    assert (notifications_router,) == notifications_registration.ROUTERS
     assert notifications_registration.TASK_REGISTRARS == ()
     assert len(registration.TASK_REGISTRARS) == 1  # review_reminders (TASK-309)
-    assert notifications_registration.CONSUMER_REGISTRARS == ()
+    assert len(notifications_registration.CONSUMER_REGISTRARS) == 1
     assert len(registration.CONSUMER_REGISTRARS) == 3
     assert accreditation_registration.TASK_REGISTRARS == ()
     assert {
@@ -235,6 +246,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         "loop_projection": 4,
         "assistant_worker": 2,
         "review_queue": 2,
+        "notification_engine": 4,
     }
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
     assert (

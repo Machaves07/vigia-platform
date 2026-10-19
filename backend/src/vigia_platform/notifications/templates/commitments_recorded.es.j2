@@ -1,0 +1,3 @@
+{# Plantilla de commitments_recorded (TASK-324): solo hechos de la carga, nunca una cadena. #}
+{% block title %}Compromisos registrados{% endblock %}
+{% block body %}Se registraron compromisos sobre el paquete mensual de una zona de su alcance{% if commitment_count is not none %} ({{ commitment_count }}){% endif %}. Abra Vigía con su sesión para ver el detalle.{% endblock %}

@@ -1,0 +1,3 @@
+{# Plantilla de export_available (TASK-324): solo hechos de la carga, nunca una cadena. #}
+{% block title %}Exportación lista para descargar{% endblock %}
+{% block body %}La exportación que solicitó está lista{% if expires_date %}; la descarga vence el {{ expires_date }} (UTC){% endif %}. Abra Vigía con su sesión para ver el detalle.{% endblock %}
