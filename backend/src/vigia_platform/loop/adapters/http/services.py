@@ -21,6 +21,7 @@ from vigia_platform.ledger.application.coverage import CoverageService
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.evidence import EvidenceService
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
@@ -59,6 +60,8 @@ class LoopHttp:
     evidence: EvidenceService | None = None
     """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
     verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
+    inbox: InboxService | None = None
+    """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -128,6 +131,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             ),
             clock=services.clock,
         ),
+        inbox=InboxService(database=services.database, authorizer=services.authorizer),
     )
 
 
