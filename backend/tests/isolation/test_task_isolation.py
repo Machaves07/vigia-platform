@@ -106,6 +106,13 @@ _U02_WHY = (
     " (tests/integration/test_worker_iteration.py y la RLS de cada tabla)"
 )
 
+_U04_WHY = (
+    "tarea de U-04 por organización con context_for_organization (igual patrón que U-02);"
+    " su aislamiento es de loop.review_queue (tests/integration/test_loop_review_queue.py::"
+    "test_the_reminder_task_only_touches_its_own_organization), con la RLS de la tabla"
+    " (BR-NUC-02), no con el arnés de fingerprinting de este archivo"
+)
+
 TASK_CASES: Final[dict[str, TaskCase]] = {
     # --- U-03 (LC-GOB-18): las seis por organización y la global (D-7) ---
     "detect_mute_nodes": TaskCase(TaskKind.PER_ORGANIZATION),
@@ -142,6 +149,8 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
             "write_checkpoints",
         )
     },
+    # --- U-04 (TASK-309) ---
+    "review_reminders": TaskCase(TaskKind.INHERITED, _U04_WHY),
 }
 """Un caso por tarea registrada en la raíz (``uncovered_tasks`` lo exige)."""
 

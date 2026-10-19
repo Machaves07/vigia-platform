@@ -68,6 +68,11 @@ BODIES: dict[str, dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    "/loop/review-queue/{detection_id}/resolution": {
+        "outcome": "review_confirmed",
+        "reason_category": "real_coexistence",
+        "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
+    },
     "/loop/findings/{finding_state_id}/actions": {
         "action_type": "engineering",
         "action_description": "Instalar un resguardo fijo en el acceso a la zona",
@@ -139,6 +144,7 @@ def _url(path: str) -> str:
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{export_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
+        .replace("{detection_id}", str(uuid.uuid4()))
         .replace("{analysis_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
     )
@@ -170,6 +176,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("PUT", "/loop/plants/{plant_id}/configuration"),
         # Clasificación de un hallazgo de U-04 (TASK-308).
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        # Resolución de la cola de revisión de U-04 (TASK-309).
+        ("POST", "/loop/review-queue/{detection_id}/resolution"),
         # Acción correctiva y su evidencia de U-04 (TASK-311).
         ("POST", "/loop/findings/{finding_state_id}/actions"),
         ("POST", "/loop/actions/{action_id}/evidence"),

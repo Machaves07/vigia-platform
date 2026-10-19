@@ -4116,6 +4116,77 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/review-queue":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Cola de revisión pendiente, por plazo ascendente, por páginas de hasta 200"
+      "operationId": "list_review_queue_loop_review_queue_get"
+      "parameters":
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewQueuePageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/review-queue/{detection_id}/resolution":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Resuelve un elemento de la cola de revisión con motivo validado (registro nuevo)"
+      "operationId": "resolve_loop_review_queue__detection_id__resolution_post"
+      "parameters":
+        - "name": "detection_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Detection Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReviewResolutionBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewResolutionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/actions":
     "post":
       "tags":
@@ -11992,6 +12063,152 @@
         - "reason_es"
         - "effective_from"
       "title": "RetirementBody"
+    "ReviewQueueItemOut":
+      "properties":
+        "detection_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Detection Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "standard_version":
+          "type": "integer"
+          "title": "Standard Version"
+        "max_confidence":
+          "type": "number"
+          "title": "Max Confidence"
+        "review_threshold":
+          "type": "number"
+          "title": "Review Threshold"
+        "publication_threshold":
+          "type": "number"
+          "title": "Publication Threshold"
+        "review_reason":
+          "type": "string"
+          "title": "Review Reason"
+        "observability_state_at_event":
+          "type": "string"
+          "title": "Observability State At Event"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "review_due_at":
+          "type": "string"
+          "title": "Review Due At"
+        "reminders_sent":
+          "type": "integer"
+          "title": "Reminders Sent"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "detection_id"
+        - "plant_id"
+        - "zone_id"
+        - "family"
+        - "standard_id"
+        - "standard_version"
+        - "max_confidence"
+        - "review_threshold"
+        - "publication_threshold"
+        - "review_reason"
+        - "observability_state_at_event"
+        - "occurred_at"
+        - "received_at"
+        - "review_due_at"
+        - "reminders_sent"
+      "title": "ReviewQueueItemOut"
+    "ReviewQueuePageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/ReviewQueueItemOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "ReviewQueuePageOut"
+    "ReviewResolutionBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "reason_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Category"
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+      "additionalProperties": false
+      "type": "object"
+      "title": "ReviewResolutionBody"
+      "description": "La decisión: salida, categoría y motivo (20 a 1000 caracteres)."
+    "ReviewResolutionOut":
+      "properties":
+        "detection_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Detection Id"
+        "resolution_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Resolution Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "resolved_at":
+          "type": "string"
+          "title": "Resolved At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "detection_id"
+        - "resolution_id"
+        - "record_id"
+        - "outcome"
+        - "reason_category"
+        - "lifecycle_state"
+        - "resolved_at"
+      "title": "ReviewResolutionOut"
     "RevocationBody":
       "properties":
         "reason_es":

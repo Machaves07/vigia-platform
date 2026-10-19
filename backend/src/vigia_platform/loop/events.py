@@ -26,6 +26,7 @@ from vigia_platform.loop.domain.enums import (
     ClassificationOutcome,
     EscalationLevel,
     FindingLifecycleState,
+    ReviewReminderPhase,
     SubjectKind,
     UnclosableReviewOutcome,
 )
@@ -81,12 +82,17 @@ class ReviewResolved(PayloadModel):
 
 
 class ReviewOverdue(PayloadModel):
-    """Un elemento de la cola sin revisar pasado su plazo; ``reminders_sent`` cuenta los avisos."""
+    """Un elemento de la cola sin revisar pasado su plazo; ``reminders_sent`` cuenta los avisos.
+
+    ``phase`` distingue el primer aviso (``first``) de sus repeticiones (``repeat``, U04-H-07):
+    ``notifications.catalog`` lo usa para bajar la urgencia de ``immediate`` a ``normal`` a partir
+    del segundo aviso."""
 
     zone_id: UUID
     detection_id: UUID
     review_due_at: Timestamp
     reminders_sent: Count
+    phase: ReviewReminderPhase
 
 
 class ActionAssigned(_Subject):
