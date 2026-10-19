@@ -62,6 +62,7 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
     attachment_router,
 )
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
+from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
@@ -228,6 +229,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     configuration_router,  # SUP-U05-38 y 39 (TASK-304)
     classification_router,  # SUP-U05-03 (TASK-308)
     actions_router,  # SUP-U05-07 y 08 (TASK-311)
+    closure_router,  # SUP-U05-11 y 14 (TASK-343, VIG-233)
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307)
