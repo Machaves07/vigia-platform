@@ -227,11 +227,16 @@ y claves públicas. Cada paquete lleva su verificador, `vigia_verify.py`, como a
   y solo una parte de la cadena, así que quien re-hashea el manifiesto puede cambiar el
   **contenido**, las marcas o el **estado** de un hallazgo de forma coherente: por eso sin ancla
   el resultado es `unanchored`. Con la firma (o el SHA registrado), cualquier cambio de ese tipo
-  rompe el paquete. La firma se comprueba con las claves que viajan en el paquete: quien
-  desconfíe de ellas las compara con las de `/.well-known/vigia-checkpoint-keys`.
+  rompe el paquete. La firma se comprueba con las claves que viajan en el paquete, y quien
+  **añada su propia clave** a ese conjunto (conservando las de la plataforma y los puntos de
+  control auténticos) puede firmar un manifiesto rehecho y obtener `intact`. Por eso el resumen y
+  `--out` dicen qué clave ancló el paquete (`signing_key`: `key_id` y SHA-256 de la clave
+  pública): el tercero la compara con `/.well-known/vigia-checkpoint-keys` o usa
+  `--manifest-sha256`.
 - **Salida**: el JSON de `--out` lleva `status` (`intact`, `broken` o `unanchored`), `volumes`,
   `manifest_sha256`, `declared_verifier_version`, los recuentos verificados, `anchored_by`
-  (`manifest_signature` y/o `manifest_sha256`) y `broken` con `reason`, `message`, `volume`,
+  (`manifest_signature` y/o `manifest_sha256`), `signing_key` (`key_id` y `public_key_sha256`
+  de la clave que firmó el manifiesto) y `broken` con `reason`, `message`, `volume`,
   `artifact`, `offset` (byte de la cabecera local del artefacto en su volumen) y `pointer`
   (puntero JSON dentro del artefacto).
 - **Corpus hostil**: `backend/tests/fixtures/synthetic/hostile_packages/` (generador

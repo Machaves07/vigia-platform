@@ -49,8 +49,10 @@ Sin el ancla, las comprobaciones 5 y 6 solo prueban la coherencia interna: el pa
 registro sin su actor ni su alcance (no se recalcula su ``record_hash``) y solo una parte de la
 cadena, así que quien re-hashea el manifiesto puede cambiar el contenido o el estado de un
 hallazgo de forma coherente. Por eso sin ancla el resultado es ``unanchored``. La firma se
-comprueba con las claves que viajan en el paquete: quien desconfíe de ellas las compara con las
-que publica la plataforma (``/.well-known/vigia-checkpoint-keys``).
+comprueba con las claves que viajan en el paquete, y quien añada su propia clave a ese conjunto
+puede firmar un manifiesto rehecho: por eso el resumen y ``--out`` dicen **qué clave** ancló el
+paquete (``key_id`` y SHA-256 de su clave pública), para compararla con la que publica la
+plataforma (``/.well-known/vigia-checkpoint-keys``).
 
 Resultado: ``intact`` (código 0), ``broken`` (código 1) con la **posición** del primer fallo
 (volumen, artefacto, desplazamiento de su cabecera en el volumen y puntero JSON dentro del
@@ -284,6 +286,8 @@ class ExportReport:
     audit_entries_checked: int = 0
     extracted_to: str | None = None
     anchored_by: list[str] = field(default_factory=list)
+    signing_key: dict[str, str] | None = None
+    """``key_id`` y SHA-256 de la clave pública que firmó el manifiesto."""
     """``manifest_signature`` y/o ``manifest_sha256``: lo que ata el manifiesto a la plataforma."""
 
     @property
@@ -834,12 +838,20 @@ def verify_manifest_anchor(
             **{**where, "artifact": EXPORT_MANIFEST_NAME, "pointer": "/manifest_signature"},
         )
     keys = _included_keys(package, manifest)
+    raw_signature = b"".join(package.stream(entry))
     try:
-        document = parse_json(b"".join(package.stream(entry)))
+        document = parse_json(raw_signature)
     except ValueError as error:
         raise _fail("manifest_signature_invalid", str(error), **where) from None
     if not isinstance(document, dict) or document.keys() != {"key_id", "payload", "signature"}:
         raise _fail("manifest_signature_invalid", "se espera {payload, key_id, signature}", **where)
+    try:
+        canonical = canonicalize(document) == raw_signature
+    except CanonicalizationError:
+        canonical = False
+    if not canonical:
+        # Los bytes que se extraen son exactamente los que firmó la plataforma (RFC 8785).
+        raise _fail("manifest_signature_invalid", "no está en forma canónica RFC 8785", **where)
     payload, key_id = document["payload"], document["key_id"]
     if (
         not isinstance(payload, dict)
@@ -880,6 +892,12 @@ def verify_manifest_anchor(
     if not ed25519_verify(key["raw"], message, signature):
         raise _fail("bad_signature", f"key_id {key_id!r}", **where)
     report.anchored_by.append("manifest_signature")
+    # Qué clave ancló el paquete: el tercero la compara con /.well-known/vigia-checkpoint-keys
+    # (una clave añadida al conjunto incluido firmaría igual de bien).
+    report.signing_key = {
+        "key_id": key_id,
+        "public_key_sha256": hashlib.sha256(key["raw"]).hexdigest(),
+    }
 
 
 # --- Contenido ----------------------------------------------------------------------------------
@@ -1426,6 +1444,7 @@ def export_report_document(report: ExportReport) -> dict[str, Any]:
         "records_checked": report.records_checked,
         "audit_entries_checked": report.audit_entries_checked,
         "anchored_by": report.anchored_by,
+        "signing_key": report.signing_key,
         "broken": broken,
         "extracted_to": report.extracted_to,
     }
@@ -1482,6 +1501,12 @@ def render_export_summary(report: ExportReport) -> str:
             "manifest_sha256": "SHA-256 del manifiesto registrado por la plataforma",
         }
         lines.append("Anclado por: " + "; ".join(anchors[item] for item in report.anchored_by))
+        if report.signing_key is not None:
+            lines.append(
+                f"Clave que firmó el manifiesto: {report.signing_key['key_id']} (SHA-256 de la "
+                f"clave pública {report.signing_key['public_key_sha256']}): compárela con "
+                "la que publica la plataforma en /.well-known/vigia-checkpoint-keys."
+            )
         if report.extracted_to is not None:
             lines.append(f"Extraído en: {report.extracted_to}")
     results = {"intact": "ÍNTEGRO", "broken": "ROTO", "unanchored": "SIN ANCLA"}

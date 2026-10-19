@@ -25,6 +25,7 @@ sintéticos.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -37,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from tests.fixtures.synthetic.hostile_packages.build_hostile_packages import (
     ACTIVE_KEY,
@@ -45,6 +47,7 @@ from tests.fixtures.synthetic.hostile_packages.build_hostile_packages import (
     Entry,
     Package,
     _checkpoint,
+    close_open_finding,
     control_package,
 )
 from vigia_platform.accreditation.export_verifier import (
@@ -62,6 +65,7 @@ from vigia_platform.accreditation.export_verifier import (
     verify_export,
 )
 from vigia_platform.accreditation.manifest.build import OPEN_STATES
+from vigia_platform.ledger.canonical import canonical_bytes_sync
 from vigia_platform.ledger.chain.checkpoints import CheckpointContent
 from vigia_platform.shared.signing.keys import KeyStatus
 
@@ -818,3 +822,125 @@ def test_an_os_error_while_extracting_is_extract_failed_and_cleans_up(
     assert report.failure is not None
     assert (report.failure.reason, report.failure.position.artifact) == ("extract_failed", AUDIT)
     assert not destination.exists()
+
+
+# --- ronda 2: campos del mensaje firmado, bytes canónicos y qué clave ancló ---------------------
+
+
+def _signed_payload(package: Package, **changes: str) -> bytes:
+    """Una firma válida de la clave activa sobre el SHA correcto con otros campos cambiados."""
+    manifest = canonical_bytes_sync(package.manifest)
+    payload = {
+        "kind": "vigia.export.manifest",
+        "export_id": package.manifest["export_id"],
+        "organization_id": package.manifest["organization"]["organization_id"],
+        "plant_id": package.manifest["plant"]["plant_id"],
+        "manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        "generated_at": package.manifest["generated_at"],
+        **changes,
+    }
+    private = Ed25519PrivateKey.from_private_bytes(SEEDS[ACTIVE_KEY])
+    signature = base64.b64encode(private.sign(canonical_bytes_sync(payload))).decode("ascii")
+    return canonical_bytes_sync({"payload": payload, "key_id": ACTIVE_KEY, "signature": signature})
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("export_id", "018f0000-0000-7000-8000-0000000a0002"),
+        ("organization_id", "018f0000-0000-7000-8000-00000000a002"),
+        ("plant_id", "018f0000-0000-7000-8000-00000000b002"),
+        ("generated_at", "2026-05-02T00:05:00.000Z"),
+    ],
+)
+def test_a_valid_signature_for_another_export_is_a_mismatch(
+    field_name: str, value: str, tmp_path: Path
+) -> None:
+    """Con el SHA del manifiesto correcto y la firma válida, otro campo del mensaje (otra
+    exportación, organización, planta o fecha) no ancla este paquete."""
+    package = control_package()
+    package.frozen_signature = _signed_payload(package, **{field_name: value})
+    report = verify_export(_write(package, tmp_path / "p"))
+    assert report.failure is not None
+    assert (report.failure.reason, report.failure.position.artifact) == (
+        "manifest_signature_mismatch",
+        "manifest.signature.json",
+    )
+    assert report.failure.detail.startswith(field_name)
+
+
+def test_the_same_signature_in_canonical_form_anchors_the_package(tmp_path: Path) -> None:
+    package = control_package()
+    package.frozen_signature = _signed_payload(package)
+    assert verify_export(_write(package, tmp_path / "p")).status == "intact"
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [lambda data: data + b" ", lambda data: b" " + data, lambda data: data.replace(b":", b": ")],
+    ids=["trailing-space", "leading-space", "spaced"],
+)
+def test_a_non_canonical_signature_file_is_invalid(transform: Any, tmp_path: Path) -> None:
+    package = control_package()
+    package.frozen_signature = transform(_signed_payload(package))
+    report = verify_export(_write(package, tmp_path / "p"))
+    assert report.failure is not None
+    assert report.failure.reason == "manifest_signature_invalid"
+
+
+def test_the_report_names_the_key_that_anchored_the_package(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = _write(control_package(), tmp_path / "p")
+    out = tmp_path / "r.json"
+    assert export_main([str(directory), "--out", str(out)]) == 0
+    expected = {
+        "key_id": ACTIVE_KEY,
+        "public_key_sha256": hashlib.sha256(
+            Ed25519PrivateKey.from_private_bytes(SEEDS[ACTIVE_KEY]).public_key().public_bytes_raw()
+        ).hexdigest(),
+    }
+    assert json.loads(out.read_text("utf-8"))["signing_key"] == expected
+    assert verify_export(directory).signing_key == expected
+    unsigned = control_package()
+    unsigned.unsign()
+    assert verify_export(_write(unsigned, tmp_path / "u")).signing_key is None
+    capsys.readouterr()
+
+
+def test_a_key_added_to_the_included_set_is_named_so_a_third_party_can_reject_it(
+    tmp_path: Path,
+) -> None:
+    """Límite del modelo de confianza decidido (claves incluidas): quien añade su clave al
+    conjunto, conserva las auténticas, cierra un hallazgo y firma obtiene ``intact``. El informe
+    dice qué clave firmó, para compararla con ``/.well-known/vigia-checkpoint-keys``."""
+    attacker_seed, attacker_id = bytes(range(210, 242)), "checkpoint-2026-99"
+    package = control_package()
+    raw = Ed25519PrivateKey.from_private_bytes(attacker_seed).public_key().public_bytes_raw()
+    keys = [
+        *package.documents[KEYS]["keys"],
+        {
+            "key_id": attacker_id,
+            "algorithm": "Ed25519",
+            "public_key": base64.b64encode(raw).decode("ascii"),
+            "status": "active",
+            "valid_from": "2026-01-01T00:00:00.000Z",
+            "valid_until": "2027-06-01T00:00:00.000Z",
+        },
+    ]
+    package.set_document(KEYS, {"keys": keys})
+    package.manifest["checkpoint_public_keys"] = keys
+    close_open_finding(package)
+    package.signer = (attacker_seed, attacker_id)
+    directory = _write(package, tmp_path / "p")
+    report = verify_export(directory)
+    assert report.status == "intact"
+    assert report.signing_key == {
+        "key_id": attacker_id,
+        "public_key_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    # Con el SHA-256 que registró la plataforma, la falsificación cae.
+    original = hashlib.sha256(canonical_bytes_sync(control_package().manifest)).hexdigest()
+    anchored = verify_export(directory, manifest_sha256=original)
+    assert anchored.failure is not None
+    assert anchored.failure.reason == "manifest_hash_mismatch"

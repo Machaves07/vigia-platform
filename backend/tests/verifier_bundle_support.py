@@ -439,14 +439,21 @@ def _audit_entry_hash(entry: Mapping[str, Any], organization_id: str) -> str:
 
 
 def _recompute(document: Any, mutation: Mutation, organization_id: str) -> None:
-    """Falsificación coherente: rehace el hash propio del registro o de la entrada alterados."""
+    """Falsificación coherente: rehace el hash propio del registro o de la entrada alterados.
+
+    Si el bit alterado es el propio hash (``content_hash`` o ``entry_hash``) no se rehace: rehacerlo
+    devolvería el valor original y el paquete quedaría idéntico (ronda 2, contraejemplo de
+    ``/entries/0/entry_hash``).
+    """
+    if mutation.pointer.endswith(("/content_hash", "/entry_hash")):
+        return
     target = document
     for part in mutation.record.strip("/").split("/"):
         target = target[int(part)] if isinstance(target, list) else target[part]
     try:
         if mutation.record.startswith("/entries/"):
             target["entry_hash"] = _audit_entry_hash(target, organization_id)
-        elif not mutation.pointer.endswith("/content_hash"):
+        else:
             target["content_hash"] = _sha256(canonical_bytes_sync(target["content"]))
     except (CanonicalizationError, CanonicalFormError, TypeError, ValueError):
         pass  # un valor sin forma canónica: el atacante no puede rehacer el hash

@@ -35,11 +35,12 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from tests.properties.laz.strategies.export import ExportWorld, exported_packages
 from tests.verifier_bundle_support import (
+    Mutation,
     apply_mutation,
     compose_to_directory,
     package_mutations,
@@ -156,3 +157,50 @@ def test_pr_laz_28_intact_package_and_every_one_bit_mutation_is_broken_with_its_
                 "manifest_hash_mismatch",
                 "manifest.json",
             )
+
+
+_REGRESSION: Any = settings(
+    max_examples=10,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+
+
+@_REGRESSION
+@given(world=exported_packages())
+def test_pr_laz_28_regression_a_flipped_entry_hash_is_never_restored(world: ExportWorld) -> None:
+    """Contraejemplo de la ronda 2: ``Mutation(record_bit, audit/audit-log.json,
+    pointer=/entries/0/entry_hash, signature=keep)``. El atacante simulado rehacía el
+    ``entry_hash`` que acababa de alterar, el paquete quedaba idéntico y salía ``intact``. Ahora el
+    bit alterado se conserva y cada forma de tratar la firma tiene su veredicto fijo."""
+    sealed = seal_world(world)
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        original = root / "original"
+        composed = compose_to_directory(sealed, original)
+        assume(composed.json("audit/audit-log.json")["entries"])
+        expected = {"keep": "manifest_signature_mismatch", "stranger": "bad_signature"}
+        for signature in ("keep", "drop", "stranger"):
+            mutation = Mutation(
+                "record_bit",
+                "audit/audit-log.json",
+                0,
+                "/entries/0/entry_hash",
+                "/entries/0",
+                signature,
+            )
+            altered = root / signature
+            shutil.copytree(original, altered)
+            apply_mutation(composed, altered, mutation)
+            assert _entries(altered) != _entries(original), "la mutación no cambió el paquete"
+            report = verify_export(altered)
+            assert not report.intact, mutation
+            if signature == "drop":
+                # Sin firma, el entry_hash alterado no cuadra con su sobre.
+                assert report.failure is not None
+                assert report.failure.reason in ("entry_hash_mismatch", "artifact_invalid")
+                assert report.failure.position.pointer is not None
+                assert report.failure.position.pointer.startswith("/entries/0")
+            else:
+                assert report.failure is not None
+                assert report.failure.reason == expected[signature]
