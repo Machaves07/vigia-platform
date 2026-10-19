@@ -86,6 +86,7 @@ from tests.isolation.laz_cases import (
 from tests.isolation.route_cases import Call, Case, Ids, Kind
 from tests.ledger_database import evidence_values, insert_evidence, set_organization
 from tests.live_view_support import LIVE_VIEW_URL, LiveViewEnvironment, live_view_environment
+from tests.middleware_support import UnlimitedRateLimiter
 from tests.second_factor_support import FakeKms
 from tests.session_support import ORIGIN_KEY
 from tests.signing_support import ENVIRONMENT
@@ -1991,6 +1992,10 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             units=None,
             permissions=None,
             runtime={
+                # La tasa no es el asunto de este archivo (lo es de test_rate_limit.py): el
+                # catálogo completo, con el reloj simulado avanzando 1 ms por petición, pasa del
+                # cubo por origen en un solo minuto simulado (VIG-223, al sumar rutas de U-04).
+                "rate_limiter": UnlimitedRateLimiter(),
                 "sessions": authz.contexts,
                 "authorizer": ContextAuthorizer(
                     audit=authz.audit,
