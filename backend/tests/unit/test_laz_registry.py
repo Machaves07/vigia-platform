@@ -4,10 +4,11 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` vacío, ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de
-  adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la de la
-  clasificación (TASK-308) y las de la acción y su evidencia (TASK-311) de ``loop`` y las dos de
-  exportación de ``accreditation`` (TASK-317).
+  ``U04_TASKS`` con la primera tarea del lazo (``unclosable_review_due``, TASK-312),
+  ``U04_CONSUMERS`` con ``export_worker``; en ``ROUTERS``, las dos rutas de adjuntos de cierre
+  (TASK-310), las dos de la configuración del lazo (TASK-304), la de la clasificación (TASK-308),
+  las de la acción y su evidencia (TASK-311), las del incerrable (TASK-312) de ``loop`` y las dos
+  de exportación de ``accreditation`` (TASK-317).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -53,7 +54,10 @@ from vigia_platform.loop.adapters.http.configuration_routes import configuration
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
+from vigia_platform.loop.application.unclosable import SCHEDULE as UNCLOSABLE_SCHEDULE
+from vigia_platform.loop.application.unclosable import TASK_NAME as UNCLOSABLE_REVIEW_DUE
 from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYPES
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
@@ -162,6 +166,9 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
                 ("GET", "/loop/assistant-requests/{request_id}"),
                 ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
+                # TASK-312: SUP-U05-12 y 13 (el estado incerrable y su revisión).
+                ("POST", "/loop/findings/{finding_state_id}/unclosable"),
+                ("POST", "/loop/unclosable/{declaration_id}/reviews"),
             ]
             assert state[LOOP_STATE_KEY].classification is not None
             assert state[LOOP_STATE_KEY].assistant is not None
@@ -169,6 +176,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
             assert state[LOOP_STATE_KEY].inbox is not None
+            assert state[LOOP_STATE_KEY].unclosable is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -191,7 +199,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert routes == [] and state == {}
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
-    assert tasks.tasks() == ()
+    # TASK-312: la tarea del incerrable, con su unidad y su iteración.
+    assert [(task.task_name, task.unit, task.iteration) for task in tasks.tasks()] == [
+        (UNCLOSABLE_REVIEW_DUE, ActorUnit.U04, TaskIteration.PER_ORGANIZATION)
+    ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
@@ -209,14 +220,18 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         root_cause_router,
         assistant_router,
         findings_router,
+        unclosable_router,
     ) == registration.ROUTERS
     assert notifications_registration.ROUTERS == ()
-    for module in (registration, notifications_registration):
-        assert module.TASK_REGISTRARS == ()
+    assert notifications_registration.TASK_REGISTRARS == ()
+    # TASK-312: la primera tarea del lazo, ``unclosable_review_due`` (diaria, por organización).
+    assert len(registration.TASK_REGISTRARS) == 1
     assert notifications_registration.CONSUMER_REGISTRARS == ()
     assert len(registration.CONSUMER_REGISTRARS) == 2
     assert accreditation_registration.TASK_REGISTRARS == ()
-    assert registration.U04_TASKS == {}
+    assert registration.U04_TASKS == {
+        UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
+    }
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
         "loop_projection": 4,
@@ -296,8 +311,10 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
         for compiled in full.event_types.compiled_types():
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
-        # Los consumidores de la raíz (export_worker, TASK-317): solo falta el evento.
+        # Los consumidores y las tareas de la raíz (export_worker, TASK-317; unclosable_review_due,
+        # TASK-312): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
+        unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced
 
 

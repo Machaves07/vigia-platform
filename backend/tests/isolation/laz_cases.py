@@ -377,9 +377,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("POST", "/loop/unclosable/{declaration_id}/reviews"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call(
-                "POST", f"/loop/unclosable/{i.record}/reviews", json=_UNCLOSABLE_REVIEW
-            ),
+            lambda i: Call("POST", f"/loop/unclosable/{i.record}/reviews", json=_UNCLOSABLE_REVIEW),
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
