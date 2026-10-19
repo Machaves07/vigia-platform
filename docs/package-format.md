@@ -167,3 +167,50 @@ El JSON de `--out` lleva `status`, `package_error`, una entrada por cadena (`sta
 `entries_after_last_checkpoint`, `broken` con `sequence`, `entry_id`, `reason`, `message` y
 `line`), `previous_checkpoints`, `first_broken` y `unlisted_files`. Los `reason` son
 identificadores en inglés; los `message`, su explicación en español.
+
+## 7. El verificador del paquete exportado de U-04 (TASK-346)
+
+La exportación de U-04 (TASK-318) no es un `vigia-package`: son volúmenes `vol-01.zip` …
+`vol-NN.zip` con `manifest.json` en `vol-01` (lista de artefactos con `path`, `kind`, `sha256`,
+`size_bytes` y `volume`), hallazgos por zona, cobertura, auditoría del periodo, puntos de control
+y claves públicas. Cada paquete lleva su verificador, `vigia_verify.py`, como artefacto de tipo
+`verifier`, y el manifiesto declara su versión en `verifier_version`.
+
+- **Construcción**: `tools/build_verifier.py` compone los cuatro módulos puros de este documento
+  con `vigia_platform.accreditation.export_verifier` en `backend/resources/verifier/vigia_verify.py`
+  (un solo archivo, Python 3.10, solo biblioteca estándar). `--check` cubre los dos archivos;
+  `tools/vigia_verify.py` no cambia.
+- **Uso**: `python vigia_verify.py <directorio de los volúmenes | vol-01.zip>
+  [--manifest-sha256 HEX] [--extract DIRECTORIO] [--out resultado.json]`. Códigos 0, 1 y 2 como
+  en §6.
+- **Orden de comprobación** (el primer fallo fija el motivo):
+  1. volúmenes seguidos, ninguno enlace simbólico; registro final del ZIP sin ZIP64 ni varios
+     discos y con un número de entradas acotado (`too_many_entries`), antes de leer el directorio
+     central;
+  2. cada entrada, sin leer sus datos: `path_traversal`, `absolute_path`, `path_not_allowed`,
+     `symlink`, `special_file`, `compression_not_allowed`, `expansion_ratio` (más de 100 veces el
+     tamaño comprimido), `entry_too_large` (más de 2 GB), `duplicate_entry`;
+  3. el manifiesto (`manifest_missing`, `manifest_invalid`) y, con `--manifest-sha256` (el que
+     registra `export_produced`), su hash (`manifest_hash_mismatch`);
+  4. **los hashes del manifiesto antes de extraer nada**: `artifact_missing`,
+     `artifact_size_mismatch`, `unlisted_entry`, `artifact_unreadable`, `artifact_hash_mismatch`;
+  5. el contenido: claves (`key_invalid`), puntos de control (`checkpoint_invalid`,
+     `unknown_key`, `key_not_valid_at_signing` —vigencia semiabierta `[valid_from,
+     valid_until)`—, `bad_signature`), auditoría recalculada con su sobre (`entry_hash_mismatch`),
+     `content_hash` de cada registro con contenido (`content_not_canonical`,
+     `content_hash_mismatch`), enlaces entre consecutivos (`previous_hash_mismatch`,
+     `record_conflict`) y con lo que cubre cada punto de control (`checkpoint_mismatch`), y las
+     declaraciones del manifiesto frente al contenido (`manifest_mismatch`: conteos por estado,
+     clips, adjuntos, entradas ausentes, `verifier_version`);
+  6. solo si todo está íntegro, `--extract` escribe en un directorio vacío, volviendo a comprobar
+     cada hash (`extract_failed` borra lo escrito).
+- **Límite declarado**: el paquete exportado lleva cada registro del expediente sin su actor ni su
+  alcance, así que el `record_hash` de un registro no se recalcula fuera; sí su `content_hash`,
+  sus enlaces con los vecinos que viajan y su igualdad con lo que cubre un punto de control
+  firmado. Las entradas de auditoría se recalculan enteras.
+- **Salida**: el JSON de `--out` lleva `status`, `volumes`, `manifest_sha256`,
+  `declared_verifier_version`, los recuentos verificados y `broken` con `reason`, `message`,
+  `volume`, `artifact`, `offset` (byte de la cabecera local del artefacto en su volumen) y
+  `pointer` (puntero JSON dentro del artefacto).
+- **Corpus hostil**: `backend/tests/fixtures/synthetic/hostile_packages/` (generador
+  `build_hostile_packages.py`, con `--check`).
