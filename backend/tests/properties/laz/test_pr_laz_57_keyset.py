@@ -140,6 +140,8 @@ def test_pr_laz_57_all_pages_neither_lose_nor_repeat_with_concurrent_newer_rows(
                 return seen, inserted, sizes
             after = page.next_cursor
             step += 1
+            # Cada página avanza al menos una fila: más páginas que filas es un bucle.
+            assert step <= INITIAL_ROWS + sum(inserts), "el recorrido no termina"
 
     initial = stack.run(seed())
     seen, inserted, sizes = stack.run(walk())
