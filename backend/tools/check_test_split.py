@@ -1,10 +1,13 @@
 """Reparto de las pruebas en grupos por tiempos (pytest-split; VIG-198 y VIG-199).
 
-Tres trabajos son matrices de grupos de pytest-split; cada grupo corre la orden de su trabajo con
-``--splits=N --group=<grupo>`` y los tiempos de su archivo:
+Cuatro trabajos son matrices de grupos de pytest-split; cada grupo corre la orden de su trabajo
+con ``--splits=N --group=<grupo>`` y los tiempos de su archivo:
 
 - ``ci.yml``, «backend (pruebas sin integración, grupo N de 4)» (``backend-pruebas``):
   ``-m "not integration"`` sobre todo ``testpaths``, perfil ``ci``, tiempos de ``.test_durations``;
+- ``ci.yml``, «backend (pruebas de integración, grupo N de 4)» (``backend-integracion-grupos``):
+  ``-m integration --ignore=tests/load`` sobre todo ``testpaths``, perfil ``ci``, tiempos de
+  ``.test_durations_integracion`` (``tests/load`` va en «backend (carga ci)»);
 - ``nightly.yml``, «propiedades nightly (tests/properties, grupo N de M)» (``propiedades-suite``):
   ``-m "not integration" tests/properties``, perfil ``nightly``, tiempos de
   ``.test_durations_nightly``;
@@ -19,13 +22,17 @@ Hace dos cosas:
 
 - **Estática** (sin pytest): lee el flujo y exige que la matriz numere los grupos ``1..N`` con el
   mismo ``N`` que ``--splits``, que la orden de cada grupo seleccione exactamente el marcador y las
-  rutas del trabajo, sin ``--ignore``, ``--deselect`` ni ``-k`` (nada que saque pruebas antes del
-  reparto), que lea los tiempos de su archivo y que pase el grupo de la matriz. La fijan las
-  pruebas de ``tests/unit/test_check_test_split.py``.
+  rutas del trabajo, sin ``--deselect`` ni ``-k`` y sin más ``--ignore`` que los del trabajo (nada
+  que saque pruebas antes del reparto), que lea los tiempos de su archivo y que pase el grupo de la
+  matriz. La fijan las pruebas de ``tests/unit/test_check_test_split.py``.
 - **Dinámica** (``--collect``): recolecta con pytest la colección completa y la de cada grupo con
   **la orden real del flujo** (``--collect-only``, con ``$GRUPO`` sustituido y sin
   ``--store-durations``, que reescribiría el archivo de tiempos), y compara. La ejecuta el trabajo
-  «backend (lint y tipos)» de ``ci.yml`` en cada PR, para los tres trabajos.
+  «backend (lint y tipos)» de ``ci.yml`` en cada PR, para los cuatro trabajos.
+
+El perfil de Hypothesis de ``ci.yml`` va en la variable ``$PERFIL`` del paso (``pr`` en los
+pull_request, ``ci`` en main): los dos dan los mismos identificadores, así que la recolección la
+sustituye por el perfil del trabajo.
 
 Uso (desde ``backend/``)::
 
@@ -52,10 +59,12 @@ from typing import Final
 import yaml
 
 __all__ = [
+    "CI_INTEGRATION_SPEC",
     "CI_SPEC",
     "GROUP_VARIABLE",
     "NIGHTLY_INTEGRATION_SPEC",
     "NIGHTLY_SUITE_SPEC",
+    "PROFILE_VARIABLE",
     "SPECS",
     "SplitError",
     "SplitJob",
@@ -74,6 +83,8 @@ CI: Final = WORKFLOWS / "ci.yml"
 NIGHTLY: Final = WORKFLOWS / "nightly.yml"
 GROUP_VARIABLE: Final = "GRUPO"
 """Variable de entorno del paso con el número de grupo de la matriz (``--group="$GRUPO"``)."""
+PROFILE_VARIABLE: Final = "PERFIL"
+"""Variable de entorno del paso con el perfil de Hypothesis (``--hypothesis-profile="$PERFIL"``)."""
 COLLECT_TIMEOUT_SECONDS: Final = 900.0
 """Tope de cada recolección: holgado, recolectar ~6000 pruebas tarda segundos."""
 
@@ -92,6 +103,8 @@ class SplitSpec:
     """Perfil de Hypothesis de la colección completa."""
     durations: str
     """Archivo de tiempos (``--durations-path``), relativo a ``backend/``."""
+    ignores: tuple[str, ...] = ()
+    """Los ``--ignore=`` de la orden: exactamente estos, y también en la colección completa."""
 
     def full_collection(self) -> list[str]:
         """Argumentos de pytest de la colección completa del trabajo."""
@@ -101,6 +114,7 @@ class SplitSpec:
             f"--hypothesis-profile={self.profile}",
             "-m",
             self.marker,
+            *(f"--ignore={path}" for path in self.ignores),
             *self.paths,
         ]
 
@@ -112,6 +126,15 @@ CI_SPEC: Final = SplitSpec(
     paths=(),
     profile="ci",
     durations=".test_durations",
+)
+CI_INTEGRATION_SPEC: Final = SplitSpec(
+    workflow=CI,
+    job_id="backend-integracion-grupos",
+    marker="integration",
+    paths=(),
+    profile="ci",
+    durations=".test_durations_integracion",
+    ignores=("tests/load",),
 )
 NIGHTLY_SUITE_SPEC: Final = SplitSpec(
     workflow=NIGHTLY,
@@ -129,7 +152,7 @@ NIGHTLY_INTEGRATION_SPEC: Final = SplitSpec(
     profile="nightly",
     durations=".test_durations_nightly",
 )
-SPECS: Final = (CI_SPEC, NIGHTLY_SUITE_SPEC, NIGHTLY_INTEGRATION_SPEC)
+SPECS: Final = (CI_SPEC, CI_INTEGRATION_SPEC, NIGHTLY_SUITE_SPEC, NIGHTLY_INTEGRATION_SPEC)
 
 _EXCLUDING = ("--ignore", "--ignore-glob", "--deselect", "-k")
 _STORING = frozenset({"--store-durations", "--clean-durations"})
@@ -155,9 +178,12 @@ class SplitJob:
         values = [arg.split("=", 1)[1] for arg in self.arguments if arg.startswith(f"{name}=")]
         return values[-1] if values else None
 
-    def for_group(self, group: int) -> list[str]:
-        variable = f"${GROUP_VARIABLE}"
-        return [arg.replace(variable, str(group)) for arg in self.arguments]
+    def for_group(self, group: int, profile: str = "ci") -> list[str]:
+        """La orden del grupo ``group``, con ``$PERFIL`` (si lo usa) como ``profile``."""
+        arguments = list(self.arguments)
+        for variable, value in ((GROUP_VARIABLE, str(group)), (PROFILE_VARIABLE, profile)):
+            arguments = [arg.replace(f"${variable}", value) for arg in arguments]
+        return arguments
 
 
 def _pytest_arguments(run: str) -> list[list[str]]:
@@ -213,6 +239,11 @@ def static_problems(job: SplitJob, spec: SplitSpec = CI_SPEC) -> list[str]:
         problems.append(f'la orden debe pasar --group="${GROUP_VARIABLE}"')
     if job.option("--durations-path") != spec.durations:
         problems.append(f"la orden debe leer los tiempos de --durations-path={spec.durations}")
+    if job.option("--hypothesis-profile") not in {spec.profile, f"${PROFILE_VARIABLE}"}:
+        problems.append(
+            f"la orden debe pasar --hypothesis-profile={spec.profile} o "
+            f'--hypothesis-profile="${PROFILE_VARIABLE}"'
+        )
     markers = [
         value
         for option, value in zip(job.arguments, job.arguments[1:], strict=False)
@@ -221,14 +252,20 @@ def static_problems(job: SplitJob, spec: SplitSpec = CI_SPEC) -> list[str]:
     if markers != [spec.marker]:
         problems.append(f'la orden debe seleccionar exactamente -m "{spec.marker}": {markers}')
     paths: list[str] = []
+    ignores: list[str] = []
     previous = ""
     for argument in job.arguments:
-        name = argument.split("=", 1)[0]
-        if name in _EXCLUDING:
+        name, _, value = argument.partition("=")
+        if name == "--ignore" and value in spec.ignores:
+            ignores.append(value)
+        elif name in _EXCLUDING:
             problems.append(f"la orden saca pruebas antes del reparto: {argument}")
         elif not argument.startswith("-") and previous not in _VALUE_OPTIONS:
             paths.append(argument)
         previous = argument
+    if sorted(ignores) != sorted(spec.ignores):
+        expected = " ".join(f"--ignore={path}" for path in spec.ignores) or "ningún --ignore"
+        problems.append(f"la orden debe llevar exactamente {expected}: {ignores}")
     if not spec.paths:
         problems.extend(f"la orden corre todo testpaths, sin rutas: {path}" for path in paths)
     elif paths != list(spec.paths):
@@ -305,7 +342,7 @@ def check(
     if problems or not collect:
         return problems
     full = _collect(spec.full_collection(), root)
-    groups = {group: _collect(job.for_group(group), root) for group in job.groups}
+    groups = {group: _collect(job.for_group(group, spec.profile), root) for group in job.groups}
     for group, tests in groups.items():
         print(f"  {spec.job_id}, grupo {group}: {len(tests)} pruebas")
     print(f"  {spec.job_id}, colección completa: {len(full)} pruebas")
