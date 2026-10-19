@@ -15,11 +15,12 @@
 
 **``IdentityQueryPort``** (U-03, U-04): ``hierarchy``, ``users_by_role_and_scope`` (destinatarios
 de notificaciones), ``signatory_candidates`` (firmantes pedidos sobre una zona, A-58),
-``node_identity`` y ``assigned_node``. Con un contexto de sesión devuelven solo lo que cubren sus
-asignaciones (una zona se ve con el nombre de su planta); con un contexto de evento, de iteración o
-de orden administrativa, toda la organización. ``signatory_candidates`` comprueba la zona con el
-contexto del llamador y los usuarios pedidos con el del sistema (``lookups``), porque bajo
-concesión de planta la RLS de A-46 oculta ``identity.user_account``.
+``recipients_under_concession`` (destinatarios bajo concesión, A-69), ``node_identity`` y
+``assigned_node``. Con un contexto de sesión devuelven solo lo que cubren sus asignaciones (una
+zona se ve con el nombre de su planta); con un contexto de evento, de iteración o de orden
+administrativa, toda la organización. ``signatory_candidates`` y ``recipients_under_concession``
+comprueban el alcance con el contexto del llamador y los usuarios con el del sistema
+(``lookups``), porque bajo concesión de planta la RLS de A-46 oculta ``identity.user_account``.
 
 **``IdentityCommandPort``** (U-03): ``declare_node`` (``node_declared`` en la cadena de la planta),
 ``update_node`` (``status``, también ``re_enrollment_pending``, y ``live_view_local_url``, que puede
@@ -132,6 +133,7 @@ __all__ = [
     "ProviderGenesisRequest",
     "ProviderGenesisResult",
     "Recipient",
+    "ScopedRecipient",
     "SignatoryCandidate",
     "ZoneGateGenesis",
     "ZoneSpec",
@@ -235,6 +237,15 @@ class Recipient:
 
 
 @dataclass(frozen=True, slots=True)
+class ScopedRecipient:
+    """Un destinatario resuelto bajo concesión: solo el usuario y el rol (A-69), sin correo ni
+    nombre."""
+
+    user_id: uuid.UUID
+    role: Role
+
+
+@dataclass(frozen=True, slots=True)
 class SignatoryCandidate:
     """Un usuario pedido que tiene ``role`` vigente sobre la zona: solo lo que el acuerdo de uso
     y el acta guardan de él (A-58; ``display_name`` ≤ 120, DE §2.8)."""
@@ -285,6 +296,14 @@ class IdentityQueryPort(Protocol):
         roles: Iterable[Role],
         user_ids: Iterable[uuid.UUID],
     ) -> tuple[SignatoryCandidate, ...]: ...
+
+    async def recipients_under_concession(
+        self,
+        context: ScopeContext,
+        roles: Iterable[Role],
+        scope_level: ScopeLevel,
+        scope_id: uuid.UUID,
+    ) -> tuple[ScopedRecipient, ...]: ...
 
     async def node_identity(self, context: ScopeContext, node_id: uuid.UUID) -> NodeView | None: ...
 
@@ -495,6 +514,19 @@ _SIGNATORY_CANDIDATES: Final = text(
     " WHERE r.organization_id = :organization_id AND u.organization_id = :organization_id"
     " AND r.removed_at IS NULL AND u.status = 'active'"
     " AND r.user_id = ANY(:user_ids) AND r.role = ANY(:roles)"
+    " AND (r.scope_level = 'organization'"
+    " OR (r.scope_level = 'plant' AND r.scope_id = :plant_id)"
+    " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))"
+    " ORDER BY u.user_id, r.role"
+)
+_SCOPED_RECIPIENTS: Final = text(
+    # Solo usuario y rol, con el rol vigente sobre un alcance que contiene al pedido: la
+    # organización, su planta o (si se pide una zona) la propia zona (A-69, como A-58).
+    "SELECT DISTINCT u.user_id, r.role"
+    " FROM identity.role_assignment AS r"
+    " JOIN identity.user_account AS u ON u.user_id = r.user_id"
+    " WHERE r.organization_id = :organization_id AND u.organization_id = :organization_id"
+    " AND r.removed_at IS NULL AND u.status = 'active' AND r.role = ANY(:roles)"
     " AND (r.scope_level = 'organization'"
     " OR (r.scope_level = 'plant' AND r.scope_id = :plant_id)"
     " OR (r.scope_level = 'zone' AND r.scope_id = :zone_id))"
@@ -882,6 +914,46 @@ class HierarchyService:
             )
             for row in rows
         )
+
+    async def recipients_under_concession(
+        self,
+        context: ScopeContext,
+        roles: Iterable[Role],
+        scope_level: ScopeLevel,
+        scope_id: uuid.UUID,
+    ) -> tuple[ScopedRecipient, ...]:
+        """Los usuarios activos con alguno de ``roles`` vigente sobre un alcance que contiene a
+        la planta o zona pedida, cuando quien pregunta está bajo concesión (A-69, como A-58).
+
+        El alcance se resuelve y se comprueba con ``context``: una planta o zona inexistente, de
+        otra organización o fuera de lo concedido (también por la RLS) responde
+        ``ResourceNotFound``; un alcance de organización solo lo cubre una concesión de toda la
+        organización. Solo después, con el contexto del sistema (``lookups.identity_lookup``),
+        se leen los usuarios: bajo concesión de planta la RLS de A-46 oculta
+        ``identity.user_account`` y **no se amplía**. Devuelve solo ``user_id`` y ``role``, nunca
+        correo ni nombre. Sin ``lookups``, la consulta usa ``context`` (fallo cerrado: bajo
+        concesión de planta no devuelve a nadie).
+        """
+        deps = self._deps
+        wanted = sorted({Role(role).value for role in roles})
+        target = await resolve_scope(deps, context, scope_level, scope_id)
+        zone_id = target.scope_id if target.level is ScopeLevel.ZONE else None
+        if not _whole_organization(context) and not context.covers(target.plant_id, zone_id):
+            raise ResourceNotFound()
+        if not wanted:
+            return ()
+        lookup = context if self._lookups is None else self._lookups.identity_lookup(context)
+        rows = await deps.database.read(
+            lookup,
+            _SCOPED_RECIPIENTS,
+            {
+                "organization_id": context.organization_id,
+                "plant_id": target.plant_id,
+                "zone_id": zone_id,
+                "roles": wanted,
+            },
+        )
+        return tuple(ScopedRecipient(as_uuid(row.user_id), Role(row.role)) for row in rows)
 
     async def node_identity(self, context: ScopeContext, node_id: uuid.UUID) -> NodeView | None:
         """La identidad del nodo, o ``None`` si no existe o está fuera de alcance."""

@@ -1,0 +1,3 @@
+{# Plantilla de gate_state_changed (TASK-324): solo hechos de la carga, nunca una cadena. #}
+{% block title %}{% if revoked %}Acuerdo de uso revocado{% else %}Compuerta de la zona cambiada{% endif %}{% endblock %}
+{% block body %}{% if revoked %}Se revocó el acuerdo de uso de una zona de su alcance: la zona deja de acumular métricas desde ahora.{% else %}Cambió el estado de una compuerta de una zona de su alcance.{% endif %} Abra Vigía con su sesión para ver el detalle.{% endblock %}

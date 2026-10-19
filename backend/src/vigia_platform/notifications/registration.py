@@ -6,6 +6,10 @@ agrupación, correo, preferencias) **añade una línea** a ``ROUTERS``, ``NOTIFI
 ``TASK_REGISTRARS``, ``NOTIFICATIONS_CONSUMERS`` y ``CONSUMER_REGISTRARS``, o ``API_STATE``.
 El módulo no registra tipos de registro ni publica eventos (``notifications.events``). La
 comprobación de arranque de U-04 es ``loop.registration.missing_u04_registrations``.
+
+``EMAIL_SENDERS`` es la ranura del ``EmailSenderPort`` (``EmailSenderRegistry`` de U-02) que lee
+el motor: sin puerto registrado, todo correo inmediato queda ``degraded_app_only``. El adaptador
+SES de TASK-325 se registra en ella desde aquí.
 """
 
 from __future__ import annotations
@@ -16,13 +20,29 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter
 
+from vigia_platform.identity.application.common import IdentityDependencies
+from vigia_platform.identity.application.hierarchy import HierarchyService
+from vigia_platform.identity.application.invitations import EmailSenderRegistry
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.domain.enums import NOTIFICATIONS_LABEL_BINDINGS
 from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
+from vigia_platform.notifications.adapters.http.routes import notifications_router
+from vigia_platform.notifications.adapters.http.services import (
+    NOTIFICATIONS_STATE_KEY,
+    NotificationsHttp,
+)
 from vigia_platform.notifications.detail_codes import (
     NOTIFICATIONS_DETAIL_CODE_LABEL_BINDINGS,
     NotificationsDetailCode,
 )
+from vigia_platform.notifications.engine import (
+    NOTIFICATION_ENGINE,
+    NOTIFICATION_ENGINE_CONCURRENCY,
+    NotificationEngine,
+    register_notification_engine,
+)
 from vigia_platform.notifications.events import register_notifications_event_types
+from vigia_platform.notifications.reader import NotificationReader
 from vigia_platform.shared.outbox.registries import (
     ConsumerRegistry,
     EventTypeRegistry,
@@ -37,6 +57,7 @@ if TYPE_CHECKING:
 __all__ = [
     "API_STATE",
     "CONSUMER_REGISTRARS",
+    "EMAIL_SENDERS",
     "NOTIFICATIONS_CONSUMERS",
     "NOTIFICATIONS_DETAIL_CODES",
     "NOTIFICATIONS_LABELS",
@@ -54,18 +75,79 @@ type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = ()
-"""Fábricas de los enrutadores de ``/notifications/*``; hoy ninguna ruta."""
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
+    notifications_router,  # SUP-U05-33, forma mínima (TASK-324)
+)
+"""Fábricas de los enrutadores de ``/notifications/*``."""
 
 NOTIFICATIONS_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {}
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = ()
 
-NOTIFICATIONS_CONSUMERS: Final[Mapping[str, int]] = {}
-"""Consumidores del módulo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
-CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = ()
+EMAIL_SENDERS: Final = EmailSenderRegistry()
+"""La ranura del ``EmailSenderPort`` del proceso (a lo sumo uno; TASK-325 registra SES)."""
 
-API_STATE: Final[tuple[StateBuilder, ...]] = ()
+
+def _register_notification_engine(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``notification_engine`` (TASK-324) con ``IdentityQueryPort`` de U-02 (la consulta acotada
+    bajo concesión con el contexto del sistema, A-69) y ``LectorExpediente``."""
+    directory = HierarchyService(
+        IdentityDependencies(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+            authorizer=services.authorizer,
+            free_text=services.free_text,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        ),
+        lookups=services.contexts,
+    )
+    register_notification_engine(
+        registry,
+        NotificationEngine(
+            directory=directory,
+            records=LectorExpediente(
+                database=services.database,
+                audit=services.audit,
+                clock=services.clock,
+                metrics=services.metrics,
+            ),
+            contexts=services.contexts,
+            database=services.database,
+            senders=EMAIL_SENDERS,
+            free_text=services.free_text,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        ),
+    )
+
+
+NOTIFICATIONS_CONSUMERS: Final[Mapping[str, int]] = {
+    NOTIFICATION_ENGINE: NOTIFICATION_ENGINE_CONCURRENCY,  # TASK-324
+}
+"""Consumidores del módulo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
+CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
+    _register_notification_engine,  # notification_engine (TASK-324)
+)
+
+
+def _notifications_state(services: UnitServices) -> Mapping[str, object]:
+    return {
+        NOTIFICATIONS_STATE_KEY: NotificationsHttp(
+            reader=NotificationReader(
+                database=services.database,
+                authorizer=services.authorizer,
+                provider_organization_id=services.provider_organization_id,
+            )
+        )
+    }
+
+
+API_STATE: Final[tuple[StateBuilder, ...]] = (
+    _notifications_state,  # NotificationsHttp (TASK-324)
+)
 
 NOTIFICATIONS_LABELS: Final[Mapping[str, type[enum.Enum]]] = {
     **NOTIFICATIONS_LABEL_BINDINGS,
