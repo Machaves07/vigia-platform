@@ -42,6 +42,7 @@ from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application import classification as classification_module
+from vigia_platform.loop.application import root_cause as root_cause_module
 from vigia_platform.loop.config.parameters import (
     INITIAL_DEFAULTS_REASON,
     LoopSettings,
@@ -49,6 +50,8 @@ from vigia_platform.loop.config.parameters import (
     check_values,
 )
 from vigia_platform.loop.config.service import validated_change
+from vigia_platform.loop.detail_codes import LoopDetailCode
+from vigia_platform.loop.domain import root_cause as root_cause_domain
 from vigia_platform.node_api.rejections import NodeRejection
 from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.shared.api.declarations import (
@@ -114,8 +117,9 @@ def chain_units() -> tuple[UnitRegistration, ...]:
     ``test_fleet_heartbeat.py`` y ``test_fleet_zone_catalog_route.py``).
 
     Las de ``loop`` sí entran, con sus dobles en ``app.state`` (``loop_state``): los adjuntos de
-    cierre (TASK-310, el puerto real sobre memoria) y la configuración del lazo (TASK-304,
-    ``LoopConfigurationDouble``, sin base). Así los catálogos de CSRF y de cuerpos mutados
+    cierre (TASK-310, el puerto real sobre memoria), la configuración del lazo (TASK-304,
+    ``LoopConfigurationDouble``, sin base), la clasificación (TASK-308, ``ClassificationDouble``)
+    y la causa raíz (TASK-315, ``RootCauseDouble``). Así los catálogos de CSRF y de cuerpos mutados
     (PR-NUC-38) cubren todas las rutas de ``loop`` registradas."""
     return tuple(
         unit
@@ -202,14 +206,89 @@ class ClassificationDouble:
         raise ResourceNotFound()
 
 
+class RootCauseDouble:
+    """Doble de ``RootCauseService`` para el arnés, sin base (TASK-315).
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código: el enunciado,
+    las referencias y la categoría de un paso; las categorías, los textos finales, lo que falta
+    (sobre un análisis sintético con un porqué) y la licencia de una firma. Un cuerpo válido no
+    encuentra ningún análisis ni hallazgo sintético (``ResourceNotFound``)."""
+
+    def __init__(self) -> None:
+        self._free_text = FreeTextPolicyRegistry()
+        self._free_text.seal()
+
+    async def start(self, context: ScopeContext, finding_state_id: uuid.UUID) -> Any:
+        raise ResourceNotFound()
+
+    async def put_step(
+        self,
+        context: ScopeContext,
+        analysis_id: uuid.UUID,
+        step_index: int,
+        *,
+        statement: object,
+        evidence_refs: object,
+        category: object,
+    ) -> Any:
+        module = root_cause_module
+        module.checked_evidence_refs(evidence_refs)
+        module.checked_text(self._free_text, statement, module.STATEMENT_FIELD, None)
+        if category is not None:
+            module.checked_category(category)
+        raise ResourceNotFound()
+
+    async def sign(
+        self,
+        context: ScopeContext,
+        analysis_id: uuid.UUID,
+        *,
+        professional_license: object,
+        root_cause_category: object,
+        root_cause_statement: object,
+        conclusion: object,
+        cause_effect_branches: Any,
+    ) -> Any:
+        module = root_cause_module
+        category = (
+            None if root_cause_category is None else module.checked_category(root_cause_category)
+        )
+        branches = module.checked_branches(self._free_text, cause_effect_branches, None)
+        organization = context.organization_id
+        statement = module._optional_text(
+            self._free_text, root_cause_statement, module.ROOT_STATEMENT_FIELD, organization
+        )
+        final = module._optional_text(
+            self._free_text, conclusion, module.CONCLUSION_FIELD, organization
+        )
+        try:
+            result = root_cause_domain.sign(
+                root_cause_domain.GuidedAnalysis(
+                    steps=(root_cause_domain.WhyStep(1, "Porqué sintético del arnés"),)
+                ),
+                branches=branches,
+                root_cause_category=category,
+                root_cause_statement=statement,
+                conclusion=final,
+                signer_name=context.actor.display_name_snapshot,
+                professional_license=module._license(professional_license),
+            )
+        except root_cause_domain.RootCauseRejected as rejected:
+            raise module._rejected(rejected) from None
+        if isinstance(result, root_cause_domain.Pending):
+            raise module.AnalysisRejected(LoopDetailCode.ANALYSIS_INFORMATION_INSUFFICIENT)
+        raise ResourceNotFound()
+
+
 def loop_state(clock: Any) -> dict[str, Any]:
-    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración y
-    clasificación)."""
+    """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración,
+    clasificación y causa raíz)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
         LOOP_STATE_KEY: LoopHttp(
             configuration=cast(Any, LoopConfigurationDouble(clock)),
             classification=cast(Any, ClassificationDouble()),
+            root_cause=cast(Any, RootCauseDouble()),
         ),
     }
 

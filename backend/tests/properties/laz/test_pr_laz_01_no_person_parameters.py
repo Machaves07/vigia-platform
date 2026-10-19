@@ -130,6 +130,20 @@ SIGNER_FIELDS: Final = frozenset(
     {
         ("GET", "/loop/plants/{plant_id}/configuration", "response", "display_name"),
         ("PUT", "/loop/plants/{plant_id}/configuration", "response", "display_name"),
+        # El firmante del análisis de causa raíz (``SignerOut``, VIG-214).
+        (
+            "POST",
+            "/loop/findings/{finding_state_id}/root-cause-analyses",
+            "response",
+            "display_name",
+        ),
+        (
+            "PUT",
+            "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}",
+            "response",
+            "display_name",
+        ),
+        ("POST", "/loop/root-cause-analyses/{analysis_id}/signature", "response", "display_name"),
     }
 )
 """Excepciones nombradas una a una: el **firmante** de un cambio (P8) es un usuario de la
