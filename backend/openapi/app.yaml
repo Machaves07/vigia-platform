@@ -4182,6 +4182,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/closure":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Cierra (firma) un hallazgo con acción asignada y evidencia"
+      "operationId": "close_loop_findings__finding_state_id__closure_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ClosureBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClosureOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/reopening":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Reabre un hallazgo cerrado o incerrable con una acción correctiva nueva"
+      "operationId": "reopen_loop_findings__finding_state_id__reopening_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReopeningBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReopeningOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/root-cause-analyses":
     "post":
       "tags":
@@ -6233,6 +6299,76 @@
       "additionalProperties": false
       "type": "object"
       "title": "CloseStepBody"
+    "ClosureBody":
+      "properties":
+        "closure_description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Closure Description"
+        "verification_note":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Verification Note"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+            - "type": "null"
+          "title": "Professional License"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "closure_description"
+      "title": "ClosureBody"
+      "description": "La descripción del cierre, su nota de verificación y la licencia del firmante."
+    "ClosureOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "closure_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Closure Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "evidence_entry_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Evidence Entry Ids"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "signed_at":
+          "type": "string"
+          "title": "Signed At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "closure_id"
+        - "record_id"
+        - "action_id"
+        - "evidence_entry_ids"
+        - "lifecycle_state"
+        - "signed_at"
+        - "time_aggregated"
+      "title": "ClosureOut"
     "Code":
       "type": "string"
       "maxLength": 32
@@ -11355,6 +11491,112 @@
       "required":
         - "reason_es"
       "title": "ReopenBody"
+    "ReopeningBody":
+      "properties":
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+        "action_type":
+          "type": "string"
+          "maxLength": 64
+          "title": "Action Type"
+        "action_description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Action Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Expected Outcome"
+        "assignee_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignee User Id"
+        "deadline_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Deadline Days"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "action_type"
+        - "action_description"
+        - "assignee_user_id"
+      "title": "ReopeningBody"
+      "description": "El motivo de la reapertura y la acción correctiva nueva (la de SUP-U05-07).\n\n``reason_text`` es opcional a nivel de esquema (como ``reason_text`` de\n``ClassificationBody``): ausente o en blanco no es ``invalid_request``, es\n``reopening_reason_required`` (BR-LAZ-146bis), y solo el servicio lo distingue."
+    "ReopeningOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "reopening_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Reopening Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "from_state":
+          "type": "string"
+          "title": "From State"
+        "previous_closure_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Previous Closure Id"
+        "previous_declaration_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Previous Declaration Id"
+        "supersedes_action_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Supersedes Action Id"
+        "reopened_at":
+          "type": "string"
+          "title": "Reopened At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "reopening_id"
+        - "record_id"
+        - "from_state"
+        - "previous_closure_id"
+        - "previous_declaration_id"
+        - "supersedes_action_id"
+        - "reopened_at"
+        - "time_aggregated"
+        - "action_id"
+        - "due_at"
+        - "lifecycle_state"
+      "title": "ReopeningOut"
     "ReplayOut":
       "properties":
         "event_id":
