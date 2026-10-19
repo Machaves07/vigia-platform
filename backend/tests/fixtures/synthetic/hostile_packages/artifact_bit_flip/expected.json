@@ -1,0 +1,7 @@
+{
+  "artifact": "coverage/zone-018f0000-0000-7000-8000-00000000c001.json",
+  "pointer": "/artifacts/1",
+  "reason": "artifact_hash_mismatch",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}

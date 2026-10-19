@@ -1,0 +1,7 @@
+{
+  "artifact": "link-to-passwd",
+  "pointer": null,
+  "reason": "symlink",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}
