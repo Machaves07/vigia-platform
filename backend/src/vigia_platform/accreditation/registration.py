@@ -222,6 +222,7 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
         checkpoints=checkpoints,
         writer=services.writer,
         clock=services.clock,
+        signer=services.signing,
     )
     task = MonthlyPackageTask(
         config=PostgresLoopConfigurationRepository(services.database),

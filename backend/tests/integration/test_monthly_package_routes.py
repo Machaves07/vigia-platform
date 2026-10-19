@@ -232,6 +232,36 @@ class World:
                     reviewer_user_id,
                 )
                 for item_id in item_ids:
+                    classification_id = uuid.uuid4()
+                    subject_id = uuid.uuid4()
+                    # ``_SAMPLE_ITEMS`` lee la clasificación por INNER JOIN (TASK-320 rework 1,
+                    # B4 de la revisión: «con su clasificación, motivo, autor, fecha»): hace
+                    # falta una fila real de ``loop.classification``, no solo el id suelto.
+                    await admin.execute(
+                        "INSERT INTO loop.classification (classification_id, organization_id,"
+                        " plant_id, zone_id, subject_kind, subject_id, record_id,"
+                        " sequence_in_subject, outcome, reason_category, reason_text,"
+                        " is_reclassification, reinforced_reason, effect_on_loop, classified_by,"
+                        " classified_at, label_id, correlation_id)"
+                        " VALUES ($1, $2, $3, $4, 'finding', $5, $6, 1, 'confirmed',"
+                        " 'real_coexistence', 'Persona cruzó el pasillo señalizado', false, false,"
+                        " 'loop_opened', $7::jsonb, $8, $9, $9)",
+                        classification_id,
+                        organization_id,
+                        plant_id,
+                        zone_id,
+                        subject_id,
+                        uuid.uuid4(),
+                        json.dumps(
+                            {
+                                "user_id": str(reviewer_user_id),
+                                "display_name": "Coordinador sintético",
+                                "role_in_use": "coordinator_sst",
+                            }
+                        ),
+                        self.now(),
+                        uuid.uuid4(),
+                    )
                     await admin.execute(
                         "INSERT INTO accreditation.audit_sample_item (sample_item_id,"
                         " organization_id, plant_id, zone_id, sample_id, classification_id,"
@@ -241,8 +271,8 @@ class World:
                         plant_id,
                         zone_id,
                         sample_id,
-                        uuid.uuid4(),
-                        uuid.uuid4(),
+                        classification_id,
+                        subject_id,
                     )
 
         self.run(insert())
@@ -403,6 +433,11 @@ def test_sample_items_are_all_unreviewed(world: World) -> None:
         assert item["reviewed_by"] is None
         assert item["reviewed_at"] is None
         assert "classification_id" in item and "subject_id" in item
+        # TASK-320 rework 1 (B4 de la revisión): «con su clasificación, motivo, autor, fecha».
+        assert item["classification_outcome"] == "confirmed"
+        assert item["reason_category"] == "real_coexistence"
+        assert item["classified_by_role"] == "coordinator_sst"
+        assert item["classified_at"]
 
 
 # --- 4: descarga por planta, filtrada por el alcance (PR-LAZ-60) --------------------------------

@@ -13,6 +13,11 @@ valla simétrica: solo sella si ``package_id`` sigue siendo el de esta composici
 composición ganó la carrera entre medias, ``UPDATE ... WHERE package_id = :package_id`` no afecta
 ninguna fila y ``seal`` devuelve ``False``; el llamador descarta su intento, nunca escribe el
 expediente de un paquete que perdió).
+
+``acquire_lease``/``lease_still_valid``/``release_lease`` (rework 1, VIG-239: B2/B3 de la
+revisión) serializan la composición sobre ``accreditation.monthly_package_lease`` (``laz_0035``):
+solo quien tiene el arrendamiento vigente sube el zip a ``vigia-evidence``, para que un perdedor
+nunca sobrescriba el objeto de un paquete ya sellado por otro.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Final, Protocol
 
 from sqlalchemy import text
@@ -33,6 +38,7 @@ from vigia_platform.shared.db import Transaction
 
 __all__ = [
     "AuditSampleItemRow",
+    "MonthlyPackageLease",
     "MonthlyPackageRepository",
     "MonthlyPackageRow",
     "SampleItemRow",
@@ -108,7 +114,14 @@ class MonthlyPackageRow:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SampleItemRow:
-    """Una fila de ``accreditation.audit_sample_item``, para ``GET .../sample``."""
+    """Una fila de ``accreditation.audit_sample_item`` con su clasificación, para ``GET
+    .../sample`` (TASK-320: «con su clasificación, motivo, autor, fecha»).
+
+    ``outcome``/``comment``/``reviewed_by``/``reviewed_at`` son la revisión por muestra
+    (``sample_audit_outcome``, TASK-347, nulos hasta entonces); ``classification_outcome``,
+    ``reason_category``, ``classified_by_role`` y ``classified_at`` son los de la clasificación
+    original, leídos de ``loop.classification`` (nunca el nombre de la persona, P3: solo el rol
+    en uso, ``classified_by_role``)."""
 
     sample_item_id: uuid.UUID
     classification_id: uuid.UUID
@@ -117,6 +130,10 @@ class SampleItemRow:
     comment: str | None
     reviewed_by: Mapping[str, Any] | None
     reviewed_at: datetime | None
+    classification_outcome: str
+    reason_category: str
+    classified_by_role: str | None
+    classified_at: datetime
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -129,6 +146,23 @@ class AuditSampleItemRow:
     zone_id: uuid.UUID
     classification_id: uuid.UUID
     subject_id: uuid.UUID
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MonthlyPackageLease:
+    """Un arrendamiento vigente de ``accreditation.monthly_package_lease`` (rework 1, VIG-239).
+
+    Serializa la composición de un ``(zone_id, period)``: solo quien lo tiene vigente sube el
+    zip y sella (P4/P5, BR-LAZ-108) — sin esto, dos composiciones del mismo periodo reclaman la
+    misma fila de ``monthly_package`` (``claim`` solo excluye un periodo ya ``sealed``, no uno en
+    curso) y ambas podrían subir a la misma clave de ``vigia-evidence`` sin condición."""
+
+    organization_id: uuid.UUID
+    zone_id: uuid.UUID
+    period: str
+    owner: str
+    until: datetime
+    attempt_count: int
 
 
 # --- sentencias ----------------------------------------------------------------------------
@@ -183,6 +217,37 @@ _SEAL: Final = text(
 ya existente de la otra) y componer en paralelo sin colisionar entre sí (cada una inserta su
 propia ``audit_sample``); ``AND state != 'sealed'`` es la valla real: solo la primera ``UPDATE``
 que llega la sella, la segunda no afecta ninguna fila y ``seal`` devuelve ``False``."""
+
+_ACQUIRE_LEASE: Final = text(
+    "INSERT INTO accreditation.monthly_package_lease"
+    " (organization_id, plant_id, zone_id, period, lease_owner, lease_until, attempt_count)"
+    " VALUES (:organization_id, :plant_id, :zone_id, CAST(:period AS date), :owner, :until, 1)"
+    " ON CONFLICT (organization_id, zone_id, period) DO UPDATE SET"
+    " lease_owner = :owner, lease_until = :until,"
+    " attempt_count = accreditation.monthly_package_lease.attempt_count + 1"
+    " WHERE accreditation.monthly_package_lease.lease_owner IS NULL"
+    " OR accreditation.monthly_package_lease.lease_until < :now"
+    " RETURNING attempt_count"
+)
+"""La valla del arrendamiento (PAT-LAZ-RES-05, símil de ``export.lease``): una sola sentencia que
+gana como mucho un proceso, igual si la fila no existía o si el arrendamiento anterior venció
+(``lease_until < :now``, con el ``Clock`` inyectado, nunca la hora de la base)."""
+
+_LEASE_STILL_VALID: Final = text(
+    "SELECT 1 FROM accreditation.monthly_package_lease"
+    " WHERE organization_id = :organization_id AND zone_id = :zone_id"
+    " AND period = CAST(:period AS date) AND lease_owner = :owner AND lease_until >= :now"
+)
+"""La comprobación antes de subir el zip (B3 del rework): si el arrendamiento ya no es de este
+proceso (vencido o tomado por otro), no se sube nada: el objeto de ``vigia-evidence`` nunca
+queda sin dueño vigente que responda por él."""
+
+_RELEASE_LEASE: Final = text(
+    "UPDATE accreditation.monthly_package_lease SET lease_owner = NULL, lease_until = NULL"
+    " WHERE organization_id = :organization_id AND zone_id = :zone_id"
+    " AND period = CAST(:period AS date) AND lease_owner = :owner"
+    " RETURNING organization_id"
+)
 
 _INSERT_AUDIT_SAMPLE: Final = text(
     "INSERT INTO accreditation.audit_sample (sample_id, organization_id, plant_id, zone_id,"
@@ -256,11 +321,19 @@ _SEALED_PACKAGES_OF_PLANT: Final = text(
 )
 
 _SAMPLE_ITEMS: Final = text(
-    "SELECT sample_item_id, classification_id, subject_id, outcome, comment, reviewed_by,"
-    " reviewed_at FROM accreditation.audit_sample_item"
-    " WHERE organization_id = :organization_id AND sample_id = :sample_id"
-    " ORDER BY sample_item_id"
+    "SELECT ai.sample_item_id, ai.classification_id, ai.subject_id, ai.outcome, ai.comment,"
+    " ai.reviewed_by, ai.reviewed_at, c.outcome AS classification_outcome, c.reason_category,"
+    " c.classified_by, c.classified_at"
+    " FROM accreditation.audit_sample_item AS ai"
+    " JOIN loop.classification AS c"
+    " ON c.organization_id = ai.organization_id AND c.classification_id = ai.classification_id"
+    " WHERE ai.organization_id = :organization_id AND ai.sample_id = :sample_id"
+    " ORDER BY ai.sample_item_id"
 )
+"""Cada elemento con su clasificación (TASK-320: «con su clasificación, motivo, autor, fecha»):
+``c.outcome``/``c.reason_category``/``c.classified_at`` son columnas directas de
+``loop.classification``; el autor se lee de ``c.classified_by`` (``role_in_use``, nunca el
+nombre, P3)."""
 
 _PREVIOUS_COMMITMENTS: Final = text(
     "SELECT c.commitment_id, c.state FROM accreditation.commitment AS c"
@@ -298,6 +371,8 @@ def _package_row(row: Any) -> MonthlyPackageRow:
 
 
 def _sample_item_row(row: Any) -> SampleItemRow:
+    classified_by = _json(row.classified_by)
+    role = classified_by.get("role_in_use") if isinstance(classified_by, Mapping) else None
     return SampleItemRow(
         sample_item_id=uuid.UUID(str(row.sample_item_id)),
         classification_id=uuid.UUID(str(row.classification_id)),
@@ -306,6 +381,10 @@ def _sample_item_row(row: Any) -> SampleItemRow:
         comment=row.comment,
         reviewed_by=None if row.reviewed_by is None else _json(row.reviewed_by),
         reviewed_at=row.reviewed_at,
+        classification_outcome=str(row.classification_outcome),
+        reason_category=str(row.reason_category),
+        classified_by_role=None if role is None else str(role),
+        classified_at=row.classified_at,
     )
 
 
@@ -408,6 +487,90 @@ class MonthlyPackageRepository:
                     "audit_sample_id": audit_sample_id,
                     "sealed_checkpoint_record_id": sealed_checkpoint_record_id,
                     "record_id": record_id,
+                },
+            )
+        ).first()
+        return row is not None
+
+    async def acquire_lease(
+        self,
+        transaction: Transaction,
+        *,
+        plant_id: uuid.UUID,
+        zone_id: uuid.UUID,
+        period: str,
+        owner: str,
+        now: datetime,
+        duration: timedelta,
+    ) -> MonthlyPackageLease | None:
+        """Reclama el arrendamiento de ``(zone_id, period)``; ``None`` si ya lo tiene otro
+        proceso con un arrendamiento vigente (rework 1, VIG-239: B2/B3)."""
+        if not isinstance(owner, str) or not 1 <= len(owner) <= 128:
+            raise ValueError("owner debe tener de 1 a 128 caracteres")
+        until = now + duration
+        row = (
+            await transaction.execute(
+                _ACQUIRE_LEASE,
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "plant_id": plant_id,
+                    "zone_id": zone_id,
+                    "period": period_to_date(period),
+                    "owner": owner,
+                    "until": until,
+                    "now": now,
+                },
+            )
+        ).first()
+        if row is None:
+            return None
+        return MonthlyPackageLease(
+            organization_id=transaction.context.organization_id,
+            zone_id=zone_id,
+            period=period,
+            owner=owner,
+            until=until,
+            attempt_count=int(row.attempt_count),
+        )
+
+    async def lease_still_valid(
+        self,
+        transaction: Transaction,
+        *,
+        zone_id: uuid.UUID,
+        period: str,
+        owner: str,
+        now: datetime,
+    ) -> bool:
+        """Si ``owner`` sigue teniendo el arrendamiento de ``(zone_id, period)`` en ``now``
+        (comprobación justo antes de subir el zip, B3: nunca se sube sin dueño vigente)."""
+        row = (
+            await transaction.execute(
+                _LEASE_STILL_VALID,
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "zone_id": zone_id,
+                    "period": period_to_date(period),
+                    "owner": owner,
+                    "now": now,
+                },
+            )
+        ).first()
+        return row is not None
+
+    async def release_lease(
+        self, transaction: Transaction, *, zone_id: uuid.UUID, period: str, owner: str
+    ) -> bool:
+        """Libera el arrendamiento si sigue siendo de ``owner`` (fallo no declarado: la fila de
+        ``monthly_package`` sigue en ``generating``, se retoma al día siguiente)."""
+        row = (
+            await transaction.execute(
+                _RELEASE_LEASE,
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "zone_id": zone_id,
+                    "period": period_to_date(period),
+                    "owner": owner,
                 },
             )
         ).first()

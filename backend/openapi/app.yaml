@@ -11791,6 +11791,20 @@
           "type": "string"
           "format": "uuid"
           "title": "Subject Id"
+        "classification_outcome":
+          "type": "string"
+          "title": "Classification Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "classified_by_role":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Classified By Role"
+        "classified_at":
+          "type": "string"
+          "title": "Classified At"
         "outcome":
           "anyOf":
             - "type": "string"
@@ -11818,6 +11832,10 @@
         - "sample_item_id"
         - "classification_id"
         - "subject_id"
+        - "classification_outcome"
+        - "reason_category"
+        - "classified_by_role"
+        - "classified_at"
         - "outcome"
         - "comment"
         - "reviewed_by"

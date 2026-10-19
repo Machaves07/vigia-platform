@@ -21,7 +21,9 @@ __all__ = [
     "SampleParameters",
     "candidates",
     "populations",
+    "reclassification_populations",
     "sample_parameters",
+    "seeds",
 ]
 
 FAMILIES: tuple[str, ...] = ("real_coexistence", "guard_bypassed", "procedure_gap")
@@ -46,6 +48,20 @@ def candidates() -> st.SearchStrategy[SampleCandidate]:
 def populations(max_size: int = 300) -> st.SearchStrategy[list[SampleCandidate]]:
     """Una población completa, acotada para que la propiedad corra en tiempo razonable."""
     return st.lists(_candidate(), max_size=max_size)
+
+
+def reclassification_populations(
+    max_size: int = 300,
+) -> st.SearchStrategy[list[SampleCandidate]]:
+    """Alias con el nombre de la tarea (TASK-320, «reclassification_populations»): la población
+    de ``draw_sample`` es la de reclasificaciones del periodo (BR-LAZ-105)."""
+    return populations(max_size)
+
+
+def seeds() -> st.SearchStrategy[int]:
+    """Alias con el nombre de la tarea (TASK-320, «seeds»): una semilla de ``draw_sample``, en el
+    mismo rango que valida (``0`` a ``MAX_SEED``, 64 bits sin signo)."""
+    return st.integers(0, MAX_SEED)
 
 
 @dataclass(frozen=True)

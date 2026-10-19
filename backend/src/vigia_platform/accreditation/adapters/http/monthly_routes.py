@@ -128,6 +128,10 @@ class SampleItemOut(_Strict):
     sample_item_id: uuid.UUID
     classification_id: uuid.UUID
     subject_id: uuid.UUID
+    classification_outcome: str
+    reason_category: str
+    classified_by_role: str | None
+    classified_at: str
     outcome: str | None
     comment: str | None
     reviewed_by: Mapping[str, Any] | None
@@ -171,6 +175,10 @@ def _sample_item_view(row: SampleItemRow) -> SampleItemOut:
         sample_item_id=row.sample_item_id,
         classification_id=row.classification_id,
         subject_id=row.subject_id,
+        classification_outcome=row.classification_outcome,
+        reason_category=row.reason_category,
+        classified_by_role=row.classified_by_role,
+        classified_at=format_timestamp(row.classified_at),
         outcome=row.outcome,
         comment=row.comment,
         reviewed_by=row.reviewed_by,
@@ -263,11 +271,14 @@ class MonthlyPackageReads:
     ) -> tuple[ZoneDownloadOut, ...]:
         """Una URL por zona de ``plant_id`` dentro del alcance del actor con paquete sellado.
 
-        Las zonas fuera de alcance, o sin paquete sellado, se omiten en silencio: es un filtro de
-        una ruta de lista, nunca un ``404``/``403`` de la petición entera. ``plant_id`` en sí sí
-        se comprueba: una planta de otra organización (o inexistente) responde ``not_found``, en
-        vez de una lista vacía que delataría, por el ``plant_id`` que la respuesta repite, que el
-        identificador pedido no es el de una planta real (PR-NUC-01).
+        Las zonas fuera de alcance se omiten en silencio dentro de una lista no vacía: es un
+        filtro de una ruta de lista, nunca un ``404``/``403`` de la petición entera. ``plant_id``
+        en sí sí se comprueba: una planta de otra organización (o inexistente) responde
+        ``not_found``, en vez de una lista vacía que delataría, por el ``plant_id`` que la
+        respuesta repite, que el identificador pedido no es el de una planta real (PR-NUC-01).
+        Si la lista queda vacía (ninguna zona en alcance tiene un paquete sellado de ``period``),
+        ``monthly_package_not_available`` (409), alineado con LC-LAZ-26 §6.7 (nota U04-H-03):
+        «un paquete sin sellar responde monthly_package_not_available».
         """
         async with self._database.transaction(context) as transaction:
             if not await self._repository.plant_in_scope(transaction, plant_id):
@@ -313,6 +324,8 @@ class MonthlyPackageReads:
                     expires_at=format_timestamp(presigned.expires_at),
                 )
             )
+        if not grants:
+            raise MonthlyPackageNotAvailable()
         return tuple(grants)
 
 
@@ -359,7 +372,10 @@ def monthly_router() -> APIRouter:
 
     @router.get(
         "/accreditation/monthly-packages/{plant_id}/{period}/download",
-        dependencies=[requires(_READ), Depends(exact_query())],
+        dependencies=[
+            requires(_READ, detail_codes=(_NOT_AVAILABLE,)),
+            Depends(exact_query()),
+        ],
         response_model_by_alias=True,
         summary="Una URL de descarga de 15 min por zona de la planta con paquete sellado",
     )
@@ -372,9 +388,12 @@ def monthly_router() -> APIRouter:
     ) -> MonthlyPackageDownloadOut:
         no_store(response)
         reads = installed(services.monthly_packages)
-        zones = await reads.plant_download(
-            request_context(request), plant_id=plant_id, period=period
-        )
+        try:
+            zones = await reads.plant_download(
+                request_context(request), plant_id=plant_id, period=period
+            )
+        except MonthlyPackageNotAvailable:
+            raise ApiError(ApiErrorCode.CONFLICT, detail_code=_NOT_AVAILABLE) from None
         return MonthlyPackageDownloadOut(plant_id=plant_id, period=period, zones=zones)
 
     return router

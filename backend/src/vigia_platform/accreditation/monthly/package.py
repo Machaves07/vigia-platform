@@ -4,9 +4,10 @@
 ``MonthlyPackageComposer.compose_and_seal`` hace, para una zona y un mes, todo lo que
 ``monthly.task.MonthlyPackageTask`` no sabe hacer por sí misma: lee el expediente de la zona en el
 periodo, compone el resumen de hallazgos y de recurrencia, reclama la fila
-(``MonthlyPackageRepository.claim``), extrae la muestra auditada (``monthly.sample``), declara
-adopción, métricas y exposición, construye el zip del paquete, lo sube al depósito de evidencias,
-fija el punto de control, inserta la muestra y sella, escribiendo por último
+(``MonthlyPackageRepository.claim``), toma el arrendamiento de la composición (B2/B3, rework 1
+VIG-239), extrae la muestra auditada (``monthly.sample``), declara adopción, métricas y
+exposición, fija el punto de control, construye el zip del paquete (firmado y verificable), lo
+sube al depósito de evidencias, inserta la muestra y sella, escribiendo por último
 ``monthly_package_produced`` en el expediente de la planta.
 
 **El orden importa** (BR-LAZ-102, «el cierre no miente», P5): el reclamo va **primero**, antes de
@@ -14,11 +15,23 @@ componer nada más (como el arrendamiento de la exportación): si el periodo ya 
 se lee nada de más, no se construye ningún zip y no se sube ningún objeto. ``claim`` nunca cambia
 ``package_id`` de una fila existente (la migración no concede ``UPDATE`` sobre esa columna):
 devuelve el identificador **de la fila** (el candidato propio, o el de un intento anterior sin
-sellar que se retoma con su propia identidad), que el resto de la composición adopta. El sellado
-de la fila y la escritura del expediente van en **una sola transacción**: si el sellado pierde la
-carrera entre medias (``seal`` no afecta ninguna fila, vallado por ``state != 'sealed'``), la
-transacción se revierte entera y el registro escrito no llega a confirmarse (nunca un
-``monthly_package_produced`` sin su fila sellada, ni al revés).
+sellar que se retoma con su propia identidad), que el resto de la composición adopta.
+
+**El arrendamiento** (``accreditation.monthly_package_lease``, ``laz_0035``) serializa lo que
+``claim`` por sí solo no excluye: dos composiciones del mismo ``(zone_id, period)`` pueden
+resolver el mismo ``package_id`` (ninguna está todavía ``sealed``) y, sin arrendamiento, ambas
+construirían y subirían su zip a la misma clave de ``vigia-evidence`` sin condición — si la
+perdedora sube después de que la ganadora selle, el objeto deja de coincidir con
+``package_sha256`` (P4/P5, BR-LAZ-108). Con el arrendamiento: solo quien lo tiene vigente sube el
+zip (comprobado justo antes de subir, no solo al reclamarlo, por si venció entre medias); se
+libera al terminar (sellado o perdido el sellado) y, si una excepción interrumpe la composición
+después de tomarlo, se deja vencer solo (10 minutos, ``LEASE_DURATION``) en vez de liberarlo con
+una transacción que podría fallar igual que la que la interrumpió.
+
+El sellado de la fila y la escritura del expediente van en **una sola transacción**: si el
+sellado pierde la carrera entre medias (``seal`` no afecta ninguna fila, vallado por
+``state != 'sealed'``), la transacción se revierte entera y el registro escrito no llega a
+confirmarse (nunca un ``monthly_package_produced`` sin su fila sellada, ni al revés).
 
 **Simplificaciones de esta tarea, declaradas aquí y en el informe final:**
 
@@ -44,6 +57,17 @@ transacción se revierte entera y el registro escrito no llega a confirmarse (nu
 - **Recurrencia**: no se correlaciona el cierre previo exacto (``reference_closure_ids`` siempre
   vacío); contar cuántas reclasificaciones son «nuevo episodio tras un cierre» por familia es la
   aproximación ``[estimación propia simplificada]`` de esta tarea.
+
+**Rework 1 (VIG-239, revisión de código del PR #161)**: el zip de ``_build_zip`` ahora es un
+paquete verificable de verdad por el ``vigia_verify.py`` endurecido que incluye
+(``accreditation.export_verifier``, el mismo que exige cualquier paquete exportado): declara
+``manifest_version``, ``package_form`` (``without_clips``: sin clips), organización, planta, una
+sola zona, el punto de control que lo ancla con sus claves públicas, conteos por estado (todos en
+cero, honesto: este paquete no exporta hallazgos propios) y ``manifest_signature`` firmada con la
+clave ``checkpoint`` (``verifier_bundle.sign_manifest``, ancla A2). El punto de control se fija
+**antes** de construir el zip, no después de subirlo: solo así el manifiesto puede embeberlo y
+firmarlo. Sigue sin un artefacto propio de hallazgos exportados (BR-LAZ-102: el paquete mensual
+compone un resumen, no una copia del expediente): el ``findings_json`` que declara va vacío.
 """
 
 from __future__ import annotations
@@ -57,13 +81,14 @@ import zipfile
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Final, Protocol
 
 from vigia_platform.accreditation.export.lease import RecordWriter
-from vigia_platform.accreditation.export.worker import CheckpointPort, covered_chains
+from vigia_platform.accreditation.export.worker import covered_chains
 from vigia_platform.accreditation.monthly.repository import (
     AuditSampleItemRow,
+    MonthlyPackageLease,
     MonthlyPackageRepository,
     ZoneRef,
     object_key,
@@ -74,7 +99,14 @@ from vigia_platform.accreditation.monthly.sample import (
     SampleDraw,
     draw_sample,
 )
-from vigia_platform.accreditation.verifier_bundle import VERIFIER_PATH, load_verifier_bundle
+from vigia_platform.accreditation.verifier_bundle import (
+    MANIFEST_SIGNATURE_DECLARATION,
+    VERIFIER_KIND,
+    VERIFIER_PATH,
+    ManifestSigner,
+    load_verifier_bundle,
+    sign_manifest,
+)
 from vigia_platform.ledger.application.reader import (
     LectorExpediente,
     LedgerFilters,
@@ -84,9 +116,21 @@ from vigia_platform.ledger.application.reader import (
 )
 from vigia_platform.ledger.application.writer import LedgerRejection, RecordScope
 from vigia_platform.ledger.canonical import canonical_bytes_sync
-from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain
+from vigia_platform.ledger.chain.checkpoints import (
+    ChainKind,
+    CheckpointChain,
+    CheckpointPublicKey,
+    CheckpointResult,
+    StoredCheckpoint,
+)
 from vigia_platform.loop.calendar import month_bounds
-from vigia_platform.loop.domain.enums import ExposureStatus, MetricKey, MetricStatus, MetricUnit
+from vigia_platform.loop.domain.enums import (
+    ExposureStatus,
+    FindingLifecycleState,
+    MetricKey,
+    MetricStatus,
+    MetricUnit,
+)
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
@@ -95,6 +139,7 @@ from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.outbox.publish import NewEvent
 from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.storage import ObjectHead
+from vigia_platform.shared.worker.leases import worker_owner_id
 
 __all__ = [
     "MONTHLY_PACKAGE_AVAILABLE",
@@ -127,6 +172,20 @@ alcanzarse en la vida de una sola zona."""
 
 _DOCUMENT_NAME: Final = "document.pdf"
 _MANIFEST_NAME: Final = "manifest.json"
+_SIGNATURE_NAME: Final = "manifest.signature.json"
+_FINDINGS_NAME: Final = "findings.json"
+_AUDIT_NAME: Final = "audit.json"
+_PUBLIC_KEY_NAME: Final = "public_key.json"
+_CHECKPOINT_NAME: Final = "checkpoint.json"
+_MANIFEST_VERSION: Final = 1
+_PACKAGE_FORM: Final = "without_clips"
+"""El paquete mensual nunca lleva clips (``accreditation.export_verifier`` exige una de las dos
+formas cerradas; el paquete mensual no es una exportación con clips, BR-LAZ-90)."""
+LEASE_DURATION: Final = timedelta(minutes=10)
+"""Vigencia del arrendamiento de la composición (rework 1, VIG-239: B2/B3 de la revisión). Un
+paquete mensual es pequeño (una zona, un mes): 10 minutos cubren con holgura leer el periodo,
+componer el zip y subirlo, sin necesitar renovación (a diferencia de ``export.lease``, pensado
+para subidas de varios GB)."""
 _ZIP_DATE_TIME: Final = (1980, 1, 1, 0, 0, 0)
 """Fecha fija de las entradas del zip: el paquete no depende del reloj del proceso (PR-LAZ-49)."""
 
@@ -189,6 +248,23 @@ class TransactionSource(Protocol):
     """``shared.db.Database``: el único camino a la base."""
 
     def transaction(self, context: ScopeContext) -> AbstractAsyncContextManager[Transaction]: ...
+
+
+class MonthlyCheckpointPort(Protocol):
+    """``CheckpointService`` de U-02: fija el punto de control que ancla el paquete y da sus
+    claves públicas vigentes y retiradas (rework 1, VIG-239: el verificador embebido exige
+    ``checkpoint_public_keys`` en el manifiesto, no solo el punto de control).
+
+    Más ancha que ``export.worker.CheckpointPort`` (que solo fija el punto de control: la
+    exportación lee las claves de su propio ``CheckpointLookup``, ``export.contents``); el
+    paquete mensual no tiene ese puerto intermedio, así que las pide aquí directamente, igual
+    que ``CheckpointLookup.checkpoint_public_keys``."""
+
+    async def write_checkpoints_now(
+        self, context: ScopeContext, chains: Sequence[CheckpointChain] | None = None
+    ) -> tuple[CheckpointResult, ...]: ...
+
+    def checkpoint_public_keys(self) -> tuple[CheckpointPublicKey, ...]: ...
 
 
 class EvidencePortMissing(Exception):
@@ -336,6 +412,14 @@ def _exposure_not_computable() -> dict[str, Any]:
     }
 
 
+_COVERAGE_NOT_COMPUTABLE: Final[Mapping[str, Any]] = {"status": "not_computable"}
+"""Lo que declara ``monthly_package.coverage_summary`` (objeto jsonb, sin ``CoverageService``
+integrado aquí): nunca ``{}`` sin decir por qué. ``MonthlyPackageProduced.coverage_summary`` del
+expediente, en cambio, es una tupla cerrada de ``CoverageShare`` (TASK-302) sin una variante
+``not_computable``: ahí la lista vacía es la única representación válida del esquema ya fijado,
+no una omisión de esta tarea."""
+
+
 # --- documento portátil mínimo (placeholder; ver docstring del módulo) ----------------------
 
 _PDF_ESCAPE: Final = re.compile(r"[\\()]")
@@ -423,9 +507,11 @@ class MonthlyPackageComposer:
         reader: LectorExpediente,
         repository: MonthlyPackageRepository,
         evidence: EvidencePort,
-        checkpoints: CheckpointPort,
+        checkpoints: MonthlyCheckpointPort,
         writer: RecordWriter,
         clock: Clock,
+        signer: ManifestSigner,
+        owner: str | None = None,
     ) -> None:
         self._database = database
         self._reader = reader
@@ -434,6 +520,12 @@ class MonthlyPackageComposer:
         self._checkpoints = checkpoints
         self._writer = writer
         self._clock = clock
+        self._signer = signer
+        """La clave ``checkpoint`` que firma el SHA-256 del manifiesto (ancla A2, como en
+        ``export.contents.ExportComposer``): el mismo firmante que ``checkpoints``, para que una
+        sola clave firme el punto de control y el manifiesto que lo declara."""
+        self._owner = owner if owner is not None else worker_owner_id()
+        """Identidad de este proceso para el arrendamiento de la composición (B2/B3)."""
 
     async def compose_and_seal(
         self,
@@ -491,14 +583,51 @@ class MonthlyPackageComposer:
         if reviewer_user_id is None:
             raise MonthlyPackageReviewerMissing(f"zona {zone.zone_id} sin coordinador SST vigente")
 
+        # El arrendamiento (B2/B3, rework 1 VIG-239): ``claim`` solo excluye un periodo ya
+        # ``sealed``, nunca uno «en curso» — sin esto, dos composiciones del mismo
+        # ``(zone_id, period)`` siempre construyen y suben su zip en paralelo, y la que pierde el
+        # sellado puede haber subido su objeto **después** del ganador, desincronizando
+        # ``vigia-evidence`` de ``package_sha256`` (P4/P5, BR-LAZ-108). Igual que «ya sellado»:
+        # perder el arrendamiento es un resultado normal (``None``), no un fallo.
+        lease = await self._acquire_lease(context, zone, period, generated_at)
+        if lease is None:
+            _log.debug(
+                "arrendamiento de la composición ya tomado por otro proceso: se descarta",
+                zone_id=str(zone.zone_id),
+                period=period,
+            )
+            return None
+
+        # El punto de control se fija **antes** de construir el zip (rework 1, VIG-239): el
+        # manifiesto endurecido lo exige embebido y firmado dentro del paquete, no escrito aparte
+        # después de subirlo (eso nunca lo anclaba de verdad: el verificador no vuelve a leer la
+        # fila de ``accreditation.monthly_package``).
+        checkpoint_chain, stored_checkpoint = await self._fetch_checkpoint(context, zone.plant_id)
+        checkpoint_id = stored_checkpoint.entry_id
+        public_keys = self._checkpoints.checkpoint_public_keys()
+
         zip_bytes = self._build_zip(
             package_id=package_id,
             zone=zone,
             period=period,
             generated_at=generated_at,
             findings=findings,
+            checkpoint_chain=checkpoint_chain,
+            stored_checkpoint=stored_checkpoint,
+            public_keys=public_keys,
         )
         package_sha256 = hashlib.sha256(zip_bytes).hexdigest()
+
+        # B3: nunca se sube sin dueño vigente del arrendamiento — si se perdió entre medias
+        # (vencido y tomado por otro proceso), el objeto de ``vigia-evidence`` quedaría sin
+        # nadie que responda por él frente a un ``package_sha256`` que no es el suyo.
+        if not await self._lease_valid(context, zone, period):
+            _log.debug(
+                "se perdió el arrendamiento antes de subir: se descarta sin tocar el depósito",
+                zone_id=str(zone.zone_id),
+                period=period,
+            )
+            return None
 
         key = object_key(
             organization_id=zone.organization_id,
@@ -507,7 +636,6 @@ class MonthlyPackageComposer:
             period=period,
         )
         await self._evidence.put_object(key, zip_bytes, "application/zip")
-        checkpoint_id = await self._write_checkpoint(context, zone.plant_id)
 
         by_classification = {candidate.classification_id: candidate for candidate in candidates}
         items = [
@@ -555,6 +683,7 @@ class MonthlyPackageComposer:
             generated_at=generated_at,
             content=content,
         )
+        await self._release_lease(context, zone, period)
         if record_id is None:
             return None
         return ComposeOutcome(
@@ -637,6 +766,41 @@ class MonthlyPackageComposer:
                 generated_at=generated_at,
             )
 
+    async def _acquire_lease(
+        self, context: ScopeContext, zone: ZoneRef, period: str, now: datetime
+    ) -> MonthlyPackageLease | None:
+        """Reclama el arrendamiento de la composición; ``None`` si otro proceso ya lo tiene
+        vigente (B2/B3: sin esto, dos composiciones del mismo ``(zone_id, period)`` siempre
+        componen en paralelo, y la que pierde el sellado puede haber subido ya su zip)."""
+        async with self._database.transaction(context) as transaction:
+            return await self._repository.acquire_lease(
+                transaction,
+                plant_id=zone.plant_id,
+                zone_id=zone.zone_id,
+                period=period,
+                owner=self._owner,
+                now=now,
+                duration=LEASE_DURATION,
+            )
+
+    async def _lease_valid(self, context: ScopeContext, zone: ZoneRef, period: str) -> bool:
+        """Justo antes de subir el zip (B3): si el arrendamiento ya no es de este proceso
+        (vencido o tomado por otro), no se sube nada."""
+        async with self._database.transaction(context) as transaction:
+            return await self._repository.lease_still_valid(
+                transaction,
+                zone_id=zone.zone_id,
+                period=period,
+                owner=self._owner,
+                now=self._clock.now(),
+            )
+
+    async def _release_lease(self, context: ScopeContext, zone: ZoneRef, period: str) -> None:
+        async with self._database.transaction(context) as transaction:
+            await self._repository.release_lease(
+                transaction, zone_id=zone.zone_id, period=period, owner=self._owner
+            )
+
     async def _coordinator(self, context: ScopeContext, zone: ZoneRef) -> uuid.UUID | None:
         """El coordinador SST vigente de la zona, para ``audit_sample.reviewer_user_id``
         (``NOT NULL`` en el esquema: quien revisará, no quien ya revisó)."""
@@ -645,8 +809,11 @@ class MonthlyPackageComposer:
                 transaction, plant_id=zone.plant_id, zone_id=zone.zone_id
             )
 
-    async def _write_checkpoint(self, context: ScopeContext, plant_id: uuid.UUID) -> uuid.UUID:
-        """El punto de control que sella el paquete (U04-H-08, símil del arranque de exportación).
+    async def _fetch_checkpoint(
+        self, context: ScopeContext, plant_id: uuid.UUID
+    ) -> tuple[CheckpointChain, StoredCheckpoint]:
+        """El punto de control que ancla el paquete (U04-H-08, símil del arranque de
+        exportación), fijado **antes** de construir el zip: el manifiesto lo embebe y lo firma.
 
         Orden preferido: la cadena del expediente de la propia planta; si está vacía, la de la
         organización; si también lo está, la de auditoría. Solo si las tres cadenas cubiertas
@@ -662,7 +829,7 @@ class MonthlyPackageComposer:
         ):
             result = by_chain.get(chain)
             if result is not None and result.checkpoint is not None:
-                return result.checkpoint.entry_id
+                return chain, result.checkpoint
         raise MonthlyPackageUnsealable("ninguna cadena cubierta tiene puntos de control que fijar")
 
     async def _insert_sample(
@@ -754,7 +921,7 @@ class MonthlyPackageComposer:
                     recurrence_summary=recurrence,
                     metric_snapshot_id=None,
                     exposure_indicator_id=None,
-                    coverage_summary={},
+                    coverage_summary=_COVERAGE_NOT_COMPUTABLE,
                     commitments_from_previous_period=commitments,
                     audit_sample_id=sample_id,
                     sealed_checkpoint_record_id=checkpoint_id,
@@ -779,31 +946,98 @@ class MonthlyPackageComposer:
         period: str,
         generated_at: datetime,
         findings: Mapping[str, int],
+        checkpoint_chain: CheckpointChain,
+        stored_checkpoint: StoredCheckpoint,
+        public_keys: Sequence[CheckpointPublicKey],
     ) -> bytes:
+        """El zip del paquete, verificable por el ``vigia_verify.py`` que incluye (rework 1,
+        VIG-239: ``accreditation.export_verifier`` lo exige, también para un paquete mensual sin
+        clips ni hallazgos exportados).
+
+        El manifiesto sigue la forma de ``accreditation.manifest`` (DE §3.2) en lo que el
+        verificador endurecido comprueba: versión, forma del paquete, organización, planta,
+        zonas, punto de control y sus claves, conteos por estado y la declaración de firma
+        (``manifest_signature``, ancla A2); ``manifest.json`` y ``manifest.signature.json`` son
+        entradas de nivel superior, como en cualquier paquete exportado. El paquete mensual no
+        tiene hallazgos propios que exportar (BR-LAZ-102: compone un resumen, no una copia del
+        expediente): el único artefacto ``findings_json`` que declara va vacío y honesto, nunca
+        inventado; sus propios campos (``findings_summary``, ``recurrence_summary``, etc.) siguen
+        solo en ``monthly_package_produced``, no en este manifiesto.
+        """
         document_bytes = _render_document(
             zone_id=zone.zone_id, period=period, findings=findings, generated_at=generated_at
         )
         verifier = load_verifier_bundle()
-        verifier_path = f"verifier/{VERIFIER_PATH}"
-        artifacts: list[dict[str, str]] = [
-            {"path": _DOCUMENT_NAME, "sha256": hashlib.sha256(document_bytes).hexdigest()},
-            {"path": verifier_path, "sha256": verifier.sha256},
+        findings_bytes = canonical_bytes_sync({"zone_id": str(zone.zone_id), "findings": []})
+        audit_bytes = canonical_bytes_sync({"entries": []})
+        public_key_items: Any = [key.to_json() for key in public_keys]
+        public_key_bytes = canonical_bytes_sync({"keys": public_key_items})
+        checkpoint_item: dict[str, Any] = {
+            "kind": checkpoint_chain.kind.value,
+            "plant_id": (
+                None if checkpoint_chain.plant_id is None else str(checkpoint_chain.plant_id)
+            ),
+            "entry_id": str(stored_checkpoint.entry_id),
+            "sequence": stored_checkpoint.sequence,
+            "entry_hash": stored_checkpoint.entry_hash,
+            "content": stored_checkpoint.content.to_json(),
+        }
+        checkpoint_bytes = canonical_bytes_sync({"checkpoints": [checkpoint_item]})
+        state_counts = {state.value: 0 for state in FindingLifecycleState}
+
+        contents: list[tuple[str, str, bytes]] = [
+            (_DOCUMENT_NAME, "document", document_bytes),
+            (VERIFIER_PATH, VERIFIER_KIND, verifier.data),
+            (_FINDINGS_NAME, "findings_json", findings_bytes),
+            (_AUDIT_NAME, "audit", audit_bytes),
+            (_PUBLIC_KEY_NAME, "public_key", public_key_bytes),
+            (_CHECKPOINT_NAME, "checkpoint", checkpoint_bytes),
         ]
+        artifacts: list[dict[str, Any]] = [
+            {
+                "path": path,
+                "kind": kind,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size_bytes": len(data),
+                "volume": 1,
+            }
+            for path, kind, data in contents
+        ]
+
         manifest: dict[str, Any] = {
-            "package_id": str(package_id),
-            "zone_id": str(zone.zone_id),
-            "period": period,
+            "manifest_version": _MANIFEST_VERSION,
+            "export_id": str(package_id),
+            "package_form": _PACKAGE_FORM,
+            "organization": {"organization_id": str(zone.organization_id)},
+            "plant": {"plant_id": str(zone.plant_id)},
+            "zones": [{"zone_id": str(zone.zone_id)}],
+            "verifier_version": verifier.version,
+            "checkpoints": [checkpoint_item],
+            "checkpoint_public_keys": public_key_items,
+            "clips": [],
+            "attachments": [],
+            "absent_entries": [],
+            "finding_count": 0,
+            "open_finding_count": 0,
+            "closed_finding_count": 0,
+            "unclosable_count": 0,
+            "discarded_count": 0,
+            "suspended_count": 0,
+            "evidence_flagged_count": 0,
+            "state_counts": state_counts,
             "generated_at": format_timestamp(generated_at),
             "artifacts": artifacts,
-            "metrics_status": MetricStatus.NOT_COMPUTABLE.value,
-            "exposure_status": ExposureStatus.NOT_COMPUTABLE.value,
+            "manifest_signature": dict(MANIFEST_SIGNATURE_DECLARATION),
         }
         manifest_bytes = canonical_bytes_sync(manifest)
+        signature_bytes = sign_manifest(self._signer, manifest, manifest_bytes)
+
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(_zip_info(_DOCUMENT_NAME), document_bytes)
-            archive.writestr(_zip_info(verifier_path), verifier.data)
+            for path, _kind, data in contents:
+                archive.writestr(_zip_info(path), data)
             archive.writestr(_zip_info(_MANIFEST_NAME), manifest_bytes)
+            archive.writestr(_zip_info(_SIGNATURE_NAME), signature_bytes)
         return buffer.getvalue()
 
 

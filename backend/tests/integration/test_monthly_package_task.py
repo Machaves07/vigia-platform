@@ -14,6 +14,9 @@ nunca inventan un punto de control ni una firma.
   (PAT-LAZ-RES-05).
 - **Concurrencia**: dos composiciones a la vez del mismo ``(zone_id, period)`` nunca dejan dos
   filas selladas ni dos registros ``monthly_package_produced``.
+- **Arrendamiento vencido** (B2/B3, rework 1 del PR #161): un arrendamiento «zombie» que venció
+  deja tomarlo a un segundo proceso sin sellar dos veces, y el objeto de ``vigia-evidence`` es
+  siempre el del ganador (nunca el de una perdedora que subiera después, P4/P5, BR-LAZ-108).
 - **Zona horaria de la planta, no UTC**: dos plantas con husos distintos calculan periodos
   vencidos distintos para el mismo instante.
 
@@ -23,11 +26,16 @@ Solo datos generados (NFR-CTR-43).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import subprocess
+import sys
+import tempfile
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -36,8 +44,13 @@ from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, ver
 from tests.laz_support import IngestedSubject, LoopOrganization, LoopWorld, loop_world
 from tests.signing_support import bootstrapped_world
 from vigia_platform.accreditation.monthly.package import ComposeOutcome, MonthlyPackageComposer
-from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository, ZoneRef
+from vigia_platform.accreditation.monthly.repository import (
+    MonthlyPackageRepository,
+    ZoneRef,
+    object_key,
+)
 from vigia_platform.accreditation.monthly.task import MonthlyPackageTask
+from vigia_platform.accreditation.verifier_bundle import VERIFIER_FILE, ManifestSigner
 from vigia_platform.ledger.adapters.checkpoint_store import SqlCheckpointStore
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.ledger.application.writer import Receipt
@@ -75,6 +88,7 @@ class World:
     config: PostgresLoopConfigurationRepository
     repository: MonthlyPackageRepository
     evidence: S3Storage
+    signer: ManifestSigner
 
     @property
     def database(self) -> Any:
@@ -97,6 +111,7 @@ class World:
             checkpoints=self.checkpoints,
             writer=self.loop.stack.primary.writer,
             clock=sessions.clock,
+            signer=self.signer,
         )  # fmt: skip
 
     def task(self, *, max_catchup_months: int) -> MonthlyPackageTask:
@@ -233,6 +248,7 @@ def world(
                 config=PostgresLoopConfigurationRepository(loop.stack.primary.database),
                 repository=MonthlyPackageRepository(database=loop.stack.primary.database),
                 evidence=evidence,
+                signer=signing.service,
             )
 
 
@@ -392,13 +408,15 @@ def test_concurrent_compose_never_seals_twice(world: World) -> None:
         assert len(winners) == 1, outcomes
         assert len(losers) == 1, outcomes
         loser = losers[0]
-        # El perdedor nunca sella: ``claim`` nunca reescribe ``package_id`` de la fila (la
-        # migración no concede ``UPDATE`` sobre esa columna), así que las dos composiciones
-        # resuelven el **mismo** ``package_id`` y componen en paralelo sin colisionar; la valla
-        # real es ``seal``'s ``WHERE ... AND state != 'sealed'``: la segunda ``UPDATE`` no afecta
-        # ninguna fila, ``_SealLost`` revierte su transacción entera (expediente incluido) y
-        # devuelve ``None``. Se tolera también una excepción (``BaseException``) por si alguna
-        # otra escritura concurrente del intento perdedor choca antes de llegar al sellado.
+        # El perdedor nunca sella: desde el rework 1 (B2/B3), el arrendamiento de
+        # ``accreditation.monthly_package_lease`` es la primera valla real — de las dos
+        # composiciones concurrentes, solo una gana la fila del arrendamiento (``acquire_lease``,
+        # fenced ``INSERT ... ON CONFLICT``) y la otra devuelve ``None`` sin construir ni subir
+        # ningún zip. ``seal``'s ``WHERE ... AND state != 'sealed'`` sigue como vallado simétrico
+        # por si dos procesos llegaran a resolver el mismo ``package_id`` con arrendamientos
+        # distintos (``_SealLost`` revierte su transacción entera, expediente incluido). Se
+        # tolera también una excepción (``BaseException``) por si alguna otra escritura
+        # concurrente del intento perdedor choca antes de perder el arrendamiento o el sellado.
         assert loser is None or isinstance(loser, BaseException), outcomes
 
         rows = world.sealed_rows(zone.zone_id)
@@ -406,6 +424,65 @@ def test_concurrent_compose_never_seals_twice(world: World) -> None:
         assert len(sealed) == 1, rows
         assert sealed[0]["package_id"] == winners[0].package_id
         assert world.produced_periods(zone.zone_id) == [period]
+
+
+def test_expired_lease_lets_a_second_composer_take_over_without_double_sealing(
+    world: World,
+) -> None:
+    """FS-LAZ-10 al pie de la letra (B2/B3 del PR #161): un primer proceso toma el arrendamiento
+    de la composición y «muere» sin liberarlo ni sellar nada; el reloj inyectado lo deja vencer
+    (``LEASE_DURATION``); dos composiciones nuevas corren a la vez por el mismo
+    ``(zone_id, period)``. Solo una sella, y el objeto que queda en ``vigia-evidence`` es
+    exactamente el suyo (nunca el de una perdedora que hubiera subido después, P4/P5,
+    BR-LAZ-108)."""
+    world.clock.set(_BASELINE)
+    organization = world.loop.organization()
+    world.configure(organization)
+    world.grant_coordinator(organization)
+    zone = world.zone(organization)
+    period = "2026-09"
+    period_from, period_to = month_bounds(BOGOTA, period)
+
+    world.clock.set(period_from + timedelta(days=5))
+    subject = world.loop.ingest_finding(organization)
+    world.classify(subject, outcome="confirmed")
+    world.clock.set(period_to + timedelta(days=5))
+    context = world.loop.event_context(organization)
+
+    async def acquire_stale_lease() -> None:
+        async with world.database.transaction(context) as transaction:
+            lease = await world.repository.acquire_lease(
+                transaction,
+                plant_id=zone.plant_id,
+                zone_id=zone.zone_id,
+                period=period,
+                owner="proceso-zombie",
+                now=world.clock.now(),
+                duration=timedelta(minutes=10),
+            )
+            assert lease is not None, "el primer proceso debe poder tomar el arrendamiento"
+
+    world.loop.stack.run(acquire_stale_lease())
+    world.clock.advance(11 * 60)  # el arrendamiento del «zombie» vence a los 10 minutos.
+
+    outcomes = world.loop.stack.run(_race(world, context, zone, period))
+    winners = [outcome for outcome in outcomes if isinstance(outcome, ComposeOutcome)]
+    assert len(winners) == 1, outcomes
+
+    rows = world.sealed_rows(zone.zone_id)
+    sealed = [row for row in rows if row["state"] == "sealed"]
+    assert len(sealed) == 1, rows
+    assert sealed[0]["package_id"] == winners[0].package_id
+    assert world.produced_periods(zone.zone_id) == [period]
+
+    key = object_key(
+        organization_id=zone.organization_id,
+        plant_id=zone.plant_id,
+        zone_id=zone.zone_id,
+        period=period,
+    )
+    package_bytes = world.loop.stack.run(world.evidence.get_object(key))
+    assert hashlib.sha256(package_bytes).hexdigest() == winners[0].package_sha256
 
 
 # --- 4. zona horaria de la planta, nunca UTC ---------------------------------------------------
@@ -455,3 +532,128 @@ def test_timezone_of_the_plant_decides_the_due_period_not_utc(world: World) -> N
     # local = 31 de octubre): la tarea usa la zona horaria de la planta, no UTC ni la del proceso.
     assert "2026-10" in madrid_periods
     assert "2026-10" not in bogota_periods
+
+
+def test_lease_still_valid_reports_false_once_it_expires(world: World) -> None:
+    """B3 del PR #161: ``lease_still_valid`` (la comprobación justo antes de subir el zip) deja
+    de confirmar al dueño en cuanto pasa ``lease_until``, aunque nadie más lo haya tomado todavía
+    — así un proceso que se queda componiendo más de la cuenta nunca sube un zip sin dueño
+    vigente que responda por él (P4/P5, BR-LAZ-108). Prueba directa y determinista del
+    repositorio: solo el paso del reloj inyectado, sin concurrencia real."""
+    world.clock.set(_BASELINE)
+    organization = world.loop.organization()
+    world.configure(organization)
+    zone = world.zone(organization)
+    period = "2026-09"
+    context = world.loop.event_context(organization)
+
+    async def scenario() -> tuple[bool, bool]:
+        async with world.database.transaction(context) as transaction:
+            lease = await world.repository.acquire_lease(
+                transaction,
+                plant_id=zone.plant_id,
+                zone_id=zone.zone_id,
+                period=period,
+                owner="composer-a",
+                now=world.clock.now(),
+                duration=timedelta(minutes=10),
+            )
+        assert lease is not None
+        async with world.database.transaction(context) as transaction:
+            still_fresh = await world.repository.lease_still_valid(
+                transaction,
+                zone_id=zone.zone_id,
+                period=period,
+                owner="composer-a",
+                now=world.clock.now(),
+            )
+        world.clock.advance(11 * 60)
+        async with world.database.transaction(context) as transaction:
+            after_expiry = await world.repository.lease_still_valid(
+                transaction,
+                zone_id=zone.zone_id,
+                period=period,
+                owner="composer-a",
+                now=world.clock.now(),
+            )
+        return still_fresh, after_expiry
+
+    still_fresh, after_expiry = world.loop.stack.run(scenario())
+    assert still_fresh is True
+    assert after_expiry is False
+
+
+# --- 5. el zip sellado verifica íntegro con el verificador embebido (rework 1, VIG-239) ------
+
+
+def _run_verifier(package: Path, out: Path) -> tuple[subprocess.CompletedProcess[str], Any]:
+    """``vigia_verify.py`` (el mismo archivo endurecido que el paquete incluye) sobre
+    ``package``, igual que lo invocaría un tercero sin la plataforma (sin ``--manifest-sha256``
+    ni ``--extract``: solo lo que el propio zip trae debe bastar para anclarlo)."""
+    completed = subprocess.run(
+        [sys.executable, str(VERIFIER_FILE), str(package), "--out", str(out)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    document = json.loads(out.read_text("utf-8")) if out.is_file() else None
+    return completed, document
+
+
+def test_sealed_package_verifies_intact_with_the_embedded_verifier(world: World) -> None:
+    """VIG-239 (rework 1 del PR #161): ``compose_and_seal`` sube un zip verificable de verdad.
+
+    La revisión encontró que el manifiesto de ``_build_zip`` no declaraba ``manifest_version``,
+    ni firma, ni punto de control ni claves públicas: ``vigia_verify.py`` lo rechazaba con
+    ``broken``/``manifest_invalid`` en ``/manifest_version``. Esta prueba sella un paquete real
+    sobre PostgreSQL y LocalStack, descarga sus bytes de ``vigia-evidence`` tal cual quedaron
+    subidos y ejecuta el verificador endurecido real (el mismo ``vigia_verify.py`` que el zip
+    incluye) sobre ellos, sin tocar la aplicación: ``intact`` (código 0) y anclado por la firma
+    del manifiesto, no solo coherente consigo mismo."""
+    world.clock.set(_BASELINE)
+    organization = world.loop.organization()
+    world.configure(organization)
+    world.grant_coordinator(organization)
+    zone = world.zone(organization)
+    period = "2026-09"
+    period_from, period_to = month_bounds(BOGOTA, period)
+
+    world.clock.set(period_from + timedelta(days=5))
+    subject = world.loop.ingest_finding(organization)
+    world.classify(subject, outcome="confirmed")
+
+    world.clock.set(period_to + timedelta(days=5))
+    context = world.loop.event_context(organization)
+    composer = world.composer()
+    outcome = world.loop.stack.run(
+        composer.compose_and_seal(
+            context, zone, period, BOGOTA,
+            sample_percent=_SAMPLE_PERCENT, sample_min=_SAMPLE_MIN, sample_max=_SAMPLE_MAX,
+        )
+    )  # fmt: skip
+    assert isinstance(outcome, ComposeOutcome)
+
+    key = object_key(
+        organization_id=zone.organization_id,
+        plant_id=zone.plant_id,
+        zone_id=zone.zone_id,
+        period=period,
+    )
+    package_bytes = world.loop.stack.run(world.evidence.get_object(key))
+    assert hashlib.sha256(package_bytes).hexdigest() == outcome.package_sha256
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        package_path = root / "package.zip"
+        package_path.write_bytes(package_bytes)
+        completed, document = _run_verifier(package_path, root / "result.json")
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert document is not None, completed.stdout + completed.stderr
+    assert document["status"] == "intact", document
+    assert document["broken"] is None, document
+    assert document["anchored_by"] == ["manifest_signature"], document
+    assert document["artifacts_verified"] == 6, document
+    assert document["checkpoints_verified"] == 1, document
