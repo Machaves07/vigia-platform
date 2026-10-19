@@ -13,20 +13,22 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from vigia_contracts.clock import SimulatedClock
 
+from tests.factories import make_context
 from vigia_platform.identity.application.invitations import InvitationEmail
 from vigia_platform.notifications.adapters.ses.fake import (
     RESEND_LIMIT_PER_ORGANIZATION,
     RESEND_LIMIT_PER_USER,
     FakeEmailSender,
 )
+from vigia_platform.shared.context import ScopeContext
 
 START = datetime(2026, 1, 1, tzinfo=UTC)
-_CONTEXT: Any = object()
-"""``send`` nunca inspecciona el contexto (no toca la base): cualquier objeto sirve."""
+_CONTEXT: ScopeContext = make_context()
+"""``send`` nunca inspecciona el contenido del contexto (no toca la base), pero la guarda
+``@repository`` (BR-NUC-02) exige uno válido antes de llegar al cuerpo."""
 
 
 def _message(organization_id: uuid.UUID, to_user_id: uuid.UUID) -> InvitationEmail:

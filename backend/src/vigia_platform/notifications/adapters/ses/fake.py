@@ -18,7 +18,7 @@ from typing import Final, Literal
 from vigia_platform.identity.application.invitations import InvitationEmail
 from vigia_platform.notifications.adapters.ses.circuit import EmailCircuitBreaker
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 
 __all__ = ["FakeEmailSender", "SentEmail"]
 
@@ -39,6 +39,7 @@ class SentEmail:
     queued_at: datetime
 
 
+@repository
 class FakeEmailSender:
     """Doble de prueba de ``EmailSenderPort``: nunca sale a la red."""
 

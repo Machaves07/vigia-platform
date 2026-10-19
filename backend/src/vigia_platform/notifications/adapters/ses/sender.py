@@ -42,7 +42,7 @@ from vigia_platform.loop.http.client_factory import HttpClientFactory
 from vigia_platform.notifications.adapters.postgres.tables import EMAIL_MESSAGE
 from vigia_platform.notifications.adapters.ses.circuit import EmailCircuitBreaker
 from vigia_platform.shared.clock import Clock
-from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -107,6 +107,7 @@ def _count_since(
     return statement
 
 
+@repository
 class SesEmailSender:
     """``EmailSenderPort`` sobre Amazon SES (LC-LAZ-33)."""
 

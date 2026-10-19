@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import pytest
 
-from tests.factories import uuid7
+from tests.factories import make_context, uuid7
 from tests.integration.conftest import PostgresEndpoint
 from tests.notification_support import NotificationWorld, Senders, notification_world
 from vigia_platform.identity.application.invitations import InvitationEmail
@@ -58,7 +58,8 @@ def test_degraded_app_only_and_integrity_compromised_bypasses_the_open_circuit(
     sender.fail_for(timedelta(minutes=5))
     # El circuito abre en el primer intento fallido, no antes (PAT-LAZ-RES-04): un envío
     # cualquiera lo dispara (aquí, la misma invitación que ``EmailSenderPort`` sirve a U-02).
-    world.run(sender.send(object(), _probe_message(organization_id)))  # type: ignore[arg-type]
+    probe_context = make_context(organization_id=organization_id)
+    world.run(sender.send(probe_context, _probe_message(organization_id)))
     assert sender.circuit_state() == "open"
 
     # Un immediate+correo normal (no bypasses_email_circuit): review_overdue, "phase": "first"
