@@ -19,7 +19,7 @@ from pypdf import PdfReader
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
 
 from tests.export_document_support import sample_manifest_inputs
-from vigia_platform.accreditation.export.document import generate_document
+from vigia_platform.accreditation.document import generate_document
 
 _FORBIDDEN_PRESENCE: frozenset[str] = frozenset(
     {"/JS", "/JavaScript", "/Launch", "/AA", "/OpenAction", "/AcroForm", "/EmbeddedFiles"}

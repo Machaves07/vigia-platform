@@ -62,11 +62,12 @@ import asyncio
 import hashlib
 import itertools
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final, Protocol
 
+from vigia_platform.accreditation.document import generate_document
 from vigia_platform.accreditation.export.composer_port import (
     CHECKPOINT_UNAVAILABLE,
     ExportInputUnavailable,
@@ -74,7 +75,6 @@ from vigia_platform.accreditation.export.composer_port import (
     ExportPackage,
     ExportSink,
 )
-from vigia_platform.accreditation.export.document import generate_document
 from vigia_platform.accreditation.export.stream import Artifact, ExportStream
 from vigia_platform.accreditation.export.timeline import (
     TimelineCoverage,
@@ -473,10 +473,15 @@ class ExportComposer:
         stream: ExportStream,
         ports: ExportPorts,
         default_window_minutes: int = DEFAULT_AGGREGATION_WINDOW_MINUTES,
+        document_renderer: Callable[[ManifestInputs], bytes] = generate_document,
     ) -> None:
         self._stream = stream
         self._ports = ports
         self._default_window = default_window_minutes
+        self._document_renderer = document_renderer
+        """``accreditation.document.generate_document`` por defecto; las pruebas sintéticas
+        inyectan un generador falso y rápido para no pagar un render real de WeasyPrint por cada
+        ejemplo (``tests/export_contents_support.py``)."""
 
     # --- fase 1: recoger ----------------------------------------------------------------------
 
@@ -777,7 +782,7 @@ class ExportComposer:
         contents = await self.collect(context, job)
         with_clips = job.package_form is PackageForm.WITH_CLIPS
         plan = _plan(contents, with_clips)
-        total = len(plan)
+        total = len(plan) + 1
         async with self._stream.writer(job, sink) as writer:
             for done, (path, kind, payload) in enumerate(plan, start=1):
                 await sink.artifact_started(kind)
@@ -791,14 +796,14 @@ class ExportComposer:
                 await sink.artifact_finished(kind, done, total)
             await sink.artifact_started("document")
             document_inputs = _manifest_inputs(job, contents, writer.artifacts, with_clips)
-            pdf_bytes = await asyncio.to_thread(generate_document, document_inputs)
+            pdf_bytes = await asyncio.to_thread(self._document_renderer, document_inputs)
             await writer.add_bytes(
                 Artifact(
                     path=DOCUMENT_NAME, kind="document", size_bytes=len(pdf_bytes), document=True
                 ),
                 pdf_bytes,
             )
-            await sink.artifact_finished("document", total + 1, total + 1)
+            await sink.artifact_finished("document", total, total)
             manifest = build_manifest(_manifest_inputs(job, contents, writer.artifacts, with_clips))
             document = manifest_json(manifest)
             result = await writer.finish(document)

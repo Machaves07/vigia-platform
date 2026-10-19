@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Final
 
 from tests.export_document_support import sample_manifest_inputs
-from vigia_platform.accreditation.export.document import generate_document
+from vigia_platform.accreditation.document import generate_document
 
 BACKEND: Final = Path(__file__).resolve().parents[2]
 

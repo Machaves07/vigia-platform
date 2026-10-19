@@ -1,4 +1,4 @@
-"""``ManifestInputs`` de ejemplo para las pruebas de ``accreditation.export.document`` (VIG-236).
+"""``ManifestInputs`` de ejemplo para las pruebas de ``accreditation.document`` (VIG-236).
 
 Sin aleatoriedad ni hora del sistema: dos llamadas a ``sample_manifest_inputs`` devuelven
 exactamente los mismos valores, en este proceso o en otro.
@@ -136,7 +136,7 @@ def sample_manifest_inputs() -> ManifestInputs:
                 zone_id=ZONE_A,
                 starts_at=datetime(2026, 1, 1, 2, tzinfo=UTC),
                 ends_at=datetime(2026, 1, 1, 3, tzinfo=UTC),
-                cause="walk-test vencido",
+                cause="model_version_change",
             ),
         ),
         revoked_gates=(

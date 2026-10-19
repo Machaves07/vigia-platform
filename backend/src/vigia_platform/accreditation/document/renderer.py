@@ -354,7 +354,7 @@ def document_content(inputs: ManifestInputs, labels: PlatformLabels) -> dict[str
                 "zone": _zone_ref(zones_by_id[item.zone_id]),
                 "starts_at": format_timestamp(item.starts_at),
                 "ends_at": NULL_TEXT if item.ends_at is None else format_timestamp(item.ends_at),
-                "cause": item.cause,
+                "cause": _label(labels, "regression_cause", item.cause),
             }
             for item in regressions_sorted
         ],
