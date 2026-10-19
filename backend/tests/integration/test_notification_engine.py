@@ -329,6 +329,8 @@ def test_a_granted_concession_notifies_the_client_administrators_and_managers(
 
 
 def _overdue(world: NotificationWorld, site: Site) -> Any:
+    # "phase": "first" (U04-H-07, VIG-213): el primer aviso es el único immediate del catálogo;
+    # estas pruebas usan review_overdue como ejemplo genérico de evento immediate+correo.
     return world.event(
         site.organization,
         "review_overdue",
@@ -336,7 +338,8 @@ def _overdue(world: NotificationWorld, site: Site) -> Any:
             "zone_id": str(site.zone),
             "detection_id": str(uuid7()),
             "review_due_at": "2026-10-01T00:00:00.000Z",
-            "reminders_sent": 2,
+            "reminders_sent": 1,
+            "phase": "first",
         },
         plant_id=site.plant,
     )

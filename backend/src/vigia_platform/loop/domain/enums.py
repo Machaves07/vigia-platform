@@ -108,6 +108,16 @@ class ReviewResolutionOutcome(enum.StrEnum):
     REVIEW_DISCARDED = "review_discarded"
 
 
+class ReviewReminderPhase(enum.StrEnum):
+    """``review_reminder_phase`` (U04-H-07): distingue el primer aviso de sus repeticiones.
+
+    ``notifications.catalog`` lo usa como ``immediate_when`` de ``review_overdue``: el primero
+    conserva el nivel ``immediate`` del catálogo; las repeticiones bajan a ``normal``."""
+
+    FIRST = "first"
+    REPEAT = "repeat"
+
+
 class ReasonCategoryConfirmed(enum.StrEnum):
     """``reason_category_confirmed`` ``[hipótesis]`` (UC1, UC2, familias de U-01)."""
 

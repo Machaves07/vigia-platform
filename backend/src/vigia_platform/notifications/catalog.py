@@ -19,6 +19,12 @@ Las notas de la tabla, tal como mandan sobre el texto de arriba:
 - ``integrity_compromised`` va a los dos (``both``) y su correo **no depende del cortacircuito**
   (``bypasses_email_circuit``, BR-LAZ-127).
 
+> **Nota fechada (2026-10-19, Code Generation de U-04, TASK-309)**: ``review_overdue`` no es
+> ``immediate`` fijo. U04-H-07 (``loop.application.review_queue.ReviewQueueReminder``) exige que
+> solo el **primer** aviso conserve ``immediate``; las repeticiones bajan a ``normal``. La carga
+> lleva ``phase`` (``ReviewReminderPhase``: ``first`` o ``repeat``), y la fila usa
+> ``immediate_when`` sobre ese campo, igual que ``gate_state_changed`` sobre ``status``.
+
 Los destinatarios del proveedor son roles de la organización proveedora, que solo admite
 ``platform_operator`` y ``provider_installer`` (``identity.application.roles.PROVIDER_ROLES``):
 «operador de plataforma» y «administrador de la proveedora» son ``platform_operator`` (el
@@ -208,7 +214,16 @@ _ENTRIES: Final = (
     _entry("loop_resumed", _U04, _U.NORMAL, IN_APP, _COORDINATOR, "Lazo reanudado"),
     _entry("review_confirmed", _U04, _U.NORMAL, IN_APP, _COORDINATOR, "Revisión confirmada"),
     _entry("review_discarded", _U04, _U.NORMAL, IN_APP, _COORDINATOR, "Revisión descartada"),
-    _entry("review_overdue", _U04, _U.IMMEDIATE, WITH_EMAIL, _COORDINATOR, "Revisión vencida"),
+    # U04-H-07 (TASK-309, nota fechada 2026-10-19): solo el primer aviso es immediate.
+    _entry(
+        "review_overdue",
+        _U04,
+        _U.NORMAL,
+        WITH_EMAIL,
+        _COORDINATOR,
+        "Revisión vencida",
+        immediate_when=ImmediateWhen("phase", frozenset({"first"})),
+    ),
     _entry(
         "action_assigned",
         _U04,

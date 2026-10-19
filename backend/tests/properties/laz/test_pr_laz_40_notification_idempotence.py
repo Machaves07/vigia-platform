@@ -262,7 +262,13 @@ def _concurrent_case(world: NotificationWorld) -> tuple[OutboxEvent, set[uuid.UU
     event = world.event(
         organization,
         "review_overdue",
-        {"zone_id": str(zone), "detection_id": str(uuid7()), "reminders_sent": 1},
+        # "phase": "first" (U04-H-07, VIG-213): el único nivel immediate+correo del catálogo.
+        {
+            "zone_id": str(zone),
+            "detection_id": str(uuid7()),
+            "reminders_sent": 1,
+            "phase": "first",
+        },
         plant_id=plant,
     )
     engine = world.engine()

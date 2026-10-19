@@ -20,12 +20,11 @@ Sobre PostgreSQL 16 real (``review_queue_stack``), con pocos ejemplos por el cos
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import LoopOrganization
@@ -71,14 +70,9 @@ def _clear(stack: ReviewQueueStack, organization: LoopOrganization) -> None:
     )
 
 
-@settings(
-    max_examples=4,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-@given(order=st.permutations(range(BATCH_SIZE)))
+@pytest.mark.parametrize("order", list(itertools.permutations(range(BATCH_SIZE))))
 def test_any_arrival_order_of_a_batch_leaves_the_same_queue(
-    stack: ReviewQueueStack, order: list[int]
+    stack: ReviewQueueStack, order: tuple[int, ...]
 ) -> None:
     organization = stack.world.organization()
     detections = [stack.world.ingest_detection(organization) for _ in range(BATCH_SIZE)]

@@ -22,6 +22,7 @@ Solo datos generados.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from collections.abc import Iterator
 from typing import Any, Final
@@ -46,6 +47,7 @@ from vigia_platform.loop.calendar import business_deadline
 from vigia_platform.loop.config.parameters import LoopSettings
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.detail_codes import LoopDetailCode
+from vigia_platform.notifications.catalog import catalog_entry
 from vigia_platform.shared.context import Role, ScopeLevel
 
 pytestmark = pytest.mark.integration
@@ -249,6 +251,33 @@ def test_one_reminder_per_window_even_if_the_task_runs_twice(stack: ReviewQueueS
     assert (row_third["reminders_sent"], row_third["state"]) == (2, "pending")
 
 
+def test_the_first_reminder_is_immediate_and_repeats_are_normal(stack: ReviewQueueStack) -> None:
+    """Criterio de aceptación de TASK-309: con ``reminder_interval_hours = 24`` por defecto y la
+    tarea corriendo cada hora, un elemento vencido recibe un recordatorio al día; el primero
+    conserva el nivel ``immediate`` del catálogo de notificaciones y las repeticiones bajan a
+    ``normal`` (``phase`` en la carga, ``notifications.catalog`` lo usa como ``immediate_when``).
+    """
+    organization = stack.world.organization()
+    detection = stack.in_review(organization)
+    _make_overdue(stack, detection)
+    reminder = _reminder(stack)
+
+    sequence = []
+    for _ in range(3):
+        sent = stack.run(_remind(stack, reminder, organization))
+        assert len(sent) == 1 and sent[0].detection_id == detection.subject_id
+        sequence.append((sent[0].reminders_sent, sent[0].phase.value))
+        stack.tick(24 * 3600 + 1)
+    assert sequence == [(1, "first"), (2, "repeat"), (3, "repeat")]
+
+    published = stack.overdue_events(organization, detection.subject_id)
+    assert len(published) == 3
+    entry = catalog_entry("review_overdue")
+    assert entry is not None
+    urgencies = [entry.urgency_for(json.loads(row["payload"])).value for row in published]
+    assert urgencies == ["immediate", "normal", "normal"]
+
+
 def test_two_concurrent_reminder_runs_send_only_one(stack: ReviewQueueStack) -> None:
     """Prueba concurrente (tabla de garantías): dos ejecuciones de ``remind`` a la vez sobre el
     mismo elemento vencido dejan un solo aviso; el ``UPDATE ... WHERE ...`` condicional serializa
@@ -320,6 +349,35 @@ def test_the_list_never_shows_another_organizations_items(stack: ReviewQueueStac
     assert response.status_code == 200, response.text
     ids = {item["detection_id"] for item in response.json()["items"]}
     assert str(foreign.subject_id) not in ids
+
+
+def test_a_zone_scoped_coordinator_does_not_see_a_sibling_zone_of_the_same_organization(
+    stack: ReviewQueueStack,
+) -> None:
+    """``_PENDING_PAGE`` filtra por alcance (``organization_wide`` o ``plant_id``/``zone_id`` del
+    rol), no solo por organización: la guarda de alcance exige una prueba que falle si se quita
+    (AGENTS.md, «guardas de alcance»). Mutación verificada en rojo y revertida (tabla del PR):
+    cambiar la cláusula a ``CAST(TRUE AS boolean) OR ...`` hace que ``sibling`` aparezca en la
+    lista del coordinador de zona; con la cláusula restaurada, no aparece."""
+    organization = stack.world.organization()
+    own = stack.in_review(organization)
+    sibling = stack.in_review(organization)
+    site = organization.site
+    stack.world.stack.execute(
+        "UPDATE loop.review_queue_item SET zone_id = $1"
+        " WHERE organization_id = $2 AND detection_id = $3",
+        site.other_zone_id,
+        organization.organization_id,
+        sibling.subject_id,
+    )
+    zone_coordinator = stack.member(
+        organization, Role.COORDINATOR_SST, ScopeLevel.ZONE, site.zone_id
+    )
+    response = stack.list_queue(zone_coordinator, limit=200)
+    assert response.status_code == 200, response.text
+    ids = {item["detection_id"] for item in response.json()["items"]}
+    assert ids == {str(own.subject_id)}
+    assert str(sibling.subject_id) not in ids
 
 
 def test_a_resolved_item_leaves_the_list(stack: ReviewQueueStack) -> None:
@@ -433,8 +491,10 @@ def test_two_simultaneous_resolutions_leave_exactly_one_winner(
     stack: ReviewQueueStack, coordinator: Who
 ) -> None:
     """Tabla de garantías: la exclusión de la detección (``lock_finding``) deja una sola
-    resolución; la mutación (quitarla) haría que las dos leyeran ``in_review`` y las dos
-    escribieran (comprobado antes de esta tarea en ``classification``, mismo mecanismo)."""
+    resolución; la mutación (quitar la llamada a ``lock_finding`` en
+    ``ReviewQueueService.resolve``) se corrió directamente contra esta prueba —no contra
+    ``classification``, que usa el mismo mecanismo pero es una prueba distinta— y dio
+    ``assert (1 == 1 and 0 == 1)`` en rojo (evidencia en el PR); restaurada después."""
     detection = stack.in_review()
     context = stack.context(coordinator)
     service = stack.service

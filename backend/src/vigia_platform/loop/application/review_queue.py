@@ -25,9 +25,12 @@ resolución humana (H-05, H-23). Este módulo tiene tres piezas:
    ``reminder_interval_hours`` desde el recordatorio anterior (actualización condicional
    ``UPDATE ... WHERE ... RETURNING``, atómica por fila: dos ejecuciones de la tarea, o una que
    corre dos veces sobre un arrendamiento vencido, dejan como máximo un aviso por ventana).
-   ``reminders_sent`` viaja en la carga del evento; el nivel de urgencia (``immediate`` en el
-   primer aviso, ``normal`` en los siguientes, del catálogo) lo decide ``notifications`` a partir
-   de ese contador (VIG-217, fuera de alcance de esta tarea).
+   ``reminders_sent`` viaja en la carga del evento junto con ``phase`` (``review_overdue_phase``,
+   ``ReviewReminderPhase``): ``first`` cuando ``reminders_sent == 1``, ``repeat`` después. El
+   catálogo de ``notifications`` (``CatalogEntry`` de ``review_overdue``) usa ``phase`` como
+   ``immediate_when``: el primer aviso conserva ``immediate``; las repeticiones bajan a ``normal``
+   (el catálogo no puede derivarlo de ``reminders_sent`` solo, porque ``ImmediateWhen`` compara
+   contra un conjunto cerrado de valores de cadena, no un contador).
 
 **Motivo de la resolución** (análogo a ``loop.classification``, BLM §1): ``ReviewResolutionOutcome``
 solo tiene dos valores (``review_confirmed``, ``review_discarded``, a diferencia de las tres
@@ -92,6 +95,7 @@ from vigia_platform.loop.domain.enums import (
     ReasonCategoryAuthorized,
     ReasonCategoryConfirmed,
     ReasonCategoryFalsePositive,
+    ReviewReminderPhase,
     ReviewResolutionOutcome,
 )
 from vigia_platform.loop.domain.lifecycle import (
@@ -146,6 +150,7 @@ __all__ = [
     "ReviewResolutionResult",
     "register_review_queue",
     "register_review_reminders",
+    "review_overdue_phase",
 ]
 
 REVIEW_RESOLUTION: Final = "review_resolution"
@@ -655,6 +660,11 @@ class ReviewQueueService:
 # --- tarea periódica review_reminders -----------------------------------------------------------
 
 
+def review_overdue_phase(reminders_sent: int) -> ReviewReminderPhase:
+    """``first`` en el primer aviso (``reminders_sent == 1``); ``repeat`` en los siguientes."""
+    return ReviewReminderPhase.FIRST if reminders_sent == 1 else ReviewReminderPhase.REPEAT
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ReviewOverdueEvent:
     """Lo que ``ReviewQueueReminder`` publica por cada aviso (carga de ``review_overdue``)."""
@@ -663,6 +673,7 @@ class ReviewOverdueEvent:
     detection_id: uuid.UUID
     review_due_at: datetime
     reminders_sent: int
+    phase: ReviewReminderPhase
 
 
 @repository
@@ -735,6 +746,7 @@ class ReviewQueueReminder:
                 cutoff=cutoff,
             )
             for row in reminded:
+                phase = review_overdue_phase(row.reminders_sent)
                 await self._outbox.publish(
                     transaction,
                     NewEvent(
@@ -744,6 +756,7 @@ class ReviewQueueReminder:
                             "detection_id": str(row.detection_id),
                             "review_due_at": format_timestamp(row.review_due_at),
                             "reminders_sent": row.reminders_sent,
+                            "phase": phase.value,
                         },
                         plant_id=plant_id,
                     ),
@@ -754,6 +767,7 @@ class ReviewQueueReminder:
                         detection_id=row.detection_id,
                         review_due_at=row.review_due_at,
                         reminders_sent=row.reminders_sent,
+                        phase=phase,
                     )
                 )
         return sent
