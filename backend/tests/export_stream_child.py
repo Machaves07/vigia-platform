@@ -1,7 +1,9 @@
 """Proceso hijo del flujo de exportación contra LocalStack (TASK-345; PR-LAZ-49; NFR-LAZ-49).
 
 ``python -m tests.export_stream_child '<json>'`` compone el paquete sintético determinista
-(``tests.export_stream_support.StreamingComposer``) con ``ExportStream`` sobre ``S3Storage``:
+(``tests.export_stream_support.StreamingComposer``) o, con la clave ``real`` (TASK-318), el del
+compositor real ``ExportComposer`` sobre el mundo determinista del trabajo (``job_world``), con
+``ExportStream`` sobre ``S3Storage``:
 
 - ``mode = "kill"``: tras cada artefacto escribe ``{"progress": p}``; al llegar a
   ``kill_percent`` escribe ``{"paused": …}`` con la subida guardada y **se queda esperando** en la
@@ -30,8 +32,11 @@ from tests.export_stream_support import (
     RecordingSink,
     StreamingComposer,
     job_from_json,
+    real_job,
     scope_from_json,
 )
+from tests.properties.laz.strategies.export import WorldPorts, job_world
+from vigia_platform.accreditation.export.contents import ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.storage import (
@@ -65,7 +70,15 @@ async def _main(spec: dict[str, Any]) -> None:
         SystemClock(),
     )
     stream = ExportStream(store=storage, settings=ExportStreamSettings(**spec["settings"]))
-    composer = StreamingComposer(stream, scope_from_json(spec["scope"]))
+    job = job_from_json(spec["job"])
+    composer: StreamingComposer | ExportComposer
+    if "real" in spec:
+        # TASK-318: el compositor real sobre el mundo determinista del trabajo (``job_world``).
+        job = real_job(job, spec["real"])
+        world = job_world(job, findings_per_zone=spec["real"]["findings"])
+        composer = ExportComposer(stream=stream, ports=WorldPorts(world).ports())
+    else:
+        composer = StreamingComposer(stream, scope_from_json(spec["scope"]))
     kill_percent: int | None = spec.get("kill_percent")
     tmp_max = _tmp_usage()
     sink = RecordingSink()
@@ -81,16 +94,15 @@ async def _main(spec: dict[str, Any]) -> None:
             raise SystemExit("el padre no mató el proceso")
 
     sink.hook = hook
-    package = await composer.compose(job_from_json(spec["job"]), sink)
-    result = composer.results[0]
+    package = await composer.compose(job, sink)
     _emit(
         {
             "result": {
                 "archive_sha256": package.archive_sha256,
                 "document_sha256": package.document_sha256,
                 "size_bytes": package.size_bytes,
-                "volumes": [volume.to_json() for volume in result.stored.volumes],
-                "manifest": composer.manifests[0],
+                "volumes": [volume.to_json() for volume in package.stored.volumes],
+                "manifest": dict(package.manifest),
             },
             "max_rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
             "tmp_max_bytes": max(tmp_max, _tmp_usage()),
