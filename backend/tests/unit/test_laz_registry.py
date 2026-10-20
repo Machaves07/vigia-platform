@@ -195,6 +195,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
                 ("GET", "/loop/assistant-requests/{request_id}"),
                 ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
+                ("GET", "/loop/findings/{finding_state_id}"),  # TASK-342: SUP-U05-02
+                ("GET", "/loop/findings/{finding_state_id}/classifications"),  # TASK-342: 04
                 ("GET", "/loop/overdue"),  # TASK-313: SUP-U05-15
             ]
             assert state[LOOP_STATE_KEY].overdue is not None
@@ -204,6 +206,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].evidence is not None
             assert state[LOOP_STATE_KEY].root_cause is not None
             assert state[LOOP_STATE_KEY].inbox is not None
+            assert state[LOOP_STATE_KEY].detail is not None
             assert state[LOOP_STATE_KEY].closure is not None
             assert state[LOOP_STATE_KEY].reopening is not None
             assert state[LOOP_STATE_KEY].review_queue is not None

@@ -17,6 +17,22 @@ Responde ``{items, zones, partitions, next_cursor}``:
 Una zona inexistente, de otra organización o fuera del alcance responde ``not_found`` (nunca
 ``forbidden``); un parámetro desconocido, repetido donde no se admite o con valor fuera de su
 lista, ``invalid_request``. ``Cache-Control: no-store``. Sin auditoría de consulta (BR-LAZ-09).
+
+El detalle y el historial (SUP-U05-02 y 04; LC-LAZ-06; ``loop.application.detail``), los dos con
+``findings.read`` sobre la zona del hallazgo y sin parámetros de consulta:
+
+- ``GET /loop/findings/{finding_state_id}``: el hallazgo con su cita del estándar (texto y
+  ``sha256``, o la sección degradada ``standard_text_unavailable``), la compuerta de uso del
+  instante, la cobertura del instante, los nodos, el episodio, los registros del expediente
+  leídos (auditados) con sus señales y clips, las clasificaciones, las acciones, los análisis y
+  sus avisos (``FindingDetailNotice``). Sin compuerta legible, **503 ``temporarily_unavailable``
+  con ``loop_gate_state_unavailable``** y ``Retry-After``: el cuerpo es solo el error, ningún
+  campo del hallazgo (fallo cerrado, BR-LAZ-12);
+- ``GET /loop/findings/{finding_state_id}/classifications``: todas las clasificaciones del sujeto
+  en orden, con motivo, categoría, autor y fecha.
+
+Inexistente, de otra organización o fuera del alcance: ``not_found``. En zona unipersonal toda
+marca es el inicio de su ventana (``time_aggregated``).
 """
 
 from __future__ import annotations
@@ -46,6 +62,13 @@ from vigia_platform.loop.adapters.postgres.inbox_query import (
     InboxCursor,
     InboxFilters,
 )
+from vigia_platform.loop.application.detail import (
+    ClassificationHistory,
+    ClassificationView,
+    FindingDetail,
+    FindingGateUnavailable,
+    RecordView,
+)
 from vigia_platform.loop.application.inbox import (
     MAX_INBOX_PAGE,
     InboxItem,
@@ -53,7 +76,9 @@ from vigia_platform.loop.application.inbox import (
     InboxRequestInvalid,
     ZoneDeclaration,
 )
+from vigia_platform.loop.detail_codes import HTTP_STATUS_BY_DETAIL_CODE, LoopDetailCode
 from vigia_platform.loop.domain.enums import (
+    FindingDetailNotice,
     FindingLifecycleState,
     InboxFindingNotice,
     InboxPartitionNotice,
@@ -65,16 +90,25 @@ from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "CLASSIFICATIONS_PATH",
+    "DETAIL_PATH",
     "MAX_ZONES",
     "PATH",
+    "ClassificationHistoryOut",
+    "FindingDetailOut",
     "InboxOrder",
     "InboxPageOut",
     "decode_inbox_cursor",
+    "detail_view",
     "encode_inbox_cursor",
     "findings_router",
+    "history_view",
 ]
 
 PATH: Final = "/loop/findings"
+DETAIL_PATH: Final = "/loop/findings/{finding_state_id}"
+CLASSIFICATIONS_PATH: Final = "/loop/findings/{finding_state_id}/classifications"
+_GATE_UNAVAILABLE: Final = LoopDetailCode.GATE_STATE_UNAVAILABLE
 MAX_ZONES: Final = 50
 """Zonas por consulta (``zone_id`` repetible)."""
 MAX_CURSOR_CHARS: Final = 128
@@ -229,6 +263,386 @@ def page_view(page: InboxPage) -> InboxPageOut:
     )
 
 
+# --- detalle e historial (SUP-U05-02 y 04) ------------------------------------------------------
+
+
+class DetailNoticeOut(_Strict):
+    code: FindingDetailNotice
+    since: str | None
+    """Desde cuándo (acuerdo revocado, versión posterior del estándar)."""
+    cause: str | None
+    """La causa del acta no vigente."""
+
+
+class StandardCitationOut(_Strict):
+    standard_id: uuid.UUID
+    version: int
+    """La versión con la que se evaluó, para siempre (H-16; nunca se reevalúa)."""
+    title_es: str | None
+    declared_text: str | None
+    """``null`` si el catálogo no lo dio: aviso ``standard_text_unavailable``."""
+    declared_text_sha256: str | None
+    effective_from: str | None
+    superseded_since: str | None
+    """Desde cuándo rige una versión posterior del catálogo (BR-LAZ-152)."""
+    superseded_in_catalog_version: int | None
+
+
+class GateAtEventOut(_Strict):
+    status: str
+    effective_from: str
+    effective_until: str | None
+
+
+class CoverageAtEventOut(_Strict):
+    state: str
+    causes: tuple[str, ...]
+    layer: str
+
+
+class NodeCameraOut(_Strict):
+    camera_id: uuid.UUID
+    code: str | None
+    connected: bool
+    observability_state: str
+
+
+class NodeOut(_Strict):
+    node_id: uuid.UUID
+    code: str
+    communication_state: str
+    since: str
+    last_heartbeat_at: str | None
+    cameras: tuple[NodeCameraOut, ...]
+
+
+class SignalOut(_Strict):
+    signal_id: uuid.UUID | None
+    role: str
+    value: str
+    valid: bool
+    read_at: str | None
+
+
+class ClipOut(_Strict):
+    evidence_id: uuid.UUID
+    clip_id: uuid.UUID
+    camera_id: uuid.UUID
+    segment: str
+    media_kind: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    duration_ms: int | None
+    starts_at: str | None
+    ends_at: str | None
+    read_url: str | None
+    """De solo lectura, vigente a lo sumo 5 minutos; ``null`` si el almacén no la concedió."""
+
+
+class RecordOut(_Strict):
+    record_id: uuid.UUID
+    record_type: str
+    chain_sequence: int
+    content_hash: str
+    segment_index: int | None
+    received_at: str
+    occurred_at: str | None
+    signals: tuple[SignalOut, ...]
+    clips: tuple[ClipOut, ...]
+
+
+class EpisodeOut(_Strict):
+    episode_id: uuid.UUID
+    segment_record_ids: tuple[uuid.UUID, ...]
+    segment_count: int
+    expected_segment_count: int
+    missing_segment_indexes: tuple[int, ...]
+    started_at: str
+    ended_at: str
+    total_episode_duration_ms: int
+    total_condition_duration_ms: int
+    continues_open: bool
+
+
+class ClassifiedByOut(_Strict):
+    """El usuario de la plataforma que clasificó (P8), nunca una persona observada."""
+
+    user_id: uuid.UUID
+    display_name: str
+    role_in_use: str
+
+
+class ClassificationItemOut(_Strict):
+    classification_id: uuid.UUID
+    record_id: uuid.UUID
+    sequence_in_subject: int
+    outcome: str
+    reason_category: str
+    reason_text: str
+    is_reclassification: bool
+    reinforced_reason: bool
+    previous_outcome: str | None
+    effect_on_loop: str
+    classified_at: str
+    classified_by: ClassifiedByOut
+
+
+class ActionOut(_Strict):
+    action_id: uuid.UUID
+    record_id: uuid.UUID
+    action_type: str
+    action_description: str
+    expected_outcome: str | None
+    state: str
+    assigned_at: str
+    due_at: str
+    counts_as_overdue: bool
+    root_cause_analysis_id: uuid.UUID | None
+
+
+class AnalysisOut(_Strict):
+    analysis_id: uuid.UUID
+    record_id: uuid.UUID | None
+    state: str
+    root_cause_category: str | None
+    root_cause_statement: str | None
+    conclusion: str | None
+    signed_at: str | None
+    created_at: str
+
+
+class FindingDetailOut(_Strict):
+    finding_state_id: uuid.UUID
+    subject_kind: str
+    subject_id: uuid.UUID
+    plant_id: uuid.UUID
+    zone_id: uuid.UUID
+    family: str
+    tier: str
+    lifecycle_state: FindingLifecycleState
+    classification_outcome: str | None
+    classification_count: int
+    age_days: int
+    observability_state_at_event: str
+    occurred_at: str
+    """Exacta, o el inicio de la ventana de agregación si la zona es unipersonal."""
+    due_at: str | None
+    overdue_days: int
+    time_aggregated: bool
+    aggregation_window_minutes: int | None
+    evidence_flagged: bool
+    standard: StandardCitationOut
+    gate_at_event: GateAtEventOut
+    coverage_at_event: CoverageAtEventOut | None
+    """``null`` si ``CoveragePort`` no respondió: aviso ``coverage_unavailable``."""
+    nodes: tuple[NodeOut, ...] | None
+    """``null`` si ``FleetQueryPort`` no respondió: aviso ``node_state_unavailable``."""
+    episode: EpisodeOut | None
+    records: tuple[RecordOut, ...]
+    classifications: tuple[ClassificationItemOut, ...]
+    actions: tuple[ActionOut, ...]
+    analyses: tuple[AnalysisOut, ...]
+    notices: tuple[DetailNoticeOut, ...]
+
+
+class ClassificationHistoryOut(_Strict):
+    finding_state_id: uuid.UUID
+    time_aggregated: bool
+    aggregation_window_minutes: int | None
+    classifications: tuple[ClassificationItemOut, ...]
+
+
+def _classification_view(item: ClassificationView) -> ClassificationItemOut:
+    return ClassificationItemOut(
+        classification_id=item.classification_id,
+        record_id=item.record_id,
+        sequence_in_subject=item.sequence_in_subject,
+        outcome=item.outcome,
+        reason_category=item.reason_category,
+        reason_text=item.reason_text,
+        is_reclassification=item.is_reclassification,
+        reinforced_reason=item.reinforced_reason,
+        previous_outcome=item.previous_outcome,
+        effect_on_loop=item.effect_on_loop,
+        classified_at=format_timestamp(item.classified_at),
+        classified_by=ClassifiedByOut(
+            user_id=item.classified_by.user_id,
+            display_name=item.classified_by.display_name,
+            role_in_use=item.classified_by.role_in_use,
+        ),
+    )
+
+
+def _record_view(record: RecordView) -> RecordOut:
+    return RecordOut(
+        record_id=record.record_id,
+        record_type=record.record_type,
+        chain_sequence=record.chain_sequence,
+        content_hash=record.content_hash,
+        segment_index=record.segment_index,
+        received_at=format_timestamp(record.received_at),
+        occurred_at=_stamp(record.occurred_at),
+        signals=tuple(
+            SignalOut(
+                signal_id=signal.signal_id,
+                role=signal.role,
+                value=signal.value,
+                valid=signal.valid,
+                read_at=_stamp(signal.read_at),
+            )
+            for signal in record.signals
+        ),
+        clips=tuple(
+            ClipOut(
+                evidence_id=clip.evidence_id,
+                clip_id=clip.clip_id,
+                camera_id=clip.camera_id,
+                segment=clip.segment,
+                media_kind=clip.media_kind,
+                content_type=clip.content_type,
+                size_bytes=clip.size_bytes,
+                sha256=clip.sha256,
+                duration_ms=clip.duration_ms,
+                starts_at=_stamp(clip.starts_at),
+                ends_at=_stamp(clip.ends_at),
+                read_url=clip.read_url,
+            )
+            for clip in record.clips
+        ),
+    )
+
+
+def detail_view(detail: FindingDetail) -> FindingDetailOut:
+    standard = detail.standard
+    episode = detail.episode
+    coverage = detail.coverage
+    return FindingDetailOut(
+        finding_state_id=detail.finding_state_id,
+        subject_kind=detail.subject_kind,
+        subject_id=detail.subject_id,
+        plant_id=detail.plant_id,
+        zone_id=detail.zone_id,
+        family=detail.family,
+        tier=detail.tier,
+        lifecycle_state=detail.lifecycle_state,
+        classification_outcome=detail.classification_outcome,
+        classification_count=detail.classification_count,
+        age_days=detail.age_days,
+        observability_state_at_event=detail.observability_state_at_event,
+        occurred_at=format_timestamp(detail.occurred_at),
+        due_at=_stamp(detail.due_at),
+        overdue_days=detail.overdue_days,
+        time_aggregated=detail.time_aggregated,
+        aggregation_window_minutes=detail.aggregation_window_minutes,
+        evidence_flagged=detail.evidence_flagged,
+        standard=StandardCitationOut(
+            standard_id=standard.standard_id,
+            version=standard.version,
+            title_es=standard.title_es,
+            declared_text=standard.declared_text,
+            declared_text_sha256=standard.declared_text_sha256,
+            effective_from=_stamp(standard.effective_from),
+            superseded_since=_stamp(standard.superseded_since),
+            superseded_in_catalog_version=standard.superseded_in_catalog_version,
+        ),
+        gate_at_event=GateAtEventOut(
+            status=detail.gate.status,
+            effective_from=format_timestamp(detail.gate.effective_from),
+            effective_until=_stamp(detail.gate.effective_until),
+        ),
+        coverage_at_event=(
+            None
+            if coverage is None
+            else CoverageAtEventOut(
+                state=coverage.state, causes=coverage.causes, layer=coverage.layer
+            )
+        ),
+        nodes=(
+            None
+            if detail.nodes is None
+            else tuple(
+                NodeOut(
+                    node_id=node.node_id,
+                    code=node.code,
+                    communication_state=node.communication_state,
+                    since=format_timestamp(node.since),
+                    last_heartbeat_at=_stamp(node.last_heartbeat_at),
+                    cameras=tuple(
+                        NodeCameraOut(
+                            camera_id=camera.camera_id,
+                            code=camera.code,
+                            connected=camera.connected,
+                            observability_state=camera.observability_state,
+                        )
+                        for camera in node.cameras
+                    ),
+                )
+                for node in detail.nodes
+            )
+        ),
+        episode=(
+            None
+            if episode is None
+            else EpisodeOut(
+                episode_id=episode.episode_id,
+                segment_record_ids=episode.segment_record_ids,
+                segment_count=episode.segment_count,
+                expected_segment_count=episode.expected_segment_count,
+                missing_segment_indexes=episode.missing_segment_indexes,
+                started_at=format_timestamp(episode.started_at),
+                ended_at=format_timestamp(episode.ended_at),
+                total_episode_duration_ms=episode.total_episode_duration_ms,
+                total_condition_duration_ms=episode.total_condition_duration_ms,
+                continues_open=episode.continues_open,
+            )
+        ),
+        records=tuple(_record_view(record) for record in detail.records),
+        classifications=tuple(_classification_view(c) for c in detail.classifications),
+        actions=tuple(
+            ActionOut(
+                action_id=action.action_id,
+                record_id=action.record_id,
+                action_type=action.action_type,
+                action_description=action.action_description,
+                expected_outcome=action.expected_outcome,
+                state=action.state,
+                assigned_at=format_timestamp(action.assigned_at),
+                due_at=format_timestamp(action.due_at),
+                counts_as_overdue=action.counts_as_overdue,
+                root_cause_analysis_id=action.root_cause_analysis_id,
+            )
+            for action in detail.actions
+        ),
+        analyses=tuple(
+            AnalysisOut(
+                analysis_id=analysis.analysis_id,
+                record_id=analysis.record_id,
+                state=analysis.state,
+                root_cause_category=analysis.root_cause_category,
+                root_cause_statement=analysis.root_cause_statement,
+                conclusion=analysis.conclusion,
+                signed_at=_stamp(analysis.signed_at),
+                created_at=format_timestamp(analysis.created_at),
+            )
+            for analysis in detail.analyses
+        ),
+        notices=tuple(
+            DetailNoticeOut(code=notice.code, since=_stamp(notice.since), cause=notice.cause)
+            for notice in detail.notices
+        ),
+    )
+
+
+def history_view(history: ClassificationHistory) -> ClassificationHistoryOut:
+    return ClassificationHistoryOut(
+        finding_state_id=history.finding_state_id,
+        time_aggregated=history.time_aggregated,
+        aggregation_window_minutes=history.aggregation_window_minutes,
+        classifications=tuple(_classification_view(c) for c in history.classifications),
+    )
+
+
 def _states(values: list[str] | None) -> tuple[FindingLifecycleState, ...] | None:
     if not values:
         return None
@@ -302,5 +716,41 @@ def findings_router() -> APIRouter:
         except InboxRequestInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return page_view(page)
+
+    @router.get(
+        DETAIL_PATH,
+        dependencies=[
+            requires(_READ, detail_codes=(_GATE_UNAVAILABLE.value,)),
+            Depends(exact_query()),
+        ],
+        summary="Detalle auditado de un hallazgo con la cita del estándar y sus degradaciones",
+    )
+    async def get_finding(
+        finding_state_id: uuid.UUID, request: Request, response: Response, services: Services
+    ) -> FindingDetailOut:
+        no_store(response)
+        try:
+            detail = await installed(services.detail).detail(
+                request_context(request), finding_state_id
+            )
+        except FindingGateUnavailable:
+            # Fallo cerrado (BR-LAZ-12): solo el error, ningún campo del hallazgo.
+            code, _status = HTTP_STATUS_BY_DETAIL_CODE[_GATE_UNAVAILABLE]
+            raise ApiError(code, detail_code=_GATE_UNAVAILABLE.value) from None
+        return detail_view(detail)
+
+    @router.get(
+        CLASSIFICATIONS_PATH,
+        dependencies=[requires(_READ), Depends(exact_query())],
+        summary="Historial completo de clasificaciones de un hallazgo, en orden",
+    )
+    async def list_classifications(
+        finding_state_id: uuid.UUID, request: Request, response: Response, services: Services
+    ) -> ClassificationHistoryOut:
+        no_store(response)
+        history = await installed(services.detail).classifications(
+            request_context(request), finding_state_id
+        )
+        return history_view(history)
 
     return router
