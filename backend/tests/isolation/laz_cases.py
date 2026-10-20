@@ -36,6 +36,7 @@ from vigia_platform.accreditation.adapters.http.services import (
 from vigia_platform.accreditation.events import register_accreditation_event_types
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.exposure.service import ExposureService
 from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
@@ -225,8 +226,23 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 audit=services.audit,
                 storage=_NoSigner(),
             ),
+            exposure=_exposure(services),  # TASK-322
         )
     }
+
+
+def _exposure(services: LazServices) -> ExposureService:
+    database: Any = services.database
+    ports = catalog_query_ports(database)
+    return ExposureService(
+        database=database,
+        authorizer=services.authorizer,
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(database=database, audit=services.audit, clock=services.clock),
+        settings=PostgresLoopConfigurationRepository(database),
+        clock=services.clock,
+    )
 
 
 def _notifications(services: LazServices) -> Mapping[str, object]:
@@ -527,6 +543,20 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         Case(
             Kind.RESOURCE,
             lambda i: Call("GET", f"/accreditation/monthly-packages/{i.plant}/2026-01/download"),
+        ),
+    ),
+    # VIG-231 (TASK-322, SUP-U05-31): el indicador de exposición de una zona de B responde igual
+    # que una zona inexistente (not_found, nunca forbidden, exposure_not_computable ni el 503 de
+    # cobertura); nada se calcula, se audita ni se guarda en B.
+    (
+        ("GET", "/accreditation/exposure"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "GET",
+                "/accreditation/exposure",
+                params={"zone_id": str(i.zone), "period": "2026-01"},
+            ),
         ),
     ),
 ]

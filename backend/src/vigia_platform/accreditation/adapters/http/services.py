@@ -19,6 +19,7 @@ from vigia_platform.shared.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
+    from vigia_platform.accreditation.exposure.service import ExposureService
 
 __all__ = ["ACCREDITATION_STATE_KEY", "AccreditationHttp", "accreditation_http", "installed"]
 
@@ -38,6 +39,8 @@ class AccreditationHttp:
     sin depósito de evidencias, ``None`` y las dos responden ``internal_error``."""
     monthly_packages: MonthlyPackageReads | None = None
     """Las tres rutas de ``/accreditation/monthly-packages*`` (TASK-344)."""
+    exposure: ExposureService | None = None
+    """``GET /accreditation/exposure`` (TASK-322, SUP-U05-31)."""
 
 
 def installed[T](service: T | None) -> T:
