@@ -27,6 +27,7 @@ from fastapi import APIRouter
 from vigia_platform.accreditation.adapters.http.adoption_routes import adoption_router
 from vigia_platform.accreditation.adapters.http.export_routes import export_router
 from vigia_platform.accreditation.adapters.http.exposure_routes import exposure_router
+from vigia_platform.accreditation.adapters.http.metrics_routes import metrics_router
 from vigia_platform.accreditation.adapters.http.monthly_routes import (
     MonthlyPackageReads,
     monthly_router,
@@ -73,6 +74,13 @@ from vigia_platform.accreditation.export.worker import (
     register_export_worker,
 )
 from vigia_platform.accreditation.exposure.service import ExposureService
+from vigia_platform.accreditation.metrics.service import ProgramMetricsService
+from vigia_platform.accreditation.metrics.task import (
+    METRICS_MATERIALIZE,
+    METRICS_SCHEDULE,
+    MetricsMaterialize,
+    register_metrics_materialize,
+)
 from vigia_platform.accreditation.monthly.audit import SampleAuditService
 from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.package import (
@@ -237,6 +245,7 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
         writer=services.writer,
         clock=services.clock,
         signer=services.signing,
+        program_metrics=metrics_service(services),
     )
     task = MonthlyPackageTask(
         config=PostgresLoopConfigurationRepository(services.database),
@@ -282,6 +291,16 @@ def exposure_service(services: UnitServices) -> ExposureService:
     )
 
 
+def metrics_service(services: UnitServices) -> ProgramMetricsService:
+    """ProgramMetricsPort y SUP-U05-30 con el mismo reloj y exposición en proceso."""
+    return ProgramMetricsService(
+        database=services.database,
+        authorizer=services.authorizer,
+        exposure=exposure_service(services),
+        clock=services.clock,
+    )
+
+
 def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
     """El único ``AccreditationHttp`` del módulo: las tareas de servicio (TASK-317, 345, 344 y
     347) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
@@ -323,6 +342,7 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
             ),
             # TASK-322: SUP-U05-31.
             exposure=exposure_service(services),
+            metrics=metrics_service(services),
             # TASK-347: SUP-U05-26 a 29, escrituras del expediente sin depósito de evidencias.
             sample_audit=SampleAuditService(
                 database=services.database,
@@ -353,16 +373,21 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     monthly_router,
     exposure_router,
     adoption_router,  # TASK-323
+    metrics_router,  # TASK-321
 )
 """Fábricas de los enrutadores de ``/accreditation/*``."""
 
 ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    METRICS_MATERIALIZE: (METRICS_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     # TASK-323: el diseño no fija la cadencia; diaria y por organización.
     ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
 }
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    lambda registry, services: register_metrics_materialize(
+        registry, MetricsMaterialize(service=metrics_service(services), clock=services.clock)
+    ),
     _register_monthly_package,
     _register_adoption_check,
 )

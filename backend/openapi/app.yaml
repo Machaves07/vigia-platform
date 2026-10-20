@@ -5213,6 +5213,51 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/metrics":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Métricas del programa por zona y mes, con su estado"
+      "operationId": "metrics_accreditation_metrics_get"
+      "parameters":
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/MetricsOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/notifications":
     "get":
       "tags":
@@ -5359,6 +5404,21 @@
         - "accepted_duplicate"
       "title": "AcceptanceStatus"
       "description": "Resultado de aceptación de un registro por la plataforma."
+    "AccreditationDetailCode":
+      "type": "string"
+      "enum":
+        - "accreditation_export_scope_too_large"
+        - "accreditation_export_zones_span_plants"
+        - "accreditation_export_zone_out_of_scope"
+        - "accreditation_coverage_unavailable"
+        - "accreditation_metric_not_computable"
+        - "accreditation_exposure_not_computable"
+        - "accreditation_sample_already_reviewed"
+        - "accreditation_sample_cannot_modify_classification"
+        - "accreditation_commitment_out_of_scope"
+        - "accreditation_monthly_package_not_available"
+      "title": "AccreditationDetailCode"
+      "description": "Lista cerrada de ``detail_code`` del módulo ``accreditation``."
     "ActionOut":
       "properties":
         "action_id":
@@ -11491,6 +11551,113 @@
         - "privacy_notice_version"
         - "api_version"
       "title": "MeResponse"
+    "MetricKey":
+      "type": "string"
+      "enum":
+        - "primary_engineering_closures"
+        - "activation"
+        - "adoption"
+        - "classified_in_time"
+        - "overdue"
+        - "recurrence"
+        - "exposure"
+      "title": "MetricKey"
+      "description": "``metric_key`` (RF-PLA-17, respuesta 14): ninguna mide productividad (P7)."
+    "MetricStatus":
+      "type": "string"
+      "enum":
+        - "computed"
+        - "partial"
+        - "not_computable"
+      "title": "MetricStatus"
+      "description": "``metric_status``: sin insumo completo, ``not_computable``, nunca cero (RF-PLA-19)."
+    "MetricUnit":
+      "type": "string"
+      "enum":
+        - "count"
+        - "ratio"
+        - "minutes"
+      "title": "MetricUnit"
+      "description": "``unit`` de un ``MetricValue`` (§3.4)."
+    "MetricValue":
+      "properties":
+        "key":
+          "$ref": "#/components/schemas/MetricKey"
+        "status":
+          "$ref": "#/components/schemas/MetricStatus"
+        "unit":
+          "$ref": "#/components/schemas/MetricUnit"
+        "value":
+          "anyOf":
+            - "type": "number"
+              "minimum": 0.0
+            - "type": "null"
+          "title": "Value"
+        "numerator":
+          "anyOf":
+            - "type": "integer"
+              "minimum": 0.0
+            - "type": "null"
+          "title": "Numerator"
+        "denominator":
+          "anyOf":
+            - "type": "integer"
+              "minimum": 0.0
+            - "type": "null"
+          "title": "Denominator"
+        "excluded_unclosable_count":
+          "type": "integer"
+          "minimum": 0.0
+          "title": "Excluded Unclosable Count"
+        "over_30_days_count":
+          "anyOf":
+            - "type": "integer"
+              "minimum": 0.0
+            - "type": "null"
+          "title": "Over 30 Days Count"
+        "not_computable_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Not Computable Reason Es"
+        "detail_code":
+          "anyOf":
+            - "$ref": "#/components/schemas/AccreditationDetailCode"
+            - "type": "null"
+        "partial_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Partial Reason Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "key"
+        - "status"
+        - "unit"
+        - "excluded_unclosable_count"
+      "title": "MetricValue"
+    "MetricsOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/ProgramMetricSnapshot"
+          "type": "array"
+          "title": "Zones"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "period"
+        - "zones"
+      "title": "MetricsOut"
     "MinimumCoverage":
       "properties":
         "required_count":
@@ -13080,6 +13247,76 @@
       "additionalProperties": false
       "type": "object"
       "title": "ProfileBody"
+    "ProgramMetricSnapshot":
+      "properties":
+        "snapshot_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Snapshot Id"
+        "organization_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Organization Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "period_from":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Period From"
+        "period_to":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Period To"
+        "granularity":
+          "type": "string"
+          "const": "month"
+          "title": "Granularity"
+          "default": "month"
+        "values":
+          "items":
+            "$ref": "#/components/schemas/MetricValue"
+          "type": "array"
+          "title": "Values"
+        "materialized_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Materialized At"
+        "recomputed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Recomputed At"
+        "inputs_digest":
+          "type": "string"
+          "pattern": "^[0-9a-f]{64}$"
+          "title": "Inputs Digest"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "snapshot_id"
+        - "organization_id"
+        - "plant_id"
+        - "zone_id"
+        - "period"
+        - "period_from"
+        - "period_to"
+        - "values"
+        - "materialized_at"
+        - "recomputed_at"
+        - "inputs_digest"
+      "title": "ProgramMetricSnapshot"
     "ProviderConcessionView":
       "properties":
         "concession_id":
