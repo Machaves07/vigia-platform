@@ -2,7 +2,7 @@
 
 ``ROW_BUILDERS`` da, por tabla, la sentencia y los parámetros de una fila nueva y válida de una
 planta (``LoopScope``): ``seed_loop`` siembra con ellos al menos una fila de cada una de las 22
-tablas (las 19 de ``laz_0029``, TASK-301, más las 3 de ``laz_0036``, TASK-306) en cada planta de
+tablas (las 19 de ``laz_0029``, TASK-301, más las 3 de ``laz_0037``, TASK-306) en cada planta de
 los dos clientes de ``tests/identity_db.py`` (el par de organizaciones de U-02), y las pruebas de
 aislamiento los reutilizan para intentar escribir desde un contexto de
 proveedor. Las filas que dependen de otra (evidencia y cierre → acción; revisión → declaración;
@@ -51,7 +51,7 @@ LOOP_TABLES: Final = (
     "finding_state_rebuild_shadow",
     "loop_projection_sample_run",
 )
-"""Las 19 tablas de ``loop`` de ``laz_0029`` (TASK-301) más las tres de ``laz_0036`` (TASK-306):
+"""Las 19 tablas de ``loop`` de ``laz_0029`` (TASK-301) más las tres de ``laz_0037`` (TASK-306):
 la sombra de la reconstrucción y la semilla de la muestra diaria. ``tests/integration/
 test_laz_loop_schema.py`` sigue comprobando solo las 19 originales contra ``MIGRATION.TABLES``."""
 
@@ -66,7 +66,7 @@ ORGANIZATION_ONLY_TABLES: Final = (
     "loop_projection_sample_run",
 )
 """Las de solo organización (A-69): ninguna fila bajo una concesión de proveedor. Las tres de
-``laz_0036`` también lo son (control interno de la proyección, no un dato de cliente)."""
+``laz_0037`` también lo son (control interno de la proyección, no un dato de cliente)."""
 
 PLANTLESS_TABLES: Final = ("assistant_draft", "blocked_vocabulary_list", "blocked_term")
 """Las que no llevan ``plant_id``."""
@@ -553,7 +553,7 @@ def loop_projection_checkpoint(scope: LoopScope, at: dt.datetime = BASE_TIME) ->
 
 
 def episode_rebuild_shadow(scope: LoopScope, at: dt.datetime = BASE_TIME) -> Statement:
-    """Una fila de la tabla sombra (TASK-306, ``laz_0036``): sin valores por defecto en la base
+    """Una fila de la tabla sombra (TASK-306, ``laz_0037``): sin valores por defecto en la base
     (la aplicación siempre escribe todas las columnas), así que el constructor las da todas."""
     return insert(
         "episode_rebuild_shadow",
@@ -584,7 +584,7 @@ def episode_rebuild_shadow(scope: LoopScope, at: dt.datetime = BASE_TIME) -> Sta
 
 
 def finding_state_rebuild_shadow(scope: LoopScope, at: dt.datetime = BASE_TIME) -> Statement:
-    """Una fila de la tabla sombra (TASK-306, ``laz_0036``): todas las columnas, por la misma
+    """Una fila de la tabla sombra (TASK-306, ``laz_0037``): todas las columnas, por la misma
     razón que ``episode_rebuild_shadow``."""
     return insert(
         "finding_state_rebuild_shadow",

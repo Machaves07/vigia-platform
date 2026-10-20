@@ -519,7 +519,7 @@ LOOP_PROJECTION_CHECKPOINT: Final = Table(
 )
 """§2.14 ``LoopProjectionCheckpoint`` (solo organización, A-69): uno por (organización, planta).
 ``rebuild_owner``/``rebuild_lease_until`` son el arrendamiento de la reconstrucción (TASK-306,
-``laz_0036``, PAT-NUC-RES-05)."""
+``laz_0037``, PAT-NUC-RES-05)."""
 
 EPISODE_REBUILD_SHADOW: Final = Table(
     "episode_rebuild_shadow",
@@ -549,7 +549,7 @@ EPISODE_REBUILD_SHADOW: Final = Table(
     _instant("projection_updated_at"),
 )
 """Tabla sombra de la reconstrucción por planta para ``episode`` (TASK-306, LC-LAZ-03,
-``laz_0036``): mismas columnas, sin ``observability_state_at_start`` fijado por FK alguna."""
+``laz_0037``): mismas columnas, sin ``observability_state_at_start`` fijado por FK alguna."""
 
 FINDING_STATE_REBUILD_SHADOW: Final = Table(
     "finding_state_rebuild_shadow",
@@ -607,7 +607,7 @@ FINDING_STATE_REBUILD_SHADOW: Final = Table(
     _text("projection_digest"),
 )
 """Tabla sombra de la reconstrucción por planta para ``finding_state`` (TASK-306, LC-LAZ-03,
-``laz_0036``): sin la partición mensual de la tabla en servicio (no es ``finding_state``,
+``laz_0037``): sin la partición mensual de la tabla en servicio (no es ``finding_state``,
 ``occurred_at_bucket`` no es parte de la clave aquí)."""
 
 LOOP_PROJECTION_SAMPLE_RUN: Final = Table(
@@ -622,4 +622,4 @@ LOOP_PROJECTION_SAMPLE_RUN: Final = Table(
     _instant("started_at"),
 )
 """Semilla registrada de la muestra diaria de ``verify_loop_projection`` (TASK-306, LC-LAZ-04,
-PAT-NUC-MAN-04, ``laz_0036``), de solo anexar."""
+PAT-NUC-MAN-04, ``laz_0037``), de solo anexar."""

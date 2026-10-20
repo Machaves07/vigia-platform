@@ -238,7 +238,7 @@ _EPISODE_SHADOW_FIXED: Final = frozenset({"plant_id", "episode_id", "organizatio
 """La clave (``plant_id``, ``episode_id``) y las columnas de alcance (organización, zona): ni la
 reconstrucción las cambia para una fila ya en la sombra, ni ``vigia_app`` tiene ``UPDATE`` sobre
 ellas (ninguna clave, organización, planta ni zona es actualizable, como en las tablas en
-servicio; ``laz_0036`` solo concede columnas de negocio)."""
+servicio; ``laz_0037`` solo concede columnas de negocio)."""
 _FINDING_STATE_SHADOW_FIXED: Final = frozenset(
     {"plant_id", "finding_state_id", "organization_id", "zone_id"}
 )

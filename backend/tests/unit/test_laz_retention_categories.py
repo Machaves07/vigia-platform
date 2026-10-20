@@ -201,7 +201,7 @@ def test_every_u04_table_declares_exactly_one_category(database: MigratedDatabas
     # No pasa por un esquema vacío: las 19 de loop, las 7 de notifications y las 9 de
     # accreditation están, también las particionadas.
     # episode_rebuild_shadow, finding_state_rebuild_shadow y loop_projection_sample_run
-    # (laz_0036, TASK-306) no son de laz_0029: una migración aditiva solo añade (BR-CTR-23),
+    # (laz_0037, TASK-306) no son de laz_0029: una migración aditiva solo añade (BR-CTR-23),
     # igual que monthly_package_lease sobre laz_0031 (más abajo).
     assert {name for name in comments if name.startswith("loop.")} == {
         f"loop.{table}" for table in MIGRATION.TABLES

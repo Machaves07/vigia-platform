@@ -71,6 +71,11 @@ from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
     NotificationsHttp,
 )
+from vigia_platform.notifications.adapters.ses.delivery_events import (
+    EMAIL_DELIVERY_EVENTS,
+    EMAIL_DELIVERY_EVENTS_POLL,
+    POLL_SCHEDULE,
+)
 from vigia_platform.notifications.catalog import subscribed_events
 from vigia_platform.notifications.events import NOTIFICATIONS_EVENT_TYPES
 from vigia_platform.shared.context import ActorUnit
@@ -223,10 +228,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # TASK-306: verify_loop_projection, diaria por organización; rebuild_loop_projection (LC-LAZ-03)
     # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
     # TASK-342 a 344: monthly_package, mensual, por organización (accreditation);
-    # TASK-309: review_reminders, horaria, por organización (loop). ``tasks()`` ordena por
-    # nombre, no por orden de registro: "monthly_package" < "review_reminders" <
-    # "verify_loop_projection".
+    # TASK-309: review_reminders, horaria, por organización (loop); TASK-325:
+    # email_delivery_events_poll, ``global`` cada 15 s (notifications). ``tasks()`` ordena por
+    # nombre, no por orden de registro: "email_delivery_events_poll" < "monthly_package" <
+    # "review_reminders" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (EMAIL_DELIVERY_EVENTS_POLL, ActorUnit.U04, POLL_SCHEDULE, TaskIteration.GLOBAL),
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         (
@@ -237,14 +244,20 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         ),
     ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02;
-    # TASK-309: review_queue, sobre detection_for_review_received.
+    # TASK-309: review_queue, sobre detection_for_review_received; TASK-325:
+    # email_delivery_events, sobre el pulso interno de email_delivery_events_poll.
     assert [(c.consumer_name, c.unit, c.subscribed_events) for c in consumers.consumers()] == [
         ("assistant_worker", ActorUnit.U04, ("assistant_requested",)),
+        (EMAIL_DELIVERY_EVENTS, ActorUnit.U04, (EMAIL_DELIVERY_EVENTS_POLL,)),
         ("export_worker", ActorUnit.U04, ("export_requested",)),
         ("loop_projection", ActorUnit.U04, LOOP_PROJECTION_EVENTS),
         ("notification_engine", ActorUnit.U04, subscribed_events()),
         ("review_queue", ActorUnit.U04, ("detection_for_review_received",)),
     ]
+    # TASK-325: email_delivery_events declara su dependencia externa (SQS), separada del
+    # circuito propio de SesEmailSender (PAT-LAZ-RES-04).
+    delivery_events = consumers.get(EMAIL_DELIVERY_EVENTS)
+    assert delivery_events is not None and delivery_events.has_external_dependency
     # TASK-316: el asistente declara su dependencia externa (cortacircuito de U-02).
     assistant = consumers.get("assistant_worker")
     assert assistant is not None and assistant.has_external_dependency
@@ -260,10 +273,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         findings_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
-    assert notifications_registration.TASK_REGISTRARS == ()
+    assert len(notifications_registration.TASK_REGISTRARS) == 1  # email_delivery_events_poll
     # TASK-306 y TASK-309: verify_loop_projection y review_reminders.
     assert len(registration.TASK_REGISTRARS) == 2
-    assert len(notifications_registration.CONSUMER_REGISTRARS) == 1
+    # notification_engine, EMAIL_SENDERS (sin Consumer propio) y email_delivery_events.
+    assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
     assert len(accreditation_registration.TASK_REGISTRARS) == 1
     assert accreditation_registration.ACCREDITATION_TASKS == {
@@ -276,6 +290,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         ),
         "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
     } == registration.U04_TASKS
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,
@@ -283,6 +298,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         "assistant_worker": 2,
         "review_queue": 2,
         "notification_engine": 4,
+        EMAIL_DELIVERY_EVENTS: 2,
     }
     # TASK-303 y TASK-340: los dos validadores de texto libre, el de vocabulario primero.
     assert (
@@ -295,16 +311,17 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
 
 
 def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
-    # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317) y
-    # assistant_requested (TASK-316).
-    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 27
+    # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317),
+    # assistant_requested (TASK-316) y email_delivery_events_poll (TASK-325).
+    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 28
     assert len(LOOP_RECORD_TYPES) == 13 and len(ACCREDITATION_RECORD_TYPES) == 4
     assert len(LOOP_EVENT_TYPES) == 21 and len(ACCREDITATION_EVENT_TYPES) == 4
     assert [event.event_name for event in ACCREDITATION_INTERNAL_EVENT_TYPES] == [
         "export_requested"
     ]
     assert [event.event_name for event in LOOP_INTERNAL_EVENT_TYPES] == ["assistant_requested"]
-    assert NOTIFICATIONS_EVENT_TYPES == ()
+    # TASK-325: email_delivery_events_poll, el único pulso interno que notifications publica.
+    assert [event.event_name for event in NOTIFICATIONS_EVENT_TYPES] == [EMAIL_DELIVERY_EVENTS_POLL]
     assert {
         definition.record_type for definition in (*LOOP_RECORD_TYPES, *ACCREDITATION_RECORD_TYPES)
     } == registration.U04_RECORD_TYPES
@@ -315,6 +332,7 @@ def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
             *ACCREDITATION_EVENT_TYPES,
             *ACCREDITATION_INTERNAL_EVENT_TYPES,
             *LOOP_INTERNAL_EVENT_TYPES,
+            *NOTIFICATIONS_EVENT_TYPES,
         )
     } == registration.U04_EVENT_TYPES
     assert set(u04_registry().record_types()) == registration.U04_RECORD_TYPES

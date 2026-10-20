@@ -252,7 +252,20 @@ async def test_every_u04_table_has_a_restrictive_provider_policy(superuser: Any)
     expected_scope = "identity.rls_provider_scope_allows(organization_id, plant_id)"
     expected_denied = "(NOT identity.rls_provider_context())"
     for name in sorted(plant):
-        named = policies.get(name, {})
+        named = dict(policies.get(name, {}))
+        lookup = named.pop("email_provider_message_lookup", None)
+        if name == "notifications.email_provider_message_key":
+            # laz_0036 (TASK-325): como identity.invitation_lookup (nuc_0011), PERMISSIVE FOR
+            # SELECT solo dentro de notifications.email_provider_message_lookup, aparte de las
+            # RESTRICTIVE de proveedor comprobadas abajo.
+            if lookup is None:
+                failures.append(f"{name}: falta la política email_provider_message_lookup")
+            elif not lookup["polpermissive"] or lookup["cmd"] != "r":
+                failures.append(
+                    f"{name}: email_provider_message_lookup no es PERMISSIVE FOR SELECT"
+                )
+        elif lookup is not None:
+            failures.append(f"{name}: email_provider_message_lookup inesperada aquí")
         wanted: dict[str, str] = {}
         if plant[name]:
             wanted["provider_concession_scope"] = expected_scope

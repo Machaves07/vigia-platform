@@ -937,6 +937,10 @@ RUNTIME_VARIABLES_OUTSIDE_TASKS = {
     "VIGIA_PROVIDER_ORGANIZATION_ID": "solo con el contexto provider_organization_id",
     "VIGIA_ENROLLMENT_SOURCE_KEY_SECRET": "su secreto aun no existe: VIG-174 (sin el, el alta "
     "falla cerrada)",
+    "VIGIA_EMAIL_EVENTS_QUEUE_URL": "U-04 en pausa (A-47): la cola y su URL las declara el "
+    "primer despliegue (VIG-203/252), todavia no esta tarea",
+    "VIGIA_EMAIL_SENDER_DOMAIN": "U-04 en pausa (A-47): el dominio verificado lo declara el "
+    "primer despliegue (VIG-203/252); sin ella, SesEmailSender no se registra (TASK-325)",
 }
 """Variables de ``RuntimeConfig`` que ninguna definición de tarea de ``pilot`` lleva, con el
 motivo. Cualquier otra que la raíz lea tiene que estar en una de las dos."""

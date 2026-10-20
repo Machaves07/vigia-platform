@@ -67,7 +67,9 @@ POSTGRES_PORT = 5432
 
 LOCALSTACK_PORT = 4566
 LOCALSTACK_REGION = "us-east-1"
-LOCALSTACK_SERVICES = ("s3", "kms", "secretsmanager")
+LOCALSTACK_SERVICES = ("s3", "kms", "secretsmanager", "sqs", "ses")
+"""``sqs`` y ``ses`` (TASK-325): la cola de rebotes y quejas y el adaptador SES (LocalStack sirve
+la API ``sesv2`` del mismo proveedor ``ses``; no hay un nombre de servicio ``sesv2`` separado)."""
 LOCALSTACK_ENVIRONMENT = {
     "SERVICES": ",".join(LOCALSTACK_SERVICES),
     "EAGER_SERVICE_LOADING": "1",

@@ -2,9 +2,9 @@
 #
 # Tres servicios, los mismos que usan las pruebas de integración con testcontainers:
 #   - postgres        PostgreSQL 16
-#   - localstack      LocalStack, edición comunitaria (S3 con sumas de verificación, KMS y
-#                     Secrets Manager). Sin MinIO: su licencia AGPL está fuera de la lista
-#                     permitida (tech-stack-decisions.md §2).
+#   - localstack      LocalStack, edición comunitaria (S3 con sumas de verificación, KMS,
+#                     Secrets Manager, SQS y SESv2 para TASK-325). Sin MinIO: su licencia AGPL
+#                     está fuera de la lista permitida (tech-stack-decisions.md §2).
 #   - otel-collector  colector de OpenTelemetry con receptor OTLP (4317 gRPC, 4318 HTTP)
 #
 # Uso: `docker compose up -d` (o `make up`, que espera a que los tres estén sanos),
@@ -46,7 +46,7 @@ services:
     # imagen `localstack/localstack` exige una licencia (LOCALSTACK_AUTH_TOKEN) y no arranca sin ella.
     image: localstack/localstack:4.14.0@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a
     environment:
-      SERVICES: s3,kms,secretsmanager
+      SERVICES: s3,kms,secretsmanager,sqs,ses
       EAGER_SERVICE_LOADING: "1"
       AWS_DEFAULT_REGION: us-east-1
       # Sin telemetría hacia LocalStack y sin descargar su certificado de pruebas.
@@ -58,7 +58,7 @@ services:
     ports:
       - "127.0.0.1:${VIGIA_LOCAL_LOCALSTACK_PORT:-4566}:4566"
     healthcheck:
-      # Sano solo cuando S3, KMS y Secrets Manager están en marcha.
+      # Sano solo cuando S3, KMS, Secrets Manager, SQS y SESv2 están en marcha.
       test:
         - CMD
         - python3
@@ -66,7 +66,7 @@ services:
         - >-
           import json, sys, urllib.request;
           s = json.load(urllib.request.urlopen('http://127.0.0.1:4566/_localstack/health', timeout=3))['services'];
-          sys.exit(0 if all(s.get(n) == 'running' for n in ('s3', 'kms', 'secretsmanager')) else 1)
+          sys.exit(0 if all(s.get(n) == 'running' for n in ('s3', 'kms', 'secretsmanager', 'sqs', 'ses')) else 1)
       interval: 3s
       timeout: 5s
       retries: 40

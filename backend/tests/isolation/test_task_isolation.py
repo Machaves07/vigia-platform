@@ -5,8 +5,11 @@ compone la raíz con **todas** las unidades registradas (``registered_units``), 
 
 - ``PER_ORGANIZATION``: una invocación por organización, en su transacción y con
   ``context_for_organization`` (el actor del sistema, BR-NUC-03); se prueba aquí;
-- ``GLOBAL``: la única excepción, ``regenerate_revocation_list`` (D-7): un ciclo por ejecución con
-  lecturas de solo lectura por organización y la escritura de la marca global;
+- ``GLOBAL``: las dos excepciones documentadas, un ciclo por ejecución sin iterar organizaciones:
+  ``regenerate_revocation_list`` (U-03, D-7), con lecturas de solo lectura por organización y la
+  escritura de la marca global; ``email_delivery_events_poll`` (U-04, TASK-325), que solo publica
+  un pulso interno sin datos de organización, porque el recurso que dispara (la cola gestionada de
+  rebotes y quejas) tampoco tiene una;
 - ``INHERITED``: tareas de U-02, por organización, fuera del alcance de U-03; el caso dice dónde
   está su prueba.
 
@@ -161,6 +164,14 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
     ),
     # --- U-04 (TASK-309) ---
     "review_reminders": TaskCase(TaskKind.INHERITED, _U04_WHY),
+    # --- U-04 (TASK-325) ---
+    "email_delivery_events_poll": TaskCase(
+        TaskKind.GLOBAL,
+        "pulso interno de U-04 sin carga que dispara email_delivery_events (notifications no"
+        " publica ningún evento de negocio, LC-LAZ-34): un ciclo por ejecución, sin iterar"
+        " organizaciones, como regenerate_revocation_list (D-7); no cambia ninguna fila de"
+        " ninguna organización, así que no hay huella que comparar entre A y B aquí",
+    ),
 }
 """Un caso por tarea registrada en la raíz (``uncovered_tasks`` lo exige)."""
 
@@ -221,11 +232,16 @@ def test_every_registered_task_has_its_isolation_case() -> None:
                 else TaskKind.PER_ORGANIZATION
             )
             assert case.kind is expected, task.task_name
+        elif case.kind is TaskKind.GLOBAL:
+            # La segunda excepción D-7, fuera de U-03 (TASK-325): mismo trato que la de U-03.
+            assert task.iteration is TaskIteration.GLOBAL and case.why, task.task_name
         else:
             assert case.kind is TaskKind.INHERITED and case.why, task.task_name
             assert task.iteration is TaskIteration.PER_ORGANIZATION, task.task_name
     assert len(PER_ORGANIZATION_TASKS) == 6
-    assert [n for n, c in TASK_CASES.items() if c.kind is TaskKind.GLOBAL] == [REVOCATION_LIST]
+    assert sorted(n for n, c in TASK_CASES.items() if c.kind is TaskKind.GLOBAL) == sorted(
+        [REVOCATION_LIST, "email_delivery_events_poll"]
+    )
 
 
 def test_a_task_without_case_is_named() -> None:

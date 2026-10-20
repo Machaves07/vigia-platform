@@ -1,7 +1,7 @@
 """Tablas de apoyo de ``rebuild_loop_projection`` y ``verify_loop_projection`` (TASK-306; LC-LAZ-03
 y 04; PAT-LAZ-RES-03).
 
-Revisión laz_0036, tras ``laz_0035`` (``monthly_package_lease``, TASK-342 a 344). Tres tablas
+Revisión laz_0037, tras ``laz_0036`` (``email_provider_message_lookup``, TASK-325). Tres tablas
 nuevas, ninguna expuesta por la API:
 
 - ``loop.episode_rebuild_shadow`` y ``loop.finding_state_rebuild_shadow``: la tabla sombra de la
@@ -36,8 +36,8 @@ from alembic import op
 
 from migrations.laz_policies import retention_tag, row_security
 
-revision: str = "laz_0036"
-down_revision: str | None = "laz_0035"
+revision: str = "laz_0037"
+down_revision: str | None = "laz_0036"
 branch_labels: None = None
 depends_on: None = None
 

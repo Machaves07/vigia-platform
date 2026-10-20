@@ -183,9 +183,12 @@ DESIGN_EVENTS: Final = frozenset(
 )
 """Los nombres de §11.3 cuya unidad publicadora es U-04 (nota R14 de §7: veinticinco)."""
 
-INTERNAL_EVENTS: Final = frozenset({"export_requested", "assistant_requested"})
-"""Eventos internos de U-04 fuera de §11.3: el trabajo de ``export_worker`` (TASK-317) y el de
-``assistant_worker`` (TASK-316)."""
+INTERNAL_EVENTS: Final = frozenset(
+    {"export_requested", "assistant_requested", "email_delivery_events_poll"}
+)
+"""Eventos internos de U-04 fuera de §11.3: el trabajo de ``export_worker`` (TASK-317), el de
+``assistant_worker`` (TASK-316) y el pulso sin carga que dispara ``email_delivery_events``
+(TASK-325)."""
 
 NARRATIVE: Final = {
     **loop_types.NARRATIVE_FREE_TEXT_PATHS,
