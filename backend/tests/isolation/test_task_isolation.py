@@ -199,6 +199,12 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
         " organizaciones, como regenerate_revocation_list (D-7); no cambia ninguna fila de"
         " ninguna organización, así que no hay huella que comparar entre A y B aquí",
     ),
+    # --- U-04 (TASK-312) ---
+    "unclosable_review_due": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización (TASK-312): marca `pending_review` en su propia"
+        " organización y su aislamiento se prueba en tests/integration/test_loop_unclosable.py",
+    ),
 }
 """Un caso por tarea registrada en la raíz (``uncovered_tasks`` lo exige)."""
 

@@ -4,8 +4,11 @@ La prohibición es estructural, no una omisión (DE §2.12, NFR-GOB-41). Esta pr
 
 1. alguna ruta de la aplicación (``iter_declared_routes`` sobre ``build_openapi_app``) acepta un
    parámetro de ruta, consulta, cabecera o cookie que nombre al responsable, o un cuerpo con
-   ``responsible_user_id`` fuera de la apertura de un paso (donde es el dato del paso, no un
-   filtro);
+   ``responsible_user_id`` fuera de las tres formas que el diseño declara: la apertura de un paso
+   del walk-test de U-03 (donde es el dato del paso), el registro de compromisos del paquete
+   mensual de U-04 (SUP-U05-27) y la declaración de incerrable de U-04 (``SUP-U05-12``, el campo
+   3 de ``domain-entities.md`` §2.7: quién responde de la decisión). En las tres es el **sujeto**
+   de un registro, nunca un filtro ni una agregación de horas;
 2. alguna respuesta devuelve horas agregadas junto a un responsable o un resumen de horas con un
    usuario (un modelo con un campo de total, horas o resumen no lleva campos de responsable, y
    los elementos de un resumen no llevan ningún usuario);
@@ -58,7 +61,10 @@ COMMITMENTS_RECORDING: Final = ("POST", "/accreditation/monthly-packages/{packag
 """TASK-347 (SUP-U05-27): el responsable es el dato de cada compromiso que se registra (DE de U-04
 §3.3 y §5.2, BR-LAZ-109), igual que en la apertura de un paso; ninguna ruta filtra, ordena ni
 agrega por él (``GET /accreditation/commitments`` solo filtra por zona y periodo)."""
-RECEIVING_ROUTES: Final = (STEP_OPENING, COMMITMENTS_RECORDING)
+UNCLOSABLE_DECLARATION: Final = ("POST", "/loop/findings/{finding_state_id}/unclosable")
+"""La declaración de incerrable de U-04 (``SUP-U05-12``, TASK-312): ``responsible_user_id`` es el
+campo 3 de DE §2.7 —quién responde de la decisión—, el sujeto de la declaración, no un filtro."""
+RECEIVING_ROUTES: Final = (STEP_OPENING, COMMITMENTS_RECORDING, UNCLOSABLE_DECLARATION)
 """Las únicas rutas cuyo cuerpo lleva ``responsible_user_id``, como dato que escriben."""
 
 
@@ -160,7 +166,9 @@ def test_no_route_filters_orders_or_aggregates_hours_by_responsible() -> None:
     assert violations == []
 
 
-def test_the_step_opening_body_is_the_only_place_a_route_receives_the_responsible() -> None:
+def test_only_the_documented_bodies_receive_the_responsible() -> None:
+    """Ni una ruta más: la apertura del paso (U-03), los compromisos del paquete mensual y la
+    declaración de incerrable (U-04)."""
     receiving = sorted(
         key
         for key, route in _routes()

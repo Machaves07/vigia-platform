@@ -6,14 +6,15 @@
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
   ``U04_TASKS`` con ``verify_loop_projection`` (TASK-306, diaria por organización;
   ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí),
-  ``review_reminders`` (TASK-309), ``monthly_package`` (TASK-342 a 344) y ``email_grouping`` y
-  ``digest_weekly`` (TASK-348), ``U04_CONSUMERS`` con ``export_worker``, ``review_queue`` y
-  ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre
-  (TASK-310), las dos de la configuración del lazo (TASK-304), la de la clasificación (TASK-308),
-  las dos de la cola de revisión (TASK-309), las de la acción y su evidencia (TASK-311) y las del
-  cierre firmado y la reapertura (TASK-343, VIG-233) de ``loop``, las dos de exportación y las
-  tres del paquete mensual de ``accreditation`` (TASK-317 y TASK-342 a 344) y las cuatro de
-  ``notifications`` (lista, marcar leída y preferencias; TASK-324 y TASK-348).
+  ``review_reminders`` (TASK-309), ``unclosable_review_due`` (TASK-312), ``monthly_package``
+  (TASK-342 a 344) y ``email_grouping`` y ``digest_weekly`` (TASK-348), ``U04_CONSUMERS`` con
+  ``export_worker``, ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las
+  dos rutas de adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la
+  de la clasificación (TASK-308), las dos de la cola de revisión (TASK-309), las de la acción y su
+  evidencia (TASK-311), las del cierre firmado y la reapertura (TASK-343, VIG-233) y las del
+  incerrable (TASK-312) de ``loop``, las dos de exportación y las tres del paquete mensual de
+  ``accreditation`` (TASK-317 y TASK-342 a 344) y las cuatro de ``notifications`` (lista, marcar
+  leída y preferencias; TASK-324 y TASK-348).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -68,8 +69,11 @@ from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.adapters.http.vocabulary_routes import vocabulary_router
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
+from vigia_platform.loop.application.unclosable import SCHEDULE as UNCLOSABLE_SCHEDULE
+from vigia_platform.loop.application.unclosable import TASK_NAME as UNCLOSABLE_REVIEW_DUE
 from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYPES
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
@@ -201,6 +205,9 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/overdue"),  # TASK-313: SUP-U05-15
                 ("GET", "/loop/vocabulary"),  # TASK-350: SUP-U05-36
                 ("POST", "/loop/vocabulary/changes"),  # TASK-350: SUP-U05-37
+                # TASK-312: SUP-U05-12 y 13 (el estado incerrable y su revisión).
+                ("POST", "/loop/findings/{finding_state_id}/unclosable"),
+                ("POST", "/loop/unclosable/{declaration_id}/reviews"),
             ]
             assert state[LOOP_STATE_KEY].overdue is not None
             assert state[LOOP_STATE_KEY].vocabulary is not None
@@ -214,6 +221,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert state[LOOP_STATE_KEY].closure is not None
             assert state[LOOP_STATE_KEY].reopening is not None
             assert state[LOOP_STATE_KEY].review_queue is not None
+            assert state[LOOP_STATE_KEY].unclosable is not None
             assert set(state) == {ATTACHMENTS_STATE_KEY, LOOP_STATE_KEY}
             assert isinstance(state[ATTACHMENTS_STATE_KEY], ClosureAttachmentService)
             assert isinstance(state[LOOP_STATE_KEY], LoopHttp)
@@ -271,10 +279,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # email_delivery_events_poll, ``global`` cada 15 s; TASK-348: email_grouping (cada hora) y
     # digest_weekly (diaria, filtra por ``weekly_digest_weekday`` del destinatario), por
     # organización (notifications); TASK-313: evaluate_deadlines, horaria, por organización
-    # (loop); TASK-323: adoption_check, diaria, por organización (accreditation). ``tasks()``
-    # ordena por nombre, no por orden de registro: "adoption_check" < "digest_weekly" <
-    # "email_delivery_events_poll" < "email_grouping" < "evaluate_deadlines" < "monthly_package" <
-    # "review_reminders" < "verify_loop_projection".
+    # (loop); TASK-323: adoption_check, diaria, por organización (accreditation); TASK-312:
+    # unclosable_review_due, diaria, por organización (loop). ``tasks()`` ordena por nombre, no
+    # por orden de registro: "adoption_check" < "digest_weekly" < "email_delivery_events_poll" <
+    # "email_grouping" < "evaluate_deadlines" < "monthly_package" < "review_reminders" <
+    # "unclosable_review_due" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
         (ADOPTION_CHECK, ActorUnit.U04, ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (DIGEST_WEEKLY, ActorUnit.U04, DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
@@ -288,6 +297,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         ),
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+        (UNCLOSABLE_REVIEW_DUE, ActorUnit.U04, UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (
             registration.VERIFY_LOOP_PROJECTION,
             ActorUnit.U04,
@@ -325,13 +335,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         findings_router,
         overdue_router,
         vocabulary_router,  # TASK-350
+        unclosable_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).
     assert len(notifications_registration.TASK_REGISTRARS) == 3
-    # TASK-306, TASK-309 y TASK-313: verify_loop_projection, review_reminders y
-    # evaluate_deadlines.
-    assert len(registration.TASK_REGISTRARS) == 3
+    # TASK-306, TASK-309, TASK-313 y TASK-312: verify_loop_projection, review_reminders,
+    # evaluate_deadlines y unclosable_review_due.
+    assert len(registration.TASK_REGISTRARS) == 4
     # notification_engine, EMAIL_SENDERS (sin Consumer propio) y email_delivery_events.
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
@@ -348,6 +359,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         ),
         "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         "evaluate_deadlines": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+        UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
@@ -452,8 +464,8 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
         # Los consumidores y las tareas periódicas de la raíz (export_worker, TASK-317;
-        # verify_loop_projection, TASK-306; review_reminders, TASK-309; monthly_package,
-        # TASK-342 a 344): solo falta el evento.
+        # verify_loop_projection, TASK-306; review_reminders, TASK-309; unclosable_review_due,
+        # TASK-312; monthly_package, TASK-342 a 344): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
         unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced

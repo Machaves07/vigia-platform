@@ -34,6 +34,7 @@ from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
+from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
@@ -98,6 +99,9 @@ class LoopHttp:
     """``GET /loop/overdue`` (LC-LAZ-11, VIG-229)."""
     vocabulary: VocabularyService | None = None
     """``GET /loop/vocabulary`` y ``POST /loop/vocabulary/changes`` (LC-LAZ-17, VIG-220)."""
+    unclosable: UnclosableService | None = None
+    """``POST /loop/findings/{finding_state_id}/unclosable`` y
+    ``POST /loop/unclosable/{declaration_id}/reviews`` (LC-LAZ-09, VIG-228)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -257,6 +261,14 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             writer=services.writer,
             authorizer=services.authorizer,
             clock=services.clock,
+        ),
+        unclosable=UnclosableService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            gates=catalog_query_ports(services.database).gates,
+            actions=actions,
         ),
     )
 
