@@ -4573,6 +4573,89 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/overdue":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Vencidos de la planta por zona, con los de más días destacados"
+      "operationId": "list_overdue_loop_overdue_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "To"
+        - "name": "min_overdue_days"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 3660
+            "minimum": 0
+            "default": 0
+            "title": "Min Overdue Days"
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/OverduePageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exports":
     "post":
       "tags":
@@ -11026,6 +11109,137 @@
         - "name"
         - "kind"
       "title": "OrganizationView"
+    "OverdueItemOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "declared":
+          "type": "boolean"
+          "title": "Declared"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "action_type":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Action Type"
+        "assignee_user_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Assignee User Id"
+        "assignee_inactive":
+          "type": "boolean"
+          "title": "Assignee Inactive"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "overdue_days":
+          "type": "integer"
+          "title": "Overdue Days"
+        "highlighted":
+          "type": "boolean"
+          "title": "Highlighted"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "plant_id"
+        - "zone_id"
+        - "subject_kind"
+        - "family"
+        - "tier"
+        - "lifecycle_state"
+        - "declared"
+        - "action_id"
+        - "action_type"
+        - "assignee_user_id"
+        - "assignee_inactive"
+        - "due_at"
+        - "overdue_days"
+        - "highlighted"
+      "title": "OverdueItemOut"
+    "OverduePageOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "highlight_threshold_days":
+          "type": "integer"
+          "title": "Highlight Threshold Days"
+        "items":
+          "items":
+            "$ref": "#/components/schemas/OverdueItemOut"
+          "type": "array"
+          "title": "Items"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/OverdueZoneOut"
+          "type": "array"
+          "title": "Zones"
+        "partition_notice":
+          "anyOf":
+            - "$ref": "#/components/schemas/InboxPartitionNotice"
+            - "type": "null"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "highlight_threshold_days"
+        - "items"
+        - "zones"
+        - "partition_notice"
+        - "next_cursor"
+      "title": "OverduePageOut"
+    "OverdueZoneOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "overdue_count":
+          "type": "integer"
+          "title": "Overdue Count"
+        "highlighted_count":
+          "type": "integer"
+          "title": "Highlighted Count"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "overdue_count"
+        - "highlighted_count"
+      "title": "OverdueZoneOut"
     "PackageForm":
       "type": "string"
       "enum":

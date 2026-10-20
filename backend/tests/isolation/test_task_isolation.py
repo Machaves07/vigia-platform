@@ -164,6 +164,13 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
     ),
     # --- U-04 (TASK-309) ---
     "review_reminders": TaskCase(TaskKind.INHERITED, _U04_WHY),
+    # --- U-04 (TASK-313) ---
+    "evaluate_deadlines": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización con context_for_organization; su aislamiento (candidatos,"
+        " claves y escrituras de la organización de la transacción, con la RLS) se prueba en"
+        " tests/integration/test_loop_deadlines_task.py",
+    ),
     # --- U-04 (TASK-325) ---
     "email_delivery_events_poll": TaskCase(
         TaskKind.GLOBAL,

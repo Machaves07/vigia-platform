@@ -49,6 +49,7 @@ from vigia_platform.loop.adapters.postgres.review_queue_repository import Review
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
+from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -188,6 +189,12 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 writer=services.writer,
                 authorizer=services.authorizer,
                 repository=ReviewQueueRepository(database),
+                clock=services.clock,
+            ),
+            overdue=OverdueService(  # TASK-313
+                database=database,
+                authorizer=services.authorizer,
+                configuration=PostgresLoopConfigurationRepository(database),
                 clock=services.clock,
             ),
         ),
@@ -448,6 +455,14 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/findings"),
         Case(
             Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
+        ),
+    ),
+    # VIG-229 (TASK-313): el panel de vencidos de una planta de B responde igual que el de una
+    # inexistente (not_found, nunca forbidden ni una página vacía con el umbral de B).
+    (
+        ("GET", "/loop/overdue"),
+        Case(
+            Kind.RESOURCE, lambda i: Call("GET", "/loop/overdue", params={"plant_id": str(i.plant)})
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
