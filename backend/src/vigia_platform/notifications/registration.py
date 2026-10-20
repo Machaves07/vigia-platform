@@ -79,6 +79,7 @@ from vigia_platform.shared.outbox.registries import (
     Schedule,
     TaskIteration,
 )
+from vigia_platform.shared.runtime.config import RegistrationIncomplete
 
 if TYPE_CHECKING:
     from vigia_platform.shared.runtime.units import UnitServices
@@ -312,6 +313,9 @@ def notifications_tasks(registry: PeriodicTaskRegistry, services: UnitServices) 
 
 
 def notifications_consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+    # La ranura es obligatoria, no la disponibilidad de SES ni el dominio verificado (BR-NUC-32).
+    if not isinstance(EMAIL_SENDERS, EmailSenderRegistry):
+        raise RegistrationIncomplete((("port", "email_sender"),))
     # Cada consumidor sale con su mamparo (LC-LAZ-40); el registrador no lo conoce.
     bulkheaded = bulkheaded_registry(registry, services)
     for register in CONSUMER_REGISTRARS:

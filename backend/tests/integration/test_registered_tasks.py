@@ -12,8 +12,9 @@ Contra PostgreSQL 16 real, como ``vigia_app``:
   cada hora o diaria), su unidad ``U-03`` y su iteración (por organización salvo
   ``regenerate_revocation_list``, global, D-7); una tarea nueva o retirada se nota aquí.
 - **U-04** (TASK-302): el recuento y las cadencias de sus tareas y sus consumidores salen de los
-  manifiestos ``U04_TASKS`` y ``U04_CONSUMERS`` de ``loop.registration`` (hoy vacíos: 11 + 7 +
-  0). Cada tarea de U-04 añade su línea al manifiesto de su módulo y **no edita esta prueba**.
+   manifiestos ``U04_TASKS`` y ``U04_CONSUMERS`` de ``loop.registration``: 11 + 7 + 10
+   periódicas. ``rebuild_loop_projection`` sigue a demanda (U04-H-14); el sondeo de correo es
+   una periódica adicional de TASK-325. TASK-326 fija los recuentos y cadencias finales.
 - **Arranque**: un ``WorkerProcess`` con ese catálogo supera el arranque supervisado, deja en
   ``shared.periodic_task`` una fila por tarea con su horario persistido y una próxima ejecución
   sobre la rejilla del horario, en ``shared.consumer`` sus dos consumidores, abre un bucle de
@@ -116,7 +117,21 @@ iteración."""
 
 U02_CONSUMERS: Final = (ALERTS_CONSUMER, INTEGRITY_ON_DEMAND_CONSUMER)
 
-TASK_COUNT: Final = 11 + 7 + len(U04_TASKS)
+U04_CADENCES: Final = {
+    "evaluate_deadlines": Schedule.every(3600),
+    "review_reminders": Schedule.every(3600),
+    "unclosable_review_due": Schedule.daily(hour=6),
+    "monthly_package": Schedule.daily(hour=4),
+    "metrics_materialize": Schedule.daily(hour=3),
+    "adoption_check": Schedule.daily(hour=5),
+    "email_grouping": Schedule.every(3600),
+    "digest_weekly": Schedule.daily(hour=2),
+    "verify_loop_projection": Schedule.daily(hour=2),
+    "email_delivery_events_poll": Schedule.every(15),
+}
+"""Cadencias independientes del código de las tareas; reconstruir no es periódica (U04-H-14)."""
+
+TASK_COUNT: Final = 11 + 7 + 10
 """Las once de U-02, las siete de U-03 y las del manifiesto de U-04 (TASK-302)."""
 
 
@@ -269,6 +284,8 @@ def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
     catalog = u02_catalog(environment)
     every = {task.task_name: task for task in catalog.periodic_tasks.tasks()}
     assert len(U03_TASKS) == 7
+    assert len(U04_TASKS) == 10
+    assert {name: schedule for name, (schedule, _) in U04_TASKS.items()} == U04_CADENCES
     assert len(every) == TASK_COUNT
     assert set(every) == (
         set(DESIGN_TASKS) | set(OTHER_U02_TASKS) | set(U03_TASKS) | set(U04_TASKS)
@@ -285,6 +302,11 @@ def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
         assert task.unit is ActorUnit.U04, name
         assert task.iteration is iteration, name
         assert task.schedule == schedule, name
+        assert iteration is (
+            TaskIteration.GLOBAL
+            if name == "email_delivery_events_poll"
+            else TaskIteration.PER_ORGANIZATION
+        )
     assert all(
         task.iteration is TaskIteration.PER_ORGANIZATION for task in u02_tasks(catalog).values()
     )

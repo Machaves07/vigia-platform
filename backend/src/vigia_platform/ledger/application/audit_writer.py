@@ -130,6 +130,8 @@ class AuditOperation(enum.StrEnum):
     """Solo auditoría: la respuesta es ``forbidden`` (PAT-NUC-SEG-02, nota del 2026-09-23)."""
     CONTEXT_ABSENT_ATTEMPT = "context_absent_attempt"
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
+    LOOP_PROJECTION_REBUILD = "loop_projection_rebuild"
+    """Intención y finalización de la reconstrucción administrativa a demanda (TASK-326)."""
     RESTORE_DRILL_RECORDED = "restore_drill_recorded"
     NODE_CA_ROOT_REQUESTED = "node_ca_root_requested"
     """``vigia-admin`` va a publicar ``ca/root.pem`` (intención, antes de escribir; TASK-132)."""

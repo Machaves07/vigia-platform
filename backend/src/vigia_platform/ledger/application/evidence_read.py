@@ -55,7 +55,16 @@ from vigia_platform.ledger.application.audit_writer import (
     ResourceRef,
 )
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.shared.context import ContextAbsent, Role, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import (
+    ActorKind,
+    ActorUnit,
+    ContextAbsent,
+    ContextOrigin,
+    Role,
+    ScopeContext,
+    ScopeLevel,
+    repository,
+)
 from vigia_platform.shared.storage import (
     PRESIGN_GET_MAX_TTL,
     ObjectHead,
@@ -172,7 +181,14 @@ class EvidencePort(Protocol):
 def _scope_parameters(context: ScopeContext, roles: frozenset[Role] | None) -> dict[str, Any]:
     """``allowed_scopes`` como parámetros; con ``roles``, solo las asignaciones de esos roles."""
     scopes = [s for s in context.allowed_scopes if roles is None or s.role in roles]
-    whole = any(
+    # Solo el resultado de verificación es un puerto interno; las URL siguen exigiendo rol.
+    internal = (
+        roles is None
+        and context.actor.kind is ActorKind.SYSTEM
+        and context.actor.unit is ActorUnit.U04
+        and context.origin in {ContextOrigin.PERIODIC_ITERATION, ContextOrigin.OUTBOX_EVENT}
+    )
+    whole = internal or any(
         s.scope_level is ScopeLevel.ORGANIZATION and s.scope_id == context.organization_id
         for s in scopes
     )

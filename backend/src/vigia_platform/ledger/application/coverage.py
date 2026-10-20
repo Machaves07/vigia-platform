@@ -72,7 +72,15 @@ from vigia_platform.ledger.domain.coverage import (
     state_at,
 )
 from vigia_platform.shared.clock import Clock, SystemClock
-from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import (
+    ActorKind,
+    ActorUnit,
+    ContextAbsent,
+    ContextOrigin,
+    ScopeContext,
+    ScopeLevel,
+    repository,
+)
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 
@@ -429,6 +437,14 @@ def _instant(value: object) -> datetime:
 
 
 def _visible(context: ScopeContext, plant_id: uuid.UUID, zone_id: uuid.UUID) -> bool:
+    # Los constructores de trabajo interno no tienen asignaciones de usuario. La consulta y
+    # RLS ya fijan su organización; reconstrucción y proyección necesitan este puerto de U-02.
+    if (
+        context.actor.kind is ActorKind.SYSTEM
+        and context.actor.unit is ActorUnit.U04
+        and context.origin in {ContextOrigin.PERIODIC_ITERATION, ContextOrigin.OUTBOX_EVENT}
+    ):
+        return True
     for scope in context.allowed_scopes:
         if scope.scope_level is ScopeLevel.ORGANIZATION:
             if scope.scope_id == context.organization_id:

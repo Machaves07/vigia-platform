@@ -69,7 +69,15 @@ from vigia_platform.ledger.application.audit_writer import (
 from vigia_platform.ledger.application.writer import MAX_SOURCE_KEY_CHARS, LedgerDatabase
 from vigia_platform.ledger.canonical import CanonicalFormError, canonical_bytes_sync
 from vigia_platform.shared.clock import Clock, SystemClock
-from vigia_platform.shared.context import ContextAbsent, ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import (
+    ActorKind,
+    ActorUnit,
+    ContextAbsent,
+    ContextOrigin,
+    ScopeContext,
+    ScopeLevel,
+    repository,
+)
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 
@@ -384,7 +392,12 @@ class _Scopes:
 
     @classmethod
     def of(cls, context: ScopeContext) -> _Scopes:
-        whole = any(
+        internal = (
+            context.actor.kind is ActorKind.SYSTEM
+            and context.actor.unit is ActorUnit.U04
+            and context.origin in {ContextOrigin.PERIODIC_ITERATION, ContextOrigin.OUTBOX_EVENT}
+        )
+        whole = internal or any(
             scope.scope_level is ScopeLevel.ORGANIZATION
             and scope.scope_id == context.organization_id
             for scope in context.allowed_scopes

@@ -152,7 +152,7 @@ from vigia_platform.loop.validators.vocabulary import (
     BlockedVocabularyValidator,
     initial_vocabulary,
 )
-from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
+from vigia_platform.loop.worker.bulkheads import ConsumerBulkhead, bulkheaded_registry
 from vigia_platform.notifications.registration import (
     NOTIFICATIONS_CONSUMERS,
     NOTIFICATIONS_TASKS,
@@ -185,8 +185,10 @@ __all__ = [
     "ROUTERS",
     "TASK_REGISTRARS",
     "U04_CONSUMERS",
+    "U04_DOMAIN_EVENT_TYPES",
     "U04_EVENT_TYPES",
     "U04_FREE_TEXT_VALIDATORS",
+    "U04_INTERNAL_EVENT_TYPES",
     "U04_RECORD_TYPES",
     "U04_TASKS",
     "assistant_provider",
@@ -201,6 +203,7 @@ __all__ = [
     "loop_tasks",
     "missing_free_text_validators",
     "missing_u04_registrations",
+    "projection_rebuilder",
     "register_blocked_vocabulary",
     "register_person_attribution",
 ]
@@ -270,6 +273,14 @@ U04_EVENT_TYPES: Final = frozenset(
 """Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y los trabajos internos
 ``export_requested`` (TASK-317), ``assistant_requested`` (TASK-316) y
 ``email_delivery_events_poll`` (TASK-325)."""
+
+U04_INTERNAL_EVENT_TYPES: Final = frozenset(
+    {"export_requested", "assistant_requested", "email_delivery_events_poll"}
+)
+"""Trabajos internos añadidos durante la construcción, fuera de los 25 eventos de §11.3."""
+
+U04_DOMAIN_EVENT_TYPES: Final = U04_EVENT_TYPES - U04_INTERNAL_EVENT_TYPES
+"""Los 25 eventos de dominio, sin retirar los trabajos internos ya persistidos (P4)."""
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
@@ -384,18 +395,10 @@ def _register_loop_projection(registry: ConsumerRegistry, services: UnitServices
     )
 
 
-def _register_verify_loop_projection(
-    registry: PeriodicTaskRegistry, services: UnitServices
-) -> None:
-    """``verify_loop_projection`` (TASK-306, diaria por organización; LC-LAZ-04).
-
-    ``rebuild_loop_projection`` (LC-LAZ-03) corre a demanda, sin cadencia que vigilar (U04-H-14,
-    ``infrastructure-design.md``): no entra en ``LOOP_TASKS``. Esta verificación construye su
-    propio ``ProjectionRebuilder`` para disparar la reconstrucción de la partición que diverge; la
-    orden administrativa de VIG-241 (``vigia-admin rebuild-loop-projection``) construye el suyo por
-    su cuenta, con los mismos puertos."""
+def projection_rebuilder(services: UnitServices) -> ProjectionRebuilder:
+    """El mismo reconstructor para la verificación diaria y la orden a demanda (U04-H-14)."""
     ports = catalog_query_ports(services.database)
-    rebuilder = ProjectionRebuilder(
+    return ProjectionRebuilder(
         database=services.database,
         catalog=ports.catalog,
         gates=ports.gates,
@@ -413,9 +416,15 @@ def _register_verify_loop_projection(
         settings=PostgresLoopConfigurationRepository(services.database),
         clock=services.clock,
     )
+
+
+def _register_verify_loop_projection(
+    registry: PeriodicTaskRegistry, services: UnitServices
+) -> None:
+    """Verificación diaria por organización; la reconstrucción no tiene periodicidad."""
     verifier = ProjectionVerifier(
         database=services.database,
-        rebuilder=rebuilder,
+        rebuilder=projection_rebuilder(services),
         outbox=services.outbox,
         clock=services.clock,
     )
@@ -608,9 +617,9 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344),
-``verify_loop_projection`` (TASK-306) y ``unclosable_review_due`` (TASK-312); TASK-326 verifica
-las diez."""
+"""Las diez periódicas de U-04: nueve del diseño y ``email_delivery_events_poll`` (TASK-325).
+La décima tarea de LC-LAZ-37, ``rebuild_loop_projection``, es administrativa a demanda
+(U04-H-14), sin periodicidad inventada. TASK-326 contrasta ambos grupos."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,
@@ -659,7 +668,12 @@ def missing_u04_registrations(
             missing.append(("periodic_task", name))
     for name in sorted(U04_CONSUMERS):
         consumer = catalog.consumers.get(name)
-        if consumer is None or consumer.unit is not ActorUnit.U04:
+        if (
+            consumer is None
+            or consumer.unit is not ActorUnit.U04
+            or not isinstance(consumer.admission, ConsumerBulkhead)
+            or consumer.admission.consumer_name != name
+        ):
             missing.append(("consumer", name))
     return tuple(missing)
 
