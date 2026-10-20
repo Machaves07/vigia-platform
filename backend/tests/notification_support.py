@@ -31,6 +31,8 @@ from datetime import timedelta
 from typing import Any, Final, Literal, TypeVar
 from unittest.mock import Mock
 
+from sqlalchemy import insert
+
 from tests.factories import uuid7
 from tests.identity_db import (
     BASE_TIME,
@@ -48,6 +50,11 @@ from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.authz.context import ScopeContexts
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.loop.domain.enums import NotificationChannel, NotificationDeliveryStatus
+from vigia_platform.notifications.adapters.postgres.tables import (
+    NOTIFICATION,
+    NOTIFICATION_DELIVERY,
+)
 from vigia_platform.notifications.engine import NotificationEngine
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import (
@@ -62,6 +69,7 @@ from vigia_platform.shared.context import (
     _seal_scope_context,
 )
 from vigia_platform.shared.db import Database
+from vigia_platform.shared.ids import uuid7 as uuid7_with_clock
 from vigia_platform.shared.outbox.publish import OutboxEvent, partition_key
 from vigia_platform.shared.runtime.units import free_text_registry, registered_units
 
@@ -340,6 +348,24 @@ class NotificationWorld:
             session_id_hash=hashlib.sha256(os.urandom(8)).hexdigest(),
         )
 
+    def member_context(self, member: Member) -> ScopeContext:
+        """El contexto de sesión de ``member`` (TASK-348): un cliente, no el proveedor ni el
+        sistema; su propio alcance, su propio rol."""
+        return _seal_scope_context(
+            organization_id=member.organization_id,
+            actor=Actor(
+                kind=ActorKind.USER,
+                id=member.user_id,
+                display_name_snapshot="Persona sintética",
+                unit=ActorUnit.U04,
+                role_in_use=member.role,
+            ),
+            origin=ContextOrigin.SESSION,
+            allowed_scopes=[AllowedScope(member.scope_level, member.scope_id, member.role)],
+            correlation_id=uuid7(),
+            session_id_hash=hashlib.sha256(os.urandom(8)).hexdigest(),
+        )
+
     # --- eventos y motor ---
 
     def event(
@@ -398,6 +424,62 @@ class NotificationWorld:
                 return await engine.process(event, tx)
 
         return self.run(run())
+
+    def seed_delivery(
+        self,
+        organization_id: uuid.UUID,
+        recipient_user_id: uuid.UUID,
+        *,
+        urgency: str,
+        plant_id: uuid.UUID | None = None,
+        zone_id: uuid.UUID | None = None,
+        created_at: Any = None,
+        event_name: str = "finding_received",
+        title_es: str = "Aviso sintético",
+        body_es: str = "Cuerpo sintético",
+    ) -> uuid.UUID:
+        """Un ``Notification`` con su entrega de correo ``pending``, directamente (TASK-348): para
+        probar la agrupación genérica sobre cualquier urgencia, también las que el catálogo de hoy
+        no combina todavía con el canal de correo (``digest``, por ejemplo)."""
+        event = self.event(organization_id, event_name, {}, plant_id=plant_id)
+        context = self.event_context(event)
+        notification_id = uuid7_with_clock(self.clock)
+        at = created_at if created_at is not None else self.clock.now()
+
+        async def run() -> None:
+            async with self.database.transaction(context) as transaction:
+                await transaction.execute(
+                    insert(NOTIFICATION).values(
+                        notification_id=notification_id,
+                        organization_id=organization_id,
+                        plant_id=plant_id,
+                        zone_id=zone_id,
+                        event_name=event_name,
+                        source_event_id=event.event_id,
+                        urgency=urgency,
+                        title_es=title_es,
+                        body_es=body_es,
+                        deep_link_ref={"kind": "zone", "id": str(zone_id or uuid.uuid4())},
+                        recipient_user_id=recipient_user_id,
+                        created_at=at,
+                    )
+                )
+                await transaction.execute(
+                    insert(NOTIFICATION_DELIVERY).values(
+                        delivery_id=uuid7_with_clock(self.clock),
+                        organization_id=organization_id,
+                        plant_id=plant_id,
+                        zone_id=zone_id,
+                        notification_id=notification_id,
+                        notification_created_at=at,
+                        channel=NotificationChannel.EMAIL.value,
+                        status=NotificationDeliveryStatus.PENDING.value,
+                        attempts=0,
+                    )
+                )
+
+        self.run(run())
+        return notification_id
 
     # --- lecturas como superusuario ---
 

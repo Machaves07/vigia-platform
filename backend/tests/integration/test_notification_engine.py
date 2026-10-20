@@ -583,6 +583,7 @@ def _reader(world: NotificationWorld, audit: _DenialAudit | None = None) -> Noti
         authorizer=Authorizer(
             audit=audit or _DenialAudit(), provider_organization_id=world.provider_id
         ),
+        clock=world.clock,
         provider_organization_id=world.provider_id,
     )
 

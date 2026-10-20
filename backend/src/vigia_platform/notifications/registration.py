@@ -26,6 +26,7 @@ from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import HierarchyService
 from vigia_platform.identity.application.invitations import EmailSenderRegistry
 from vigia_platform.ledger.application.reader import LectorExpediente
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.domain.enums import NOTIFICATIONS_LABEL_BINDINGS
 from vigia_platform.loop.http.client_factory import DEFAULT_REGION, HttpClientFactory
 from vigia_platform.loop.worker.bulkheads import bulkheaded_registry
@@ -50,6 +51,12 @@ from vigia_platform.notifications.detail_codes import (
     NOTIFICATIONS_DETAIL_CODE_LABEL_BINDINGS,
     NotificationsDetailCode,
 )
+from vigia_platform.notifications.digest import (
+    DIGEST_WEEKLY,
+    DIGEST_WEEKLY_SCHEDULE,
+    DigestWeeklyTask,
+    register_digest_weekly,
+)
 from vigia_platform.notifications.engine import (
     NOTIFICATION_ENGINE,
     NOTIFICATION_ENGINE_CONCURRENCY,
@@ -57,6 +64,13 @@ from vigia_platform.notifications.engine import (
     register_notification_engine,
 )
 from vigia_platform.notifications.events import register_notifications_event_types
+from vigia_platform.notifications.grouping import (
+    EMAIL_GROUPING,
+    EMAIL_GROUPING_SCHEDULE,
+    EmailGroupingTask,
+    register_email_grouping,
+)
+from vigia_platform.notifications.preferences import NotificationPreferences
 from vigia_platform.notifications.reader import NotificationReader
 from vigia_platform.shared.outbox.registries import (
     ConsumerRegistry,
@@ -209,12 +223,33 @@ def _register_email_delivery_events_poll(
     register_email_delivery_events_poll(registry, EmailDeliveryEventsPollTrigger(services.outbox))
 
 
+def _register_email_grouping(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``email_grouping`` (TASK-348): agrupa el correo ``normal`` pendiente, cada hora."""
+    register_email_grouping(
+        registry,
+        EmailGroupingTask(
+            configuration=PostgresLoopConfigurationRepository(services.database),
+            senders=EMAIL_SENDERS,
+            clock=services.clock,
+        ),
+    )
+
+
+def _register_digest_weekly(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``digest_weekly`` (TASK-348): el resumen semanal del gerente, cada día."""
+    register_digest_weekly(registry, DigestWeeklyTask(senders=EMAIL_SENDERS, clock=services.clock))
+
+
 NOTIFICATIONS_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),  # TASK-325, D-7
+    EMAIL_GROUPING: (EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-348
+    DIGEST_WEEKLY: (DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-348
 }
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
     _register_email_delivery_events_poll,  # TASK-325
+    _register_email_grouping,  # email_grouping (TASK-348)
+    _register_digest_weekly,  # digest_weekly (TASK-348)
 )
 
 NOTIFICATIONS_CONSUMERS: Final[Mapping[str, int]] = {
@@ -235,8 +270,15 @@ def _notifications_state(services: UnitServices) -> Mapping[str, object]:
             reader=NotificationReader(
                 database=services.database,
                 authorizer=services.authorizer,
+                clock=services.clock,
                 provider_organization_id=services.provider_organization_id,
-            )
+            ),
+            preferences=NotificationPreferences(
+                database=services.database,
+                clock=services.clock,
+                authorizer=services.authorizer,
+                provider_organization_id=services.provider_organization_id,
+            ),
         )
     }
 

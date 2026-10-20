@@ -155,6 +155,11 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         "vigia_platform.notifications.recipients.event_scope",
         "vigia_platform.notifications.recipients.client_recipients",
         "vigia_platform.notifications.recipients.provider_recipients",
+        # notifications (TASK-348): agrupación, resumen semanal, preferencias y archivado;
+        # consultan y escriben solo por la ``Transaction`` dada (la abre ``EmailGroupingTask``,
+        # ``DigestWeeklyTask`` o la ruta, registradas y guardadas).
+        "vigia_platform.notifications.preferences.preference_for",
+        "vigia_platform.notifications.reader.archive_read_notifications",
         # loop.assistant (TASK-316): lee la solicitud y su borrador solo por la ``Transaction``
         # dada (la abre ``AssistantService.status``, registrado y guardado).
         "vigia_platform.loop.assistant.service.read_request",
