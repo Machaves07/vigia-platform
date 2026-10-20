@@ -62,6 +62,17 @@ _CURRENT_TERMS: Final = text(
     " WHERE organization_id = :organization_id AND list_id = :list_id"
     " AND removed_in_version IS NULL ORDER BY added_in_version, term_id"
 )
+_TERMS_AT_VERSION: Final = text(
+    "SELECT term_id, category, form, value, suggestion_es, origin, added_in_version"
+    " FROM loop.blocked_term"
+    " WHERE organization_id = :organization_id AND list_id = :list_id"
+    " AND added_in_version <= :version"
+    " AND (removed_in_version IS NULL OR removed_in_version > :version)"
+    " ORDER BY added_in_version, term_id"
+)
+"""Los términos vigentes en la versión leída (como ``PostgresVocabularyStore``): una lectura sin
+transacción que coincide con un cambio no mezcla la cabeza de una versión con los términos de la
+siguiente."""
 _INSERT_LIST: Final = text(
     "INSERT INTO loop.blocked_vocabulary_list (list_id, organization_id, version, effective_from,"
     " created_by, record_id, lemmatizer_version, declared_names)"
@@ -210,7 +221,9 @@ class PostgresVocabularyRepository:
             return None, ()
         head = _list_row(heads[0], organization)
         rows = await self._database.read(
-            context, _CURRENT_TERMS, {"organization_id": organization, "list_id": head.list_id}
+            context,
+            _TERMS_AT_VERSION,
+            {"organization_id": organization, "list_id": head.list_id, "version": head.version},
         )
         return head, tuple(_term(row) for row in rows)
 

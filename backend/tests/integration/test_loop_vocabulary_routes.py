@@ -576,6 +576,34 @@ def test_the_cache_preparation_reads_the_declared_names_of_its_writer(
     assert {row["name"] for row in hierarchy} <= set(names)
 
 
+def test_the_list_is_read_at_the_version_of_its_head(
+    stack: VocabularyStack, site: Site, admin: Who
+) -> None:
+    """Un ``GET`` que coincide con un cambio a medio confirmar (los términos de la versión 3 ya
+    escritos, la cabeza aún en la 2) responde la versión 2 entera, sin mezclar las dos."""
+    organization = site.organization_id
+    added = stack.post(admin, {"added": [term("pasillo")], "reason": REASON}).json()
+    (pasillo,) = added["added"]
+    row = stack.row(organization)
+    stack.fetch(
+        "INSERT INTO loop.blocked_term (term_id, list_id, organization_id, category, form, value,"
+        " suggestion_es, origin, added_in_version, added_reason) VALUES ($1, $2, $3,"
+        " 'absence_claim', 'lemma', 'bocina', 'Alternativa sintética', 'customer_added', 3,"
+        " 'Motivo sintético del término')",
+        uuid.uuid4(),
+        row["list_id"],
+        organization,
+    )
+    stack.fetch(
+        "UPDATE loop.blocked_term SET removed_in_version = 3 WHERE term_id = $1",
+        uuid.UUID(pasillo["term_id"]),
+    )
+    listed = stack.get(admin).json()
+    assert listed["list_version"] == 2
+    customer = [item["value"] for item in listed["terms"] if item["origin"] == "customer_added"]
+    assert customer == ["pasillo"]
+
+
 def test_declared_names_is_always_a_json_array(
     stack: VocabularyStack, site: Site, admin: Who
 ) -> None:

@@ -20,7 +20,6 @@ Solo datos generados.
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from typing import Final
 
@@ -36,6 +35,10 @@ from vigia_platform.loop.validators.vocabulary import (
     find_blocked,
 )
 from vigia_platform.loop.vocabulary.patterns import UnsafePattern, check_pattern
+from vigia_platform.shared.clock import SystemClock
+
+CLOCK: Final = SystemClock()
+"""El reloj monótono real: esta prueba mide tiempo de verdad (la ausencia de retroceso)."""
 
 SECONDS: Final = 1.0
 """Tope por búsqueda: holgado (un runner cargado), muy por encima de un retroceso lineal (ms) y
@@ -43,6 +46,10 @@ muy por debajo de uno exponencial (los de la revisión pasaban de 3 s con 41 car
 
 REVIEW_ROUND_1: Final = ("(\\w+\\s?)+x", "((a+))+b", "(a|a)+b", "(a+b?)+c", "(.*a){12}x")
 """Los cinco que la revisión de la ronda 1 midió por encima de 3 s."""
+
+GROUP_REPEATS_AT_THE_END: Final = ("(a+b?)+", "(\\w+\\s?)+", "(a|aa)+", "x(a|ab)*")
+"""Grupos cuantificados al final del patrón: nada los sigue dentro del patrón (solo el límite de
+palabra del validador), así que solo los rechaza la regla del cuerpo de un carácter."""
 
 POLYNOMIAL: Final = (
     "\\w*\\w*x",
@@ -87,7 +94,9 @@ ACCEPTED: Final = (
 )
 
 
-@pytest.mark.parametrize("pattern", REVIEW_ROUND_1 + POLYNOMIAL + OUTSIDE_GRAMMAR)
+@pytest.mark.parametrize(
+    "pattern", REVIEW_ROUND_1 + GROUP_REPEATS_AT_THE_END + POLYNOMIAL + OUTSIDE_GRAMMAR
+)
 def test_unsafe_patterns_are_rejected(pattern: str) -> None:
     with pytest.raises(UnsafePattern):
         check_pattern(pattern)
@@ -133,9 +142,9 @@ def test_find_blocked_over_1000_characters_stays_within_the_bound() -> None:
         VocabularyList(version=2, terms=tuple(_term(value) for value in ACCEPTED))
     )
     for text in ADVERSARIAL:
-        started = time.perf_counter()
+        started = CLOCK.monotonic()
         find_blocked(text, compiled)
-        elapsed = time.perf_counter() - started
+        elapsed = CLOCK.monotonic() - started
         assert elapsed < SECONDS, (text[:20], elapsed)
 
 
@@ -166,7 +175,7 @@ def test_every_accepted_generated_pattern_runs_in_linear_time(pattern: str) -> N
         return
     bounded = _bounded(pattern)
     for text in ADVERSARIAL:
-        started = time.perf_counter()
+        started = CLOCK.monotonic()
         bounded.search(text)
-        elapsed = time.perf_counter() - started
+        elapsed = CLOCK.monotonic() - started
         assert elapsed < SECONDS, (pattern, text[:20], elapsed)

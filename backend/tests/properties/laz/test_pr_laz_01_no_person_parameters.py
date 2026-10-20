@@ -149,7 +149,8 @@ SIGNER_FIELDS: Final = frozenset(
         ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),
         # El vocabulario declarado de la organización (VIG-220, TASK-350, BLM §14.5): nombres de
         # plantas, zonas, equipos, máquinas y normas (``kind`` cerrado, sin persona), que eximen
-        # al patrón de nombre propio del validador de atribución; nunca el de una persona.
+        # al patrón de nombre propio del validador de atribución (no el de una persona: lo exige
+        # el uso, y cada nombre queda en el expediente con su motivo; ver DeclaredNameKind).
         ("GET", "/loop/vocabulary", "response", "declared_names"),
         ("POST", "/loop/vocabulary/changes", "body", "declared_names_added"),
         ("POST", "/loop/vocabulary/changes", "body", "declared_names_removed"),
