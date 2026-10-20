@@ -146,6 +146,23 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "action_description": "Ampliar el resguardo fijo para cubrir el acceso lateral",
         "assignee_user_id": str(uuid.uuid4()),
     },
+    # TASK-312: los cinco campos y la licencia (sin ella, ``signer_license_missing``); la fecha de
+    # revisión es opcional (sin ella, la de la planta) y queda fuera.
+    ("POST", "/loop/findings/{finding_state_id}/unclosable"): {
+        "evaluated_alternative": "Reubicar la estación de carga al costado norte de la zona",
+        "rejection_reason": "La reubicación deja el pasillo peatonal sin salida de emergencia",
+        "responsible_user_id": str(uuid.uuid4()),
+        "decision_date": "2026-10-01",
+        "compensatory_measure": "Vigilancia peatonal permanente durante el turno de carga",
+        "professional_license": "LIC-SST-0001",
+    },
+    # ``new_review_due_at`` y ``action`` son opcionales a nivel de esquema (dependen del resultado):
+    # quedan fuera.
+    ("POST", "/loop/unclosable/{declaration_id}/reviews"): {
+        "outcome": "renewed",
+        "review_note": "La alternativa sigue descartada por el trazado de la zona",
+        "professional_license": "LIC-SST-0001",
+    },
     ("POST", "/accreditation/exports"): {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -197,6 +214,7 @@ def _url(path: str, user_id: str | None = None) -> str:
         .replace("{sample_item_id}", str(uuid.uuid4()))
         .replace("{package_id}", str(uuid.uuid4()))
         .replace("{commitment_id}", str(uuid.uuid4()))
+        .replace("{declaration_id}", str(uuid.uuid4()))
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -323,6 +341,9 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         ("POST", "/loop/findings/{finding_state_id}/closure"),
         ("POST", "/loop/findings/{finding_state_id}/reopening"),
+        # TASK-312: ``findings.close_and_sign`` (coordinación SST).
+        ("POST", "/loop/findings/{finding_state_id}/unclosable"),
+        ("POST", "/loop/unclosable/{declaration_id}/reviews"),
         ("POST", "/accreditation/exports"),
         ("POST", "/loop/review-queue/{detection_id}/resolution"),
         # TASK-347: ``findings.classify`` y ``commitments.write`` (coordinación SST).
@@ -346,6 +367,9 @@ ACCEPTED_STATUS: dict[tuple[str, str], int] = {
     ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"): 404,
     ("POST", "/loop/findings/{finding_state_id}/closure"): 404,
     ("POST", "/loop/findings/{finding_state_id}/reopening"): 404,
+    # TASK-312 (``UnclosableDouble``): ni el hallazgo ni la declaración sintéticos existen.
+    ("POST", "/loop/findings/{finding_state_id}/unclosable"): 404,
+    ("POST", "/loop/unclosable/{declaration_id}/reviews"): 404,
     ("POST", "/accreditation/exports"): 404,
     ("POST", "/loop/review-queue/{detection_id}/resolution"): 404,
 }
@@ -447,6 +471,9 @@ def _mutated(
         elif "{analysis_id}" in path:
             bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
             url = _url(path.replace("{analysis_id}", bad))
+        elif "{declaration_id}" in path:
+            bad = data.draw(st.sampled_from(["no-es-uuid", "1234", "zzzzzzzz-zzzz-zzzz-zzzz-zzzz"]))
+            url = _url(path.replace("{declaration_id}", bad))
         elif "plant_id" in body:
             body["plant_id"] = data.draw(st.sampled_from(["no-es-uuid", "", "0" * 31]))
         else:

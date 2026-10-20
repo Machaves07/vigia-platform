@@ -14,7 +14,8 @@ LC-LAZ-09; TASK-312).
 
 Rechazos de negocio, como ``invalid_request`` con su ``detail_code`` (400, A-68):
 ``loop_unclosable_fields_incomplete``, ``loop_unclosable_policy_not_signed``,
-``loop_unclosable_policy_revoked``, ``loop_unclosable_review_date_out_of_range``,
+``loop_unclosable_policy_revoked``, ``loop_unclosable_review_date_out_of_range`` (la revisión
+también ``loop_unclosable_fields_incomplete``, sin su nota),
 ``loop_signer_license_missing``, ``loop_blocked_vocabulary_term``,
 ``loop_person_attribution_detected`` y los de la acción (``loop_action_type_not_allowed``,
 ``loop_action_on_person_forbidden``, ``loop_deadline_out_of_range``);
@@ -78,6 +79,8 @@ _DECLARE_CODES: Final = (
     LoopDetailCode.TRANSITION_NOT_ALLOWED.value,
 )
 _REVIEW_CODES: Final = (
+    # La nota que falta o no cabe en su esquema (20 a 2000 caracteres), como un campo de §2.7.
+    LoopDetailCode.UNCLOSABLE_FIELDS_INCOMPLETE.value,
     LoopDetailCode.UNCLOSABLE_REVIEW_DATE_OUT_OF_RANGE.value,
     LoopDetailCode.SIGNER_LICENSE_MISSING.value,
     LoopDetailCode.BLOCKED_VOCABULARY_TERM.value,

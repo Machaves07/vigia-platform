@@ -21,7 +21,8 @@ de la planta y la bandeja de salida real:
   evento, su fila, la declaración que se conserva (P4) y —en T12— el ``action_assigned`` por el
   servicio de TASK-311 en la misma transacción. La revisión **no reabre** el lazo por sí sola.
 - **La tarea diaria** ``unclosable_review_due`` (BR-LAZ-58): marca ``pending_review`` una sola vez
-  —también cuando otra ejecución toma la tarea con el arrendamiento **vencido** a mano— y **no
+  —también cuando otra ejecución toma la tarea con el arrendamiento **vencido** a mano, en la
+  pasada del día siguiente y con dos ejecuciones **simultáneas** desde dos conexiones— y **no
   cambia** el estado del ciclo de vida.
 - **Alcance** (BR-NUC-13): otra organización, otra zona, un rol sin ``findings.close_and_sign`` y
   la concesión de proveedor responden ``not_found`` sin escribir.
@@ -31,6 +32,7 @@ Solo datos generados. Un solo reloj: las marcas salen del reloj simulado del mun
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import Iterator
@@ -55,7 +57,7 @@ from tests.loop_unclosable_support import (
 )
 from tests.properties.laz.strategies.lifecycle import RevokedPolicyState
 from vigia_platform.catalog.domain.ports import PlantPolicyState
-from vigia_platform.loop.application.unclosable import TASK_NAME, add_months
+from vigia_platform.loop.application.unclosable import TASK_NAME, UnclosableService, add_months
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
 from vigia_platform.loop.domain.time_aggregation import bucket_start
@@ -556,6 +558,11 @@ def test_the_review_needs_the_license_and_a_valid_outcome(
     assert _error(without) == _NO_LICENSE
     unknown = stack.review(coordinator, declaration_id, stack.review_body(outcome="reopened"))
     assert _error(unknown) == _INVALID
+    # Sin nota, o con una nota fuera de su esquema (menos de 20 caracteres), la revisión está
+    # incompleta: el código que la ruta declara (``requires(..., detail_codes=...)``, A-68).
+    for note in (None, "Sigue igual"):
+        incomplete = stack.review(coordinator, declaration_id, stack.review_body(review_note=note))
+        assert _error(incomplete) == _FIELDS
     assert stack.untouched(subject) == before
 
 
@@ -674,6 +681,97 @@ def test_the_daily_task_marks_pending_review_once(
     assert len(_due_of(stack, subject.organization, declaration_id)) == 1
     assert stack.world.finding_state(subject) == projection
     assert stack.declaration_rows(subject) == [declaration]
+
+
+def test_the_daily_task_on_a_later_day_does_not_mark_again(
+    stack: UnclosableStack, coordinator: Who, responsible: uuid.UUID
+) -> None:
+    """La marca es única por ``(declaration_id, review_due_at)``: la pasada del día siguiente, con
+    la misma fecha de revisión ya marcada, no marca ni publica otra vez (la condición
+    ``unclosable_pending_review = false`` de la lectura y del ``UPDATE`` es la garantía)."""
+    subject = stack.opened()
+    _signed(stack, subject.organization)
+    body = _declared(stack, coordinator, subject, responsible, review_due_at=_soon(stack))
+    declaration_id = uuid.UUID(body["declaration_id"])
+    stack.reach_review_date(subject)
+    assert stack.run(stack.scheduler("worker-a").run_due(TASK_NAME)) is not None
+    projection = stack.world.finding_state(subject)
+    assert projection is not None and projection["unclosable_pending_review"] is True
+    (declaration,) = stack.declaration_rows(subject)
+    assert len(_due_of(stack, subject.organization, declaration_id)) == 1
+    # El día siguiente, una pasada nueva del planificador (otro proceso) y una ejecución directa
+    # en la organización: ninguna marca ni publica.
+    stack.tick(24 * 3600)
+    stack.task_due()
+    report = stack.run(stack.scheduler("worker-b").run_due(TASK_NAME))
+    assert report is not None and not report.lease_lost
+    assert stack.run(stack.mark_due_async(subject.organization)) == 0
+    assert len(_due_of(stack, subject.organization, declaration_id)) == 1
+    assert stack.world.finding_state(subject) == projection
+    assert stack.declaration_rows(subject) == [declaration]
+
+
+_LOCK_WAIT_SECONDS: Final = 60.0
+"""Tope de las esperas de la prueba concurrente (retro 15: topes de 60 s, nunca de pared corta)."""
+
+
+class _HoldsFirst(UnclosableService):
+    """Con la marca hecha y sus candados tomados (antes de su ``COMMIT``), avisa (``holding``) y
+    espera a que la otra ejecución esté esperando un candado; después termina."""
+
+    stack: UnclosableStack
+    holding: asyncio.Event
+
+    async def _declaration_of(self, transaction: Any, due: Any) -> uuid.UUID:  # type: ignore[override]
+        self.holding.set()
+        async with asyncio.timeout(_LOCK_WAIT_SECONDS):
+            while await self.stack.waiting_locks() == 0:
+                await asyncio.sleep(0.05)
+        return await UnclosableService._declaration_of(transaction, due)
+
+
+@pytest.mark.parametrize("round_", range(3))
+def test_two_runs_at_once_mark_and_publish_once(
+    stack: UnclosableStack, coordinator: Who, responsible: uuid.UUID, round_: int
+) -> None:
+    """Dos ejecuciones simultáneas de la tarea en la misma organización, desde dos conexiones (el
+    arrendamiento de la primera venció mientras seguía viva): la segunda arranca cuando la primera
+    ya marcó y tiene sus candados, espera el control de la planta y, tras el ``COMMIT`` de la
+    primera, no encuentra nada que marcar. Una sola marca y un solo ``unclosable_review_due``."""
+    subject = stack.opened()
+    _signed(stack, subject.organization)
+    body = _declared(stack, coordinator, subject, responsible, review_due_at=_soon(stack))
+    declaration_id = uuid.UUID(body["declaration_id"])
+    stack.reach_review_date(subject)
+    holding = asyncio.Event()
+    first: Any = stack.service_like(_HoldsFirst)
+    first.stack, first.holding = stack, holding
+
+    async def later() -> int:
+        await holding.wait()
+        return await stack.mark_due_async(subject.organization)
+
+    async def race() -> list[Any]:
+        async with asyncio.timeout(4 * _LOCK_WAIT_SECONDS):
+            return list(
+                await asyncio.gather(
+                    stack.mark_due_async(subject.organization, first),
+                    later(),
+                    return_exceptions=True,
+                )
+            )
+
+    results = stack.run(race())
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert failures == [], failures
+    assert results == [1, 0]
+    assert len(_due_of(stack, subject.organization, declaration_id)) == 1
+    projection = stack.world.finding_state(subject)
+    assert projection is not None
+    assert projection["unclosable_pending_review"] is True
+    assert projection["lifecycle_state"] == "unclosable"
+    (declaration,) = stack.declaration_rows(subject)
+    assert declaration["state"] == "pending_review"
 
 
 def test_the_daily_task_waits_for_the_renewed_date(

@@ -459,6 +459,48 @@ class UnclosableStack:
             metrics=get_metrics(),
         )
 
+    def periodic_context(self, organization: LoopOrganization) -> ScopeContext:
+        """El contexto que el planificador da a la tarea en ``organization`` (BR-NUC-03)."""
+        registry = PeriodicTaskRegistry()
+        loop_tasks(registry, self.unit_services())
+        task = registry.get(TASK_NAME)
+        assert task is not None
+        context: ScopeContext = self.world.stack.authz.contexts.context_for_organization(
+            task, organization.organization_id
+        )
+        return context
+
+    def service_like(self, cls: type[UnclosableService]) -> UnclosableService:
+        """Un servicio de la clase ``cls`` (una subclase con un gancho) con la misma infraestructura
+        que ``service``."""
+        return cls(
+            database=self.database,
+            writer=self.writer,
+            authorizer=self.world.stack.authz.authorizer,
+            clock=self.world.stack.authz.sessions.clock,
+            gates=self.gates,
+            configuration=PostgresLoopConfigurationRepository(self.database),
+            outbox=self.world.stack.outbox,
+        )
+
+    async def mark_due_async(
+        self, organization: LoopOrganization, service: UnclosableService | None = None
+    ) -> int:
+        """Una ejecución de ``unclosable_review_due`` en ``organization``, en su propia transacción
+        (y su propia conexión), como la del planificador."""
+        chosen = service if service is not None else self.service
+        async with self.database.transaction(self.periodic_context(organization)) as transaction:
+            return await chosen.mark_due(transaction)
+
+    async def waiting_locks(self) -> int:
+        """Candados pedidos y no concedidos en la base de la prueba (de cualquier tipo)."""
+        rows = await self.world.stack.authz.sessions.admin.fetch(
+            "SELECT count(*) AS n FROM pg_locks WHERE NOT granted"
+            " AND (database IS NULL"
+            " OR database = (SELECT oid FROM pg_database WHERE datname = current_database()))"
+        )
+        return int(rows[0]["n"])
+
     def subject_in(
         self, state: str, organization: LoopOrganization | None = None
     ) -> IngestedSubject:
