@@ -94,6 +94,8 @@ class Zone:
 
     organization: LoopOrganization
     zone_id: uuid.UUID
+    plant: uuid.UUID | None = None
+    """La planta de la zona si no es la del sitio (``add_plant_zone``)."""
 
     @property
     def organization_id(self) -> uuid.UUID:
@@ -101,7 +103,7 @@ class Zone:
 
     @property
     def plant_id(self) -> uuid.UUID:
-        return self.organization.plant_id
+        return self.organization.plant_id if self.plant is None else self.plant
 
 
 @dataclass
@@ -168,6 +170,23 @@ class AdoptionStack:
             organization.organization_id, organization.plant_id, zone_id
         )
         return Zone(organization, zone_id)
+
+    def add_plant_zone(self, organization: LoopOrganization) -> Zone:
+        """Una zona en una planta **nueva** de la misma organización (mismo huso del sitio)."""
+        plant_id = self.actions.world.add_plant(organization)
+        zone_id = uuid.uuid4()
+        self.actions.world.stack.authz.add_zone(organization.organization_id, plant_id, zone_id)
+        return Zone(organization, zone_id, plant_id)
+
+    def zones_of_plant(self, organization: LoopOrganization, plant_id: uuid.UUID) -> set[str]:
+        return {
+            str(row["zone_id"])
+            for row in self.fetch(
+                "SELECT zone_id FROM identity.zone WHERE organization_id = $1 AND plant_id = $2",
+                organization.organization_id,
+                plant_id,
+            )
+        }
 
     def _gate_row(self, zone: Zone, usage_status: str, at: datetime) -> None:
         operator = self.actions.world.stack.authz.operator_id
@@ -238,13 +257,16 @@ class AdoptionStack:
     def manager(self, organization: LoopOrganization) -> Who:
         return self.actions.member(organization, Role.PLANT_MANAGER)
 
-    def set_silence_days(self, organization: LoopOrganization, days: int) -> None:
-        """``adoption_silence_days`` de la planta por ``loop.config`` (TASK-304)."""
+    def set_silence_days(
+        self, organization: LoopOrganization, days: int, plant_id: uuid.UUID | None = None
+    ) -> None:
+        """``adoption_silence_days`` de la planta (la del sitio por omisión) por ``loop.config``
+        (TASK-304)."""
         self.tick()
         self.run(
             self.actions.configuration.change(
                 self.actions.context(self.manager(organization)),
-                organization.plant_id,
+                organization.plant_id if plant_id is None else plant_id,
                 integers={"adoption_silence_days": days},
                 business_calendar=None,
                 reason=CONFIGURATION_REASON,

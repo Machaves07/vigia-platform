@@ -49,8 +49,9 @@ confirmarse (nunca un ``monthly_package_produced`` sin su fila sellada, ni al re
   revisará, no quien ya revisó); se resuelve al coordinador SST vigente de la zona (por zona,
   planta u organización). Sin ninguno asignado, ``MonthlyPackageReviewerMissing`` deja la fila en
   ``generating`` para reintentar al día siguiente, nunca inventa un revisor.
-- **Adopción**: ``accreditation.adoption_counter`` ya existe en el esquema pero ningún escritor de
-  este repositorio la llena; mientras no lo tenga, la cuenta de días activos es honestamente 0.
+- **Adopción**: ``accreditation.adoption_counter`` lo alimentan las escrituras del lazo
+  (``accreditation.adoption.counter``, TASK-323); los días activos del periodo son los que tienen
+  alguna actividad (``session_count > 0``).
 - **Compromisos del periodo anterior**: ``accreditation.commitment`` existe, pero su escritor
   (TASK-347/``notifications``) tampoco existe: una zona sin compromisos registrados da la lista
   vacía, nunca inventada.

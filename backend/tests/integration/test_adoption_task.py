@@ -424,7 +424,75 @@ def test_the_task_only_marks_and_publishes_in_its_organization(stack: AdoptionSt
     assert len(stack.adoption_events(a)) == 1
 
 
+def test_the_task_evaluates_each_zone_in_its_own_plant(stack: AdoptionStack) -> None:
+    """Guarda de planta de ``ProductiveZones``: con dos plantas de la misma organización, cada
+    zona activa se evalúa con el umbral y la planta de la suya (sin el filtro, la zona de B se
+    evaluaría en A y la marca violaría ``adoption_alert_zone_fkey``)."""
+    organization, zone_a, _ = _silent_world(stack, 1)
+    zone_b = stack.add_plant_zone(organization)
+    stack.set_silence_days(organization, 3, plant_id=zone_b.plant_id)
+    stack.activate(zone_b)
+    stack.next_morning(organization)
+    assert stack.run_check(organization) == ()
+    stack.next_morning(organization)
+    (alert,) = stack.run_check(organization)
+    assert (alert.zone_id, alert.plant_id, alert.threshold_days) == (
+        zone_a.zone_id,
+        organization.plant_id,
+        1,
+    )
+    stack.next_morning(organization)
+    assert stack.run_check(organization) == ()
+    stack.next_morning(organization)
+    (other,) = stack.run_check(organization)
+    assert (other.zone_id, other.plant_id, other.threshold_days, other.streak.silent_days) == (
+        zone_b.zone_id,
+        zone_b.plant_id,
+        3,
+        3,
+    )
+    assert {(row["zone_id"], row["plant_id"]) for row in stack.alert_rows(organization)} == {
+        (zone_a.zone_id, organization.plant_id),
+        (zone_b.zone_id, zone_b.plant_id),
+    }
+    assert [
+        (event["plant_id"], event["zone_id"]) for event in stack.adoption_events(organization)
+    ] == [
+        (organization.plant_id, str(zone_a.zone_id)),
+        (zone_b.plant_id, str(zone_b.zone_id)),
+    ]
+
+
 # --- ruta -----------------------------------------------------------------------------------------
+
+
+def test_the_route_lists_only_the_zones_of_the_requested_plant(stack: AdoptionStack) -> None:
+    """Guarda de planta de la consulta (``_ZONES_OF_PLANT``): un coordinador con alcance de la
+    planta A nunca recibe una zona de la planta B de su misma organización."""
+    organization = stack.organization()
+    zone_b = stack.add_plant_zone(organization)
+    stack.record(zone_b, "classification")
+    period = {
+        "from": str(stack.local_today(organization)),
+        "to": str(stack.local_today(organization)),
+    }
+    plant_a = stack.actions.member(
+        organization, Role.COORDINATOR_SST, ScopeLevel.PLANT, organization.plant_id
+    )
+    response = stack.get_adoption(plant_a, {"plant_id": str(organization.plant_id), **period})
+    assert response.status_code == 200, response.text
+    zones = {item["zone_id"] for item in response.json()["zones"]}
+    assert str(zone_b.zone_id) not in zones
+    assert zones == stack.zones_of_plant(organization, organization.plant_id)
+    # La planta B, con alcance de organización: solo su zona, con su actividad.
+    coordinator = stack.actions.member(organization)
+    response = stack.get_adoption(coordinator, {"plant_id": str(zone_b.plant_id), **period})
+    assert response.status_code == 200, response.text
+    (only,) = response.json()["zones"]
+    assert (only["zone_id"], len(only["days"])) == (str(zone_b.zone_id), 1)
+    # El coordinador de la planta A no ve la planta B.
+    response = stack.get_adoption(plant_a, {"plant_id": str(zone_b.plant_id), **period})
+    assert _error(response) == _NOT_FOUND, response.text
 
 
 def test_the_route_reports_activity_silence_and_threshold(stack: AdoptionStack) -> None:
