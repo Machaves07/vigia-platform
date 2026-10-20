@@ -18,7 +18,9 @@ estado). Sobre todo lo exportado:
 - la metapropiedad de cardinalidad de U-03 (``violations`` de
   ``tests/properties/gob/test_metrics_cardinality.py``) sigue verde con las series de U-04;
 - los registros estructurados de la misma ejecución tampoco llevan esos valores, y el término
-  rechazado sale como ``term_id`` (NFR-LAZ-17).
+  rechazado sale como ``term_id`` (NFR-LAZ-17): cada línea se lee y se compara campo a campo, con
+  sus claves dentro de las del formato y sus campos fijos por igualdad, nunca como subcadena de
+  la línea JSON entera (un texto generado como ``fields`` es un trozo de ``redacted_fields``).
 
 Y no es vacía: los atributos legítimos salen (el ``correlation_id`` de la petición en cada tramo,
 el modelo registrado, las fichas, un tramo por artefacto).
@@ -31,13 +33,14 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Final
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -54,7 +57,7 @@ from vigia_platform.loop.observability.metrics import (
     register_long_job_values,
 )
 from vigia_platform.shared.observability import redaction
-from vigia_platform.shared.observability.logging import JsonFormatter, get_logger
+from vigia_platform.shared.observability.logging import CONTEXT_FIELDS, JsonFormatter, get_logger
 from vigia_platform.shared.observability.metrics import METER_NAME
 
 MODEL: Final = "claude-opus-5-5"
@@ -62,11 +65,26 @@ ARTIFACTS: Final = ("manifest", "document", "clips", "verifier")
 STEPS: Final = ("context", "provider_call", "validation")
 register_long_job_values(models=[MODEL], artifacts=ARTIFACTS, steps=STEPS)
 
-_log = get_logger("loop.probe")
+COMPONENT: Final = "loop.probe"
+DRAFT_REJECTED: Final = "borrador rechazado por el validador"
+EMAIL_SENT: Final = "correo enviado"
+_log = get_logger(COMPONENT)
 N: Final = LoopMetricName
 FORBIDDEN_KEYS: Final = frozenset(
     {"user_id", "actor_id", "node_id", "recipient", "subject", "prompt", "context", "draft"}
 )
+FIXED_LOG_KEYS: Final = frozenset({"timestamp", "level", "component", "message"})
+LOG_KEYS: Final = frozenset(
+    {
+        *FIXED_LOG_KEYS,
+        "redacted_fields",
+        "exception_type",
+        *CONTEXT_FIELDS,
+        *redaction.DEFAULT_POLICY.keys,
+    }
+)
+"""Las claves que puede llevar una línea de ``JsonFormatter``: las fijas y las de la política."""
+TIMESTAMP: Final = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
 
 # --- Vocabulario legítimo y valores sensibles generados ------------------------------------------
 
@@ -257,7 +275,7 @@ class FakeAssistantProvider:
             },
         )
         _log.warning(
-            "borrador rechazado por el validador",
+            DRAFT_REJECTED,
             term_id=run.term_id,
             assistant_request_id=run.assistant_request_id,
             correlation_id=run.correlation_id,
@@ -283,7 +301,7 @@ class FakeEmailSender:
                 **_hostile(run),
             },
         )
-        _log.info("correo enviado", correlation_id=run.correlation_id, **_for_log(run))
+        _log.info(EMAIL_SENT, correlation_id=run.correlation_id, **_for_log(run))
 
 
 def export(telemetry: Telemetry, run: Run) -> None:
@@ -338,11 +356,36 @@ def _leaks(attributes: dict[str, Any], sensitive: Sensitive) -> list[str]:
     return leaks
 
 
+FIELDS_COUNTEREXAMPLE: Final = Run(
+    correlation_id=uuid.UUID(int=1),
+    organization_id=uuid.UUID(int=2),
+    plant_id=uuid.UUID(int=3),
+    assistant_request_id=uuid.UUID(int=4),
+    export_request_id=uuid.UUID(int=5),
+    term_id=uuid.UUID(int=6),
+    model=MODEL,
+    stop_reason="end_turn",
+    assistant_state="ready",
+    email_state="sent",
+    input_tokens=0,
+    output_tokens=0,
+    artifacts=("manifest",),
+    sensitive=Sensitive(
+        texts=("00000:", "00000:", "00000:", "fields"),
+        email="4@A.OM",
+        link="https://aaa.com/0",
+        user_id=uuid.UUID(int=7),
+    ),
+)
+"""Contraejemplo de VIG-263: ``fields`` es un trozo de la clave fija ``redacted_fields``."""
+
+
 @settings(
     max_examples=60,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
+@example(run=FIELDS_COUNTEREXAMPLE)
 @given(run=runs())
 def test_pr_laz_55_no_attribute_carries_free_text_or_user(telemetry: Telemetry, run: Run) -> None:
     identifiers = {
@@ -367,11 +410,19 @@ def test_pr_laz_55_no_attribute_carries_free_text_or_user(telemetry: Telemetry, 
         assert set(attributes) <= LONG_JOB_ATTRIBUTE_KEYS, name
     assert violations(exported(telemetry.reader)) == []
 
-    lines = telemetry.logs.getvalue()
-    for secret in run.sensitive.values():
-        assert secret not in lines
-    for line in lines.splitlines():
-        assert not set(json.loads(line)) & FORBIDDEN_KEYS
+    # Línea a línea y ya leída, nunca el JSON en bruto: ahí un texto generado puede ser un trozo
+    # de una clave fija (``fields`` en ``redacted_fields``) o de la sintaxis sin ser una fuga, y
+    # un texto con comillas o barras, escapado, no se vería. Los campos fijos, por igualdad.
+    entries = [json.loads(line) for line in telemetry.logs.getvalue().splitlines()]
+    assert [(entry["level"], entry["component"], entry["message"]) for entry in entries] == [
+        ("WARNING", COMPONENT, DRAFT_REJECTED),
+        ("INFO", COMPONENT, EMAIL_SENT),
+    ]
+    for entry in entries:
+        assert set(entry) <= LOG_KEYS, entry
+        assert TIMESTAMP.fullmatch(entry["timestamp"]), entry
+        fields = {key: value for key, value in entry.items() if key not in FIXED_LOG_KEYS}
+        assert _leaks(fields, run.sensitive) == [], entry
 
     # No es vacía: lo legítimo sale.
     finished = telemetry.spans.get_finished_spans()
@@ -387,7 +438,7 @@ def test_pr_laz_55_no_attribute_carries_free_text_or_user(telemetry: Telemetry, 
     call = next(span for span in finished if (span.attributes or {}).get("step") == "provider_call")
     assert (call.attributes or {})["model"] == (run.model if run.model == MODEL else "other")
     assert (call.attributes or {})["input_tokens"] == run.input_tokens
-    assert f'"term_id": "{run.term_id}"' in lines
+    assert entries[0]["term_id"] == str(run.term_id)
 
 
 def test_the_long_job_attributes_are_only_identifiers_enumerations_and_counts() -> None:
