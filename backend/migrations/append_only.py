@@ -63,5 +63,7 @@ APPEND_ONLY_TABLES: Final[frozenset[str]] = frozenset(
         # loop (TASK-301, laz_0029): adjuntos de cierre y solicitudes al asistente
         "loop.closure_attachment",
         "loop.assistant_request",
+        # loop (TASK-306, laz_0036): la semilla registrada de la muestra diaria
+        "loop.loop_projection_sample_run",
     }
 )

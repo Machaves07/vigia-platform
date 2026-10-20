@@ -234,15 +234,21 @@ _episode_conflict_update = ", ".join(f"{name} = EXCLUDED.{name}" for name in _EP
 _finding_state_conflict_update = ", ".join(
     f"{name} = EXCLUDED.{name}" for name in _FINDING_STATE_MUTABLE
 )
+_EPISODE_SHADOW_FIXED: Final = frozenset({"plant_id", "episode_id", "organization_id", "zone_id"})
+"""La clave (``plant_id``, ``episode_id``) y las columnas de alcance (organización, zona): ni la
+reconstrucción las cambia para una fila ya en la sombra, ni ``vigia_app`` tiene ``UPDATE`` sobre
+ellas (ninguna clave, organización, planta ni zona es actualizable, como en las tablas en
+servicio; ``laz_0036`` solo concede columnas de negocio)."""
+_FINDING_STATE_SHADOW_FIXED: Final = frozenset(
+    {"plant_id", "finding_state_id", "organization_id", "zone_id"}
+)
 _episode_shadow_update = ", ".join(
-    f"{name} = EXCLUDED.{name}"
-    for name in _EPISODE_COLUMNS
-    if name not in ("plant_id", "episode_id")
+    f"{name} = EXCLUDED.{name}" for name in _EPISODE_COLUMNS if name not in _EPISODE_SHADOW_FIXED
 )
 _finding_state_shadow_update = ", ".join(
     f"{name} = EXCLUDED.{name}"
     for name in _FINDING_STATE_COLUMNS
-    if name not in ("plant_id", "finding_state_id")
+    if name not in _FINDING_STATE_SHADOW_FIXED
 )
 
 # Las dos sentencias a la sombra son un `UPSERT` (y no un `INSERT` liso): la fase 3 puede volver a

@@ -45,6 +45,88 @@ _HEX64 = "'^[0-9a-f]{64}$'"
 
 _SHADOW_TABLES = ("episode_rebuild_shadow", "finding_state_rebuild_shadow")
 
+_EPISODE_SHADOW_COLUMNS = (
+    "episode_id",
+    "organization_id",
+    "plant_id",
+    "zone_id",
+    "family",
+    "tier",
+    "standard_id",
+    "standard_version",
+    "segment_record_ids",
+    "segment_count",
+    "expected_segment_count",
+    "missing_segment_indexes",
+    "started_at",
+    "ended_at",
+    "total_episode_duration_ms",
+    "total_condition_duration_ms",
+    "max_confidence",
+    "clip_references",
+    "observability_state_at_start",
+    "continues_open",
+    "last_segment_received_at",
+    "last_event_id",
+    "projection_updated_at",
+)
+_FINDING_STATE_SHADOW_COLUMNS = (
+    "finding_state_id",
+    "organization_id",
+    "plant_id",
+    "zone_id",
+    "subject_kind",
+    "subject_id",
+    "anchor_record_id",
+    "family",
+    "tier",
+    "standard_id",
+    "standard_version",
+    "lifecycle_state",
+    "previous_lifecycle_state",
+    "current_classification_outcome",
+    "current_reason_category",
+    "classification_count",
+    "first_classified_at",
+    "last_classified_at",
+    "classified_within_deadline",
+    "current_action_id",
+    "current_action_type",
+    "assignee_user_id",
+    "assignee_inactive",
+    "due_at",
+    "overdue_since",
+    "overdue_days",
+    "closed_at",
+    "closure_record_id",
+    "unclosable_since",
+    "unclosable_review_due_at",
+    "unclosable_pending_review",
+    "closed_with_later_different_classification",
+    "reopening_count",
+    "has_signed_root_cause",
+    "observability_state_at_event",
+    "zone_gate_status_at_event",
+    "zone_agreement_revoked",
+    "zone_agreement_revoked_at",
+    "single_occupancy_zone",
+    "aggregation_window_minutes",
+    "walk_test_regression_pending",
+    "walk_test_regression_cause",
+    "occurred_at_exact",
+    "occurred_at_bucket",
+    "age_days",
+    "evidence_flagged",
+    "missing_segments_declared",
+    "last_event_id",
+    "last_record_id",
+    "projection_updated_at",
+    "projection_digest",
+)
+_SHADOW_SCOPE_COLUMNS = frozenset({"organization_id", "plant_id", "zone_id"})
+"""Ninguna clave, organización, planta ni zona es ``UPDATE`` de ``vigia_app`` (como en las tablas
+en servicio, ``laz_0029``): el ``GRANT`` de la sombra se acota a las columnas de negocio."""
+
 _EPISODE_SHADOW = """
 CREATE TABLE loop.episode_rebuild_shadow (
     episode_id uuid NOT NULL,
@@ -175,28 +257,40 @@ _COMMENTS = (
     """,
 )
 
+# Mismos nombres de disparador que ``laz_0029._triggers()`` (``append_only_update``,
+# ``append_only_delete``, ``append_only_no_truncate``): tres disparadores separados, no uno
+# combinado, para que el catálogo de ``test_append_only_triggers_are_always_enabled`` los lea
+# igual que los de cualquier otra tabla de solo anexar.
 _APPEND_ONLY_SAMPLE_RUN = (
-    """
-    CREATE TRIGGER loop_projection_sample_run_append_only_row
-        BEFORE UPDATE OR DELETE ON loop.loop_projection_sample_run
-        FOR EACH ROW EXECUTE FUNCTION shared.vigia_reject_mutation()
-    """,
-    """
-    CREATE TRIGGER loop_projection_sample_run_append_only_truncate
-        BEFORE TRUNCATE ON loop.loop_projection_sample_run
-        FOR EACH STATEMENT EXECUTE FUNCTION shared.vigia_reject_mutation()
-    """,
-    "ALTER TABLE loop.loop_projection_sample_run ENABLE ALWAYS TRIGGER "
-    "loop_projection_sample_run_append_only_row",
-    "ALTER TABLE loop.loop_projection_sample_run ENABLE ALWAYS TRIGGER "
-    "loop_projection_sample_run_append_only_truncate",
+    "CREATE TRIGGER append_only_update BEFORE UPDATE ON loop.loop_projection_sample_run"
+    " FOR EACH ROW EXECUTE FUNCTION shared.vigia_reject_mutation()",
+    "CREATE TRIGGER append_only_delete BEFORE DELETE ON loop.loop_projection_sample_run"
+    " FOR EACH ROW EXECUTE FUNCTION shared.vigia_reject_mutation()",
+    "CREATE TRIGGER append_only_no_truncate BEFORE TRUNCATE ON loop.loop_projection_sample_run"
+    " FOR EACH STATEMENT EXECUTE FUNCTION shared.vigia_reject_mutation()",
+    *(
+        f"ALTER TABLE loop.loop_projection_sample_run ENABLE ALWAYS TRIGGER {trigger}"
+        for trigger in ("append_only_update", "append_only_delete", "append_only_no_truncate")
+    ),
 )
 
 
 def _grants() -> list[str]:
     statements = []
-    for table in (*_SHADOW_TABLES, "loop_projection_sample_run"):
-        statements.append(f"GRANT SELECT, INSERT, UPDATE, DELETE ON loop.{table} TO vigia_app")
+    for table, columns, pk in (
+        ("episode_rebuild_shadow", _EPISODE_SHADOW_COLUMNS, "episode_id"),
+        ("finding_state_rebuild_shadow", _FINDING_STATE_SHADOW_COLUMNS, "finding_state_id"),
+    ):
+        # La sombra es un área de preparación interna que el intercambio vacía (DELETE); su
+        # UPDATE (el UPSERT de cada lote) se acota a las columnas de negocio, como laz_0029.
+        mutable = ", ".join(
+            name for name in columns if name not in _SHADOW_SCOPE_COLUMNS and name != pk
+        )
+        statements.append(f"GRANT SELECT, INSERT, DELETE ON loop.{table} TO vigia_app")
+        statements.append(f"GRANT UPDATE ({mutable}) ON loop.{table} TO vigia_app")
+    # ``loop_projection_sample_run`` es de solo anexar (como ``ledger.evidence_sample_run``,
+    # nuc_0006): ni UPDATE ni DELETE, el disparador no es la única defensa (NFR-NUC-14).
+    statements.append("GRANT SELECT, INSERT ON loop.loop_projection_sample_run TO vigia_app")
     statements.append(
         "GRANT UPDATE (rebuild_owner, rebuild_lease_until)"
         " ON loop.loop_projection_checkpoint TO vigia_app"
