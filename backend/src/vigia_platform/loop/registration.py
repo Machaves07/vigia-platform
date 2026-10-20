@@ -284,7 +284,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     closure_router,  # SUP-U05-11 y 14 (TASK-343, VIG-233)
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
-    findings_router,  # SUP-U05-01 (TASK-307)
+    findings_router,  # SUP-U05-01 (TASK-307), 02 y 04 (TASK-342)
     overdue_router,  # SUP-U05-15 (TASK-313)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
 )

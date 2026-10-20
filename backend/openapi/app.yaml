@@ -4116,6 +4116,32 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Historial completo de clasificaciones de un hallazgo, en orden"
+      "operationId": "list_classifications_loop_findings__finding_state_id__classifications_get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClassificationHistoryOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/review-queue":
     "get":
       "tags":
@@ -4339,7 +4365,7 @@
           "content":
             "application/json":
               "schema":
-                "$ref": "#/components/schemas/AnalysisOut"
+                "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -4380,7 +4406,7 @@
           "content":
             "application/json":
               "schema":
-                "$ref": "#/components/schemas/AnalysisOut"
+                "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -4413,7 +4439,7 @@
           "content":
             "application/json":
               "schema":
-                "$ref": "#/components/schemas/AnalysisOut"
+                "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -4567,6 +4593,33 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/InboxPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Detalle auditado de un hallazgo con la cita del estándar y sus degradaciones"
+      "operationId": "get_finding_loop_findings__finding_state_id__get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/FindingDetailOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -5306,6 +5359,59 @@
         - "accepted_duplicate"
       "title": "AcceptanceStatus"
       "description": "Resultado de aceptación de un registro por la plataforma."
+    "ActionOut":
+      "properties":
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "action_type":
+          "type": "string"
+          "title": "Action Type"
+        "action_description":
+          "type": "string"
+          "title": "Action Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Expected Outcome"
+        "state":
+          "type": "string"
+          "title": "State"
+        "assigned_at":
+          "type": "string"
+          "title": "Assigned At"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "counts_as_overdue":
+          "type": "boolean"
+          "title": "Counts As Overdue"
+        "root_cause_analysis_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Root Cause Analysis Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "action_id"
+        - "record_id"
+        - "action_type"
+        - "action_description"
+        - "expected_outcome"
+        - "state"
+        - "assigned_at"
+        - "due_at"
+        - "counts_as_overdue"
+        - "root_cause_analysis_id"
+      "title": "ActionOut"
     "ActivationEnrollment":
       "properties":
         "provisioning_uri":
@@ -5667,117 +5773,6 @@
         - "cleared"
       "title": "AlarmStatus"
       "description": "Filtro de ``GET /fleet/alarms``: abiertas o ya cerradas."
-    "AnalysisOut":
-      "properties":
-        "analysis_id":
-          "type": "string"
-          "format": "uuid"
-          "title": "Analysis Id"
-        "subject_kind":
-          "type": "string"
-          "title": "Subject Kind"
-        "subject_id":
-          "type": "string"
-          "format": "uuid"
-          "title": "Subject Id"
-        "zone_id":
-          "type": "string"
-          "format": "uuid"
-          "title": "Zone Id"
-        "state":
-          "type": "string"
-          "title": "State"
-        "zone_context":
-          "$ref": "#/components/schemas/ZoneContextOut"
-        "why_steps":
-          "items":
-            "$ref": "#/components/schemas/WhyStepOut"
-          "type": "array"
-          "title": "Why Steps"
-        "next_step_index":
-          "anyOf":
-            - "type": "integer"
-            - "type": "null"
-          "title": "Next Step Index"
-        "next_question_es":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Next Question Es"
-        "cause_effect_branches":
-          "items":
-            "$ref": "#/components/schemas/BranchOut"
-          "type": "array"
-          "title": "Cause Effect Branches"
-        "root_cause_category":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Root Cause Category"
-        "root_cause_statement":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Root Cause Statement"
-        "conclusion":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Conclusion"
-        "pending_information":
-          "items":
-            "type": "string"
-          "type": "array"
-          "title": "Pending Information"
-        "missing_information":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Missing Information"
-        "record_id":
-          "anyOf":
-            - "type": "string"
-              "format": "uuid"
-            - "type": "null"
-          "title": "Record Id"
-        "signer":
-          "anyOf":
-            - "$ref": "#/components/schemas/SignerOut"
-            - "type": "null"
-        "signed_at":
-          "anyOf":
-            - "type": "string"
-            - "type": "null"
-          "title": "Signed At"
-        "created_at":
-          "type": "string"
-          "title": "Created At"
-        "updated_at":
-          "type": "string"
-          "title": "Updated At"
-      "type": "object"
-      "required":
-        - "analysis_id"
-        - "subject_kind"
-        - "subject_id"
-        - "zone_id"
-        - "state"
-        - "zone_context"
-        - "why_steps"
-        - "next_step_index"
-        - "next_question_es"
-        - "cause_effect_branches"
-        - "root_cause_category"
-        - "root_cause_statement"
-        - "conclusion"
-        - "pending_information"
-        - "missing_information"
-        - "record_id"
-        - "signer"
-        - "signed_at"
-        - "created_at"
-        - "updated_at"
-      "title": "AnalysisOut"
     "AnalysisSignatureBody":
       "properties":
         "professional_license":
@@ -6849,6 +6844,90 @@
       "type": "object"
       "title": "ClassificationBody"
       "description": "La decisión: salida, categoría, motivo y, al reclasificar, el motivo reforzado."
+    "ClassificationHistoryOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "aggregation_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Aggregation Window Minutes"
+        "classifications":
+          "items":
+            "$ref": "#/components/schemas/ClassificationItemOut"
+          "type": "array"
+          "title": "Classifications"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "time_aggregated"
+        - "aggregation_window_minutes"
+        - "classifications"
+      "title": "ClassificationHistoryOut"
+    "ClassificationItemOut":
+      "properties":
+        "classification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Classification Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "sequence_in_subject":
+          "type": "integer"
+          "title": "Sequence In Subject"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "reason_text":
+          "type": "string"
+          "title": "Reason Text"
+        "is_reclassification":
+          "type": "boolean"
+          "title": "Is Reclassification"
+        "reinforced_reason":
+          "type": "boolean"
+          "title": "Reinforced Reason"
+        "previous_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Previous Outcome"
+        "effect_on_loop":
+          "type": "string"
+          "title": "Effect On Loop"
+        "classified_at":
+          "type": "string"
+          "title": "Classified At"
+        "classified_by":
+          "$ref": "#/components/schemas/ClassifiedByOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "classification_id"
+        - "record_id"
+        - "sequence_in_subject"
+        - "outcome"
+        - "reason_category"
+        - "reason_text"
+        - "is_reclassification"
+        - "reinforced_reason"
+        - "previous_outcome"
+        - "effect_on_loop"
+        - "classified_at"
+        - "classified_by"
+      "title": "ClassificationItemOut"
     "ClassificationOut":
       "properties":
         "finding_state_id":
@@ -6913,6 +6992,91 @@
         - "classified_at"
         - "time_aggregated"
       "title": "ClassificationOut"
+    "ClassifiedByOut":
+      "properties":
+        "user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "User Id"
+        "display_name":
+          "type": "string"
+          "title": "Display Name"
+        "role_in_use":
+          "type": "string"
+          "title": "Role In Use"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "user_id"
+        - "display_name"
+        - "role_in_use"
+      "title": "ClassifiedByOut"
+      "description": "El usuario de la plataforma que clasificó (P8), nunca una persona observada."
+    "ClipOut":
+      "properties":
+        "evidence_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Evidence Id"
+        "clip_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Clip Id"
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "segment":
+          "type": "string"
+          "title": "Segment"
+        "media_kind":
+          "type": "string"
+          "title": "Media Kind"
+        "content_type":
+          "type": "string"
+          "title": "Content Type"
+        "size_bytes":
+          "type": "integer"
+          "title": "Size Bytes"
+        "sha256":
+          "type": "string"
+          "title": "Sha256"
+        "duration_ms":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Duration Ms"
+        "starts_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Starts At"
+        "ends_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Ends At"
+        "read_url":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read Url"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "evidence_id"
+        - "clip_id"
+        - "camera_id"
+        - "segment"
+        - "media_kind"
+        - "content_type"
+        - "size_bytes"
+        - "sha256"
+        - "duration_ms"
+        - "starts_at"
+        - "ends_at"
+        - "read_url"
+      "title": "ClipOut"
     "ClipUploadGrant":
       "properties":
         "clip_id":
@@ -8023,6 +8187,26 @@
         - "assigned_at"
         - "time_aggregated"
       "title": "CorrectiveActionOut"
+    "CoverageAtEventOut":
+      "properties":
+        "state":
+          "type": "string"
+          "title": "State"
+        "causes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Causes"
+        "layer":
+          "type": "string"
+          "title": "Layer"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "state"
+        - "causes"
+        - "layer"
+      "title": "CoverageAtEventOut"
     "CoverageShareOut":
       "properties":
         "state":
@@ -8380,6 +8564,27 @@
         - "kind"
         - "id"
       "title": "DeepLinkOut"
+    "DetailNoticeOut":
+      "properties":
+        "code":
+          "$ref": "#/components/schemas/FindingDetailNotice"
+        "since":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Since"
+        "cause":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Cause"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "code"
+        - "since"
+        - "cause"
+      "title": "DetailNoticeOut"
     "DocumentContentType":
       "type": "string"
       "enum":
@@ -8780,6 +8985,58 @@
         - "episode_ms"
         - "condition_ms"
       "title": "EpisodeDurationsOut"
+    "EpisodeOut":
+      "properties":
+        "episode_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Episode Id"
+        "segment_record_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Segment Record Ids"
+        "segment_count":
+          "type": "integer"
+          "title": "Segment Count"
+        "expected_segment_count":
+          "type": "integer"
+          "title": "Expected Segment Count"
+        "missing_segment_indexes":
+          "items":
+            "type": "integer"
+          "type": "array"
+          "title": "Missing Segment Indexes"
+        "started_at":
+          "type": "string"
+          "title": "Started At"
+        "ended_at":
+          "type": "string"
+          "title": "Ended At"
+        "total_episode_duration_ms":
+          "type": "integer"
+          "title": "Total Episode Duration Ms"
+        "total_condition_duration_ms":
+          "type": "integer"
+          "title": "Total Condition Duration Ms"
+        "continues_open":
+          "type": "boolean"
+          "title": "Continues Open"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "episode_id"
+        - "segment_record_ids"
+        - "segment_count"
+        - "expected_segment_count"
+        - "missing_segment_indexes"
+        - "started_at"
+        - "ended_at"
+        - "total_episode_duration_ms"
+        - "total_condition_duration_ms"
+        - "continues_open"
+      "title": "EpisodeOut"
     "EpisodeParameters":
       "properties":
         "grouping_window_ms":
@@ -9581,6 +9838,162 @@
         - "family"
         - "count"
       "title": "FamilyCountOut"
+    "FindingDetailNotice":
+      "type": "string"
+      "enum":
+        - "agreement_revoked"
+        - "walk_test_regression_pending"
+        - "evidence_flagged"
+        - "missing_segments_declared"
+        - "later_standard_version"
+        - "standard_text_unavailable"
+        - "coverage_unavailable"
+        - "node_state_unavailable"
+        - "evidence_url_unavailable"
+        - "segment_records_limited"
+      "title": "FindingDetailNotice"
+      "description": "``finding_detail_notice``: los avisos del detalle de un hallazgo (TASK-342; BR-LAZ-10, 11,\n150, 152 y 155; PAT-LAZ-RES-04). Los cuatro primeros son los de la bandeja; los demás declaran\nuna sección degradada o la versión posterior del estándar. **Ninguno oculta el hallazgo** y\nninguno afirma que la zona estuviera observada."
+    "FindingDetailOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "subject_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Subject Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "classification_outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Classification Outcome"
+        "classification_count":
+          "type": "integer"
+          "title": "Classification Count"
+        "age_days":
+          "type": "integer"
+          "title": "Age Days"
+        "observability_state_at_event":
+          "type": "string"
+          "title": "Observability State At Event"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "due_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Due At"
+        "overdue_days":
+          "type": "integer"
+          "title": "Overdue Days"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "aggregation_window_minutes":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Aggregation Window Minutes"
+        "evidence_flagged":
+          "type": "boolean"
+          "title": "Evidence Flagged"
+        "standard":
+          "$ref": "#/components/schemas/StandardCitationOut"
+        "gate_at_event":
+          "$ref": "#/components/schemas/GateAtEventOut"
+        "coverage_at_event":
+          "anyOf":
+            - "$ref": "#/components/schemas/CoverageAtEventOut"
+            - "type": "null"
+        "nodes":
+          "anyOf":
+            - "items":
+                "$ref": "#/components/schemas/NodeOut"
+              "type": "array"
+            - "type": "null"
+          "title": "Nodes"
+        "episode":
+          "anyOf":
+            - "$ref": "#/components/schemas/EpisodeOut"
+            - "type": "null"
+        "records":
+          "items":
+            "$ref": "#/components/schemas/RecordOut"
+          "type": "array"
+          "title": "Records"
+        "classifications":
+          "items":
+            "$ref": "#/components/schemas/ClassificationItemOut"
+          "type": "array"
+          "title": "Classifications"
+        "actions":
+          "items":
+            "$ref": "#/components/schemas/ActionOut"
+          "type": "array"
+          "title": "Actions"
+        "analyses":
+          "items":
+            "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__findings_routes__AnalysisOut"
+          "type": "array"
+          "title": "Analyses"
+        "notices":
+          "items":
+            "$ref": "#/components/schemas/DetailNoticeOut"
+          "type": "array"
+          "title": "Notices"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "subject_kind"
+        - "subject_id"
+        - "plant_id"
+        - "zone_id"
+        - "family"
+        - "tier"
+        - "lifecycle_state"
+        - "classification_outcome"
+        - "classification_count"
+        - "age_days"
+        - "observability_state_at_event"
+        - "occurred_at"
+        - "due_at"
+        - "overdue_days"
+        - "time_aggregated"
+        - "aggregation_window_minutes"
+        - "evidence_flagged"
+        - "standard"
+        - "gate_at_event"
+        - "coverage_at_event"
+        - "nodes"
+        - "episode"
+        - "records"
+        - "classifications"
+        - "actions"
+        - "analyses"
+        - "notices"
+      "title": "FindingDetailOut"
     "FindingLifecycleState":
       "type": "string"
       "enum":
@@ -9805,6 +10218,26 @@
         - "captured_at"
         - "reason_es"
       "title": "FramingRecaptureBody"
+    "GateAtEventOut":
+      "properties":
+        "status":
+          "type": "string"
+          "title": "Status"
+        "effective_from":
+          "type": "string"
+          "title": "Effective From"
+        "effective_until":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Effective Until"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "status"
+        - "effective_from"
+        - "effective_until"
+      "title": "GateAtEventOut"
     "GateKind":
       "type": "string"
       "enum":
@@ -11279,6 +11712,31 @@
         - "stream_reference"
       "title": "NodeCamera"
       "description": "Cámara asignada al nodo. `stream_reference` nombra el flujo; nunca contiene una dirección con credenciales."
+    "NodeCameraOut":
+      "properties":
+        "camera_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Camera Id"
+        "code":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Code"
+        "connected":
+          "type": "boolean"
+          "title": "Connected"
+        "observability_state":
+          "type": "string"
+          "title": "Observability State"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "camera_id"
+        - "code"
+        - "connected"
+        - "observability_state"
+      "title": "NodeCameraOut"
     "NodeCredential":
       "properties":
         "node_id":
@@ -11645,6 +12103,41 @@
         - "live_view_local_url"
       "title": "NodeInventoryView"
       "description": "``NodeInventory`` (interfaces §3.4 y «Versión 1.5»); sin latido, sus campos son ``null``."
+    "NodeOut":
+      "properties":
+        "node_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Node Id"
+        "code":
+          "type": "string"
+          "title": "Code"
+        "communication_state":
+          "type": "string"
+          "title": "Communication State"
+        "since":
+          "type": "string"
+          "title": "Since"
+        "last_heartbeat_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Last Heartbeat At"
+        "cameras":
+          "items":
+            "$ref": "#/components/schemas/NodeCameraOut"
+          "type": "array"
+          "title": "Cameras"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "node_id"
+        - "code"
+        - "communication_state"
+        - "since"
+        - "last_heartbeat_at"
+        - "cameras"
+      "title": "NodeOut"
     "NodeReasonBody":
       "properties":
         "reason_es":
@@ -12818,6 +13311,57 @@
         - "received_at"
         - "record_id"
       "title": "RecordCursorOut"
+    "RecordOut":
+      "properties":
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "record_type":
+          "type": "string"
+          "title": "Record Type"
+        "chain_sequence":
+          "type": "integer"
+          "title": "Chain Sequence"
+        "content_hash":
+          "type": "string"
+          "title": "Content Hash"
+        "segment_index":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Segment Index"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "occurred_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Occurred At"
+        "signals":
+          "items":
+            "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__findings_routes__SignalOut"
+          "type": "array"
+          "title": "Signals"
+        "clips":
+          "items":
+            "$ref": "#/components/schemas/ClipOut"
+          "type": "array"
+          "title": "Clips"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "record_id"
+        - "record_type"
+        - "chain_sequence"
+        - "content_hash"
+        - "segment_index"
+        - "received_at"
+        - "occurred_at"
+        - "signals"
+        - "clips"
+      "title": "RecordOut"
     "RecurrenceEntryOut":
       "properties":
         "family":
@@ -13818,23 +14362,6 @@
         - "low"
       "title": "SignalLevel"
       "description": "Nivel físico de una señal."
-    "SignalOut":
-      "properties":
-        "role":
-          "type": "string"
-          "title": "Role"
-        "value":
-          "type": "string"
-          "title": "Value"
-        "valid":
-          "type": "boolean"
-          "title": "Valid"
-      "type": "object"
-      "required":
-        - "role"
-        - "value"
-        - "valid"
-      "title": "SignalOut"
     "SignalReaderView":
       "properties":
         "available":
@@ -14133,6 +14660,57 @@
       "additionalProperties": false
       "type": "object"
       "title": "StandardChanges"
+    "StandardCitationOut":
+      "properties":
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "version":
+          "type": "integer"
+          "title": "Version"
+        "title_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Title Es"
+        "declared_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Declared Text"
+        "declared_text_sha256":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Declared Text Sha256"
+        "effective_from":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Effective From"
+        "superseded_since":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Superseded Since"
+        "superseded_in_catalog_version":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Superseded In Catalog Version"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "standard_id"
+        - "version"
+        - "title_es"
+        - "declared_text"
+        - "declared_text_sha256"
+        - "effective_from"
+        - "superseded_since"
+        - "superseded_in_catalog_version"
+      "title": "StandardCitationOut"
     "StandardOut":
       "properties":
         "standard_id":
@@ -15298,7 +15876,7 @@
           "title": "Node State"
         "signals_by_role":
           "items":
-            "$ref": "#/components/schemas/SignalOut"
+            "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__SignalOut"
           "type": "array"
           "title": "Signals By Role"
         "episode_durations":
@@ -15706,3 +16284,212 @@
         - "signed_at"
       "title": "SignedEnvelope"
       "description": "Sobre firmado `SignedEnvelope<T>` (domain-entities.md §3.5). La firma es Ed25519 sobre la serialización canónica RFC 8785 de `payload`; el receptor verifica con la clave pública cuyo `key_id` coincide y cuyo `purpose` corresponde al tipo de carga. Un sobre que no verifica no se aplica ni se cachea. Es genérico: `payload` se resuelve por `$dynamicRef` al ancla dinámica `payload`, y quien lo usa lo especializa con `{\"$ref\": \"signed_envelope.schema.json\", \"$defs\": {\"payload\": {\"$dynamicAnchor\": \"payload\", \"$ref\": \"<esquema de la carga>\"}}}`. Sin especializar no admite ninguna carga."
+    "vigia_platform__loop__adapters__http__findings_routes__AnalysisOut":
+      "properties":
+        "analysis_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Analysis Id"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+        "state":
+          "type": "string"
+          "title": "State"
+        "root_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Category"
+        "root_cause_statement":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Statement"
+        "conclusion":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Conclusion"
+        "signed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Signed At"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "analysis_id"
+        - "record_id"
+        - "state"
+        - "root_cause_category"
+        - "root_cause_statement"
+        - "conclusion"
+        - "signed_at"
+        - "created_at"
+      "title": "AnalysisOut"
+    "vigia_platform__loop__adapters__http__findings_routes__SignalOut":
+      "properties":
+        "signal_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Signal Id"
+        "role":
+          "type": "string"
+          "title": "Role"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "valid":
+          "type": "boolean"
+          "title": "Valid"
+        "read_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "signal_id"
+        - "role"
+        - "value"
+        - "valid"
+        - "read_at"
+      "title": "SignalOut"
+    "vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut":
+      "properties":
+        "analysis_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Analysis Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "subject_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Subject Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "state":
+          "type": "string"
+          "title": "State"
+        "zone_context":
+          "$ref": "#/components/schemas/ZoneContextOut"
+        "why_steps":
+          "items":
+            "$ref": "#/components/schemas/WhyStepOut"
+          "type": "array"
+          "title": "Why Steps"
+        "next_step_index":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Next Step Index"
+        "next_question_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Question Es"
+        "cause_effect_branches":
+          "items":
+            "$ref": "#/components/schemas/BranchOut"
+          "type": "array"
+          "title": "Cause Effect Branches"
+        "root_cause_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Category"
+        "root_cause_statement":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Root Cause Statement"
+        "conclusion":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Conclusion"
+        "pending_information":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Pending Information"
+        "missing_information":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Missing Information"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+        "signer":
+          "anyOf":
+            - "$ref": "#/components/schemas/SignerOut"
+            - "type": "null"
+        "signed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Signed At"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "updated_at":
+          "type": "string"
+          "title": "Updated At"
+      "type": "object"
+      "required":
+        - "analysis_id"
+        - "subject_kind"
+        - "subject_id"
+        - "zone_id"
+        - "state"
+        - "zone_context"
+        - "why_steps"
+        - "next_step_index"
+        - "next_question_es"
+        - "cause_effect_branches"
+        - "root_cause_category"
+        - "root_cause_statement"
+        - "conclusion"
+        - "pending_information"
+        - "missing_information"
+        - "record_id"
+        - "signer"
+        - "signed_at"
+        - "created_at"
+        - "updated_at"
+      "title": "AnalysisOut"
+    "vigia_platform__loop__adapters__http__root_cause_routes__SignalOut":
+      "properties":
+        "role":
+          "type": "string"
+          "title": "Role"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "valid":
+          "type": "boolean"
+          "title": "Valid"
+      "type": "object"
+      "required":
+        - "role"
+        - "value"
+        - "valid"
+      "title": "SignalOut"

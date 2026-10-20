@@ -144,6 +144,10 @@ SIGNER_FIELDS: Final = frozenset(
             "display_name",
         ),
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature", "response", "display_name"),
+        # El autor de cada clasificación del historial y del detalle (``ClassifiedByOut``,
+        # VIG-232): el usuario de la plataforma que clasificó (P8), nunca la persona observada.
+        ("GET", "/loop/findings/{finding_state_id}", "response", "display_name"),
+        ("GET", "/loop/findings/{finding_state_id}/classifications", "response", "display_name"),
         # La declaración de privacidad de un adjunto de evidencia (VIG-223, TASK-310): afirma que
         # **ninguna** persona identificable aparece; es la guarda de P3, no un dato de persona.
         ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),
