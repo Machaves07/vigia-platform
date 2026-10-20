@@ -22,7 +22,11 @@ domain-entities.md de U-04 §2.14 y §9; BR-LAZ-146 a 148 y 156; DR-LAZ-01 y 02)
    planta podían entrar a la vez en cuanto la primera confirmaba el reclamo. El arrendamiento con
    vencimiento cubre la reconstrucción entera, no solo su primer paso.)
 
-2. **Cómputo** (puede ser largo, una transacción): ``ledger.ledger_record`` en lotes de 10 000
+2. **Cómputo** (puede ser largo, una transacción): primero, antes de tocar nada, una lectura de
+   ``last_applied_event_id`` del punto de control como marca de referencia para la fase 3 (ronda 3
+   de revisión: leerla al final, tras enriquecer, dejaba fuera un evento confirmado a mitad del
+   enriquecimiento — la ventana más larga de la fase — y la fase 3 no veía ninguna diferencia).
+   Después, ``ledger.ledger_record`` en lotes de 10 000
    ``[objetivo propio]`` por ``chain_sequence``, plegados con ``fold.step`` (puro) y enriquecidos
    después con el mismo procedimiento que un hallazgo nuevo (``ProjectionEnrichment.finding_facts``,
    ``new=True``): el pliegue no depende del reloj, y el enriquecimiento consulta los mismos
@@ -390,6 +394,7 @@ class ProjectionRebuilder:
         clock: Clock,
         batch_size: int = BATCH_SIZE,
         on_compute_started: Callable[[], Awaitable[None]] | None = None,
+        on_enrichment_complete: Callable[[], Awaitable[None]] | None = None,
         on_swap_started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._database = database
@@ -401,6 +406,12 @@ class ProjectionRebuilder:
         self._on_compute_started = on_compute_started
         """Gancho de prueba (PR-LAZ-51): se invoca al entrar a la fase 2, antes de tocar nada; una
         prueba lo usa para pausar el cómputo y lanzar una segunda reconstrucción."""
+        self._on_enrichment_complete = on_enrichment_complete
+        """Gancho de prueba (PR-LAZ-59, ronda 3 de revisión): se invoca dentro de la transacción de
+        la fase 2, justo después de ``_enrich_and_stage``, todavía antes del ``COMMIT``; una prueba
+        lo usa para confirmar un evento de enriquecimiento de U-03 (p. ej. ``gate_state_changed``)
+        a mitad de la ventana más larga de la fase 2, el caso que la marca de referencia leída al
+        final (ronda 2) no detectaba."""
         self._on_swap_started = on_swap_started
         """Gancho de prueba (PR-LAZ-59 y BR-LAZ-148): se invoca al entrar a la fase 3, justo antes
         de tomar el control de la planta; una prueba lo usa para intercalar una escritura
@@ -463,6 +474,24 @@ class ProjectionRebuilder:
             await self._on_compute_started()
         projection = PlantProjection(context.organization_id, plant_id)
         async with self._database.transaction(context) as transaction:
+            # Marca de referencia para la fase 3 (BR-LAZ-148, ronda 3 de revisión): el último
+            # evento de enriquecimiento (``update_enrichment``, p. ej. ``gate_state_changed``) que
+            # el punto de control ya había visto. No corresponde a ningún ``chain_sequence`` del
+            # expediente de esta partición, así que ``last_applied_ledger_sequence`` no lo refleja:
+            # se compara aparte en el intercambio. Se lee **al principio** de esta transacción,
+            # antes de vaciar la sombra y de plegar: si se leyera al final (ronda 2), un evento
+            # confirmado mientras ``_enrich_and_stage`` recorre las filas (la ventana más larga,
+            # renovada varias veces en una planta grande) quedaría ya dentro de la marca pero fuera
+            # de lo que la sombra alcanzó a reflejar, y la fase 3 no vería ninguna diferencia. Leída
+            # aquí, cualquier evento posterior —incluido uno a mitad del enriquecimiento— lo detecta
+            # la fase 3 (un falso positivo solo cuesta volver a enriquecer, nunca pierde uno real).
+            baseline = (
+                await transaction.execute(
+                    _CHECKPOINT_EVENT,
+                    {"organization_id": context.organization_id, "plant_id": plant_id},
+                )
+            ).one()
+            projection.last_applied_event_id = _optional_uuid(baseline.last_applied_event_id)
             await transaction.execute(
                 _CLEAR_EPISODE_SHADOW,
                 {"organization_id": context.organization_id, "plant_id": plant_id},
@@ -481,18 +510,8 @@ class ProjectionRebuilder:
             if top is not None:
                 await self._fold_batches(transaction, context, plant_id, projection, int(top))
             await self._enrich_and_stage(transaction, context, plant_id, projection, owner=owner)
-            # Marca de referencia para la fase 3 (BR-LAZ-148, ronda 2 de revisión): el último evento
-            # de enriquecimiento (``update_enrichment``, p. ej. ``gate_state_changed``) que el plant
-            # ya había visto cuando terminó el cómputo. No corresponde a ningún ``chain_sequence``
-            # del expediente para esta partición, así que ``last_applied_ledger_sequence`` no lo
-            # refleja: se compara aparte en el intercambio.
-            baseline = (
-                await transaction.execute(
-                    _CHECKPOINT_EVENT,
-                    {"organization_id": context.organization_id, "plant_id": plant_id},
-                )
-            ).one()
-            projection.last_applied_event_id = _optional_uuid(baseline.last_applied_event_id)
+            if self._on_enrichment_complete is not None:
+                await self._on_enrichment_complete()
         await self._renew(context, plant_id, owner)
         return projection
 

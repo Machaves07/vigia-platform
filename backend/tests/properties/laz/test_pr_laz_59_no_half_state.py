@@ -70,6 +70,7 @@ def _rebuilder(
     ports: InstrumentedPorts,
     *,
     batch_size: int = 1,
+    on_enrichment_complete: Any = None,
     on_swap_started: Any = None,
 ) -> ProjectionRebuilder:
     database = world.stack.primary.database
@@ -85,6 +86,7 @@ def _rebuilder(
         settings=PostgresLoopConfigurationRepository(database),
         clock=sessions.clock,
         batch_size=batch_size,
+        on_enrichment_complete=on_enrichment_complete,
         on_swap_started=on_swap_started,
     )
 
@@ -227,6 +229,65 @@ def test_pr_laz_59_surplus_during_compute_is_not_lost(world: LoopWorld) -> None:
     assert final["classification_count"] == 1
 
 
+async def _revoke_usage_and_deliver(
+    world: LoopWorld, consumer: Any, organization: LoopOrganization
+) -> None:
+    """Lo mismo que ``world.gate_event`` + la entrega (``LoopWorld.deliver``), pero sin su
+    envoltorio síncrono (``stack.execute``/``stack.run``): para llamarla ya dentro del bucle en
+    marcha, con la reconstrucción pausada en un gancho de prueba."""
+    site = organization.site
+    database = world.stack.primary.database
+    at = world.stack.now()
+    event_context = unit_context(site.organization_id, ActorUnit.U04, kind=ActorKind.SYSTEM)
+    async with database.transaction(event_context) as transaction:
+        await transaction.execute(
+            text(
+                "UPDATE catalog.gate_state_history SET effective_until = :at"
+                " WHERE zone_id = :zone_id AND gate = 'usage' AND effective_until IS NULL"
+            ),
+            {"zone_id": site.zone_id, "at": at},
+        )
+        await transaction.execute(
+            text(
+                "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id,"
+                " gate, status, effective_from, decided_by, reason_es, ledger_record_id,"
+                " record_id)"
+                " VALUES (:organization_id, :plant_id, :zone_id, 'usage', 'revoked', :at,"
+                " :decided_by, :reason_es, :ledger_record_id, :record_id)"
+            ),
+            {
+                "organization_id": site.organization_id,
+                "plant_id": site.plant_id,
+                "zone_id": site.zone_id,
+                "at": at,
+                "decided_by": world.stack.authz.operator_id,
+                "reason_es": "Revocación sintética del uso de la zona",
+                "ledger_record_id": world.stack.uuid7(),
+                "record_id": world.stack.uuid7(),
+            },
+        )
+        event = OutboxEvent(
+            event_id=world.stack.uuid7(),
+            organization_id=site.organization_id,
+            plant_id=site.plant_id,
+            event_name="gate_state_changed",
+            partition_key=partition_key(site.organization_id, site.plant_id),
+            ledger_sequence=None,
+            payload={
+                "zone_id": str(site.zone_id),
+                "gate": "usage",
+                "status": "revoked",
+                "resulting_mode": "commissioning",
+                "record_id": str(uuid.uuid4()),
+                "reason_es_present": True,
+            },
+            correlation_id=uuid.uuid4(),
+            created_at=at,
+        )
+        applied = await consumer.apply(event, transaction)
+    assert applied == 1
+
+
 def test_pr_laz_59_enrichment_event_during_swap_is_not_lost(world: LoopWorld) -> None:
     """Un evento de enriquecimiento (``gate_state_changed`` revocando la compuerta de uso de la
     zona) aplicado **entre el fin del cómputo y el intercambio** no se pierde: ``update_enrichment``
@@ -249,67 +310,48 @@ def test_pr_laz_59_enrichment_event_during_swap_is_not_lost(world: LoopWorld) ->
 
     rebuilder = _rebuilder(world, ports, batch_size=1, on_swap_started=pause)
     context = world.context(organization)
-    site = organization.site
-
-    async def revoke_usage_and_deliver() -> None:
-        """Lo mismo que ``world.gate_event`` + la entrega (``LoopWorld.deliver``), pero sin su
-        envoltorio síncrono (``stack.execute``/``stack.run``): ya estamos dentro del bucle en
-        marcha, pausado justo antes del intercambio."""
-        database = world.stack.primary.database
-        at = world.stack.now()
-        event_context = unit_context(site.organization_id, ActorUnit.U04, kind=ActorKind.SYSTEM)
-        async with database.transaction(event_context) as transaction:
-            await transaction.execute(
-                text(
-                    "UPDATE catalog.gate_state_history SET effective_until = :at"
-                    " WHERE zone_id = :zone_id AND gate = 'usage' AND effective_until IS NULL"
-                ),
-                {"zone_id": site.zone_id, "at": at},
-            )
-            await transaction.execute(
-                text(
-                    "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id,"
-                    " gate, status, effective_from, decided_by, reason_es, ledger_record_id,"
-                    " record_id)"
-                    " VALUES (:organization_id, :plant_id, :zone_id, 'usage', 'revoked', :at,"
-                    " :decided_by, :reason_es, :ledger_record_id, :record_id)"
-                ),
-                {
-                    "organization_id": site.organization_id,
-                    "plant_id": site.plant_id,
-                    "zone_id": site.zone_id,
-                    "at": at,
-                    "decided_by": world.stack.authz.operator_id,
-                    "reason_es": "Revocación sintética del uso de la zona",
-                    "ledger_record_id": world.stack.uuid7(),
-                    "record_id": world.stack.uuid7(),
-                },
-            )
-            event = OutboxEvent(
-                event_id=world.stack.uuid7(),
-                organization_id=site.organization_id,
-                plant_id=site.plant_id,
-                event_name="gate_state_changed",
-                partition_key=partition_key(site.organization_id, site.plant_id),
-                ledger_sequence=None,
-                payload={
-                    "zone_id": str(site.zone_id),
-                    "gate": "usage",
-                    "status": "revoked",
-                    "resulting_mode": "commissioning",
-                    "record_id": str(uuid.uuid4()),
-                    "reason_es_present": True,
-                },
-                correlation_id=uuid.uuid4(),
-                created_at=at,
-            )
-            applied = await consumer.apply(event, transaction)
-        assert applied == 1
 
     async def run() -> Any:
         task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
         await reached.wait()
-        await revoke_usage_and_deliver()
+        await _revoke_usage_and_deliver(world, consumer, organization)
+        resume.set()
+        return await task
+
+    world.stack.run(run())
+    final = world.finding_state(subject)
+    assert final is not None
+    assert final["zone_agreement_revoked"] is True
+    assert final["zone_agreement_revoked_at"] is not None
+
+
+def test_pr_laz_59_enrichment_event_during_compute_is_not_lost(world: LoopWorld) -> None:
+    """La misma garantía, pero el evento se confirma **a mitad de la fase 2** (justo tras
+    enriquecer, todavía dentro de la transacción de cómputo): la marca de referencia para la fase
+    3 (``last_applied_event_id``) se lee ahora al **principio** de esa transacción, no al final
+    (hallazgo bloqueante de la ronda 3 de revisión). Leída al final, el evento confirmado a mitad
+    del enriquecimiento ya estaría dentro de la marca pero fuera de lo que la sombra alcanzó a
+    reflejar, y la fase 3 no vería ninguna diferencia que la hiciera reenriquecer."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    reached = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def pause() -> None:
+        reached.set()
+        await resume.wait()
+
+    rebuilder = _rebuilder(world, ports, batch_size=1, on_enrichment_complete=pause)
+    context = world.context(organization)
+
+    async def run() -> Any:
+        task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
+        await reached.wait()
+        await _revoke_usage_and_deliver(world, consumer, organization)
         resume.set()
         return await task
 
