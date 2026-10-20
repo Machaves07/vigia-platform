@@ -4,10 +4,12 @@
   después de las de U-02 y U-03, que delegan en el ``registration.py`` de su paquete.
 - **Manifiestos a mano**: ``U04_RECORD_TYPES`` (17) y ``U04_EVENT_TYPES`` (los 25 de §11.3 y el
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
-  ``U04_TASKS`` con ``review_reminders`` (TASK-309) y ``monthly_package`` (TASK-342 a 344),
-  ``U04_CONSUMERS`` con ``export_worker``, ``review_queue`` y ``notification_engine`` (TASK-324);
-  en ``ROUTERS``, las dos rutas de adjuntos de cierre (TASK-310), las dos de la configuración del
-  lazo (TASK-304), la de la clasificación (TASK-308), las dos de la cola de revisión (TASK-309),
+  ``U04_TASKS`` con ``verify_loop_projection`` (TASK-306, diaria por organización;
+  ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí),
+  ``review_reminders`` (TASK-309) y ``monthly_package`` (TASK-342 a 344), ``U04_CONSUMERS`` con
+  ``export_worker``, ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las
+  dos rutas de adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la
+  de la clasificación (TASK-308), las dos de la cola de revisión (TASK-309),
   las de la acción y su evidencia (TASK-311) y las del cierre firmado y la reapertura (TASK-343,
   VIG-233) de ``loop``, las dos de exportación y las tres del paquete mensual de
   ``accreditation`` (TASK-317 y TASK-342 a 344) y ``GET /notifications`` (TASK-324).
@@ -223,15 +225,23 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(state[NOTIFICATIONS_STATE_KEY], NotificationsHttp)
         unit.periodic_tasks(tasks, services)
         unit.consumers(consumers, services)
+    # TASK-306: verify_loop_projection, diaria por organización; rebuild_loop_projection (LC-LAZ-03)
+    # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
     # TASK-342 a 344: monthly_package, mensual, por organización (accreditation);
     # TASK-309: review_reminders, horaria, por organización (loop); TASK-325:
     # email_delivery_events_poll, ``global`` cada 15 s (notifications). ``tasks()`` ordena por
     # nombre, no por orden de registro: "email_delivery_events_poll" < "monthly_package" <
-    # "review_reminders".
+    # "review_reminders" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
         (EMAIL_DELIVERY_EVENTS_POLL, ActorUnit.U04, POLL_SCHEDULE, TaskIteration.GLOBAL),
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+        (
+            registration.VERIFY_LOOP_PROJECTION,
+            ActorUnit.U04,
+            registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
+            TaskIteration.PER_ORGANIZATION,
+        ),
     ]
     # TASK-341: loop_projection, sobre los eventos de U-03 de §8.4 y user_deactivated de U-02;
     # TASK-309: review_queue, sobre detection_for_review_received; TASK-325:
@@ -264,7 +274,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     assert len(notifications_registration.TASK_REGISTRARS) == 1  # email_delivery_events_poll
-    assert len(registration.TASK_REGISTRARS) == 1  # review_reminders (TASK-309)
+    # TASK-306 y TASK-309: verify_loop_projection y review_reminders.
+    assert len(registration.TASK_REGISTRARS) == 2
     # notification_engine, EMAIL_SENDERS (sin Consumer propio) y email_delivery_events.
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
@@ -273,6 +284,10 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
     }
     assert {
+        registration.VERIFY_LOOP_PROJECTION: (
+            registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
+            TaskIteration.PER_ORGANIZATION,
+        ),
         "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
@@ -362,7 +377,8 @@ def _catalog_without_event(name: str) -> OutboxCatalog:
             if compiled.event_name != name:
                 reduced.event_types.register(compiled.definition)
         # Los consumidores y las tareas periódicas de la raíz (export_worker, TASK-317;
-        # review_reminders, TASK-309; monthly_package, TASK-342 a 344): solo falta el evento.
+        # verify_loop_projection, TASK-306; review_reminders, TASK-309; monthly_package,
+        # TASK-342 a 344): solo falta el evento.
         unit.consumers(reduced.consumers, _services())
         unit.periodic_tasks(reduced.periodic_tasks, _services())
     return reduced

@@ -152,6 +152,16 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
             "write_checkpoints",
         )
     },
+    # --- U-04 (TASK-306) ---
+    "verify_loop_projection": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización con context_for_organization; su aislamiento (muestreo,"
+        " divergencia y reconstrucción, todo con el filtro de planta/organización) es de U-04:"
+        " tests/properties/laz/test_pr_laz_44_projection_equivalence.py,"
+        " tests/properties/laz/test_pr_laz_51_rebuild_exclusion.py,"
+        " tests/properties/laz/test_pr_laz_59_no_half_state.py y"
+        " tests/integration/test_loop_projection_rebuild.py",
+    ),
     # --- U-04 (TASK-309) ---
     "review_reminders": TaskCase(TaskKind.INHERITED, _U04_WHY),
     # --- U-04 (TASK-325) ---
