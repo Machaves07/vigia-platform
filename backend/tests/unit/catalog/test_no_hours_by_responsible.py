@@ -53,7 +53,13 @@ INDEX_ON_RESPONSIBLE: Final = re.compile(
     r"create\s+(unique\s+)?index\b[^;]*?\bresponsible_user_id\b", re.IGNORECASE | re.DOTALL
 )
 STEP_OPENING: Final = ("POST", "/walk-tests/{session_id}/steps")
-"""La única ruta cuyo cuerpo lleva ``responsible_user_id``: es el dato del paso (DE §2.12)."""
+"""La ruta de U-03 cuyo cuerpo lleva ``responsible_user_id``: es el dato del paso (DE §2.12)."""
+COMMITMENTS_RECORDING: Final = ("POST", "/accreditation/monthly-packages/{package_id}/commitments")
+"""TASK-347 (SUP-U05-27): el responsable es el dato de cada compromiso que se registra (DE de U-04
+§3.3 y §5.2, BR-LAZ-109), igual que en la apertura de un paso; ninguna ruta filtra, ordena ni
+agrega por él (``GET /accreditation/commitments`` solo filtra por zona y periodo)."""
+RECEIVING_ROUTES: Final = (STEP_OPENING, COMMITMENTS_RECORDING)
+"""Las únicas rutas cuyo cuerpo lleva ``responsible_user_id``, como dato que escriben."""
 
 
 # --- 1 y 2. Rutas ---------------------------------------------------------------------------------
@@ -115,7 +121,7 @@ def _parameter_violations(key: tuple[str, str], route: APIRoute) -> list[str]:
             for model in _reachable(list(_models(body.field_info.annotation))):
                 for name in model.model_fields:
                     if RESPONSIBLE.search(name) and not (
-                        key == STEP_OPENING and name == "responsible_user_id"
+                        key in RECEIVING_ROUTES and name == "responsible_user_id"
                     ):
                         violations.append(f"{key}: cuerpo {model.__name__}.{name}")
     return violations
@@ -144,7 +150,8 @@ def _response_violations(key: tuple[str, str], route: APIRoute) -> list[str]:
 
 def test_no_route_filters_orders_or_aggregates_hours_by_responsible() -> None:
     routes = _routes()
-    assert any(key == STEP_OPENING for key, _ in routes), "la apertura de pasos está registrada"
+    for receiving in RECEIVING_ROUTES:
+        assert any(key == receiving for key, _ in routes), f"{receiving} está registrada"
     violations = [
         violation
         for key, route in routes
@@ -162,7 +169,7 @@ def test_the_step_opening_body_is_the_only_place_a_route_receives_the_responsibl
         for model in _reachable(list(_models(body.field_info.annotation)))
         if "responsible_user_id" in model.model_fields
     )
-    assert receiving == [STEP_OPENING]
+    assert receiving == sorted(RECEIVING_ROUTES)
 
 
 # --- 3. Puertos y servicio ------------------------------------------------------------------------

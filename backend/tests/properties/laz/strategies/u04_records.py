@@ -114,7 +114,16 @@ def _fix_monthly(document: JsonObject, draw: st.DrawFn) -> None:
             metric.pop("value", None)
 
 
+def _fix_commitments(document: JsonObject, draw: st.DrawFn) -> None:
+    """Versión 2 (TASK-347): un alta **o** una actualización, nunca las dos ni ninguna."""
+    commitments, updates = document.get("commitments") or [], document.get("updates") or []
+    assume(bool(commitments) or bool(updates))  # la versión 1 siempre trae compromisos
+    if commitments and updates:
+        document.pop(draw(st.sampled_from(("commitments", "updates"))))
+
+
 _FIXES: Final[Mapping[str, Callable[[JsonObject, st.DrawFn], None]]] = {
+    "commitments_recorded": _fix_commitments,
     "classification": _fix_classification,
     "unclosable_review": _fix_unclosable_review,
     "root_cause_analysis": _fix_root_cause,
