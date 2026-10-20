@@ -528,9 +528,12 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ),
     ),
     # VIG-220 (TASK-350): la lista de vocabulario es ``own`` (de la organización del contexto, sin
-    # identificador): nunca muestra ni toca la de B. El cambio escribe en la lista de A (su fila,
-    # sus términos y su registro), nunca en B; bajo concesión, ``not_found`` (vocabulary.manage no
-    # está en la columna del instalador).
+    # identificador): nunca muestra ni toca la de B; bajo concesión, ``not_found``
+    # (vocabulary.manage no está en la columna del instalador). El escritor de esta prueba no
+    # registra los tipos de U-04, así que el cambio pide retirar un término que no está vigente:
+    # recorre la transacción de A (candado, fila y términos) y termina en ``invalid_request`` sin
+    # escribir. La escritura completa y que otra organización no la ve ni la toca:
+    # ``tests/integration/test_loop_vocabulary_routes.py``.
     (("GET", "/loop/vocabulary"), Case(Kind.OWN, lambda i: Call("GET", "/loop/vocabulary"))),
     (
         ("POST", "/loop/vocabulary/changes"),
@@ -540,17 +543,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 "POST",
                 "/loop/vocabulary/changes",
                 json={
-                    "added": [
-                        {
-                            "category": "absence_claim",
-                            "form": "lemma",
-                            "value": f"termino{i.record.hex[:8]}",
-                            "suggestion_es": "Describa lo observado en la zona",
-                        }
-                    ],
-                    "declared_names_added": [
-                        {"kind": "machine", "value": f"Prensa {i.record.hex[:6]}"}
-                    ],
+                    "removed": [str(i.record)],
                     "reason": "Ajuste acordado en el comité de seguridad",
                 },
             ),
