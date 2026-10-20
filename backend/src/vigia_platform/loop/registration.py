@@ -74,6 +74,7 @@ from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
+from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
@@ -93,6 +94,16 @@ from vigia_platform.loop.application.review_queue import (
     ReviewQueueReminder,
     register_review_queue,
     register_review_reminders,
+)
+from vigia_platform.loop.application.unclosable import (
+    SCHEDULE as UNCLOSABLE_SCHEDULE,
+)
+from vigia_platform.loop.application.unclosable import (
+    TASK_NAME as UNCLOSABLE_REVIEW_DUE,
+)
+from vigia_platform.loop.application.unclosable import (
+    UnclosableService,
+    register_unclosable_review_due,
 )
 from vigia_platform.loop.assistant.consumer import (
     ASSISTANT_WORKER,
@@ -275,6 +286,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307), 02 y 04 (TASK-342)
     overdue_router,  # SUP-U05-15 (TASK-313)
+    unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
 
@@ -300,6 +312,22 @@ def _register_evaluate_deadlines(registry: PeriodicTaskRegistry, services: UnitS
             writer=services.writer,
             clock=services.clock,
             configuration=PostgresLoopConfigurationRepository(services.database),
+        ),
+    )
+
+
+def _register_unclosable_review_due(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``unclosable_review_due`` (TASK-312) con la bandeja de salida real y el puerto de la
+    política de planta de U-03. Declara hechos de plazo: no escribe el expediente."""
+    register_unclosable_review_due(
+        registry,
+        UnclosableService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            gates=catalog_query_ports(services.database).gates,
+            outbox=services.outbox,
         ),
     )
 
@@ -396,6 +424,7 @@ LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     VERIFY_LOOP_PROJECTION: (VERIFY_LOOP_PROJECTION_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
     EVALUATE_DEADLINES_TASK: (EVALUATE_DEADLINES_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # 313
+    UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-312
 }
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``.
 
@@ -404,6 +433,7 @@ TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
     _register_verify_loop_projection,
     _register_review_reminders,  # review_reminders (TASK-309)
     _register_evaluate_deadlines,  # evaluate_deadlines (TASK-313)
+    _register_unclosable_review_due,  # unclosable_review_due (TASK-312)
 )
 
 
@@ -575,8 +605,9 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344) y
-``verify_loop_projection`` (TASK-306; TASK-326 verifica las diez)."""
+"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344),
+``verify_loop_projection`` (TASK-306) y ``unclosable_review_due`` (TASK-312); TASK-326 verifica
+las diez."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,

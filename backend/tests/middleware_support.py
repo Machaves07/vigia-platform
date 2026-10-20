@@ -47,6 +47,7 @@ from vigia_platform.loop.application import closure as closure_module
 from vigia_platform.loop.application import reopening as reopening_module
 from vigia_platform.loop.application import review_queue as review_queue_module
 from vigia_platform.loop.application import root_cause as root_cause_module
+from vigia_platform.loop.application import unclosable as unclosable_module
 from vigia_platform.loop.config.parameters import (
     INITIAL_DEFAULTS_REASON,
     LoopSettings,
@@ -278,6 +279,60 @@ class ReopeningDouble:
         raise ResourceNotFound()
 
 
+class UnclosableDouble:
+    """Doble de ``UnclosableService`` para el arnés, sin base ni puerto de la política (TASK-312).
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código: los cinco
+    campos, la forma de la fecha de revisión y la licencia de la declaración; el resultado, la nota
+    y la licencia de la revisión. Un cuerpo válido no encuentra ningún hallazgo ni declaración
+    sintéticos (``ResourceNotFound``)."""
+
+    async def declare(
+        self,
+        context: ScopeContext,
+        finding_state_id: uuid.UUID,
+        *,
+        evaluated_alternative: object,
+        rejection_reason: object,
+        responsible_user_id: object,
+        decision_date: object,
+        compensatory_measure: object,
+        review_due_at: object = None,
+        professional_license: object = None,
+    ) -> Any:
+        module = unclosable_module
+        module.five_fields(
+            evaluated_alternative=evaluated_alternative,
+            rejection_reason=rejection_reason,
+            responsible_user_id=responsible_user_id,
+            decision_date=decision_date,
+            compensatory_measure=compensatory_measure,
+        )
+        if review_due_at is not None:
+            module._instant(review_due_at, "review_due_at")
+        if module._license(professional_license) is None:
+            raise module.UnclosableRejected(LoopDetailCode.SIGNER_LICENSE_MISSING)
+        raise ResourceNotFound()
+
+    async def review(
+        self,
+        context: ScopeContext,
+        declaration_id: uuid.UUID,
+        *,
+        outcome: object,
+        review_note: object,
+        new_review_due_at: object = None,
+        action: Mapping[str, Any] | None = None,
+        professional_license: object = None,
+    ) -> Any:
+        module = unclosable_module
+        module.review_outcome(outcome)
+        module._text(review_note, module.REVIEW_NOTE_FIELD)
+        if module._license(professional_license) is None:
+            raise module.UnclosableRejected(LoopDetailCode.SIGNER_LICENSE_MISSING)
+        raise ResourceNotFound()
+
+
 class RootCauseDouble:
     """Doble de ``RootCauseService`` para el arnés, sin base (TASK-315).
 
@@ -375,7 +430,8 @@ class ReviewQueueDouble:
 
 def loop_state(clock: Any) -> dict[str, Any]:
     """Las entradas de ``app.state`` de ``loop`` en el arnés (adjuntos, configuración,
-    clasificación, acciones y evidencia, causa raíz, cierre y reapertura, y cola de revisión)."""
+    clasificación, acciones y evidencia, causa raíz, cierre y reapertura, cola de revisión e
+    incerrable)."""
     return {
         ATTACHMENTS_STATE_KEY: attachment_world(clock).service,
         LOOP_STATE_KEY: LoopHttp(
@@ -387,6 +443,7 @@ def loop_state(clock: Any) -> dict[str, Any]:
             closure=cast(Any, ClosureDouble()),
             reopening=cast(Any, ReopeningDouble()),
             review_queue=cast(Any, ReviewQueueDouble()),
+            unclosable=cast(Any, UnclosableDouble()),
         ),
     }
 

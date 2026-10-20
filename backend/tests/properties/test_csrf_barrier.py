@@ -110,6 +110,19 @@ BODIES: dict[str, dict[str, Any]] = {
         "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
     },
     "/loop/root-cause-analyses/{analysis_id}/assistant-requests": {},
+    "/loop/findings/{finding_state_id}/unclosable": {
+        "evaluated_alternative": "Reubicar la estación de carga al costado norte de la zona",
+        "rejection_reason": "La reubicación deja el pasillo peatonal sin salida de emergencia",
+        "responsible_user_id": str(uuid.uuid4()),
+        "decision_date": "2026-10-01",
+        "compensatory_measure": "Vigilancia peatonal permanente durante el turno de carga",
+        "professional_license": "LIC-SST-0001",
+    },
+    "/loop/unclosable/{declaration_id}/reviews": {
+        "outcome": "renewed",
+        "review_note": "La alternativa sigue descartada por el trazado de la zona",
+        "professional_license": "LIC-SST-0001",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -170,6 +183,7 @@ def _url(path: str) -> str:
         .replace("{sample_item_id}", str(uuid.uuid4()))
         .replace("{package_id}", str(uuid.uuid4()))
         .replace("{commitment_id}", str(uuid.uuid4()))
+        .replace("{declaration_id}", str(uuid.uuid4()))
     )
 
 
@@ -213,6 +227,9 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         # Solicitud al asistente de causa raíz de U-04 (TASK-316).
         ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+        # Declaración del incerrable y su revisión de U-04 (TASK-312).
+        ("POST", "/loop/findings/{finding_state_id}/unclosable"),
+        ("POST", "/loop/unclosable/{declaration_id}/reviews"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).
