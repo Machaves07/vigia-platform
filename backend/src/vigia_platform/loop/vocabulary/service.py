@@ -16,8 +16,9 @@ nombres declarados que se añaden (tipo y valor) y que se retiran (por ``name_id
    ``vocabulary_change_reason_required``; uno que no pasa la política base de U-02,
    ``invalid_request``); la forma de cada elemento
    (``invalid_request``): un lema es **una palabra** de 2 a 64 caracteres, que se guarda **ya
-   plegada** (``lexicon.fold_word``) con la tabla de flexiones vigente; un patrón compila, no
-   casa con la cadena vacía y no anida cuantificadores (un patrón del cliente corre en la ruta
+   plegada** (``lexicon.fold_word``) con la tabla de flexiones vigente; un patrón cumple la
+   gramática segura de ``loop.vocabulary.patterns`` (retroceso lineal) y no casa con la cadena
+   vacía (un patrón del cliente corre en la ruta
    caliente de toda escritura de su organización); un nombre declarado tiene de 2 a 120
    caracteres y al menos una letra; nada se repite dentro del cambio y el cambio nombra algo.
 2. **En una sola transacción**: exclusión de la organización (``loop_vocabulary|<org>``); la
@@ -95,6 +96,7 @@ from vigia_platform.loop.domain.enums import (
 from vigia_platform.loop.record_types import MAX_TERMS_PER_CHANGE
 from vigia_platform.loop.validators import lexicon
 from vigia_platform.loop.validators.initial_list import INITIAL_LIST_VERSION, INITIAL_TERMS
+from vigia_platform.loop.vocabulary.patterns import UnsafePattern, check_pattern
 from vigia_platform.loop.vocabulary.repository import (
     DeclaredName,
     ListRow,
@@ -155,11 +157,6 @@ _NAME: Final = FreeTextField(
 
 _ONE_WORD: Final = re.compile(r"[^\W_]+")
 _LETTER: Final = re.compile(r"[^\W\d_]")
-_NESTED_QUANTIFIER: Final = re.compile(
-    r"\((?:[^()\\]|\\.)*(?:[*+]|\{\d*,?\d*\})\)(?:[*+]|\{\d*,?\d*\})"
-)
-"""Un grupo cuantificado que ya contiene un cuantificador (``(a+)+``): retroceso exponencial."""
-
 _VALIDATOR_CODES: Final[Mapping[str, LoopDetailCode]] = MappingProxyType(
     {
         LoopDetailCode.BLOCKED_VOCABULARY_TERM.value: LoopDetailCode.BLOCKED_VOCABULARY_TERM,
@@ -368,14 +365,10 @@ def checked_pattern(value: str) -> str:
     """Un patrón del cliente que se puede compilar y correr en la ruta caliente, o rechazo."""
     if len(value) > PATTERN_MAX_CHARS:
         raise VocabularyRequestInvalid("patrón demasiado largo")
-    if _NESTED_QUANTIFIER.search(value) is not None:
-        raise VocabularyRequestInvalid("el patrón anida cuantificadores")
     try:
-        compiled = re.compile(value)
-    except re.error:
-        raise VocabularyRequestInvalid("el patrón no compila") from None
-    if compiled.fullmatch("") is not None:
-        raise VocabularyRequestInvalid("el patrón casa con la cadena vacía")
+        check_pattern(value)
+    except UnsafePattern as unsafe:
+        raise VocabularyRequestInvalid(str(unsafe)) from None
     return value
 
 
