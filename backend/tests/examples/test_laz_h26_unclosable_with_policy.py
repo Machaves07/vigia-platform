@@ -76,8 +76,8 @@ def test_h26_the_declaration_cites_the_policy_and_the_five_fields(
     organization = stack.world.a
     who = coordinator
     responsible = stack.user(organization)
-    signed_at = stack.now()
-    policy_id = stack.signed_policy(organization, version=1, signed_at=signed_at)
+    policy = stack.ensure_signed_policy(organization, version=1)
+    policy_id, signed_at = policy["policy_id"], policy["signed_at"]
     subject = stack.opened()
 
     # 1. La declaración: los cinco campos, la política de la planta y la firma con licencia.
@@ -182,6 +182,7 @@ def test_h26_without_the_signed_policy_there_is_no_declaration(stack: Unclosable
 def test_h26_a_revoked_policy_keeps_what_was_declared(stack: UnclosableStack) -> None:
     """BR-LAZ-56: lo declarado se conserva aunque la política se revoque después (P4)."""
     organization = stack.world.a
+    stack.ensure_signed_policy(organization, version=1)
     who = stack.member(organization)
     responsible = stack.user(organization)
     subject = stack.opened()
@@ -210,6 +211,7 @@ def test_h26_a_revoked_policy_keeps_what_was_declared(stack: UnclosableStack) ->
 def test_h26_the_review_note_passes_the_two_validators(stack: UnclosableStack) -> None:
     """La nota de la revisión es texto libre de §5.2: la atribución a una persona la rechaza."""
     organization = stack.world.a
+    stack.ensure_signed_policy(organization, version=1)
     who = stack.member(organization)
     responsible = stack.user(organization)
     subject = stack.opened()
@@ -242,6 +244,7 @@ def test_h26_the_review_note_passes_the_two_validators(stack: UnclosableStack) -
 def test_h26_the_review_needs_the_license_and_the_right_role(stack: UnclosableStack) -> None:
     """Sin licencia no hay firma (BR-LAZ-59); sin ``findings.close_and_sign`` no hay revisión."""
     organization = stack.world.a
+    stack.ensure_signed_policy(organization, version=1)
     who = stack.member(organization)
     responsible = stack.user(organization)
     subject = stack.opened()

@@ -70,7 +70,9 @@ from vigia_platform.loop.application.unclosable import (
     UnclosableService,
 )
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.registration import loop_tasks
+from vigia_platform.shared.api.declarations import iter_declared_routes
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
@@ -106,6 +108,7 @@ COMPENSATORY: Final = "Vigilancia peatonal permanente durante el turno de carga 
 DECISION_DATE: Final = "2026-10-01"
 REVIEW_NOTE: Final = "La alternativa sigue descartada por el trazado actual de la zona"
 LICENSE: Final = "LIC-SST-0001"
+_LOOP_CODES: Final = frozenset(code.value for code in LoopDetailCode)
 
 Who = tuple[SessionCookie, uuid.UUID | None]
 
@@ -166,6 +169,7 @@ class UnclosableStack:
     actions: ActionService
     gates: Gates
     client: httpx.AsyncClient
+    app: Any
 
     # --- utilidades ---------------------------------------------------------------------------
 
@@ -536,6 +540,25 @@ class UnclosableStack:
         response: httpx.Response = self.run(self.client.post(path, json=body, headers=headers))
         return response
 
+    def declared_codes(self, template: str) -> frozenset[str]:
+        """Los ``detail_code`` que declara la ruta ``POST template`` (``requires(...)``, A-68)."""
+        return frozenset(
+            code
+            for route in iter_declared_routes(self.app.routes)
+            if route.path == template and "POST" in route.methods
+            for declaration in route.declarations
+            for code in declaration.detail_codes
+        )
+
+    def _checked(self, template: str, response: httpx.Response) -> httpx.Response:
+        """Todo ``detail_code`` del lazo que devuelve la ruta tiene que estar entre los que declara:
+        cada rechazo de las pruebas comprueba así también la declaración de la ruta."""
+        if response.status_code >= 400:
+            code = response.json().get("detail_code")
+            if code in _LOOP_CODES:
+                assert code in self.declared_codes(template), (template, code)
+        return response
+
     def declaration_body(self, responsible: uuid.UUID, **changes: Any) -> dict[str, Any]:
         """Los cinco campos, la fecha de revisión y la licencia (SUP-U05-12)."""
         body: dict[str, Any] = {
@@ -556,7 +579,9 @@ class UnclosableStack:
         body: Mapping[str, Any],
     ) -> httpx.Response:
         fsid = subject if isinstance(subject, uuid.UUID) else self.finding_state_id(subject)
-        return self.post(who, DECLARE_PATH.format(finding_state_id=fsid), dict(body))
+        return self._checked(
+            DECLARE_PATH, self.post(who, DECLARE_PATH.format(finding_state_id=fsid), dict(body))
+        )
 
     def review_body(self, **changes: Any) -> dict[str, Any]:
         """Una revisión que renueva la declaración (T11) con su nota y su licencia."""
@@ -571,7 +596,8 @@ class UnclosableStack:
     def review(
         self, who: Who, declaration_id: uuid.UUID | str, body: Mapping[str, Any]
     ) -> httpx.Response:
-        return self.post(who, REVIEW_PATH.format(declaration_id=declaration_id), dict(body))
+        path = REVIEW_PATH.format(declaration_id=declaration_id)
+        return self._checked(REVIEW_PATH, self.post(who, path, dict(body)))
 
     def action_body(self, assignee: uuid.UUID, **changes: Any) -> dict[str, Any]:
         """La acción de una conversión (T12): el cuerpo de TASK-311."""
@@ -616,6 +642,21 @@ class UnclosableStack:
             uuid.uuid4(),
         )
         return policy_id
+
+    def ensure_signed_policy(
+        self, organization: LoopOrganization, *, version: int = 1
+    ) -> dict[str, Any]:
+        """La política ``version`` de la planta: la firma si falta y, si ya está, la reutiliza.
+
+        Las pruebas que comparten un ``unclosable_stack`` de módulo no dependen así del orden en
+        que se ejecuten ni del grupo de ``pytest-split`` en que caigan: cada una firma la suya.
+        """
+        for row in self.policy_rows(organization):
+            if row["version"] == version:
+                return row
+        self.signed_policy(organization, version=version)
+        (row,) = [row for row in self.policy_rows(organization) if row["version"] == version]
+        return row
 
     def policy_rows(self, organization: LoopOrganization) -> list[dict[str, Any]]:
         return [
@@ -775,7 +816,7 @@ def unclosable_stack(
             transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=60.0
         )
         built = UnclosableStack(
-            world, database, writer, service, classification, actions, gates, client
+            world, database, writer, service, classification, actions, gates, client, app
         )
         try:
             yield built
