@@ -1,5 +1,8 @@
 """``notifications.registration._register_email_sender``: ``SesEmailSender`` solo en ``pilot``
-con el dominio configurado; en cualquier otro entorno, ``FakeEmailSender`` (TASK-325; LC-LAZ-33).
+con el dominio configurado; en ``pilot`` sin dominio, ningún adaptador (U-02 degrada a mostrar el
+enlace, BR-NUC-32); en cualquier otro entorno, ``FakeEmailSender`` (TASK-325; LC-LAZ-33; rework de
+revisión: ``FakeEmailSender`` ya no es el valor por defecto en ``pilot``, para no fingir una
+entrega real que nunca ocurrió).
 
 Una credencial real (``email_sender_domain`` configurado) fuera de ``pilot`` **nunca** llega a
 registrar el adaptador real: la prueba de arranque es justamente esta selección por entorno, que
@@ -77,10 +80,13 @@ def test_outside_pilot_the_default_is_fake_even_with_a_real_looking_credential(
     assert isinstance(registration.EMAIL_SENDERS.sender, FakeEmailSender)
 
 
-def test_in_pilot_without_the_sender_domain_the_default_is_still_fake() -> None:
+def test_in_pilot_without_the_sender_domain_nothing_is_registered() -> None:
+    """Sin ``VIGIA_EMAIL_SENDER_DOMAIN`` en ``pilot``, la ranura queda vacía: U-02 degrada a
+    mostrar el enlace de la invitación una sola vez (BR-NUC-32), en vez de un ``FakeEmailSender``
+    que fingiría una entrega real que nunca llegó a ocurrir."""
     config = RuntimeConfig(environment="pilot", **_BASE)
     _register(config)
-    assert isinstance(registration.EMAIL_SENDERS.sender, FakeEmailSender)
+    assert registration.EMAIL_SENDERS.sender is None
 
 
 def test_in_pilot_with_the_sender_domain_the_real_adapter_registers() -> None:

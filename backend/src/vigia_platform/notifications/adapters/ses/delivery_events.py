@@ -28,9 +28,14 @@ código de aplicación).
 ``bounce_kind = hard`` y se declara (``NotificationDelivery.status = failed`` si hay una entrega
 asociada, lo que hoy no ocurre para ``kind = platform_invitation``: no tiene entrega del motor de
 notificaciones); un rebote **blando** solo se registra (``bounce_kind = soft``), sin suprimir
-nada. Una **queja** marca ``EmailMessage.complaint_at`` y silencia los niveles ``normal`` y
-``digest`` del usuario (``UserNotificationPreference.email_suppressed_complaint``); **nunca**
-``immediate``: la entidad no tiene campo para eso (BR-LAZ-126). El consumidor **no crea
+nada. ``bounce_kind`` es **monótono** (duro domina sobre blando, PR-LAZ-58; rework de revisión):
+un blando que llega después de un duro ya aplicado no lo rebaja, así el resultado final no depende
+del orden de los avisos. Una **queja** marca ``EmailMessage.complaint_at`` y silencia los niveles
+``normal`` y ``digest`` del usuario (``UserNotificationPreference.email_suppressed_complaint``);
+**nunca** ``immediate``: la entidad no tiene campo para eso (BR-LAZ-126). Las dos marcas de
+supresión se escriben con ``INSERT ... ON CONFLICT`` sobre ``user_id`` (rework de revisión): la
+fila de preferencia no existe hasta que el usuario la toca (LC-LAZ-35) o hasta este primer rebote
+o queja, y la marca no se puede perder por falta de fila. El consumidor **no crea
 notificaciones**: solo actualiza el estado de entrega y las marcas de supresión; el motor de
 notificaciones sigue siendo el único que crea avisos. Cada campo se escribe con el mismo valor sin
 importar el orden o la repetición de los avisos (conmutativo e idempotente, PR-LAZ-58).
@@ -100,7 +105,6 @@ indefinidamente entre pulsos)."""
 
 _HARD: Final = "hard"
 _SOFT: Final = "soft"
-_STATUS_FAILED: Final = "failed"
 _DELIVERY_FAILED: Final = "failed"
 _FAILURE_BOUNCED_HARD: Final = "email_bounced_hard"
 
@@ -177,18 +181,17 @@ _LOOKUP: Final = text(
     "SELECT organization_id, message_id, queued_at"
     " FROM notifications.email_provider_message_lookup(:provider_message_id)"
 )
-_UPDATE_BOUNCE_HARD: Final = text(
+_UPDATE_BOUNCE: Final = text(
     "UPDATE notifications.email_message"
-    " SET status = :status, bounce_kind = :bounce_kind"
+    " SET bounce_kind = CASE WHEN bounce_kind = 'hard' THEN 'hard' ELSE :bounce_kind END,"
+    " status = CASE WHEN bounce_kind = 'hard' OR :bounce_kind = 'hard' THEN 'failed'"
+    " ELSE status END"
     " WHERE message_id = :message_id AND queued_at = :queued_at"
-    " RETURNING to_user_id"
+    " RETURNING to_user_id, bounce_kind"
 )
-_UPDATE_BOUNCE_SOFT: Final = text(
-    "UPDATE notifications.email_message"
-    " SET bounce_kind = :bounce_kind"
-    " WHERE message_id = :message_id AND queued_at = :queued_at"
-    " RETURNING to_user_id"
-)
+"""``bounce_kind`` es monótono (duro domina siempre sobre blando, PR-LAZ-58): el resultado no
+depende del orden ni de la repetición de los avisos, también si un blando llega después de un
+duro ya aplicado."""
 _UPDATE_COMPLAINT: Final = text(
     "UPDATE notifications.email_message"
     " SET complaint_at = COALESCE(complaint_at, :now)"
@@ -200,18 +203,31 @@ _UPDATE_DELIVERY_BOUNCE: Final = text(
     " SET status = :status, failure_code = :failure_code"
     " WHERE provider_message_id = :provider_message_id"
 )
-_SUPPRESS_HARD_BOUNCE: Final = text(
-    "UPDATE notifications.user_notification_preference"
-    " SET email_suppressed_hard_bounce = true,"
-    " email_suppressed_at = COALESCE(email_suppressed_at, :now)"
-    " WHERE user_id = :user_id AND organization_id = :organization_id"
+_UPSERT_SUPPRESS_HARD_BOUNCE: Final = text(
+    "INSERT INTO notifications.user_notification_preference AS current_row"
+    " (user_id, organization_id, email_enabled_normal, email_enabled_digest,"
+    " weekly_digest_weekday, updated_at, email_suppressed_hard_bounce,"
+    " email_suppressed_complaint, email_suppressed_at)"
+    " VALUES (:user_id, :organization_id, true, true, 1, :now, true, false, :now)"
+    " ON CONFLICT (user_id) DO UPDATE SET"
+    " email_suppressed_hard_bounce = true,"
+    " email_suppressed_at = COALESCE(current_row.email_suppressed_at, :now)"
 )
-_SUPPRESS_COMPLAINT: Final = text(
-    "UPDATE notifications.user_notification_preference"
-    " SET email_suppressed_complaint = true,"
-    " email_suppressed_at = COALESCE(email_suppressed_at, :now)"
-    " WHERE user_id = :user_id AND organization_id = :organization_id"
+_UPSERT_SUPPRESS_COMPLAINT: Final = text(
+    "INSERT INTO notifications.user_notification_preference AS current_row"
+    " (user_id, organization_id, email_enabled_normal, email_enabled_digest,"
+    " weekly_digest_weekday, updated_at, email_suppressed_hard_bounce,"
+    " email_suppressed_complaint, email_suppressed_at)"
+    " VALUES (:user_id, :organization_id, true, true, 1, :now, false, true, :now)"
+    " ON CONFLICT (user_id) DO UPDATE SET"
+    " email_suppressed_complaint = true,"
+    " email_suppressed_at = COALESCE(current_row.email_suppressed_at, :now)"
 )
+"""La fila de preferencia no existe hasta que el usuario la toca (``LC-LAZ-35``) o llega aquí: un
+rebote duro o una queja del primer correo que recibe alguien que nunca abrió sus preferencias no
+debe perderse por falta de fila (``ON CONFLICT`` sobre la clave primaria ``user_id``). Los valores
+del ``INSERT`` para las columnas que no son la marca de supresión son los predeterminados de
+``domain-entities`` §6.2; la rama ``DO UPDATE`` nunca los toca, solo la marca que corresponde."""
 
 
 def parse_notice(body: str) -> _Notice | None:
@@ -376,7 +392,7 @@ class EmailDeliveryEventsConsumer:
         if row is None:
             return
         await transaction.execute(
-            _SUPPRESS_COMPLAINT,
+            _UPSERT_SUPPRESS_COMPLAINT,
             {"user_id": row.to_user_id, "organization_id": found.organization_id, "now": now},
         )
 
@@ -384,27 +400,18 @@ class EmailDeliveryEventsConsumer:
     async def _apply_bounce(
         transaction: Any, found: _Found, notice: _Notice, now: datetime
     ) -> None:
-        if notice.bounce_kind == _HARD:
-            result = await transaction.execute(
-                _UPDATE_BOUNCE_HARD,
-                {
-                    "status": _STATUS_FAILED,
-                    "bounce_kind": notice.bounce_kind,
-                    "message_id": found.message_id,
-                    "queued_at": found.queued_at,
-                },
-            )
-        else:
-            result = await transaction.execute(
-                _UPDATE_BOUNCE_SOFT,
-                {
-                    "bounce_kind": notice.bounce_kind,
-                    "message_id": found.message_id,
-                    "queued_at": found.queued_at,
-                },
-            )
+        result = await transaction.execute(
+            _UPDATE_BOUNCE,
+            {
+                "bounce_kind": notice.bounce_kind,
+                "message_id": found.message_id,
+                "queued_at": found.queued_at,
+            },
+        )
         row = result.first()
-        if row is None or notice.bounce_kind != _HARD:
+        # ``bounce_kind`` monótono: refleja si ESTE aviso o uno anterior ya fue duro, sin importar
+        # el orden de llegada (PR-LAZ-58).
+        if row is None or row.bounce_kind != _HARD:
             return
         to_user_id = row.to_user_id
         await transaction.execute(
@@ -416,7 +423,7 @@ class EmailDeliveryEventsConsumer:
             },
         )
         await transaction.execute(
-            _SUPPRESS_HARD_BOUNCE,
+            _UPSERT_SUPPRESS_HARD_BOUNCE,
             {"user_id": to_user_id, "organization_id": found.organization_id, "now": now},
         )
 

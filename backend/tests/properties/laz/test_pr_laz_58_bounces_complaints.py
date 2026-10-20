@@ -10,8 +10,10 @@ con un cliente de SQS doble (``FakeSqsClient``) y ``EmailDeliveryEventsConsumer`
 - Una **queja** marca ``complaint_at`` y suprime ``email_suppressed_complaint``; **nunca**
   suprime el nivel ``immediate`` (la entidad no tiene ese campo, BR-LAZ-126) y nunca toca la otra
   marca de supresión.
-- **Conmutativo**: procesar primero el rebote duro y después la queja del mismo correo, o al
-  revés, deja el mismo estado final.
+- **Conmutativo**: cualquier multiserie de avisos (duro, blando, queja, con repeticiones) aplicada
+  en cualquier orden deja el mismo estado final (``bounce_kind`` monótono: duro domina sobre
+  blando); una marca de supresión no se pierde aunque el destinatario no tuviera fila de
+  preferencia todavía.
 - **Idempotente**: reentregar el mismo aviso (mismo ``provider_message_id``) una o varias veces
   no cambia el estado tras la primera vez, y cada mensaje recibido se borra de la cola.
 - Un mensaje cuyo ``provider_message_id`` no está en ``email_provider_message_key`` (ajeno o
@@ -269,34 +271,113 @@ def test_a_complaint_suppresses_normal_and_digest_never_immediate(world: Notific
     assert sqs.queue == [] and len(sqs.deleted) == 1
 
 
-@given(order=st.sampled_from(["bounce_first", "complaint_first"]))
+_NOTICE_KINDS: Final = ("hard", "soft", "complaint")
+
+
+def _notice_body(provider_message_id: str, kind: str) -> str:
+    if kind == "complaint":
+        return _complaint_body(provider_message_id)
+    return _bounce_body(provider_message_id, "Permanent" if kind == "hard" else "Transient")
+
+
+def _apply_sequence(
+    world: NotificationWorld, provider_message_id: str, sequence: list[str]
+) -> None:
+    for kind in sequence:
+        sqs = FakeSqsClient()
+        sqs.enqueue(_notice_body(provider_message_id, kind))
+        _run_once(world, sqs)
+
+
+def _projection(
+    world: NotificationWorld,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    provider_message_id: str,
+) -> tuple[Any, ...]:
+    email = _email_row(world, _message_id_of(world, provider_message_id))
+    preference = _preference_row(world, organization_id, user_id)
+    return (
+        email["bounce_kind"],
+        email["status"],
+        email["complaint_at"] is not None,
+        preference["email_suppressed_hard_bounce"],
+        preference["email_suppressed_complaint"],
+        preference["email_suppressed_at"] is not None,
+    )
+
+
+@given(
+    sequence=st.lists(st.sampled_from(_NOTICE_KINDS), min_size=1, max_size=6),
+    shuffler=st.randoms(use_true_random=True),
+)
 @settings(
     max_examples=EXAMPLES,
     deadline=None,
     database=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
-def test_bounce_and_complaint_are_commutative(world: NotificationWorld, order: str) -> None:
-    """El mismo correo rebota (duro) y recibe una queja: el orden no cambia el resultado final."""
-    organization_id, user_id, provider_message_id = _setup(world)
-    first_body = _bounce_body(provider_message_id, "Permanent")
-    second_body = _complaint_body(provider_message_id)
-    if order == "complaint_first":
-        first_body, second_body = second_body, first_body
+def test_bounce_and_complaint_processing_is_commutative_under_any_order_and_repetition(
+    world: NotificationWorld, sequence: list[str], shuffler: Any
+) -> None:
+    """La misma multiserie de avisos (duro, blando, queja, con repeticiones) deja el mismo estado
+    final sin importar el orden de llegada (PR-LAZ-58): se aplica dos veces, una en el orden
+    generado y otra en una permutación al azar de la misma multiserie, sobre dos correos
+    sembrados de cero cada vez, y se compara la proyección del estado final."""
+    organization_id_a, user_id_a, provider_message_id_a = _setup(world)
+    _apply_sequence(world, provider_message_id_a, sequence)
+    expected = _projection(world, organization_id_a, user_id_a, provider_message_id_a)
+
+    shuffled = list(sequence)
+    shuffler.shuffle(shuffled)
+    organization_id_b, user_id_b, provider_message_id_b = _setup(world)
+    _apply_sequence(world, provider_message_id_b, shuffled)
+    actual = _projection(world, organization_id_b, user_id_b, provider_message_id_b)
+
+    assert actual == expected
+
+
+def test_a_hard_bounce_without_an_existing_preference_row_still_suppresses(
+    world: NotificationWorld,
+) -> None:
+    """El usuario nunca tocó sus preferencias: la fila no existe hasta este rebote. La marca no
+    se pierde por falta de fila (``ON CONFLICT`` de ``_UPSERT_SUPPRESS_HARD_BOUNCE``)."""
+    organization_id, _plant_id, _zone_id = world.new_organization()
+    member = world.add_member(
+        organization_id, Role.ADMINISTRATOR, ScopeLevel.ORGANIZATION, organization_id
+    )
+    provider_message_id = f"ses-{uuid.uuid4().hex}"
+    world.run(_seed_sent_email(world, organization_id, member.user_id, provider_message_id))
 
     sqs = FakeSqsClient()
-    sqs.enqueue(first_body)
-    _run_once(world, sqs)
-    sqs.enqueue(second_body)
+    sqs.enqueue(_bounce_body(provider_message_id, "Permanent"))
     _run_once(world, sqs)
 
-    email = _email_row(world, _message_id_of(world, provider_message_id))
-    preference = _preference_row(world, organization_id, user_id)
-    assert email["bounce_kind"] == "hard"
-    assert email["status"] == "failed"
-    assert email["complaint_at"] is not None
+    preference = _preference_row(world, organization_id, member.user_id)
     assert preference["email_suppressed_hard_bounce"] is True
+    assert preference["email_suppressed_complaint"] is False
+    assert preference["email_suppressed_at"] is not None
+
+
+def test_a_complaint_without_an_existing_preference_row_still_suppresses(
+    world: NotificationWorld,
+) -> None:
+    """Misma ausencia de fila que el caso anterior, con una queja en vez de un rebote duro."""
+    organization_id, _plant_id, _zone_id = world.new_organization()
+    member = world.add_member(
+        organization_id, Role.ADMINISTRATOR, ScopeLevel.ORGANIZATION, organization_id
+    )
+    provider_message_id = f"ses-{uuid.uuid4().hex}"
+    world.run(_seed_sent_email(world, organization_id, member.user_id, provider_message_id))
+
+    sqs = FakeSqsClient()
+    sqs.enqueue(_complaint_body(provider_message_id))
+    _run_once(world, sqs)
+
+    preference = _preference_row(world, organization_id, member.user_id)
     assert preference["email_suppressed_complaint"] is True
+    assert preference["email_suppressed_hard_bounce"] is False
+    assert preference["email_suppressed_at"] is not None
 
 
 @pytest.mark.parametrize("repetitions", [1, 2, 3])

@@ -8,10 +8,12 @@ enlace una sola vez (BR-NUC-32); esta tarea no cambia esa ruta.
 
 **Admisión** (``_admit``), en la transacción que la concede (PAT-LAZ-ESC-02): bajo dos candados
 consultivos de la transacción, **organización primero y usuario después** (orden único,
-documentado aquí y en el PR), cuenta los ``EmailMessage`` de la última hora sobre
-``EmailMessage.queued_at`` y rechaza con ``"unavailable"`` si el límite exacto de 3 por hora y
-usuario o 50 por hora y organización ya se alcanzó (reenvíos y reintentos incluidos); si admite,
-escribe el ``EmailMessage`` con ``status = "queued"`` en la misma transacción.
+documentado aquí y en el PR), cuenta los ``EmailMessage`` del mismo ``kind`` (``platform_
+invitation``) de la última hora sobre ``EmailMessage.queued_at`` y rechaza con ``"unavailable"``
+si el límite exacto de 3 por hora y usuario o 50 por hora y organización ya se alcanzó (reenvíos y
+reintentos incluidos; el tope es solo de este tipo de correo, no del total de correo de la
+organización o el usuario, rework de revisión); si admite, escribe el ``EmailMessage`` con
+``status = "queued"`` en la misma transacción.
 
 **Envío**, fuera de la transacción de admisión (para no mantener una conexión abierta durante la
 llamada de red): cliente ``sesv2`` de ``loop.http.client_factory`` (LC-LAZ-39), en un hilo
@@ -92,14 +94,23 @@ del de una clave): nunca al revés, también en cualquier otro envío que tome a
 
 
 def _count_since(
-    organization_id: uuid.UUID, window_start: datetime, *, to_user_id: uuid.UUID | None
+    organization_id: uuid.UUID,
+    window_start: datetime,
+    *,
+    kind: str,
+    to_user_id: uuid.UUID | None,
 ) -> Select[tuple[int]]:
+    """Cuenta solo ``EmailMessage`` del mismo ``kind`` que lo que se admite: el límite de
+    PAT-LAZ-ESC-02 es de reenvíos y reintentos de **ese** correo, no del total de correo de la
+    organización o el usuario (un aviso ``notification``/``digest`` del motor no debe consumir el
+    presupuesto de reenvío de una invitación, ni al revés; rework de revisión)."""
     statement = (
         select(func.count())
         .select_from(EMAIL_MESSAGE)
         .where(
             EMAIL_MESSAGE.c.organization_id == organization_id,
             EMAIL_MESSAGE.c.queued_at >= window_start,
+            EMAIL_MESSAGE.c.kind == kind,
         )
     )
     if to_user_id is not None:
@@ -175,7 +186,9 @@ class SesEmailSender:
             await transaction.execute(
                 _LOCK_USER, {"organization": str(organization_id), "recipient": str(to_user_id)}
             )
-            organization_statement = _count_since(organization_id, window_start, to_user_id=None)
+            organization_statement = _count_since(
+                organization_id, window_start, kind=message.kind, to_user_id=None
+            )
             organization_count = (await transaction.execute(organization_statement)).scalar_one()
             if organization_count >= RESEND_LIMIT_PER_ORGANIZATION:
                 _log.warning(
@@ -185,7 +198,9 @@ class SesEmailSender:
                 return None
             user_count = (
                 await transaction.execute(
-                    _count_since(organization_id, window_start, to_user_id=to_user_id)
+                    _count_since(
+                        organization_id, window_start, kind=message.kind, to_user_id=to_user_id
+                    )
                 )
             ).scalar_one()
             if user_count >= RESEND_LIMIT_PER_USER:

@@ -140,29 +140,29 @@ def _register_notification_engine(registry: ConsumerRegistry, services: UnitServ
 
 
 def _register_email_sender(registry: ConsumerRegistry, services: UnitServices) -> None:
-    """``SesEmailSender`` solo en ``pilot`` con el dominio verificado configurado; en cualquier
-    otro entorno (o sin configurarlo), ``FakeEmailSender`` (TASK-325; LC-LAZ-33). Idempotente:
-    ``EMAIL_SENDERS`` es la ranura de todo el proceso (``api.py`` y ``admin.py`` la leen también),
-    así que una segunda composición en el mismo proceso no vuelve a registrar."""
+    """``SesEmailSender`` solo en ``pilot`` con el dominio verificado configurado; en ``pilot``
+    sin dominio no registra ningún adaptador, para que U-02 degrade a mostrar el enlace una sola
+    vez (BR-NUC-32) en vez de fingir una entrega que nunca ocurrió; ``FakeEmailSender`` queda solo
+    como doble de pruebas y entornos no productivos (local, test, staging-N) (TASK-325; LC-LAZ-33;
+    rework de revisión). Idempotente: ``EMAIL_SENDERS`` es la ranura de todo el proceso (``api.py``
+    y ``admin.py`` la leen también), así que una segunda composición en el mismo proceso no vuelve
+    a registrar."""
     del registry
     if EMAIL_SENDERS.sender is not None:
         return
     config = services.config
-    if (
-        config is not None
-        and config.environment == _PILOT_ENVIRONMENT
-        and config.email_sender_domain is not None
-    ):
-        EMAIL_SENDERS.register(
-            SesEmailSender(
-                database=services.database,
-                http_clients=HttpClientFactory.from_config(config),
-                region_name=config.aws_region,
-                sender_email=f"no-responder@mail.{config.email_sender_domain}",
-                configuration_set_name=f"vigia-email-{config.environment}",
-                clock=services.clock,
+    if config is not None and config.environment == _PILOT_ENVIRONMENT:
+        if config.email_sender_domain is not None:
+            EMAIL_SENDERS.register(
+                SesEmailSender(
+                    database=services.database,
+                    http_clients=HttpClientFactory.from_config(config),
+                    region_name=config.aws_region,
+                    sender_email=f"no-responder@mail.{config.email_sender_domain}",
+                    configuration_set_name=f"vigia-email-{config.environment}",
+                    clock=services.clock,
+                )
             )
-        )
         return
     EMAIL_SENDERS.register(FakeEmailSender(clock=services.clock))
 
