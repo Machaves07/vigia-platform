@@ -40,6 +40,9 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   <entorno>``): sin ella, el consumidor ``email_delivery_events`` no arranca; y
   ``VIGIA_EMAIL_SENDER_DOMAIN`` (TASK-325, LC-LAZ-33), el dominio verificado del remitente
   (``no-responder@mail.<dominio>``): sin él, ``SesEmailSender`` no se registra;
+  ``VIGIA_ASSISTANT_MODEL`` (TASK-344), el modelo del asistente (``claude-opus-5`` por defecto o
+  ``claude-sonnet-5``, sin sufijo de fecha). La clave del proveedor no es de esta lista: la
+  inyecta Secrets Manager solo en ``vigia-worker`` (NFR-LAZ-26) y la lee ``loop.registration``;
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -111,6 +114,8 @@ _QUEUE_URL: Final = re.compile(
     r"https://sqs\.[a-z0-9-]{1,50}\.amazonaws\.com/[0-9]{12}/[A-Za-z0-9_-]{1,80}"
 )
 """URL de una cola de SQS (``notifications.adapters.ses.delivery_events``, LC-LAZ-34)."""
+_ASSISTANT_MODEL: Final = re.compile(r"claude-opus-5|claude-sonnet-5")
+"""Modelo del asistente (tech-stack U-04 §2.2): lista cerrada, sin sufijo de fecha."""
 
 
 class RuntimeConfigInvalid(ValueError):
@@ -263,6 +268,7 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable("loop_bulkheads", "VIGIA_LOOP_BULKHEADS", _bulkheads),
     _Variable("email_events_queue_url", "VIGIA_EMAIL_EVENTS_QUEUE_URL", _text(_QUEUE_URL)),
     _Variable("email_sender_domain", "VIGIA_EMAIL_SENDER_DOMAIN", _text(EGRESS_HOST)),
+    _Variable("assistant_model", "VIGIA_ASSISTANT_MODEL", _text(_ASSISTANT_MODEL)),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -328,6 +334,9 @@ class RuntimeConfig(BaseModel):
     """Dominio verificado del remitente (U-04, LC-LAZ-33): el correo sale de
     ``no-responder@mail.<este dominio>``; sin él, ``SesEmailSender`` no se registra y U-02 sigue
     degradando a mostrar el enlace de invitación una sola vez (BR-NUC-32)."""
+    assistant_model: str | None = None
+    """Modelo del asistente de causa raíz (U-04, TASK-344): ``claude-opus-5`` o
+    ``claude-sonnet-5``; sin ella, ``claude-opus-5``. Bajar de modelo es decisión del dueño."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:

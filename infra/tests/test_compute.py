@@ -941,6 +941,8 @@ RUNTIME_VARIABLES_OUTSIDE_TASKS = {
     "primer despliegue (VIG-203/252), todavia no esta tarea",
     "VIGIA_EMAIL_SENDER_DOMAIN": "U-04 en pausa (A-47): el dominio verificado lo declara el "
     "primer despliegue (VIG-203/252); sin ella, SesEmailSender no se registra (TASK-325)",
+    "VIGIA_ASSISTANT_MODEL": "U-04 en pausa (A-47): sin ella, claude-opus-5; el modelo lo decide "
+    "el dueno en el primer despliegue (VIG-203/252), con la clave (TASK-344)",
 }
 """Variables de ``RuntimeConfig`` que ninguna definición de tarea de ``pilot`` lleva, con el
 motivo. Cualquier otra que la raíz lea tiene que estar en una de las dos."""
