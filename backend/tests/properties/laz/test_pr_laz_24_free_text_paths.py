@@ -93,6 +93,9 @@ NAME_PATHS: Final = frozenset(
         ("unclosable_state_declared", "/responsible_display_name"),
         ("unclosable_state_declared", "/signer/display_name"),
         ("vocabulary_list_changed", "/changed_by/display_name"),
+        # TASK-350: los nombres del vocabulario declarado (v2), como un nombre de zona.
+        ("vocabulary_list_changed", "/declared_names_added[*]/value"),
+        ("vocabulary_list_changed", "/declared_names_removed[*]/value"),
         ("zone_created", "/name"),
         ("organization", "/name"),
         ("plant", "/name"),

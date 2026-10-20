@@ -177,6 +177,20 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         ]
     },
     ("PATCH", "/accreditation/commitments/{commitment_id}"): {"state": "done"},
+    # TASK-350: ``removed``, ``declared_names_added`` y ``declared_names_removed`` son opcionales
+    # y ``reason`` también a nivel de esquema (sin motivo es
+    # ``vocabulary_change_reason_required``, no un cuerpo mal formado).
+    ("POST", "/loop/vocabulary/changes"): {
+        "added": [
+            {
+                "category": "absence_claim",
+                "form": "lemma",
+                "value": "pasillo",
+                "suggestion_es": "Describa lo observado en la zona",
+            }
+        ],
+        "reason": "Ajuste acordado en el comité de seguridad",
+    },
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -332,6 +346,8 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
+    # TASK-350: el doble acepta un cambio válido (la versión 2), como la ruta real (201).
+    ("POST", "/loop/vocabulary/changes"): 201,
     ("POST", "/accreditation/sample-items/{sample_item_id}/result"): 404,
     ("POST", "/accreditation/monthly-packages/{package_id}/commitments"): 404,
     ("PATCH", "/accreditation/commitments/{commitment_id}"): 404,

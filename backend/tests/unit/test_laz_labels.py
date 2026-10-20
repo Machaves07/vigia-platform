@@ -83,6 +83,8 @@ RECORD_ENUMERATIONS: Final = frozenset(
         "escalation_level",
         "evidence_ref_kind",
         "blocked_term_origin",
+        # TASK-350: qué nombra un nombre declarado (vocabulary_list_changed v2).
+        "declared_name_kind",
         "metric_unit",
         # TASK-307: los avisos cerrados de la bandeja (BR-LAZ-10, 11, 149 a 156).
         "inbox_zone_notice",

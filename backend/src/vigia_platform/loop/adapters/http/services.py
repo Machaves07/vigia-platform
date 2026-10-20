@@ -31,6 +31,8 @@ from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
+from vigia_platform.loop.vocabulary.repository import PostgresVocabularyRepository
+from vigia_platform.loop.vocabulary.service import VocabularyService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
 
@@ -79,6 +81,8 @@ class LoopHttp:
     """``GET /loop/review-queue`` y ``POST .../resolution`` (LC-LAZ-08, VIG-213)."""
     overdue: OverdueService | None = None
     """``GET /loop/overdue`` (LC-LAZ-11, VIG-229)."""
+    vocabulary: VocabularyService | None = None
+    """``GET /loop/vocabulary`` y ``POST /loop/vocabulary/changes`` (LC-LAZ-17, VIG-220)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -180,6 +184,13 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             database=services.database,
             authorizer=services.authorizer,
             configuration=PostgresLoopConfigurationRepository(services.database),
+            clock=services.clock,
+        ),
+        vocabulary=VocabularyService(
+            repository=PostgresVocabularyRepository(services.database),
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
             clock=services.clock,
         ),
     )

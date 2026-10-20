@@ -42,6 +42,7 @@ __all__ = [
     "CauseCategory",
     "ClassificationOutcome",
     "CommitmentState",
+    "DeclaredNameKind",
     "EffectOnLoop",
     "EscalationLevel",
     "EvidenceRefKind",
@@ -344,6 +345,16 @@ class BlockedTermOrigin(enum.StrEnum):
     CUSTOMER_ADDED = "customer_added"
 
 
+class DeclaredNameKind(enum.StrEnum):
+    """Qué nombra un nombre del vocabulario declarado (TASK-350, BLM §14.5): nunca una persona."""
+
+    PLANT = "plant"
+    ZONE = "zone"
+    EQUIPMENT = "equipment"
+    MACHINE = "machine"
+    STANDARD = "standard"
+
+
 # --- acreditación (§1, §3) ------------------------------------------------------------------
 
 
@@ -487,6 +498,7 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "escalation_level": EscalationLevel,
     "evidence_ref_kind": EvidenceRefKind,
     "blocked_term_origin": BlockedTermOrigin,
+    "declared_name_kind": DeclaredNameKind,
     "inbox_zone_notice": InboxZoneNotice,
     "inbox_partition_notice": InboxPartitionNotice,
     "inbox_finding_notice": InboxFindingNotice,

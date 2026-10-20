@@ -61,6 +61,8 @@ from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
+from vigia_platform.loop.vocabulary.repository import PostgresVocabularyRepository
+from vigia_platform.loop.vocabulary.service import VocabularyService
 from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
     NotificationsHttp,
@@ -199,6 +201,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 database=database,
                 authorizer=services.authorizer,
                 configuration=PostgresLoopConfigurationRepository(database),
+                clock=services.clock,
+            ),
+            vocabulary=VocabularyService(  # TASK-350
+                repository=PostgresVocabularyRepository(database),
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
                 clock=services.clock,
             ),
         ),
@@ -502,6 +511,35 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/overdue"),
         Case(
             Kind.RESOURCE, lambda i: Call("GET", "/loop/overdue", params={"plant_id": str(i.plant)})
+        ),
+    ),
+    # VIG-220 (TASK-350): la lista de vocabulario es ``own`` (de la organización del contexto, sin
+    # identificador): nunca muestra ni toca la de B. El cambio escribe en la lista de A (su fila,
+    # sus términos y su registro), nunca en B; bajo concesión, ``not_found`` (vocabulary.manage no
+    # está en la columna del instalador).
+    (("GET", "/loop/vocabulary"), Case(Kind.OWN, lambda i: Call("GET", "/loop/vocabulary"))),
+    (
+        ("POST", "/loop/vocabulary/changes"),
+        Case(
+            Kind.OWN,
+            lambda i: Call(
+                "POST",
+                "/loop/vocabulary/changes",
+                json={
+                    "added": [
+                        {
+                            "category": "absence_claim",
+                            "form": "lemma",
+                            "value": f"termino{i.record.hex[:8]}",
+                            "suggestion_es": "Describa lo observado en la zona",
+                        }
+                    ],
+                    "declared_names_added": [
+                        {"kind": "machine", "value": f"Prensa {i.record.hex[:6]}"}
+                    ],
+                    "reason": "Ajuste acordado en el comité de seguridad",
+                },
+            ),
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).

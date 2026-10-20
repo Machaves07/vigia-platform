@@ -56,6 +56,7 @@ from vigia_platform.loop.config.parameters import (
 from vigia_platform.loop.config.service import validated_change
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain import root_cause as root_cause_domain
+from vigia_platform.loop.vocabulary import service as vocabulary_module
 from vigia_platform.node_api.rejections import NodeRejection
 from vigia_platform.shared.api.app import UnitRegistration, platform_units
 from vigia_platform.shared.api.declarations import (
@@ -186,6 +187,34 @@ class LoopConfigurationDouble:
             LoopSettings.defaults().replaced(request.integers, request.business_calendar)
         )
         return self._configuration(context, plant_id, settings, 2)
+
+
+class VocabularyDouble:
+    """Doble de ``VocabularyService`` para el arnés, sin base (TASK-350).
+
+    Hace las comprobaciones del servicio que no miran la base, con el mismo código
+    (``validated_change``: motivo, forma de cada término y nombre, nada repetido y algo que
+    cambiar). Un cambio válido devuelve la versión 2 sin escribir nada; la lectura, la lista
+    inicial (versión 1)."""
+
+    def __init__(self, clock: Any) -> None:
+        self._clock = clock
+
+    async def current(self, context: ScopeContext) -> Any:
+        return vocabulary_module._view(None, ())
+
+    async def change(self, context: ScopeContext, **request: Any) -> Any:
+        checked = vocabulary_module.validated_change(**request)
+        return vocabulary_module.ChangeResult(
+            change_id=uuid.uuid4(),
+            record_id=uuid.uuid4(),
+            list_version=2,
+            changed_at=to_millisecond(self._clock.now()),
+            added=(),
+            removed_term_ids=checked.removed,
+            declared_names_added=(),
+            removed_name_ids=checked.names_removed,
+        )
 
 
 class ClassificationDouble:
@@ -387,6 +416,7 @@ def loop_state(clock: Any) -> dict[str, Any]:
             closure=cast(Any, ClosureDouble()),
             reopening=cast(Any, ReopeningDouble()),
             review_queue=cast(Any, ReviewQueueDouble()),
+            vocabulary=cast(Any, VocabularyDouble(clock)),
         ),
     }
 

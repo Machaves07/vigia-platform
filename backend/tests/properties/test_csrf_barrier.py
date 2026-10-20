@@ -110,6 +110,17 @@ BODIES: dict[str, dict[str, Any]] = {
         "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
     },
     "/loop/root-cause-analyses/{analysis_id}/assistant-requests": {},
+    "/loop/vocabulary/changes": {
+        "added": [
+            {
+                "category": "absence_claim",
+                "form": "lemma",
+                "value": "pasillo",
+                "suggestion_es": "Describa lo observado en la zona",
+            }
+        ],
+        "reason": "Ajuste acordado en el comité de seguridad",
+    },
     "/accreditation/exports": {
         "plant_id": str(uuid.uuid4()),
         "zone_ids": [str(uuid.uuid4())],
@@ -213,6 +224,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         # Solicitud al asistente de causa raíz de U-04 (TASK-316).
         ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+        # Cambio de la lista de vocabulario de U-04 (TASK-350).
+        ("POST", "/loop/vocabulary/changes"),
         # Solicitud de exportación de U-04 (TASK-317).
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).

@@ -447,8 +447,10 @@ BLOCKED_VOCABULARY_LIST: Final = Table(
     _jsonb("created_by"),
     _uuid("record_id"),
     _text("lemmatizer_version", nullable=True),
+    _jsonb("declared_names"),
 )
-"""§2.12 ``BlockedVocabularyList`` 🔁 (solo organización, A-69): una por organización."""
+"""§2.12 ``BlockedVocabularyList`` 🔁 (solo organización, A-69): una por organización;
+``declared_names`` es de ``laz_0038`` (TASK-350)."""
 
 BLOCKED_TERM: Final = Table(
     "blocked_term",
