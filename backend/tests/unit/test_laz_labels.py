@@ -90,10 +90,12 @@ RECORD_ENUMERATIONS: Final = frozenset(
         "inbox_zone_notice",
         "inbox_partition_notice",
         "inbox_finding_notice",
+        # TASK-342: los avisos cerrados del detalle (BR-LAZ-152, PAT-LAZ-RES-04).
+        "finding_detail_notice",
     }
 )
 """``package_form`` (U04-H-03), las listas que cierran los tipos de registro (§2, §5.2) y los
-avisos de la bandeja (TASK-307)."""
+avisos de la bandeja (TASK-307) y del detalle (TASK-342)."""
 
 DETAIL_CODE_ENUMERATIONS: Final = frozenset(
     {"loop_detail_code", "accreditation_detail_code", "notifications_detail_code"}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Final
 
 from fastapi import Request
@@ -18,11 +19,16 @@ from fastapi import Request
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.ledger.application.evidence_read import (
+    EvidenceService as LedgerEvidenceService,
+)
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
+from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -35,6 +41,12 @@ from vigia_platform.loop.vocabulary.repository import PostgresVocabularyReposito
 from vigia_platform.loop.vocabulary.service import VocabularyService
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
+from vigia_platform.shared.storage import (
+    PRESIGN_GET_MAX_TTL,
+    ObjectHead,
+    PresignedRequest,
+    StorageUnavailable,
+)
 
 if TYPE_CHECKING:
     from vigia_platform.shared.runtime.units import UnitServices
@@ -42,6 +54,7 @@ if TYPE_CHECKING:
 __all__ = [
     "LOOP_STATE_KEY",
     "LoopHttp",
+    "build_detail",
     "build_loop_http",
     "installed",
     "loop_http",
@@ -77,6 +90,8 @@ class LoopHttp:
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
     inbox: InboxService | None = None
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
+    detail: FindingDetailService | None = None
+    """``GET /loop/findings/{finding_state_id}`` y ``.../classifications`` (LC-LAZ-06, VIG-232)."""
     review_queue: ReviewQueueService | None = None
     """``GET /loop/review-queue`` y ``POST .../resolution`` (LC-LAZ-08, VIG-213)."""
     overdue: OverdueService | None = None
@@ -100,6 +115,55 @@ def loop_http(request: Request) -> LoopHttp:
         _log.error("las rutas del lazo no tienen servicios instalados")
         raise ApiError(ApiErrorCode.INTERNAL_ERROR)
     return services
+
+
+class _NoEvidenceStore:
+    """Sin depósito de evidencias configurado: el detalle declara la evidencia no disponible
+    (``evidence_url_unavailable``) y muestra la referencia del clip; nunca oculta el hallazgo."""
+
+    async def head_object(self, key: str) -> ObjectHead | None:
+        raise StorageUnavailable("head_object")
+
+    async def presign_get(
+        self, key: str, ttl: timedelta = PRESIGN_GET_MAX_TTL, *, version_id: str | None = None
+    ) -> PresignedRequest:
+        raise StorageUnavailable("presign_get")
+
+
+def build_detail(services: UnitServices) -> FindingDetailService:
+    """El detalle con sus puertos en proceso: ``LectorExpediente`` y ``EvidencePort`` de U-02,
+    ``CatalogQueryPort``, ``GateQueryPort`` y ``FleetQueryPort`` de U-03 y ``CoveragePort``."""
+    ports = catalog_query_ports(services.database)
+    return FindingDetailService(
+        database=services.database,
+        authorizer=services.authorizer,
+        reader=LectorExpediente(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        evidence=LedgerEvidenceService(
+            database=services.database,
+            audit=services.audit,
+            storage=services.evidence if services.evidence is not None else _NoEvidenceStore(),
+        ),
+        catalog=ports.catalog,
+        gates=ports.gates,
+        fleet=FleetInventory(
+            database=services.database,
+            authorizer=services.authorizer,
+            audit=services.audit,
+            clock=services.clock,
+            provider_organization_id=services.provider_organization_id,
+        ),
+        coverage=CoverageService(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+    )
 
 
 def build_loop_http(services: UnitServices) -> LoopHttp:
@@ -173,6 +237,7 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),
+        detail=build_detail(services),
         review_queue=ReviewQueueService(
             database=services.database,
             writer=services.writer,
