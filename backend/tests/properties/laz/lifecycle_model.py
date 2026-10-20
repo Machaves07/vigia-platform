@@ -29,6 +29,8 @@ class LifecycleModel:
         if self.state == "received":
             self.state = "open" if outcome == "confirmed" else "discarded"
             return None
+        if self.state == "in_review":
+            return "transition_not_allowed"
         if not reinforced:
             return "reason_required"
         if self.state in {"open", "action_assigned", "overdue"}:
@@ -77,7 +79,7 @@ class LifecycleModel:
 
     def close(self, signer_has_license: bool) -> str | None:
         if self.state not in {"action_assigned", "overdue"}:
-            if self.state in {"received", "open"}:
+            if self.state in {"received", "in_review", "open", "discarded"}:
                 return "closure_requires_assigned_action"
             return "transition_not_allowed"
         if self.evidence_entries == 0:
@@ -90,16 +92,19 @@ class LifecycleModel:
     def declare_unclosable(
         self, fields_complete: bool, policy: str, review_months: int | None, license_present: bool
     ) -> str | None:
-        if self.state not in {"open", "action_assigned", "overdue"}:
-            return "transition_not_allowed"
         if policy == "revoked":
             return "unclosable_policy_revoked"
         if policy == "partial":
             return "unclosable_policy_unavailable"
         if policy == "not_signed":
             return "unclosable_policy_not_signed"
+        # BLM §8.2 consulta primero la política; una vez superada, la implementación valida los
+        # cinco campos antes de comprobar el estado de la tabla. Esta prioridad permite que el
+        # oráculo compare también el ``detail_code`` de un rechazo de la plataforma.
         if not fields_complete:
             return "unclosable_fields_incomplete"
+        if self.state not in {"open", "action_assigned", "overdue"}:
+            return "transition_not_allowed"
         if review_months is not None and not 0 < review_months <= 12:
             return "unclosable_review_date_out_of_range"
         if not license_present:
@@ -108,9 +113,15 @@ class LifecycleModel:
         self.unclosable_review_due_at = self.clock + (review_months or 6) * 30 * 86_400
         return None
 
-    def review_unclosable(self, outcome: str, license_present: bool) -> str | None:
+    def review_unclosable(
+        self, outcome: str, license_present: bool, review_months: int | None
+    ) -> str | None:
         if self.state != "unclosable":
             return "transition_not_allowed"
+        if outcome == "converted_to_action" and review_months is not None:
+            return "invalid_request"
+        if outcome == "renewed" and review_months is not None and not 0 < review_months <= 12:
+            return "unclosable_review_date_out_of_range"
         if not license_present:
             return "signer_license_missing"
         if outcome == "converted_to_action":

@@ -590,6 +590,8 @@ def lifecycle_command_sequences(
 
 def stateful_lifecycle_command_sequences(
     max_size: int = 50,
+    *,
+    min_size: int = 0,
 ) -> st.SearchStrategy[list[LifecycleCommand]]:
     """Los catorce comandos de PR-LAZ-10, incluida la secuencia vacía.
 
@@ -614,14 +616,9 @@ def stateful_lifecycle_command_sequences(
             st.just(LateSegment()),
             st.just(DeactivateAssignee()),
             st.just(RevokeGate()),
-            st.builds(
-                ChangeDeadlineRange,
-                st.integers(1, 30),
-                st.integers(1, 30),
-                st.integers(1, 180),
-                st.just((1, 2, 3, 4, 5)),
-            ),
+            deadline_ranges(),
         ),
+        min_size=min_size,
         max_size=max_size,
     )
 
