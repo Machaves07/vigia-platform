@@ -176,6 +176,12 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # ``@repository``); ninguna abre su propia transacción ni construye su propio contexto.
         "vigia_platform.loop.projection.rebuild.evidence_ids_for",
         "vigia_platform.loop.projection.rebuild.enrich_finding",
+        # accreditation.adoption (TASK-323): el gancho del contador lee y escribe solo por la
+        # ``Transaction`` dada (la de la escritura del lazo, que abre el servicio registrado y
+        # guardado que llama a ``LoopProjectionStore.write_and_apply``).
+        "vigia_platform.accreditation.adoption.counter.plant_timezone",
+        "vigia_platform.accreditation.adoption.counter.record_loop_activity",
+        "vigia_platform.accreditation.adoption.counter.write_activity",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

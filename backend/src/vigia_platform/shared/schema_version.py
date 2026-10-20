@@ -32,8 +32,10 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 34
-"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0034`` (el tipo
+MINIMUM_SCHEMA_VERSION: Final = 38
+"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0038`` (la marca
+``accreditation.adoption_alert`` de ``adoption_low`` que escribe ``adoption_check``, TASK-323), que
+incluye ``laz_0035`` a ``laz_0037`` y ``laz_0034`` (el tipo
 ``organization`` de ``notifications.notification.deep_link_ref`` que escribe
 ``notification_engine``, TASK-324), que incluye ``laz_0033`` (el uso por
 solicitud del asistente en ``loop.assistant_request``, la causa ``budget_exceeded`` y el borrador
