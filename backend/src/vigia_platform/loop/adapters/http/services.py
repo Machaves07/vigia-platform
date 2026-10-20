@@ -22,6 +22,7 @@ from vigia_platform.loop.adapters.postgres.review_queue_repository import Review
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
+from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -76,6 +77,8 @@ class LoopHttp:
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
     review_queue: ReviewQueueService | None = None
     """``GET /loop/review-queue`` y ``POST .../resolution`` (LC-LAZ-08, VIG-213)."""
+    overdue: OverdueService | None = None
+    """``GET /loop/overdue`` (LC-LAZ-11, VIG-229)."""
 
 
 def installed[T](service: T | None) -> T:
@@ -171,6 +174,12 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             writer=services.writer,
             authorizer=services.authorizer,
             repository=ReviewQueueRepository(services.database),
+            clock=services.clock,
+        ),
+        overdue=OverdueService(
+            database=services.database,
+            authorizer=services.authorizer,
+            configuration=PostgresLoopConfigurationRepository(services.database),
             clock=services.clock,
         ),
     )

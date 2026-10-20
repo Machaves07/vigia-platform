@@ -61,6 +61,7 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
@@ -191,7 +192,9 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
                 ("GET", "/loop/assistant-requests/{request_id}"),
                 ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
+                ("GET", "/loop/overdue"),  # TASK-313: SUP-U05-15
             ]
+            assert state[LOOP_STATE_KEY].overdue is not None
             assert state[LOOP_STATE_KEY].classification is not None
             assert state[LOOP_STATE_KEY].assistant is not None
             assert state[LOOP_STATE_KEY].actions is not None
@@ -252,13 +255,20 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # TASK-309: review_reminders, horaria, por organización (loop); TASK-325:
     # email_delivery_events_poll, ``global`` cada 15 s; TASK-348: email_grouping (cada hora) y
     # digest_weekly (diaria, filtra por ``weekly_digest_weekday`` del destinatario), por
-    # organización (notifications). ``tasks()`` ordena por nombre, no por orden de registro:
-    # "digest_weekly" < "email_delivery_events_poll" < "email_grouping" < "monthly_package" <
+    # organización (notifications); TASK-313: evaluate_deadlines, horaria, por organización
+    # (loop). ``tasks()`` ordena por nombre, no por orden de registro: "digest_weekly" <
+    # "email_delivery_events_poll" < "email_grouping" < "evaluate_deadlines" < "monthly_package" <
     # "review_reminders" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
         (DIGEST_WEEKLY, ActorUnit.U04, DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (EMAIL_DELIVERY_EVENTS_POLL, ActorUnit.U04, POLL_SCHEDULE, TaskIteration.GLOBAL),
         (EMAIL_GROUPING, ActorUnit.U04, EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        (
+            "evaluate_deadlines",
+            ActorUnit.U04,
+            Schedule.every(3600),
+            TaskIteration.PER_ORGANIZATION,
+        ),
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         (
@@ -296,12 +306,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         root_cause_router,
         assistant_router,
         findings_router,
+        overdue_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).
     assert len(notifications_registration.TASK_REGISTRARS) == 3
-    # TASK-306 y TASK-309: verify_loop_projection y review_reminders.
-    assert len(registration.TASK_REGISTRARS) == 2
+    # TASK-306, TASK-309 y TASK-313: verify_loop_projection, review_reminders y
+    # evaluate_deadlines.
+    assert len(registration.TASK_REGISTRARS) == 3
     # notification_engine, EMAIL_SENDERS (sin Consumer propio) y email_delivery_events.
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
@@ -315,6 +327,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             TaskIteration.PER_ORGANIZATION,
         ),
         "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
+        "evaluate_deadlines": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
         EMAIL_GROUPING: (EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
