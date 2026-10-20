@@ -661,15 +661,10 @@ def test_an_update_writes_a_new_record_and_changes_only_the_commitment(
         recorded["record_id"],
         body["record_id"],
     ]
-    (entry,) = records[-1]["content"]["commitments"]
-    assert entry == {
-        "commitment_id": commitment_id,
-        "text": COMMITMENT_TEXT,
-        "responsible_user_id": recorded["commitments"][0]["responsible_user_id"],
-        "due_date": "2026-12-15",
-        "state": "done",
-        "closed_note": NOTE,
-    }
+    # Solo lo que cambia: ni el texto, ni el responsable, ni la fecha (no se revalidan).
+    assert "commitments" not in records[-1]["content"]
+    (entry,) = records[-1]["content"]["updates"]
+    assert entry == {"commitment_id": commitment_id, "state": "done", "closed_note": NOTE}
     assert stack.events(organization_id, body["record_id"]) == []  # sin evento al actualizar
     (row,) = [
         row
@@ -775,17 +770,42 @@ def test_two_simultaneous_updates_leave_the_row_as_the_last_record(
     results = stack.run(race())
     assert all(isinstance(result, CommitmentUpdateResult) for result in results), results
     updates = [
-        record
-        for record in stack.records_of(organization_id, "commitments_recorded")
-        if record["content"]["commitments"][0]["commitment_id"] == str(commitment_id)
-    ][1:]
-    assert len(updates) == 2
+        record["content"]["updates"][0]
+        for record in stack.batches_of(organization_id, seed.package_id)
+        if record["content"].get("updates")
+    ]
+    assert [update["commitment_id"] for update in updates] == [str(commitment_id)] * 2
     (row,) = [
         row
         for row in stack.commitment_rows(organization_id)
         if row["commitment_id"] == commitment_id
     ]
-    assert row["state"] == updates[-1]["content"]["commitments"][0]["state"]
+    assert row["state"] == updates[-1]["state"]
+
+
+def test_a_text_blocked_after_the_alta_never_prevents_closing_the_commitment(
+    stack: MonthlyReviewStack,
+) -> None:
+    """Revisión de la ronda 1: la lista de vocabulario puede crecer después del alta (BR-LAZ-86).
+    El texto del compromiso pasa a contener un término bloqueado y la actualización sigue
+    respondiendo 200 con su registro: no copia el texto ni lo revalida."""
+    seed, line_manager, recorded = _one_commitment(stack)
+    organization_id = seed.organization.organization_id
+    commitment_id = uuid.UUID(recorded["commitments"][0]["commitment_id"])
+    stack.admin(
+        organization_id,
+        "UPDATE accreditation.commitment SET text = $1 WHERE commitment_id = $2",
+        BLOCKED_REASON,
+        commitment_id,
+    )
+    response = stack.update_commitment(line_manager, commitment_id, {"state": "done", "note": NOTE})
+    assert response.status_code == 200, response.text
+    assert response.json()["commitment"]["state"] == "done"
+    last = stack.batches_of(organization_id, seed.package_id)[-1]
+    assert str(last["record_id"]) == response.json()["record_id"]
+    assert last["content"]["updates"] == [
+        {"commitment_id": str(commitment_id), "state": "done", "closed_note": NOTE}
+    ]
 
 
 # --- SUP-U05-29: la lista ----------------------------------------------------------------------

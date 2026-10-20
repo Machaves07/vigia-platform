@@ -14,13 +14,15 @@ regla de etiqueta:
   clasificación auditada (H-39);
 - ``commitments_recorded``: los compromisos de la conversación mensual (1 a 20).
 
-``commitments_recorded`` tiene además una **versión 2** (TASK-347), que solo amplía (BR-NUC-52):
-cada compromiso admite ``state`` (``commitment_state``) y ``closed_note`` (0 a 500, la nota de
-cierre de DE §3.3), para que la actualización de estado y nota de SUP-U05-28 sea **un registro
-nuevo** del expediente y la proyección ``Commitment`` siga siendo derivable de él. La versión 2
-declara por eso una ruta de texto libre más, ``/commitments[*]/closed_note``, que pasa la política
-base y los dos validadores de U-04 como ``/commitments[*]/text``. Ninguna operación escribe ya la
-versión 1, pero sigue registrada para presentar los registros históricos.
+``commitments_recorded`` tiene además una **versión 2** (TASK-347), que solo amplía (BR-NUC-52)
+para que la actualización de estado y nota de SUP-U05-28 sea **un registro nuevo** del expediente
+y la proyección ``Commitment`` siga siendo derivable de él: un registro lleva un alta
+(``commitments``, cada compromiso con ``state`` opcional) **o** una actualización (``updates``:
+``commitment_id``, ``state`` y ``closed_note`` de 0 a 500, la nota de cierre de DE §3.3). La
+actualización no copia el texto del compromiso: no cambia y no se revalida contra una lista de
+vocabulario posterior al alta. La versión 2 declara por eso una ruta de texto libre más,
+``/updates[*]/closed_note``, que pasa la política base y los dos validadores de U-04. Ninguna
+operación escribe ya la versión 1, pero sigue registrada para presentar los registros históricos.
 """
 
 from __future__ import annotations
@@ -279,7 +281,7 @@ class CommitmentsRecorded(ContentModel):
 
 
 class CommitmentEntryV2(ContentModel):
-    """Un compromiso con su estado y su nota de cierre (versión 2, TASK-347; SUP-U05-28)."""
+    """Un compromiso que se da de alta, con su estado (versión 2, TASK-347; SUP-U05-27)."""
 
     commitment_id: UUIDv7
     text: CommitmentText
@@ -287,21 +289,37 @@ class CommitmentEntryV2(ContentModel):
     due_date: CalendarDate
     state: CommitmentState | None = None
     """Sin estado (los registros de la versión 1), el compromiso nace ``open``."""
+
+
+class CommitmentUpdate(ContentModel):
+    """El cambio de estado y nota de un compromiso ya registrado (versión 2; SUP-U05-28).
+
+    Solo el identificador, el estado y la nota: el texto, el responsable y la fecha no cambian y
+    no se vuelven a escribir (ni a validar contra una lista de vocabulario posterior al alta)."""
+
+    commitment_id: UUIDv7
+    state: CommitmentState
     closed_note: ClosedNote | None = None
     """Solo con ``done`` o ``dropped`` (lo exige el servicio, no el esquema)."""
 
 
 class CommitmentsRecordedV2(ContentModel):
-    """Versión 2: el alta (estado ``open``) o la actualización de estado y nota de compromisos."""
+    """Versión 2: un alta de compromisos (``commitments``) **o** una actualización
+    (``updates``), nunca las dos ni ninguna."""
 
     commitment_batch_id: UUIDv7
     package_id: UUIDv7
     zone_id: UUID
-    commitments: Annotated[
-        tuple[CommitmentEntryV2, ...], Field(min_length=1, max_length=MAX_COMMITMENTS)
-    ]
+    commitments: Annotated[tuple[CommitmentEntryV2, ...], Field(max_length=MAX_COMMITMENTS)] = ()
+    updates: Annotated[tuple[CommitmentUpdate, ...], Field(max_length=MAX_COMMITMENTS)] = ()
     recorded_by: UserSnapshot
     recorded_at: Timestamp
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> Self:
+        if bool(self.commitments) == bool(self.updates):
+            raise ValueError("un alta (commitments) o una actualización (updates), solo una")
+        return self
 
 
 # --- registro -------------------------------------------------------------------------------
@@ -325,7 +343,7 @@ SNAPSHOT_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
 }
 """Instantáneas del usuario que la metapropiedad de U-02 cuenta como texto libre."""
 
-COMMITMENTS_RECORDED_V2_FREE_TEXT_PATHS: Final[tuple[str, ...]] = ("/commitments[*]/closed_note",)
+COMMITMENTS_RECORDED_V2_FREE_TEXT_PATHS: Final[tuple[str, ...]] = ("/updates[*]/closed_note",)
 """La ruta narrativa que añade la versión 2 de ``commitments_recorded`` (TASK-347)."""
 
 

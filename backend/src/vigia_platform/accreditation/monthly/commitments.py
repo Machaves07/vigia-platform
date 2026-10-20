@@ -25,8 +25,10 @@ fuera del alcance en el que registra compromisos, sin revelar nada que no vea ya
   ``state = open``) con el evento ``commitments_recorded`` y una fila ``open`` por compromiso.
 - ``update`` (SUP-U05-28): estado (``open``, ``done`` o ``dropped``) y nota de cierre opcional de
   hasta 500 caracteres, solo con ``done`` o ``dropped``. **Un registro nuevo**
-  ``commitments_recorded`` (versión 2) con el compromiso tal como estaba más su estado y su nota,
-  sin evento (no se registran compromisos nuevos); la fila cambia solo ``state``, ``closed_note`` y
+  ``commitments_recorded`` (versión 2, ``updates``) con solo el identificador, el estado y la nota:
+  el texto, que no cambia, no se copia ni se revalida contra una lista de vocabulario posterior al
+  alta (que nunca impide cerrar un compromiso). Sin evento (no se registran compromisos nuevos);
+  la fila cambia solo ``state``, ``closed_note`` y
   ``closed_at`` (las columnas que ``laz_0031`` concede a ``vigia_app``): ``record_id`` sigue
   siendo el registro del alta.
 - ``of_zone`` (SUP-U05-29): los compromisos de los paquetes de una zona y un mes, completos
@@ -110,7 +112,7 @@ _TEXT_FIELD: Final = FreeTextField(
     COMMITMENTS_RECORDED, "/commitments[*]/text", TEXT_MIN_CHARS, TEXT_MAX_CHARS
 )
 _NOTE_FIELD: Final = FreeTextField(
-    COMMITMENTS_RECORDED, "/commitments[*]/closed_note", 1, CLOSED_NOTE_MAX_CHARS
+    COMMITMENTS_RECORDED, "/updates[*]/closed_note", 1, CLOSED_NOTE_MAX_CHARS
 )
 _CLOSED_STATES: Final = frozenset({CommitmentState.DONE, CommitmentState.DROPPED})
 
@@ -586,20 +588,19 @@ class CommitmentService:
         closed_note: str | None,
     ) -> CommitmentUpdateResult:
         at = to_millisecond(self._clock.now())
-        entry: dict[str, Any] = {
+        # Solo lo que cambia: el texto, el responsable y la fecha no se copian, así que una lista
+        # de vocabulario que crezca después del alta nunca impide cerrar el compromiso.
+        update: dict[str, Any] = {
             "commitment_id": str(current.commitment_id),
-            "text": current.text,
-            "responsible_user_id": str(current.responsible_user_id),
-            "due_date": current.due_date.isoformat(),
             "state": state.value,
         }
         if closed_note is not None:
-            entry["closed_note"] = closed_note
+            update["closed_note"] = closed_note
         content: dict[str, Any] = {
             "commitment_batch_id": str(uuid7(self._clock, self._random_bytes)),
             "package_id": str(current.package_id),
             "zone_id": str(current.zone_id),
-            "commitments": [entry],
+            "updates": [update],
             "recorded_by": _actor(context),
             "recorded_at": format_timestamp(at),
         }
