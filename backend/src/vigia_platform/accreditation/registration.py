@@ -26,6 +26,7 @@ from fastapi import APIRouter
 
 from vigia_platform.accreditation.adapters.http.adoption_routes import adoption_router
 from vigia_platform.accreditation.adapters.http.export_routes import export_router
+from vigia_platform.accreditation.adapters.http.exposure_routes import exposure_router
 from vigia_platform.accreditation.adapters.http.monthly_routes import (
     MonthlyPackageReads,
     monthly_router,
@@ -71,6 +72,7 @@ from vigia_platform.accreditation.export.worker import (
     LoggingExportAlarm,
     register_export_worker,
 )
+from vigia_platform.accreditation.exposure.service import ExposureService
 from vigia_platform.accreditation.monthly.package import (
     EvidencePort,
     MissingEvidence,
@@ -121,6 +123,7 @@ __all__ = [
     "accreditation_record_types",
     "accreditation_routers",
     "accreditation_tasks",
+    "exposure_service",
 ]
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
@@ -243,8 +246,8 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
 
 
 def _register_adoption_check(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
-    """``adoption_check`` (TASK-323): diaria y por organización; las zonas activas salen de
-    ``GateQueryPort`` de U-03 y el umbral, de ``loop.config``."""
+    """``adoption_check`` (TASK-323): diaria y por organización; las zonas activas salen de la
+    proyección de compuertas de U-03 (``ProductiveZones``) y el umbral, de ``loop.config``."""
     register_adoption_check(
         registry,
         AdoptionCheck(
@@ -253,6 +256,27 @@ def _register_adoption_check(registry: PeriodicTaskRegistry, services: UnitServi
             outbox=services.outbox,
             clock=services.clock,
         ),
+    )
+
+
+def exposure_service(services: UnitServices) -> ExposureService:
+    """``ExposurePort`` (TASK-322) con los puertos de U-02 y U-03 en proceso; el paquete mensual
+    (VIG-239) lo construye igual."""
+    database = services.database
+    ports = catalog_query_ports(database)
+    return ExposureService(
+        database=database,
+        authorizer=services.authorizer,
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(
+            database=database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        settings=PostgresLoopConfigurationRepository(database),
+        clock=services.clock,
     )
 
 
@@ -295,6 +319,8 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
                     storage=evidence,
                 )
             ),
+            # TASK-322: SUP-U05-31.
+            exposure=exposure_service(services),
             # TASK-323: SUP-U05-32, la adopción por zona.
             adoption=AdoptionReads(
                 database=services.database,
@@ -310,6 +336,7 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
 ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     export_router,
     monthly_router,
+    exposure_router,
     adoption_router,  # TASK-323
 )
 """Fábricas de los enrutadores de ``/accreditation/*``."""

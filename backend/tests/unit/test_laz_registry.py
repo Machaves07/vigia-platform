@@ -40,11 +40,14 @@ from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
 )
+from vigia_platform.accreditation.adoption.reads import AdoptionReads
+from vigia_platform.accreditation.adoption.task import ADOPTION_CHECK, ADOPTION_CHECK_SCHEDULE
 from vigia_platform.accreditation.events import (
     ACCREDITATION_EVENT_TYPES,
     ACCREDITATION_INTERNAL_EVENT_TYPES,
 )
 from vigia_platform.accreditation.export.download import ExportDownloads
+from vigia_platform.accreditation.exposure.service import ExposureService
 from vigia_platform.accreditation.monthly.task import MONTHLY_PACKAGE, MONTHLY_PACKAGE_SCHEDULE
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
@@ -208,7 +211,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         elif name == "accreditation":
             # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker;
             # TASK-345: SUP-U05-40 y 23 (las descargas, con el depósito de evidencias);
-            # TASK-342 a 344: el paquete mensual, su muestra y la descarga por planta.
+            # TASK-342 a 344: el paquete mensual, su muestra y la descarga por planta;
+            # TASK-322: SUP-U05-31, el indicador de exposición; TASK-323: SUP-U05-32, la adopción.
             assert routes == [
                 ("POST", "/accreditation/exports"),
                 ("GET", "/accreditation/exports/{export_id}"),
@@ -217,11 +221,15 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/accreditation/monthly-packages"),
                 ("GET", "/accreditation/monthly-packages/{package_id}/sample"),
                 ("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download"),
+                ("GET", "/accreditation/exposure"),
+                ("GET", "/accreditation/adoption"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
             http = state[ACCREDITATION_STATE_KEY]
             assert isinstance(http, AccreditationHttp)
             assert isinstance(http.downloads, ExportDownloads)
+            assert isinstance(http.exposure, ExposureService)
+            assert isinstance(http.adoption, AdoptionReads)
             bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
             assert isinstance(bare, AccreditationHttp) and bare.downloads is None
         else:
@@ -244,10 +252,12 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # email_delivery_events_poll, ``global`` cada 15 s; TASK-348: email_grouping (cada hora) y
     # digest_weekly (diaria, filtra por ``weekly_digest_weekday`` del destinatario), por
     # organización (notifications); TASK-313: evaluate_deadlines, horaria, por organización
-    # (loop). ``tasks()`` ordena por nombre, no por orden de registro: "digest_weekly" <
+    # (loop); TASK-323: adoption_check, diaria, por organización (accreditation). ``tasks()``
+    # ordena por nombre, no por orden de registro: "adoption_check" < "digest_weekly" <
     # "email_delivery_events_poll" < "email_grouping" < "evaluate_deadlines" < "monthly_package" <
     # "review_reminders" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (ADOPTION_CHECK, ActorUnit.U04, ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (DIGEST_WEEKLY, ActorUnit.U04, DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (EMAIL_DELIVERY_EVENTS_POLL, ActorUnit.U04, POLL_SCHEDULE, TaskIteration.GLOBAL),
         (EMAIL_GROUPING, ActorUnit.U04, EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
@@ -305,9 +315,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # notification_engine, EMAIL_SENDERS (sin Consumer propio) y email_delivery_events.
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
-    assert len(accreditation_registration.TASK_REGISTRARS) == 1
+    # monthly_package (TASK-342 a 344) y adoption_check (TASK-323).
+    assert len(accreditation_registration.TASK_REGISTRARS) == 2
     assert accreditation_registration.ACCREDITATION_TASKS == {
-        MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION)
+        MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     }
     assert {
         registration.VERIFY_LOOP_PROJECTION: (
@@ -317,6 +329,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         "review_reminders": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         "evaluate_deadlines": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
         EMAIL_GROUPING: (EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         DIGEST_WEEKLY: (DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
