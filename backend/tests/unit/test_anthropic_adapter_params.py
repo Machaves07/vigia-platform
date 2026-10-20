@@ -355,6 +355,18 @@ def test_a_refusal_or_a_token_cap_never_reads_the_content(
     assert failure is not None and failure.kind is kind and failure.status_code == 200
 
 
+@pytest.mark.parametrize("stop_reason", ["pause_turn", "tool_use", "motivo_nuevo", ""])
+def test_any_other_stop_reason_never_reads_the_content_nor_drafts(
+    monkeypatch: pytest.MonkeyPatch, stop_reason: str
+) -> None:
+    body = message(stop_reason=stop_reason, content=Untouchable())
+    provider, _, _ = provider_with_parse(monkeypatch, Raw(body))
+    outcome = complete(provider)
+    assert isinstance(outcome, AssistantCompletion) and outcome.content_json is None
+    failure = completion_failure(outcome)
+    assert failure is not None and failure.kind is FailureKind.PERMANENT
+
+
 def test_a_truncated_draft_through_the_real_package_is_a_token_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
