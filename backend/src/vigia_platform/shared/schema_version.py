@@ -32,10 +32,12 @@ __all__ = [
     "read_schema_version",
 ]
 
-MINIMUM_SCHEMA_VERSION: Final = 38
-"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0038`` (la columna
+MINIMUM_SCHEMA_VERSION: Final = 39
+"""Versión mínima del esquema que exige el código de esta imagen: ``laz_0039`` (la columna
 ``loop.blocked_vocabulary_list.declared_names`` que la administración del vocabulario escribe y
-el validador de atribución lee, TASK-350), que incluye ``laz_0034`` (el tipo
+el validador de atribución lee, TASK-350), que incluye ``laz_0038`` (la marca
+``accreditation.adoption_alert`` de ``adoption_low`` que escribe ``adoption_check``, TASK-323), que
+incluye ``laz_0035`` a ``laz_0037`` y ``laz_0034`` (el tipo
 ``organization`` de ``notifications.notification.deep_link_ref`` que escribe
 ``notification_engine``, TASK-324), que incluye ``laz_0033`` (el uso por
 solicitud del asistente en ``loop.assistant_request``, la causa ``budget_exceeded`` y el borrador

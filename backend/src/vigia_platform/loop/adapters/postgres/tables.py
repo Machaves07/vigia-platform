@@ -450,7 +450,7 @@ BLOCKED_VOCABULARY_LIST: Final = Table(
     _jsonb("declared_names"),
 )
 """§2.12 ``BlockedVocabularyList`` 🔁 (solo organización, A-69): una por organización;
-``declared_names`` es de ``laz_0038`` (TASK-350)."""
+``declared_names`` es de ``laz_0039`` (TASK-350)."""
 
 BLOCKED_TERM: Final = Table(
     "blocked_term",

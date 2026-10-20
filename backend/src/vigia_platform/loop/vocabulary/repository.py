@@ -4,7 +4,7 @@
 la produjo, la tabla de flexiones con la que se plegaron los lemas y el vocabulario declarado) y
 ``loop.blocked_term`` (los términos que añadió el cliente, con la versión en que entraron y, si se
 retiraron, en la que salieron). Es la proyección de los registros ``vocabulary_list_changed``:
-solo ``INSERT`` y el ``UPDATE`` de las columnas que ``laz_0029`` y ``laz_0038`` conceden a
+solo ``INSERT`` y el ``UPDATE`` de las columnas que ``laz_0029`` y ``laz_0039`` conceden a
 ``vigia_app``; nunca ``DELETE`` (retirar un término no borra nada, BR-LAZ-85). La lista inicial
 del producto (BLM §14, ``origin = derived``) no se guarda aquí: la compila siempre el validador
 (BR-LAZ-86).

@@ -1,7 +1,7 @@
 """Vocabulario declarado en la lista de vocabulario de la organización (TASK-350; LC-LAZ-17;
 BR-LAZ-84).
 
-Revisión laz_0038, tras ``laz_0037`` (tablas de apoyo de la reconstrucción de la proyección).
+Revisión laz_0039, tras ``laz_0038`` (la marca de la alerta de adopción baja, TASK-323).
 ``loop.blocked_vocabulary_list`` gana ``declared_names``: los nombres de equipos, máquinas, normas
 y los alias de plantas y zonas que la organización declara **como parte de su lista** y que eximen
 al patrón de nombre propio de ``person_attribution`` («Prensa Schuler Kompakt»). Los nombres de
@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision: str = "laz_0038"
-down_revision: str | None = "laz_0037"
+revision: str = "laz_0039"
+down_revision: str | None = "laz_0038"
 branch_labels: None = None
 depends_on: None = None
 
