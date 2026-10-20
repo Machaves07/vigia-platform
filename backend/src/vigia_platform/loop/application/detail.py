@@ -20,13 +20,15 @@
 5. **Lo que degrada declarando** (PAT-LAZ-RES-04; nunca oculta el hallazgo):
    ``CatalogQueryPort.standard_version`` (llamada 2) da el título, el texto y su ``sha256``; sin
    él, la cita ``(standard_id, version)`` y el aviso ``standard_text_unavailable``. Si la versión
-   citada tiene ``effective_until``, el aviso ``later_standard_version`` con esa fecha: una
-   versión posterior del catálogo rige desde entonces y el hallazgo **conserva** la versión con la
-   que se evaluó (BR-LAZ-152; nunca se reevalúa). ``FleetQueryPort.nodes_by_zone`` (llamada 3)
-   da el estado de los nodos; sin él, ``node_state_unavailable``. ``CoveragePort.estado_en``
-   (U-02) da la cobertura del instante; sin ella, ``coverage_unavailable`` y la zona **nunca** se
-   presenta como observada. ``EvidencePort.url_lectura`` da la URL de cada clip (≤ 5 min,
-   auditada, BR-LAZ-08); sin almacén, la referencia del clip y ``evidence_url_unavailable``.
+   citada tiene ``effective_until``, el aviso ``later_standard_version`` con esa fecha: la versión
+   dejó de regir entonces (sustituida o retirada; ``effective_until`` no lo distingue) y el
+   hallazgo **conserva** la versión con la que se evaluó (BR-LAZ-152; nunca se reevalúa).
+   ``FleetQueryPort.nodes_by_zone`` (llamada 3) da el estado de los nodos; sin él,
+   ``node_state_unavailable``. ``CoveragePort.estado_en`` (U-02) da la cobertura del instante;
+   sin ella, ``coverage_unavailable`` y la zona **nunca** se presenta como observada.
+   ``EvidencePort.url_lectura`` da la URL de cada clip (≤ 5 min, auditada, BR-LAZ-08); un clip
+   ilegible o sin almacén deja su referencia y ``evidence_url_unavailable``, y los demás clips se
+   siguen pidiendo (solo un almacén caído corta el resto).
 
 **A lo sumo tres llamadas a U-03** por detalle (NFR-LAZ-03): ``state_at``, ``standard_version``
 y ``nodes_by_zone``, una vez cada una y nunca dentro de un bucle. La ocupación unipersonal, el
@@ -901,14 +903,17 @@ class FindingDetailService:
     ) -> tuple[dict[uuid.UUID, str], bool]:
         """La URL de cada clip; sin almacén, la referencia y el aviso (nunca oculta el hallazgo)."""
         urls: dict[uuid.UUID, str] = {}
+        tried: set[uuid.UUID] = set()
         unavailable = False
         for evidence_id in (e.evidence_id for r in records for e in r.evidences):
-            if unavailable and evidence_id not in urls:
+            if evidence_id in tried:
                 continue
+            tried.add(evidence_id)
             try:
                 grant = await self._evidence.url_lectura(context, evidence_id)
             except (EvidenceNotFound, EvidenceUnreadable):
-                unavailable = True  # este clip; los demás pueden leerse
+                # Solo este clip queda sin URL; los demás se siguen pidiendo (BR-LAZ-08).
+                unavailable = True
                 continue
             except Exception:
                 # Almacén o base caídos: no se insiste con el resto de los clips.

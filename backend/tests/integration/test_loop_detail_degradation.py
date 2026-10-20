@@ -14,6 +14,8 @@ de evidencias caído (``DetailEvidenceStore.down``):
   ``(standard_id, version)`` y la sección degradada ``standard_text_unavailable``.
 - **Almacén caído**: 200 con la referencia de cada clip (los metadatos del expediente) sin URL y
   el aviso ``evidence_url_unavailable``.
+- **Un clip ilegible** (su objeto no está) de los dos de la cámara (``start`` y ``end``): solo
+  ese queda sin URL; el otro la tiene y el aviso se declara (BR-LAZ-08).
 - **Nodos o cobertura sin respuesta**: ``node_state_unavailable`` y ``coverage_unavailable``; la
   zona nunca se presenta como observada.
 - Con **todos** los puertos opcionales caídos a la vez el hallazgo **sigue** saliendo: en ningún
@@ -52,9 +54,11 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[DetailStack]:
 def _healthy(stack: DetailStack) -> Iterator[None]:
     stack.ports.reset()
     stack.evidence_store.down = False
+    stack.evidence_store.unreadable.clear()
     yield
     stack.ports.reset()
     stack.evidence_store.down = False
+    stack.evidence_store.unreadable.clear()
 
 
 @pytest.fixture(scope="module")
@@ -181,6 +185,26 @@ def test_with_the_store_up_each_clip_has_its_read_url(
     (record,) = body["records"]
     assert record["clips"] and all(clip["read_url"] for clip in record["clips"])
     assert "evidence_url_unavailable" not in _codes(body)
+
+
+@pytest.mark.parametrize("broken", [0, 1])
+def test_one_unreadable_clip_does_not_take_the_read_url_of_the_others(
+    stack: DetailStack, coordinator: Who, broken: int
+) -> None:
+    finding = stack.received_with_two_clips()
+    clips = finding.document["cameras"][0]["clips"]
+    stack.evidence_store.unreadable.add(clips[broken]["storage_key"])
+    stack.evidence_store.presigned.clear()
+    body = _detail(stack, coordinator, finding)
+    (record,) = body["records"]
+    assert [clip["clip_id"] for clip in record["clips"]] == [clip["clip_id"] for clip in clips]
+    for index, clip in enumerate(record["clips"]):
+        assert (clip["read_url"] is None) is (index == broken), (index, clip)
+    # BR-LAZ-08: una URL por cada clip legible; el ilegible no corta los demás.
+    assert sorted(stack.evidence_store.presigned) == sorted(
+        clip["storage_key"] for index, clip in enumerate(clips) if index != broken
+    )
+    assert _codes(body) == ["evidence_url_unavailable"]
 
 
 def test_without_nodes_or_coverage_the_sections_are_declared_never_observed(

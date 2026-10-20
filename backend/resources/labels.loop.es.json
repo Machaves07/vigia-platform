@@ -151,7 +151,7 @@
     "walk_test_regression_pending": "acta no vigente",
     "evidence_flagged": "la verificación diferida de esta evidencia no pasó; el hallazgo se conserva y se declara",
     "missing_segments_declared": "faltan tramos de este episodio",
-    "later_standard_version": "este hallazgo se evaluó con la versión citada; hay una versión posterior vigente desde la fecha indicada",
+    "later_standard_version": "este hallazgo se evaluó con la versión citada; esa versión dejó de regir en la fecha indicada",
     "standard_text_unavailable": "texto del estándar no disponible ahora; se muestra la cita del estándar",
     "coverage_unavailable": "cobertura del instante no disponible; la zona no se presenta como observada",
     "node_state_unavailable": "estado del nodo no disponible ahora",

@@ -18,8 +18,9 @@ clasificación y el detalle.
 - ``detail`` y ``history``: las dos peticiones; ``audit_reads``: las entradas de auditoría de
   lectura del expediente; ``record``: un registro como superusuario.
 
-``DetailEvidenceStore`` es el almacén de evidencias de la ingesta con ``presign_get`` y ``down``
-(el almacén caído: ``StorageUnavailable``).
+``DetailEvidenceStore`` es el almacén de evidencias de la ingesta con ``presign_get``, ``down``
+(el almacén caído: ``StorageUnavailable``) y ``unreadable`` (claves cuyo objeto no está: ese clip
+es ilegible, ``EvidenceUnreadable``). ``received_with_two_clips`` ingresa un hallazgo con dos.
 
 Solo datos generados. Las marcas salen del reloj simulado, que arranca en la hora de la base
 (retro 14). Topes de las esperas de la base: 60 s (retro 15).
@@ -43,6 +44,7 @@ from tests.api_support import World
 from tests.fleet_ingest_support import EvidenceStore
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import (
+    IngestedSubject,
     InstrumentedPorts,
     LoopOrganization,
     PortUnavailable,
@@ -59,6 +61,7 @@ from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_p
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
 from vigia_platform.fleet.application.inventory_read import FleetInventory
+from vigia_platform.fleet.domain.ingest_order import IngestKind
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
 from vigia_platform.ledger.application.coverage import CoverageService
@@ -73,6 +76,7 @@ from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
+from vigia_platform.shared.signing.keys import format_timestamp
 from vigia_platform.shared.storage import (
     PRESIGN_GET_MAX_TTL,
     ObjectHead,
@@ -166,11 +170,15 @@ class DetailEvidenceStore:
     store: EvidenceStore
     clock: Clock
     down: bool = False
+    unreadable: set[str] = field(default_factory=set)
+    """Claves cuyo objeto no está (``head_object`` → ``None``): ese clip queda ilegible."""
     presigned: list[str] = field(default_factory=list)
 
     async def head_object(self, key: str) -> ObjectHead | None:
         if self.down:
             raise StorageUnavailable("head_object")
+        if key in self.unreadable:
+            return None
         return await self.store.head_object(key)
 
     async def presign_get(
@@ -243,6 +251,33 @@ class DetailStack(ClassificationStack):
         self.declare_standard(organization, version=1, catalog_version=1, retired_in=2)
         self.declare_standard(organization, version=2, catalog_version=2, text=LATER_TEXT)
         return issued_at
+
+    def received_with_two_clips(self) -> IngestedSubject:
+        """Un hallazgo de la organización A con dos clips de la cámara de origen (``start`` y
+        ``end``, la forma de dos clips de BR-CTR-39 partiendo el clip ``full`` por la mitad), los
+        dos en el almacén y con su concesión, ingresado y proyectado (``received``)."""
+        organization = self.world.a
+        site = organization.site
+        ingest = self.world.stack
+        document = ingest.finding(site)
+        first = document["cameras"][0]["clips"][0]
+        starts_at = datetime.fromisoformat(first["starts_at"])
+        ends_at = datetime.fromisoformat(first["ends_at"])
+        middle = starts_at + (ends_at - starts_at) / 2
+        second = ingest._clip(site, site.zone_id, starts_at, ends_at)
+        for clip, segment, start, end in (
+            (first, "start", starts_at, middle),
+            (second, "end", middle, ends_at),
+        ):
+            clip["segment"] = segment
+            clip["starts_at"] = format_timestamp(start)
+            clip["ends_at"] = format_timestamp(end)
+            clip["duration_ms"] = int((end - start).total_seconds() * 1000)
+        ingest._prepare_clip(site, second, store=True, grant=True)
+        document["cameras"][0]["clips"].append(second)
+        finding = self.world._ingest(organization, IngestKind.FINDING, document)
+        assert self.world.project(finding).transition_id == "T01"
+        return finding
 
     def occupancy(self, finding_state_id: uuid.UUID, single: bool, window: int = 60) -> None:
         """La marca unipersonal de la fila del hallazgo (como superusuario). Sin respuesta de

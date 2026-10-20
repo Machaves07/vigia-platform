@@ -323,13 +323,14 @@ class FindingDetailNotice(enum.StrEnum):
     EVIDENCE_FLAGGED = "evidence_flagged"
     MISSING_SEGMENTS_DECLARED = "missing_segments_declared"
     LATER_STANDARD_VERSION = "later_standard_version"
-    """BR-LAZ-152: se evaluó con la versión citada; rige una posterior desde ``since``."""
+    """BR-LAZ-152: se evaluó con la versión citada, que dejó de regir en ``since`` (sustituida o
+    retirada: ``effective_until`` no distingue los dos casos)."""
     STANDARD_TEXT_UNAVAILABLE = "standard_text_unavailable"
     """Sin el texto del estándar: se muestra la cita ``(standard_id, version)``."""
     COVERAGE_UNAVAILABLE = "coverage_unavailable"
     NODE_STATE_UNAVAILABLE = "node_state_unavailable"
     EVIDENCE_URL_UNAVAILABLE = "evidence_url_unavailable"
-    """Sin URL de lectura (almacén caído): se muestra la referencia del clip."""
+    """Sin URL de lectura (almacén caído o clip ilegible): se muestra la referencia del clip."""
     SEGMENT_RECORDS_LIMITED = "segment_records_limited"
 
 
