@@ -288,6 +288,9 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
     # El arrendamiento de la reconstrucción (laz_0037, TASK-306): dos columnas más, aditivas
     # sobre lo que laz_0029 ya dejaba actualizable en loop_projection_checkpoint.
     expected["loop_projection_checkpoint"] |= {"rebuild_owner", "rebuild_lease_until"}
+    # El vocabulario declarado de la lista (laz_0039, TASK-350): una columna más, aditiva sobre
+    # lo que laz_0029 ya dejaba actualizable en blocked_vocabulary_list.
+    expected["blocked_vocabulary_list"] |= {"declared_names"}
     # Las dos tablas sombra de laz_0037 (TASK-306): UPDATE acotado a las columnas de negocio, no
     # a la clave, la organización, la planta ni la zona (igual invariante que las de laz_0029).
     for table, core in (

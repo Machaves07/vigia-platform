@@ -110,6 +110,17 @@ BODIES: dict[str, dict[str, Any]] = {
         "conclusion": "Separar físicamente los flujos con un resguardo fijo en el acceso",
     },
     "/loop/root-cause-analyses/{analysis_id}/assistant-requests": {},
+    "/loop/vocabulary/changes": {
+        "added": [
+            {
+                "category": "absence_claim",
+                "form": "lemma",
+                "value": "pasillo",
+                "suggestion_es": "Describa lo observado en la zona",
+            }
+        ],
+        "reason": "Ajuste acordado en el comité de seguridad",
+    },
     "/loop/findings/{finding_state_id}/unclosable": {
         "evaluated_alternative": "Reubicar la estación de carga al costado norte de la zona",
         "rejection_reason": "La reubicación deja el pasillo peatonal sin salida de emergencia",
@@ -227,6 +238,8 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
         # Solicitud al asistente de causa raíz de U-04 (TASK-316).
         ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
+        # Cambio de la lista de vocabulario de U-04 (TASK-350).
+        ("POST", "/loop/vocabulary/changes"),
         # Declaración del incerrable y su revisión de U-04 (TASK-312).
         ("POST", "/loop/findings/{finding_state_id}/unclosable"),
         ("POST", "/loop/unclosable/{declaration_id}/reviews"),

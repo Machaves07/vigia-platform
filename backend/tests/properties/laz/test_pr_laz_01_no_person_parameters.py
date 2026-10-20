@@ -151,6 +151,17 @@ SIGNER_FIELDS: Final = frozenset(
         # La declaración de privacidad de un adjunto de evidencia (VIG-223, TASK-310): afirma que
         # **ninguna** persona identificable aparece; es la guarda de P3, no un dato de persona.
         ("POST", "/loop/actions/{action_id}/evidence", "body", "no_identifiable_person_declared"),
+        # El vocabulario declarado de la organización (VIG-220, TASK-350, BLM §14.5): nombres de
+        # plantas, zonas, equipos, máquinas y normas (``kind`` cerrado, sin persona), que eximen
+        # al patrón de nombre propio del validador de atribución (no el de una persona: lo exige
+        # el uso, y cada nombre queda en el expediente con su motivo; ver DeclaredNameKind).
+        ("GET", "/loop/vocabulary", "response", "declared_names"),
+        ("POST", "/loop/vocabulary/changes", "body", "declared_names_added"),
+        ("POST", "/loop/vocabulary/changes", "body", "declared_names_removed"),
+        ("POST", "/loop/vocabulary/changes", "response", "declared_names_added"),
+        ("POST", "/loop/vocabulary/changes", "response", "declared_names_removed"),
+        ("GET", "/loop/vocabulary", "response", "name_id"),
+        ("POST", "/loop/vocabulary/changes", "response", "name_id"),
         # El hash del **documento de la política** de la planta (VIG-228, TASK-312; DE §2.7
         # ``policy_document_sha256``): el «documento» es el texto del abogado que la planta firmó,
         # no un documento de identidad de una persona observada.

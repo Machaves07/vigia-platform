@@ -26,6 +26,10 @@ término bloqueado (``/added[*]/value`` y ``/removed[*]/value`` de ``vocabulary_
 valida solo con el esquema estricto y la política base de U-02, nunca con el validador de
 vocabulario, que rechazaría el término que se quiere prohibir.
 
+La versión 2 de ``vocabulary_list_changed`` (TASK-350) añade los nombres del vocabulario
+declarado (``VOCABULARY_LIST_CHANGED_V2_NAME_PATHS``): pasan los dos validadores, como un nombre de
+zona, y no son exentas.
+
 **Etiquetas** (§5.3): solo ``classification`` y ``review_resolution`` proyectan una ``Label`` de
 U-02, con ``subject_record_id`` en ``/anchor_record_id`` y el firmante en ``/signer`` y
 ``/resolved_by``; una etiqueta nunca lleva texto libre.
@@ -58,6 +62,7 @@ from vigia_platform.loop.domain.enums import (
     BlockedTermForm,
     CauseCategory,
     ClassificationOutcome,
+    DeclaredNameKind,
     EffectOnLoop,
     EscalationLevel,
     EvidenceRefKind,
@@ -76,6 +81,7 @@ __all__ = [
     "NARRATIVE_FREE_TEXT_PATHS",
     "SNAPSHOT_TEXT_PATHS",
     "VALIDATOR_EXEMPT_PATHS",
+    "VOCABULARY_LIST_CHANGED_V2_NAME_PATHS",
     "BusinessCalendar",
     "CalendarDate",
     "DisplayName",
@@ -156,6 +162,9 @@ TermValue = Annotated[StrictStr, Field(min_length=1, max_length=256)]
 """Término bloqueado: hasta 64 caracteres un lema y 256 un patrón (§2.12)."""
 TermSuggestion = Annotated[StrictStr, Field(min_length=1, max_length=200)]
 """Alternativa que se propone al autor (§2.12)."""
+DeclaredNameValue = Annotated[StrictStr, Field(min_length=2, max_length=120)]
+"""Nombre del vocabulario declarado: una planta, una zona, un equipo, una máquina o una norma
+(TASK-350), con el mismo tope que el nombre de una zona `[estimación propia]`."""
 
 ModelIdentifier = Annotated[
     StrictStr, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -529,6 +538,29 @@ class VocabularyListChanged(ContentModel):
     changed_at: Timestamp
 
 
+class AddedDeclaredName(ContentModel):
+    name_id: UUIDv7
+    kind: DeclaredNameKind
+    value: DeclaredNameValue
+
+
+class RemovedDeclaredName(ContentModel):
+    name_id: UUIDv7
+    value: DeclaredNameValue
+
+
+class VocabularyListChangedV2(VocabularyListChanged):
+    """Versión 2 (TASK-350): además, los nombres del vocabulario declarado que se añaden y se
+    retiran (BR-LAZ-84). Solo amplía la 1: los dos campos nuevos son opcionales."""
+
+    declared_names_added: Annotated[
+        tuple[AddedDeclaredName, ...], Field(max_length=MAX_TERMS_PER_CHANGE)
+    ] = ()
+    declared_names_removed: Annotated[
+        tuple[RemovedDeclaredName, ...], Field(max_length=MAX_TERMS_PER_CHANGE)
+    ] = ()
+
+
 class BusinessCalendar(ContentModel):
     """Calendario laboral declarado por la planta (§2.13, ``[hipótesis]``)."""
 
@@ -649,6 +681,15 @@ VALIDATOR_EXEMPT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
 }
 """Exclusión declarada de los validadores de U-04 (§2.12, BR-LAZ-64): solo la política base."""
 
+VOCABULARY_LIST_CHANGED_V2_NAME_PATHS: Final[tuple[str, ...]] = (
+    "/declared_names_added[*]/value",
+    "/declared_names_removed[*]/value",
+)
+"""Las cadenas que añade la versión 2 de ``vocabulary_list_changed`` (TASK-350): nombres de
+plantas, zonas, equipos, máquinas o normas. Pasan la política base y **los dos validadores**,
+como un nombre de zona: ``person_attribution`` las trata como campos de nombre (sin el patrón de
+nombre propio, ``attribution.field_kind``), el resto de patrones sí; no son exentas."""
+
 _PLANT: Final = ChainLevel.PLANT
 _ORGANIZATION: Final = ChainLevel.ORGANIZATION
 
@@ -676,15 +717,21 @@ def _u04(
     *,
     chain_level: ChainLevel = _PLANT,
     label_rule: LabelRule | None = None,
+    schema_version: int = 1,
+    extra_free_text_paths: tuple[str, ...] = (),
 ) -> RecordType:
     return RecordType(
         record_type=name,
         writer_unit=ActorUnit.U04,
         chain_level=chain_level,
-        schema_version=1,
+        schema_version=schema_version,
         content_model=model,
         source_key_path=source_key_path,
-        free_text_paths=(*NARRATIVE_FREE_TEXT_PATHS[name], *SNAPSHOT_TEXT_PATHS[name]),
+        free_text_paths=(
+            *NARRATIVE_FREE_TEXT_PATHS[name],
+            *SNAPSHOT_TEXT_PATHS[name],
+            *extra_free_text_paths,
+        ),
         label_rule=label_rule,
         outbox_events=outbox_events,
     )
@@ -739,6 +786,15 @@ LOOP_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         chain_level=_ORGANIZATION,
     ),
     _u04(
+        "vocabulary_list_changed",
+        VocabularyListChangedV2,
+        "/change_id",
+        ("vocabulary_list_changed",),
+        chain_level=_ORGANIZATION,
+        schema_version=2,
+        extra_free_text_paths=VOCABULARY_LIST_CHANGED_V2_NAME_PATHS,
+    ),
+    _u04(
         "action_overdue",
         ActionOverdue,
         "/overdue_id",
@@ -754,10 +810,11 @@ LOOP_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         ("late_segment_attached",),
     ),
 )
-"""Los trece tipos del lazo, en el orden de §5.1."""
+"""Los trece tipos del lazo, en el orden de §5.1, cada uno con todas sus versiones en orden: todos
+en la 1 y ``vocabulary_list_changed`` también en la 2 (TASK-350)."""
 
 
 def register_loop_record_types(registry: RecordTypeRegistry) -> None:
-    """Registra los trece tipos del lazo al arrancar."""
+    """Registra los trece tipos del lazo (con todas sus versiones) al arrancar."""
     for definition in LOOP_RECORD_TYPES:
         registry.register(definition)

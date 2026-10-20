@@ -26,12 +26,14 @@ Sin red y sin base: las lecturas las hace el ``VocabularyStore`` con el lector d
 escritura (``FreeTextPreparation.rows``); el reloj es el del escritor.
 
 ``DeclaredNamesCache`` (TASK-340) guarda igual, por organización, el **vocabulario declarado** que
-exime al patrón de nombre propio de ``person_attribution`` (los nombres de sus plantas y zonas;
-TASK-350 añadirá equipos y máquinas): ``refresh`` es el preparador de ese validador, que relee los
-nombres al abrir una escritura si la entrada tiene más de ``TTL_SECONDS``; ``names_for`` es lo que
-usa el validador, solo memoria. Sin entrada se valida sin vocabulario declarado
-(``NO_DECLARED_NAMES``), lo más estricto. Un nombre nuevo tarda como mucho ``TTL_SECONDS`` en
-eximir: hasta entonces un texto que lo cite se rechaza (fallo cerrado), nunca al revés.
+exime al patrón de nombre propio de ``person_attribution`` (los nombres de sus plantas y zonas y
+los que la organización declara en su lista, TASK-350: equipos, máquinas, normas y alias):
+``refresh`` es el preparador de ese validador, que relee los nombres al abrir una escritura si la
+entrada tiene más de ``TTL_SECONDS`` o, con ``versions``, si la versión de la lista cambió;
+``names_for`` es lo que usa el validador, solo memoria. Sin entrada se valida sin vocabulario
+declarado (``NO_DECLARED_NAMES``), lo más estricto. Un nombre nuevo de la jerarquía tarda como
+mucho ``TTL_SECONDS`` en eximir, y uno de la lista, hasta la siguiente escritura: hasta entonces un
+texto que lo cite se rechaza (fallo cerrado), nunca al revés.
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ from vigia_platform.loop.validators.attribution import (
     DeclaredNames,
     declared_names,
 )
+from vigia_platform.loop.validators.initial_list import INITIAL_LIST_VERSION
 from vigia_platform.loop.validators.vocabulary import (
     CompiledVocabulary,
     VocabularyCompileError,
@@ -175,16 +178,33 @@ class DeclaredNamesStore(Protocol):
 class _NamesEntry:
     names: DeclaredNames
     loaded_at: float
+    list_version: int = INITIAL_LIST_VERSION
+    """La versión de la lista de vocabulario con la que se leyeron (TASK-350)."""
 
 
 class DeclaredNamesCache:
-    """Vocabulario declarado por organización, en memoria del proceso (``person_attribution``)."""
+    """Vocabulario declarado por organización, en memoria del proceso (``person_attribution``).
 
-    def __init__(self, store: DeclaredNamesStore, *, ttl_seconds: float = TTL_SECONDS) -> None:
+    Con ``versions`` (el ``VocabularyStore`` de la lista, TASK-350), ``refresh`` comprueba además
+    la versión de la lista al abrir la escritura, con la misma lectura de una fila que
+    ``VocabularyCache``: los nombres que la organización declara son parte de la lista, así que un
+    cambio se aplica en la siguiente escritura de cualquier proceso, sin esperar a ``TTL_SECONDS``.
+    Como en la lista, una comprobación que leyó una versión más vieja nunca sustituye a una entrada
+    más nueva.
+    """
+
+    def __init__(
+        self,
+        store: DeclaredNamesStore,
+        *,
+        ttl_seconds: float = TTL_SECONDS,
+        versions: VocabularyStore | None = None,
+    ) -> None:
         if not ttl_seconds > 0:
             raise ValueError("ttl_seconds debe ser positivo")
         self._store = store
         self._ttl = ttl_seconds
+        self._versions = versions
         self._entries: dict[uuid.UUID, _NamesEntry] = {}
 
     def names_for(self, organization_id: uuid.UUID | None) -> DeclaredNames:
@@ -197,13 +217,25 @@ class DeclaredNamesCache:
         self._entries.pop(organization_id, None)
 
     async def refresh(self, preparation: FreeTextPreparation) -> None:
-        """Relee los nombres al abrir la escritura si la entrada caducó (el preparador)."""
+        """Relee los nombres al abrir la escritura si la entrada caducó o la versión de la lista
+        cambió (el preparador)."""
         organization = preparation.organization_id
         now = preparation.clock.monotonic()
+        version = await self._list_version(preparation)
         entry = self._entries.get(organization)
-        if entry is not None and now - entry.loaded_at < self._ttl:
+        if (
+            entry is not None
+            and entry.list_version == version
+            and now - entry.loaded_at < self._ttl
+        ):
             return
         names = declared_names(await self._store.names(organization, preparation.rows))
         current = self._entries.get(organization)
-        if current is None or now >= current.loaded_at:
-            self._entries[organization] = _NamesEntry(names, now)
+        if current is None or (version, now) >= (current.list_version, current.loaded_at):
+            self._entries[organization] = _NamesEntry(names, now, version)
+
+    async def _list_version(self, preparation: FreeTextPreparation) -> int:
+        if self._versions is None:
+            return INITIAL_LIST_VERSION
+        head = await self._versions.head(preparation.organization_id, preparation.rows)
+        return INITIAL_LIST_VERSION if head is None else head.version

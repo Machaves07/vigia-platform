@@ -4709,6 +4709,50 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/vocabulary":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Lista de vocabulario bloqueado y vocabulario declarado de la organización"
+      "operationId": "vocabulary_loop_vocabulary_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/VocabularyOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/vocabulary/changes":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Cambia la lista de vocabulario con motivo (versión nueva, registrada)"
+      "operationId": "change_vocabulary_loop_vocabulary_changes_post"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/VocabularyChangeBody"
+        "required": true
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/VocabularyChangeOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/unclosable":
     "post":
       "tags":
@@ -8437,6 +8481,43 @@
         - "role"
       "title": "DeclaredBy"
       "description": "Firmante responsable de un estándar: usuario de la plataforma, no persona observada. `display_name` es uno de los textos libres admitidos por BR-CTR-13; `role` es un identificador técnico (código de rol de la plataforma) para cumplir la metapropiedad de BR-CTR-13."
+    "DeclaredNameBody":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "value":
+          "type": "string"
+          "title": "Value"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "value"
+      "title": "DeclaredNameBody"
+      "description": "Un nombre que se declara: exime al patrón de nombre propio del validador de atribución."
+    "DeclaredNameOut":
+      "properties":
+        "name_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Name Id"
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "added_in_version":
+          "type": "integer"
+          "title": "Added In Version"
+      "type": "object"
+      "required":
+        - "name_id"
+        - "kind"
+        - "value"
+        - "added_in_version"
+      "title": "DeclaredNameOut"
     "DeclaredNodeView":
       "properties":
         "node_id":
@@ -15015,6 +15096,69 @@
       "minLength": 1
       "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
       "title": "TechnicalId"
+    "TermBody":
+      "properties":
+        "category":
+          "type": "string"
+          "title": "Category"
+        "form":
+          "type": "string"
+          "title": "Form"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "suggestion_es":
+          "type": "string"
+          "title": "Suggestion Es"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "category"
+        - "form"
+        - "value"
+        - "suggestion_es"
+      "title": "TermBody"
+      "description": "Un término que se añade."
+    "TermOut":
+      "properties":
+        "term_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Term Id"
+        "category":
+          "type": "string"
+          "title": "Category"
+        "form":
+          "type": "string"
+          "title": "Form"
+        "value":
+          "type": "string"
+          "title": "Value"
+        "lemma":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Lemma"
+        "suggestion_es":
+          "type": "string"
+          "title": "Suggestion Es"
+        "origin":
+          "type": "string"
+          "title": "Origin"
+        "added_in_version":
+          "type": "integer"
+          "title": "Added In Version"
+      "type": "object"
+      "required":
+        - "term_id"
+        - "category"
+        - "form"
+        - "value"
+        - "lemma"
+        - "suggestion_es"
+        - "origin"
+        - "added_in_version"
+      "title": "TermOut"
     "ThresholdValues":
       "properties":
         "review":
@@ -15624,6 +15768,134 @@
         - "kind"
       "title": "VerifyRequest"
       "description": "La cadena a verificar: ``ledger`` con ``plant_id`` (planta) o sin él (organización), o\n``audit`` (sin planta). Sin campos de más; ``plant_id`` es un UUID en texto."
+    "VocabularyChangeBody":
+      "properties":
+        "added":
+          "items":
+            "$ref": "#/components/schemas/TermBody"
+          "type": "array"
+          "maxItems": 200
+          "title": "Added"
+          "default": []
+        "removed":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 200
+          "title": "Removed"
+          "default": []
+        "declared_names_added":
+          "items":
+            "$ref": "#/components/schemas/DeclaredNameBody"
+          "type": "array"
+          "maxItems": 200
+          "title": "Declared Names Added"
+          "default": []
+        "declared_names_removed":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "maxItems": 200
+          "title": "Declared Names Removed"
+          "default": []
+        "reason":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason"
+      "additionalProperties": false
+      "type": "object"
+      "title": "VocabularyChangeBody"
+      "description": "Lo que se añade y se retira, y el motivo (obligatorio)."
+    "VocabularyChangeOut":
+      "properties":
+        "change_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Change Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "list_version":
+          "type": "integer"
+          "title": "List Version"
+        "changed_at":
+          "type": "string"
+          "title": "Changed At"
+        "added":
+          "items":
+            "$ref": "#/components/schemas/TermOut"
+          "type": "array"
+          "title": "Added"
+        "removed":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Removed"
+        "declared_names_added":
+          "items":
+            "$ref": "#/components/schemas/DeclaredNameOut"
+          "type": "array"
+          "title": "Declared Names Added"
+        "declared_names_removed":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Declared Names Removed"
+      "type": "object"
+      "required":
+        - "change_id"
+        - "record_id"
+        - "list_version"
+        - "changed_at"
+        - "added"
+        - "removed"
+        - "declared_names_added"
+        - "declared_names_removed"
+      "title": "VocabularyChangeOut"
+    "VocabularyOut":
+      "properties":
+        "list_version":
+          "type": "integer"
+          "title": "List Version"
+        "lemmatizer_version":
+          "type": "string"
+          "title": "Lemmatizer Version"
+        "effective_from":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Effective From"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+        "terms":
+          "items":
+            "$ref": "#/components/schemas/TermOut"
+          "type": "array"
+          "title": "Terms"
+        "declared_names":
+          "items":
+            "$ref": "#/components/schemas/DeclaredNameOut"
+          "type": "array"
+          "title": "Declared Names"
+      "type": "object"
+      "required":
+        - "list_version"
+        - "lemmatizer_version"
+        - "effective_from"
+        - "record_id"
+        - "terms"
+        - "declared_names"
+      "title": "VocabularyOut"
     "VolumeDownloadView":
       "properties":
         "volume":
