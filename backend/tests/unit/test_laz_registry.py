@@ -6,13 +6,14 @@
   trabajo interno ``export_requested`` de TASK-317) coinciden con lo que registra el código;
   ``U04_TASKS`` con ``verify_loop_projection`` (TASK-306, diaria por organización;
   ``rebuild_loop_projection`` corre a demanda, sin cadencia, U04-H-14, y no entra aquí),
-  ``review_reminders`` (TASK-309) y ``monthly_package`` (TASK-342 a 344), ``U04_CONSUMERS`` con
-  ``export_worker``, ``review_queue`` y ``notification_engine`` (TASK-324); en ``ROUTERS``, las
-  dos rutas de adjuntos de cierre (TASK-310), las dos de la configuración del lazo (TASK-304), la
-  de la clasificación (TASK-308), las dos de la cola de revisión (TASK-309),
-  las de la acción y su evidencia (TASK-311) y las del cierre firmado y la reapertura (TASK-343,
-  VIG-233) de ``loop``, las dos de exportación y las tres del paquete mensual de
-  ``accreditation`` (TASK-317 y TASK-342 a 344) y ``GET /notifications`` (TASK-324).
+  ``review_reminders`` (TASK-309), ``monthly_package`` (TASK-342 a 344) y ``email_grouping`` y
+  ``digest_weekly`` (TASK-348), ``U04_CONSUMERS`` con ``export_worker``, ``review_queue`` y
+  ``notification_engine`` (TASK-324); en ``ROUTERS``, las dos rutas de adjuntos de cierre
+  (TASK-310), las dos de la configuración del lazo (TASK-304), la de la clasificación (TASK-308),
+  las dos de la cola de revisión (TASK-309), las de la acción y su evidencia (TASK-311) y las del
+  cierre firmado y la reapertura (TASK-343, VIG-233) de ``loop``, las dos de exportación y las
+  tres del paquete mensual de ``accreditation`` (TASK-317 y TASK-342 a 344) y las cuatro de
+  ``notifications`` (lista, marcar leída y preferencias; TASK-324 y TASK-348).
 - **La raíz real** compone los 17 tipos y los 25 eventos de U-04 además de los de U-02 y U-03, y
   ``missing_u04_registrations`` no encuentra nada que falte.
 - **Fallo cerrado**: sin un tipo, un evento, una tarea o un consumidor del manifiesto (o con la
@@ -78,7 +79,9 @@ from vigia_platform.notifications.adapters.ses.delivery_events import (
     POLL_SCHEDULE,
 )
 from vigia_platform.notifications.catalog import subscribed_events
+from vigia_platform.notifications.digest import DIGEST_WEEKLY, DIGEST_WEEKLY_SCHEDULE
 from vigia_platform.notifications.events import NOTIFICATIONS_EVENT_TYPES
+from vigia_platform.notifications.grouping import EMAIL_GROUPING, EMAIL_GROUPING_SCHEDULE
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.observability.metrics import get_metrics
 from vigia_platform.shared.outbox.registries import (
@@ -222,8 +225,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
             assert isinstance(bare, AccreditationHttp) and bare.downloads is None
         else:
-            # TASK-324: SUP-U05-33 en su forma mínima, su app.state y notification_engine.
-            assert routes == [("GET", "/notifications")]
+            # TASK-324: SUP-U05-33 en su forma mínima; TASK-348: SUP-U05-33 completa (marcar
+            # leída y preferencias), su app.state y notification_engine.
+            assert routes == [
+                ("GET", "/notifications"),
+                ("POST", "/notifications/{notification_id}/read"),
+                ("PUT", "/notifications/preferences"),
+                ("GET", "/notifications/preferences"),
+            ]
             assert set(state) == {NOTIFICATIONS_STATE_KEY}
             assert isinstance(state[NOTIFICATIONS_STATE_KEY], NotificationsHttp)
         unit.periodic_tasks(tasks, services)
@@ -232,12 +241,16 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     # corre a demanda y no entra aquí (sin cadencia que vigilar, U04-H-14).
     # TASK-342 a 344: monthly_package, mensual, por organización (accreditation);
     # TASK-309: review_reminders, horaria, por organización (loop); TASK-325:
-    # email_delivery_events_poll, ``global`` cada 15 s (notifications); TASK-313:
-    # evaluate_deadlines, horaria, por organización (loop). ``tasks()`` ordena por nombre, no por
-    # orden de registro: "email_delivery_events_poll" < "evaluate_deadlines" < "monthly_package" <
+    # email_delivery_events_poll, ``global`` cada 15 s; TASK-348: email_grouping (cada hora) y
+    # digest_weekly (diaria, filtra por ``weekly_digest_weekday`` del destinatario), por
+    # organización (notifications); TASK-313: evaluate_deadlines, horaria, por organización
+    # (loop). ``tasks()`` ordena por nombre, no por orden de registro: "digest_weekly" <
+    # "email_delivery_events_poll" < "email_grouping" < "evaluate_deadlines" < "monthly_package" <
     # "review_reminders" < "verify_loop_projection".
     assert [(t.task_name, t.unit, t.schedule, t.iteration) for t in tasks.tasks()] == [
+        (DIGEST_WEEKLY, ActorUnit.U04, DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (EMAIL_DELIVERY_EVENTS_POLL, ActorUnit.U04, POLL_SCHEDULE, TaskIteration.GLOBAL),
+        (EMAIL_GROUPING, ActorUnit.U04, EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (
             "evaluate_deadlines",
             ActorUnit.U04,
@@ -284,7 +297,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         overdue_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
-    assert len(notifications_registration.TASK_REGISTRARS) == 1  # email_delivery_events_poll
+    # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).
+    assert len(notifications_registration.TASK_REGISTRARS) == 3
     # TASK-306, TASK-309 y TASK-313: verify_loop_projection, review_reminders y
     # evaluate_deadlines.
     assert len(registration.TASK_REGISTRARS) == 3
@@ -304,6 +318,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         "evaluate_deadlines": (Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         EMAIL_DELIVERY_EVENTS_POLL: (POLL_SCHEDULE, TaskIteration.GLOBAL),
+        EMAIL_GROUPING: (EMAIL_GROUPING_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+        DIGEST_WEEKLY: (DIGEST_WEEKLY_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     } == registration.U04_TASKS
     assert registration.U04_CONSUMERS == {
         "export_worker": 1,

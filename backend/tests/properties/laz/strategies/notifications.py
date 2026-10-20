@@ -37,11 +37,13 @@ __all__ = [
     "Hierarchy",
     "Place",
     "Placed",
+    "PreferenceDraft",
     "expected_recipients",
     "hierarchies",
     "hostile_payload",
     "notification_event_sequences",
     "payload_for",
+    "preference_sets",
 ]
 
 CLIENT_ROLES: Final = (
@@ -377,3 +379,35 @@ def hostile_payload(event_name: str, text: str, ids: Mapping[str, str]) -> dict[
         "days_overdue": 3,
         "due_at": "2026-10-01T00:00:00.000Z",
     }
+
+
+@dataclass(frozen=True)
+class PreferenceDraft:
+    """Una ``UserNotificationPreference`` generada (TASK-348; BR-LAZ-126): nunca hay campo para
+    silenciar ``immediate``, así que esta forma no lo declara."""
+
+    email_enabled_normal: bool
+    email_enabled_digest: bool
+    weekly_digest_weekday: int
+
+
+@st.composite
+def preference_sets(
+    draw: st.DrawFn, *, min_size: int = 0, max_size: int = 6
+) -> tuple[PreferenceDraft, ...]:
+    """Preferencias de correo generadas (TASK-348, PR-LAZ-42): cada combinación de
+    ``email_enabled_normal``/``email_enabled_digest`` con un día de resumen semanal entre 1 y 7."""
+    return tuple(
+        draw(
+            st.lists(
+                st.builds(
+                    PreferenceDraft,
+                    email_enabled_normal=st.booleans(),
+                    email_enabled_digest=st.booleans(),
+                    weekly_digest_weekday=st.integers(1, 7),
+                ),
+                min_size=min_size,
+                max_size=max_size,
+            )
+        )
+    )

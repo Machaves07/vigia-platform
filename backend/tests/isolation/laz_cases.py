@@ -62,6 +62,7 @@ from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
     NotificationsHttp,
 )
+from vigia_platform.notifications.preferences import NotificationPreferences
 from vigia_platform.notifications.reader import NotificationReader
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext
@@ -245,8 +246,15 @@ def _notifications(services: LazServices) -> Mapping[str, object]:
             reader=NotificationReader(
                 database=services.database,  # type: ignore[arg-type]
                 authorizer=services.authorizer,
+                clock=services.clock,
                 provider_organization_id=provider,
-            )
+            ),
+            preferences=NotificationPreferences(
+                database=services.database,  # type: ignore[arg-type]
+                clock=services.clock,
+                authorizer=services.authorizer,
+                provider_organization_id=provider,
+            ),
         )
     }
 
@@ -516,6 +524,34 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     # VIG-217 (TASK-324): la lista propia (SUP-U05-33, forma mínima) nunca muestra un aviso de B
     # ni de otro usuario; ``notifications.read`` la tienen los siete roles (lista propia, OWN).
     (("GET", "/notifications"), Case(Kind.OWN, lambda i: Call("GET", "/notifications"))),
+    # TASK-348 (SUP-U05-34, PR-LAZ-61): marcar leído un aviso ajeno o inexistente responde
+    # ``not_found`` y no deja efecto (lista propia, OWN; sin identificador real de B que probar
+    # aquí, el caso de ``not_found`` sobre un aviso real de otro usuario está en
+    # ``tests/properties/laz/test_pr_laz_61_preference_ownership.py``).
+    (
+        ("POST", "/notifications/{notification_id}/read"),
+        Case(Kind.OWN, lambda i: Call("POST", f"/notifications/{i.record}/read")),
+    ),
+    # TASK-348 (SUP-U05-35, PR-LAZ-61): las preferencias son siempre las del propio actor.
+    (
+        ("GET", "/notifications/preferences"),
+        Case(Kind.OWN, lambda i: Call("GET", "/notifications/preferences")),
+    ),
+    (
+        ("PUT", "/notifications/preferences"),
+        Case(
+            Kind.OWN,
+            lambda i: Call(
+                "PUT",
+                "/notifications/preferences",
+                json={
+                    "email_enabled_normal": True,
+                    "email_enabled_digest": True,
+                    "weekly_digest_weekday": 1,
+                },
+            ),
+        ),
+    ),
     # TASK-344 (SUP-U05-24, 25 y 41): el paquete mensual, su muestra y la descarga por planta de
     # una zona de B responden igual que un identificador inexistente (not_found, nunca forbidden
     # ni el 409 de "no sellado"); nada se firma ni se audita en B.
@@ -553,6 +589,11 @@ LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
         # VIG-217 (TASK-324): el proveedor no entra al lazo (BR-LAZ-142) ni tiene avisos en el
         # cliente; ``notifications.read`` la tienen los siete roles, también el instalador.
         ("GET", "/notifications"),
+        # TASK-348: mismo cierre bajo concesión (A-69: ninguna fila de notifications visible ni
+        # escribible bajo concesión de proveedor).
+        ("POST", "/notifications/{notification_id}/read"),
+        ("GET", "/notifications/preferences"),
+        ("PUT", "/notifications/preferences"),
     }
 )
 """Rutas de U-04 con la clave en la columna que el servicio deniega bajo concesión."""

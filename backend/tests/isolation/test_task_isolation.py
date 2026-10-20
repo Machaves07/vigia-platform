@@ -116,6 +116,15 @@ _U04_WHY = (
     " (BR-NUC-02), no con el arnés de fingerprinting de este archivo"
 )
 
+_U04_GROUPING_WHY = (
+    "tarea de U-04 por organización con context_for_organization (igual patrón que U-02);"
+    " su aislamiento (digest_batch y email_message filtrados y escritos solo bajo la RLS de"
+    " la organización del ScopeContext, BR-NUC-02) es de notifications:"
+    " tests/integration/test_notification_grouping_tasks.py, con la cuenta de filas acotada a"
+    " ``organization_id = $1`` en cada organización sembrada por separado, no con el arnés de"
+    " fingerprinting de este archivo"
+)
+
 TASK_CASES: Final[dict[str, TaskCase]] = {
     # --- U-03 (LC-GOB-18): las seis por organización y la global (D-7) ---
     "detect_mute_nodes": TaskCase(TaskKind.PER_ORGANIZATION),
@@ -171,6 +180,9 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
         " claves y escrituras de la organización de la transacción, con la RLS) se prueba en"
         " tests/integration/test_loop_deadlines_task.py",
     ),
+    # --- U-04 (TASK-348) ---
+    "email_grouping": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),
+    "digest_weekly": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),
     # --- U-04 (TASK-325) ---
     "email_delivery_events_poll": TaskCase(
         TaskKind.GLOBAL,

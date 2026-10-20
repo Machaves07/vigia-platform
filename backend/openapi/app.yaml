@@ -4897,6 +4897,39 @@
             "minimum": 1
             "default": 50
             "title": "Limit"
+        - "name": "status"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/NotificationStatusFilter"
+              - "type": "null"
+            "title": "Status"
+        - "name": "since"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "date-time"
+              - "type": "null"
+            "title": "Since"
+        - "name": "until"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "date-time"
+              - "type": "null"
+            "title": "Until"
+        - "name": "include_archived"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+            "title": "Include Archived"
       "responses":
         "200":
           "description": "Successful Response"
@@ -4904,6 +4937,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/NotificationPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications/{notification_id}/read":
+    "post":
+      "tags":
+        - "notificaciones"
+      "summary": "Marca leído un aviso propio (idempotente)"
+      "operationId": "mark_notification_read_notifications__notification_id__read_post"
+      "parameters":
+        - "name": "notification_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Notification Id"
+      "responses":
+        "204":
+          "description": "Successful Response"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications/preferences":
+    "get":
+      "tags":
+        - "notificaciones"
+      "summary": "Las preferencias de correo vigentes del propio actor"
+      "operationId": "read_preferences_notifications_preferences_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPreferenceOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "put":
+      "tags":
+        - "notificaciones"
+      "summary": "Las preferencias de correo del propio actor (sin campo para silenciar immediate)"
+      "operationId": "update_preferences_notifications_preferences_put"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NotificationPreferenceUpdateIn"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPreferenceOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -10929,6 +11028,11 @@
             - "type": "string"
             - "type": "null"
           "title": "Read At"
+        "archived_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Archived At"
         "email_status":
           "anyOf":
             - "type": "string"
@@ -10945,6 +11049,7 @@
         - "deep_link_ref"
         - "created_at"
         - "read_at"
+        - "archived_at"
         - "email_status"
       "title": "NotificationOut"
     "NotificationPageOut":
@@ -10965,6 +11070,63 @@
         - "items"
         - "next_after"
       "title": "NotificationPageOut"
+    "NotificationPreferenceOut":
+      "properties":
+        "email_enabled_normal":
+          "type": "boolean"
+          "title": "Email Enabled Normal"
+        "email_enabled_digest":
+          "type": "boolean"
+          "title": "Email Enabled Digest"
+        "weekly_digest_weekday":
+          "type": "integer"
+          "title": "Weekly Digest Weekday"
+        "updated_at":
+          "type": "string"
+          "title": "Updated At"
+        "email_suppressed_hard_bounce":
+          "type": "boolean"
+          "title": "Email Suppressed Hard Bounce"
+        "email_suppressed_complaint":
+          "type": "boolean"
+          "title": "Email Suppressed Complaint"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email_enabled_normal"
+        - "email_enabled_digest"
+        - "weekly_digest_weekday"
+        - "updated_at"
+        - "email_suppressed_hard_bounce"
+        - "email_suppressed_complaint"
+      "title": "NotificationPreferenceOut"
+    "NotificationPreferenceUpdateIn":
+      "properties":
+        "email_enabled_normal":
+          "type": "boolean"
+          "title": "Email Enabled Normal"
+        "email_enabled_digest":
+          "type": "boolean"
+          "title": "Email Enabled Digest"
+        "weekly_digest_weekday":
+          "type": "integer"
+          "maximum": 7.0
+          "minimum": 1.0
+          "title": "Weekly Digest Weekday"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email_enabled_normal"
+        - "email_enabled_digest"
+        - "weekly_digest_weekday"
+      "title": "NotificationPreferenceUpdateIn"
+    "NotificationStatusFilter":
+      "type": "string"
+      "enum":
+        - "unread"
+        - "read"
+      "title": "NotificationStatusFilter"
+      "description": "``status`` de ``GET /notifications`` (SUP-U05-33)."
     "OcclusionSummaryOut":
       "properties":
         "camera_id":
