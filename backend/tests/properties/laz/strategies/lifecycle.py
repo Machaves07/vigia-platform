@@ -605,6 +605,7 @@ def stateful_lifecycle_command_sequences(
                 st.sampled_from(("confirmed", "false_positive")),
                 st.booleans(),
             ),
+            st.builds(Reclassify, st.sampled_from(("false_positive", "confirmed"))),
             st.builds(ResolveQueue, st.sampled_from(("review_confirmed", "review_discarded"))),
             st.builds(Assign, st.sampled_from(ACTION_TYPES), _deadline()),
             st.just(AddEvidence()),

@@ -42,6 +42,7 @@ from tests.properties.laz.strategies.lifecycle import (
     DeclareUnclosable,
     LateSegment,
     LifecycleCommand,
+    Reclassify,
     ReopenFinding,
     ResolveQueue,
     ReviewUnclosable,
@@ -57,6 +58,10 @@ from vigia_platform.shared.context import Role
 from vigia_platform.shared.signing.keys import format_timestamp
 
 _STEPS: Final = 50
+_PLATFORM_STEPS: Final = 12
+"""El recorrido real queda bajo el presupuesto de cinco minutos: las cuatro combinaciones de
+entrada/semilla ejecutan hasta 48 comandos con transacción PostgreSQL. El modelo puro conserva
+los 50 pasos del perfil para explorar secuencias más largas sin rebajar la cobertura de comandos."""
 
 
 def _apply(model: LifecycleModel, command: LifecycleCommand) -> str | None:
@@ -64,10 +69,12 @@ def _apply(model: LifecycleModel, command: LifecycleCommand) -> str | None:
     match command:
         case ClassifyFinding(outcome=outcome, reinforced=reinforced):
             return model.classify(outcome, reinforced)
+        case Reclassify(outcome=outcome):
+            return model.classify(outcome, reinforced=True)
         case ResolveQueue(outcome=outcome):
             return model.resolve_queue(outcome)
         case Assign(deadline_days=days):
-            return model.assign_action(days or model.deadline_days)
+            return model.assign_action(model.deadline_days if days is None else days)
         case AddEvidence():
             return model.add_evidence()
         case CloseFinding():
@@ -207,14 +214,14 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
         }
         fields = tuple(body)[:5]
         for name in fields[attempt.fields :]:
-            body.pop(name)
+            body[name] = None
         if attempt.review_months is not None:
             body["review_due_at"] = format_timestamp(
                 add_months(self.stack.now(), attempt.review_months)
             )
         return body
 
-    @rule(command=stateful_lifecycle_command_sequences(max_size=1))
+    @rule(command=stateful_lifecycle_command_sequences(max_size=1, min_size=1))
     def apply_command(self, command: list[LifecycleCommand]) -> None:
         """Ejecuta uno de los catorce comandos contra modelo y plataforma reales."""
         if not command:
@@ -232,6 +239,20 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                         reason_category=category,
                         reason_text="Motivo sintético de clasificación para la prueba estatal",
                         reinforced_reason=reinforced,
+                    )
+                )
+                self._assert_code(expected, actual)
+            case Reclassify(outcome=outcome):
+                expected = _apply(self.model, item)
+                category = "real_coexistence" if outcome == "confirmed" else "no_person_present"
+                actual, _result = self._code(
+                    lambda: self.stack.classification.classify(
+                        self._context(),
+                        self._state_id(),
+                        outcome=outcome,
+                        reason_category=category,
+                        reason_text="Motivo sintético de reclasificación para la prueba estatal",
+                        reinforced_reason=True,
                     )
                 )
                 self._assert_code(expected, actual)
@@ -500,10 +521,11 @@ def test_pr_laz_10_platform_state_machine(postgres_endpoint: PostgresEndpoint) -
                 run_state_machine_as_test(
                     seeded,
                     settings=settings(
-                        # La base real recorre los 50 pasos exigidos para cada semilla y entrada;
-                        # el oráculo puro conserva los ejemplos del perfil para explorar secuencias.
+                        # Cada combinación semilla/entrada recorre doce comandos (48 comandos de
+                        # plataforma como máximo por corrida). Un solo ejemplo mantiene la propiedad
+                        # de integración bajo cinco minutos; el oráculo puro usa el perfil completo.
                         max_examples=1,
-                        stateful_step_count=_STEPS,
+                        stateful_step_count=_PLATFORM_STEPS,
                         deadline=None,
                         database=None,
                         suppress_health_check=[
@@ -522,6 +544,7 @@ def test_pr_laz_10_rejection_and_frozen_deadline_regressions() -> None:
     assert model.assign_action(1) == "transition_not_allowed"
 
     model.classify("confirmed", reinforced=False)
+    assert model.classify("confirmed", reinforced=False) == "transition_not_allowed"
     assert model.assign_action(1) is None
     original_due_at = model.due_at
     assert model.change_configuration(30) is None

@@ -31,16 +31,18 @@ class LifecycleModel:
             return None
         if self.state == "in_review":
             return "transition_not_allowed"
-        if not reinforced:
-            return "reason_required"
         if self.state in {"open", "action_assigned", "overdue"}:
             if outcome == "confirmed":
                 return "transition_not_allowed"
+            if not reinforced:
+                return "reason_required"
             self.previous_state, self.state = self.state, "suspended_by_reclassification"
             return None
         if self.state == "suspended_by_reclassification":
             if outcome != "confirmed":
                 return "transition_not_allowed"
+            if not reinforced:
+                return "reason_required"
             previous = self.previous_state
             self.previous_state = None
             self.state = (
@@ -48,17 +50,21 @@ class LifecycleModel:
             )
             return None
         if self.state == "discarded":
+            if not reinforced:
+                return "reason_required"
             self.state = "open" if outcome == "confirmed" else "discarded"
             return None
         if self.state in {"closed", "unclosable"}:
+            if not reinforced:
+                return "reason_required"
             return None
         return "transition_not_allowed"
 
-    def resolve_queue(self, outcome: str) -> str:
+    def resolve_queue(self, outcome: str) -> str | None:
         if self.state != "in_review":
             return "transition_not_allowed"
         self.state = "open" if outcome == "review_confirmed" else "discarded"
-        return "accepted"
+        return None
 
     def assign_action(self, deadline_days: int) -> str | None:
         if self.state != "open":
