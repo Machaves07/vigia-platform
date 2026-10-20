@@ -18,6 +18,8 @@
   (asignar, reasignar, añadir evidencia, cambiar la configuración del lazo de la planta y avanzar
   el reloj). TASK-343, 312 y 313 la amplían con cierre, reapertura, incerrable y plazos para la
   prueba con estado de TASK-314; los comandos son valores puros, sin base ni reloj.
+- ``deadline_command_sequences`` (TASK-313): la base con la tarea ``evaluate_deadlines``, saltos
+  de reloj de días, reclasificaciones, el umbral del gerente y la declaración de incerrable.
 
 Solo datos generados: los cargos, equipos y zonas son sintéticos y de uso corriente.
 """
@@ -42,13 +44,18 @@ __all__ = [
     "AddEvidence",
     "Assign",
     "ChangeDeadlineRange",
+    "ChangeHighlightDays",
     "CloseFinding",
+    "DeclareUnclosableFinding",
+    "EvaluateDeadlines",
     "LifecycleCommand",
     "NeutralAction",
     "Reassign",
+    "Reclassify",
     "ReopenFinding",
     "Tick",
     "action_texts",
+    "deadline_command_sequences",
     "deadline_ranges",
     "lifecycle_command_sequences",
     "neutral_action_texts",
@@ -297,10 +304,46 @@ class ReopenFinding:
     deadline_days: int | None
 
 
+@dataclass(frozen=True)
+class EvaluateDeadlines:
+    """Una ejecución de la tarea ``evaluate_deadlines`` (TASK-313): un comando del sistema."""
+
+
+@dataclass(frozen=True)
+class Reclassify:
+    """Reclasificar con motivo reforzado (TASK-313): ``false_positive`` suspende el lazo (T15) y
+    ``confirmed`` lo reanuda (T16)."""
+
+    outcome: Literal["false_positive", "confirmed"]
+
+
+@dataclass(frozen=True)
+class ChangeHighlightDays:
+    """Cambiar ``manager_highlight_overdue_days`` de la planta (``loop.config``, TASK-313)."""
+
+    days: int
+
+
+@dataclass(frozen=True)
+class DeclareUnclosableFinding:
+    """Declarar el hallazgo incerrable (T10) con sus cinco campos y la política firmada."""
+
+
 type LifecycleCommand = (
-    Assign | Reassign | AddEvidence | ChangeDeadlineRange | Tick | CloseFinding | ReopenFinding
+    Assign
+    | Reassign
+    | AddEvidence
+    | ChangeDeadlineRange
+    | Tick
+    | CloseFinding
+    | ReopenFinding
+    | EvaluateDeadlines
+    | Reclassify
+    | ChangeHighlightDays
+    | DeclareUnclosableFinding
 )
-"""Los comandos de la base; las tareas siguientes añaden los suyos a esta unión."""
+"""Los comandos de la base y los de los plazos (TASK-313); las tareas siguientes añaden los suyos
+a esta unión."""
 
 
 @st.composite
@@ -333,3 +376,25 @@ def lifecycle_command_sequences(
 ) -> st.SearchStrategy[list[LifecycleCommand]]:
     """Una secuencia de comandos sobre un hallazgo abierto (incluida la vacía)."""
     return st.lists(_commands(), max_size=max_size)
+
+
+def _deadline_commands() -> st.SearchStrategy[LifecycleCommand]:
+    return st.one_of(
+        _commands(),
+        # Saltos de reloj con huecos de días: el plazo vence y el umbral del gerente se cumple.
+        st.builds(Tick, st.integers(3600, 6 * 24 * 3600)),
+        st.just(EvaluateDeadlines()),
+        st.just(EvaluateDeadlines()),
+        st.builds(Reclassify, st.sampled_from(("false_positive", "confirmed"))),
+        st.builds(ChangeHighlightDays, st.integers(1, 5)),
+        st.just(DeclareUnclosableFinding()),
+    )
+
+
+def deadline_command_sequences(
+    max_size: int = 10,
+) -> st.SearchStrategy[list[LifecycleCommand]]:
+    """La base ampliada con los plazos (TASK-313): la tarea ``evaluate_deadlines`` intercalada con
+    saltos de reloj de días, reclasificaciones que suspenden y reanudan, cambios del umbral del
+    gerente y la declaración de incerrable (PR-LAZ-13 y 15; la usa también TASK-314)."""
+    return st.lists(_deadline_commands(), max_size=max_size)

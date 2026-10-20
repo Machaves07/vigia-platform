@@ -31,8 +31,23 @@ from tests.api_support import World
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject, LoopOrganization
 from tests.loop_actions_support import SAME_ORIGIN, ActionsStack, Who, actions_stack
+from tests.properties.laz.strategies.lifecycle import (
+    AddEvidence,
+    Assign,
+    ChangeDeadlineRange,
+    ChangeHighlightDays,
+    CloseFinding,
+    DeclareUnclosableFinding,
+    EvaluateDeadlines,
+    LifecycleCommand,
+    Reassign,
+    Reclassify,
+    ReopenFinding,
+    Tick,
+)
 from vigia_platform.identity.adapters.authz_store import LedgerProviderQueryLedger
 from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME
+from vigia_platform.loop.adapters.http.classification_routes import PATH as CLASSIFICATION_PATH
 from vigia_platform.loop.adapters.http.overdue_routes import PATH as OVERDUE_PATH
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.application.deadlines import (
@@ -50,6 +65,9 @@ from vigia_platform.shared.outbox.registries import PeriodicTask, PeriodicTaskRe
 __all__ = ["CONFIGURATION_REASON", "DeadlinesStack", "deadlines_stack"]
 
 CONFIGURATION_REASON: Final = "Ajuste del umbral acordado en el comité de seguridad"
+RECLASSIFICATION_REASON: Final = (
+    "Revisado el clip completo con mantenimiento: la intervención constaba en el registro"
+)
 
 
 @dataclass
@@ -192,6 +210,135 @@ class DeadlinesStack:
                 str(record_id),
             )
         ]
+
+    # --- secuencias de comandos (PR-LAZ-13 y 15) ----------------------------------------------
+
+    def change_deadline_range(
+        self,
+        organization: LoopOrganization,
+        low: int,
+        default: int,
+        high: int,
+        weekdays: tuple[int, ...],
+    ) -> None:
+        """El rango de plazos y el calendario de la planta (``loop.config``), abriendo el rango
+        primero para que ``min ≤ default ≤ max`` se cumpla sobre el resultado."""
+        configuration = self.actions.configuration
+        for integers, calendar in (
+            ({"action_deadline_min_days": 1, "action_deadline_max_days": 180}, None),
+            (
+                {
+                    "action_deadline_min_days": low,
+                    "action_deadline_default_days": default,
+                    "action_deadline_max_days": high,
+                },
+                {"working_weekdays": list(weekdays), "non_working_dates": []},
+            ),
+        ):
+            self.tick()
+            self.run(
+                configuration.change(
+                    self.actions.context(self.manager(organization)),
+                    organization.plant_id,
+                    integers=integers,
+                    business_calendar=calendar,
+                    reason=CONFIGURATION_REASON,
+                )
+            )
+
+    def apply(
+        self, organization: LoopOrganization, finding: IngestedSubject, command: LifecycleCommand
+    ) -> list[str]:
+        """Aplica ``command`` (de ``deadline_command_sequences``) por el servicio o la ruta real,
+        con sesiones nuevas (el reloj salta días). Devuelve los tipos de registro que escribió.
+
+        Un rechazo de negocio es un resultado válido (la secuencia no se predice aquí); una
+        respuesta 5xx no lo es. ``EvaluateDeadlines`` comprueba además que el comando del
+        sistema solo declara: el estado sigue igual o pasa de ``action_assigned`` a ``overdue``,
+        la fila del hallazgo sigue ahí y solo escribe ``action_overdue``."""
+        actions = self.actions
+        before = len(actions.subject_records(finding))
+        coordinator = actions.member(organization)
+        row = actions.world.finding_state(finding)
+        assert row is not None
+        current = row["current_action_id"]
+        responses: list[httpx.Response] = []
+        match command:
+            case Assign(action_type=action_type, deadline_days=days):
+                body = actions.action_body(
+                    self.assignee(organization), action_type=action_type, deadline_days=days
+                )
+                responses.append(actions.assign(coordinator, finding, body))
+            case Reassign(deadline_days=days):
+                supersedes = str(current) if current is not None else str(uuid.uuid4())
+                body = actions.action_body(
+                    self.assignee(organization),
+                    action_type=row["current_action_type"] or "engineering",
+                    deadline_days=days,
+                    supersedes_action_id=supersedes,
+                )
+                responses.append(actions.assign(coordinator, finding, body))
+            case AddEvidence():
+                if current is not None:
+                    responses.append(
+                        actions.add_evidence(coordinator, current, actions.evidence_body())
+                    )
+            case ChangeDeadlineRange(
+                min_days=low, default_days=default, max_days=high, working_weekdays=weekdays
+            ):
+                self.change_deadline_range(organization, low, default, high, weekdays)
+            case Tick(seconds=seconds):
+                self.tick(seconds)
+            case CloseFinding():
+                responses.append(actions.close(coordinator, finding, actions.closure_body()))
+            case ReopenFinding(action_type=action_type, deadline_days=days):
+                body = actions.reopening_body(
+                    self.assignee(organization), action_type=action_type, deadline_days=days
+                )
+                responses.append(actions.reopen(coordinator, finding, body))
+            case Reclassify(outcome=outcome):
+                category = (
+                    "no_person_present" if outcome == "false_positive" else "real_coexistence"
+                )
+                path = CLASSIFICATION_PATH.format(
+                    finding_state_id=actions.finding_state_id(finding)
+                )
+                responses.append(
+                    actions.post(
+                        coordinator,
+                        path,
+                        {
+                            "outcome": outcome,
+                            "reason_category": category,
+                            "reason_text": RECLASSIFICATION_REASON,
+                            "reinforced_reason": True,
+                        },
+                    )
+                )
+            case ChangeHighlightDays(days=days):
+                self.set_highlight_days(organization, days)
+            case DeclareUnclosableFinding():
+                if row["lifecycle_state"] in ("open", "action_assigned", "overdue"):
+                    actions.write_unclosable(finding)
+            case EvaluateDeadlines():
+                self.evaluate(organization)
+                after = actions.world.finding_state(finding)
+                assert after is not None, "la tarea retiró la fila del hallazgo"
+                allowed = {row["lifecycle_state"]}
+                if row["lifecycle_state"] == "action_assigned":
+                    allowed.add("overdue")
+                assert after["lifecycle_state"] in allowed, (row["lifecycle_state"], after)
+                written = actions.subject_records(finding)[before:]
+                assert {r["record_type"] for r in written} <= {"action_overdue"}, written
+            case _:  # pragma: no cover - un comando nuevo sin su rama
+                raise AssertionError(f"comando sin aplicar: {command!r}")
+        for response in responses:
+            assert response.status_code < 500, response.text
+        return [r["record_type"] for r in actions.subject_records(finding)[before:]]
+
+    def assignee(self, organization: LoopOrganization) -> uuid.UUID:
+        """Un responsable con alcance sobre la organización (uno nuevo cada vez)."""
+        return self.actions.user(organization)
 
     # --- peticiones ---------------------------------------------------------------------------
 
