@@ -71,6 +71,7 @@ from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
+from vigia_platform.loop.adapters.http.vocabulary_routes import vocabulary_router
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.application.unclosable import SCHEDULE as UNCLOSABLE_SCHEDULE
 from vigia_platform.loop.application.unclosable import TASK_NAME as UNCLOSABLE_REVIEW_DUE
@@ -203,11 +204,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/findings/{finding_state_id}"),  # TASK-342: SUP-U05-02
                 ("GET", "/loop/findings/{finding_state_id}/classifications"),  # TASK-342: 04
                 ("GET", "/loop/overdue"),  # TASK-313: SUP-U05-15
+                ("GET", "/loop/vocabulary"),  # TASK-350: SUP-U05-36
+                ("POST", "/loop/vocabulary/changes"),  # TASK-350: SUP-U05-37
                 # TASK-312: SUP-U05-12 y 13 (el estado incerrable y su revisión).
                 ("POST", "/loop/findings/{finding_state_id}/unclosable"),
                 ("POST", "/loop/unclosable/{declaration_id}/reviews"),
             ]
             assert state[LOOP_STATE_KEY].overdue is not None
+            assert state[LOOP_STATE_KEY].vocabulary is not None
             assert state[LOOP_STATE_KEY].classification is not None
             assert state[LOOP_STATE_KEY].assistant is not None
             assert state[LOOP_STATE_KEY].actions is not None
@@ -333,6 +337,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         assistant_router,
         findings_router,
         overdue_router,
+        vocabulary_router,  # TASK-350
         unclosable_router,
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
@@ -388,7 +393,13 @@ def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
     # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317),
     # assistant_requested (TASK-316) y email_delivery_events_poll (TASK-325).
     assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 28
-    assert len(LOOP_RECORD_TYPES) == 13
+    # Trece tipos del lazo; ``vocabulary_list_changed`` también en su versión 2 (TASK-350).
+    assert len({definition.record_type for definition in LOOP_RECORD_TYPES}) == 13
+    assert [
+        (definition.record_type, definition.schema_version)
+        for definition in LOOP_RECORD_TYPES
+        if definition.schema_version != 1
+    ] == [("vocabulary_list_changed", 2)]
     # Cuatro tipos de la acreditación; ``commitments_recorded`` también en su versión 2 (TASK-347).
     assert len({definition.record_type for definition in ACCREDITATION_RECORD_TYPES}) == 4
     assert [

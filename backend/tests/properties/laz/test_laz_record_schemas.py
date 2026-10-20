@@ -227,12 +227,34 @@ def test_each_type_matches_its_row_of_the_table(name: str) -> None:
     assert not free_text & frozenset(SNAPSHOT[name])
 
 
-def test_only_commitments_recorded_has_a_second_version() -> None:
+def test_only_commitments_recorded_and_vocabulary_list_changed_have_a_second_version() -> None:
     assert {
         compiled.record_type: compiled.schema_version
         for compiled in REGISTRY.latest()
         if compiled.schema_version != 1
-    } == {"commitments_recorded": 2}
+    } == {"commitments_recorded": 2, "vocabulary_list_changed": 2}
+
+
+def test_vocabulary_list_changed_v2_adds_only_the_declared_names() -> None:
+    """TASK-350: la versión 2 amplía la 1 con los nombres declarados que se añaden y se retiran
+    (opcionales), que pasan los dos validadores (no son exentas). La cadena de organización, la
+    clave, los eventos, la ruta narrativa y la exclusión declarada no cambian."""
+    v1 = REGISTRY.get("vocabulary_list_changed", schema_version=1).definition
+    v2 = REGISTRY.get("vocabulary_list_changed", schema_version=2).definition
+    for attribute in ("writer_unit", "chain_level", "source_key_path", "outbox_events"):
+        assert getattr(v2, attribute) == getattr(v1, attribute)
+    assert v2.chain_level is ChainLevel.ORGANIZATION
+    assert v2.evidence_paths == () and v2.label_rule is None
+    assert frozenset(v2.free_text_paths) - frozenset(v1.free_text_paths) == {
+        "/declared_names_added[*]/value",
+        "/declared_names_removed[*]/value",
+    }
+    assert frozenset(v1.free_text_paths) <= frozenset(v2.free_text_paths)
+    exempt = loop_types.VALIDATOR_EXEMPT_PATHS["vocabulary_list_changed"]
+    assert not set(loop_types.VOCABULARY_LIST_CHANGED_V2_NAME_PATHS) & set(exempt)
+    model = v2.content_model
+    assert not model.model_fields["declared_names_added"].is_required()
+    assert not model.model_fields["declared_names_removed"].is_required()
 
 
 def _element(model: Any, field: str) -> Any:

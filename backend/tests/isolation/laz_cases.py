@@ -70,6 +70,8 @@ from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.config.service import LoopConfigurationService
+from vigia_platform.loop.vocabulary.repository import PostgresVocabularyRepository
+from vigia_platform.loop.vocabulary.service import VocabularyService
 from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
     NotificationsHttp,
@@ -221,6 +223,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 database=database,
                 authorizer=services.authorizer,
                 configuration=PostgresLoopConfigurationRepository(database),
+                clock=services.clock,
+            ),
+            vocabulary=VocabularyService(  # TASK-350
+                repository=PostgresVocabularyRepository(database),
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
                 clock=services.clock,
             ),
             unclosable=UnclosableService(  # TASK-312
@@ -594,6 +603,28 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/loop/overdue"),
         Case(
             Kind.RESOURCE, lambda i: Call("GET", "/loop/overdue", params={"plant_id": str(i.plant)})
+        ),
+    ),
+    # VIG-220 (TASK-350): la lista de vocabulario es ``own`` (de la organización del contexto, sin
+    # identificador): nunca muestra ni toca la de B; bajo concesión, ``not_found``
+    # (vocabulary.manage no está en la columna del instalador). El escritor de esta prueba no
+    # registra los tipos de U-04, así que el cambio pide retirar un término que no está vigente:
+    # recorre la transacción de A (candado, fila y términos) y termina en ``invalid_request`` sin
+    # escribir. La escritura completa y que otra organización no la ve ni la toca:
+    # ``tests/integration/test_loop_vocabulary_routes.py``.
+    (("GET", "/loop/vocabulary"), Case(Kind.OWN, lambda i: Call("GET", "/loop/vocabulary"))),
+    (
+        ("POST", "/loop/vocabulary/changes"),
+        Case(
+            Kind.OWN,
+            lambda i: Call(
+                "POST",
+                "/loop/vocabulary/changes",
+                json={
+                    "removed": [str(i.record)],
+                    "reason": "Ajuste acordado en el comité de seguridad",
+                },
+            ),
         ),
     ),
     # VIG-228 (TASK-312): declarar el incerrable de un hallazgo de B y revisar una declaración de B

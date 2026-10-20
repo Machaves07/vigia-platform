@@ -75,6 +75,7 @@ from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
+from vigia_platform.loop.adapters.http.vocabulary_routes import vocabulary_router
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
@@ -286,6 +287,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307), 02 y 04 (TASK-342)
     overdue_router,  # SUP-U05-15 (TASK-313)
+    vocabulary_router,  # SUP-U05-36 y 37 (TASK-350)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
@@ -562,12 +564,13 @@ def register_blocked_vocabulary(registry: FreeTextPolicyRegistry) -> None:
 def register_person_attribution(registry: FreeTextPolicyRegistry) -> None:
     """``person_attribution`` (TASK-340) con la caché del vocabulario declarado y su preparador.
 
-    El preparador relee los nombres de plantas y zonas de la organización al abrir la escritura
+    El preparador relee los nombres de plantas y zonas y los que la organización declara en su
+    lista (TASK-350) al abrir la escritura, si caducaron o si la versión de la lista cambió
     (fuera de la ruta de validación); el validador solo lee la caché. Las palabras comunes se
     cargan aquí, al arrancar: un archivo roto detiene el arranque, no la primera escritura.
     """
     common_words()
-    cache = DeclaredNamesCache(PostgresDeclaredNamesStore())
+    cache = DeclaredNamesCache(PostgresDeclaredNamesStore(), versions=PostgresVocabularyStore())
     registry.register(PERSON_ATTRIBUTION, PersonAttributionValidator(cache.names_for))
     registry.register_preparer(PERSON_ATTRIBUTION, cache.refresh)
 

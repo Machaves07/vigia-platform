@@ -43,6 +43,7 @@ from sqlalchemy.sql import Executable
 
 from tests.identity_db import migrated_database
 from tests.integration.conftest import PostgresEndpoint
+from tests.loop_vocabulary_support import REASON, VocabularyStack, loop_vocabulary_stack
 from tests.properties.laz.strategies.texts import allowed_texts, blocked_vocabulary_texts
 from tests.vocabulary_support import (
     FIELD,
@@ -86,6 +87,7 @@ from vigia_platform.loop.validators.vocabulary import (
     compile_vocabulary,
     find_blocked,
 )
+from vigia_platform.loop.vocabulary.service import TermRequest
 from vigia_platform.shared.clock import SimulatedClock
 from vigia_platform.shared.context import ActorUnit
 
@@ -492,3 +494,70 @@ def test_the_writer_checks_the_version_when_it_opens_the_write(
             )
         else:
             assert isinstance(result, Receipt)
+
+
+# --- Dos procesos tras un cambio de la lista (TASK-350) -------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def vocabulary_stack(postgres_endpoint: PostgresEndpoint) -> Iterator[VocabularyStack]:
+    with loop_vocabulary_stack(postgres_endpoint, "laz_vocabulary_cache_processes") as built:
+        yield built
+
+
+def _reader_of(stack: VocabularyStack, organization: uuid.UUID) -> RowReader:
+    """Las lecturas de una escritura de U-03 de la organización, como ``vigia_app``."""
+    context = unit_context(organization, ActorUnit.U03)
+
+    async def rows(statement: Executable, parameters: Mapping[str, Any]) -> Sequence[Row[Any]]:
+        return await stack.database.read(context, statement, parameters)
+
+    return rows
+
+
+def _term_request(value: str) -> TermRequest:
+    return TermRequest("absence_claim", "lemma", value, "Describa lo observado en la zona")
+
+
+@pytest.mark.integration
+def test_after_a_change_every_process_applies_the_new_list_in_its_next_write(
+    vocabulary_stack: VocabularyStack,
+) -> None:
+    """Dos procesos con su propia caché (dos «vigia-worker») y un tercero, la API, que cambia la
+    lista: hasta su siguiente escritura cada proceso valida con la versión que tenía (solo
+    memoria); en su siguiente escritura, el preparador lee la versión nueva y el veredicto lleva
+    su ``list_version``."""
+    stack = vocabulary_stack
+    site = stack.site()
+    organization = site.organization_id
+    context = stack.context(stack.member(site))
+    stack.run(stack.service.change(context, added=(_term_request("baliza"),), reason=REASON))
+    processes = [VocabularyCache(PostgresVocabularyStore()) for _ in range(2)]
+    preparation = FreeTextPreparation(
+        organization, _reader_of(stack, organization), stack.authz.sessions.clock
+    )
+    for cache in processes:
+        stack.run(cache.refresh(preparation))
+        assert cache.compiled_for(organization).list_version == 2
+    validators = [BlockedVocabularyValidator(cache.compiled_for) for cache in processes]
+    text = "Revisión de la bocina de la zona"
+    assert [validator.verdict(_candidate(text, organization)) for validator in validators] == [
+        None,
+        None,
+    ]
+    changed = stack.run(
+        stack.service.change(context, added=(_term_request("bocina"),), reason=REASON)
+    )
+    assert changed.list_version == 3
+    # Sin escribir todavía: la lista en memoria de cada proceso (la caché nunca lee al validar).
+    for cache, validator in zip(processes, validators, strict=True):
+        assert cache.compiled_for(organization).list_version == 2
+        assert validator.verdict(_candidate(text, organization)) is None
+    # La siguiente escritura de cada proceso comprueba la versión al abrir y aplica la nueva.
+    for cache, validator in zip(processes, validators, strict=True):
+        stack.run(cache.refresh(preparation))
+        verdict = validator.verdict(_candidate(text, organization))
+        assert verdict is not None
+        assert (verdict.term_id, verdict.list_version) == (changed.added[0].term_id, 3)
+        # Otra organización sigue con la lista inicial en ese mismo proceso.
+        assert validator.verdict(_candidate(text, uuid.uuid4())) is None
