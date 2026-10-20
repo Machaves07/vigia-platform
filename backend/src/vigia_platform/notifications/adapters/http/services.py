@@ -12,6 +12,7 @@ from typing import Final
 
 from fastapi import Request
 
+from vigia_platform.notifications.preferences import NotificationPreferences
 from vigia_platform.notifications.reader import NotificationReader
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
 from vigia_platform.shared.observability.logging import get_logger
@@ -28,7 +29,9 @@ class NotificationsHttp:
     """Los servicios que usan las rutas de ``notifications``."""
 
     reader: NotificationReader | None = None
-    """``GET /notifications`` (TASK-324, forma mínima; TASK-348 la completa)."""
+    """``GET /notifications`` y ``POST /notifications/{id}/read`` (TASK-324 y 348)."""
+    preferences: NotificationPreferences | None = None
+    """``PUT /notifications/preferences`` (TASK-348, SUP-U05-35)."""
 
 
 def installed[T](service: T | None) -> T:

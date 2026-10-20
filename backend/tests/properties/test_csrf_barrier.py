@@ -51,6 +51,12 @@ BODIES: dict[str, dict[str, Any]] = {
     "/users/{user_id}": {"display_name": "Nombre sintético", "active": True},
     "/auth/login": {"email": "a@b.co", "password": "contraseña-sintética"},
     "/privacy-notice/accept": {},
+    "/notifications/{notification_id}/read": {},
+    "/notifications/preferences": {
+        "email_enabled_normal": True,
+        "email_enabled_digest": True,
+        "weekly_digest_weekday": 1,
+    },
     "/platform/dead-letter/{event_id}/{consumer}/replay": {},
     "/platform/keys/{purpose}/rotate": {},
     "/loop/actions/{action_id}/attachments/upload-grant": {
@@ -115,11 +121,13 @@ BODIES: dict[str, dict[str, Any]] = {
 OPERATION_PREFIX = "/platform/"
 """Rutas reales de operación (TASK-137): sin servicios en el arnés no tienen efecto observable, así
 que entran en las falsificadas (``forbidden`` sin efecto) y no en las que se procesan."""
-REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/", "/accreditation/")
+REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/", "/accreditation/", "/notifications/")
 """Rutas con servicios reales o dobles (operación, adjuntos de cierre de U-04, TASK-310,
-configuración del lazo, TASK-304, y exportación, TASK-317): se prueban entre las falsificadas; su
-procesamiento, en ``tests/properties/laz``, ``tests/integration/test_loop_configuration_routes.py``
-y ``tests/integration/test_export_request_routes.py``."""
+configuración del lazo, TASK-304, exportación, TASK-317, y marcar leída/preferencias, TASK-348):
+se prueban entre las falsificadas; su procesamiento, en ``tests/properties/laz``,
+``tests/integration/test_loop_configuration_routes.py``,
+``tests/integration/test_export_request_routes.py`` y
+``tests/isolation/test_route_isolation.py``/``tests/integration/test_notification_routes.py``."""
 
 
 def _state_changing_routes(app: Any) -> list[tuple[str, str]]:
@@ -147,6 +155,7 @@ def _url(path: str) -> str:
         .replace("{detection_id}", str(uuid.uuid4()))
         .replace("{analysis_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
+        .replace("{notification_id}", str(uuid.uuid4()))
     )
 
 
@@ -194,6 +203,9 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).
         ("POST", "/accreditation/exports/{export_id}/download-url"),
+        # Marcar leída y preferencias de notificaciones de U-04 (TASK-348).
+        ("POST", "/notifications/{notification_id}/read"),
+        ("PUT", "/notifications/preferences"),
         ("POST", "/users"),
         ("PATCH", "/users/{user_id}"),
         ("POST", "/privacy-notice/accept"),
