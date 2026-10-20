@@ -15,7 +15,10 @@ solo en la proyección: todo campo de ``FindingState`` es función de los regist
    bandeja (``READ_FILTERS``, BR-LAZ-02) se eximen solo en la consulta de un ``GET``: otros
    canarios demuestran que siguen contando en un ``POST``, en la ruta y en una cabecera.
 3. **Escritura**: en ``src`` solo ``loop.projection.store`` escribe ``loop.finding_state`` y
-   ``loop.episode`` (y ``tables.py`` los declara).
+   ``loop.episode`` (y ``tables.py`` los declara), con una excepción documentada: ``loop.
+   projection.rebuild`` (TASK-306, LC-LAZ-03), el intercambio atómico de la reconstrucción
+   (``INSERT … ON CONFLICT DO UPDATE`` desde la tabla sombra), que repliega el mismo pliegue puro
+   y el mismo enriquecimiento que ``store`` — nunca inventa un campo.
 4. **Propiedad**: sobre ``loop_projection_commands``, la fila de cada sujeto plegando **solo** sus
    registros es la misma que plegando toda la planta.
 """
@@ -82,6 +85,10 @@ READ_ONLY_METHODS: Final = frozenset({"GET", "HEAD"})
 WRITERS: Final = {
     SRC / "loop" / "projection" / "store.py",
     SRC / "loop" / "adapters" / "postgres" / "tables.py",
+    # TASK-306 (LC-LAZ-03): el intercambio atómico de la reconstrucción por planta sustituye las
+    # filas en servicio por las de la tabla sombra (``INSERT … ON CONFLICT DO UPDATE``), con el
+    # mismo pliegue puro y el mismo enriquecimiento que ``store`` — nunca un campo inventado.
+    SRC / "loop" / "projection" / "rebuild.py",
 }
 WRITES_PROJECTION: Final = re.compile(
     r"\b(insert|update)\(\s*(FINDING_STATE|EPISODE)\b"

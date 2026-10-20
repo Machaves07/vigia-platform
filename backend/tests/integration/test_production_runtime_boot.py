@@ -92,10 +92,10 @@ U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
 U03_TASKS: Final = 7
 """Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
-U04_TASKS: Final = 5
+U04_TASKS: Final = 6
 """``review_reminders`` (TASK-309), ``monthly_package`` (TASK-342 a 344, VIG-239),
-``email_delivery_events_poll`` (TASK-325), ``email_grouping`` y ``digest_weekly`` (TASK-348):
-las cinco tareas periódicas de U-04."""
+``verify_loop_projection`` (TASK-306, VIG-221), ``email_delivery_events_poll`` (TASK-325),
+``email_grouping`` y ``digest_weekly`` (TASK-348): las seis tareas periódicas de U-04."""
 UNREACHABLE_HOST: Final = "192.0.2.1"  # TEST-NET-1 (RFC 5737): nunca responde
 BOOTSTRAP: Final = (
     "bootstrap",

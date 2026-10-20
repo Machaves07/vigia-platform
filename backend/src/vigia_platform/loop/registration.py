@@ -103,7 +103,15 @@ from vigia_platform.loop.projection.consumer import (
     register_loop_projection,
 )
 from vigia_platform.loop.projection.enrichment import ProjectionEnrichment
+from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
 from vigia_platform.loop.projection.store import LoopProjectionStore
+from vigia_platform.loop.projection.verify import (
+    VERIFY_LOOP_PROJECTION,
+    VERIFY_LOOP_PROJECTION_SCHEDULE,
+    ProjectionVerifier,
+    register_verify_loop_projection,
+    verify_loop_projection_handler,
+)
 from vigia_platform.loop.record_types import register_loop_record_types
 from vigia_platform.loop.validators.attribution import (
     PERSON_ATTRIBUTION,
@@ -266,15 +274,6 @@ def _register_review_reminders(registry: PeriodicTaskRegistry, services: UnitSer
     )
 
 
-LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
-    REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
-}
-"""Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
-    _register_review_reminders,  # review_reminders (TASK-309)
-)
-
-
 class _NoEvidenceReads:
     """``vigia-worker`` sin depósito de evidencias: ``loop_projection`` solo usa
     ``resultados_marca``, que lee la base; una lectura de clip aquí es un defecto."""
@@ -323,6 +322,57 @@ def _register_loop_projection(registry: ConsumerRegistry, services: UnitServices
             clock=services.clock,
         ),
     )
+
+
+def _register_verify_loop_projection(
+    registry: PeriodicTaskRegistry, services: UnitServices
+) -> None:
+    """``verify_loop_projection`` (TASK-306, diaria por organización; LC-LAZ-04).
+
+    ``rebuild_loop_projection`` (LC-LAZ-03) corre a demanda, sin cadencia que vigilar (U04-H-14,
+    ``infrastructure-design.md``): no entra en ``LOOP_TASKS``. Esta verificación construye su
+    propio ``ProjectionRebuilder`` para disparar la reconstrucción de la partición que diverge; la
+    orden administrativa de VIG-241 (``vigia-admin rebuild-loop-projection``) construye el suyo por
+    su cuenta, con los mismos puertos."""
+    ports = catalog_query_ports(services.database)
+    rebuilder = ProjectionRebuilder(
+        database=services.database,
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        markers=EvidenceService(
+            database=services.database,
+            audit=services.audit,
+            storage=services.evidence if services.evidence is not None else _NoEvidenceReads(),
+        ),
+        settings=PostgresLoopConfigurationRepository(services.database),
+        clock=services.clock,
+    )
+    verifier = ProjectionVerifier(
+        database=services.database,
+        rebuilder=rebuilder,
+        outbox=services.outbox,
+        clock=services.clock,
+    )
+    register_verify_loop_projection(registry, verify_loop_projection_handler(verifier))
+
+
+LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    VERIFY_LOOP_PROJECTION: (VERIFY_LOOP_PROJECTION_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+    REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
+}
+"""Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``.
+
+``rebuild_loop_projection`` (LC-LAZ-03) no está aquí: corre a demanda, sin cadencia (U04-H-14)."""
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_verify_loop_projection,
+    _register_review_reminders,  # review_reminders (TASK-309)
+)
 
 
 class AssistantProviderOnFirstUse:
@@ -456,7 +506,8 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344) hasta ahora."""
+"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344) y
+``verify_loop_projection`` (TASK-306; TASK-326 verifica las diez)."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,

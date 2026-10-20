@@ -171,6 +171,11 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # ``CoveragePort.linea_de_tiempo`` (``CoverageService``, que pone la guarda) con el
         # contexto que recibe.
         "vigia_platform.accreditation.export.timeline.zone_timeline",
+        # loop.projection.rebuild (TASK-306): leen y escriben solo por la ``Transaction`` dada,
+        # abierta por ``ProjectionRebuilder``/``ProjectionVerifier`` (registrados, método
+        # ``@repository``); ninguna abre su propia transacción ni construye su propio contexto.
+        "vigia_platform.loop.projection.rebuild.evidence_ids_for",
+        "vigia_platform.loop.projection.rebuild.enrich_finding",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.
