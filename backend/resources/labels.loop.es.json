@@ -131,6 +131,13 @@
     "derived": "mínimo irreductible del producto",
     "customer_added": "añadido por la organización"
   },
+  "declared_name_kind": {
+    "plant": "planta",
+    "zone": "zona",
+    "equipment": "equipo",
+    "machine": "máquina",
+    "standard": "norma"
+  },
   "inbox_zone_notice": {
     "coverage_unavailable": "cobertura no disponible en la bandeja: consulte la cobertura del periodo",
     "not_observed": "no se observó: el nodo de la zona no comunica",

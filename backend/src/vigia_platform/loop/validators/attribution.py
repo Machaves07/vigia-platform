@@ -182,9 +182,13 @@ _NAME_FIELDS: Final = frozenset(
         ("organization_created", "/name"),
         ("plant_created", "/name"),
         ("zone_created", "/name"),
+        ("vocabulary_list_changed", "/declared_names_added[*]/value"),
+        ("vocabulary_list_changed", "/declared_names_removed[*]/value"),
     }
 )
-"""Nombres de organización, planta y zona (los de ``identity`` y sus registros de alta)."""
+"""Nombres de organización, planta y zona (los de ``identity`` y sus registros de alta) y los del
+vocabulario declarado que añade o retira ``vocabulary_list_changed`` v2 (TASK-350): un nombre ahí
+es lo esperado, y retirar uno ya no declarado no debe caer en el patrón que el nombre eximía."""
 
 _IDENTIFIER_SEGMENTS: Final = frozenset(
     {"professional_license", "filename", "legal_opinion_reference"}

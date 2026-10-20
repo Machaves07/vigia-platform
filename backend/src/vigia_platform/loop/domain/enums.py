@@ -42,6 +42,7 @@ __all__ = [
     "CauseCategory",
     "ClassificationOutcome",
     "CommitmentState",
+    "DeclaredNameKind",
     "EffectOnLoop",
     "EscalationLevel",
     "EvidenceRefKind",
@@ -367,6 +368,20 @@ class BlockedTermOrigin(enum.StrEnum):
     CUSTOMER_ADDED = "customer_added"
 
 
+class DeclaredNameKind(enum.StrEnum):
+    """Qué nombra un nombre declarado (TASK-350, BLM §14.5): una cosa, no una persona.
+
+    El tipo no lo garantiza: declarar el nombre de una persona lo eximiría del patrón de nombre
+    propio. Queda en el expediente (``vocabulary_list_changed`` v2, con su motivo y su autor); una
+    guarda adicional la decide el dueño (pendiente anotado en VIG-220)."""
+
+    PLANT = "plant"
+    ZONE = "zone"
+    EQUIPMENT = "equipment"
+    MACHINE = "machine"
+    STANDARD = "standard"
+
+
 # --- acreditación (§1, §3) ------------------------------------------------------------------
 
 
@@ -510,6 +525,7 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "escalation_level": EscalationLevel,
     "evidence_ref_kind": EvidenceRefKind,
     "blocked_term_origin": BlockedTermOrigin,
+    "declared_name_kind": DeclaredNameKind,
     "inbox_zone_notice": InboxZoneNotice,
     "inbox_partition_notice": InboxPartitionNotice,
     "inbox_finding_notice": InboxFindingNotice,
