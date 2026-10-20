@@ -1,7 +1,7 @@
 """Lecturas y guardado del indicador de exposición sobre PostgreSQL (TASK-322; LC-LAZ-28;
 PAT-LAZ-REN-01).
 
-- ``zone``: la planta y la zona horaria de la zona en la organización del contexto.
+- ``zone``: la planta, la zona horaria y el alta de la zona en la organización del contexto.
 - ``episodes``: los episodios de ``loop.episode`` de la zona que se solapan con el periodo, de
   ``coexistence``/``dwell`` y ``tier_1``, con la última clasificación de su hallazgo
   (``loop.finding_state``); sin fila de estado todavía, cuenta como pendiente (nunca se omite).
@@ -43,7 +43,7 @@ from vigia_platform.shared.db import Transaction
 __all__ = ["DigestInputs", "ExposureRepository", "StoredExposure", "ZonePlace"]
 
 _ZONE: Final = text(
-    "SELECT z.plant_id, p.timezone FROM identity.zone AS z"
+    "SELECT z.plant_id, z.created_at, p.timezone FROM identity.zone AS z"
     " JOIN identity.plant AS p"
     " ON p.organization_id = z.organization_id AND p.plant_id = z.plant_id"
     " WHERE z.organization_id = :organization_id AND z.zone_id = :zone_id"
@@ -112,6 +112,8 @@ _SAVE: Final = text(_SAVE_SQL)
 class ZonePlace:
     plant_id: uuid.UUID
     timezone: str
+    created_at: datetime
+    """El alta de la zona: ningún mes que termine antes se calcula ni se guarda."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,7 +190,9 @@ class ExposureRepository:
         ).first()
         if row is None:
             return None
-        return ZonePlace(plant_id=_uuid(row.plant_id), timezone=str(row.timezone))
+        return ZonePlace(
+            plant_id=_uuid(row.plant_id), timezone=str(row.timezone), created_at=row.created_at
+        )
 
     async def episodes(
         self,

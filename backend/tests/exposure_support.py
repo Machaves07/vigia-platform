@@ -11,9 +11,9 @@ salvo los huecos que la prueba declara (``not_observable``), para que las cifras
 lo que la prueba siembra. ``real_coverage`` cambia al ``CoverageService`` real.
 
 Solo datos generados. Las marcas salen del reloj simulado, que arranca en la hora de la base
-(retro 14); si ese instante cae en la primera hora del mes local de la planta, el reloj avanza una
-hora para que los episodios de las pruebas no crucen el borde del mes. Topes de la base: 60 s
-(retro 15).
+(retro 14); si ese instante cae cerca de un borde del mes local de la planta, el reloj avanza
+(``_away_from_month_borders``) para que el periodo en curso no cambie a mitad de prueba. Topes de
+la base: 60 s (retro 15).
 """
 
 from __future__ import annotations
@@ -341,17 +341,23 @@ class ExposureStack:
         return response
 
 
-def _away_from_month_start(world: LoopWorld) -> None:
+def _away_from_month_borders(world: LoopWorld) -> None:
+    """Las pruebas siembran episodios unos minutos antes de ahora y avanzan el reloj hasta media
+    hora: lejos de los dos bordes del mes local, el periodo en curso no cambia a mitad de prueba.
+    Si faltan menos de 2 horas para el fin del mes, el reloj salta a la segunda hora del siguiente;
+    si el mes empezó hace menos de 1 hora, avanza 1 hora."""
     now = world.stack.now()
-    start, _ = month_bounds(TIMEZONE, period_of(now, TIMEZONE))
-    if now - start < timedelta(hours=1):
+    start, end = month_bounds(TIMEZONE, period_of(now, TIMEZONE))
+    if end - now < timedelta(hours=2):
+        world.stack.tick((end - now).total_seconds() + 3600)
+    elif now - start < timedelta(hours=1):
         world.stack.tick(3600)
 
 
 @contextlib.contextmanager
 def exposure_stack(endpoint: PostgresEndpoint, prefix: str) -> Iterator[ExposureStack]:
     with loop_world(endpoint, prefix) as world:
-        _away_from_month_start(world)
+        _away_from_month_borders(world)
         stack = world.stack
         authz = stack.authz
         clock = authz.sessions.clock

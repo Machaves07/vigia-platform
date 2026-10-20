@@ -25,6 +25,9 @@ Solo datos generados; reloj simulado desde la hora de la base (retro 14).
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import dataclasses
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import timedelta
@@ -45,6 +48,9 @@ from tests.integration.conftest import PostgresEndpoint
 from vigia_platform.accreditation.exposure.indicator import USAGE_NOTICE_ES
 from vigia_platform.catalog.domain.enums import GateKind
 from vigia_platform.catalog.domain.gates import GateInterval
+from vigia_platform.catalog.domain.ports import PortLimitExceeded, PortQueryInvalid
+from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.ledger.application.coverage import CoverageZoneNotFound
 from vigia_platform.loop.calendar import local_date
 from vigia_platform.loop.domain.enums import ExposureStatus
 from vigia_platform.shared.context import Role, ScopeLevel
@@ -323,6 +329,169 @@ def test_scope_not_found_and_invalid_requests(
     malformed = stack.get(coordinator, _params(organization.zone_id, "2026-13"))
     assert malformed.status_code == 400
     assert stack.rows(organization.zone_id) == []
+
+
+class FailingGates:
+    """``GateQueryPort.gate_history`` caído (``error``) o que devuelve un intervalo de otra zona."""
+
+    def __init__(self, error: Exception | None) -> None:
+        self.error = error
+        self.calls = 0
+
+    async def gate_history(
+        self, context: Any, zone_id: uuid.UUID, start: Any, end: Any
+    ) -> tuple[GateInterval, ...]:
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        foreign = RevokedGates(context.organization_id, start)
+        (approved, _, _) = await foreign.gate_history(context, uuid.uuid4(), start, end)
+        return (approved,)
+
+
+class FailingCoverage:
+    """``CoveragePort.linea_de_tiempo`` caído o con una línea de tiempo que no es partición."""
+
+    def __init__(self, scripted: ScriptedCoverage, *, broken: bool) -> None:
+        self.scripted = scripted
+        self.broken = broken
+
+    async def linea_de_tiempo(self, context: Any, zone_id: uuid.UUID, period: Any) -> Any:
+        if not self.broken:
+            raise CoverageZoneNotFound()
+        timeline = await self.scripted.linea_de_tiempo(context, zone_id, period)
+        return dataclasses.replace(timeline, intervals=timeline.intervals[1:])
+
+
+class FailingOccupancy:
+    """``CatalogQueryPort`` real salvo ``single_occupancy``, que no responde."""
+
+    def __init__(self, catalog: Any) -> None:
+        self.catalog = catalog
+
+    async def catalog_at(self, context: Any, zone_id: uuid.UUID, at: Any) -> Any:
+        return await self.catalog.catalog_at(context, zone_id, at)
+
+    async def single_occupancy(self, context: Any, zone_id: uuid.UUID, at: Any = None) -> Any:
+        raise LookupError("puerto de catálogo caído")
+
+
+@contextlib.contextmanager
+def _swapped(stack: ExposureStack, **ports: Any) -> Iterator[None]:
+    """Cambia puertos del servicio que sirve la ruta y los restaura al salir."""
+    service: Any = stack.http.exposure
+    before = {name: getattr(service, f"_{name}") for name in ports}
+    for name, port in ports.items():
+        setattr(service, f"_{name}", port)
+    try:
+        yield
+    finally:
+        for name, port in before.items():
+            setattr(service, f"_{name}", port)
+
+
+def _unavailable(response: Any, detail_code: str) -> None:
+    assert response.status_code == 503, response.text
+    body = response.json()
+    assert body["code"] == "temporarily_unavailable"
+    assert body["detail_code"] == detail_code
+    assert not {"confirmed_minutes", "pending_classification_minutes"} & set(body)
+
+
+def test_without_gate_history_or_coverage_it_fails_closed_and_stores_nothing(
+    stack: ExposureStack, coverage: ScriptedCoverage
+) -> None:
+    organization = stack.world.organization()
+    coordinator = stack.member(organization)
+    stack.finding(
+        organization, started=stack.now() - timedelta(minutes=20), duration=timedelta(seconds=30)
+    )
+    params = _params(organization.zone_id, stack.period())
+    errors: list[Exception | None] = [
+        ResourceNotFound(),
+        PortQueryInvalid("entrada mal formada"),
+        PortLimitExceeded("gate_history", "366 días"),
+        LookupError("puerto de compuertas caído"),
+        None,  # un intervalo de otra zona
+    ]
+    for error in errors:
+        gates = FailingGates(error)
+        with _swapped(stack, gates=gates):
+            response = stack.get(coordinator, params)
+        _unavailable(response, "loop_gate_state_unavailable")
+        assert gates.calls == 1
+        assert stack.rows(organization.zone_id) == []
+
+    for broken in (False, True):
+        with _swapped(stack, coverage=FailingCoverage(coverage, broken=broken)):
+            response = stack.get(coordinator, params)
+        _unavailable(response, "accreditation_coverage_unavailable")
+        assert stack.rows(organization.zone_id) == []
+
+    # Con los dos puertos de vuelta, el mismo mes se calcula y se guarda.
+    response = stack.get(coordinator, params)
+    assert response.status_code == 200, response.text
+    assert response.json()["confirmed_minutes"] == 0.5
+    assert len(stack.rows(organization.zone_id)) == 1
+
+
+def test_without_the_single_occupancy_port_it_aggregates_never_finer_than_served(
+    stack: ExposureStack, coverage: ScriptedCoverage
+) -> None:
+    # Sin respuesta del puerto, unipersonal con la ventana por defecto de la planta (240).
+    organization = stack.world.organization()
+    stack.world.configure_default_window(organization, 240)
+    stack.finding(
+        organization, started=stack.now() - timedelta(minutes=20), duration=timedelta(seconds=30)
+    )
+    context = stack.context(organization)
+    period = stack.period()
+    service = stack.service()
+    service._catalog = FailingOccupancy(service._catalog)
+    fallback = stack.run(service.indicator(context, organization.zone_id, period))
+    assert {bucket.width_minutes for bucket in fallback.hourly_distribution} == {240}
+    assert sum(bucket.confirmed_ms for bucket in fallback.hourly_distribution) == 30_000
+
+    # Una zona que ya sirvió cubos de 480: la caída (ventana por defecto 60) no los afina.
+    wide = stack.world.organization()
+    stack.finding(wide, started=stack.now() - timedelta(minutes=20), duration=timedelta(seconds=30))
+    stack.set_single_occupancy(wide, 480)
+    served = stack.run(stack.service().indicator(stack.context(wide), wide.zone_id, period))
+    assert {bucket.width_minutes for bucket in served.hourly_distribution} == {480}
+    stack.advance(16 * 60)
+    down = stack.service()
+    down._catalog = FailingOccupancy(down._catalog)
+    during = stack.run(down.indicator(stack.context(wide), wide.zone_id, period))
+    assert {bucket.width_minutes for bucket in during.hourly_distribution} == {480}
+    (row,) = stack.rows(wide.zone_id)
+    assert {bucket["width_minutes"] for bucket in json_list(row["hourly_distribution"])} == {480}
+
+
+def json_list(value: Any) -> list[dict[str, Any]]:
+    return json.loads(value) if isinstance(value, str | bytes) else list(value)
+
+
+def test_a_month_that_ended_before_the_zone_existed_is_invalid_and_stores_nothing(
+    stack: ExposureStack, coverage: ScriptedCoverage
+) -> None:
+    organization = stack.world.organization()
+    coordinator = stack.member(organization)
+    (zone,) = stack.fetch(
+        "SELECT created_at FROM identity.zone WHERE zone_id = $1", organization.zone_id
+    )
+    created = stack.period(zone["created_at"])
+    start, _ = stack.bounds(created)
+    before = stack.period(start - timedelta(days=1))
+    for period in (before, "2000-01", "0001-01"):
+        response = stack.get(coordinator, _params(organization.zone_id, period))
+        assert response.status_code == 400, (period, response.text)
+        assert response.json()["code"] == "invalid_request"
+        assert response.json().get("detail_code") is None
+    assert stack.rows(organization.zone_id) == []
+    # El mes del alta sí se calcula (cerrado o en curso).
+    response = stack.get(coordinator, _params(organization.zone_id, created))
+    assert response.status_code == 200, response.text
+    assert len(stack.rows(organization.zone_id)) == 1
 
 
 def test_with_the_real_coverage_port_the_percent_is_its_timeline(stack: ExposureStack) -> None:

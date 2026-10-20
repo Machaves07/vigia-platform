@@ -274,9 +274,11 @@ class ExposureService:
     def _period(self, place: ZonePlace, period: str, now: datetime) -> _Period:
         try:
             start, end = month_bounds(place.timezone, period)
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, OverflowError):
             raise ExposurePeriodInvalid() from None
-        if start > now:
+        if start > now or end <= place.created_at:
+            # Ni un mes que no empezó ni uno que terminó antes del alta de la zona: un ``GET``
+            # nunca materializa meses en los que la zona no existía.
             raise ExposurePeriodInvalid()
         return _Period(period, start, end)
 
@@ -290,7 +292,7 @@ class ExposureService:
             settings, _ = await self._settings.settings_in(transaction, place.plant_id)
             inputs = await self._repository.inputs(transaction, place.plant_id)
             stored = await self._repository.stored(transaction, zone_id=zone_id, period=period.key)
-        single, window = await self._occupancy(context, zone_id, settings)
+        single, window = await self._occupancy(context, zone_id, settings, stored)
         width = bucket_width(single_occupancy=single, window_minutes=window)
         digest = inputs_digest(zone_id=zone_id, period=period.name, inputs=inputs)
         if stored is not None and _reusable(
@@ -378,12 +380,22 @@ class ExposureService:
         return _from_stored(saved, period)
 
     async def _occupancy(
-        self, context: ScopeContext, zone_id: uuid.UUID, settings: LoopSettings
+        self,
+        context: ScopeContext,
+        zone_id: uuid.UUID,
+        settings: LoopSettings,
+        stored: StoredExposure | None,
     ) -> tuple[bool, int]:
+        """La marca unipersonal y la ventana de la zona. Si el puerto no responde, unipersonal con
+        la ventana por defecto de la planta (PAT-LAZ-MAN-05) **o la de los cubos ya guardados, si
+        es más ancha**: la caída del puerto nunca sirve cubos más finos que los que ya se
+        servían."""
         try:
             answer = await self._catalog.single_occupancy(context, zone_id)
         except (ResourceNotFound, PortQueryInvalid, PortLimitExceeded, LookupError):
-            return True, settings["single_occupancy_default_window_minutes"]
+            window = settings["single_occupancy_default_window_minutes"]
+            served = None if stored is None else _stored_width(stored)
+            return True, window if served is None else max(window, served)
         return answer.single_occupancy, answer.aggregation_window_minutes
 
     async def _no_hard_signal(
