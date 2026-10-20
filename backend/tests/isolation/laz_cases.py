@@ -39,6 +39,7 @@ from vigia_platform.accreditation.events import register_accreditation_event_typ
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.accreditation.exposure.service import ExposureService
+from vigia_platform.accreditation.metrics.service import ProgramMetricsService
 from vigia_platform.accreditation.monthly.audit import SampleAuditService
 from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
@@ -314,6 +315,12 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 storage=_NoSigner(),
             ),
             exposure=_exposure(services),  # TASK-322
+            metrics=ProgramMetricsService(
+                database=services.database,
+                authorizer=services.authorizer,
+                exposure=_exposure(services),
+                clock=services.clock,
+            ),
             sample_audit=SampleAuditService(  # TASK-347
                 database=database,
                 writer=services.writer,
@@ -828,6 +835,17 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 "GET",
                 "/accreditation/adoption",
                 params={"plant_id": str(i.plant), "from": "2026-01-01", "to": "2026-01-31"},
+            ),
+        ),
+    ),
+    (
+        ("GET", "/accreditation/metrics"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "GET",
+                "/accreditation/metrics",
+                params={"zone_id": str(i.zone), "period": "2026-01"},
             ),
         ),
     ),

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
     from vigia_platform.accreditation.adoption.reads import AdoptionReads
     from vigia_platform.accreditation.exposure.service import ExposureService
+    from vigia_platform.accreditation.metrics.service import ProgramMetricsService
     from vigia_platform.accreditation.monthly.audit import SampleAuditService
     from vigia_platform.accreditation.monthly.commitments import CommitmentService
 
@@ -50,6 +51,8 @@ class AccreditationHttp:
     """Las tres rutas de los compromisos del mando de línea (TASK-347)."""
     adoption: AdoptionReads | None = None
     """``GET /accreditation/adoption`` (SUP-U05-32, TASK-323)."""
+    metrics: ProgramMetricsService | None = None
+    """``GET /accreditation/metrics`` (SUP-U05-30, TASK-321)."""
 
 
 def installed[T](service: T | None) -> T:
