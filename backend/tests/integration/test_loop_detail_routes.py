@@ -295,6 +295,23 @@ def test_the_history_is_exactly_the_classification_records_of_the_subject_in_cha
     assert detail["classification_count"] == 3
 
 
+def test_the_history_of_a_finding_without_usage_gate_at_the_instant_does_not_exist(
+    stack: DetailStack, coordinator: Who
+) -> None:
+    finding = stack.received()
+    finding_state_id = stack.finding_state_id(finding)
+    assert stack.classify(coordinator, finding).status_code == 201
+    stack.world.stack.execute(
+        "UPDATE loop.finding_state SET zone_gate_status_at_event = 'pending'"
+        " WHERE finding_state_id = $1",
+        finding_state_id,
+    )
+    response = stack.history(coordinator, finding_state_id)
+    missing = stack.history(coordinator, uuid.uuid4())
+    assert response.status_code == 404
+    assert _without(response) == _without(missing)
+
+
 def test_the_history_of_an_unclassified_finding_is_empty(
     stack: DetailStack, coordinator: Who
 ) -> None:
