@@ -3,7 +3,9 @@
 - **Rechazo**: los patrones con retroceso exponencial que la revisión de la ronda 1 midió (más de
   3 s sobre una frase de 41 caracteres), los de retroceso polinómico (cuantificadores seguidos de lo
   que comparte caracteres con ellos), las piezas fuera de la gramática (búsquedas, referencias
-  atrás, grupos con nombre, indicadores en línea) y las alternancias que pasan del tope.
+  atrás, grupos con nombre, indicadores en línea) y las alternancias que pasan del tope. También los
+  que repiten caracteres fuera del alfabeto (CJK, cirílico, dígitos arábigos) que la revisión de la
+  ronda 2 midió en 38 s sobre 40 caracteres.
 - **Aceptación**: los patrones que un cliente escribe de verdad (palabras separadas por huecos,
   cifras y porcentajes, alternativas de una palabra).
 - **Tiempo**: ``find_blocked`` con la lista inicial más los patrones aceptados más caros, sobre
@@ -34,7 +36,7 @@ from vigia_platform.loop.validators.vocabulary import (
     compile_vocabulary,
     find_blocked,
 )
-from vigia_platform.loop.vocabulary.patterns import UnsafePattern, check_pattern
+from vigia_platform.loop.vocabulary.patterns import ALPHABET, UnsafePattern, check_pattern
 from vigia_platform.shared.clock import SystemClock
 
 CLOCK: Final = SystemClock()
@@ -46,6 +48,17 @@ muy por debajo de uno exponencial (los de la revisión pasaban de 3 s con 41 car
 
 REVIEW_ROUND_1: Final = ("(\\w+\\s?)+x", "((a+))+b", "(a|a)+b", "(a+b?)+c", "(.*a){12}x")
 """Los cinco que la revisión de la ronda 1 midió por encima de 3 s."""
+
+REVIEW_ROUND_2: Final = (
+    "龥*" * 10 + "x",
+    "龥*龥*龥*龥*x",
+    "[一-龥]*[一-龥]*[一-龥]*x",
+    "[\u0660-\u0669]*[\u0660-\u0669]*[\u0660-\u0669]*x",
+    "д*д*д*д*x",
+    "\\d*[\u0660-\u0669]*x",
+)
+"""Los que la revisión de la ronda 2 aceptaba por tratar lo que queda fuera del alfabeto como
+disjunto de todo (38 s sobre 40 caracteres CJK con el primero)."""
 
 GROUP_REPEATS_AT_THE_END: Final = ("(a+b?)+", "(\\w+\\s?)+", "(a|aa)+", "x(a|ab)*")
 """Grupos cuantificados al final del patrón: nada los sigue dentro del patrón (solo el límite de
@@ -60,8 +73,16 @@ POLYNOMIAL: Final = (
     "a*a?b",
     ".+z",
     "x.*y.*",
+    "\\w*一",
+    "[^x]*д",
+    "[^xy]*д",
+    "[^\\d]*一",
+    "\\s*\u1680",
+    "[\\W_]*\u3001x",
+    "д*ж*x",
 )
-"""Cuantificadores seguidos de algo que comparte caracteres con ellos."""
+"""Cuantificadores seguidos de algo que comparte caracteres con ellos (o que podría compartirlos
+fuera del alfabeto: ``д*ж*x`` se rechaza por la aproximación conservadora)."""
 
 OUTSIDE_GRAMMAR: Final = (
     "(?=x)a",
@@ -91,15 +112,38 @@ ACCEPTED: Final = (
     "turno[\\W_]*\\d{1,2}",
     "[^x]*x",
     "a[\\W_]+[^\\W_].*",
+    "龥+x",
+    "[一-龥]+ x",
+    "x\\d+%",
 )
 
 
 @pytest.mark.parametrize(
-    "pattern", REVIEW_ROUND_1 + GROUP_REPEATS_AT_THE_END + POLYNOMIAL + OUTSIDE_GRAMMAR
+    "pattern",
+    REVIEW_ROUND_1 + REVIEW_ROUND_2 + GROUP_REPEATS_AT_THE_END + POLYNOMIAL + OUTSIDE_GRAMMAR,
 )
 def test_unsafe_patterns_are_rejected(pattern: str) -> None:
     with pytest.raises(UnsafePattern):
         check_pattern(pattern)
+
+
+@pytest.mark.parametrize(
+    ("category", "outside"),
+    [
+        ("\\d", "\u0660"),
+        ("\\D", "一"),
+        ("\\s", "\u1680"),
+        ("\\S", "一"),
+        ("\\w", "一"),
+        ("\\W", "、"),
+    ],
+)
+def test_every_category_matches_outside_the_alphabet(category: str, outside: str) -> None:
+    """Por qué las seis categorías llevan el centinela: todas casan con algo fuera del alfabeto."""
+    assert outside not in ALPHABET
+    assert re.fullmatch(category, outside)
+    with pytest.raises(UnsafePattern):
+        check_pattern(f"{category}*{outside}")
 
 
 @pytest.mark.parametrize("pattern", ACCEPTED)
@@ -117,6 +161,11 @@ ADVERSARIAL: Final = (
     "zona " * 200,
     "30 " * 333 + "a",
     "Revisión del resguardo de la prensa norte " * 24,
+    "龥" * 1000,
+    "一龥 " * 333,
+    "\u0660\u0661\u0662" * 333,
+    "д" * 1000,
+    "дж " * 333,
 )
 """Textos de unos 1000 caracteres que hacen retroceder a un patrón inseguro."""
 
@@ -149,7 +198,10 @@ def test_find_blocked_over_1000_characters_stays_within_the_bound() -> None:
 
 
 _PIECES: Final = st.sampled_from(
-    ("a", "b", "x", "_", " ", "%", "\\w", "\\W", "\\d", "\\s", ".", "[\\W_]", "[a-z]", "[^x]")
+    (
+        *("a", "b", "x", "_", " ", "%", "\\w", "\\W", "\\d", "\\s", ".", "[\\W_]", "[a-z]", "[^x]"),
+        *("龥", "一", "д", "ж", "\u0660", "[一-龥]", "[\u0660-\u0669]", "[^д]"),
+    )
 )
 _QUANTIFIERS: Final = st.sampled_from(("", "", "*", "+", "?", "{0,3}", "{2}", "*?"))
 

@@ -24,7 +24,18 @@ se acepta solo si su árbol (el del analizador de ``re``) cumple, **a cualquier 
 
 La disjunción se calcula sobre un alfabeto fijo (``ALPHABET``: Latín básico y extendido, signos
 de puntuación generales y espacios de U+2000 a U+206F y U+3000), que cubre la forma de validación
-(plegada, sin tildes y en minúsculas).
+(plegada, sin tildes y en minúsculas), **más cuatro centinelas** que reparten, sin solaparse, todo
+lo que queda fuera de él (CJK, cirílico, dígitos arábigos…, que la forma de validación conserva):
+dígito (``\\d``), otro carácter de palabra (``\\w`` sin ``\\d``), espacio (``\\s``) y otro carácter
+que no es de palabra (``\\W`` sin ``\\s``). Cada categoría es la unión exacta de sus centinelas
+(``\\d`` casa con U+0660, ``\\w`` con ``一``, ``\\s`` con U+1680), así que ``[\\W_]+\\d`` sigue
+siendo disjunto; un literal fuera del alfabeto lleva el centinela de su categoría, un rango que sale
+del alfabeto los cuatro, y el punto y las negaciones todos los que la clase no cubre entera. Dos
+piezas con el mismo centinela cuentan como no disjuntas: ``龥*龥*x``, ``д*д*x`` o ``\\d*``
+seguido de un rango de dígitos arábigos quedan fuera (en la ronda 2 la revisión midió 38 s sobre
+40 caracteres CJK con diez ``龥*`` seguidos de ``x``). La
+aproximación es conservadora: solo puede rechazar de más (``д*ж*x``), nunca aceptar un patrón que
+retroceda sobre caracteres compartidos.
 
 Sin red, sin base y sin reloj; el analizador es el de la biblioteca estándar (``re._parser``).
 """
@@ -51,8 +62,25 @@ ALPHABET: Final[tuple[str, ...]] = tuple(
 )
 """Los caracteres sobre los que se decide si dos clases comparten alguno."""
 
+_OUTSIDE_DIGIT: Final = "<fuera: dígito>"
+_OUTSIDE_WORD: Final = "<fuera: otra letra de palabra>"
+_OUTSIDE_SPACE: Final = "<fuera: espacio>"
+_OUTSIDE_OTHER: Final = "<fuera: otro signo>"
+_OUTSIDE: Final = frozenset({_OUTSIDE_DIGIT, _OUTSIDE_WORD, _OUTSIDE_SPACE, _OUTSIDE_OTHER})
+"""Los centinelas de lo que queda fuera de ``ALPHABET`` (no son caracteres: no chocan con ninguno).
+``\\d`` está dentro de ``\\w`` y ``\\s`` dentro de ``\\W``, así que los cuatro no se solapan."""
+
+_OUTSIDE_OF_CATEGORY: Final[dict[str, frozenset[str]]] = {
+    "CATEGORY_DIGIT": frozenset({_OUTSIDE_DIGIT}),
+    "CATEGORY_NOT_DIGIT": _OUTSIDE - {_OUTSIDE_DIGIT},
+    "CATEGORY_SPACE": frozenset({_OUTSIDE_SPACE}),
+    "CATEGORY_NOT_SPACE": _OUTSIDE - {_OUTSIDE_SPACE},
+    "CATEGORY_WORD": frozenset({_OUTSIDE_DIGIT, _OUTSIDE_WORD}),
+    "CATEGORY_NOT_WORD": frozenset({_OUTSIDE_SPACE, _OUTSIDE_OTHER}),
+}
 _CATEGORIES: Final[dict[str, frozenset[str]]] = {
     name: frozenset(char for char in ALPHABET if re.fullmatch(expression, char))
+    | _OUTSIDE_OF_CATEGORY[name]
     for name, expression in (
         ("CATEGORY_DIGIT", r"\d"),
         ("CATEGORY_NOT_DIGIT", r"\D"),
@@ -76,37 +104,62 @@ def _name(op: object) -> str:
     return str(op)
 
 
+def _literal(code: int) -> frozenset[str]:
+    """El carácter si está en ``ALPHABET``; si no, el centinela de su categoría."""
+    char = chr(code)
+    if char in _ALL:
+        return frozenset({char})
+    if re.fullmatch(r"\d", char):
+        return frozenset({_OUTSIDE_DIGIT})
+    if re.fullmatch(r"\w", char):
+        return frozenset({_OUTSIDE_WORD})
+    if re.fullmatch(r"\s", char):
+        return frozenset({_OUTSIDE_SPACE})
+    return frozenset({_OUTSIDE_OTHER})
+
+
 def _class_set(items: Iterable[tuple[object, Any]]) -> frozenset[str]:
+    """Los caracteres de ``[...]``: exactos dentro de ``ALPHABET``; fuera, los centinelas que
+    pueden alcanzar (de más, nunca de menos)."""
     chars: set[str] = set()
+    covered: set[str] = set()
     negate = False
     for op, value in items:
         name = _name(op)
         if name == "NEGATE":
             negate = True
         elif name == "LITERAL":
-            chars.add(chr(value))
+            chars |= _literal(value)
         elif name == "RANGE":
             low, high = value
-            chars.update(char for char in ALPHABET if low <= ord(char) <= high)
+            inside = [char for char in ALPHABET if low <= ord(char) <= high]
+            chars.update(inside)
+            if len(inside) < high - low + 1:
+                chars |= _OUTSIDE
         elif name == "CATEGORY":
             category = _CATEGORIES.get(_name(value))
             if category is None:
                 raise UnsafePattern("clase de caracteres no admitida")
             chars |= category
+            covered |= category & _OUTSIDE
         else:
             raise UnsafePattern("pieza de una clase de caracteres no admitida")
-    matched = frozenset(chars) & _ALL
-    return _ALL - matched if negate else matched
+    if negate:
+        # La parte del alfabeto es exacta, así que su complemento también. Fuera del alfabeto, la
+        # negación solo deja de alcanzar los centinelas que una categoría cubre enteros; los
+        # literales y los rangos nunca cubren uno entero.
+        return (_ALL - chars) | (_OUTSIDE - covered)
+    return frozenset(chars)
 
 
 def _character_set(op: object, value: Any) -> frozenset[str]:
     name = _name(op)
     if name == "LITERAL":
-        return frozenset({chr(value)}) & _ALL
+        return _literal(value)
     if name == "NOT_LITERAL":
-        return _ALL - {chr(value)}
+        return (_ALL - {chr(value)}) | _OUTSIDE
     if name == "ANY":
-        return _ALL - {"\n"}
+        return (_ALL - {"\n"}) | _OUTSIDE
     return _class_set(value)
 
 
