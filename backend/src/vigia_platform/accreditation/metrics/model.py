@@ -85,9 +85,9 @@ class ProgramMetricsPort(Protocol):
 def reusable(
     snapshot: ProgramMetricSnapshot, digest: str, now: datetime, *, definitive: bool
 ) -> bool:
-    """La misma huella, definitiva o dentro de la validez del reloj inyectado."""
-    if snapshot.inputs_digest != digest:
-        return False
+    """El definitivo se fija una sola vez; solo la caché depende de huella y reloj."""
     if snapshot.recomputed_at is None:
         return True
+    if snapshot.inputs_digest != digest:
+        return False
     return not definitive and timedelta(0) <= now - snapshot.recomputed_at < FRESHNESS

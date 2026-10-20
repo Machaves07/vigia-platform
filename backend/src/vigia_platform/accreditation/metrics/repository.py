@@ -1,8 +1,8 @@
 """Lecturas acotadas y guardado atómico de ProgramMetricSnapshot (RLS + organización explícita).
 
-La restricción única existente y el upsert condicional dejan una sola escritura por huella
-y ventana, incluso si dos procesos calcularon simultáneamente. No se toman candados de cadena
-ni se escribe el expediente: es una proyección reconstruible.
+La restricción única y el upsert dejan una sola escritura por huella/ventana de caché y un solo
+definitivo por zona/mes, incluso si dos procesos calcularon con distintas huellas. No se toman
+candados de cadena ni se escribe el expediente: es una proyección reconstruible.
 """
 
 from __future__ import annotations
@@ -64,10 +64,10 @@ _SAVE = text(
     " ON CONFLICT (organization_id, zone_id, period) DO UPDATE SET"
     ' "values"=EXCLUDED."values", materialized_at=EXCLUDED.materialized_at,'
     " recomputed_at=EXCLUDED.recomputed_at, inputs_digest=EXCLUDED.inputs_digest"
-    " WHERE (EXCLUDED.recomputed_at IS NULL OR kept.recomputed_at IS NOT NULL) AND ("
+    " WHERE kept.recomputed_at IS NOT NULL AND ("
     " kept.inputs_digest<>EXCLUDED.inputs_digest OR"
-    " (kept.recomputed_at IS NOT NULL AND (EXCLUDED.recomputed_at IS NULL"
-    " OR kept.recomputed_at<=:expired_before OR kept.recomputed_at>:cache_now))) RETURNING *"
+    " EXCLUDED.recomputed_at IS NULL OR"
+    " kept.recomputed_at<=:expired_before OR kept.recomputed_at>:cache_now) RETURNING *"
 )
 
 

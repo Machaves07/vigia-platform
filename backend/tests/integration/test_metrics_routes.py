@@ -6,7 +6,7 @@ import asyncio
 import dataclasses
 import uuid
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -35,12 +35,76 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[ExposureStack]:
+def metrics_database(postgres_endpoint: PostgresEndpoint) -> Iterator[ExposureStack]:
     with exposure_stack(postgres_endpoint, "program_metrics") as built:
-        # El Clock simulado queda por delante de las recepciones que fija el disparador.
-        # No se compara nunca con un segundo reloj para medir vigencia de la caché.
-        built.advance(3600)
-        yield built
+        # Solo esta base desechable: el disparador y sus valores por defecto leen una
+        # copia del Clock inyectado. Se conservan exclusión, secuencias, hashes y RLS;
+        # no se reescribe ninguna recepción ni se desactiva append-only.
+        (row,) = built.fetch("SELECT pg_get_functiondef('ledger.vigia_chain_link()'::regprocedure)")
+        original = row[0]
+        assert "clock_timestamp()" in original
+        built.execute("CREATE TABLE ledger.metrics_test_clock (at timestamptz NOT NULL)")
+        built.execute("INSERT INTO ledger.metrics_test_clock VALUES ($1)", built.now())
+        built.execute(
+            "CREATE FUNCTION ledger.metrics_test_now() RETURNS timestamptz LANGUAGE sql"
+            " STABLE SECURITY DEFINER SET search_path=pg_catalog"
+            " AS 'SELECT at FROM ledger.metrics_test_clock'"
+        )
+        built.execute(original.replace("clock_timestamp()", "ledger.metrics_test_now()"))
+        built.execute(
+            "ALTER TABLE ledger.ledger_record ALTER COLUMN received_at"
+            " SET DEFAULT date_trunc('milliseconds', ledger.metrics_test_now())"
+        )
+        built.execute(
+            "ALTER TABLE shared.audit_entry ALTER COLUMN occurred_at"
+            " SET DEFAULT date_trunc('milliseconds', ledger.metrics_test_now())"
+        )
+        try:
+            yield built
+        finally:
+            built.execute(original)
+            built.execute(
+                "ALTER TABLE ledger.ledger_record ALTER COLUMN received_at"
+                " SET DEFAULT date_trunc('milliseconds', clock_timestamp())"
+            )
+            built.execute(
+                "ALTER TABLE shared.audit_entry ALTER COLUMN occurred_at"
+                " SET DEFAULT date_trunc('milliseconds', clock_timestamp())"
+            )
+            built.execute("DROP FUNCTION ledger.metrics_test_now()")
+            built.execute("DROP TABLE ledger.metrics_test_clock")
+
+
+@pytest.fixture(scope="module")
+def metrics_baseline(metrics_database: ExposureStack) -> datetime:
+    return (metrics_database.now() + timedelta(days=40)).replace(
+        day=10, hour=12, minute=0, second=0, microsecond=0
+    )
+
+
+@pytest.fixture
+def stack(
+    metrics_database: ExposureStack,
+    metrics_baseline: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> ExposureStack:
+    built = metrics_database
+    clock = built.world.stack.authz.sessions.clock
+    # Cada prueba vuelve al mismo mes; las carreras ya no acumulan meses vacíos.
+    clock.set(metrics_baseline)
+    if getattr(request, "param", "middle") == "near_end":
+        clock.set(built.bounds(built.period())[1] - timedelta(hours=1))
+    built.execute("UPDATE ledger.metrics_test_clock SET at=$1", built.now())
+    ingest = built.world.stack
+    original_tick = type(ingest).tick
+
+    def tick(self: Any, seconds: float = 1.0) -> None:
+        original_tick(self, seconds)
+        built.execute("UPDATE ledger.metrics_test_clock SET at=$1", built.now())
+
+    monkeypatch.setattr(type(ingest), "tick", tick)
+    return built
 
 
 def service(
@@ -55,7 +119,13 @@ def service(
     )
 
 
-def get(stack: ExposureStack, who: Any, params: dict[str, Any]) -> httpx.Response:
+def get(
+    stack: ExposureStack,
+    who: Any,
+    params: dict[str, Any],
+    *,
+    repository: MetricsRepository | None = None,
+) -> httpx.Response:
     authz = stack.world.stack.authz
     app = World(clock=authz.sessions.clock).app(
         runtime={
@@ -66,7 +136,9 @@ def get(stack: ExposureStack, who: Any, params: dict[str, Any]) -> httpx.Respons
                 provider_queries=LedgerProviderQueryLedger(stack.world.stack.primary.writer),
                 clock=authz.sessions.clock,
             ),
-            "state": {ACCREDITATION_STATE_KEY: AccreditationHttp(metrics=service(stack))},
+            "state": {
+                ACCREDITATION_STATE_KEY: AccreditationHttp(metrics=service(stack, repository))
+            },
         }
     )
 
@@ -201,11 +273,18 @@ def test_repository_does_not_read_records_of_another_zone_of_the_same_plant(
     assert receipt.record_id not in {r.record_id for r in records}
 
 
+@pytest.mark.parametrize("stack", ["middle", "near_end"], indirect=True)
 def test_current_month_cache_expires_at_15_minutes_and_on_a_new_record(
     stack: ExposureStack,
 ) -> None:
     org = stack.world.organization()
-    stack.finding(org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1))
+    subject = stack.finding(
+        org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1)
+    )
+    (receipt,) = stack.fetch(
+        "SELECT received_at FROM ledger.ledger_record WHERE record_id=$1", subject.record_id
+    )
+    assert receipt["received_at"] == stack.now()
     repository = CountingRepository()
     svc = service(stack, repository)
     context = stack.context(org)
@@ -228,14 +307,21 @@ def test_current_month_cache_expires_at_15_minutes_and_on_a_new_record(
 class CountingRepository(MetricsRepository):
     def __init__(self) -> None:
         self.reads = 0
+        self.heads = 0
+
+    async def head(self, transaction: Transaction, plant_id: uuid.UUID) -> int:
+        self.heads += 1
+        return await super().head(transaction, plant_id)
 
     async def records(self, transaction: Transaction, **kwargs: Any) -> Any:
         self.reads += 1
         return await super().records(transaction, **kwargs)
 
 
+@pytest.mark.parametrize("database_ahead_seconds", [0, 120])
 def test_record_known_by_digest_is_not_omitted_by_the_cutoff_before_head(
     stack: ExposureStack,
+    database_ahead_seconds: int,
 ) -> None:
     """Regresión: una recepción concurrente entra en la cabeza mientras avanza Clock."""
     org = stack.world.organization()
@@ -244,7 +330,7 @@ def test_record_known_by_digest_is_not_omitted_by_the_cutoff_before_head(
     class RacingRepository(MetricsRepository):
         async def head(self, transaction: Transaction, plant_id: uuid.UUID) -> int:
             head = await super().head(transaction, plant_id)
-            stack.advance(0.001)
+            stack.world.stack.authz.sessions.clock.advance(0.001)
             return head
 
         async def records(self, transaction: Transaction, **kwargs: Any) -> Any:
@@ -257,7 +343,11 @@ def test_record_known_by_digest_is_not_omitted_by_the_cutoff_before_head(
                 if record.record_type == "classification":
                     document["classified_at"] = stack.now().isoformat()
                 result.append(
-                    dataclasses.replace(record, received_at=stack.now(), document=document)
+                    dataclasses.replace(
+                        record,
+                        received_at=stack.now() + timedelta(seconds=database_ahead_seconds),
+                        document=document,
+                    )
                 )
             return tuple(result)
 
@@ -327,21 +417,33 @@ def test_concurrent_materialization_writes_once_and_retries_after_a_crash(
     assert resumed == first
 
 
+@pytest.mark.parametrize("stack", ["middle", "near_end"], indirect=True)
 def test_current_read_matches_the_month_close_task_and_stale_cache_cannot_replace_it(
     stack: ExposureStack,
 ) -> None:
     org = stack.world.organization()
-    stack.finding(org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1))
+    subject = stack.finding(
+        org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1)
+    )
     context = stack.context(org)
     period = stack.period()
     _, end = stack.bounds(period)
     stack.advance((end - stack.now()).total_seconds() - 0.001)
     current = stack.run(service(stack).snapshot(context, org.zone_id, period))
+    metrics = {v.key: v for v in current.values}
+    classified = metrics["classified_in_time"]
+    assert classified.status.value == "computed"
+    assert classified.denominator == classified.numerator == 1
+    assert metrics["exposure"].value == pytest.approx(1 / 60)
+    (receipt,) = stack.fetch(
+        "SELECT received_at FROM ledger.ledger_record WHERE record_id=$1", subject.record_id
+    )
+    assert current.period_from <= receipt["received_at"] < current.period_to
     stack.advance(0.001)
     task = MetricsMaterialize(service=service(stack), clock=stack.world.stack.authz.sessions.clock)
 
     async def close() -> None:
-        async with stack.database.transaction(context) as tx:
+        async with stack.database.transaction(stack.world.event_context(org)) as tx:
             await task.run(tx)
 
     stack.run(close())
@@ -421,7 +523,7 @@ def test_task_only_materializes_its_organization(stack: ExposureStack) -> None:
     task = MetricsMaterialize(service=service(stack), clock=stack.world.stack.authz.sessions.clock)
 
     async def run() -> None:
-        async with stack.database.transaction(stack.context(a)) as tx:
+        async with stack.database.transaction(stack.world.event_context(a)) as tx:
             await task.run(tx)
 
     stack.run(run())
@@ -430,3 +532,76 @@ def test_task_only_materializes_its_organization(stack: ExposureStack) -> None:
     before = rows(stack, a.zone_id)
     stack.run(run())
     assert rows(stack, a.zone_id) == before
+
+
+def test_definitive_survives_new_records_and_next_daily_task_without_history_reads(
+    stack: ExposureStack,
+) -> None:
+    org = stack.world.organization()
+    stack.execute(
+        "UPDATE identity.zone SET created_at=$1 WHERE organization_id=$2",
+        stack.now(),
+        org.organization_id,
+    )
+    stack.finding(org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1))
+    period = stack.period()
+    stack.advance((stack.bounds(period)[1] - stack.now()).total_seconds())
+    repository = CountingRepository()
+    svc = service(stack, repository)
+    task = MetricsMaterialize(service=svc, clock=stack.world.stack.authz.sessions.clock)
+
+    async def materialize() -> None:
+        async with stack.database.transaction(stack.world.event_context(org)) as tx:
+            await task.run(tx)
+
+    stack.run(materialize())
+    before = rows(stack, org.zone_id)
+    assert len(before) == 1
+    assert before[0]["recomputed_at"] is None
+    final = stack.run(svc.snapshot(stack.context(org), org.zone_id, period))
+    assert {v.key: v for v in final.values}["classified_in_time"].denominator == 1
+    repository.reads = 0
+    repository.heads = 0
+    stack.finding(org, started=stack.now(), duration=timedelta(seconds=1))
+    stack.advance(86400)
+    stack.run(materialize())
+    assert stack.run(svc.snapshot(stack.context(org), org.zone_id, period)) == final
+    response = get(
+        stack,
+        stack.member(org),
+        {"zone_id": str(org.zone_id), "period": period},
+        repository=repository,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["zones"][0] == final.model_dump(mode="json")
+    assert repository.reads == 0
+    assert repository.heads == 0
+    assert rows(stack, org.zone_id) == before
+
+
+@pytest.mark.parametrize("_repeat", range(3))
+def test_concurrent_different_definitives_never_replace_the_first(
+    stack: ExposureStack, _repeat: int
+) -> None:
+    org = stack.world.organization()
+    period = stack.period()
+    stack.advance((stack.bounds(period)[1] - stack.now()).total_seconds())
+    final = stack.run(service(stack).snapshot(stack.context(org), org.zone_id, period))
+    repository = ConcurrentRepository()
+
+    async def write(digest: str) -> Any:
+        async with stack.database.transaction(stack.world.event_context(org)) as tx:
+            return await repository.save(
+                tx,
+                final.model_copy(update={"inputs_digest": digest, "materialized_at": stack.now()}),
+                timezone="America/Bogota",
+                expired_before=stack.now(),
+            )
+
+    async def both() -> Any:
+        return await asyncio.gather(write("a" * 64), write("b" * 64))
+
+    before = rows(stack, org.zone_id)
+    assert stack.run(both()) == [None, None]
+    assert repository.writes == 0
+    assert rows(stack, org.zone_id) == before

@@ -53,7 +53,8 @@ def test_pr_laz_33_seven_metrics_match_the_independent_oracle(history: ProgramHi
     assert len(values) == 7
     assert all(v.excluded_unclosable_count == excluded for v in values.values())
     assert values[MetricKey.PRIMARY_ENGINEERING_CLOSURES].value == sum(
-        s.closed is not None and START <= s.closed < END and s.engineering for s in subjects
+        s.closed is not None and START <= s.closed < END and s.engineering and s.closure_eligible
+        for s in subjects
     )
     assert values[MetricKey.ACTIVATION].value == int(history.approved)
     assert values[MetricKey.ADOPTION].value == history.adoption
@@ -89,6 +90,7 @@ def test_pr_laz_33_seven_metrics_match_the_independent_oracle(history: ProgramHi
             closed
             for closed in subjects
             if closed.closed is not None
+            and closed.closure_eligible
             and PREVIOUS <= closed.closed < START
             and closed.family == episode.family
             and episode.received > closed.closed

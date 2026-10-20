@@ -28,6 +28,7 @@ class Subject:
     closed: datetime | None
     engineering: bool
     kind: str = "finding"
+    closure_eligible: bool = True
 
 
 @dataclass(frozen=True)
@@ -153,8 +154,27 @@ def program_histories(draw: st.DrawFn) -> ProgramHistory:
                 )
             )
         closed = None
+        closure_eligible = True
         if state == "closed":
             closed = at
+            closure_case = draw(st.sampled_from(("valid", "superseded", "unknown_evidence")))
+            closure_eligible = closure_case == "valid"
+            if closure_case == "superseded":
+                events.append(
+                    (
+                        "action_assigned",
+                        {
+                            **subject,
+                            "action_id": str(uuid.UUID(int=10000 + index)),
+                            "supersedes_action_id": str(action_id),
+                            "action_type": "engineering" if engineering else "process",
+                            "assignee_user_id": str(uuid.UUID(int=9)),
+                            "due_at": stamp(due),
+                            "assigned_at": stamp(at - timedelta(seconds=1)),
+                        },
+                        at - timedelta(seconds=1),
+                    )
+                )
             events.append(
                 (
                     "action_evidence_added",
@@ -167,6 +187,10 @@ def program_histories(draw: st.DrawFn) -> ProgramHistory:
                     at,
                 )
             )
+            if closure_case == "unknown_evidence":
+                # La lista del cierre no está vacía, pero la entrada que cita no
+                # existe en el expediente. El cálculo no debe contar ese cierre.
+                events.pop()
             events.append(
                 (
                     "closure",
@@ -192,6 +216,7 @@ def program_histories(draw: st.DrawFn) -> ProgramHistory:
                 closed,
                 engineering,
                 kind,
+                closure_eligible,
             )
         )
     records = tuple(

@@ -160,10 +160,17 @@ class ProgramMetricsService:
                 raise MetricsRequestInvalid() from None
             if start > now or end <= place.created_at:
                 raise MetricsRequestInvalid()
+            stored = await self._repository.stored(
+                tx, zone_id=zone_id, period=period, timezone=place.timezone
+            )
+            # PAT-LAZ-REN-01: el definitivo queda fijado al cerrar. Ni el avance de
+            # la cadena ni el de la proyección deben recalcular un mes ya materializado.
+            if stored is not None and stored.recomputed_at is None:
+                return stored
             head = await self._repository.head(tx, place.plant_id)
             # La cabeza puede incorporar una recepción que llegó mientras esperábamos la
-            # consulta. El corte temporal se toma después: nunca una huella nueva con una
-            # recepción omitida por el instante anterior a la lectura de la cabeza.
+            # consulta. El corte de los hechos fechados por la aplicación se toma después;
+            # las recepciones de base se acotan por secuencia, no por este Clock.
             now = self._clock.now()
             now -= timedelta(microseconds=now.microsecond % 1000)
             cutoff = min(end, now)
@@ -184,9 +191,6 @@ class ProgramMetricsService:
                 adoption=adoption,
                 projection_sequence=projection.projection_sequence,
                 projection_state=projection.projection_state,
-            )
-            stored = await self._repository.stored(
-                tx, zone_id=zone_id, period=period, timezone=place.timezone
             )
             definitive = end <= now
             if stored is not None and reusable(stored, digest, now, definitive=definitive):

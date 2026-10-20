@@ -16,7 +16,10 @@ necesita `metrics.read` sobre la zona. La ruta acepta exactamente `period` y uno
   la historia de configuración, no desde sus valores actuales. Sin cohorte, no calculable.
 - Vencidos: estado al corte, con subconjunto estrictamente mayor de 30 días de calendario.
 - Reincidencia: episodios del periodo tras un cierre de acción de la misma zona y familia en el
-  mes anterior. Un episodio cuenta una vez aunque coincida con varios cierres o tenga varios tramos.
+   mes anterior. Un episodio cuenta una vez aunque coincida con varios cierres o tenga varios tramos.
+   Interpretación de «periodo siguiente» de BR-LAZ-113: el mes calendario siguiente, no una
+   ventana móvil desde cada cierre; los episodios del mismo mes del cierre no cuentan. Pendiente
+   de confirmación del dueño; no se cambia la definición en esta ronda.
 - Exposición: consume `ExposureService.indicator`, conservando estado parcial y motivo. Si el
   puerto no dispone de sus insumos, no calculable con motivo, nunca cero ni una cifra parcial oculta.
 
@@ -29,11 +32,15 @@ Una sola tabla existente, sin migración. La huella incluye secuencia de la cade
 conjunto canónico de zonas (la zona de la instantánea), periodo, contador operativo y punto/estado
 de la proyección que consume exposición. La huella se lee antes de los insumos: una escritura
 concurrente obliga al siguiente lector a invalidar, nunca deja una huella nueva para datos viejos.
-La validez de 15 minutos depende solo de `Clock`; al cerrar, la tarea sustituye el recálculo por
-el definitivo, incluso con la misma huella.
+La validez de 15 minutos y la invalidación por huella solo se aplican al mes en curso. Al cerrar,
+la tarea sustituye el recálculo por el definitivo, incluso con la misma huella. Una vez escrito,
+el definitivo se sirve antes de leer cabeza o insumos: el avance posterior de la cadena no lo
+invalida. El upsert no reemplaza un definitivo ni siquiera por otro definitivo con distinta huella.
 
-El corte temporal se toma después de leer la cabeza: una recepción incorporada durante esa
-consulta no se omite bajo una huella que ya la conoce. Un retroceso de `Clock` también invalida
+Las recepciones del mes se acotan por `chain_sequence <= head` y `received_at < period_end`,
+no por `received_at <= Clock.now()`: el desfase entre los relojes de base y aplicación no omite
+una recepción que ya contiene la huella. Los hechos fechados por la aplicación conservan su
+corte histórico. Un retroceso de `Clock` también invalida
 una caché con marca futura. Su comparación al guardar usa el mismo reloj, leído al guardar,
 no la marca antigua de un cálculo lento (que no debe sobrescribir una caché más reciente).
 
@@ -45,3 +52,17 @@ recupera todos los meses cerrados desde el alta de cada zona, con su calendario 
 
 `monthly` consume el puerto en el manifiesto firmado, el registro v1 (sus campos compatibles)
 y `metric_snapshot_id`; el manifiesto conserva además motivos y el subconjunto de vencidos.
+
+## Bordes y pendientes menores
+
+- BR-LAZ-111: el generador incluye cierres con acción reemplazada y evidencia citada no conocida;
+  ninguno cuenta. La guarda de incerrable es redundante con el pliegue del dominio: `Close`
+  desde `unclosable` no es una transición válida y falla antes de devolver métricas. No se
+  afirma una mutación detectada para esa redundancia.
+- La tarea sigue fallando de forma visible ante una zona inconsistente: el ejecutor registra
+  el fallo y reintenta; los definitivos ya confirmados se reutilizan. Una zona defectuosa puede
+  impedir llegar a las siguientes de la organización. Aislar fallos por zona queda como pendiente
+  menor explícito (sin ocultar errores ni ampliar aquí el catálogo de eventos).
+- Las pruebas de integración inyectan el mismo `Clock` en la marca de recepción de su base
+  desechable, sin reescribir filas ni quitar hashes/RLS. Reinician el reloj por prueba y ejecutan
+  caché/cierre tanto a mitad de mes como a una hora del fin de mes local.

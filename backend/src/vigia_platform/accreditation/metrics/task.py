@@ -1,7 +1,7 @@
 """Materialización diaria de meses cerrados, en el calendario local de cada zona.
 
 Recupera desde el alta, de más antiguo a más reciente. Cada instantánea confirma su propia
-transacción; tras una caída, el upsert conserva lo ya confirmado con la misma huella.
+transacción; tras una caída, se conserva todo definitivo ya confirmado, aunque avance la huella.
 """
 
 from __future__ import annotations

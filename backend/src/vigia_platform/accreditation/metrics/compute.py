@@ -82,7 +82,10 @@ def compute_metrics(
             and r.plant_id == plant_id
             and r.received_at < end
             and effective_at(r) < end
-            and effective_at(r) <= cutoff
+            # La consulta ya fijó la recepción por secuencia de cadena. El reloj
+            # de la base puede ir por delante del de la aplicación: no se vuelve a
+            # recortar esa recepción por Clock, solo los hechos fechados del lazo.
+            and (r.record_type not in _TIMES or effective_at(r) <= cutoff)
         ),
         key=lambda r: r.chain_sequence,
     )

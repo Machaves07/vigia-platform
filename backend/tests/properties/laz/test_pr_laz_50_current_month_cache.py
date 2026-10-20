@@ -46,6 +46,8 @@ def test_pr_laz_50_cache_boundaries_and_digest(
     )
     assert not reusable(snapshot, changed, now, definitive=False)
     assert not reusable(snapshot, digest, now, definitive=True)
+    final = snapshot.model_copy(update={"recomputed_at": None})
+    assert reusable(final, changed, END + timedelta(days=1), definitive=True)
     assert (
         inputs_digest(head=head, zones=(ZONE, ZONE), period="2026-03", adoption=history.adoption)
         == digest
