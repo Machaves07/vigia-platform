@@ -212,7 +212,9 @@ def test_the_seventeen_types_are_exactly_those_of_the_design() -> None:
 @pytest.mark.parametrize("name", NAMES)
 def test_each_type_matches_its_row_of_the_table(name: str) -> None:
     chain, source_key, free_text, events = DESIGN_TABLE[name]
-    definition = _compiled(name).definition
+    # La tabla de §5.1 describe la versión 1; la 2 de ``commitments_recorded`` (TASK-347) la prueba
+    # ``test_commitments_recorded_v2_only_adds_state_and_closed_note``.
+    definition = REGISTRY.get(name, schema_version=1).definition
     assert definition.writer_unit is ActorUnit.U04
     assert definition.schema_version == 1
     assert definition.chain_level is ChainLevel(chain)
@@ -223,6 +225,36 @@ def test_each_type_matches_its_row_of_the_table(name: str) -> None:
     assert frozenset(NARRATIVE[name]) == free_text
     assert frozenset(definition.free_text_paths) == free_text | frozenset(SNAPSHOT[name])
     assert not free_text & frozenset(SNAPSHOT[name])
+
+
+def test_only_commitments_recorded_has_a_second_version() -> None:
+    assert {
+        compiled.record_type: compiled.schema_version
+        for compiled in REGISTRY.latest()
+        if compiled.schema_version != 1
+    } == {"commitments_recorded": 2}
+
+
+def test_commitments_recorded_v2_only_adds_state_and_closed_note() -> None:
+    """TASK-347 (SUP-U05-28): la versión 2 amplía la 1 con ``state`` y ``closed_note`` opcionales
+    en cada compromiso; la cadena, la clave, los eventos y el resto de las rutas no cambian."""
+    v1 = REGISTRY.get("commitments_recorded", schema_version=1).definition
+    v2 = REGISTRY.get("commitments_recorded", schema_version=2).definition
+    for attribute in ("writer_unit", "chain_level", "source_key_path", "outbox_events"):
+        assert getattr(v2, attribute) == getattr(v1, attribute)
+    assert v2.evidence_paths == () and v2.label_rule is None
+    assert frozenset(v2.free_text_paths) - frozenset(v1.free_text_paths) == {
+        "/commitments[*]/closed_note"
+    }
+    assert frozenset(v1.free_text_paths) <= frozenset(v2.free_text_paths)
+    entry_v1 = v1.content_model.model_fields["commitments"].annotation
+    entry_v2 = v2.content_model.model_fields["commitments"].annotation
+    assert entry_v1 is not None and entry_v2 is not None
+    (model_v1,) = {arg for arg in entry_v1.__args__ if arg is not Ellipsis}
+    (model_v2,) = {arg for arg in entry_v2.__args__ if arg is not Ellipsis}
+    assert set(model_v2.model_fields) - set(model_v1.model_fields) == {"state", "closed_note"}
+    for name in ("state", "closed_note"):
+        assert not model_v2.model_fields[name].is_required()
 
 
 def test_only_classification_and_review_project_a_label_with_the_paths_of_5_3() -> None:

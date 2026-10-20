@@ -62,6 +62,8 @@ from vigia_platform.accreditation.export.worker import (
     LoggingExportAlarm,
     register_export_worker,
 )
+from vigia_platform.accreditation.monthly.audit import SampleAuditService
+from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.package import (
     EvidencePort,
     MissingEvidence,
@@ -234,8 +236,8 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
 
 
 def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
-    """El único ``AccreditationHttp`` del módulo: las tres tareas de servicio (TASK-317, 345 y
-    344) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
+    """El único ``AccreditationHttp`` del módulo: las tareas de servicio (TASK-317, 345, 344 y
+    347) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
     exige una sola aparición de ``ACCREDITATION_STATE_KEY``)."""
     evidence = services.evidence
     monthly_repository = MonthlyPackageRepository(database=services.database)
@@ -271,6 +273,19 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
                     audit=services.audit,
                     storage=evidence,
                 )
+            ),
+            # TASK-347: SUP-U05-26 a 29, escrituras del expediente sin depósito de evidencias.
+            sample_audit=SampleAuditService(
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            commitments=CommitmentService(
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
             ),
         )
     }

@@ -36,6 +36,8 @@ from vigia_platform.accreditation.adapters.http.services import (
 from vigia_platform.accreditation.events import register_accreditation_event_types
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
+from vigia_platform.accreditation.monthly.audit import SampleAuditService
+from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.repository import MonthlyPackageRepository
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
@@ -203,6 +205,7 @@ class _NoSigner:
 
 
 def _accreditation(services: LazServices) -> Mapping[str, object]:
+    database: Any = services.database
     return {
         ACCREDITATION_STATE_KEY: AccreditationHttp(
             exports=ExportRequests(
@@ -225,6 +228,18 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 audit=services.audit,
                 storage=_NoSigner(),
+            ),
+            sample_audit=SampleAuditService(  # TASK-347
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            commitments=CommitmentService(  # TASK-347
+                database=database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
             ),
         )
     }
@@ -563,6 +578,62 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         Case(
             Kind.RESOURCE,
             lambda i: Call("GET", f"/accreditation/monthly-packages/{i.plant}/2026-01/download"),
+        ),
+    ),
+    # TASK-347 (SUP-U05-26 a 29): el resultado de un elemento de la muestra, los compromisos de
+    # un paquete, la actualización de un compromiso y la lista de una zona de B responden igual
+    # que con un identificador inexistente (not_found, nunca forbidden, sample_already_reviewed
+    # ni commitment_out_of_scope); nada se escribe en B. Las pruebas con una muestra y un paquete
+    # reales de otra organización y de otra zona están en
+    # tests/integration/test_monthly_audit_and_commitments_routes.py.
+    (
+        ("POST", "/accreditation/sample-items/{sample_item_id}/result"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/accreditation/sample-items/{i.record}/result",
+                json={"outcome": "consistent_criterion"},
+            ),
+        ),
+    ),
+    (
+        ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "POST",
+                f"/accreditation/monthly-packages/{i.record}/commitments",
+                json={
+                    "commitments": [
+                        {
+                            "text": "Revisar la señalización del pasillo peatonal de la zona",
+                            "responsible_user_id": str(i.user),
+                            "due_date": "2026-12-01",
+                        }
+                    ]
+                },
+            ),
+        ),
+    ),
+    (
+        ("PATCH", "/accreditation/commitments/{commitment_id}"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "PATCH", f"/accreditation/commitments/{i.record}", json={"state": "done"}
+            ),
+        ),
+    ),
+    (
+        ("GET", "/accreditation/commitments"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "GET",
+                "/accreditation/commitments",
+                params={"zone_id": str(i.zone), "period": "2026-01"},
+            ),
         ),
     ),
 ]
