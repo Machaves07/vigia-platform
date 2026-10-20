@@ -38,9 +38,10 @@ ACCREDITATION_TABLES: Final = (
     "program_metric_snapshot",
     "exposure_indicator",
     "adoption_counter",
+    "adoption_alert",
 )
-"""Las nueve tablas de ``accreditation`` (``laz_0031``) y ``monthly_package_lease`` (``laz_0035``,
-VIG-239), todas con planta."""
+"""Las nueve tablas de ``accreditation`` (``laz_0031``), ``monthly_package_lease`` (``laz_0035``,
+VIG-239) y ``adoption_alert`` (``laz_0038``, TASK-323), todas con planta."""
 
 PERIOD_KEY_TABLES: Final = ("monthly_package", "program_metric_snapshot", "exposure_indicator")
 """Las de clave ``(organization_id, zone_id, period)``."""
@@ -312,6 +313,25 @@ def adoption_counter(
     )
 
 
+def adoption_alert(
+    scope: AccreditationScope, at: dt.datetime = BASE_TIME, *, start: dt.date | None = None
+) -> Statement:
+    streak_start = start or next_day()
+    return insert(
+        "adoption_alert",
+        {
+            "organization_id": scope.organization_id,
+            "plant_id": scope.plant_id,
+            "zone_id": scope.zone_id,
+            "streak_start": streak_start,
+            "silent_days": 14,
+            "threshold_days": 14,
+            "evaluated_day": streak_start + dt.timedelta(days=14),
+            "emitted_at": at,
+        },
+    )
+
+
 ROW_BUILDERS: Final[dict[str, Builder]] = {
     "export_request": export_request,
     "export_package": export_package,
@@ -323,6 +343,7 @@ ROW_BUILDERS: Final[dict[str, Builder]] = {
     "program_metric_snapshot": program_metric_snapshot,
     "exposure_indicator": exposure_indicator,
     "adoption_counter": adoption_counter,
+    "adoption_alert": adoption_alert,
 }
 """Una fila nueva por tabla (el paquete de exportación, además, su solicitud)."""
 
