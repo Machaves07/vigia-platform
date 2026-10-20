@@ -58,11 +58,14 @@ __all__ = [
     "Assign",
     "ChangeDeadlineRange",
     "ChangeHighlightDays",
+    "ClassifyFinding",
     "CloseFinding",
+    "DeactivateAssignee",
     "DeclarationAttempt",
     "DeclareUnclosable",
     "DeclareUnclosableFinding",
     "EvaluateDeadlines",
+    "LateSegment",
     "LifecycleCommand",
     "NeutralAction",
     "PlantPolicy",
@@ -70,8 +73,10 @@ __all__ = [
     "Reassign",
     "Reclassify",
     "ReopenFinding",
+    "ResolveQueue",
     "ReviewAttempt",
     "ReviewUnclosable",
+    "RevokeGate",
     "RevokedPolicyState",
     "Tick",
     "action_texts",
@@ -83,6 +88,7 @@ __all__ = [
     "not_an_action_type",
     "plant_policies",
     "review_attempts",
+    "stateful_lifecycle_command_sequences",
     "unclosable_texts",
 ]
 
@@ -496,6 +502,36 @@ class DeclareUnclosableFinding:
     """Declarar el hallazgo incerrable (T10) con sus cinco campos y la política firmada."""
 
 
+@dataclass(frozen=True)
+class ClassifyFinding:
+    """Clasificar o reclasificar un hallazgo con salida y motivo reforzado."""
+
+    outcome: Literal["confirmed", "false_positive"]
+    reinforced: bool
+
+
+@dataclass(frozen=True)
+class ResolveQueue:
+    """Resolver una detección de cola; se conserva para ejercitar T05/T06 y sus rechazos."""
+
+    outcome: Literal["review_confirmed", "review_discarded"]
+
+
+@dataclass(frozen=True)
+class LateSegment:
+    """Adjuntar un tramo tardío (T21), que nunca reabre el lazo."""
+
+
+@dataclass(frozen=True)
+class DeactivateAssignee:
+    """Desactivar al responsable sin cambiar el estado de su acción."""
+
+
+@dataclass(frozen=True)
+class RevokeGate:
+    """Revocar la compuerta de uso: conserva los hechos ya escritos."""
+
+
 type LifecycleCommand = (
     Assign
     | Reassign
@@ -510,6 +546,11 @@ type LifecycleCommand = (
     | DeclareUnclosableFinding
     | DeclareUnclosable
     | ReviewUnclosable
+    | ClassifyFinding
+    | ResolveQueue
+    | LateSegment
+    | DeactivateAssignee
+    | RevokeGate
 )
 """Los comandos de la base, los de los plazos (TASK-313) y los del incerrable (TASK-312); las
 tareas siguientes añaden los suyos a esta unión."""
@@ -545,6 +586,44 @@ def lifecycle_command_sequences(
 ) -> st.SearchStrategy[list[LifecycleCommand]]:
     """Una secuencia de comandos sobre un hallazgo abierto (incluida la vacía)."""
     return st.lists(_commands(), max_size=max_size)
+
+
+def stateful_lifecycle_command_sequences(
+    max_size: int = 50,
+) -> st.SearchStrategy[list[LifecycleCommand]]:
+    """Los catorce comandos de PR-LAZ-10, incluida la secuencia vacía.
+
+    La estrategia histórica se conserva para las propiedades de tareas anteriores que usan una
+    aplicación parcial; esta es la variante completa que consume la máquina estatal.
+    """
+    return st.lists(
+        st.one_of(
+            st.builds(
+                ClassifyFinding,
+                st.sampled_from(("confirmed", "false_positive")),
+                st.booleans(),
+            ),
+            st.builds(ResolveQueue, st.sampled_from(("review_confirmed", "review_discarded"))),
+            st.builds(Assign, st.sampled_from(ACTION_TYPES), _deadline()),
+            st.just(AddEvidence()),
+            st.just(CloseFinding()),
+            st.builds(DeclareUnclosable, declaration_attempts()),
+            st.builds(ReviewUnclosable, review_attempts()),
+            st.builds(ReopenFinding, st.sampled_from(ACTION_TYPES), _deadline()),
+            st.builds(Tick, st.integers(1, 3 * 24 * 3600)),
+            st.just(LateSegment()),
+            st.just(DeactivateAssignee()),
+            st.just(RevokeGate()),
+            st.builds(
+                ChangeDeadlineRange,
+                st.integers(1, 30),
+                st.integers(1, 30),
+                st.integers(1, 180),
+                st.just((1, 2, 3, 4, 5)),
+            ),
+        ),
+        max_size=max_size,
+    )
 
 
 def _deadline_commands() -> st.SearchStrategy[LifecycleCommand]:
