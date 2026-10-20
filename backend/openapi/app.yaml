@@ -5008,6 +5008,40 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exposure":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Indicador de exposición de una zona y un mes, con su cobertura"
+      "operationId": "get_exposure_accreditation_exposure_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExposureOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/notifications":
     "get":
       "tags":
@@ -8983,6 +9017,212 @@
         - "correlation_id"
         - "manifest_summary"
       "title": "ExportStatusOut"
+    "ExposureCoverageAnnotationOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+        "cause":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Cause"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "from"
+        - "to"
+        - "cause"
+      "title": "ExposureCoverageAnnotationOut"
+      "description": "Un tramo de compuerta de uso revocada (o de acta no vigente) sobre la línea de tiempo."
+    "ExposureCoverageIntervalOut":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+        "state":
+          "type": "string"
+          "title": "State"
+        "causes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Causes"
+        "layer":
+          "type": "string"
+          "title": "Layer"
+        "duration_ms":
+          "type": "integer"
+          "title": "Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+        - "state"
+        - "causes"
+        - "layer"
+        - "duration_ms"
+      "title": "ExposureCoverageIntervalOut"
+    "ExposureCoverageSummaryOut":
+      "properties":
+        "observable_ms":
+          "type": "integer"
+          "title": "Observable Ms"
+        "degraded_ms":
+          "type": "integer"
+          "title": "Degraded Ms"
+        "not_observable_ms":
+          "type": "integer"
+          "title": "Not Observable Ms"
+        "no_communication_ms":
+          "type": "integer"
+          "title": "No Communication Ms"
+        "never_reported_ms":
+          "type": "integer"
+          "title": "Never Reported Ms"
+        "zone_not_active_ms":
+          "type": "integer"
+          "title": "Zone Not Active Ms"
+        "not_elapsed_ms":
+          "type": "integer"
+          "title": "Not Elapsed Ms"
+        "total_ms":
+          "type": "integer"
+          "title": "Total Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "observable_ms"
+        - "degraded_ms"
+        - "not_observable_ms"
+        - "no_communication_ms"
+        - "never_reported_ms"
+        - "zone_not_active_ms"
+        - "not_elapsed_ms"
+        - "total_ms"
+      "title": "ExposureCoverageSummaryOut"
+    "ExposureCoverageTimelineOut":
+      "properties":
+        "period":
+          "$ref": "#/components/schemas/ExposureTimelineRangeOut"
+        "intervals":
+          "items":
+            "$ref": "#/components/schemas/ExposureCoverageIntervalOut"
+          "type": "array"
+          "title": "Intervals"
+        "summary":
+          "$ref": "#/components/schemas/ExposureCoverageSummaryOut"
+        "annotations":
+          "items":
+            "$ref": "#/components/schemas/ExposureCoverageAnnotationOut"
+          "type": "array"
+          "title": "Annotations"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "period"
+        - "intervals"
+        - "summary"
+        - "annotations"
+      "title": "ExposureCoverageTimelineOut"
+    "ExposureHourlyBucketOut":
+      "properties":
+        "start_minute_of_day":
+          "type": "integer"
+          "title": "Start Minute Of Day"
+        "width_minutes":
+          "type": "integer"
+          "title": "Width Minutes"
+        "confirmed_minutes":
+          "type": "number"
+          "title": "Confirmed Minutes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "start_minute_of_day"
+        - "width_minutes"
+        - "confirmed_minutes"
+      "title": "ExposureHourlyBucketOut"
+      "description": "Un cubo de la distribución horaria: solo su inicio en el día local y su ancho."
+    "ExposureOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "period_from":
+          "type": "string"
+          "title": "Period From"
+        "period_to":
+          "type": "string"
+          "title": "Period To"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "confirmed_minutes":
+          "type": "number"
+          "title": "Confirmed Minutes"
+        "pending_classification_minutes":
+          "type": "number"
+          "title": "Pending Classification Minutes"
+        "observable_coverage_percent":
+          "type": "number"
+          "title": "Observable Coverage Percent"
+        "partial_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Partial Reason Es"
+        "usage_notice_es":
+          "type": "string"
+          "title": "Usage Notice Es"
+        "hourly_distribution":
+          "items":
+            "$ref": "#/components/schemas/ExposureHourlyBucketOut"
+          "type": "array"
+          "title": "Hourly Distribution"
+        "coverage_timeline":
+          "$ref": "#/components/schemas/ExposureCoverageTimelineOut"
+        "materialized_at":
+          "type": "string"
+          "title": "Materialized At"
+        "recomputed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Recomputed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "period"
+        - "period_from"
+        - "period_to"
+        - "status"
+        - "confirmed_minutes"
+        - "pending_classification_minutes"
+        - "observable_coverage_percent"
+        - "partial_reason_es"
+        - "usage_notice_es"
+        - "hourly_distribution"
+        - "coverage_timeline"
+        - "materialized_at"
+        - "recomputed_at"
+      "title": "ExposureOut"
     "ExposureSampleBody":
       "properties":
         "pass_id":
@@ -9037,6 +9277,20 @@
         - "displayed_at"
         - "recorded_at"
       "title": "ExposureSampleOut"
+    "ExposureTimelineRangeOut":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "ExposureTimelineRangeOut"
     "FactorBody":
       "properties":
         "text":

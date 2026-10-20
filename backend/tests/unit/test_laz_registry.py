@@ -45,6 +45,7 @@ from vigia_platform.accreditation.events import (
     ACCREDITATION_INTERNAL_EVENT_TYPES,
 )
 from vigia_platform.accreditation.export.download import ExportDownloads
+from vigia_platform.accreditation.exposure.service import ExposureService
 from vigia_platform.accreditation.monthly.audit import SampleAuditService
 from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.task import MONTHLY_PACKAGE, MONTHLY_PACKAGE_SCHEDULE
@@ -210,7 +211,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         elif name == "accreditation":
             # TASK-317: SUP-U05-21 y 22, su app.state y el consumidor export_worker;
             # TASK-345: SUP-U05-40 y 23 (las descargas, con el depósito de evidencias);
-            # TASK-342 a 344: el paquete mensual, su muestra y la descarga por planta.
+            # TASK-342 a 344: el paquete mensual, su muestra y la descarga por planta;
+            # TASK-322: SUP-U05-31, el indicador de exposición.
             assert routes == [
                 ("POST", "/accreditation/exports"),
                 ("GET", "/accreditation/exports/{export_id}"),
@@ -224,11 +226,13 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
                 ("PATCH", "/accreditation/commitments/{commitment_id}"),
                 ("GET", "/accreditation/commitments"),
+                ("GET", "/accreditation/exposure"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
             http = state[ACCREDITATION_STATE_KEY]
             assert isinstance(http, AccreditationHttp)
             assert isinstance(http.downloads, ExportDownloads)
+            assert isinstance(http.exposure, ExposureService)
             assert isinstance(http.sample_audit, SampleAuditService)
             assert isinstance(http.commitments, CommitmentService)
             bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
