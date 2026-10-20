@@ -31,6 +31,7 @@ import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Final
 
+import asyncpg  # type: ignore[import-untyped]
 import pytest
 from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
@@ -573,3 +574,17 @@ def test_the_cache_preparation_reads_the_declared_names_of_its_writer(
         "SELECT name FROM identity.zone WHERE organization_id = $1", site.organization_id
     )
     assert {row["name"] for row in hierarchy} <= set(names)
+
+
+def test_declared_names_is_always_a_json_array(
+    stack: VocabularyStack, site: Site, admin: Who
+) -> None:
+    """``laz_0039``: la columna nace con ``[]`` y su restricción rechaza lo que no es una lista."""
+    assert stack.post(admin, {"added": [term("pasillo")], "reason": REASON}).status_code == 201
+    assert stack.row(site.organization_id)["declared_names"] in ("[]", [])
+    with pytest.raises(asyncpg.CheckViolationError):
+        stack.fetch(
+            "UPDATE loop.blocked_vocabulary_list SET declared_names = '{}'::jsonb"
+            " WHERE organization_id = $1",
+            site.organization_id,
+        )

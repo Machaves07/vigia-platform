@@ -68,6 +68,7 @@ from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
+from vigia_platform.loop.adapters.http.vocabulary_routes import vocabulary_router
 from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYPES
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
@@ -196,8 +197,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/loop/assistant-requests/{request_id}"),
                 ("GET", "/loop/findings"),  # TASK-307: SUP-U05-01
                 ("GET", "/loop/overdue"),  # TASK-313: SUP-U05-15
+                ("GET", "/loop/vocabulary"),  # TASK-350: SUP-U05-36
+                ("POST", "/loop/vocabulary/changes"),  # TASK-350: SUP-U05-37
             ]
             assert state[LOOP_STATE_KEY].overdue is not None
+            assert state[LOOP_STATE_KEY].vocabulary is not None
             assert state[LOOP_STATE_KEY].classification is not None
             assert state[LOOP_STATE_KEY].assistant is not None
             assert state[LOOP_STATE_KEY].actions is not None
@@ -317,6 +321,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
         assistant_router,
         findings_router,
         overdue_router,
+        vocabulary_router,  # TASK-350
     ) == registration.ROUTERS
     assert (notifications_router,) == notifications_registration.ROUTERS
     # email_delivery_events_poll (TASK-325), email_grouping y digest_weekly (TASK-348).

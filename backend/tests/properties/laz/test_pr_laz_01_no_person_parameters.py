@@ -155,6 +155,8 @@ SIGNER_FIELDS: Final = frozenset(
         ("POST", "/loop/vocabulary/changes", "body", "declared_names_removed"),
         ("POST", "/loop/vocabulary/changes", "response", "declared_names_added"),
         ("POST", "/loop/vocabulary/changes", "response", "declared_names_removed"),
+        ("GET", "/loop/vocabulary", "response", "name_id"),
+        ("POST", "/loop/vocabulary/changes", "response", "name_id"),
     }
 )
 """Excepciones nombradas una a una: el **firmante** de un cambio (P8) es un usuario de la
