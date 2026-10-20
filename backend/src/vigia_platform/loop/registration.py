@@ -65,6 +65,7 @@ from vigia_platform.loop.adapters.http.classification_routes import classificati
 from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
 from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
@@ -72,6 +73,12 @@ from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclare
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.application.deadlines import (
+    EVALUATE_DEADLINES_SCHEDULE,
+    EVALUATE_DEADLINES_TASK,
+    DeadlineEvaluator,
+    register_evaluate_deadlines,
+)
 from vigia_platform.loop.application.review_queue import (
     REVIEW_QUEUE_CONSUMER,
     REVIEW_QUEUE_CONSUMER_CONCURRENCY,
@@ -257,6 +264,7 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307)
+    overdue_router,  # SUP-U05-15 (TASK-313)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
 
@@ -270,6 +278,18 @@ def _register_review_reminders(registry: PeriodicTaskRegistry, services: UnitSer
             configuration=PostgresLoopConfigurationRepository(services.database),
             outbox=services.outbox,
             clock=services.clock,
+        ),
+    )
+
+
+def _register_evaluate_deadlines(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``evaluate_deadlines`` (TASK-313): vencimientos por nivel, sin cerrar ni ocultar nada."""
+    register_evaluate_deadlines(
+        registry,
+        DeadlineEvaluator(
+            writer=services.writer,
+            clock=services.clock,
+            configuration=PostgresLoopConfigurationRepository(services.database),
         ),
     )
 
@@ -365,6 +385,7 @@ def _register_verify_loop_projection(
 LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     VERIFY_LOOP_PROJECTION: (VERIFY_LOOP_PROJECTION_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
+    EVALUATE_DEADLINES_TASK: (EVALUATE_DEADLINES_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # 313
 }
 """Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``.
 
@@ -372,6 +393,7 @@ LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
 TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
     _register_verify_loop_projection,
     _register_review_reminders,  # review_reminders (TASK-309)
+    _register_evaluate_deadlines,  # evaluate_deadlines (TASK-313)
 )
 
 
