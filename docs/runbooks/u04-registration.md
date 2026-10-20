@@ -60,6 +60,11 @@ Las lecturas internas de catálogo, cobertura, expediente y resultados de marcas
 contextos sellados de evento/iteración del sistema U-04, siempre bajo RLS y organización fija.
 No obtienen por ello permisos de usuario ni URL de lectura de clips.
 
+Las diez tareas tienen su nombre fijado en la política de atributos de métricas desde el
+arranque; no dependen del registro dinámico de nombres, que rechaza los más largos. La prueba
+de PR-LAZ-55 emite series para cada tarea y consumidor con una política nueva, exige que
+ningún nombre se convierta en `other` y aplica la metapropiedad de cardinalidad de U-03.
+
 ## Reproceso
 
 ```sh
@@ -81,4 +86,5 @@ cadencias de forma independiente de los manejadores.
 **PR-LAZ-48 sigue pendiente**: la igualdad literal de notificaciones entre ejecución continua y
 caída de 48 h no concuerda con la separación entre envíos de U04-H-07. El contraejemplo local
 de VIG-241 deja 3 `review_overdue` en ejecución continua y 1 al volver. No se ha alterado esa
-semántica ni se declara aprobada la propiedad transversal de las diez tareas.
+semántica ni se declara aprobada la propiedad transversal de las diez tareas. La decisión
+pendiente está registrada en VIG-267, que bloquea el cierre de VIG-241.
