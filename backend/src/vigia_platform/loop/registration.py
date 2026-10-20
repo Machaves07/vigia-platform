@@ -34,12 +34,17 @@ Si falta uno, o una tarea cambió de cadencia, unidad o iteración, ``vigia-api`
 - ``loop_http_client_factory(services)``: la fábrica única de clientes de salida con los dos
   destinos de la configuración (LC-LAZ-39);
 - ``loop_metrics()``: los instrumentos de ``loop.observability.metrics`` (LC-LAZ-38).
+
+**Asistente** (TASK-344): ``assistant_provider(services)`` elige en la primera entrega el adaptador
+real ``loop.adapters.anthropic`` **solo si el proceso tiene la clave** del proveedor; sin ella,
+``FakeAssistantProvider.unconfigured()``.
 """
 
 from __future__ import annotations
 
 import enum
 import importlib
+import os
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Final
@@ -96,7 +101,11 @@ from vigia_platform.loop.assistant.consumer import (
     register_assistant_worker,
 )
 from vigia_platform.loop.assistant.context import AssistantContext
-from vigia_platform.loop.assistant.port import AssistantOutcome, AssistantProviderPort
+from vigia_platform.loop.assistant.port import (
+    AssistantOutcome,
+    AssistantProviderPort,
+    provider_credentials_present,
+)
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.detail_codes import LOOP_DETAIL_CODE_LABEL_BINDINGS, LoopDetailCode
 from vigia_platform.loop.domain.enums import LOOP_LABEL_BINDINGS
@@ -168,6 +177,7 @@ __all__ = [
     "U04_FREE_TEXT_VALIDATORS",
     "U04_RECORD_TYPES",
     "U04_TASKS",
+    "assistant_provider",
     "loop_api_state",
     "loop_consumers",
     "loop_event_types",
@@ -397,22 +407,59 @@ TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
 )
 
 
+def _unconfigured_assistant() -> AssistantProviderPort:
+    fake = importlib.import_module("vigia_platform.loop.adapters.assistant.fake")
+    provider: AssistantProviderPort = fake.FakeAssistantProvider.unconfigured()
+    return provider
+
+
+def assistant_provider(
+    services: UnitServices, environ: Mapping[str, str] | None = None
+) -> AssistantProviderPort:
+    """El adaptador del asistente según la configuración del proceso (TASK-344).
+
+    Con la clave del proveedor en el entorno (``ANTHROPIC_API_KEY`` o ``ANTHROPIC_AUTH_TOKEN``,
+    que Secrets Manager inyecta **solo** en ``vigia-worker``, NFR-LAZ-26),
+    ``AnthropicAssistantProvider`` con el modelo de ``VIGIA_ASSISTANT_MODEL`` y la fábrica de
+    U-04 (LC-LAZ-39); sin clave, ``FakeAssistantProvider.unconfigured()``. Los dos módulos se
+    importan aquí, nunca al cargar este archivo.
+    """
+    environ = os.environ if environ is None else environ
+    if not provider_credentials_present(environ):
+        return _unconfigured_assistant()
+    adapter = importlib.import_module("vigia_platform.loop.adapters.anthropic.client")
+    config = services.config
+    model = (
+        config.assistant_model
+        if config is not None and config.assistant_model is not None
+        else adapter.DEFAULT_MODEL
+    )
+    provider: AssistantProviderPort = adapter.AnthropicAssistantProvider(
+        loop_http_client_factory(services),
+        model=model,
+        api_key=environ.get("ANTHROPIC_API_KEY", "").strip() or None,
+        auth_token=environ.get("ANTHROPIC_AUTH_TOKEN", "").strip() or None,
+    )
+    return provider
+
+
 class AssistantProviderOnFirstUse:
     """El adaptador del asistente, elegido y construido en la **primera entrega**.
 
     Solo ``vigia-worker`` entrega eventos: ``vigia-api`` compone el consumidor con el resto del
     catálogo pero **nunca importa ni construye un adaptador** del proveedor (NFR-LAZ-26, LC-LAZ-14).
-    Sin clave del proveedor, ``FakeAssistantProvider.unconfigured()``: el consumidor responde
-    ``no_api_key`` sin llamar (BR-LAZ-74). El adaptador real con clave es de TASK-344.
+    ``build`` lo elige una sola vez por proceso (``assistant_provider``: el real con clave,
+    TASK-344); sin ``build``, ``FakeAssistantProvider.unconfigured()``: el consumidor responde
+    ``no_api_key`` sin llamar (BR-LAZ-74).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, build: Callable[[], AssistantProviderPort] | None = None) -> None:
+        self._build = build if build is not None else _unconfigured_assistant
         self._provider: AssistantProviderPort | None = None
 
     def _resolved(self) -> AssistantProviderPort:
         if self._provider is None:
-            fake = importlib.import_module("vigia_platform.loop.adapters.assistant.fake")
-            self._provider = fake.FakeAssistantProvider.unconfigured()
+            self._provider = self._build()
         return self._provider
 
     @property
@@ -434,7 +481,7 @@ def _register_assistant_worker(registry: ConsumerRegistry, services: UnitService
         registry,
         AssistantWorker(
             database=services.database,
-            provider=AssistantProviderOnFirstUse(),
+            provider=AssistantProviderOnFirstUse(lambda: assistant_provider(services)),
             free_text=services.free_text,
             clock=services.clock,
         ),
