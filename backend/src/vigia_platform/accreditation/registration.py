@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Final
 from fastapi import APIRouter
 
 from vigia_platform.accreditation.adapters.http.export_routes import export_router
+from vigia_platform.accreditation.adapters.http.exposure_routes import exposure_router
 from vigia_platform.accreditation.adapters.http.monthly_routes import (
     MonthlyPackageReads,
     monthly_router,
@@ -62,6 +63,7 @@ from vigia_platform.accreditation.export.worker import (
     LoggingExportAlarm,
     register_export_worker,
 )
+from vigia_platform.accreditation.exposure.service import ExposureService
 from vigia_platform.accreditation.monthly.package import (
     EvidencePort,
     MissingEvidence,
@@ -112,6 +114,7 @@ __all__ = [
     "accreditation_record_types",
     "accreditation_routers",
     "accreditation_tasks",
+    "exposure_service",
 ]
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
@@ -233,6 +236,27 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
     register_monthly_package(registry, task)
 
 
+def exposure_service(services: UnitServices) -> ExposureService:
+    """``ExposurePort`` (TASK-322) con los puertos de U-02 y U-03 en proceso; el paquete mensual
+    (VIG-239) lo construye igual."""
+    database = services.database
+    ports = catalog_query_ports(database)
+    return ExposureService(
+        database=database,
+        authorizer=services.authorizer,
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(
+            database=database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        settings=PostgresLoopConfigurationRepository(database),
+        clock=services.clock,
+    )
+
+
 def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
     """El único ``AccreditationHttp`` del módulo: las tres tareas de servicio (TASK-317, 345 y
     344) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
@@ -272,11 +296,17 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
                     storage=evidence,
                 )
             ),
+            # TASK-322: SUP-U05-31.
+            exposure=exposure_service(services),
         )
     }
 
 
-ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (export_router, monthly_router)
+ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
+    export_router,
+    monthly_router,
+    exposure_router,
+)
 """Fábricas de los enrutadores de ``/accreditation/*``."""
 
 ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
