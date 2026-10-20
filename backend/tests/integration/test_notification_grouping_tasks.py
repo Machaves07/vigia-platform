@@ -22,7 +22,10 @@ from tests.integration.conftest import PostgresEndpoint
 from tests.notification_support import NotificationWorld, Senders, StubSender, notification_world
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.domain.enums import NotificationDeliveryStatus, NotificationUrgency
-from vigia_platform.notifications.adapters.postgres.tables import USER_NOTIFICATION_PREFERENCE
+from vigia_platform.notifications.adapters.postgres.tables import (
+    EMAIL_MESSAGE,
+    USER_NOTIFICATION_PREFERENCE,
+)
 from vigia_platform.notifications.delivery import EMAIL_CIRCUIT_OPEN
 from vigia_platform.notifications.digest import DigestWeeklyTask
 from vigia_platform.notifications.grouping import (
@@ -94,6 +97,38 @@ def _run(
     async def run() -> None:
         async with world.database.transaction(context) as transaction:
             await task.run(transaction)
+
+    world.run(run())
+
+
+def _seed_sent_messages(
+    world: NotificationWorld,
+    context: Any,
+    organization_id: uuid.UUID,
+    filler_recipient: uuid.UUID,
+    count: int,
+) -> None:
+    """``count`` ``EmailMessage`` de ``kind = digest`` ya "enviados" esta hora, para dejar el
+    presupuesto de la organización justo en el borde del tope (NFR-LAZ-13) sin tener que cerrar
+    ``count`` ventanas reales."""
+    now = world.clock.now()
+
+    async def run() -> None:
+        async with world.database.transaction(context) as transaction:
+            for _ in range(count):
+                await transaction.execute(
+                    EMAIL_MESSAGE.insert().values(
+                        message_id=uuid.uuid4(),
+                        organization_id=organization_id,
+                        to_user_id=filler_recipient,
+                        subject_es="Relleno",
+                        body_es="Relleno",
+                        kind=DIGEST_EMAIL_KIND,
+                        related_ids=[],
+                        queued_at=now,
+                        status="queued",
+                    )
+                )
 
     world.run(run())
 
@@ -245,20 +280,33 @@ def test_digest_weekly_groups_digest_urgency_after_a_week(world: NotificationWor
 def test_organization_cap_is_never_exceeded_with_concurrent_recipients(
     world: NotificationWorld,
 ) -> None:
-    """Garantía de tope: 200 ``EmailMessage`` de ``kind = digest`` por hora y organización, también
-    con varios destinatarios cerrando su ventana a la vez (NFR-LAZ-13)."""
+    """Garantía de tope: 200 ``EmailMessage`` de ``kind = digest`` por hora y organización, con
+    el presupuesto justo en el borde (faltan 5 para el tope) y 12 destinatarios cerrando su
+    ventana a la vez (NFR-LAZ-13): como mucho 5 de los 12 entran; el resto queda pendiente, sin
+    reclamar y sin lote enviado (PR-LAZ-42, nada se pierde), y una ejecución posterior tras
+    liberarse el presupuesto los agrupa."""
     organization_id, plant_id, zone_id = world.new_organization()
     recipients = [
         world.add_member(organization_id, Role.COORDINATOR_SST, ScopeLevel.ZONE, zone_id).user_id
         for _ in range(12)
     ]
-    for recipient in recipients:
-        world.seed_delivery(
+    notification_by_recipient = {
+        recipient: world.seed_delivery(
             organization_id, recipient, urgency="normal", plant_id=plant_id, zone_id=zone_id
         )
+        for recipient in recipients
+    }
     world.clock.advance(int(timedelta(hours=_DEFAULT_GROUPING_HOURS, minutes=1).total_seconds()))
-    task = _grouping_task(world)
+    remaining_budget = 5
     context = world.event_context(world.event(organization_id, "finding_received", {}))
+    _seed_sent_messages(
+        world,
+        context,
+        organization_id,
+        world.owners[organization_id],
+        ORGANIZATION_EMAIL_CAP_PER_HOUR - remaining_budget,
+    )
+    task = _grouping_task(world)
 
     async def run_one(recipient: uuid.UUID) -> None:
         async with world.database.transaction(context) as transaction:
@@ -276,4 +324,24 @@ def test_organization_cap_is_never_exceeded_with_concurrent_recipients(
     world.run(scenario())
     messages = _email_messages(world, organization_id)
     assert len(messages) <= ORGANIZATION_EMAIL_CAP_PER_HOUR
-    assert len(messages) == len(recipients)  # bien por debajo del tope: todas deben caber
+    sent_recipients = {message["to_user_id"] for message in messages} & set(recipients)
+    # El tope deja pasar exactamente lo que queda de presupuesto, nunca más.
+    assert len(sent_recipients) == remaining_budget
+    stuck = set(recipients) - sent_recipients
+    assert len(stuck) == len(recipients) - remaining_budget
+    for recipient in stuck:
+        # Quien no cupo en el tope queda pendiente, sin lote y sin reclamar: nada se pierde
+        # (PR-LAZ-42) y no se duplica en la siguiente ejecución.
+        delivery = _delivery_for(world, notification_by_recipient[recipient])
+        assert delivery["status"] == NotificationDeliveryStatus.PENDING.value
+        assert delivery["digest_batch_id"] is None
+    # Pasada la hora del tope, el presupuesto se libera y la siguiente ejecución agrupa lo que
+    # había quedado pendiente: no se pierde ni se duplica.
+    world.clock.advance(int(timedelta(hours=1, minutes=1).total_seconds()))
+    _run(world, task, context)
+    messages_after = _email_messages(world, organization_id)
+    sent_recipients_after = {message["to_user_id"] for message in messages_after} & set(recipients)
+    assert sent_recipients_after == set(recipients)
+    for recipient in recipients:
+        delivery = _delivery_for(world, notification_by_recipient[recipient])
+        assert delivery["digest_batch_id"] is not None

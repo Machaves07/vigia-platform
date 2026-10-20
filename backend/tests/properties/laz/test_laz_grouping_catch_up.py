@@ -33,6 +33,7 @@ from vigia_platform.notifications.adapters.postgres.tables import (
     DIGEST_BATCH,
     NOTIFICATION_DELIVERY,
 )
+from vigia_platform.notifications.digest import WEEKLY_MANAGER_KIND, DigestWeeklyTask
 from vigia_platform.notifications.grouping import (
     EMAIL_GROUPED_KIND,
     Candidate,
@@ -59,6 +60,10 @@ def _task(world: NotificationWorld) -> EmailGroupingTask:
         senders=Senders(StubSender()),  # type: ignore[arg-type]
         clock=world.clock,
     )
+
+
+def _digest_task(world: NotificationWorld) -> DigestWeeklyTask:
+    return DigestWeeklyTask(senders=Senders(StubSender()), clock=world.clock)  # type: ignore[arg-type]
 
 
 def _digest_batches(world: NotificationWorld, organization_id: uuid.UUID) -> list[dict[str, Any]]:
@@ -101,6 +106,44 @@ def test_a_prolonged_outage_produces_exactly_one_batch_with_everything_accumulat
 
     world.run(run())
     batches = _digest_batches(world, organization_id)
+    assert len(batches) == 1, batches
+    assert batches[0]["item_count"] == 5
+    assert sorted(batches[0]["notification_ids"]) == sorted(ids)
+    messages = _email_messages(world, organization_id)
+    assert len(messages) == 1, messages
+
+
+def test_a_prolonged_outage_produces_exactly_one_digest_weekly_batch_with_everything_accumulated(
+    world: NotificationWorld,
+) -> None:
+    """Lo mismo que la prueba anterior, pero para ``digest_weekly`` (PR-LAZ-48 nombra las dos
+    tareas): varias semanas caído acumulan avisos ``digest`` sin que ``digest_weekly`` corra; al
+    volver, un solo lote con todo, nunca una ráfaga de varios lotes por el tiempo transcurrido."""
+    organization_id, plant_id, zone_id = world.new_organization()
+    recipient = world.add_member(
+        organization_id, Role.COORDINATOR_SST, ScopeLevel.ZONE, zone_id
+    ).user_id
+    task = _digest_task(world)
+    context = world.event_context(world.event(organization_id, "finding_received", {}))
+    ids = []
+    for _ in range(5):
+        ids.append(
+            world.seed_delivery(
+                organization_id, recipient, urgency="digest", plant_id=plant_id, zone_id=zone_id
+            )
+        )
+        world.clock.advance(int(timedelta(days=8).total_seconds()))  # la tarea no corrió: caída
+    # El reloj ya avanzó varias semanas desde el primer aviso pendiente: una sola pasada agrupa
+    # todo (la sonda diaria de ``digest_weekly`` alcanza el día que tocaba tras la caída).
+
+    async def run() -> None:
+        async with world.database.transaction(context) as transaction:
+            await task.run(transaction)
+
+    world.run(run())
+    batches = [
+        row for row in _digest_batches(world, organization_id) if row["kind"] == "weekly_manager"
+    ]
     assert len(batches) == 1, batches
     assert batches[0]["item_count"] == 5
     assert sorted(batches[0]["notification_ids"]) == sorted(ids)
@@ -160,6 +203,7 @@ async def _close_window_without_the_claim_guard(
         recipient_user_id=recipient_user_id,
         subject_prefix=subject_prefix,
         candidates=candidates,
+        failure_code=None,
     )
 
 
@@ -185,6 +229,8 @@ async def _two_concurrent_closes(
     organization_id: uuid.UUID,
     recipient: uuid.UUID,
     notification_ids: list[uuid.UUID],
+    *,
+    kind: str = EMAIL_GROUPED_KIND,
 ) -> None:
     window_from, window_to = _window(world)
     candidates = [
@@ -204,7 +250,7 @@ async def _two_concurrent_closes(
             await task._close_window(
                 transaction,
                 recipient_user_id=recipient,
-                kind=EMAIL_GROUPED_KIND,
+                kind=kind,
                 subject_prefix="Resumen de notificaciones",
                 window_from=window_from,
                 window_to=window_to,
@@ -215,16 +261,23 @@ async def _two_concurrent_closes(
 
 
 @pytest.mark.parametrize("attempt", range(REPETITIONS))
+@pytest.mark.parametrize("task_kind", ["email_grouping", "digest_weekly"])
 def test_two_concurrent_closes_of_the_same_window_send_only_once(
-    world: NotificationWorld, attempt: int
+    world: NotificationWorld, task_kind: str, attempt: int
 ) -> None:
     """Simula un arrendamiento vencido artificialmente: dos ejecuciones calculan la misma ventana
-    a la vez. Puede quedar más de una fila de ``DigestBatch`` (la que pierde la carrera de
-    ``notification_delivery`` no se borra, PAT-LAZ-RES-05: queda ``superseded``), pero solo una
-    reclama las entregas y envía: un solo correo, nunca dos."""
+    a la vez, para las dos tareas que comparten ``DigestGrouperBase._close_window`` (PR-LAZ-48
+    nombra ``email_grouping`` y ``digest_weekly``). Puede quedar más de una fila de ``DigestBatch``
+    (la que pierde la carrera de ``notification_delivery`` no se borra, PAT-LAZ-RES-05: queda
+    ``superseded``), pero solo una reclama las entregas y envía: un solo correo, nunca dos."""
     organization_id, recipient, ids = _seed_recipient_with_pending(world)
-    task = _task(world)
-    world.run(_two_concurrent_closes(world, task, organization_id, recipient, ids))
+    task: DigestGrouperBase
+    kind: str
+    if task_kind == "email_grouping":
+        task, kind = _task(world), EMAIL_GROUPED_KIND
+    else:
+        task, kind = _digest_task(world), WEEKLY_MANAGER_KIND
+    world.run(_two_concurrent_closes(world, task, organization_id, recipient, ids, kind=kind))
     batches = _digest_batches(world, organization_id)
     assert len(batches) in (1, 2), batches
     assert sum(1 for b in batches if b["status"] == "sent") == 1

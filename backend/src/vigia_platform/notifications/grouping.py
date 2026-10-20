@@ -21,10 +21,14 @@ lote se escribe igual (para cerrar la ventana y no repetir el intento cada hora)
 sigue visible en la aplicación: nada se pierde.
 
 **Tope de 200 correos por hora y organización** ``[estimación propia]`` (NFR-LAZ-13): bajo el
-mismo candado consultivo de organización que ``adapters.ses.sender`` (orden único: organización),
-se cuentan los ``EmailMessage`` de ``kind = digest`` de la última hora antes de admitir uno más;
-sin presupuesto, el destinatario se deja para la siguiente ejecución (su ventana no se cierra,
-así que no se pierde ni se duplica nada).
+mismo candado consultivo de organización que ``adapters.ses.sender._admit`` (orden único:
+organización), se cuentan los ``EmailMessage`` de ``kind = digest`` de la última hora **antes**
+de insertar el ``DigestBatch`` y reclamar las entregas, no después: sin presupuesto, nada se
+escribe (ni lote ni reclamo) y el destinatario se deja tal cual para la siguiente ejecución (su
+ventana no se cierra, así que no se pierde ni se duplica nada). Comprobarlo después de reclamar
+dejaba las entregas con ``digest_batch_id`` puesto pero el lote ``queued`` para siempre, fuera del
+alcance de ``candidates_statement`` (que solo ve ``digest_batch_id IS NULL``): un hallazgo real de
+la ronda de revisión, no solo de las pruebas.
 
 **Garantía de «una sola vez» entre ejecuciones concurrentes** (PR-LAZ-48): el ``DigestBatch`` se
 inserta sin condición (puede haber, transitoriamente, más de uno para la misma ventana si dos
@@ -202,6 +206,21 @@ class DigestGrouperBase:
         candidates: list[Candidate],
     ) -> None:
         organization_id = transaction.context.organization_id
+        sender = self._senders.sender
+        failure_code: str | None = None
+        if sender is None:
+            failure_code = EMAIL_SENDER_ABSENT
+        elif sender.circuit_state() == "open":
+            failure_code = EMAIL_CIRCUIT_OPEN
+        # Tope de 200/hora/organización (NFR-LAZ-13): se comprueba **antes** de insertar el lote
+        # y reclamar las entregas (como ``adapters.ses.sender._admit``): sin presupuesto, nada se
+        # escribe y el destinatario se deja tal cual para la siguiente ejecución (su ventana no
+        # se cierra, así que no se pierde ni se duplica nada, BR-LAZ-125/P5). Sin esto, el lote
+        # quedaba ``queued`` para siempre con las entregas ya reclamadas (``digest_batch_id``
+        # puesto) y ``candidates_statement`` dejaba de encontrarlas. No aplica con el correo
+        # caído: ahí no se envía nada, así que el tope no entra en juego.
+        if failure_code is None and not await self._has_budget(transaction, organization_id):
+            return
         notification_ids = sorted({c.notification_id for c in candidates})
         digest_batch_id = uuid7(self._clock)
         await transaction.execute(
@@ -251,7 +270,26 @@ class DigestGrouperBase:
             recipient_user_id=recipient_user_id,
             subject_prefix=subject_prefix,
             candidates=sent_candidates,
+            failure_code=failure_code,
         )
+
+    async def _has_budget(self, transaction: Transaction, organization_id: uuid.UUID) -> bool:
+        """Tope de 200/hora/organización (NFR-LAZ-13), bajo el mismo candado consultivo que
+        ``adapters.ses.sender._admit`` (orden único: organización); lo toma el llamador antes de
+        escribir nada, para que la decisión sea atómica con la escritura que la sigue."""
+        await transaction.execute(_LOCK_ORGANIZATION, {"organization": str(organization_id)})
+        window_start = self._clock.now() - timedelta(seconds=_RATE_WINDOW_SECONDS)
+        count_statement = (
+            select(func.count())
+            .select_from(EMAIL_MESSAGE)
+            .where(
+                EMAIL_MESSAGE.c.organization_id == organization_id,
+                EMAIL_MESSAGE.c.kind == DIGEST_EMAIL_KIND,
+                EMAIL_MESSAGE.c.queued_at >= window_start,
+            )
+        )
+        sent_this_hour: int = (await transaction.execute(count_statement)).scalar_one()
+        return sent_this_hour < ORGANIZATION_EMAIL_CAP_PER_HOUR
 
     async def _send(
         self,
@@ -261,15 +299,10 @@ class DigestGrouperBase:
         recipient_user_id: uuid.UUID,
         subject_prefix: str,
         candidates: list[Candidate],
+        failure_code: str | None,
     ) -> None:
         organization_id = transaction.context.organization_id
         now = self._clock.now()
-        sender = self._senders.sender
-        failure_code: str | None = None
-        if sender is None:
-            failure_code = EMAIL_SENDER_ABSENT
-        elif sender.circuit_state() == "open":
-            failure_code = EMAIL_CIRCUIT_OPEN
         notification_ids = [c.notification_id for c in candidates]
         if failure_code is not None:
             await transaction.execute(
@@ -289,21 +322,8 @@ class DigestGrouperBase:
                 .values(status=_STATUS_DEGRADED)
             )
             return
-        await transaction.execute(_LOCK_ORGANIZATION, {"organization": str(organization_id)})
-        window_start = now - timedelta(seconds=_RATE_WINDOW_SECONDS)
-        count_statement = (
-            select(func.count())
-            .select_from(EMAIL_MESSAGE)
-            .where(
-                EMAIL_MESSAGE.c.organization_id == organization_id,
-                EMAIL_MESSAGE.c.kind == DIGEST_EMAIL_KIND,
-                EMAIL_MESSAGE.c.queued_at >= window_start,
-            )
-        )
-        sent_this_hour = (await transaction.execute(count_statement)).scalar_one()
-        if sent_this_hour >= ORGANIZATION_EMAIL_CAP_PER_HOUR:
-            return  # Sin presupuesto esta hora: la ventana queda cerrada y sin enviar (reintenta
-            # en la siguiente ejecución cuando vuelva a tocar, sin duplicar el lote).
+        # El presupuesto ya se comprobó en ``_close_window``, antes de insertar el lote y
+        # reclamar las entregas: aquí solo queda escribir el envío.
         subject, body = compose(subject_prefix, candidates)
         await transaction.execute(
             EMAIL_MESSAGE.insert().values(
