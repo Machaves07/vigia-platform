@@ -1,0 +1,7 @@
+{
+  "artifact": "manifest.signature.json",
+  "pointer": null,
+  "reason": "key_not_valid_at_signing",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}

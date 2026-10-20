@@ -183,9 +183,12 @@ DESIGN_EVENTS: Final = frozenset(
 )
 """Los nombres de §11.3 cuya unidad publicadora es U-04 (nota R14 de §7: veinticinco)."""
 
-INTERNAL_EVENTS: Final = frozenset({"export_requested", "assistant_requested"})
-"""Eventos internos de U-04 fuera de §11.3: el trabajo de ``export_worker`` (TASK-317) y el de
-``assistant_worker`` (TASK-316)."""
+INTERNAL_EVENTS: Final = frozenset(
+    {"export_requested", "assistant_requested", "email_delivery_events_poll"}
+)
+"""Eventos internos de U-04 fuera de §11.3: el trabajo de ``export_worker`` (TASK-317), el de
+``assistant_worker`` (TASK-316) y el pulso sin carga que dispara ``email_delivery_events``
+(TASK-325)."""
 
 NARRATIVE: Final = {
     **loop_types.NARRATIVE_FREE_TEXT_PATHS,
@@ -209,7 +212,9 @@ def test_the_seventeen_types_are_exactly_those_of_the_design() -> None:
 @pytest.mark.parametrize("name", NAMES)
 def test_each_type_matches_its_row_of_the_table(name: str) -> None:
     chain, source_key, free_text, events = DESIGN_TABLE[name]
-    definition = _compiled(name).definition
+    # La tabla de §5.1 describe la versión 1; la 2 de ``commitments_recorded`` (TASK-347) la prueba
+    # ``test_commitments_recorded_v2_adds_state_and_a_separate_update``.
+    definition = REGISTRY.get(name, schema_version=1).definition
     assert definition.writer_unit is ActorUnit.U04
     assert definition.schema_version == 1
     assert definition.chain_level is ChainLevel(chain)
@@ -220,6 +225,77 @@ def test_each_type_matches_its_row_of_the_table(name: str) -> None:
     assert frozenset(NARRATIVE[name]) == free_text
     assert frozenset(definition.free_text_paths) == free_text | frozenset(SNAPSHOT[name])
     assert not free_text & frozenset(SNAPSHOT[name])
+
+
+def test_only_commitments_recorded_has_a_second_version() -> None:
+    assert {
+        compiled.record_type: compiled.schema_version
+        for compiled in REGISTRY.latest()
+        if compiled.schema_version != 1
+    } == {"commitments_recorded": 2}
+
+
+def _element(model: Any, field: str) -> Any:
+    annotation = model.model_fields[field].annotation
+    assert annotation is not None
+    (element,) = {arg for arg in annotation.__args__ if arg is not Ellipsis}
+    return element
+
+
+def test_commitments_recorded_v2_adds_state_and_a_separate_update() -> None:
+    """TASK-347 (SUP-U05-27 y 28): la versión 2 amplía la 1. El alta lleva ``state`` opcional en
+    cada compromiso; la actualización va aparte, en ``updates`` (``commitment_id``, ``state`` y
+    ``closed_note``), **sin** el texto del compromiso, que no cambia ni se revalida. La cadena, la
+    clave, los eventos y el resto de las rutas no cambian."""
+    v1 = REGISTRY.get("commitments_recorded", schema_version=1).definition
+    v2 = REGISTRY.get("commitments_recorded", schema_version=2).definition
+    for attribute in ("writer_unit", "chain_level", "source_key_path", "outbox_events"):
+        assert getattr(v2, attribute) == getattr(v1, attribute)
+    assert v2.evidence_paths == () and v2.label_rule is None
+    assert frozenset(v2.free_text_paths) - frozenset(v1.free_text_paths) == {
+        "/updates[*]/closed_note"
+    }
+    assert frozenset(v1.free_text_paths) <= frozenset(v2.free_text_paths)
+    entry_v1 = _element(v1.content_model, "commitments")
+    entry_v2 = _element(v2.content_model, "commitments")
+    assert set(entry_v2.model_fields) - set(entry_v1.model_fields) == {"state"}
+    assert not entry_v2.model_fields["state"].is_required()
+    update = _element(v2.content_model, "updates")
+    assert set(update.model_fields) == {"commitment_id", "state", "closed_note"}
+    assert not update.model_fields["closed_note"].is_required()
+    for name in ("commitments", "updates"):
+        assert not v2.content_model.model_fields[name].is_required()
+
+
+def test_commitments_recorded_v2_is_an_alta_or_an_update_never_both_nor_none() -> None:
+    model = REGISTRY.get("commitments_recorded", schema_version=2).definition.content_model
+    entry = {
+        "commitment_id": "01a15836-330c-79ed-8b7a-eb355e496828",
+        "text": "Revisar la señalización del pasillo peatonal de la zona",
+        "responsible_user_id": "3f1c6e49-2778-4369-a2b8-e0a7d1f00001",
+        "due_date": "2026-12-15",
+    }
+    update = {"commitment_id": "01a15836-330c-79ed-8b7a-eb355e496828", "state": "done"}
+    base = {
+        "commitment_batch_id": "01a15836-330c-7dfc-bec4-cbe738fbb3fb",
+        "package_id": "01a15836-330c-7dfc-bec4-cbe738fbb3fc",
+        "zone_id": "3f1c6e49-2778-4369-a2b8-e0a7d1f00002",
+        "recorded_by": {
+            "user_id": "3f1c6e49-2778-4369-a2b8-e0a7d1f00003",
+            "display_name": "Mando de línea sintético",
+            "role_in_use": "line_manager",
+        },
+        "recorded_at": "2026-10-20T08:00:00.000Z",
+    }
+    model.model_validate_json(json.dumps({**base, "commitments": [entry]}))
+    model.model_validate_json(json.dumps({**base, "updates": [update]}))
+    for wrong in ({}, {"commitments": [entry], "updates": [update]}):
+        with pytest.raises(ValidationError):
+            model.model_validate_json(json.dumps({**base, **wrong}))
+    with pytest.raises(ValidationError):  # una actualización no lleva el texto
+        model.model_validate_json(
+            json.dumps({**base, "updates": [{**update, "text": entry["text"]}]})
+        )
 
 
 def test_only_classification_and_review_project_a_label_with_the_paths_of_5_3() -> None:

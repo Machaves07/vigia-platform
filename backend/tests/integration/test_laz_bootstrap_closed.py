@@ -6,7 +6,8 @@ registro), quitando **una sola cosa** cada vez:
 
 - **cada uno de los 17 tipos y de los 25 eventos** de U-04 y el trabajo interno
   ``export_requested`` (y cada tarea de ``U04_TASKS``, hoy vacío, cada consumidor de
-  ``U04_CONSUMERS``: ``export_worker`` desde TASK-317, y cada validador de texto libre de
+  ``U04_CONSUMERS``: ``export_worker`` desde TASK-317 y ``notification_engine`` desde TASK-324,
+  y cada validador de texto libre de
   ``U04_FREE_TEXT_VALIDATORS``: ``blocked_vocabulary``, TASK-303, y ``person_attribution``,
   TASK-340): la composición no termina
   (``RegistrationIncomplete`` nombra exactamente lo que falta) y el proceso sale con
@@ -95,9 +96,12 @@ MISSING: Final[tuple[tuple[str, str], ...]] = (
 SUBSCRIBERS: Final = {
     "export_requested": "export_worker",
     "assistant_requested": "assistant_worker",
+    "email_delivery_events_poll": "email_delivery_events",
 }
-"""Eventos de U-04 a los que se suscribe un consumidor de U-04 (``export_worker``, TASK-317, y
-``assistant_worker``, TASK-316), con su consumidor."""
+"""Eventos de U-04 cuya suscripción se conserva al quitarlos (``export_worker``, TASK-317,
+``assistant_worker``, TASK-316, y ``email_delivery_events``, TASK-325), con su consumidor: el
+catálogo se niega a componerse con la suscripción huérfana. De los demás eventos de U-04 también
+se quita la suscripción de ``notification_engine`` (TASK-324)."""
 SUBSCRIBED: Final = frozenset(SUBSCRIBERS)
 
 ONE_OF_EACH: Final = (
@@ -121,6 +125,11 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
     libre, que U-03 no exige)."""
     if kind == "free_text_validator":
         return _strip_free_text(unit, name)
+    if kind == "event_type" and name not in SUBSCRIBED:
+        # ``notification_engine`` (TASK-324) se suscribe a los eventos de U-04 que notifican: sin
+        # el evento se quita también su suscripción, para que el manifiesto nombre lo que falta
+        # (la caída por la suscripción huérfana la fija ``export_requested``).
+        return _without_subscription(_strip_u03(unit, kind, name), name)
     if kind != "consumer":
         return _strip_u03(unit, kind, name)
     original = unit.consumers
@@ -131,6 +140,20 @@ def _strip(unit: PlatformUnit, kind: str, name: str) -> PlatformUnit:
         for consumer in full.consumers():
             if consumer.consumer_name != name:
                 registry.register(consumer)
+
+    return dataclasses.replace(unit, consumers=consumers)
+
+
+def _without_subscription(unit: PlatformUnit, event_name: str) -> PlatformUnit:
+    """``unit`` con sus consumidores sin la suscripción a ``event_name``."""
+    original = unit.consumers
+
+    def consumers(registry: ConsumerRegistry, services: UnitServices) -> None:
+        full = ConsumerRegistry()
+        original(full, services)
+        for consumer in full.consumers():
+            events = tuple(event for event in consumer.subscribed_events if event != event_name)
+            registry.register(dataclasses.replace(consumer, subscribed_events=events))
 
     return dataclasses.replace(unit, consumers=consumers)
 

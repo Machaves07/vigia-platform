@@ -74,6 +74,9 @@ dev = [
   "moto>=5",
   # Solo para leer de vuelta `openapi/app.yaml` en las pruebas de `export_openapi` (TASK-133).
   "pyyaml>=6",
+  # Inspección estructural del PDF del documento portátil (TASK-319, VIG-236): solo en las
+  # pruebas de `test_export_document_no_active_content.py`, nunca en la imagen de ejecución.
+  "pypdf>=5",
   "ruff>=0.6",
   "mypy>=1.11",
   "pytest-split>=0.10",
@@ -96,7 +99,7 @@ target-version = "py312"
 line-length = 100
 # Generado por tools/build_verifier.py a partir de módulos que ruff ya revisa (LC-NUC-18);
 # su igualdad con lo generado la exige `build_verifier.py --check`.
-extend-exclude = ["tools/vigia_verify.py"]
+extend-exclude = ["tools/vigia_verify.py", "resources/verifier/vigia_verify.py"]
 
 [tool.ruff.lint]
 # Códigos propios de `tools/lint_rules.py`: ruff acepta `# noqa: VIG004` sin avisar.

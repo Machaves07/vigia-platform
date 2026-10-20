@@ -18,10 +18,15 @@ from fastapi import Request
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
 from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
+from vigia_platform.loop.application.closure import ClosureService
+from vigia_platform.loop.application.deadlines import OverdueService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
+from vigia_platform.loop.application.reopening import ReopeningService
+from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.root_cause import RootCauseService
 from vigia_platform.loop.application.unclosable import UnclosableService
 from vigia_platform.loop.assistant.service import AssistantService
@@ -62,11 +67,19 @@ class LoopHttp:
     evidence: EvidenceService | None = None
     """``POST /loop/actions/{action_id}/evidence`` (LC-LAZ-09, VIG-223); los adjuntos los
     verifica ``ClosureAttachmentPort`` de ``app.state`` (TASK-310)."""
+    closure: ClosureService | None = None
+    """``POST /loop/findings/{finding_state_id}/closure`` (LC-LAZ-09, VIG-233)."""
+    reopening: ReopeningService | None = None
+    """``POST /loop/findings/{finding_state_id}/reopening`` (LC-LAZ-09, VIG-233)."""
     assistant: AssistantService | None = None
     """Las dos rutas del asistente de causa raíz (LC-LAZ-13, VIG-224); ningún adaptador del
     proveedor: la solicitud la atiende ``assistant_worker`` en ``vigia-worker``."""
     inbox: InboxService | None = None
     """``GET /loop/findings`` (LC-LAZ-05, VIG-222)."""
+    review_queue: ReviewQueueService | None = None
+    """``GET /loop/review-queue`` y ``POST .../resolution`` (LC-LAZ-08, VIG-213)."""
+    overdue: OverdueService | None = None
+    """``GET /loop/overdue`` (LC-LAZ-11, VIG-229)."""
     unclosable: UnclosableService | None = None
     """``POST /loop/findings/{finding_state_id}/unclosable`` y
     ``POST /loop/unclosable/{declaration_id}/reviews`` (LC-LAZ-09, VIG-228)."""
@@ -119,6 +132,19 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             authorizer=services.authorizer,
             clock=services.clock,
         ),
+        closure=ClosureService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+        ),
+        reopening=ReopeningService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            clock=services.clock,
+            actions=actions,
+        ),
         root_cause=RootCauseService(
             database=services.database,
             writer=services.writer,
@@ -147,6 +173,19 @@ def build_loop_http(services: UnitServices) -> LoopHttp:
             clock=services.clock,
         ),
         inbox=InboxService(database=services.database, authorizer=services.authorizer),
+        review_queue=ReviewQueueService(
+            database=services.database,
+            writer=services.writer,
+            authorizer=services.authorizer,
+            repository=ReviewQueueRepository(services.database),
+            clock=services.clock,
+        ),
+        overdue=OverdueService(
+            database=services.database,
+            authorizer=services.authorizer,
+            configuration=PostgresLoopConfigurationRepository(services.database),
+            clock=services.clock,
+        ),
         unclosable=UnclosableService(
             database=services.database,
             writer=services.writer,

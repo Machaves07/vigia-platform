@@ -92,6 +92,11 @@ U02_TASKS: Final = 11
 U02_CONSUMERS: Final = 2
 U03_TASKS: Final = 7
 """Las siete tareas de U-03 (VIG-163, TASK-227): la raíz las registra en los tres procesos."""
+U04_TASKS: Final = 7
+"""``review_reminders`` (TASK-309), ``monthly_package`` (TASK-342 a 344, VIG-239),
+``verify_loop_projection`` (TASK-306, VIG-221), ``email_delivery_events_poll`` (TASK-325),
+``email_grouping`` y ``digest_weekly`` (TASK-348) y ``evaluate_deadlines`` (TASK-313, VIG-229):
+las siete tareas periódicas de U-04."""
 UNREACHABLE_HOST: Final = "192.0.2.1"  # TEST-NET-1 (RFC 5737): nunca responde
 BOOTSTRAP: Final = (
     "bootstrap",
@@ -320,7 +325,12 @@ def test_api_boots_with_the_production_root_and_becomes_ready(stack: Stack) -> N
 def test_worker_boots_registers_u02_and_stops_in_order(stack: Stack) -> None:
     # El arranque de bootstrap ya sincronizó el catálogo: se borra para que lo escriba el worker.
     stack.fetch("DELETE FROM shared.periodic_task")
-    stack.fetch("DELETE FROM shared.consumer")
+    # Los consumidores con entregas pendientes se quedan (la clave foránea de ``outbox_delivery``):
+    # ``notification_engine`` (TASK-324) está suscrito a eventos que el bootstrap ya publicó.
+    stack.fetch(
+        "DELETE FROM shared.consumer AS c WHERE NOT EXISTS"
+        " (SELECT 1 FROM shared.outbox_delivery AS d WHERE d.consumer_name = c.consumer_name)"
+    )
     port = _free_port()
     with stack.start("vigia-worker", VIGIA_WORKER_HEALTH_PORT=str(port)) as worker:
         worker.wait_for(lambda: "worker en marcha" in worker.output(), "worker en marcha")
@@ -501,5 +511,5 @@ def test_a_test_unit_reaches_the_database_at_startup(
     assert PROBE_EVENT in rows["event_type"]
     assert PROBE_CONSUMER in rows["consumer"]
     assert PROBE_TASK in rows["periodic_task"]
-    assert len(rows["periodic_task"]) == U02_TASKS + U03_TASKS + 1
+    assert len(rows["periodic_task"]) == U02_TASKS + U03_TASKS + U04_TASKS + 1
     assert reader.reads == 1

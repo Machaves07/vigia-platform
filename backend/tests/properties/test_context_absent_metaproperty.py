@@ -147,6 +147,19 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # accreditation.export (TASK-317): lee la solicitud y su paquete solo por la
         # ``Transaction`` dada (la abre ``ExportRequests.status``, registrado y guardado).
         "vigia_platform.accreditation.export.request.read_status",
+        # notifications (TASK-324): consultan y escriben solo por la ``Transaction`` dada (la del
+        # despachador o la de la proveedora, que abre ``NotificationEngine``, registrado y
+        # guardado) y por ``IdentityQueryPort`` y ``LectorExpediente`` (registrados).
+        "vigia_platform.notifications.delivery.already_delivered",
+        "vigia_platform.notifications.delivery.write_notification",
+        "vigia_platform.notifications.recipients.event_scope",
+        "vigia_platform.notifications.recipients.client_recipients",
+        "vigia_platform.notifications.recipients.provider_recipients",
+        # notifications (TASK-348): agrupación, resumen semanal, preferencias y archivado;
+        # consultan y escriben solo por la ``Transaction`` dada (la abre ``EmailGroupingTask``,
+        # ``DigestWeeklyTask`` o la ruta, registradas y guardadas).
+        "vigia_platform.notifications.preferences.preference_for",
+        "vigia_platform.notifications.reader.archive_read_notifications",
         # loop.assistant (TASK-316): lee la solicitud y su borrador solo por la ``Transaction``
         # dada (la abre ``AssistantService.status``, registrado y guardado).
         "vigia_platform.loop.assistant.service.read_request",
@@ -158,6 +171,11 @@ DELEGATING_FUNCTIONS: frozenset[str] = frozenset(
         # ``CoveragePort.linea_de_tiempo`` (``CoverageService``, que pone la guarda) con el
         # contexto que recibe.
         "vigia_platform.accreditation.export.timeline.zone_timeline",
+        # loop.projection.rebuild (TASK-306): leen y escriben solo por la ``Transaction`` dada,
+        # abierta por ``ProjectionRebuilder``/``ProjectionVerifier`` (registrados, método
+        # ``@repository``); ninguna abre su propia transacción ni construye su propio contexto.
+        "vigia_platform.loop.projection.rebuild.evidence_ids_for",
+        "vigia_platform.loop.projection.rebuild.enrich_finding",
     }
 )
 """Funciones de módulo con operación de datos que delegan en una operación guardada.

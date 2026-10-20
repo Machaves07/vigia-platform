@@ -1,0 +1,179 @@
+{#- Documento portátil del paquete exportado (LC-LAZ-23, NFR-LAZ-18 y 54). Autoescape activo: todo
+    valor se escapa; sin JavaScript, sin formularios, sin referencias externas. Cada eje va en un
+    <section data-section="<numeral>">: la prueba de estructura compara estos atributos con
+    document.DOCUMENT_SECTIONS, por igualdad, nunca por subcadena en el texto. -#}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="dcterms.created" content="{{ generated_at }}">
+<meta name="dcterms.modified" content="{{ generated_at }}">
+<title>Documento portátil del paquete exportado</title>
+</head>
+<body>
+<header>
+  <h1>Documento portátil del paquete exportado</h1>
+  <p class="note">Resumen legible del paquete, organizado según los soportes de la Resolución
+  0312 de 2019, artículo 16. La fuente de verdad es el manifiesto incluido en el paquete: este
+  documento no sustituye ninguna de sus declaraciones.</p>
+  <table class="facts">
+    <tr><th>Exportación</th><td>{{ export_id }}</td></tr>
+    <tr><th>Organización</th><td>{{ organization.name }} ({{ organization.code }})</td></tr>
+    <tr><th>Planta</th><td>{{ plant.name }} ({{ plant.code }}), {{ plant.country }}</td></tr>
+    <tr><th>Periodo (UTC)</th><td>{{ period_from }} a {{ period_to }}</td></tr>
+    <tr><th>Generado el (UTC)</th><td>{{ generated_at }}</td></tr>
+    <tr><th>Solicitado por</th><td>{{ generated_by_name }} ({{ generated_by_role }})</td></tr>
+    <tr><th>Forma del paquete</th><td>{{ package_form_label }}</td></tr>
+  </table>
+  <p class="note">{{ package_form_notice_es }}</p>
+</header>
+
+{% for numeral, title in sections %}
+<section class="axis" data-section="{{ numeral }}">
+  <h2>{{ numeral }}. {{ title }}</h2>
+
+  {% if numeral == "I" %}
+  <h3>Zonas del alcance</h3>
+  <table class="grid">
+    <thead><tr><th>Código</th><th>Nombre</th></tr></thead>
+    <tbody>
+    {% for zone in zones %}
+      <tr><td>{{ zone.code }}</td><td>{{ zone.name }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif numeral == "II" %}
+  <table class="grid">
+    <thead><tr><th>Estado</th><th>Hallazgos</th></tr></thead>
+    <tbody>
+    {% for row in counts.by_state %}
+      <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+    {% endfor %}
+    <tr><th>Total</th><td>{{ counts.finding_count }}</td></tr>
+    <tr><th>Con evidencia marcada</th><td>{{ counts.evidence_flagged_count }}</td></tr>
+    </tbody>
+  </table>
+  {% if evidence_flagged_notice_es %}<p class="note">{{ evidence_flagged_notice_es }}</p>{% endif %}
+
+  {% elif numeral == "III" %}
+  {% if aggregation_notice_es %}<p class="note">{{ aggregation_notice_es }}</p>{% endif %}
+  {% for zone in zone_findings %}
+  <h3>{{ zone.zone.name }} ({{ zone.zone.code }})</h3>
+  <table class="grid">
+    <thead><tr><th>Estado</th><th>Hallazgos</th></tr></thead>
+    <tbody>
+    {% for row in zone.by_state %}
+      <tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+
+  {% elif numeral == "IV" %}
+  <p class="note">{{ coverage_notice_es }}</p>
+  <table class="grid">
+    <thead>
+      <tr><th>Zona</th><th>Observable</th><th>Degradada</th><th>No observable</th>
+      <th>Sin comunicación</th><th>Nunca reportó</th><th>Zona no activa</th>
+      <th>No transcurrido</th><th>Total (ms)</th></tr>
+    </thead>
+    <tbody>
+    {% for row in zone_coverage %}
+      <tr>
+        <td>{{ row.zone.code }}</td><td>{{ row.observable_ms }}</td><td>{{ row.degraded_ms }}</td>
+        <td>{{ row.not_observable_ms }}</td><td>{{ row.no_communication_ms }}</td>
+        <td>{{ row.never_reported_ms }}</td><td>{{ row.zone_not_active_ms }}</td>
+        <td>{{ row.not_elapsed_ms }}</td><td>{{ row.total_ms }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h3>Estándares citados</h3>
+  <table class="grid">
+    <thead><tr><th>Zona</th><th>Estándar</th><th>Versión</th><th>Hash del texto</th></tr></thead>
+    <tbody>
+    {% for row in standards %}
+      <tr><td>{{ row.zone.code }}</td><td>{{ row.title_es }}</td><td>{{ row.version }}</td>
+      <td>{{ row.declared_text_sha256 }}</td></tr>
+    {% else %}
+      <tr><td colspan="4">Ningún estándar citado en el periodo.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif numeral == "V" %}
+  {% for zone in agreements %}
+  <h3>Acuerdos de uso: {{ zone.zone.name }} ({{ zone.zone.code }})</h3>
+  <table class="grid">
+    <thead><tr><th>Estado</th><th>Aprobado el</th><th>Firmantes</th></tr></thead>
+    <tbody>
+    {% for agreement in zone.agreements %}
+      <tr>
+        <td>{{ agreement.status_label }}</td><td>{{ agreement.approved_at }}</td>
+        <td>
+        {% for signatory in agreement.signatories %}
+          {{ signatory.role_label }} ({{ signatory.confirmed_at }}){% if not loop.last %}; {% endif %}
+        {% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+  {% if regression_notice_es %}
+  <p class="note">{{ regression_notice_es }}</p>
+  <table class="grid">
+    <thead><tr><th>Zona</th><th>Desde</th><th>Hasta</th><th>Causa</th></tr></thead>
+    <tbody>
+    {% for row in regression_periods %}
+      <tr><td>{{ row.zone.code }}</td><td>{{ row.starts_at }}</td><td>{{ row.ends_at }}</td>
+      <td class="text">{{ row.cause }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if revocation_notice_es %}
+  <p class="note">{{ revocation_notice_es }}</p>
+  <table class="grid">
+    <thead><tr><th>Zona</th><th>Desde</th><th>Hasta</th><th>Motivo</th></tr></thead>
+    <tbody>
+    {% for row in revoked_gates %}
+      <tr><td>{{ row.zone.code }}</td><td>{{ row.since }}</td><td>{{ row.until }}</td>
+      <td class="text">{{ row.reason_es }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% elif numeral == "VI" %}
+  <h3>Puntos de control</h3>
+  <table class="grid">
+    <thead><tr><th>Tipo</th><th>Secuencia</th><th>Hash</th></tr></thead>
+    <tbody>
+    {% for row in checkpoints %}
+      <tr><td>{{ row.kind_label }}</td><td>{{ row.sequence }}</td><td>{{ row.entry_hash }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <h3>Claves públicas</h3>
+  <table class="grid">
+    <thead><tr><th>Identificador</th><th>Estado</th><th>Vigente desde</th><th>Vigente hasta</th></tr></thead>
+    <tbody>
+    {% for row in public_keys %}
+      <tr><td>{{ row.key_id }}</td><td>{{ row.status_label }}</td><td>{{ row.valid_from }}</td>
+      <td>{{ row.valid_until }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% elif numeral == "VII" %}
+  <p class="note">{{ anonymization_statement_es }}</p>
+  <p class="note">{{ verifier_absent_es }}</p>
+  <p class="note">El manifiesto incluido en el paquete declara cada artefacto con su hash y cada
+  entrada ausente con su motivo: nada falta en silencio.</p>
+  {% endif %}
+</section>
+{% endfor %}
+</body>
+</html>

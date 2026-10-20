@@ -51,6 +51,12 @@ BODIES: dict[str, dict[str, Any]] = {
     "/users/{user_id}": {"display_name": "Nombre sintético", "active": True},
     "/auth/login": {"email": "a@b.co", "password": "contraseña-sintética"},
     "/privacy-notice/accept": {},
+    "/notifications/{notification_id}/read": {},
+    "/notifications/preferences": {
+        "email_enabled_normal": True,
+        "email_enabled_digest": True,
+        "weekly_digest_weekday": 1,
+    },
     "/platform/dead-letter/{event_id}/{consumer}/replay": {},
     "/platform/keys/{purpose}/rotate": {},
     "/loop/actions/{action_id}/attachments/upload-grant": {
@@ -68,6 +74,11 @@ BODIES: dict[str, dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    "/loop/review-queue/{detection_id}/resolution": {
+        "outcome": "review_confirmed",
+        "reason_category": "real_coexistence",
+        "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
+    },
     "/loop/findings/{finding_state_id}/actions": {
         "action_type": "engineering",
         "action_description": "Instalar un resguardo fijo en el acceso a la zona",
@@ -77,6 +88,16 @@ BODIES: dict[str, dict[str, Any]] = {
         "description": "Resguardo fijo instalado y anclado al piso en el acceso",
         "performed_at": "2026-10-01T10:00:00.000Z",
         "performed_by_role": "Técnico de mantenimiento",
+    },
+    "/loop/findings/{finding_state_id}/closure": {
+        "closure_description": "Resguardo fijo verificado y anclado en el acceso de la zona",
+        "professional_license": "LIC-SST-0001",
+    },
+    "/loop/findings/{finding_state_id}/reopening": {
+        "reason_text": "El resguardo se retiró durante el mantenimiento mayor",
+        "action_type": "engineering",
+        "action_description": "Reinstalar el resguardo fijo en el acceso de la zona",
+        "assignee_user_id": str(uuid.uuid4()),
     },
     "/loop/findings/{finding_state_id}/root-cause-analyses": {},
     "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}": {
@@ -96,15 +117,28 @@ BODIES: dict[str, dict[str, Any]] = {
         "package_form": "without_clips",
     },
     "/accreditation/exports/{export_id}/download-url": {},
+    "/accreditation/sample-items/{sample_item_id}/result": {"outcome": "consistent_criterion"},
+    "/accreditation/monthly-packages/{package_id}/commitments": {
+        "commitments": [
+            {
+                "text": "Revisar la señalización del pasillo peatonal de la zona",
+                "responsible_user_id": str(uuid.uuid4()),
+                "due_date": "2026-12-01",
+            }
+        ]
+    },
+    "/accreditation/commitments/{commitment_id}": {"state": "done"},
 }
 OPERATION_PREFIX = "/platform/"
 """Rutas reales de operación (TASK-137): sin servicios en el arnés no tienen efecto observable, así
 que entran en las falsificadas (``forbidden`` sin efecto) y no en las que se procesan."""
-REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/", "/accreditation/")
+REAL_SERVICE_PREFIXES = (OPERATION_PREFIX, "/loop/", "/accreditation/", "/notifications/")
 """Rutas con servicios reales o dobles (operación, adjuntos de cierre de U-04, TASK-310,
-configuración del lazo, TASK-304, y exportación, TASK-317): se prueban entre las falsificadas; su
-procesamiento, en ``tests/properties/laz``, ``tests/integration/test_loop_configuration_routes.py``
-y ``tests/integration/test_export_request_routes.py``."""
+configuración del lazo, TASK-304, exportación, TASK-317, y marcar leída/preferencias, TASK-348):
+se prueban entre las falsificadas; su procesamiento, en ``tests/properties/laz``,
+``tests/integration/test_loop_configuration_routes.py``,
+``tests/integration/test_export_request_routes.py`` y
+``tests/isolation/test_route_isolation.py``/``tests/integration/test_notification_routes.py``."""
 
 
 def _state_changing_routes(app: Any) -> list[tuple[str, str]]:
@@ -129,8 +163,13 @@ def _url(path: str) -> str:
         .replace("{plant_id}", str(uuid.uuid4()))
         .replace("{export_id}", str(uuid.uuid4()))
         .replace("{finding_state_id}", str(uuid.uuid4()))
+        .replace("{detection_id}", str(uuid.uuid4()))
         .replace("{analysis_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
+        .replace("{notification_id}", str(uuid.uuid4()))
+        .replace("{sample_item_id}", str(uuid.uuid4()))
+        .replace("{package_id}", str(uuid.uuid4()))
+        .replace("{commitment_id}", str(uuid.uuid4()))
     )
 
 
@@ -160,9 +199,14 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("PUT", "/loop/plants/{plant_id}/configuration"),
         # Clasificación de un hallazgo de U-04 (TASK-308).
         ("POST", "/loop/findings/{finding_state_id}/classifications"),
+        # Resolución de la cola de revisión de U-04 (TASK-309).
+        ("POST", "/loop/review-queue/{detection_id}/resolution"),
         # Acción correctiva y su evidencia de U-04 (TASK-311).
         ("POST", "/loop/findings/{finding_state_id}/actions"),
         ("POST", "/loop/actions/{action_id}/evidence"),
+        # Cierre firmado y reapertura de un hallazgo de U-04 (TASK-343, VIG-233).
+        ("POST", "/loop/findings/{finding_state_id}/closure"),
+        ("POST", "/loop/findings/{finding_state_id}/reopening"),
         # Análisis de causa raíz guiado de U-04 (TASK-315).
         ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
@@ -173,6 +217,13 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).
         ("POST", "/accreditation/exports/{export_id}/download-url"),
+        # Resultado de la auditoría muestral y compromisos del mando de línea (TASK-347).
+        ("POST", "/accreditation/sample-items/{sample_item_id}/result"),
+        ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
+        ("PATCH", "/accreditation/commitments/{commitment_id}"),
+        # Marcar leída y preferencias de notificaciones de U-04 (TASK-348).
+        ("POST", "/notifications/{notification_id}/read"),
+        ("PUT", "/notifications/preferences"),
         ("POST", "/users"),
         ("PATCH", "/users/{user_id}"),
         ("POST", "/privacy-notice/accept"),

@@ -17,6 +17,7 @@ Solo datos generados.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from collections.abc import Iterator
@@ -28,22 +29,41 @@ from tests.properties.laz.strategies.export import ExportWorld, WorldPorts
 from vigia_platform.accreditation.export.composer_port import ExportJob, ExportPackage
 from vigia_platform.accreditation.export.contents import ExportComposer
 from vigia_platform.accreditation.export.stream import ExportStream, ExportStreamSettings
-from vigia_platform.accreditation.export.volumes import MANIFEST_NAME, ExportLocation
+from vigia_platform.accreditation.export.volumes import (
+    MANIFEST_NAME,
+    MANIFEST_SIGNATURE_NAME,
+    ExportLocation,
+)
+from vigia_platform.accreditation.manifest.model import ManifestInputs
 from vigia_platform.loop.projection.fold import U03_RECORD_TYPES, FindingStateRow, fold
 
 __all__ = [
     "SMALL_VOLUMES",
     "Composed",
     "compose_world",
+    "fake_document_renderer",
     "oracle_findings",
     "prose",
 ]
 
 KIB: Final = 1024
 SMALL_VOLUMES: Final = ExportStreamSettings(
-    part_size=5 * 1024 * KIB, volume_max_bytes=48 * KIB, manifest_reserve_bytes=40 * KIB
+    part_size=5 * 1024 * KIB, volume_max_bytes=160 * KIB, manifest_reserve_bytes=40 * KIB
 )
-"""Volúmenes pequeños: un paquete generado ocupa a menudo más de uno."""
+"""Volúmenes pequeños: un paquete generado ocupa a menudo más de uno. El verificador del paquete
+(``vigia_verify.py``, unos 125 KB, TASK-346) no cabe en lo que ``vol-01`` deja libre (120 KiB), así
+que va siempre a otro volumen."""
+
+
+def fake_document_renderer(inputs: ManifestInputs) -> bytes:
+    """Un documento falso, determinista y rápido: ``accreditation.document.generate_document``
+    de verdad llama a WeasyPrint (cientos de ms); con cientos de ejemplos por propiedad
+    (``test_pr_laz_26_export_completeness.py`` y similares), eso convierte una prueba de
+    segundos en una de minutos sin probar nada que ``test_export_document_determinism.py`` y
+    ``test_export_document_no_active_content.py`` no prueben ya con el generador real. Mismo
+    ``ManifestInputs`` (mismo ``export_id``), mismos bytes."""
+    seed = str(inputs.export_id).encode("utf-8")
+    return b"%PDF-1.7\n% documento falso de pruebas\n" + hashlib.sha256(seed).digest()
 
 
 @dataclass(frozen=True)
@@ -53,6 +73,8 @@ class Composed:
     artifacts: dict[str, bytes]
     store: MemoryExportStore
     sink: RecordingSink
+    signature: bytes | None = None
+    """``manifest.signature.json`` (TASK-346): la firma del manifiesto, que no es un artefacto."""
 
     def json(self, path: str) -> Any:
         return json.loads(self.artifacts[path])
@@ -69,7 +91,9 @@ def compose_world(
     store = store if store is not None else MemoryExportStore()
     job = job if job is not None else world.job
     composer = ExportComposer(
-        stream=ExportStream(store=store, settings=SMALL_VOLUMES), ports=ports.ports()
+        stream=ExportStream(store=store, settings=SMALL_VOLUMES),
+        ports=ports.ports(),
+        document_renderer=fake_document_renderer,
     )
     sink = RecordingSink()
     package = asyncio.run(composer.compose(job, sink))
@@ -81,7 +105,8 @@ def compose_world(
             assert name not in artifacts, f"entrada repetida entre volúmenes: {name}"
             artifacts[name] = archive.read(name)
     manifest = json.loads(artifacts.pop(MANIFEST_NAME))
-    return Composed(package, manifest, artifacts, store, sink)
+    signature = artifacts.pop(MANIFEST_SIGNATURE_NAME, None)
+    return Composed(package, manifest, artifacts, store, sink, signature)
 
 
 def oracle_findings(world: ExportWorld, job: ExportJob) -> dict[uuid.UUID, FindingStateRow]:

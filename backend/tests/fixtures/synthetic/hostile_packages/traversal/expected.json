@@ -1,0 +1,7 @@
+{
+  "artifact": "../../evil.txt",
+  "pointer": null,
+  "reason": "path_traversal",
+  "status": "broken",
+  "volume": "vol-01.zip"
+}

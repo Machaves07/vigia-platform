@@ -82,6 +82,13 @@ def _load(name: str) -> Any:
 MIGRATION = _load("laz_0029_loop_schema.py")
 USAGE = _load("laz_0033_assistant_usage.py")
 """laz_0033 (TASK-316): las columnas de uso de ``assistant_request``, de trabajo del guardián."""
+LAZ_0037 = _load("laz_0037_projection_rebuild_shadow.py")
+
+LAZ_0037_SHADOW_TABLES: Final = LAZ_0037._SHADOW_TABLES
+"""Las dos tablas sombra de la reconstrucción (TASK-306): a diferencia de las 19 de laz_0029, sí
+tienen ``DELETE`` concedido (el intercambio las vacía)."""
+LAZ_0037_TABLES: Final = (*LAZ_0037._SHADOW_TABLES, "loop_projection_sample_run")
+"""Las tres tablas que ``laz_0037`` añade al esquema ``loop``, aditivas sobre laz_0029."""
 
 
 @dataclass(frozen=True)
@@ -190,8 +197,14 @@ async def test_upgrade_head_applies_laz_0029(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'loop' AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
     )
-    assert {row["relname"] for row in rows} == set(LOOP_TABLES) == set(MIGRATION.TABLES)
-    assert len(LOOP_TABLES) == 19
+    # Las tres de laz_0037 (TASK-306) son aditivas, como monthly_package_lease sobre laz_0031
+    # (VIG-239): no las creó laz_0029, pero ya están en el esquema y en LOOP_TABLES.
+    assert (
+        {row["relname"] for row in rows}
+        == set(LOOP_TABLES)
+        == set(MIGRATION.TABLES) | set(LAZ_0037_TABLES)
+    )
+    assert len(LOOP_TABLES) == 19 + len(LAZ_0037_TABLES)
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in rows), rows
     assert {row["owner"] for row in rows} == {"vigia_migrate"}
     partitioned = {row["relname"] for row in rows if row["kind"] == "p"}
@@ -227,7 +240,8 @@ async def test_upgrade_head_applies_laz_0029(superuser: Any) -> None:
             for clause in (denied["qual"], denied["with_check"]):
                 assert clause == "(NOT identity.rls_provider_context())", table
 
-    # Ningún DELETE ni TRUNCATE para vigia_app; SELECT e INSERT en todas.
+    # Ningún DELETE ni TRUNCATE para vigia_app; SELECT e INSERT en todas. Excepción: las dos
+    # tablas sombra de laz_0037 sí tienen DELETE (el intercambio las vacía por planta).
     for table in LOOP_TABLES:
         privileges = {
             privilege: await superuser.fetchval(
@@ -235,7 +249,13 @@ async def test_upgrade_head_applies_laz_0029(superuser: Any) -> None:
             )
             for privilege in ("SELECT", "INSERT", "DELETE", "TRUNCATE")
         }
-        assert privileges == {"SELECT": True, "INSERT": True, "DELETE": False, "TRUNCATE": False}
+        expected_delete = table in LAZ_0037_SHADOW_TABLES
+        assert privileges == {
+            "SELECT": True,
+            "INSERT": True,
+            "DELETE": expected_delete,
+            "TRUNCATE": False,
+        }, table
     # Las particiones no se leen directamente: no tienen RLS propia y vigia_app no tiene nada.
     children = await superuser.fetch(
         "SELECT c.oid::regclass::text AS name FROM pg_class c"
@@ -265,6 +285,21 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         if MIGRATION.app_updatable_columns(table)
     }
     expected["assistant_request"] |= set(USAGE.USAGE_COLUMNS)
+    # El arrendamiento de la reconstrucción (laz_0037, TASK-306): dos columnas más, aditivas
+    # sobre lo que laz_0029 ya dejaba actualizable en loop_projection_checkpoint.
+    expected["loop_projection_checkpoint"] |= {"rebuild_owner", "rebuild_lease_until"}
+    # Las dos tablas sombra de laz_0037 (TASK-306): UPDATE acotado a las columnas de negocio, no
+    # a la clave, la organización, la planta ni la zona (igual invariante que las de laz_0029).
+    for table, core in (
+        ("episode_rebuild_shadow", loop_tables.EPISODE_REBUILD_SHADOW),
+        ("finding_state_rebuild_shadow", loop_tables.FINDING_STATE_REBUILD_SHADOW),
+    ):
+        expected[table] = {
+            column.name
+            for column in core.columns
+            if column.name not in {"organization_id", "plant_id", "zone_id"}
+            and not column.primary_key
+        }
     assert granted == expected
     # Las decisiones no cambian: ninguna columna actualizable.
     for table in (
@@ -298,7 +333,11 @@ def test_append_only_registry_lists_every_append_only_table() -> None:
     registry = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(registry)
     listed = {name for name in registry.APPEND_ONLY_TABLES if name.startswith("loop.")}
-    assert listed == {f"loop.{table}" for table in MIGRATION.APPEND_ONLY_TABLES}
+    # loop_projection_sample_run (laz_0037, TASK-306) es aditiva sobre laz_0029, como
+    # monthly_package_lease sobre laz_0031 (VIG-239).
+    assert listed == {f"loop.{table}" for table in MIGRATION.APPEND_ONLY_TABLES} | {
+        "loop.loop_projection_sample_run"
+    }
     assert set(MIGRATION.APPEND_ONLY_TABLES) == {"closure_attachment", "assistant_request"}
 
 
@@ -315,8 +354,11 @@ async def test_append_only_triggers_are_always_enabled(superuser: Any) -> None:
     for row in rows:
         target = partitions if row["relispartition"] else triggers
         target.setdefault(row["relname"], {})[row["tgname"]] = row["tgenabled"]
-    assert set(triggers) == set(MIGRATION.APPEND_ONLY_TABLES)
-    for table in MIGRATION.APPEND_ONLY_TABLES:
+    # loop_projection_sample_run (laz_0037, TASK-306) es aditiva: de solo anexar, con los mismos
+    # tres disparadores que las de laz_0029.
+    append_only = (*MIGRATION.APPEND_ONLY_TABLES, "loop_projection_sample_run")
+    assert set(triggers) == set(append_only)
+    for table in append_only:
         assert triggers[table] == {
             "append_only_update": "A",
             "append_only_delete": "A",
@@ -463,8 +505,12 @@ async def test_delete_and_truncate_fail_for_the_app_and_the_owner(
             await _steps(owner, scope.organization_id, (f"TRUNCATE loop.{table} CASCADE", []))
             == RESTRICT_VIOLATION
         ), table
-    # Las proyecciones tampoco se borran desde la aplicación (P4).
+    # Las proyecciones tampoco se borran desde la aplicación (P4); excepción documentada: las dos
+    # tablas sombra de laz_0037 (TASK-306) no son la proyección en servicio, son su área de
+    # preparación interna, y el intercambio las vacía por planta a propósito.
     for table in LOOP_TABLES:
+        if table in LAZ_0037_SHADOW_TABLES:
+            continue
         assert (
             await _steps(app, scope.organization_id, (f"DELETE FROM loop.{table}", []))  # noqa: S608
             == INSUFFICIENT_PRIVILEGE

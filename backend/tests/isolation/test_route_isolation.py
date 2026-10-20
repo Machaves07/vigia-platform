@@ -233,6 +233,8 @@ CONCESSION_HEADER: Final = "X-Vigia-Concession"
 REASON: Final = "Mantenimiento sintético del nodo de la línea 2"
 T0: Final = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
 HOUR: Final = timedelta(hours=1)
+REQUEST_SPACING_SECONDS: Final = 0.1
+"""Reloj simulado entre dos peticiones: dos fichas del origen y una de la sesión por petición."""
 NBSP: Final = chr(0x00A0)
 ZERO_WIDTH_SPACE: Final = chr(0x200B)
 _CSR_PLACEHOLDER: Final = (
@@ -1327,9 +1329,11 @@ class Isolation:
     def send(
         self, call: Call, cookie: SessionCookie, concession: uuid.UUID | None = None
     ) -> httpx.Response:
-        # Un milisegundo por petición: dos peticiones reales nunca comparten el instante (la
-        # retirada de una zona exige ``unassigned_at > assigned_at``, VIG-147).
-        self.env.clock.advance(0.001)
+        # Dos peticiones reales nunca comparten el instante (la retirada de una zona exige
+        # ``unassigned_at > assigned_at``, VIG-147), y la separación repone en los cubos del
+        # límite de tasa más de lo que gasta cada petición (origen 20 por segundo, sesión 10,
+        # NFR-NUC-25): con un milisegundo, el módulo agotaba las 1 200 del origen (VIG-217).
+        self.env.clock.advance(REQUEST_SPACING_SECONDS)
         headers = dict(SAME_ORIGIN)
         headers["Cookie"] = f"{SESSION_COOKIE_NAME}={cookie.value}"
         if concession is not None:

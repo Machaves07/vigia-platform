@@ -224,16 +224,26 @@ def test_the_real_root_registers_every_u03_type_event_and_task(tmp_path: Path) -
     assert api.node_ca is not None and worker.node_ca is not None
 
 
+_ALSO_MISSING: Final[Mapping[tuple[str, str], tuple[tuple[str, str], ...]]] = {
+    # review_queue (TASK-309) solo se suscribe a este evento de U-03: sin él, _strip lo deja sin
+    # ninguna suscripción y no lo vuelve a registrar (un Consumer exige al menos un evento), así
+    # que también falta como consumidor; el resultado se ordena por (kind, name). Solo el evento
+    # (no el tipo de registro homónimo, ``record_type:detection_for_review_received``).
+    ("event_type", "detection_for_review_received"): (("consumer", "review_queue"),)
+}
+
+
 @pytest.mark.parametrize(("kind", "name"), MISSING, ids=[f"{k}:{n}" for k, n in MISSING])
 def test_composition_fails_naming_exactly_what_is_missing(
     kind: str, name: str, tmp_path: Path
 ) -> None:
     units = _without(kind, name)
     runtime = _runtime(tmp_path)
+    expected = tuple(sorted({(kind, name), *_ALSO_MISSING.get((kind, name), ())}))
     for compose in (_compose_worker, _compose_api):
         with pytest.raises(RegistrationIncomplete) as raised:
             compose(runtime, units)
-        assert raised.value.missing == ((kind, name),)
+        assert raised.value.missing == expected
         assert name in str(raised.value)
 
 

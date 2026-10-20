@@ -1,0 +1,362 @@
+"""PR-LAZ-59: ninguna lectura de la bandeja ve una mezcla de filas viejas y nuevas durante la
+reconstrucción (TASK-306; LC-LAZ-03; PAT-LAZ-RES-03; domain-entities.md de U-04 §2.14 y §9).
+
+Contra PostgreSQL 16 real como ``vigia_app``, dos hallazgos de la misma planta, cada uno con su
+``projection_digest`` mutado (como un defecto de la caché) para que la reconstrucción cambie su
+valor de forma observable. Un lector en su propia conexión muestrea ``loop.finding_state`` en un
+bucle apretado, a la vez que ``ProjectionRebuilder.rebuild_plant`` corre (con un lote de tamaño 1,
+para ensanchar la ventana con más viajes a la base por planta): en **cada** muestra, las dos filas
+están en el mismo lado (las dos con el resumen mutado, o las dos con el corregido), nunca una de
+cada.
+
+También: una escritura incremental aceptada **entre el fin del cómputo y el intercambio** (el
+«excedente» de BR-LAZ-148, el hallazgo de la ronda 1 de revisión) no se pierde — la reconstrucción
+la pliega bajo el mismo candado de ``store.py`` antes de intercambiar.
+
+**Mutación** (la tabla sombra se omite y la reconstrucción escribe fila a fila directamente en
+``loop.finding_state``): el muestreador ve una mezcla al menos una vez. Ejecutada manualmente
+contra el archivo (no queda como prueba permanente: mutar `_swap` en una prueba de regresión no es
+el patrón de este repositorio); ver la nota «Evidence» del PR con la salida real en rojo y la
+restauración.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from collections.abc import Iterator
+from typing import Any, Final
+
+import pytest
+from sqlalchemy import text
+
+from tests.integration.conftest import PostgresEndpoint
+from tests.laz_support import (
+    IngestedSubject,
+    InstrumentedPorts,
+    LoopOrganization,
+    LoopWorld,
+    loop_world,
+)
+from tests.writer_support import unit_context
+from vigia_platform.ledger.application.evidence_read import EvidenceService
+from vigia_platform.ledger.application.writer import RecordScope
+from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.projection.fold import FindingStateRow
+from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
+from vigia_platform.shared.context import ActorKind, ActorUnit
+from vigia_platform.shared.outbox.publish import OutboxEvent, partition_key
+
+_DIGESTS: Final = text(
+    "SELECT projection_digest FROM loop.finding_state"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    " ORDER BY finding_state_id"
+)
+
+pytestmark = pytest.mark.integration
+
+ROUNDS: Final = 3
+"""Rondas independientes de reconstrucción + muestreo concurrente."""
+
+
+@pytest.fixture(scope="module")
+def world(postgres_endpoint: PostgresEndpoint) -> Iterator[LoopWorld]:
+    with loop_world(postgres_endpoint, "pr_laz_59") as built:
+        yield built
+
+
+def _rebuilder(
+    world: LoopWorld,
+    ports: InstrumentedPorts,
+    *,
+    batch_size: int = 1,
+    on_enrichment_complete: Any = None,
+    on_swap_started: Any = None,
+) -> ProjectionRebuilder:
+    database = world.stack.primary.database
+    sessions = world.stack.authz.sessions
+    return ProjectionRebuilder(
+        database=database,
+        catalog=ports,
+        gates=ports,
+        coverage=ports,
+        markers=EvidenceService(
+            database=database, audit=sessions.audit, storage=world.stack.storage
+        ),
+        settings=PostgresLoopConfigurationRepository(database),
+        clock=sessions.clock,
+        batch_size=batch_size,
+        on_enrichment_complete=on_enrichment_complete,
+        on_swap_started=on_swap_started,
+    )
+
+
+def _mutate(world: LoopWorld, subject: IngestedSubject) -> tuple[str, str]:
+    """Invierte ``evidence_flagged`` y recalcula un ``projection_digest`` consistente con el
+    valor mutado (como un defecto de la caché, no una operación de U-04); devuelve
+    ``(digest_mutado, digest_correcto)``."""
+    organization = subject.organization
+    row = world.finding_state(subject)
+    assert row is not None
+    correct_digest = row["projection_digest"]
+    world.stack.execute(
+        "UPDATE loop.finding_state SET evidence_flagged = NOT evidence_flagged"
+        " WHERE organization_id = $1 AND finding_state_id = $2",
+        organization.organization_id,
+        row["finding_state_id"],
+    )
+    mutated_row = world.finding_state(subject)
+    assert mutated_row is not None
+    mutated_digest = FindingStateRow(**mutated_row).computed_digest()
+    world.stack.execute(
+        "UPDATE loop.finding_state SET projection_digest = $1"
+        " WHERE organization_id = $2 AND finding_state_id = $3",
+        mutated_digest,
+        organization.organization_id,
+        row["finding_state_id"],
+    )
+    return mutated_digest, correct_digest
+
+
+async def _sample_digests(world: LoopWorld, organization: LoopOrganization) -> list[str]:
+    rows = await world.stack.primary.database.read(
+        world.event_context(organization),
+        _DIGESTS,
+        {"organization_id": organization.organization_id, "plant_id": organization.plant_id},
+    )
+    return [str(row.projection_digest) for row in rows]
+
+
+async def _poll_while(
+    world: LoopWorld,
+    organization: LoopOrganization,
+    stop: asyncio.Event,
+    samples: list[list[str]],
+) -> None:
+    while not stop.is_set():
+        samples.append(await _sample_digests(world, organization))
+        await asyncio.sleep(0)
+
+
+async def _run_round(
+    world: LoopWorld, rebuilder: ProjectionRebuilder, subjects: list[IngestedSubject]
+) -> list[list[str]]:
+    organization = subjects[0].organization
+    context = world.context(organization)
+    stop = asyncio.Event()
+    samples: list[list[str]] = []
+    poller = asyncio.ensure_future(_poll_while(world, organization, stop, samples))
+    try:
+        await rebuilder.rebuild_plant(context, organization.plant_id)
+    finally:
+        stop.set()
+        await poller
+    samples.append(await _sample_digests(world, organization))
+    return samples
+
+
+def test_pr_laz_59_no_reader_ever_sees_a_mix(world: LoopWorld) -> None:
+    for _ in range(ROUNDS):
+        organization = world.organization()
+        consumer, ports = world.projection_consumer()
+        subjects = [world.ingest_finding(organization) for _ in range(2)]
+        for subject in subjects:
+            # Con el consumidor real, como en la vía incremental: la reconstrucción enriquece
+            # igual, así que el resumen "correcto" coincide con el que ella produce (PR-LAZ-44).
+            written = world.deliver(consumer, world.outbox_event(subject))
+            assert written == 1
+        mutated_and_correct = [_mutate(world, subject) for subject in subjects]
+        mutated = {digest for digest, _ in mutated_and_correct}
+        correct = {digest for _, digest in mutated_and_correct}
+
+        rebuilder = _rebuilder(world, ports)
+        samples = world.stack.run(_run_round(world, rebuilder, subjects))
+
+        for sample in samples:
+            assert len(sample) == 2, sample
+            assert set(sample) <= mutated or set(sample) <= correct, (sample, mutated, correct)
+        # Al menos la última muestra, tras terminar, debe ser la corregida.
+        assert set(samples[-1]) <= correct
+
+
+def test_pr_laz_59_surplus_during_compute_is_not_lost(world: LoopWorld) -> None:
+    """Una clasificación aceptada **mientras computa** la fase 2 no desaparece: la fase 3 la
+    pliega como excedente antes de intercambiar (BR-LAZ-148, hallazgo de la ronda 1 de revisión)."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    reached = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def pause() -> None:
+        reached.set()
+        await resume.wait()
+
+    rebuilder = _rebuilder(world, ports, batch_size=1, on_swap_started=pause)
+    context = world.context(organization)
+
+    async def classify() -> None:
+        # Como `LoopWorld.write`, pero sin su envoltorio síncrono (ya estamos dentro del bucle).
+        database = world.stack.primary.database
+        scope = RecordScope(plant_id=organization.plant_id, zone_id=organization.zone_id)
+        async with database.transaction(context) as transaction:
+            _receipt, step = await world.store.write_and_apply(
+                transaction,
+                world.stack.primary.writer,
+                context,
+                "classification",
+                world.classification_content(subject),
+                scope=scope,
+            )
+        assert step is not None and step.applied
+
+    async def run() -> Any:
+        task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
+        await reached.wait()
+        world.stack.tick()
+        await classify()
+        resume.set()
+        return await task
+
+    world.stack.run(run())
+    final = world.finding_state(subject)
+    assert final is not None
+    assert final["lifecycle_state"] == "open"
+    assert final["current_classification_outcome"] == "confirmed"
+    assert final["classification_count"] == 1
+
+
+async def _revoke_usage_and_deliver(
+    world: LoopWorld, consumer: Any, organization: LoopOrganization
+) -> None:
+    """Lo mismo que ``world.gate_event`` + la entrega (``LoopWorld.deliver``), pero sin su
+    envoltorio síncrono (``stack.execute``/``stack.run``): para llamarla ya dentro del bucle en
+    marcha, con la reconstrucción pausada en un gancho de prueba."""
+    site = organization.site
+    database = world.stack.primary.database
+    at = world.stack.now()
+    event_context = unit_context(site.organization_id, ActorUnit.U04, kind=ActorKind.SYSTEM)
+    async with database.transaction(event_context) as transaction:
+        await transaction.execute(
+            text(
+                "UPDATE catalog.gate_state_history SET effective_until = :at"
+                " WHERE zone_id = :zone_id AND gate = 'usage' AND effective_until IS NULL"
+            ),
+            {"zone_id": site.zone_id, "at": at},
+        )
+        await transaction.execute(
+            text(
+                "INSERT INTO catalog.gate_state_history (organization_id, plant_id, zone_id,"
+                " gate, status, effective_from, decided_by, reason_es, ledger_record_id,"
+                " record_id)"
+                " VALUES (:organization_id, :plant_id, :zone_id, 'usage', 'revoked', :at,"
+                " :decided_by, :reason_es, :ledger_record_id, :record_id)"
+            ),
+            {
+                "organization_id": site.organization_id,
+                "plant_id": site.plant_id,
+                "zone_id": site.zone_id,
+                "at": at,
+                "decided_by": world.stack.authz.operator_id,
+                "reason_es": "Revocación sintética del uso de la zona",
+                "ledger_record_id": world.stack.uuid7(),
+                "record_id": world.stack.uuid7(),
+            },
+        )
+        event = OutboxEvent(
+            event_id=world.stack.uuid7(),
+            organization_id=site.organization_id,
+            plant_id=site.plant_id,
+            event_name="gate_state_changed",
+            partition_key=partition_key(site.organization_id, site.plant_id),
+            ledger_sequence=None,
+            payload={
+                "zone_id": str(site.zone_id),
+                "gate": "usage",
+                "status": "revoked",
+                "resulting_mode": "commissioning",
+                "record_id": str(uuid.uuid4()),
+                "reason_es_present": True,
+            },
+            correlation_id=uuid.uuid4(),
+            created_at=at,
+        )
+        applied = await consumer.apply(event, transaction)
+    assert applied == 1
+
+
+def test_pr_laz_59_enrichment_event_during_swap_is_not_lost(world: LoopWorld) -> None:
+    """Un evento de enriquecimiento (``gate_state_changed`` revocando la compuerta de uso de la
+    zona) aplicado **entre el fin del cómputo y el intercambio** no se pierde: ``update_enrichment``
+    avanza ``last_applied_event_id`` sin tocar ``last_applied_ledger_sequence``, así que el
+    excedente por secuencia no lo detectaba (hallazgo bloqueante de la ronda 2 de revisión,
+    BR-LAZ-148, P5). La fase 3 ahora compara también ``last_applied_event_id`` y, si cambió,
+    re-enriquece todas las filas de la sombra antes de intercambiar."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    reached = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def pause() -> None:
+        reached.set()
+        await resume.wait()
+
+    rebuilder = _rebuilder(world, ports, batch_size=1, on_swap_started=pause)
+    context = world.context(organization)
+
+    async def run() -> Any:
+        task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
+        await reached.wait()
+        await _revoke_usage_and_deliver(world, consumer, organization)
+        resume.set()
+        return await task
+
+    world.stack.run(run())
+    final = world.finding_state(subject)
+    assert final is not None
+    assert final["zone_agreement_revoked"] is True
+    assert final["zone_agreement_revoked_at"] is not None
+
+
+def test_pr_laz_59_enrichment_event_during_compute_is_not_lost(world: LoopWorld) -> None:
+    """La misma garantía, pero el evento se confirma **a mitad de la fase 2** (justo tras
+    enriquecer, todavía dentro de la transacción de cómputo): la marca de referencia para la fase
+    3 (``last_applied_event_id``) se lee ahora al **principio** de esa transacción, no al final
+    (hallazgo bloqueante de la ronda 3 de revisión). Leída al final, el evento confirmado a mitad
+    del enriquecimiento ya estaría dentro de la marca pero fuera de lo que la sombra alcanzó a
+    reflejar, y la fase 3 no vería ninguna diferencia que la hiciera reenriquecer."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    written = world.deliver(consumer, world.outbox_event(subject))
+    assert written == 1
+
+    reached = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def pause() -> None:
+        reached.set()
+        await resume.wait()
+
+    rebuilder = _rebuilder(world, ports, batch_size=1, on_enrichment_complete=pause)
+    context = world.context(organization)
+
+    async def run() -> Any:
+        task = asyncio.ensure_future(rebuilder.rebuild_plant(context, organization.plant_id))
+        await reached.wait()
+        await _revoke_usage_and_deliver(world, consumer, organization)
+        resume.set()
+        return await task
+
+    world.stack.run(run())
+    final = world.finding_state(subject)
+    assert final is not None
+    assert final["zone_agreement_revoked"] is True
+    assert final["zone_agreement_revoked_at"] is not None

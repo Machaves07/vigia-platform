@@ -62,6 +62,7 @@ from vigia_platform.accreditation.export.volumes import (
     DOCUMENT_CONTENT_TYPE,
     MANIFEST_NAME,
     MANIFEST_RESERVE_BYTES,
+    MANIFEST_SIGNATURE_NAME,
     MAX_VOLUMES,
     MIN_PART_SIZE,
     PART_SIZE,
@@ -179,7 +180,7 @@ class Artifact:
             or len(self.path) > _MAX_PATH
             or _PATH.fullmatch(self.path) is None
             or ".." in self.path.split("/")
-            or self.path == MANIFEST_NAME
+            or self.path in (MANIFEST_NAME, MANIFEST_SIGNATURE_NAME)
         ):
             raise ValueError("ruta de artefacto no válida")
         if self.kind not in ARTIFACT_KINDS or self.kind == "manifest":
@@ -582,31 +583,46 @@ class ArchiveWriter:
             volume=volume.number,
         )
 
-    async def finish(self, manifest: BaseModel | JsonValue) -> ArchiveResult:
-        """Escribe el manifiesto en ``vol-01``, cierra los ZIP y completa todas las subidas."""
+    async def finish(
+        self,
+        manifest: BaseModel | JsonValue,
+        *,
+        sign: Callable[[bytes], bytes] | None = None,
+    ) -> ArchiveResult:
+        """Escribe el manifiesto en ``vol-01``, cierra los ZIP y completa todas las subidas.
+
+        Con ``sign``, escribe además en ``vol-01``, detrás del manifiesto, la entrada
+        ``manifest.signature.json`` con lo que devuelve ``sign(bytes del manifiesto)``: la firma
+        que ancla el paquete (TASK-346, decisión A2). No es un artefacto del manifiesto: lo firma.
+        """
         if self._finished:
             raise RuntimeError("el paquete ya está cerrado")
         data = await self._run(functools.partial(canonical_bytes_sync, manifest))
+        entries = [(MANIFEST_NAME, data)]
+        if sign is not None:
+            entries.append((MANIFEST_SIGNATURE_NAME, sign(data)))
         first = self._volumes[0]
-        bound = (
+        bound = sum(
             _LOCAL_HEADER
             + _CENTRAL_HEADER
             + _DATA_DESCRIPTOR
-            + 2 * len(MANIFEST_NAME)
-            + len(data)
-            + len(data) // 1000
+            + 2 * len(name)
+            + len(content)
+            + len(content) // 1000
             + 64
+            for name, content in entries
         )
         if bound > first.room(self._settings.volume_max_bytes):
             raise ValueError("el manifiesto no cabe en vol-01")
         with self._tracer.start_as_current_span(
             EXPORT_ARTIFACT_SPAN, attributes=self._span_attributes("manifest")
         ):
-            info = zipfile.ZipInfo(MANIFEST_NAME, date_time=ZIP_DATE_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.create_system = _ZIP_UNIX
-            info.external_attr = _ZIP_FILE_MODE
-            await self._run(functools.partial(first.archive.writestr, info, data))
+            for name, content in entries:
+                info = zipfile.ZipInfo(name, date_time=ZIP_DATE_TIME)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = _ZIP_UNIX
+                info.external_attr = _ZIP_FILE_MODE
+                await self._run(functools.partial(first.archive.writestr, info, content))
         volumes: list[Volume] = []
         for volume in self._volumes:
             if not volume.sealed:

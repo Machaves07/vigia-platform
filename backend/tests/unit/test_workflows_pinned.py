@@ -736,12 +736,12 @@ def test_ci_tools_are_installed_by_hash() -> None:
 
 
 def test_the_coverage_job_needs_every_backend_job_with_coverage() -> None:
-    """Los 4 grupos sin integración (VIG-198) y las dos mitades de la integración (retro 23 C):
-    ninguna cifra baja. Cada trabajo con cobertura sube su artefacto ``cobertura-*`` (en la matriz,
+    """Los 4 grupos sin integración (VIG-198) y los 4 de la integración (2026-10-19): ninguna
+    cifra baja. Cada trabajo con cobertura sube su artefacto ``cobertura-*`` (en la matriz,
     uno por grupo) y «cobertura» los combina todos."""
     ci = _ci()
     job = next(job for job in ci["jobs"].values() if job["name"].startswith("cobertura"))
-    backend_jobs = ["backend-integracion", "backend-integracion-2", "backend-pruebas"]
+    backend_jobs = ["backend-integracion-grupos", "backend-pruebas"]
     assert sorted(job["needs"]) == backend_jobs
     artifacts = []
     for job_id in backend_jobs:
@@ -751,10 +751,10 @@ def test_the_coverage_job_needs_every_backend_job_with_coverage() -> None:
             str(step["with"]["name"])
             for step in steps
             if str(step.get("uses", "")).startswith("actions/upload-artifact")
+            and str(step["with"]["name"]).startswith("cobertura-")
         ]
     assert artifacts == [
-        "cobertura-integracion",
-        "cobertura-integracion-2",
+        "cobertura-integracion-${{ matrix.grupo }}",
         "cobertura-sin-integracion-${{ matrix.grupo }}",
     ]
     (download,) = [

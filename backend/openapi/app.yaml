@@ -4116,6 +4116,77 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/review-queue":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Cola de revisión pendiente, por plazo ascendente, por páginas de hasta 200"
+      "operationId": "list_review_queue_loop_review_queue_get"
+      "parameters":
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewQueuePageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/review-queue/{detection_id}/resolution":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Resuelve un elemento de la cola de revisión con motivo validado (registro nuevo)"
+      "operationId": "resolve_loop_review_queue__detection_id__resolution_post"
+      "parameters":
+        - "name": "detection_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Detection Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReviewResolutionBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReviewResolutionOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/actions":
     "post":
       "tags":
@@ -4176,6 +4247,72 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/EvidenceEntryOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/closure":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Cierra (firma) un hallazgo con acción asignada y evidencia"
+      "operationId": "close_loop_findings__finding_state_id__closure_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ClosureBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClosureOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/reopening":
+    "post":
+      "tags":
+        - "lazo"
+      "summary": "Reabre un hallazgo cerrado o incerrable con una acción correctiva nueva"
+      "operationId": "reopen_loop_findings__finding_state_id__reopening_post"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReopeningBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReopeningOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -4436,6 +4573,89 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/overdue":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Vencidos de la planta por zona, con los de más días destacados"
+      "operationId": "list_overdue_loop_overdue_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "array"
+                "items":
+                  "type": "string"
+                  "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+        - "name": "from"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 40
+              - "type": "null"
+            "title": "To"
+        - "name": "min_overdue_days"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 3660
+            "minimum": 0
+            "default": 0
+            "title": "Min Overdue Days"
+        - "name": "cursor"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "Cursor"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 200
+            "title": "Limit"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/OverduePageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/findings/{finding_state_id}/unclosable":
     "post":
       "tags":
@@ -4614,6 +4834,411 @@
               "schema":
                 "$ref": "#/components/schemas/ExportConflictOut"
           "description": "Conflict"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/monthly-packages":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Resumen del paquete mensual sellado de una zona y un mes"
+      "operationId": "get_monthly_package_accreditation_monthly_packages_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/MonthlyPackageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/monthly-packages/{package_id}/sample":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Elementos de la muestra auditada de un paquete mensual sellado"
+      "operationId": "get_monthly_package_sample_accreditation_monthly_packages__package_id__sample_get"
+      "parameters":
+        - "name": "package_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Package Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "type": "array"
+                "items":
+                  "$ref": "#/components/schemas/SampleItemOut"
+                "title": "Response Get Monthly Package Sample Accreditation Monthly Packages  Package Id  Sample Get"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/monthly-packages/{plant_id}/{period}/download":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Una URL de descarga de 15 min por zona de la planta con paquete sellado"
+      "operationId": "get_monthly_package_plant_download_accreditation_monthly_packages__plant_id___period__download_get"
+      "parameters":
+        - "name": "plant_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Plant Id"
+        - "name": "period"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/MonthlyPackageDownloadOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/sample-items/{sample_item_id}/result":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "Registra el resultado de un elemento de la muestra (no toca la clasificación)"
+      "operationId": "record_sample_result_accreditation_sample_items__sample_item_id__result_post"
+      "parameters":
+        - "name": "sample_item_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Sample Item Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SampleResultBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SampleResultOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/monthly-packages/{package_id}/commitments":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "Registra los compromisos del mando de línea sobre un paquete mensual sellado"
+      "operationId": "record_commitments_accreditation_monthly_packages__package_id__commitments_post"
+      "parameters":
+        - "name": "package_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Package Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CommitmentsBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommitmentsRecordedOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/commitments/{commitment_id}":
+    "patch":
+      "tags":
+        - "acreditación"
+      "summary": "Actualiza el estado y la nota de cierre de un compromiso (registro nuevo)"
+      "operationId": "update_commitment_accreditation_commitments__commitment_id__patch"
+      "parameters":
+        - "name": "commitment_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Commitment Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CommitmentUpdateBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommitmentUpdatedOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/commitments":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Compromisos de los paquetes mensuales de una zona y un mes, con su estado"
+      "operationId": "list_commitments_accreditation_commitments_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "type": "array"
+                "items":
+                  "$ref": "#/components/schemas/CommitmentOut"
+                "title": "Response List Commitments Accreditation Commitments Get"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/exposure":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Indicador de exposición de una zona y un mes, con su cobertura"
+      "operationId": "get_exposure_accreditation_exposure_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ExposureOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications":
+    "get":
+      "tags":
+        - "notificaciones"
+      "summary": "Las notificaciones propias, de la más reciente a la más antigua, por clave"
+      "operationId": "list_notifications_notifications_get"
+      "parameters":
+        - "name": "after"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "maxLength": 128
+              - "type": "null"
+            "title": "After"
+        - "name": "limit"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "maximum": 200
+            "minimum": 1
+            "default": 50
+            "title": "Limit"
+        - "name": "status"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "$ref": "#/components/schemas/NotificationStatusFilter"
+              - "type": "null"
+            "title": "Status"
+        - "name": "since"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "date-time"
+              - "type": "null"
+            "title": "Since"
+        - "name": "until"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "date-time"
+              - "type": "null"
+            "title": "Until"
+        - "name": "include_archived"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+            "title": "Include Archived"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPageOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications/{notification_id}/read":
+    "post":
+      "tags":
+        - "notificaciones"
+      "summary": "Marca leído un aviso propio (idempotente)"
+      "operationId": "mark_notification_read_notifications__notification_id__read_post"
+      "parameters":
+        - "name": "notification_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Notification Id"
+      "responses":
+        "204":
+          "description": "Successful Response"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/notifications/preferences":
+    "get":
+      "tags":
+        - "notificaciones"
+      "summary": "Las preferencias de correo vigentes del propio actor"
+      "operationId": "read_preferences_notifications_preferences_get"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPreferenceOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+    "put":
+      "tags":
+        - "notificaciones"
+      "summary": "Las preferencias de correo del propio actor (sin campo para silenciar immediate)"
+      "operationId": "update_preferences_notifications_preferences_put"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/NotificationPreferenceUpdateIn"
+        "required": true
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationPreferenceOut"
         "default":
           "description": "Error genérico (ApiError)"
           "content":
@@ -6261,6 +6886,76 @@
       "additionalProperties": false
       "type": "object"
       "title": "CloseStepBody"
+    "ClosureBody":
+      "properties":
+        "closure_description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Closure Description"
+        "verification_note":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Verification Note"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+            - "type": "null"
+          "title": "Professional License"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "closure_description"
+      "title": "ClosureBody"
+      "description": "La descripción del cierre, su nota de verificación y la licencia del firmante."
+    "ClosureOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "closure_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Closure Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "evidence_entry_ids":
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "type": "array"
+          "title": "Evidence Entry Ids"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "signed_at":
+          "type": "string"
+          "title": "Signed At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "closure_id"
+        - "record_id"
+        - "action_id"
+        - "evidence_entry_ids"
+        - "lifecycle_state"
+        - "signed_at"
+        - "time_aggregated"
+      "title": "ClosureOut"
     "Code":
       "type": "string"
       "maxLength": 32
@@ -6439,6 +7134,177 @@
         - "closed_at"
       "title": "CommissioningRecordOut"
       "description": "``CommissioningRecord`` (DE §2.15 con sus notas): el acta estructurada, sin responsable."
+    "CommitmentIn":
+      "properties":
+        "text":
+          "type": "string"
+          "title": "Text"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+        "due_date":
+          "type": "string"
+          "title": "Due Date"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "text"
+        - "responsible_user_id"
+        - "due_date"
+      "title": "CommitmentIn"
+    "CommitmentOut":
+      "properties":
+        "commitment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Commitment Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "text":
+          "type": "string"
+          "title": "Text"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+        "due_date":
+          "type": "string"
+          "title": "Due Date"
+        "state":
+          "type": "string"
+          "title": "State"
+        "recorded_at":
+          "type": "string"
+          "title": "Recorded At"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "closed_note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed Note"
+        "closed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment_id"
+        - "package_id"
+        - "zone_id"
+        - "period"
+        - "text"
+        - "responsible_user_id"
+        - "due_date"
+        - "state"
+        - "recorded_at"
+        - "record_id"
+        - "closed_note"
+        - "closed_at"
+      "title": "CommitmentOut"
+    "CommitmentStatusOut":
+      "properties":
+        "commitment_id":
+          "type": "string"
+          "title": "Commitment Id"
+        "state":
+          "type": "string"
+          "title": "State"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment_id"
+        - "state"
+      "title": "CommitmentStatusOut"
+    "CommitmentUpdateBody":
+      "properties":
+        "state":
+          "type": "string"
+          "title": "State"
+        "note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Note"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "state"
+      "title": "CommitmentUpdateBody"
+    "CommitmentUpdatedOut":
+      "properties":
+        "commitment":
+          "$ref": "#/components/schemas/CommitmentOut"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment"
+        - "record_id"
+      "title": "CommitmentUpdatedOut"
+    "CommitmentsBody":
+      "properties":
+        "commitments":
+          "items":
+            "$ref": "#/components/schemas/CommitmentIn"
+          "type": "array"
+          "maxItems": 20
+          "minItems": 1
+          "title": "Commitments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitments"
+      "title": "CommitmentsBody"
+    "CommitmentsRecordedOut":
+      "properties":
+        "commitment_batch_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Commitment Batch Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "commitments":
+          "items":
+            "$ref": "#/components/schemas/CommitmentOut"
+          "type": "array"
+          "title": "Commitments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment_batch_id"
+        - "record_id"
+        - "package_id"
+        - "zone_id"
+        - "commitments"
+      "title": "CommitmentsRecordedOut"
     "CommunicationState":
       "type": "string"
       "enum":
@@ -7007,6 +7873,20 @@
         - "assigned_at"
         - "time_aggregated"
       "title": "CorrectiveActionOut"
+    "CoverageShareOut":
+      "properties":
+        "state":
+          "type": "string"
+          "title": "State"
+        "duration_ms":
+          "type": "integer"
+          "title": "Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "state"
+        - "duration_ms"
+      "title": "CoverageShareOut"
     "CoverageStatusOut":
       "properties":
         "zone_id":
@@ -7335,6 +8215,21 @@
         - "predicate"
       "title": "DeclaredStandard"
       "description": "Estándar de seguridad tal como la planta lo declaró (domain-entities.md §3.2). Viaja dentro de `ZoneCatalog.standards`. Cada cambio de texto, predicado o parámetro produce una versión nueva; una versión emitida nunca se edita. `declared_text` es el único texto libre del contrato escrito por la planta. El predicado sigue la gramática booleana cerrada de §3.2.1 y su forma depende de `family`: el esquema empareja cada familia con su plantilla (`oneOf`), así que un predicado con la forma de otra familia es inválido. La gramática no puede expresar, por construcción, ausencia de personas ni negación de presencia (P2), disyunciones, comparaciones o conteos de personas, velocidades, tiempos de ciclo ni ninguna magnitud de productividad (P7)."
+    "DeepLinkOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "id"
+      "title": "DeepLinkOut"
     "DocumentContentType":
       "type": "string"
       "enum":
@@ -8188,6 +9083,212 @@
         - "correlation_id"
         - "manifest_summary"
       "title": "ExportStatusOut"
+    "ExposureCoverageAnnotationOut":
+      "properties":
+        "kind":
+          "type": "string"
+          "title": "Kind"
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+        "cause":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Cause"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "kind"
+        - "from"
+        - "to"
+        - "cause"
+      "title": "ExposureCoverageAnnotationOut"
+      "description": "Un tramo de compuerta de uso revocada (o de acta no vigente) sobre la línea de tiempo."
+    "ExposureCoverageIntervalOut":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+        "state":
+          "type": "string"
+          "title": "State"
+        "causes":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Causes"
+        "layer":
+          "type": "string"
+          "title": "Layer"
+        "duration_ms":
+          "type": "integer"
+          "title": "Duration Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+        - "state"
+        - "causes"
+        - "layer"
+        - "duration_ms"
+      "title": "ExposureCoverageIntervalOut"
+    "ExposureCoverageSummaryOut":
+      "properties":
+        "observable_ms":
+          "type": "integer"
+          "title": "Observable Ms"
+        "degraded_ms":
+          "type": "integer"
+          "title": "Degraded Ms"
+        "not_observable_ms":
+          "type": "integer"
+          "title": "Not Observable Ms"
+        "no_communication_ms":
+          "type": "integer"
+          "title": "No Communication Ms"
+        "never_reported_ms":
+          "type": "integer"
+          "title": "Never Reported Ms"
+        "zone_not_active_ms":
+          "type": "integer"
+          "title": "Zone Not Active Ms"
+        "not_elapsed_ms":
+          "type": "integer"
+          "title": "Not Elapsed Ms"
+        "total_ms":
+          "type": "integer"
+          "title": "Total Ms"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "observable_ms"
+        - "degraded_ms"
+        - "not_observable_ms"
+        - "no_communication_ms"
+        - "never_reported_ms"
+        - "zone_not_active_ms"
+        - "not_elapsed_ms"
+        - "total_ms"
+      "title": "ExposureCoverageSummaryOut"
+    "ExposureCoverageTimelineOut":
+      "properties":
+        "period":
+          "$ref": "#/components/schemas/ExposureTimelineRangeOut"
+        "intervals":
+          "items":
+            "$ref": "#/components/schemas/ExposureCoverageIntervalOut"
+          "type": "array"
+          "title": "Intervals"
+        "summary":
+          "$ref": "#/components/schemas/ExposureCoverageSummaryOut"
+        "annotations":
+          "items":
+            "$ref": "#/components/schemas/ExposureCoverageAnnotationOut"
+          "type": "array"
+          "title": "Annotations"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "period"
+        - "intervals"
+        - "summary"
+        - "annotations"
+      "title": "ExposureCoverageTimelineOut"
+    "ExposureHourlyBucketOut":
+      "properties":
+        "start_minute_of_day":
+          "type": "integer"
+          "title": "Start Minute Of Day"
+        "width_minutes":
+          "type": "integer"
+          "title": "Width Minutes"
+        "confirmed_minutes":
+          "type": "number"
+          "title": "Confirmed Minutes"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "start_minute_of_day"
+        - "width_minutes"
+        - "confirmed_minutes"
+      "title": "ExposureHourlyBucketOut"
+      "description": "Un cubo de la distribución horaria: solo su inicio en el día local y su ancho."
+    "ExposureOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "period_from":
+          "type": "string"
+          "title": "Period From"
+        "period_to":
+          "type": "string"
+          "title": "Period To"
+        "status":
+          "type": "string"
+          "title": "Status"
+        "confirmed_minutes":
+          "type": "number"
+          "title": "Confirmed Minutes"
+        "pending_classification_minutes":
+          "type": "number"
+          "title": "Pending Classification Minutes"
+        "observable_coverage_percent":
+          "type": "number"
+          "title": "Observable Coverage Percent"
+        "partial_reason_es":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Partial Reason Es"
+        "usage_notice_es":
+          "type": "string"
+          "title": "Usage Notice Es"
+        "hourly_distribution":
+          "items":
+            "$ref": "#/components/schemas/ExposureHourlyBucketOut"
+          "type": "array"
+          "title": "Hourly Distribution"
+        "coverage_timeline":
+          "$ref": "#/components/schemas/ExposureCoverageTimelineOut"
+        "materialized_at":
+          "type": "string"
+          "title": "Materialized At"
+        "recomputed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Recomputed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "period"
+        - "period_from"
+        - "period_to"
+        - "status"
+        - "confirmed_minutes"
+        - "pending_classification_minutes"
+        - "observable_coverage_percent"
+        - "partial_reason_es"
+        - "usage_notice_es"
+        - "hourly_distribution"
+        - "coverage_timeline"
+        - "materialized_at"
+        - "recomputed_at"
+      "title": "ExposureOut"
     "ExposureSampleBody":
       "properties":
         "pass_id":
@@ -8242,6 +9343,20 @@
         - "displayed_at"
         - "recorded_at"
       "title": "ExposureSampleOut"
+    "ExposureTimelineRangeOut":
+      "properties":
+        "from":
+          "type": "string"
+          "title": "From"
+        "to":
+          "type": "string"
+          "title": "To"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "from"
+        - "to"
+      "title": "ExposureTimelineRangeOut"
     "FactorBody":
       "properties":
         "text":
@@ -8351,6 +9466,44 @@
         - "since"
         - "cause"
       "title": "FindingNoticeOut"
+    "FindingsSummaryOut":
+      "properties":
+        "received":
+          "type": "integer"
+          "title": "Received"
+        "classified":
+          "type": "integer"
+          "title": "Classified"
+        "confirmed":
+          "type": "integer"
+          "title": "Confirmed"
+        "discarded":
+          "type": "integer"
+          "title": "Discarded"
+        "closed":
+          "type": "integer"
+          "title": "Closed"
+        "overdue":
+          "type": "integer"
+          "title": "Overdue"
+        "unclosable":
+          "type": "integer"
+          "title": "Unclosable"
+        "reopened":
+          "type": "integer"
+          "title": "Reopened"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "received"
+        - "classified"
+        - "confirmed"
+        - "discarded"
+        - "closed"
+        - "overdue"
+        - "unclosable"
+        - "reopened"
+      "title": "FindingsSummaryOut"
     "FleetAlarmKind":
       "type": "string"
       "enum":
@@ -9787,6 +10940,90 @@
         - "required_camera_ids"
         - "reason_es"
       "title": "MinimumCoverageBody"
+    "MonthlyPackageDownloadOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/ZoneDownloadOut"
+          "type": "array"
+          "title": "Zones"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "period"
+        - "zones"
+      "title": "MonthlyPackageDownloadOut"
+    "MonthlyPackageOut":
+      "properties":
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "state":
+          "type": "string"
+          "title": "State"
+        "generated_at":
+          "type": "string"
+          "title": "Generated At"
+        "findings_summary":
+          "$ref": "#/components/schemas/FindingsSummaryOut"
+        "recurrence_summary":
+          "items":
+            "$ref": "#/components/schemas/RecurrenceEntryOut"
+          "type": "array"
+          "title": "Recurrence Summary"
+        "coverage_summary":
+          "items":
+            "$ref": "#/components/schemas/CoverageShareOut"
+          "type": "array"
+          "title": "Coverage Summary"
+        "commitments_from_previous_period":
+          "items":
+            "$ref": "#/components/schemas/CommitmentStatusOut"
+          "type": "array"
+          "title": "Commitments From Previous Period"
+        "audit_sample_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Audit Sample Id"
+        "record_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "package_id"
+        - "zone_id"
+        - "period"
+        - "state"
+        - "generated_at"
+        - "findings_summary"
+        - "recurrence_summary"
+        - "coverage_summary"
+        - "commitments_from_previous_period"
+        - "audit_sample_id"
+        - "record_id"
+      "title": "MonthlyPackageOut"
     "MountingGate":
       "properties":
         "status":
@@ -10376,6 +11613,133 @@
         - "text"
         - "pending_legal_text"
       "title": "NoticeView"
+    "NotificationOut":
+      "properties":
+        "notification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Notification Id"
+        "event_name":
+          "type": "string"
+          "title": "Event Name"
+        "urgency":
+          "type": "string"
+          "title": "Urgency"
+        "title_es":
+          "type": "string"
+          "title": "Title Es"
+        "body_es":
+          "type": "string"
+          "title": "Body Es"
+        "deep_link_ref":
+          "$ref": "#/components/schemas/DeepLinkOut"
+        "created_at":
+          "type": "string"
+          "title": "Created At"
+        "read_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Read At"
+        "archived_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Archived At"
+        "email_status":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Email Status"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "notification_id"
+        - "event_name"
+        - "urgency"
+        - "title_es"
+        - "body_es"
+        - "deep_link_ref"
+        - "created_at"
+        - "read_at"
+        - "archived_at"
+        - "email_status"
+      "title": "NotificationOut"
+    "NotificationPageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/NotificationOut"
+          "type": "array"
+          "title": "Items"
+        "next_after":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next After"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_after"
+      "title": "NotificationPageOut"
+    "NotificationPreferenceOut":
+      "properties":
+        "email_enabled_normal":
+          "type": "boolean"
+          "title": "Email Enabled Normal"
+        "email_enabled_digest":
+          "type": "boolean"
+          "title": "Email Enabled Digest"
+        "weekly_digest_weekday":
+          "type": "integer"
+          "title": "Weekly Digest Weekday"
+        "updated_at":
+          "type": "string"
+          "title": "Updated At"
+        "email_suppressed_hard_bounce":
+          "type": "boolean"
+          "title": "Email Suppressed Hard Bounce"
+        "email_suppressed_complaint":
+          "type": "boolean"
+          "title": "Email Suppressed Complaint"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email_enabled_normal"
+        - "email_enabled_digest"
+        - "weekly_digest_weekday"
+        - "updated_at"
+        - "email_suppressed_hard_bounce"
+        - "email_suppressed_complaint"
+      "title": "NotificationPreferenceOut"
+    "NotificationPreferenceUpdateIn":
+      "properties":
+        "email_enabled_normal":
+          "type": "boolean"
+          "title": "Email Enabled Normal"
+        "email_enabled_digest":
+          "type": "boolean"
+          "title": "Email Enabled Digest"
+        "weekly_digest_weekday":
+          "type": "integer"
+          "maximum": 7.0
+          "minimum": 1.0
+          "title": "Weekly Digest Weekday"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "email_enabled_normal"
+        - "email_enabled_digest"
+        - "weekly_digest_weekday"
+      "title": "NotificationPreferenceUpdateIn"
+    "NotificationStatusFilter":
+      "type": "string"
+      "enum":
+        - "unread"
+        - "read"
+      "title": "NotificationStatusFilter"
+      "description": "``status`` de ``GET /notifications`` (SUP-U05-33)."
     "OcclusionSummaryOut":
       "properties":
         "camera_id":
@@ -10520,6 +11884,141 @@
         - "name"
         - "kind"
       "title": "OrganizationView"
+    "OverdueItemOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "subject_kind":
+          "type": "string"
+          "title": "Subject Kind"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "tier":
+          "type": "string"
+          "title": "Tier"
+        "lifecycle_state":
+          "$ref": "#/components/schemas/FindingLifecycleState"
+        "declared":
+          "type": "boolean"
+          "title": "Declared"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "action_type":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Action Type"
+        "assignee_user_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Assignee User Id"
+        "assignee_inactive":
+          "type": "boolean"
+          "title": "Assignee Inactive"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "overdue_since":
+          "type": "string"
+          "title": "Overdue Since"
+        "overdue_days":
+          "type": "integer"
+          "title": "Overdue Days"
+        "highlighted":
+          "type": "boolean"
+          "title": "Highlighted"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "plant_id"
+        - "zone_id"
+        - "subject_kind"
+        - "family"
+        - "tier"
+        - "lifecycle_state"
+        - "declared"
+        - "action_id"
+        - "action_type"
+        - "assignee_user_id"
+        - "assignee_inactive"
+        - "due_at"
+        - "overdue_since"
+        - "overdue_days"
+        - "highlighted"
+      "title": "OverdueItemOut"
+    "OverduePageOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "highlight_threshold_days":
+          "type": "integer"
+          "title": "Highlight Threshold Days"
+        "items":
+          "items":
+            "$ref": "#/components/schemas/OverdueItemOut"
+          "type": "array"
+          "title": "Items"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/OverdueZoneOut"
+          "type": "array"
+          "title": "Zones"
+        "partition_notice":
+          "anyOf":
+            - "$ref": "#/components/schemas/InboxPartitionNotice"
+            - "type": "null"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "highlight_threshold_days"
+        - "items"
+        - "zones"
+        - "partition_notice"
+        - "next_cursor"
+      "title": "OverduePageOut"
+    "OverdueZoneOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "overdue_count":
+          "type": "integer"
+          "title": "Overdue Count"
+        "highlighted_count":
+          "type": "integer"
+          "title": "Highlighted Count"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "overdue_count"
+        - "highlighted_count"
+      "title": "OverdueZoneOut"
     "PackageForm":
       "type": "string"
       "enum":
@@ -11158,6 +12657,26 @@
         - "received_at"
         - "record_id"
       "title": "RecordCursorOut"
+    "RecurrenceEntryOut":
+      "properties":
+        "family":
+          "type": "string"
+          "title": "Family"
+        "episodes_after_closure":
+          "type": "integer"
+          "title": "Episodes After Closure"
+        "reference_closure_ids":
+          "items":
+            "type": "string"
+          "type": "array"
+          "title": "Reference Closure Ids"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "family"
+        - "episodes_after_closure"
+        - "reference_closure_ids"
+      "title": "RecurrenceEntryOut"
     "RegressionCause":
       "type": "string"
       "enum":
@@ -11304,6 +12823,112 @@
       "required":
         - "reason_es"
       "title": "ReopenBody"
+    "ReopeningBody":
+      "properties":
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+        "action_type":
+          "type": "string"
+          "maxLength": 64
+          "title": "Action Type"
+        "action_description":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 20
+          "title": "Action Description"
+        "expected_outcome":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 1000
+              "minLength": 1
+            - "type": "null"
+          "title": "Expected Outcome"
+        "assignee_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Assignee User Id"
+        "deadline_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Deadline Days"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "action_type"
+        - "action_description"
+        - "assignee_user_id"
+      "title": "ReopeningBody"
+      "description": "El motivo de la reapertura y la acción correctiva nueva (la de SUP-U05-07).\n\n``reason_text`` es opcional a nivel de esquema (como ``reason_text`` de\n``ClassificationBody``): ausente o en blanco no es ``invalid_request``, es\n``reopening_reason_required`` (BR-LAZ-146bis), y solo el servicio lo distingue."
+    "ReopeningOut":
+      "properties":
+        "finding_state_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Finding State Id"
+        "reopening_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Reopening Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "from_state":
+          "type": "string"
+          "title": "From State"
+        "previous_closure_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Previous Closure Id"
+        "previous_declaration_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Previous Declaration Id"
+        "supersedes_action_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Supersedes Action Id"
+        "reopened_at":
+          "type": "string"
+          "title": "Reopened At"
+        "time_aggregated":
+          "type": "boolean"
+          "title": "Time Aggregated"
+        "action_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Action Id"
+        "due_at":
+          "type": "string"
+          "title": "Due At"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+      "type": "object"
+      "required":
+        - "finding_state_id"
+        - "reopening_id"
+        - "record_id"
+        - "from_state"
+        - "previous_closure_id"
+        - "previous_declaration_id"
+        - "supersedes_action_id"
+        - "reopened_at"
+        - "time_aggregated"
+        - "action_id"
+        - "due_at"
+        - "lifecycle_state"
+      "title": "ReopeningOut"
     "ReplayOut":
       "properties":
         "event_id":
@@ -11465,6 +13090,152 @@
       "type": "object"
       "title": "ReviewActionBody"
       "description": "La acción nueva de la conversión (T12): el cuerpo de una asignación de TASK-311."
+    "ReviewQueueItemOut":
+      "properties":
+        "detection_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Detection Id"
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "family":
+          "type": "string"
+          "title": "Family"
+        "standard_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Standard Id"
+        "standard_version":
+          "type": "integer"
+          "title": "Standard Version"
+        "max_confidence":
+          "type": "number"
+          "title": "Max Confidence"
+        "review_threshold":
+          "type": "number"
+          "title": "Review Threshold"
+        "publication_threshold":
+          "type": "number"
+          "title": "Publication Threshold"
+        "review_reason":
+          "type": "string"
+          "title": "Review Reason"
+        "observability_state_at_event":
+          "type": "string"
+          "title": "Observability State At Event"
+        "occurred_at":
+          "type": "string"
+          "title": "Occurred At"
+        "received_at":
+          "type": "string"
+          "title": "Received At"
+        "review_due_at":
+          "type": "string"
+          "title": "Review Due At"
+        "reminders_sent":
+          "type": "integer"
+          "title": "Reminders Sent"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "detection_id"
+        - "plant_id"
+        - "zone_id"
+        - "family"
+        - "standard_id"
+        - "standard_version"
+        - "max_confidence"
+        - "review_threshold"
+        - "publication_threshold"
+        - "review_reason"
+        - "observability_state_at_event"
+        - "occurred_at"
+        - "received_at"
+        - "review_due_at"
+        - "reminders_sent"
+      "title": "ReviewQueueItemOut"
+    "ReviewQueuePageOut":
+      "properties":
+        "items":
+          "items":
+            "$ref": "#/components/schemas/ReviewQueueItemOut"
+          "type": "array"
+          "title": "Items"
+        "next_cursor":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Next Cursor"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "items"
+        - "next_cursor"
+      "title": "ReviewQueuePageOut"
+    "ReviewResolutionBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "reason_category":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Category"
+        "reason_text":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reason Text"
+      "additionalProperties": false
+      "type": "object"
+      "title": "ReviewResolutionBody"
+      "description": "La decisión: salida, categoría y motivo (20 a 1000 caracteres)."
+    "ReviewResolutionOut":
+      "properties":
+        "detection_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Detection Id"
+        "resolution_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Resolution Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "lifecycle_state":
+          "type": "string"
+          "title": "Lifecycle State"
+        "resolved_at":
+          "type": "string"
+          "title": "Resolved At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "detection_id"
+        - "resolution_id"
+        - "record_id"
+        - "outcome"
+        - "reason_category"
+        - "lifecycle_state"
+        - "resolved_at"
+      "title": "ReviewResolutionOut"
     "RevocationBody":
       "properties":
         "reason_es":
@@ -11492,6 +13263,135 @@
         - "copasst"
         - "platform_operator"
       "title": "Role"
+    "SampleItemOut":
+      "properties":
+        "sample_item_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Item Id"
+        "classification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Classification Id"
+        "subject_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Subject Id"
+        "classification_outcome":
+          "type": "string"
+          "title": "Classification Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "classified_by_role":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Classified By Role"
+        "classified_at":
+          "type": "string"
+          "title": "Classified At"
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "comment":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Comment"
+        "reviewed_by":
+          "anyOf":
+            - "additionalProperties": true
+              "type": "object"
+            - "type": "null"
+          "title": "Reviewed By"
+        "reviewed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Reviewed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sample_item_id"
+        - "classification_id"
+        - "subject_id"
+        - "classification_outcome"
+        - "reason_category"
+        - "classified_by_role"
+        - "classified_at"
+        - "outcome"
+        - "comment"
+        - "reviewed_by"
+        - "reviewed_at"
+      "title": "SampleItemOut"
+    "SampleResultBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "comment":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Comment"
+      "additionalProperties": true
+      "type": "object"
+      "title": "SampleResultBody"
+      "description": "El resultado de un elemento de la muestra.\n\nAdmite campos de más **solo para reconocerlos**: si nombran la clasificación auditada, el\nrechazo es ``sample_cannot_modify_classification`` (BR-LAZ-107); si no, ``invalid_request``.\nNada de lo que no sea ``outcome`` o ``comment`` llega nunca al registro."
+    "SampleResultOut":
+      "properties":
+        "sample_item_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Item Id"
+        "sample_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "classification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Classification Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "comment":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Comment"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "reviewed_at":
+          "type": "string"
+          "title": "Reviewed At"
+        "review_completed":
+          "type": "boolean"
+          "title": "Review Completed"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sample_item_id"
+        - "sample_id"
+        - "package_id"
+        - "classification_id"
+        - "outcome"
+        - "comment"
+        - "record_id"
+        - "reviewed_at"
+        - "review_completed"
+      "title": "SampleResultOut"
     "ScopeLevel":
       "type": "string"
       "enum":
@@ -13281,6 +15181,25 @@
         - "previous_cause_categories"
       "title": "ZoneContextOut"
       "description": "``ZoneObjectiveContext`` (DE §2.10): solo hechos medidos de la zona (BR-LAZ-63)."
+    "ZoneDownloadOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "url":
+          "type": "string"
+          "title": "Url"
+        "expires_at":
+          "type": "string"
+          "title": "Expires At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "url"
+        - "expires_at"
+      "title": "ZoneDownloadOut"
     "ZoneMode":
       "type": "string"
       "enum":

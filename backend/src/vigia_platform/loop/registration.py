@@ -62,14 +62,34 @@ from vigia_platform.loop.adapters.http.attachment_routes import (
     attachment_router,
 )
 from vigia_platform.loop.adapters.http.classification_routes import classification_router
+from vigia_platform.loop.adapters.http.closure_routes import closure_router
 from vigia_platform.loop.adapters.http.configuration_routes import configuration_router
 from vigia_platform.loop.adapters.http.findings_routes import findings_router
+from vigia_platform.loop.adapters.http.overdue_routes import overdue_router
+from vigia_platform.loop.adapters.http.review_routes import review_queue_router
 from vigia_platform.loop.adapters.http.root_cause_routes import root_cause_router
 from vigia_platform.loop.adapters.http.services import loop_http_state
 from vigia_platform.loop.adapters.http.unclosable_routes import unclosable_router
 from vigia_platform.loop.adapters.postgres.declared_names import PostgresDeclaredNamesStore
+from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.adapters.postgres.vocabulary import PostgresVocabularyStore
 from vigia_platform.loop.application.attachments import build_attachment_service
+from vigia_platform.loop.application.deadlines import (
+    EVALUATE_DEADLINES_SCHEDULE,
+    EVALUATE_DEADLINES_TASK,
+    DeadlineEvaluator,
+    register_evaluate_deadlines,
+)
+from vigia_platform.loop.application.review_queue import (
+    REVIEW_QUEUE_CONSUMER,
+    REVIEW_QUEUE_CONSUMER_CONCURRENCY,
+    REVIEW_REMINDERS_SCHEDULE,
+    REVIEW_REMINDERS_TASK,
+    ReviewQueueConsumer,
+    ReviewQueueReminder,
+    register_review_queue,
+    register_review_reminders,
+)
 from vigia_platform.loop.application.unclosable import (
     SCHEDULE as UNCLOSABLE_SCHEDULE,
 )
@@ -101,7 +121,15 @@ from vigia_platform.loop.projection.consumer import (
     register_loop_projection,
 )
 from vigia_platform.loop.projection.enrichment import ProjectionEnrichment
+from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
 from vigia_platform.loop.projection.store import LoopProjectionStore
+from vigia_platform.loop.projection.verify import (
+    VERIFY_LOOP_PROJECTION,
+    VERIFY_LOOP_PROJECTION_SCHEDULE,
+    ProjectionVerifier,
+    register_verify_loop_projection,
+    verify_loop_projection_handler,
+)
 from vigia_platform.loop.record_types import register_loop_record_types
 from vigia_platform.loop.validators.attribution import (
     PERSON_ATTRIBUTION,
@@ -224,10 +252,13 @@ U04_EVENT_TYPES: Final = frozenset(
         "export_requested",
         # interno (TASK-316): el trabajo del consumidor assistant_worker, fuera de §11.3
         "assistant_requested",
+        # interno (TASK-325): el pulso que dispara email_delivery_events, fuera de §11.3
+        "email_delivery_events_poll",
     }
 )
 """Los 25 eventos de U-04 (domain-entities §11.3 y nota R14 de §7) y los trabajos internos
-``export_requested`` (TASK-317) y ``assistant_requested`` (TASK-316)."""
+``export_requested`` (TASK-317), ``assistant_requested`` (TASK-316) y
+``email_delivery_events_poll`` (TASK-325)."""
 
 type TaskRegistrar = Callable[[PeriodicTaskRegistry, UnitServices], None]
 type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
@@ -238,13 +269,41 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     attachment_router,  # SUP-U05-09 y 10 (TASK-310)
     configuration_router,  # SUP-U05-38 y 39 (TASK-304)
     classification_router,  # SUP-U05-03 (TASK-308)
+    review_queue_router,  # SUP-U05-05 y 06 (TASK-309)
     actions_router,  # SUP-U05-07 y 08 (TASK-311)
+    closure_router,  # SUP-U05-11 y 14 (TASK-343, VIG-233)
     root_cause_router,  # SUP-U05-16 a 18 (TASK-315)
     assistant_router,  # SUP-U05-19 y 20 (TASK-316)
     findings_router,  # SUP-U05-01 (TASK-307)
+    overdue_router,  # SUP-U05-15 (TASK-313)
     unclosable_router,  # SUP-U05-12 y 13 (TASK-312)
 )
 """Fábricas de los enrutadores de ``/loop/*``."""
+
+
+def _register_review_reminders(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``review_reminders`` (TASK-309): un recordatorio por ventana, sin sacar nada de la cola."""
+    register_review_reminders(
+        registry,
+        ReviewQueueReminder(
+            repository=ReviewQueueRepository(services.database),
+            configuration=PostgresLoopConfigurationRepository(services.database),
+            outbox=services.outbox,
+            clock=services.clock,
+        ),
+    )
+
+
+def _register_evaluate_deadlines(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``evaluate_deadlines`` (TASK-313): vencimientos por nivel, sin cerrar ni ocultar nada."""
+    register_evaluate_deadlines(
+        registry,
+        DeadlineEvaluator(
+            writer=services.writer,
+            clock=services.clock,
+            configuration=PostgresLoopConfigurationRepository(services.database),
+        ),
+    )
 
 
 def _register_unclosable_review_due(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
@@ -261,15 +320,6 @@ def _register_unclosable_review_due(registry: PeriodicTaskRegistry, services: Un
             outbox=services.outbox,
         ),
     )
-
-
-LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
-    UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-312
-}
-"""Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
-    _register_unclosable_review_due,  # TASK-312
-)
 
 
 class _NoEvidenceReads:
@@ -322,6 +372,61 @@ def _register_loop_projection(registry: ConsumerRegistry, services: UnitServices
     )
 
 
+def _register_verify_loop_projection(
+    registry: PeriodicTaskRegistry, services: UnitServices
+) -> None:
+    """``verify_loop_projection`` (TASK-306, diaria por organización; LC-LAZ-04).
+
+    ``rebuild_loop_projection`` (LC-LAZ-03) corre a demanda, sin cadencia que vigilar (U04-H-14,
+    ``infrastructure-design.md``): no entra en ``LOOP_TASKS``. Esta verificación construye su
+    propio ``ProjectionRebuilder`` para disparar la reconstrucción de la partición que diverge; la
+    orden administrativa de VIG-241 (``vigia-admin rebuild-loop-projection``) construye el suyo por
+    su cuenta, con los mismos puertos."""
+    ports = catalog_query_ports(services.database)
+    rebuilder = ProjectionRebuilder(
+        database=services.database,
+        catalog=ports.catalog,
+        gates=ports.gates,
+        coverage=CoverageService(
+            database=services.database,
+            audit=services.audit,
+            clock=services.clock,
+            metrics=services.metrics,
+        ),
+        markers=EvidenceService(
+            database=services.database,
+            audit=services.audit,
+            storage=services.evidence if services.evidence is not None else _NoEvidenceReads(),
+        ),
+        settings=PostgresLoopConfigurationRepository(services.database),
+        clock=services.clock,
+    )
+    verifier = ProjectionVerifier(
+        database=services.database,
+        rebuilder=rebuilder,
+        outbox=services.outbox,
+        clock=services.clock,
+    )
+    register_verify_loop_projection(registry, verify_loop_projection_handler(verifier))
+
+
+LOOP_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
+    VERIFY_LOOP_PROJECTION: (VERIFY_LOOP_PROJECTION_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+    REVIEW_REMINDERS_TASK: (REVIEW_REMINDERS_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-309
+    EVALUATE_DEADLINES_TASK: (EVALUATE_DEADLINES_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # 313
+    UNCLOSABLE_REVIEW_DUE: (UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),  # TASK-312
+}
+"""Tareas periódicas del lazo: nombre → (cadencia, iteración), todas con ``unit = U-04``.
+
+``rebuild_loop_projection`` (LC-LAZ-03) no está aquí: corre a demanda, sin cadencia (U04-H-14)."""
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_verify_loop_projection,
+    _register_review_reminders,  # review_reminders (TASK-309)
+    _register_evaluate_deadlines,  # evaluate_deadlines (TASK-313)
+    _register_unclosable_review_due,  # unclosable_review_due (TASK-312)
+)
+
+
 class AssistantProviderOnFirstUse:
     """El adaptador del asistente, elegido y construido en la **primera entrega**.
 
@@ -366,14 +471,31 @@ def _register_assistant_worker(registry: ConsumerRegistry, services: UnitService
     )
 
 
+def _register_review_queue(registry: ConsumerRegistry, services: UnitServices) -> None:
+    """``review_queue`` (TASK-309): sin dependencia externa, lee del expediente en proceso."""
+    register_review_queue(
+        registry,
+        ReviewQueueConsumer(
+            store=LoopProjectionStore(),
+            reader=LectorExpediente(
+                database=services.database, audit=services.audit, clock=services.clock
+            ),
+            repository=ReviewQueueRepository(services.database),
+            configuration=PostgresLoopConfigurationRepository(services.database),
+        ),
+    )
+
+
 LOOP_CONSUMERS: Final[Mapping[str, int]] = {
     LOOP_PROJECTION: LOOP_PROJECTION_CONCURRENCY,  # TASK-341
     ASSISTANT_WORKER: ASSISTANT_WORKER_CONCURRENCY,  # TASK-316
+    REVIEW_QUEUE_CONSUMER: REVIEW_QUEUE_CONSUMER_CONCURRENCY,  # TASK-309
 }
 """Consumidores del lazo: nombre → concurrencia de su mamparo (LC-LAZ-40)."""
 CONSUMER_REGISTRARS: Final[tuple[ConsumerRegistrar, ...]] = (
     _register_loop_projection,  # loop_projection (TASK-341)
     _register_assistant_worker,  # assistant_worker (TASK-316)
+    _register_review_queue,  # review_queue (TASK-309)
 )
 
 
@@ -436,8 +558,9 @@ U04_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     **ACCREDITATION_TASKS,
     **NOTIFICATIONS_TASKS,
 }
-"""Todas las tareas periódicas de U-04 (la primera, ``unclosable_review_due`` de TASK-312;
-TASK-326 verifica las diez)."""
+"""Todas las tareas periódicas de U-04: ``monthly_package`` (TASK-342 a 344),
+``verify_loop_projection`` (TASK-306) y ``unclosable_review_due`` (TASK-312); TASK-326 verifica
+las diez."""
 
 U04_CONSUMERS: Final[Mapping[str, int]] = {
     **LOOP_CONSUMERS,

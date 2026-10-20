@@ -5,8 +5,11 @@ compone la raíz con **todas** las unidades registradas (``registered_units``), 
 
 - ``PER_ORGANIZATION``: una invocación por organización, en su transacción y con
   ``context_for_organization`` (el actor del sistema, BR-NUC-03); se prueba aquí;
-- ``GLOBAL``: la única excepción, ``regenerate_revocation_list`` (D-7): un ciclo por ejecución con
-  lecturas de solo lectura por organización y la escritura de la marca global;
+- ``GLOBAL``: las dos excepciones documentadas, un ciclo por ejecución sin iterar organizaciones:
+  ``regenerate_revocation_list`` (U-03, D-7), con lecturas de solo lectura por organización y la
+  escritura de la marca global; ``email_delivery_events_poll`` (U-04, TASK-325), que solo publica
+  un pulso interno sin datos de organización, porque el recurso que dispara (la cola gestionada de
+  rebotes y quejas) tampoco tiene una;
 - ``INHERITED``: tareas de U-02, por organización, fuera del alcance de U-03; el caso dice dónde
   está su prueba.
 
@@ -106,6 +109,22 @@ _U02_WHY = (
     " (tests/integration/test_worker_iteration.py y la RLS de cada tabla)"
 )
 
+_U04_WHY = (
+    "tarea de U-04 por organización con context_for_organization (igual patrón que U-02);"
+    " su aislamiento es de loop.review_queue (tests/integration/test_loop_review_queue.py::"
+    "test_the_reminder_task_only_touches_its_own_organization), con la RLS de la tabla"
+    " (BR-NUC-02), no con el arnés de fingerprinting de este archivo"
+)
+
+_U04_GROUPING_WHY = (
+    "tarea de U-04 por organización con context_for_organization (igual patrón que U-02);"
+    " su aislamiento (digest_batch y email_message filtrados y escritos solo bajo la RLS de"
+    " la organización del ScopeContext, BR-NUC-02) es de notifications:"
+    " tests/integration/test_notification_grouping_tasks.py, con la cuenta de filas acotada a"
+    " ``organization_id = $1`` en cada organización sembrada por separado, no con el arnés de"
+    " fingerprinting de este archivo"
+)
+
 TASK_CASES: Final[dict[str, TaskCase]] = {
     # --- U-03 (LC-GOB-18): las seis por organización y la global (D-7) ---
     "detect_mute_nodes": TaskCase(TaskKind.PER_ORGANIZATION),
@@ -116,6 +135,14 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
     "alert_expiring_certificates": TaskCase(TaskKind.PER_ORGANIZATION),
     REVOCATION_LIST: TaskCase(
         TaskKind.GLOBAL, "lista global de vigia-node-ca: excepción D-7 (nota T-07)"
+    ),
+    # --- U-04 ---
+    "monthly_package": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización (TASK-342 a 344); su aislamiento entre organizaciones es"
+        " de accreditation, no de U-03: tests/properties/laz/test_pr_laz_04_rls_two_organizations"
+        ".py (monthly_package y monthly_package_lease, con mutación DROP POLICY/DISABLE RLS) y el"
+        " sellado exactamente una vez en tests/integration/test_monthly_package_task.py",
     ),
     # --- U-02 ---
     **{
@@ -134,7 +161,37 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
             "write_checkpoints",
         )
     },
-    # --- U-04 ---
+    # --- U-04 (TASK-306) ---
+    "verify_loop_projection": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización con context_for_organization; su aislamiento (muestreo,"
+        " divergencia y reconstrucción, todo con el filtro de planta/organización) es de U-04:"
+        " tests/properties/laz/test_pr_laz_44_projection_equivalence.py,"
+        " tests/properties/laz/test_pr_laz_51_rebuild_exclusion.py,"
+        " tests/properties/laz/test_pr_laz_59_no_half_state.py y"
+        " tests/integration/test_loop_projection_rebuild.py",
+    ),
+    # --- U-04 (TASK-309) ---
+    "review_reminders": TaskCase(TaskKind.INHERITED, _U04_WHY),
+    # --- U-04 (TASK-313) ---
+    "evaluate_deadlines": TaskCase(
+        TaskKind.INHERITED,
+        "tarea de U-04 por organización con context_for_organization; su aislamiento (candidatos,"
+        " claves y escrituras de la organización de la transacción, con la RLS) se prueba en"
+        " tests/integration/test_loop_deadlines_task.py",
+    ),
+    # --- U-04 (TASK-348) ---
+    "email_grouping": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),
+    "digest_weekly": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),
+    # --- U-04 (TASK-325) ---
+    "email_delivery_events_poll": TaskCase(
+        TaskKind.GLOBAL,
+        "pulso interno de U-04 sin carga que dispara email_delivery_events (notifications no"
+        " publica ningún evento de negocio, LC-LAZ-34): un ciclo por ejecución, sin iterar"
+        " organizaciones, como regenerate_revocation_list (D-7); no cambia ninguna fila de"
+        " ninguna organización, así que no hay huella que comparar entre A y B aquí",
+    ),
+    # --- U-04 (TASK-312) ---
     "unclosable_review_due": TaskCase(
         TaskKind.INHERITED,
         "tarea de U-04 por organización (TASK-312): marca `pending_review` en su propia"
@@ -200,11 +257,16 @@ def test_every_registered_task_has_its_isolation_case() -> None:
                 else TaskKind.PER_ORGANIZATION
             )
             assert case.kind is expected, task.task_name
+        elif case.kind is TaskKind.GLOBAL:
+            # La segunda excepción D-7, fuera de U-03 (TASK-325): mismo trato que la de U-03.
+            assert task.iteration is TaskIteration.GLOBAL and case.why, task.task_name
         else:
             assert case.kind is TaskKind.INHERITED and case.why, task.task_name
             assert task.iteration is TaskIteration.PER_ORGANIZATION, task.task_name
     assert len(PER_ORGANIZATION_TASKS) == 6
-    assert [n for n, c in TASK_CASES.items() if c.kind is TaskKind.GLOBAL] == [REVOCATION_LIST]
+    assert sorted(n for n, c in TASK_CASES.items() if c.kind is TaskKind.GLOBAL) == sorted(
+        [REVOCATION_LIST, "email_delivery_events_poll"]
+    )
 
 
 def test_a_task_without_case_is_named() -> None:

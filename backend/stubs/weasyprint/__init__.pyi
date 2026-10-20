@@ -34,4 +34,6 @@ class HTML:
         stylesheets: list[CSS] | None = ...,
         font_config: FontConfiguration | None = ...,
         uncompressed_pdf: bool = ...,
+        pdf_identifier: bytes | None = ...,
+        full_fonts: bool = ...,
     ) -> bytes: ...

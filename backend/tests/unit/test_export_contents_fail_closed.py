@@ -196,3 +196,18 @@ def test_an_overlap_in_the_assignment_history_raises_the_alarm_and_is_declared_a
         ]
     else:
         assert log.errors == []
+
+
+def test_without_a_checkpoint_key_to_sign_the_manifest_nothing_is_published() -> None:
+    """TASK-346 (ancla A2): la firma del manifiesto es lo último antes de completar las subidas;
+    si no hay clave ``checkpoint`` activa, el paquete se abandona entero y no se publica nada."""
+    world = job_world(_job())
+    ports = WorldPorts(world, fail=frozenset({"signer"}))
+    store = MemoryExportStore()
+    composer = ExportComposer(stream=ExportStream(store=store), ports=ports.ports())
+    with pytest.raises(RuntimeError):
+        asyncio.run(composer.compose(world.job, RecordingSink()))
+    assert ports.calls["sign"] == 1
+    assert store.objects == {}
+    assert store.uploads == {}
+    assert store.aborted

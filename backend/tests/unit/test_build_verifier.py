@@ -6,6 +6,11 @@ estándar (LC-NUC-18, PAT-NUC-MAN-08, NFR-NUC-53).
   posterior, usa alias o importaciones relativas, o define un nombre que ya existe en otro módulo.
 - El archivo generado solo importa la biblioteca estándar de Python 3.10 y no importa
   ``vigia_platform``.
+- Composición de U-04 (TASK-346): el verificador del paquete exportado
+  (``resources/verifier/vigia_verify.py``) es el mismo archivo con ``export_verifier`` detrás;
+  está al día, ``--check`` falla si se edita a mano, solo importa la biblioteca estándar y solo
+  conserva el ``if __name__ == "__main__"`` del último módulo. ``tools/vigia_verify.py`` no
+  cambia por la composición, y las reglas valen también para el módulo de U-04.
 """
 
 from __future__ import annotations
@@ -19,7 +24,19 @@ from pathlib import Path
 import pytest
 
 from tools import build_verifier
-from tools.build_verifier import MODULES, OUTPUT, SOURCE_DIRECTORY, BuildError, build, main
+from tools.build_verifier import (
+    ACCREDITATION_PACKAGE,
+    BUNDLE_HEADER,
+    BUNDLE_OUTPUT,
+    MODULES,
+    OUTPUT,
+    SOURCE_DIRECTORY,
+    BuildError,
+    SourceModule,
+    build,
+    build_bundle,
+    main,
+)
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -132,3 +149,80 @@ def test_build_reports_rule_violations_as_exit_code(
     monkeypatch.setattr(build_verifier.build, "__defaults__", (directory, MODULES))
     assert main(["--check"]) == 1
     assert "numpy" in capsys.readouterr().err
+
+
+# --- Composición de U-04 (TASK-346) --------------------------------------------------------------
+
+
+def _imports(text: str) -> set[str]:
+    modules: set[str] = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0
+            modules.add(node.module or "")
+    return modules
+
+
+def _main_guards(text: str) -> list[str]:
+    return [
+        ast.unparse(node)
+        for node in ast.parse(text).body
+        if isinstance(node, ast.If) and ast.unparse(node.test) == "__name__ == '__main__'"
+    ]
+
+
+def test_committed_bundle_is_the_generated_one_and_u02_is_unchanged() -> None:
+    assert BUNDLE_OUTPUT.read_bytes() == build_bundle().encode("utf-8")
+    # La composición no toca el verificador de U-02: sus bytes son los de build() sin extras.
+    assert OUTPUT.read_bytes() == build().encode("utf-8")
+    assert build_bundle() != build()
+
+
+def test_bundle_imports_only_the_standard_library_and_keeps_one_entry_point() -> None:
+    text = BUNDLE_OUTPUT.read_text(encoding="utf-8")
+    modules = _imports(text)
+    assert not any(module.startswith("vigia_platform") for module in modules)
+    assert {module.split(".")[0] for module in modules} <= set(sys.stdlib_module_names)
+    assert _main_guards(text) == ["if __name__ == '__main__':\n    raise SystemExit(export_main())"]
+    assert _main_guards(OUTPUT.read_text(encoding="utf-8")) == [
+        "if __name__ == '__main__':\n    raise SystemExit(main())"
+    ]
+
+
+def test_check_fails_after_a_hand_edit_of_the_bundle(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    edited = tmp_path / "vigia_verify.py"
+    edited.write_text(
+        BUNDLE_OUTPUT.read_text(encoding="utf-8").replace(
+            "MAX_EXPANSION_RATIO: Final = 100", "MAX_EXPANSION_RATIO: Final = 1000"
+        ),
+        encoding="utf-8",
+    )
+    assert main(["--check", "--bundle-output", str(edited)]) == 1
+    assert "no coincide con lo generado" in capsys.readouterr().err
+
+
+def _accreditation_copy(tmp_path: Path, line: str) -> SourceModule:
+    directory = tmp_path / "accreditation"
+    directory.mkdir()
+    source = BACKEND / "src" / "vigia_platform" / "accreditation" / "export_verifier.py"
+    target = directory / "export_verifier.py"
+    target.write_text(source.read_text(encoding="utf-8") + "\n" + line, encoding="utf-8")
+    return SourceModule(ACCREDITATION_PACKAGE, directory, "export_verifier")
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ("from vigia_platform.loop.domain.enums import PackageForm\n", "que no va antes"),
+        ("import pydantic\n", "no es biblioteca estándar"),
+        ("def main():\n    return 0\n", "ya está definido"),
+        ("MAX_SAFE_INTEGER = 1\n", "ya está definido"),
+    ],
+)
+def test_the_rules_hold_for_the_u04_module(tmp_path: Path, line: str, message: str) -> None:
+    with pytest.raises(BuildError, match=message):
+        build(extra=[_accreditation_copy(tmp_path, line)], header=BUNDLE_HEADER)
