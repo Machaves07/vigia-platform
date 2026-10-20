@@ -48,6 +48,14 @@ from vigia_platform.accreditation.adapters.http.services import (
     AccreditationHttp,
 )
 from vigia_platform.identity.authz.authorize import ResourceNotFound
+from vigia_platform.notifications.adapters.http.services import (
+    NOTIFICATIONS_STATE_KEY,
+    NotificationsHttp,
+)
+from vigia_platform.notifications.preferences import (
+    NotificationPreference,
+    NotificationPreferenceUpdate,
+)
 from vigia_platform.shared.api.app import (
     AppConfig,
     UnitRegistration,
@@ -146,6 +154,11 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "reason_category": "real_coexistence",
         "reason_text": "Coexistencia observada entre la carretilla y el peatón en el pasillo",
     },
+    ("PUT", "/notifications/preferences"): {
+        "email_enabled_normal": True,
+        "email_enabled_digest": True,
+        "weekly_digest_weekday": 1,
+    },
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -183,6 +196,9 @@ def world() -> Iterator[tuple[Harness, Any, dict[str, str]]]:
     # La exportación (TASK-317) necesita la base: un cuerpo válido llega a un servicio que no
     # encuentra las zonas sintéticas (``not_found``), como el de adjuntos con la acción.
     setattr(app.state, ACCREDITATION_STATE_KEY, AccreditationHttp(exports=_NoZones()))  # type: ignore[arg-type]
+    # TASK-348: ``PUT /notifications/preferences`` también necesita la base; el doble responde
+    # con el cuerpo actualizado, como el resto de las rutas con cuerpo que sí tienen éxito (200).
+    setattr(app.state, NOTIFICATIONS_STATE_KEY, NotificationsHttp(preferences=_FakePreferences()))  # type: ignore[arg-type]
     with TestClient(app, raise_server_exceptions=False) as client:
         yield harness, client, {**cookie_header(cookie), **SAME_ORIGIN}
 
@@ -197,6 +213,27 @@ class _NoZones:
 
     async def status(self, context: Any, export_id: Any) -> Any:
         raise ResourceNotFound()
+
+
+class _FakePreferences:
+    """``NotificationPreferences`` sin base: un cuerpo válido llega al servicio y vuelve (sin
+    tocar ``FakeDatabase``, que no implementa ``transaction``, como ``_NoZones`` arriba)."""
+
+    clock = SimulatedClock(utc())
+
+    async def update_own(
+        self, context: Any, update_values: NotificationPreferenceUpdate
+    ) -> NotificationPreference:
+        return NotificationPreference(
+            user_id=context.actor.id,
+            email_enabled_normal=update_values.email_enabled_normal,
+            email_enabled_digest=update_values.email_enabled_digest,
+            weekly_digest_weekday=update_values.weekly_digest_weekday,
+            updated_at=self.clock.now(),
+            email_suppressed_hard_bounce=False,
+            email_suppressed_complaint=False,
+            email_suppressed_at=None,
+        )
 
 
 _ROLE_HEADERS: dict[str, str] = {}
