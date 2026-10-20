@@ -43,6 +43,10 @@ dependencies = [
   "jinja2>=3.1",
   "holidays>=0.60",
   "tzdata>=2025.2",
+  # Cliente del asistente de causa raíz (TASK-344, tech-stack U-04 §2.1): la serie 1.x está
+  # construida sobre `httpx2`, no sobre `httpx`; los dos paquetes conviven y U-04 nunca pasa un
+  # objeto de `httpx` al cliente del proveedor (lo rechaza `loop.http.client_factory`).
+  "anthropic>=1.15,<2",
 ]
 
 [project.scripts]
