@@ -662,9 +662,9 @@ class MonthlyPackageRepository:
     ) -> int:
         """Días del periodo con alguna actividad del lazo (``session_count > 0``).
 
-        ``accreditation.adoption_counter`` no tiene hoy ningún escritor en este repositorio: hasta
-        que exista (el contador de actividad de U-04), esta lectura devuelve honestamente 0 en
-        vez de inventar adopción.
+        ``accreditation.adoption_counter`` lo alimentan las escrituras del lazo
+        (``accreditation.adoption.counter``, TASK-323): una fila por zona y día local con alguna
+        actividad, y ``session_count`` es el número de actividades de ese día.
         """
         row = (
             await transaction.execute(

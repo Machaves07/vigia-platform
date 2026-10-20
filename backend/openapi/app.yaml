@@ -5042,6 +5042,58 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/adoption":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Actividad del lazo por zona y día, días de silencio y umbral vigente"
+      "operationId": "get_adoption_accreditation_adoption_get"
+      "parameters":
+        - "name": "from"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "maxLength": 10
+            "title": "From"
+        - "name": "to"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "maxLength": 10
+            "title": "To"
+        - "name": "plant_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Plant Id"
+        - "name": "zone_id"
+          "in": "query"
+          "required": false
+          "schema":
+            "anyOf":
+              - "type": "string"
+                "format": "uuid"
+              - "type": "null"
+            "title": "Zone Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AdoptionReportOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/notifications":
     "get":
       "tags":
@@ -5374,6 +5426,104 @@
         - "admissions"
         - "next_after"
       "title": "AdmissionsPage"
+    "AdoptionDayOut":
+      "properties":
+        "day":
+          "type": "string"
+          "title": "Day"
+        "activity_counts":
+          "additionalProperties":
+            "type": "integer"
+          "propertyNames":
+            "$ref": "#/components/schemas/LoopActivityKind"
+          "type": "object"
+          "title": "Activity Counts"
+        "activity_count":
+          "type": "integer"
+          "title": "Activity Count"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "day"
+        - "activity_counts"
+        - "activity_count"
+      "title": "AdoptionDayOut"
+    "AdoptionReportOut":
+      "properties":
+        "plant_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Plant Id"
+        "period_from":
+          "type": "string"
+          "title": "Period From"
+        "period_to":
+          "type": "string"
+          "title": "Period To"
+        "evaluated_day":
+          "type": "string"
+          "title": "Evaluated Day"
+        "threshold_days":
+          "type": "integer"
+          "title": "Threshold Days"
+        "usage_notice_es":
+          "type": "string"
+          "title": "Usage Notice Es"
+        "zones":
+          "items":
+            "$ref": "#/components/schemas/AdoptionZoneOut"
+          "type": "array"
+          "title": "Zones"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "plant_id"
+        - "period_from"
+        - "period_to"
+        - "evaluated_day"
+        - "threshold_days"
+        - "usage_notice_es"
+        - "zones"
+      "title": "AdoptionReportOut"
+    "AdoptionZoneOut":
+      "properties":
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "zone_active":
+          "type": "boolean"
+          "title": "Zone Active"
+        "silent_days":
+          "anyOf":
+            - "type": "integer"
+            - "type": "null"
+          "title": "Silent Days"
+        "streak_start":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Streak Start"
+        "last_activity_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Last Activity At"
+        "days":
+          "items":
+            "$ref": "#/components/schemas/AdoptionDayOut"
+          "type": "array"
+          "title": "Days"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "zone_id"
+        - "zone_active"
+        - "silent_days"
+        - "streak_start"
+        - "last_activity_at"
+        - "days"
+      "title": "AdoptionZoneOut"
     "AgreementOut":
       "properties":
         "agreement_id":
@@ -10612,6 +10762,17 @@
       "required":
         - "status"
       "title": "LoginResponse"
+    "LoopActivityKind":
+      "type": "string"
+      "enum":
+        - "inbox_opened"
+        - "finding_classified"
+        - "queue_resolved"
+        - "analysis_advanced"
+        - "action_managed"
+        - "finding_closed"
+      "title": "LoopActivityKind"
+      "description": "``loop_activity_kind``: actividad por zona y día, nunca por usuario (respuesta 17)."
     "MaintenanceWindowBody":
       "properties":
         "from":

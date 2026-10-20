@@ -201,11 +201,12 @@ async def test_upgrade_head_applies_laz_0031(superuser: Any) -> None:
         " JOIN pg_namespace n ON n.oid = c.relnamespace"
         " WHERE n.nspname = 'accreditation' AND c.relkind IN ('r', 'p')"
     )
-    # Las nueve entidades de DE §3.1 a §3.6, más monthly_package_lease (laz_0035, VIG-239): una
-    # migración aditiva solo añade, nunca quita de lo que laz_0031 ya dejó (BR-CTR-23).
+    # Las nueve entidades de DE §3.1 a §3.6, más monthly_package_lease (laz_0035, VIG-239) y
+    # adoption_alert (laz_0038, TASK-323): una migración aditiva solo añade, nunca quita de lo que
+    # laz_0031 ya dejó (BR-CTR-23).
     assert {row["relname"] for row in rows} == set(ACCREDITATION_TABLES)
     assert set(MIGRATION.TABLES) <= set(ACCREDITATION_TABLES)
-    assert len(ACCREDITATION_TABLES) == 10
+    assert len(ACCREDITATION_TABLES) == 11
     assert all(row["relrowsecurity"] and row["relforcerowsecurity"] for row in rows), rows
     assert {row["owner"] for row in rows} == {"vigia_migrate"}
 

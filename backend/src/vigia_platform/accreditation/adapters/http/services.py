@@ -19,6 +19,7 @@ from vigia_platform.shared.observability.logging import get_logger
 
 if TYPE_CHECKING:
     from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
+    from vigia_platform.accreditation.adoption.reads import AdoptionReads
     from vigia_platform.accreditation.exposure.service import ExposureService
     from vigia_platform.accreditation.monthly.audit import SampleAuditService
     from vigia_platform.accreditation.monthly.commitments import CommitmentService
@@ -47,6 +48,8 @@ class AccreditationHttp:
     """``POST /accreditation/sample-items/{sample_item_id}/result`` (TASK-347)."""
     commitments: CommitmentService | None = None
     """Las tres rutas de los compromisos del mando de línea (TASK-347)."""
+    adoption: AdoptionReads | None = None
+    """``GET /accreditation/adoption`` (SUP-U05-32, TASK-323)."""
 
 
 def installed[T](service: T | None) -> T:
