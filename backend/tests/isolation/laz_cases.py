@@ -33,6 +33,8 @@ from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
 )
+from vigia_platform.accreditation.adoption.reads import AdoptionReads
+from vigia_platform.accreditation.adoption.task import ProductiveZones
 from vigia_platform.accreditation.events import register_accreditation_event_types
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.export.request import ExportRequests
@@ -232,6 +234,11 @@ class _NoSigner:
         raise AssertionError("una descarga fuera de alcance no firma ninguna URL")
 
 
+def _any(value: object) -> Any:
+    """La base de la prueba donde un repositorio pide la de producción (como ``_loop``)."""
+    return value
+
+
 def _accreditation(services: LazServices) -> Mapping[str, object]:
     database: Any = services.database
     return {
@@ -268,6 +275,13 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 database=database,
                 writer=services.writer,
                 authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            adoption=AdoptionReads(  # TASK-323
+                database=services.database,
+                authorizer=services.authorizer,
+                activations=ProductiveZones(),
+                configuration=PostgresLoopConfigurationRepository(_any(services.database)),
                 clock=services.clock,
             ),
         )
@@ -719,6 +733,19 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
                 "GET",
                 "/accreditation/exposure",
                 params={"zone_id": str(i.zone), "period": "2026-01"},
+            ),
+        ),
+    ),
+    # VIG-216 (TASK-323): la adopción de una planta de B responde igual que la de una inexistente
+    # (not_found, nunca forbidden ni la actividad o el umbral de B).
+    (
+        ("GET", "/accreditation/adoption"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call(
+                "GET",
+                "/accreditation/adoption",
+                params={"plant_id": str(i.plant), "from": "2026-01-01", "to": "2026-01-31"},
             ),
         ),
     ),

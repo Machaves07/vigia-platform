@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter
 
+from vigia_platform.accreditation.adapters.http.adoption_routes import adoption_router
 from vigia_platform.accreditation.adapters.http.export_routes import export_router
 from vigia_platform.accreditation.adapters.http.exposure_routes import exposure_router
 from vigia_platform.accreditation.adapters.http.monthly_routes import (
@@ -39,6 +40,14 @@ from vigia_platform.accreditation.adapters.postgres.export_reads import (
     SqlEpisodeHistory,
     SqlExportPlaces,
     StorageBlobs,
+)
+from vigia_platform.accreditation.adoption.reads import AdoptionReads
+from vigia_platform.accreditation.adoption.task import (
+    ADOPTION_CHECK,
+    ADOPTION_CHECK_SCHEDULE,
+    AdoptionCheck,
+    ProductiveZones,
+    register_adoption_check,
 )
 from vigia_platform.accreditation.detail_codes import (
     ACCREDITATION_DETAIL_CODE_LABEL_BINDINGS,
@@ -238,6 +247,20 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
     register_monthly_package(registry, task)
 
 
+def _register_adoption_check(registry: PeriodicTaskRegistry, services: UnitServices) -> None:
+    """``adoption_check`` (TASK-323): diaria y por organización; las zonas activas salen de la
+    proyección de compuertas de U-03 (``ProductiveZones``) y el umbral, de ``loop.config``."""
+    register_adoption_check(
+        registry,
+        AdoptionCheck(
+            activations=ProductiveZones(),
+            configuration=PostgresLoopConfigurationRepository(services.database),
+            outbox=services.outbox,
+            clock=services.clock,
+        ),
+    )
+
+
 def exposure_service(services: UnitServices) -> ExposureService:
     """``ExposurePort`` (TASK-322) con los puertos de U-02 y U-03 en proceso; el paquete mensual
     (VIG-239) lo construye igual."""
@@ -313,6 +336,14 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
                 authorizer=services.authorizer,
                 clock=services.clock,
             ),
+            # TASK-323: SUP-U05-32, la adopción por zona.
+            adoption=AdoptionReads(
+                database=services.database,
+                authorizer=services.authorizer,
+                activations=ProductiveZones(),
+                configuration=PostgresLoopConfigurationRepository(services.database),
+                clock=services.clock,
+            ),
         )
     }
 
@@ -321,14 +352,20 @@ ROUTERS: Final[tuple[Callable[[], APIRouter], ...]] = (
     export_router,
     monthly_router,
     exposure_router,
+    adoption_router,  # TASK-323
 )
 """Fábricas de los enrutadores de ``/accreditation/*``."""
 
 ACCREDITATION_TASKS: Final[Mapping[str, tuple[Schedule, TaskIteration]]] = {
     MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
+    # TASK-323: el diseño no fija la cadencia; diaria y por organización.
+    ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
 }
 """Tareas periódicas del módulo: nombre → (cadencia, iteración), todas con ``unit = U-04``."""
-TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (_register_monthly_package,)
+TASK_REGISTRARS: Final[tuple[TaskRegistrar, ...]] = (
+    _register_monthly_package,
+    _register_adoption_check,
+)
 
 ACCREDITATION_CONSUMERS: Final[Mapping[str, int]] = {
     EXPORT_WORKER: EXPORT_WORKER_CONCURRENCY,

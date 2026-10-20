@@ -23,9 +23,20 @@ eventos de U-03 (TASK-341) pasa un ``ProjectionInput`` con su ``event_id``
 2. la fila ``loop_projection_checkpoint`` de la planta (``SELECT … FOR UPDATE``, creada si falta);
 3. las filas ``episode`` y ``finding_state`` del sujeto.
 
+4. la fila ``(zona, día)`` de ``accreditation.adoption_counter`` (TASK-323, solo los recibos del
+   escritor; ``INSERT … ON CONFLICT DO UPDATE``). Ninguna operación toma otro candado después.
+
 El paso 2 serializa a todos los que aplican sobre la misma planta, por la vía de escritura o por
 la de eventos: dos aplicaciones concurrentes del mismo registro esperan una a la otra y la
 segunda ve ``last_record_id`` y no hace nada (PR-LAZ-43). Una planta no bloquea a otra.
+
+**Actividad de la zona** (TASK-323; LC-LAZ-29; BR-LAZ-134): ``write_and_apply`` pasa a
+``apply_in_transaction`` el instante de la escritura según el ``Clock`` del escritor
+(``activity_at``) y, con el recibo ``accepted``, este llama al gancho
+``accreditation.adoption.counter.write_activity`` en la misma transacción, que suma la escritura al
+contador de actividad de su zona y día si su tipo es actividad del lazo (clasificación, cola,
+análisis, acción o cierre), sin ningún dato de usuario. La vía de eventos (``ProjectionInput``) no
+cuenta: es el nodo, no una persona.
 
 Las columnas que se actualizan son solo las que ``laz_0029`` concede a ``vigia_app``
 (``_EPISODE_MUTABLE`` y ``_FINDING_STATE_MUTABLE``): la organización, la planta, la zona, el
@@ -56,6 +67,7 @@ from sqlalchemy import ColumnElement, insert, select, text, update
 from sqlalchemy.engine import Row
 from vigia_contracts.models.enumerations import AcceptanceStatus
 
+from vigia_platform.accreditation.adoption.counter import write_activity
 from vigia_platform.ledger.application.reader import LedgerRecordView
 from vigia_platform.ledger.application.writer import (
     EscritorExpediente,
@@ -79,6 +91,7 @@ from vigia_platform.loop.projection.fold import (
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.publish import NewEvent
+from vigia_platform.shared.signing.keys import to_millisecond
 
 __all__ = [
     "ENRICHED_COLUMNS",
@@ -383,6 +396,7 @@ class LoopProjectionStore:
         source: ProjectionInput | Receipt,
         *,
         enrich: Enrich | None = None,
+        activity_at: datetime | None = None,
     ) -> Step:
         """Aplica ``source`` (el recibo de una escritura o el registro de un evento).
 
@@ -394,7 +408,12 @@ class LoopProjectionStore:
 
         ``enrich`` (la vía de eventos, TASK-341) recibe la fila anterior y la que calculó el
         pliegue, y devuelve la que se escribe; el resumen de la fila se recalcula aquí. En una fila
-        que ya existía no puede cambiar lo que nace con el hallazgo (``ValueError``)."""
+        que ya existía no puede cambiar lo que nace con el hallazgo (``ValueError``).
+
+        ``activity_at`` (TASK-323) es el instante de la escritura según el ``Clock`` del escritor
+        (``write_and_apply`` lo pasa): con un recibo ``accepted`` y ese instante, el gancho
+        ``write_activity`` cuenta la escritura en el contador de actividad de su zona y día. No se
+        usa ``received_at``, que es la marca de la base y no la del reloj inyectado."""
         if isinstance(source, Receipt):
             if source.status is not AcceptanceStatus.ACCEPTED:
                 return Step(None, None, False)
@@ -411,6 +430,7 @@ class LoopProjectionStore:
         digest: str = checkpoint.projection_digest or EMPTY_PARTITION_DIGEST
         subject = subject_id_of(item)
         result = Step(None, None, False)
+        finding: FindingStateRow | None = None
         if subject is not None:
             episode = await self._episode(transaction, item, subject)
             finding = await self._finding(transaction, item, subject)
@@ -430,6 +450,17 @@ class LoopProjectionStore:
                 "projection_digest": digest,
             },
         )
+        if isinstance(source, Receipt) and activity_at is not None:
+            known = result.finding if result.finding is not None else finding
+            document_subject = item.document.get("subject_id")
+            await write_activity(
+                transaction,
+                record_type=item.record_type,
+                plant_id=item.plant_id,
+                zone_id=None if known is None else known.zone_id,
+                subject_id=None if document_subject is None else _uuid(document_subject),
+                at=activity_at,
+            )
         return result
 
     async def write_and_apply(
@@ -463,7 +494,10 @@ class LoopProjectionStore:
         )
         if isinstance(receipt, LedgerRejection):
             return receipt, Step(None, None, False)
-        return receipt, await self.apply_in_transaction(transaction, receipt)
+        activity_at = to_millisecond(writer.clock.now())
+        return receipt, await self.apply_in_transaction(
+            transaction, receipt, activity_at=activity_at
+        )
 
     async def record_input(
         self,

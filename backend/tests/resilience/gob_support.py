@@ -116,6 +116,8 @@ __all__ = [
 ]
 
 U03_UNIT_NAMES: Final = frozenset({"catalog", "fleet", "node_api"})
+# Las de U-02: sus eventos ya los registra ``worker_catalog`` (el registro rechaza duplicados).
+U02_UNIT_NAMES: Final = frozenset({"shared", "identity", "ledger"})
 """Las unidades de U-03 en ``REGISTERED_UNITS`` (``shared.runtime.units``)."""
 
 PRODUCTION_API_DATABASE: Final[Mapping[str, Any]] = {
@@ -180,6 +182,13 @@ def add_u03(
     units = u03_units()
     for unit in units:
         unit.event_types(catalog.event_types)
+    # Los eventos de las unidades posteriores a U-03 (U-04: loop, accreditation, notifications…):
+    # ``gob_platform`` sincroniza los de todas las ``registered_units()`` y, sin ellos, el arranque
+    # del arnés falla con ``OutboxStartupError`` («está en la base y ninguna unidad lo registra»;
+    # nightly del 18 al 20-10, desde VIG-201). Los de U-02 ya los pone ``worker_catalog``.
+    for unit in registered_units():
+        if unit.name not in U02_UNIT_NAMES | U03_UNIT_NAMES:
+            unit.event_types(catalog.event_types)
     if services is not None:
         tasks: Any = catalog.periodic_tasks
         if wrap is not None:

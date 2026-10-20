@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.types import TIMESTAMP
 
 __all__ = [
+    "ADOPTION_ALERT",
     "ADOPTION_COUNTER",
     "AUDIT_SAMPLE",
     "AUDIT_SAMPLE_ITEM",
@@ -253,3 +254,17 @@ ADOPTION_COUNTER: Final = Table(
     _instant("last_activity_at", nullable=True),
 )
 """Por zona y día, sin ninguna columna de usuario (H-33)."""
+
+ADOPTION_ALERT: Final = Table(
+    "adoption_alert",
+    METADATA,
+    _uuid("organization_id", primary_key=True),
+    _uuid("plant_id"),
+    _uuid("zone_id", primary_key=True),
+    _date("streak_start", primary_key=True),
+    _integer("silent_days"),
+    _integer("threshold_days"),
+    _date("evaluated_day"),
+    _instant("emitted_at"),
+)
+"""``laz_0038`` (TASK-323): la marca de ``adoption_low`` por racha de silencio, sin usuario."""

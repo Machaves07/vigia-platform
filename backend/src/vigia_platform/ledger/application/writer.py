@@ -598,6 +598,13 @@ class EscritorExpediente:
         self._random_bytes = random_bytes
         self._metrics = metrics
 
+    @property
+    def clock(self) -> Clock:
+        """El ``Clock`` inyectado del escritor (solo lectura): quien escribe por él y necesita la
+        hora de la escritura la toma de aquí, nunca de ``received_at``, que es la marca de la base
+        (TASK-323: el contador de actividad del lazo)."""
+        return self._clock
+
     @handles_absent_context
     async def write(
         self,
