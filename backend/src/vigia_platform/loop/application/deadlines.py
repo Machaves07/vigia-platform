@@ -45,12 +45,14 @@ declaran en la ejecución siguiente, con el mismo contenido.
 46): ningún camino de este módulo escribe ``closure``, ni cambia un estado que no sea T08.
 
 **Panel de vencidos** (SUP-U05-15 ``consultar_vencidos``, ``OverdueService.page``):
-``executive_summary.read`` sobre la **planta** (BR-LAZ-47 y 48, H-27). Desde la proyección, las
-acciones vigentes con el plazo pasado (``overdue`` declarado, o ``action_assigned`` aún sin
-declarar: lo vencido se ve aunque la tarea esté atrasada), por zona, con paginación por clave
-sobre ``(due_at, finding_state_id)`` y **destacadas** las de ``manager_highlight_overdue_days`` o
-más días. Ningún dato de persona observada: nombra la zona y al responsable de la acción (un
-usuario de la plataforma, BR-LAZ-38). Una planta o una zona inexistente, de otra organización o
+``executive_summary.read`` sobre la **planta** (BR-LAZ-47 y 48, H-27). Desde la proyección, los
+hallazgos vencidos: todo ``overdue`` declarado (también si su acción se reasignó después con otro
+plazo: sigue vencido, P5) y todo ``action_assigned`` con el plazo pasado aún sin declarar (lo
+vencido se ve aunque la tarea esté atrasada), por zona, con paginación por clave sobre
+``(due_at, finding_state_id)``. Los días cuentan desde ``overdue_since`` (la primera declaración;
+sin declarar, el plazo) y se **destacan** los de ``manager_highlight_overdue_days`` o más.
+Ningún dato de persona observada: nombra la zona y al responsable de la acción (un usuario de la
+plataforma, BR-LAZ-38). Una planta o una zona inexistente, de otra organización o
 fuera de alcance responde ``not_found`` (nunca ``forbidden``). Sin auditoría de consulta
 (BR-LAZ-09).
 
@@ -590,7 +592,12 @@ class OverdueItem:
     assignee_user_id: uuid.UUID | None
     assignee_inactive: bool
     due_at: datetime
+    """El plazo de la acción **vigente** (otro, posterior, si se reasignó tras vencer)."""
+    overdue_since: datetime
+    """Desde cuándo está vencido el hallazgo: la primera declaración (``overdue_since`` de la
+    proyección) o, sin declarar todavía, el plazo."""
     overdue_days: int
+    """Días naturales desde ``overdue_since``."""
     highlighted: bool
     cursor: OverdueCursor
 
@@ -625,10 +632,11 @@ _ZONES: Final = text(
 _ITEMS: Final = text(
     "SELECT f.finding_state_id, f.plant_id, f.zone_id, f.subject_kind, f.family, f.tier,"
     " f.lifecycle_state, f.current_action_id, f.current_action_type, f.assignee_user_id,"
-    " f.assignee_inactive, f.due_at FROM loop.finding_state AS f"
+    " f.assignee_inactive, f.due_at, f.overdue_since FROM loop.finding_state AS f"
     " WHERE f.organization_id = :organization_id AND f.plant_id = :plant_id"
     " AND f.lifecycle_state IN ('action_assigned', 'overdue')"
-    " AND f.current_action_id IS NOT NULL AND f.due_at IS NOT NULL AND f.due_at <= :latest_due"
+    " AND f.current_action_id IS NOT NULL AND f.due_at IS NOT NULL"
+    " AND COALESCE(f.overdue_since, f.due_at) <= :latest_due"
     " AND (CAST(:zone_ids AS uuid[]) IS NULL OR f.zone_id = ANY(CAST(:zone_ids AS uuid[])))"
     " AND (CAST(:due_from AS timestamptz) IS NULL OR f.due_at >= CAST(:due_from AS timestamptz))"
     " AND (CAST(:due_to AS timestamptz) IS NULL OR f.due_at < CAST(:due_to AS timestamptz))"
@@ -640,11 +648,13 @@ _ITEMS: Final = text(
 """Las acciones vencidas de la planta, por el índice parcial ``finding_state_overdue``."""
 _BY_ZONE: Final = text(
     "SELECT f.zone_id, count(*) AS overdue_count,"
-    " count(*) FILTER (WHERE f.due_at <= :highlight_due) AS highlighted_count"
+    " count(*) FILTER (WHERE COALESCE(f.overdue_since, f.due_at) <= :highlight_due)"
+    " AS highlighted_count"
     " FROM loop.finding_state AS f"
     " WHERE f.organization_id = :organization_id AND f.plant_id = :plant_id"
     " AND f.lifecycle_state IN ('action_assigned', 'overdue')"
-    " AND f.current_action_id IS NOT NULL AND f.due_at IS NOT NULL AND f.due_at <= :latest_due"
+    " AND f.current_action_id IS NOT NULL AND f.due_at IS NOT NULL"
+    " AND COALESCE(f.overdue_since, f.due_at) <= :latest_due"
     " AND (CAST(:zone_ids AS uuid[]) IS NULL OR f.zone_id = ANY(CAST(:zone_ids AS uuid[])))"
     " AND (CAST(:due_from AS timestamptz) IS NULL OR f.due_at >= CAST(:due_from AS timestamptz))"
     " AND (CAST(:due_to AS timestamptz) IS NULL OR f.due_at < CAST(:due_to AS timestamptz))"
@@ -814,7 +824,10 @@ class OverdueService:
 
 def _item(row: Mapping[str, Any], now: datetime, threshold: int) -> OverdueItem:
     due_at: datetime = row["due_at"]
-    days = days_overdue(due_at, now)
+    # Vencido desde la primera declaración: una reasignación da otro plazo a la acción, pero el
+    # hallazgo sigue vencido desde entonces (P5); sin declarar todavía, desde su plazo.
+    since: datetime = row["overdue_since"] or due_at
+    days = days_overdue(since, now)
     state = S(row["lifecycle_state"])
     finding_state_id = _uuid(row["finding_state_id"])
     assignee = row["assignee_user_id"]
@@ -832,6 +845,7 @@ def _item(row: Mapping[str, Any], now: datetime, threshold: int) -> OverdueItem:
         assignee_user_id=None if assignee is None else _uuid(assignee),
         assignee_inactive=bool(row["assignee_inactive"]),
         due_at=due_at,
+        overdue_since=since,
         overdue_days=days,
         highlighted=days >= threshold,
         cursor=OverdueCursor(due_at, finding_state_id),

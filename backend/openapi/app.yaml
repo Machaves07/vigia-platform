@@ -11158,6 +11158,9 @@
         "due_at":
           "type": "string"
           "title": "Due At"
+        "overdue_since":
+          "type": "string"
+          "title": "Overdue Since"
         "overdue_days":
           "type": "integer"
           "title": "Overdue Days"
@@ -11180,6 +11183,7 @@
         - "assignee_user_id"
         - "assignee_inactive"
         - "due_at"
+        - "overdue_since"
         - "overdue_days"
         - "highlighted"
       "title": "OverdueItemOut"

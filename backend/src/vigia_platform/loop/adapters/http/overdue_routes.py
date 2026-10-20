@@ -90,8 +90,12 @@ class OverdueItemOut(_Strict):
     """El responsable de la acción: un usuario de la plataforma, nunca una persona observada."""
     assignee_inactive: bool
     due_at: str
-    """El plazo congelado al asignar (fin exclusivo de su último día hábil)."""
+    """El plazo de la acción vigente, congelado al asignarla (fin exclusivo de su último día
+    hábil)."""
+    overdue_since: str
+    """Desde cuándo está vencido el hallazgo (la primera declaración; sin declarar, el plazo)."""
     overdue_days: int
+    """Días naturales desde ``overdue_since``."""
     highlighted: bool
 
 
@@ -152,6 +156,7 @@ def item_view(item: OverdueItem) -> OverdueItemOut:
         assignee_user_id=item.assignee_user_id,
         assignee_inactive=item.assignee_inactive,
         due_at=_stamp(item.due_at),
+        overdue_since=_stamp(item.overdue_since),
         overdue_days=item.overdue_days,
         highlighted=item.highlighted,
     )

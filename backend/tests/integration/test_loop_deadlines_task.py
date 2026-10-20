@@ -525,6 +525,7 @@ def test_the_panel_lists_by_due_at_highlights_and_pages_by_key(stack: DeadlinesS
             "assignee_user_id": item["assignee_user_id"],
             "assignee_inactive": False,
             "due_at": format_timestamp(due),
+            "overdue_since": format_timestamp(due),
             "overdue_days": days,
             "highlighted": days >= 3,
         }
@@ -566,6 +567,47 @@ def test_the_panel_lists_by_due_at_highlights_and_pages_by_key(stack: DeadlinesS
         **{"from": format_timestamp(dues[1]), "to": format_timestamp(dues[1] + SECOND)},
     )
     assert [i["due_at"] for i in period["items"]] == [format_timestamp(dues[1])]
+
+
+def test_a_reassigned_overdue_finding_stays_in_the_panel_counted_from_its_first_deadline(
+    stack: DeadlinesStack,
+) -> None:
+    """Regresión del contraejemplo de PR-LAZ-13 (perfil ``nightly``, semilla 3419975480):
+    ``[Tick(3600), EvaluateDeadlines(), Reassign(None)]``. La reasignación da a la acción nueva un
+    plazo futuro, pero el hallazgo sigue ``overdue`` (P5): el panel lo muestra y cuenta los días
+    desde la primera declaración, y lo destaca al cumplir el umbral."""
+    organization = stack.actions.world.organization()
+    stack.set_highlight_days(organization, 2)
+    coordinator, assignee = _people(stack, organization)
+    finding, old_action, due_at = stack.with_action(organization, coordinator, assignee)
+    stack.tick_to(due_at + SECOND)
+    stack.evaluate(organization)
+    response = stack.actions.assign(
+        stack.actions.member(organization),
+        finding,
+        stack.actions.action_body(
+            stack.actions.user(organization), supersedes_action_id=str(old_action)
+        ),
+    )
+    assert response.status_code == 201, response.text
+    new_due = datetime.fromisoformat(response.json()["due_at"].replace("Z", "+00:00"))
+    assert new_due > stack.now() + 2 * DAY
+    stack.tick_to(due_at + 2 * DAY)
+
+    status, page = _panel(stack, stack.manager(organization), plant_id=str(organization.plant_id))
+
+    assert status == 200
+    (item,) = page["items"]
+    assert (item["finding_state_id"], item["declared"]) == (
+        str(stack.actions.finding_state_id(finding)),
+        True,
+    )
+    assert (item["due_at"], item["overdue_since"]) == (
+        format_timestamp(new_due),
+        format_timestamp(due_at),
+    )
+    assert (item["overdue_days"], item["highlighted"]) == (2, True)
+    assert page["zones"][0]["highlighted_count"] == 1
 
 
 def test_the_panel_filters_by_plant_and_by_zone(stack: DeadlinesStack) -> None:

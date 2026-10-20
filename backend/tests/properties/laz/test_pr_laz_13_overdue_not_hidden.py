@@ -29,13 +29,16 @@ from datetime import timedelta
 from typing import Final
 
 import pytest
-from hypothesis import HealthCheck, event, given, settings
+from hypothesis import HealthCheck, event, example, given, settings
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject, LoopOrganization
 from tests.loop_deadlines_support import DeadlinesStack, deadlines_stack
 from tests.properties.laz.strategies.lifecycle import (
+    EvaluateDeadlines,
     LifecycleCommand,
+    Reassign,
+    Tick,
     deadline_command_sequences,
 )
 from vigia_platform.loop.adapters.postgres.inbox_query import InboxFilters
@@ -125,6 +128,9 @@ def _invariant(
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
 @given(commands=deadline_command_sequences())
+# Contraejemplo del perfil nightly (semilla 3419975480): la reasignación tras vencer dejaba el
+# hallazgo overdue fuera del panel, que filtraba por el plazo de la acción nueva.
+@example(commands=[Tick(3600), EvaluateDeadlines(), Reassign(None)])
 def test_pr_laz_13_an_overdue_finding_stays_reachable_and_manageable(
     stack: DeadlinesStack, commands: list[LifecycleCommand]
 ) -> None:
