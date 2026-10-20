@@ -46,6 +46,8 @@ from vigia_platform.accreditation.events import (
 )
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.exposure.service import ExposureService
+from vigia_platform.accreditation.monthly.audit import SampleAuditService
+from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.task import MONTHLY_PACKAGE, MONTHLY_PACKAGE_SCHEDULE
 from vigia_platform.accreditation.record_types import ACCREDITATION_RECORD_TYPES
 from vigia_platform.ledger.registry import ChainLevel, ContentModel, RecordType, RecordTypeRegistry
@@ -219,6 +221,11 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/accreditation/monthly-packages"),
                 ("GET", "/accreditation/monthly-packages/{package_id}/sample"),
                 ("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download"),
+                # TASK-347: auditoría muestral y compromisos (SUP-U05-26 a 29).
+                ("POST", "/accreditation/sample-items/{sample_item_id}/result"),
+                ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
+                ("PATCH", "/accreditation/commitments/{commitment_id}"),
+                ("GET", "/accreditation/commitments"),
                 ("GET", "/accreditation/exposure"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
@@ -226,8 +233,13 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             assert isinstance(http, AccreditationHttp)
             assert isinstance(http.downloads, ExportDownloads)
             assert isinstance(http.exposure, ExposureService)
+            assert isinstance(http.sample_audit, SampleAuditService)
+            assert isinstance(http.commitments, CommitmentService)
             bare = unit.api_state(replace(services, evidence=None))[ACCREDITATION_STATE_KEY]
             assert isinstance(bare, AccreditationHttp) and bare.downloads is None
+            # Sin depósito de evidencias, las escrituras de la revisión mensual siguen instaladas.
+            assert isinstance(bare.sample_audit, SampleAuditService)
+            assert isinstance(bare.commitments, CommitmentService)
         else:
             # TASK-324: SUP-U05-33 en su forma mínima; TASK-348: SUP-U05-33 completa (marcar
             # leída y preferencias), su app.state y notification_engine.
@@ -347,7 +359,14 @@ def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
     # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317),
     # assistant_requested (TASK-316) y email_delivery_events_poll (TASK-325).
     assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 28
-    assert len(LOOP_RECORD_TYPES) == 13 and len(ACCREDITATION_RECORD_TYPES) == 4
+    assert len(LOOP_RECORD_TYPES) == 13
+    # Cuatro tipos de la acreditación; ``commitments_recorded`` también en su versión 2 (TASK-347).
+    assert len({definition.record_type for definition in ACCREDITATION_RECORD_TYPES}) == 4
+    assert [
+        (definition.record_type, definition.schema_version)
+        for definition in ACCREDITATION_RECORD_TYPES
+        if definition.schema_version != 1
+    ] == [("commitments_recorded", 2)]
     assert len(LOOP_EVENT_TYPES) == 21 and len(ACCREDITATION_EVENT_TYPES) == 4
     assert [event.event_name for event in ACCREDITATION_INTERNAL_EVENT_TYPES] == [
         "export_requested"

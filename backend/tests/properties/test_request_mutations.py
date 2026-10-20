@@ -47,6 +47,9 @@ from vigia_platform.accreditation.adapters.http.services import (
     ACCREDITATION_STATE_KEY,
     AccreditationHttp,
 )
+from vigia_platform.accreditation.detail_codes import AccreditationDetailCode
+from vigia_platform.accreditation.monthly import audit as audit_module
+from vigia_platform.accreditation.monthly import commitments as commitments_module
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.notifications.adapters.http.services import (
     NOTIFICATIONS_STATE_KEY,
@@ -159,6 +162,21 @@ VALID_BODIES: dict[tuple[str, str], dict[str, Any]] = {
         "email_enabled_digest": True,
         "weekly_digest_weekday": 1,
     },
+    # TASK-347: ``comment`` y ``note`` son opcionales a nivel de esquema; quedan fuera para que
+    # quitar o anular cualquiera de estos campos sea un rechazo.
+    ("POST", "/accreditation/sample-items/{sample_item_id}/result"): {
+        "outcome": "consistent_criterion",
+    },
+    ("POST", "/accreditation/monthly-packages/{package_id}/commitments"): {
+        "commitments": [
+            {
+                "text": "Revisar la señalización del pasillo peatonal de la zona",
+                "responsible_user_id": str(uuid.uuid4()),
+                "due_date": "2026-12-01",
+            }
+        ]
+    },
+    ("PATCH", "/accreditation/commitments/{commitment_id}"): {"state": "done"},
 }
 """Un cuerpo válido por ruta de personas con cuerpo del catálogo de la unidad de prueba. Las rutas
 del contrato (``/api/nodes``) responden ``RejectionResponse``, no ``ApiError``: sus cuerpos los
@@ -176,6 +194,9 @@ def _url(path: str, user_id: str | None = None) -> str:
         .replace("{analysis_id}", str(uuid.uuid4()))
         .replace("{detection_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
+        .replace("{sample_item_id}", str(uuid.uuid4()))
+        .replace("{package_id}", str(uuid.uuid4()))
+        .replace("{commitment_id}", str(uuid.uuid4()))
         # Ruta del contrato de VIG-152: el clip es un UUID v7 del nodo.
         .replace("{clip_id}", str(uuid7()))
     )
@@ -195,7 +216,17 @@ def world() -> Iterator[tuple[Harness, Any, dict[str, str]]]:
     app = harness.app(rate_limiter=UnlimitedRateLimiter())
     # La exportación (TASK-317) necesita la base: un cuerpo válido llega a un servicio que no
     # encuentra las zonas sintéticas (``not_found``), como el de adjuntos con la acción.
-    setattr(app.state, ACCREDITATION_STATE_KEY, AccreditationHttp(exports=_NoZones()))  # type: ignore[arg-type]
+    # TASK-347: los dobles de la auditoría muestral y de los compromisos hacen las comprobaciones
+    # del servicio que no miran la base y no encuentran ningún recurso sintético.
+    setattr(
+        app.state,
+        ACCREDITATION_STATE_KEY,
+        AccreditationHttp(
+            exports=_NoZones(),  # type: ignore[arg-type]
+            sample_audit=_NoSampleItems(),  # type: ignore[arg-type]
+            commitments=_NoCommitments(),  # type: ignore[arg-type]
+        ),
+    )
     # TASK-348: ``PUT /notifications/preferences`` también necesita la base; el doble responde
     # con el cuerpo actualizado, como el resto de las rutas con cuerpo que sí tienen éxito (200).
     setattr(app.state, NOTIFICATIONS_STATE_KEY, NotificationsHttp(preferences=_FakePreferences()))  # type: ignore[arg-type]
@@ -212,6 +243,48 @@ class _NoZones:
         raise ResourceNotFound()
 
     async def status(self, context: Any, export_id: Any) -> Any:
+        raise ResourceNotFound()
+
+
+class _NoSampleItems:
+    """``SampleAuditService`` sin base (TASK-347): las comprobaciones del cuerpo con el mismo
+    código del servicio; un cuerpo válido no encuentra ningún elemento sintético."""
+
+    async def record_result(
+        self,
+        context: Any,
+        sample_item_id: Any,
+        *,
+        outcome: object,
+        comment: object = None,
+        extra_fields: Any = None,
+    ) -> Any:
+        extras = extra_fields or {}
+        if audit_module.modification_attempt(outcome, extras):
+            raise audit_module.SampleAuditRejected(
+                AccreditationDetailCode.SAMPLE_CANNOT_MODIFY_CLASSIFICATION
+            )
+        if extras:
+            raise audit_module.SampleAuditRequestInvalid("campo desconocido")
+        audit_module._outcome(outcome)
+        audit_module._comment(comment)
+        raise ResourceNotFound()
+
+
+class _NoCommitments:
+    """``CommitmentService`` sin base (TASK-347), como ``_NoSampleItems``."""
+
+    async def record(self, context: Any, package_id: Any, drafts: Any) -> Any:
+        for draft in drafts:
+            commitments_module._text(draft.text)
+            commitments_module._responsible(draft.responsible_user_id)
+            commitments_module._due_date(draft.due_date)
+        raise ResourceNotFound()
+
+    async def update(
+        self, context: Any, commitment_id: Any, *, state: object, note: object = None
+    ) -> Any:
+        commitments_module._note(note, commitments_module._state(state))
         raise ResourceNotFound()
 
 
@@ -252,9 +325,16 @@ ROLE_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/loop/findings/{finding_state_id}/reopening"),
         ("POST", "/accreditation/exports"),
         ("POST", "/loop/review-queue/{detection_id}/resolution"),
+        # TASK-347: ``findings.classify`` y ``commitments.write`` (coordinación SST).
+        ("POST", "/accreditation/sample-items/{sample_item_id}/result"),
+        ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
+        ("PATCH", "/accreditation/commitments/{commitment_id}"),
     }
 )
 ACCEPTED_STATUS: dict[tuple[str, str], int] = {
+    ("POST", "/accreditation/sample-items/{sample_item_id}/result"): 404,
+    ("POST", "/accreditation/monthly-packages/{package_id}/commitments"): 404,
+    ("PATCH", "/accreditation/commitments/{commitment_id}"): 404,
     # Cuerpo válido: llega al servicio, que no encuentra la acción, el hallazgo (TASK-308,
     # ``ClassificationDouble``; TASK-311, ``ActionsDouble``), el análisis (TASK-315,
     # ``RootCauseDouble``), la detección (TASK-309, ``ReviewQueueDouble``) ni las zonas sintéticas.
