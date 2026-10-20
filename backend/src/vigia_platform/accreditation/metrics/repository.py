@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
-from vigia_platform.accreditation.metrics.model import MetricValue, ProgramMetricSnapshot
+from vigia_platform.accreditation.metrics.model import FRESHNESS, MetricValue, ProgramMetricSnapshot
 from vigia_platform.loop.calendar import month_bounds
 from vigia_platform.loop.projection.fold import ProjectionInput
 from vigia_platform.shared.context import repository
@@ -67,7 +67,7 @@ _SAVE = text(
     " WHERE (EXCLUDED.recomputed_at IS NULL OR kept.recomputed_at IS NOT NULL) AND ("
     " kept.inputs_digest<>EXCLUDED.inputs_digest OR"
     " (kept.recomputed_at IS NOT NULL AND (EXCLUDED.recomputed_at IS NULL"
-    " OR kept.recomputed_at<=:expired_before))) RETURNING *"
+    " OR kept.recomputed_at<=:expired_before OR kept.recomputed_at>:cache_now))) RETURNING *"
 )
 
 
@@ -236,6 +236,7 @@ class MetricsRepository:
             period=date.fromisoformat(snapshot.period + "-01"),
             values=_VALUES.dump_json(snapshot.values).decode(),
             expired_before=expired_before,
+            cache_now=expired_before + FRESHNESS,
         )
         row = (await transaction.execute(_SAVE, parameters)).first()
         return None if row is None else _snapshot(row, timezone)

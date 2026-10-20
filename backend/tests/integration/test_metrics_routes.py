@@ -234,6 +234,54 @@ class CountingRepository(MetricsRepository):
         return await super().records(transaction, **kwargs)
 
 
+def test_record_known_by_digest_is_not_omitted_by_the_cutoff_before_head(
+    stack: ExposureStack,
+) -> None:
+    """Regresión: una recepción concurrente entra en la cabeza mientras avanza Clock."""
+    org = stack.world.organization()
+    stack.finding(org, started=stack.now() - timedelta(minutes=10), duration=timedelta(seconds=1))
+
+    class RacingRepository(MetricsRepository):
+        async def head(self, transaction: Transaction, plant_id: uuid.UUID) -> int:
+            head = await super().head(transaction, plant_id)
+            stack.advance(0.001)
+            return head
+
+        async def records(self, transaction: Transaction, **kwargs: Any) -> Any:
+            # Insumos sintéticos al devolver la consulta: la recepción y la primera
+            # clasificación ya forman parte de la secuencia que contiene la huella.
+            records = await super().records(transaction, **kwargs)
+            result = []
+            for record in records:
+                document = dict(record.document)
+                if record.record_type == "classification":
+                    document["classified_at"] = stack.now().isoformat()
+                result.append(
+                    dataclasses.replace(record, received_at=stack.now(), document=document)
+                )
+            return tuple(result)
+
+    snapshot = stack.run(
+        service(stack, RacingRepository()).snapshot(stack.context(org), org.zone_id, stack.period())
+    )
+    classified = next(v for v in snapshot.values if v.key.value == "classified_in_time")
+    assert classified.denominator == classified.numerator == 1
+    assert snapshot.recomputed_at == stack.now()
+
+
+def test_clock_moving_back_does_not_serve_a_future_cached_stamp(stack: ExposureStack) -> None:
+    org = stack.world.organization()
+    stack.advance(10)
+    svc = service(stack)
+    context = stack.context(org)
+    period = stack.period()
+    first = stack.run(svc.snapshot(context, org.zone_id, period))
+    stack.world.stack.authz.sessions.clock.set(stack.now() - timedelta(seconds=1))
+    recomputed = stack.run(svc.snapshot(context, org.zone_id, period))
+    assert recomputed.recomputed_at == stack.now()
+    assert recomputed.recomputed_at != first.recomputed_at
+
+
 class ConcurrentRepository(MetricsRepository):
     def __init__(self) -> None:
         self.barrier = asyncio.Barrier(2)

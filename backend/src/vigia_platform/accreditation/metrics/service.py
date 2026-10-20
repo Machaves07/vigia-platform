@@ -160,8 +160,13 @@ class ProgramMetricsService:
                 raise MetricsRequestInvalid() from None
             if start > now or end <= place.created_at:
                 raise MetricsRequestInvalid()
-            cutoff = min(end, now)
             head = await self._repository.head(tx, place.plant_id)
+            # La cabeza puede incorporar una recepción que llegó mientras esperábamos la
+            # consulta. El corte temporal se toma después: nunca una huella nueva con una
+            # recepción omitida por el instante anterior a la lectura de la cabeza.
+            now = self._clock.now()
+            now -= timedelta(microseconds=now.microsecond % 1000)
+            cutoff = min(end, now)
             projection = await ExposureRepository().inputs(tx, place.plant_id)
             adoption = await self._repository.adoption(
                 tx,
@@ -229,7 +234,7 @@ class ProgramMetricsService:
         )
         async with self._database.transaction(context) as tx:
             saved = await self._repository.save(
-                tx, snapshot, timezone=place.timezone, expired_before=now - FRESHNESS
+                tx, snapshot, timezone=place.timezone, expired_before=self._clock.now() - FRESHNESS
             )
             if saved is None:
                 saved = await self._repository.stored(

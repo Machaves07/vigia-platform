@@ -32,6 +32,11 @@ concurrente obliga al siguiente lector a invalidar, nunca deja una huella nueva 
 La validez de 15 minutos depende solo de `Clock`; al cerrar, la tarea sustituye el recálculo por
 el definitivo, incluso con la misma huella.
 
+El corte temporal se toma después de leer la cabeza: una recepción incorporada durante esa
+consulta no se omite bajo una huella que ya la conoce. Un retroceso de `Clock` también invalida
+una caché con marca futura. Su comparación al guardar usa el mismo reloj, leído al guardar,
+no la marca antigua de un cálculo lento (que no debe sobrescribir una caché más reciente).
+
 La clave única existente y `ON CONFLICT DO UPDATE ... WHERE` excluyen materializaciones repetidas
 de una huella/ventana, sin candados adicionales ni escrituras de cadena. Un recálculo iniciado
 antes del cierre nunca pisa un definitivo, aunque llegue después con otra huella. Una caída
