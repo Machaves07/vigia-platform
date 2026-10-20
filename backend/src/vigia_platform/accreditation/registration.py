@@ -73,6 +73,8 @@ from vigia_platform.accreditation.export.worker import (
     register_export_worker,
 )
 from vigia_platform.accreditation.exposure.service import ExposureService
+from vigia_platform.accreditation.monthly.audit import SampleAuditService
+from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.package import (
     EvidencePort,
     MissingEvidence,
@@ -281,8 +283,8 @@ def exposure_service(services: UnitServices) -> ExposureService:
 
 
 def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
-    """El único ``AccreditationHttp`` del módulo: las tres tareas de servicio (TASK-317, 345 y
-    344) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
+    """El único ``AccreditationHttp`` del módulo: las tareas de servicio (TASK-317, 345, 344 y
+    347) añaden aquí su campo, nunca una clave nueva en ``API_STATE`` (``accreditation_api_state``
     exige una sola aparición de ``ACCREDITATION_STATE_KEY``)."""
     evidence = services.evidence
     monthly_repository = MonthlyPackageRepository(database=services.database)
@@ -321,6 +323,19 @@ def _accreditation_state(services: UnitServices) -> Mapping[str, object]:
             ),
             # TASK-322: SUP-U05-31.
             exposure=exposure_service(services),
+            # TASK-347: SUP-U05-26 a 29, escrituras del expediente sin depósito de evidencias.
+            sample_audit=SampleAuditService(
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
+            commitments=CommitmentService(
+                database=services.database,
+                writer=services.writer,
+                authorizer=services.authorizer,
+                clock=services.clock,
+            ),
             # TASK-323: SUP-U05-32, la adopción por zona.
             adoption=AdoptionReads(
                 database=services.database,

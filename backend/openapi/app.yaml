@@ -4872,6 +4872,142 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/sample-items/{sample_item_id}/result":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "Registra el resultado de un elemento de la muestra (no toca la clasificación)"
+      "operationId": "record_sample_result_accreditation_sample_items__sample_item_id__result_post"
+      "parameters":
+        - "name": "sample_item_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Sample Item Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SampleResultBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/SampleResultOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/monthly-packages/{package_id}/commitments":
+    "post":
+      "tags":
+        - "acreditación"
+      "summary": "Registra los compromisos del mando de línea sobre un paquete mensual sellado"
+      "operationId": "record_commitments_accreditation_monthly_packages__package_id__commitments_post"
+      "parameters":
+        - "name": "package_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Package Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CommitmentsBody"
+      "responses":
+        "201":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommitmentsRecordedOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/commitments/{commitment_id}":
+    "patch":
+      "tags":
+        - "acreditación"
+      "summary": "Actualiza el estado y la nota de cierre de un compromiso (registro nuevo)"
+      "operationId": "update_commitment_accreditation_commitments__commitment_id__patch"
+      "parameters":
+        - "name": "commitment_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Commitment Id"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CommitmentUpdateBody"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/CommitmentUpdatedOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
+  "/accreditation/commitments":
+    "get":
+      "tags":
+        - "acreditación"
+      "summary": "Compromisos de los paquetes mensuales de una zona y un mes, con su estado"
+      "operationId": "list_commitments_accreditation_commitments_get"
+      "parameters":
+        - "name": "zone_id"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Zone Id"
+        - "name": "period"
+          "in": "query"
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+            "title": "Period"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "type": "array"
+                "items":
+                  "$ref": "#/components/schemas/CommitmentOut"
+                "title": "Response List Commitments Accreditation Commitments Get"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/accreditation/exposure":
     "get":
       "tags":
@@ -7082,6 +7218,88 @@
         - "closed_at"
       "title": "CommissioningRecordOut"
       "description": "``CommissioningRecord`` (DE §2.15 con sus notas): el acta estructurada, sin responsable."
+    "CommitmentIn":
+      "properties":
+        "text":
+          "type": "string"
+          "title": "Text"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+        "due_date":
+          "type": "string"
+          "title": "Due Date"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "text"
+        - "responsible_user_id"
+        - "due_date"
+      "title": "CommitmentIn"
+    "CommitmentOut":
+      "properties":
+        "commitment_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Commitment Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "period":
+          "type": "string"
+          "title": "Period"
+        "text":
+          "type": "string"
+          "title": "Text"
+        "responsible_user_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Responsible User Id"
+        "due_date":
+          "type": "string"
+          "title": "Due Date"
+        "state":
+          "type": "string"
+          "title": "State"
+        "recorded_at":
+          "type": "string"
+          "title": "Recorded At"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "closed_note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed Note"
+        "closed_at":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Closed At"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment_id"
+        - "package_id"
+        - "zone_id"
+        - "period"
+        - "text"
+        - "responsible_user_id"
+        - "due_date"
+        - "state"
+        - "recorded_at"
+        - "record_id"
+        - "closed_note"
+        - "closed_at"
+      "title": "CommitmentOut"
     "CommitmentStatusOut":
       "properties":
         "commitment_id":
@@ -7096,6 +7314,81 @@
         - "commitment_id"
         - "state"
       "title": "CommitmentStatusOut"
+    "CommitmentUpdateBody":
+      "properties":
+        "state":
+          "type": "string"
+          "title": "State"
+        "note":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Note"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "state"
+      "title": "CommitmentUpdateBody"
+    "CommitmentUpdatedOut":
+      "properties":
+        "commitment":
+          "$ref": "#/components/schemas/CommitmentOut"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment"
+        - "record_id"
+      "title": "CommitmentUpdatedOut"
+    "CommitmentsBody":
+      "properties":
+        "commitments":
+          "items":
+            "$ref": "#/components/schemas/CommitmentIn"
+          "type": "array"
+          "maxItems": 20
+          "minItems": 1
+          "title": "Commitments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitments"
+      "title": "CommitmentsBody"
+    "CommitmentsRecordedOut":
+      "properties":
+        "commitment_batch_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Commitment Batch Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "zone_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Zone Id"
+        "commitments":
+          "items":
+            "$ref": "#/components/schemas/CommitmentOut"
+          "type": "array"
+          "title": "Commitments"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "commitment_batch_id"
+        - "record_id"
+        - "package_id"
+        - "zone_id"
+        - "commitments"
+      "title": "CommitmentsRecordedOut"
     "CommunicationState":
       "type": "string"
       "enum":
@@ -13095,6 +13388,71 @@
         - "reviewed_by"
         - "reviewed_at"
       "title": "SampleItemOut"
+    "SampleResultBody":
+      "properties":
+        "outcome":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Outcome"
+        "comment":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Comment"
+      "additionalProperties": true
+      "type": "object"
+      "title": "SampleResultBody"
+      "description": "El resultado de un elemento de la muestra.\n\nAdmite campos de más **solo para reconocerlos**: si nombran la clasificación auditada, el\nrechazo es ``sample_cannot_modify_classification`` (BR-LAZ-107); si no, ``invalid_request``.\nNada de lo que no sea ``outcome`` o ``comment`` llega nunca al registro."
+    "SampleResultOut":
+      "properties":
+        "sample_item_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Item Id"
+        "sample_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Sample Id"
+        "package_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Package Id"
+        "classification_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Classification Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "comment":
+          "anyOf":
+            - "type": "string"
+            - "type": "null"
+          "title": "Comment"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "reviewed_at":
+          "type": "string"
+          "title": "Reviewed At"
+        "review_completed":
+          "type": "boolean"
+          "title": "Review Completed"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "sample_item_id"
+        - "sample_id"
+        - "package_id"
+        - "classification_id"
+        - "outcome"
+        - "comment"
+        - "record_id"
+        - "reviewed_at"
+        - "review_completed"
+      "title": "SampleResultOut"
     "ScopeLevel":
       "type": "string"
       "enum":

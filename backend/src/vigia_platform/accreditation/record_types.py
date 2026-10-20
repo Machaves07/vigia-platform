@@ -13,6 +13,16 @@ regla de etiqueta:
 - ``sample_audit_result``: el resultado de un elemento de la muestra, que nunca cambia la
   clasificación auditada (H-39);
 - ``commitments_recorded``: los compromisos de la conversación mensual (1 a 20).
+
+``commitments_recorded`` tiene además una **versión 2** (TASK-347), que solo amplía (BR-NUC-52)
+para que la actualización de estado y nota de SUP-U05-28 sea **un registro nuevo** del expediente
+y la proyección ``Commitment`` siga siendo derivable de él: un registro lleva un alta
+(``commitments``, cada compromiso con ``state`` opcional) **o** una actualización (``updates``:
+``commitment_id``, ``state`` y ``closed_note`` de 0 a 500, la nota de cierre de DE §3.3). La
+actualización no copia el texto del compromiso: no cambia y no se revalida contra una lista de
+vocabulario posterior al alta. La versión 2 declara por eso una ruta de texto libre más,
+``/updates[*]/closed_note``, que pasa la política base y los dos validadores de U-04. Ninguna
+operación escribe ya la versión 1, pero sigue registrada para presentar los registros históricos.
 """
 
 from __future__ import annotations
@@ -45,6 +55,7 @@ from vigia_platform.shared.context import ActorUnit
 
 __all__ = [
     "ACCREDITATION_RECORD_TYPES",
+    "COMMITMENTS_RECORDED_V2_FREE_TEXT_PATHS",
     "NARRATIVE_FREE_TEXT_PATHS",
     "SNAPSHOT_TEXT_PATHS",
     "register_accreditation_record_types",
@@ -79,6 +90,8 @@ CommitmentText = Annotated[StrictStr, Field(min_length=20, max_length=1000)]
 """Texto de un compromiso (§3.3)."""
 CommentText = Annotated[StrictStr, Field(min_length=1, max_length=1000)]
 """Comentario de la auditoría por muestra (§3.3: 0 a 1000)."""
+ClosedNote = Annotated[StrictStr, Field(min_length=1, max_length=500)]
+"""Nota de cierre de un compromiso (§3.3: 0 a 500; sin nota, el campo no va)."""
 
 
 # --- exportación (C-PLA-29) -----------------------------------------------------------------
@@ -267,6 +280,48 @@ class CommitmentsRecorded(ContentModel):
     recorded_at: Timestamp
 
 
+class CommitmentEntryV2(ContentModel):
+    """Un compromiso que se da de alta, con su estado (versión 2, TASK-347; SUP-U05-27)."""
+
+    commitment_id: UUIDv7
+    text: CommitmentText
+    responsible_user_id: UUID
+    due_date: CalendarDate
+    state: CommitmentState | None = None
+    """Sin estado (los registros de la versión 1), el compromiso nace ``open``."""
+
+
+class CommitmentUpdate(ContentModel):
+    """El cambio de estado y nota de un compromiso ya registrado (versión 2; SUP-U05-28).
+
+    Solo el identificador, el estado y la nota: el texto, el responsable y la fecha no cambian y
+    no se vuelven a escribir (ni a validar contra una lista de vocabulario posterior al alta)."""
+
+    commitment_id: UUIDv7
+    state: CommitmentState
+    closed_note: ClosedNote | None = None
+    """Solo con ``done`` o ``dropped`` (lo exige el servicio, no el esquema)."""
+
+
+class CommitmentsRecordedV2(ContentModel):
+    """Versión 2: un alta de compromisos (``commitments``) **o** una actualización
+    (``updates``), nunca las dos ni ninguna."""
+
+    commitment_batch_id: UUIDv7
+    package_id: UUIDv7
+    zone_id: UUID
+    commitments: Annotated[tuple[CommitmentEntryV2, ...], Field(max_length=MAX_COMMITMENTS)] = ()
+    updates: Annotated[tuple[CommitmentUpdate, ...], Field(max_length=MAX_COMMITMENTS)] = ()
+    recorded_by: UserSnapshot
+    recorded_at: Timestamp
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> Self:
+        if bool(self.commitments) == bool(self.updates):
+            raise ValueError("un alta (commitments) o una actualización (updates), solo una")
+        return self
+
+
 # --- registro -------------------------------------------------------------------------------
 
 NARRATIVE_FREE_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
@@ -288,18 +343,31 @@ SNAPSHOT_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
 }
 """Instantáneas del usuario que la metapropiedad de U-02 cuenta como texto libre."""
 
+COMMITMENTS_RECORDED_V2_FREE_TEXT_PATHS: Final[tuple[str, ...]] = ("/updates[*]/closed_note",)
+"""La ruta narrativa que añade la versión 2 de ``commitments_recorded`` (TASK-347)."""
+
 
 def _u04(
-    name: str, model: type[ContentModel], source_key_path: str, outbox_events: tuple[str, ...]
+    name: str,
+    model: type[ContentModel],
+    source_key_path: str,
+    outbox_events: tuple[str, ...],
+    *,
+    schema_version: int = 1,
+    extra_free_text_paths: tuple[str, ...] = (),
 ) -> RecordType:
     return RecordType(
         record_type=name,
         writer_unit=ActorUnit.U04,
         chain_level=ChainLevel.PLANT,
-        schema_version=1,
+        schema_version=schema_version,
         content_model=model,
         source_key_path=source_key_path,
-        free_text_paths=(*NARRATIVE_FREE_TEXT_PATHS[name], *SNAPSHOT_TEXT_PATHS[name]),
+        free_text_paths=(
+            *NARRATIVE_FREE_TEXT_PATHS[name],
+            *extra_free_text_paths,
+            *SNAPSHOT_TEXT_PATHS[name],
+        ),
         outbox_events=outbox_events,
     )
 
@@ -319,11 +387,20 @@ ACCREDITATION_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         "/commitment_batch_id",
         ("commitments_recorded",),
     ),
+    _u04(
+        "commitments_recorded",
+        CommitmentsRecordedV2,
+        "/commitment_batch_id",
+        ("commitments_recorded",),
+        schema_version=2,
+        extra_free_text_paths=COMMITMENTS_RECORDED_V2_FREE_TEXT_PATHS,
+    ),
 )
-"""Los cuatro tipos de la acreditación, en el orden de §5.1."""
+"""Los cuatro tipos de la acreditación, en el orden de §5.1, cada uno con todas sus versiones en
+orden: todos en la 1 y ``commitments_recorded`` también en la 2 (TASK-347)."""
 
 
 def register_accreditation_record_types(registry: RecordTypeRegistry) -> None:
-    """Registra los cuatro tipos de la acreditación al arrancar."""
+    """Registra los cuatro tipos de la acreditación (con todas sus versiones) al arrancar."""
     for definition in ACCREDITATION_RECORD_TYPES:
         registry.register(definition)

@@ -117,6 +117,17 @@ BODIES: dict[str, dict[str, Any]] = {
         "package_form": "without_clips",
     },
     "/accreditation/exports/{export_id}/download-url": {},
+    "/accreditation/sample-items/{sample_item_id}/result": {"outcome": "consistent_criterion"},
+    "/accreditation/monthly-packages/{package_id}/commitments": {
+        "commitments": [
+            {
+                "text": "Revisar la señalización del pasillo peatonal de la zona",
+                "responsible_user_id": str(uuid.uuid4()),
+                "due_date": "2026-12-01",
+            }
+        ]
+    },
+    "/accreditation/commitments/{commitment_id}": {"state": "done"},
 }
 OPERATION_PREFIX = "/platform/"
 """Rutas reales de operación (TASK-137): sin servicios en el arnés no tienen efecto observable, así
@@ -156,6 +167,9 @@ def _url(path: str) -> str:
         .replace("{analysis_id}", str(uuid.uuid4()))
         .replace("{step_index}", "1")
         .replace("{notification_id}", str(uuid.uuid4()))
+        .replace("{sample_item_id}", str(uuid.uuid4()))
+        .replace("{package_id}", str(uuid.uuid4()))
+        .replace("{commitment_id}", str(uuid.uuid4()))
     )
 
 
@@ -203,6 +217,10 @@ def test_the_catalog_has_state_changing_routes(harness: Harness) -> None:
         ("POST", "/accreditation/exports"),
         # URL de descarga del documento de una exportación (TASK-345).
         ("POST", "/accreditation/exports/{export_id}/download-url"),
+        # Resultado de la auditoría muestral y compromisos del mando de línea (TASK-347).
+        ("POST", "/accreditation/sample-items/{sample_item_id}/result"),
+        ("POST", "/accreditation/monthly-packages/{package_id}/commitments"),
+        ("PATCH", "/accreditation/commitments/{commitment_id}"),
         # Marcar leída y preferencias de notificaciones de U-04 (TASK-348).
         ("POST", "/notifications/{notification_id}/read"),
         ("PUT", "/notifications/preferences"),
