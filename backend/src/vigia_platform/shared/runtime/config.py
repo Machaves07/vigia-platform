@@ -35,7 +35,11 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   destinos de salida del worker (LC-LAZ-39; por defecto ``api.anthropic.com`` y
   ``email.<AWS_REGION>.amazonaws.com``), y ``VIGIA_LOOP_BULKHEADS``
   (``consumidor=concurrencia,…``), que cambia las concurrencias del diseño de los mamparos
-  (LC-LAZ-40);
+  (LC-LAZ-40); ``VIGIA_EMAIL_EVENTS_QUEUE_URL`` (TASK-325, LC-LAZ-34), la URL de la cola
+  gestionada de rebotes y quejas que Infrastructure Design de U-04 declara (``vigia-email-events-
+  <entorno>``): sin ella, el consumidor ``email_delivery_events`` no arranca; y
+  ``VIGIA_EMAIL_SENDER_DOMAIN`` (TASK-325, LC-LAZ-33), el dominio verificado del remitente
+  (``no-responder@mail.<dominio>``): sin él, ``SesEmailSender`` no se registra;
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
   ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
 
@@ -103,6 +107,10 @@ EGRESS_HOST: Final = re.compile(
 comodín ni dirección IP (la última etiqueta empieza por letra)."""
 _BULKHEAD_ENTRY: Final = re.compile(r"([a-z][a-z0-9_]{0,63})=([1-9][0-9]?)")
 """Una entrada de ``VIGIA_LOOP_BULKHEADS``: ``consumidor=concurrencia`` (de 1 a 99)."""
+_QUEUE_URL: Final = re.compile(
+    r"https://sqs\.[a-z0-9-]{1,50}\.amazonaws\.com/[0-9]{12}/[A-Za-z0-9_-]{1,80}"
+)
+"""URL de una cola de SQS (``notifications.adapters.ses.delivery_events``, LC-LAZ-34)."""
 
 
 class RuntimeConfigInvalid(ValueError):
@@ -253,6 +261,8 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     _Variable("assistant_api_host", "VIGIA_ASSISTANT_API_HOST", _text(EGRESS_HOST)),
     _Variable("email_api_host", "VIGIA_EMAIL_API_HOST", _text(EGRESS_HOST)),
     _Variable("loop_bulkheads", "VIGIA_LOOP_BULKHEADS", _bulkheads),
+    _Variable("email_events_queue_url", "VIGIA_EMAIL_EVENTS_QUEUE_URL", _text(_QUEUE_URL)),
+    _Variable("email_sender_domain", "VIGIA_EMAIL_SENDER_DOMAIN", _text(EGRESS_HOST)),
 )
 """Cada campo de ``RuntimeConfig`` con su variable y su lector."""
 
@@ -311,6 +321,13 @@ class RuntimeConfig(BaseModel):
     ``email.<AWS_REGION>.amazonaws.com``."""
     loop_bulkheads: dict[str, int] | None = None
     """Concurrencias de los mamparos de U-04 que cambian el valor del diseño (LC-LAZ-40)."""
+    email_events_queue_url: str | None = None
+    """URL de la cola gestionada de rebotes y quejas (``vigia-email-events-<entorno>``,
+    LC-LAZ-34); sin ella, el consumidor ``email_delivery_events`` no arranca."""
+    email_sender_domain: str | None = None
+    """Dominio verificado del remitente (U-04, LC-LAZ-33): el correo sale de
+    ``no-responder@mail.<este dominio>``; sin él, ``SesEmailSender`` no se registra y U-02 sigue
+    degradando a mostrar el enlace de invitación una sola vez (BR-NUC-32)."""
 
     @model_validator(mode="after")
     def _person_reserve(self) -> Self:

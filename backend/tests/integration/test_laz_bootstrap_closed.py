@@ -96,11 +96,12 @@ MISSING: Final[tuple[tuple[str, str], ...]] = (
 SUBSCRIBERS: Final = {
     "export_requested": "export_worker",
     "assistant_requested": "assistant_worker",
+    "email_delivery_events_poll": "email_delivery_events",
 }
-"""Eventos de U-04 cuya suscripción se conserva al quitarlos (``export_worker``, TASK-317, y
-``assistant_worker``, TASK-316), con su consumidor: el catálogo se niega a componerse con la
-suscripción huérfana. De los demás eventos de U-04 también se quita la suscripción de
-``notification_engine`` (TASK-324)."""
+"""Eventos de U-04 cuya suscripción se conserva al quitarlos (``export_worker``, TASK-317,
+``assistant_worker``, TASK-316, y ``email_delivery_events``, TASK-325), con su consumidor: el
+catálogo se niega a componerse con la suscripción huérfana. De los demás eventos de U-04 también
+se quita la suscripción de ``notification_engine`` (TASK-324)."""
 SUBSCRIBED: Final = frozenset(SUBSCRIBERS)
 
 ONE_OF_EACH: Final = (

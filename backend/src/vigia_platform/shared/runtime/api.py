@@ -50,10 +50,7 @@ from vigia_platform.identity.adapters.session_store import PostgresSessionStore
 from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.concessions import ConcessionService
 from vigia_platform.identity.application.hierarchy import HierarchyService
-from vigia_platform.identity.application.invitations import (
-    EmailSenderRegistry,
-    InvitationService,
-)
+from vigia_platform.identity.application.invitations import InvitationService
 from vigia_platform.identity.application.me import MeService
 from vigia_platform.identity.application.organization import OrganizationSettingsService
 from vigia_platform.identity.application.password_change import PasswordChangeService
@@ -71,6 +68,7 @@ from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.ledger.application.integrity_requests import IntegrityRequests
 from vigia_platform.ledger.application.labels import LabelService
 from vigia_platform.ledger.application.reader import LectorExpediente
+from vigia_platform.notifications.registration import EMAIL_SENDERS
 from vigia_platform.shared.adapters.http import PlatformHttp
 from vigia_platform.shared.api.app import AppConfig, AppRuntime
 from vigia_platform.shared.api.middleware import AuditCsrfRejections, ContextAuthorizer
@@ -204,7 +202,7 @@ async def compose_api_runtime(
         ),
         me=MeService(database, contexts=contexts, provider_organization_id=provider),
         provider_organization_id=provider,
-        users=UserService(deps, senders=EmailSenderRegistry(), link_base=link_base),
+        users=UserService(deps, senders=EMAIL_SENDERS, link_base=link_base),
         roles=RoleService(deps),
         second_factor_reset=SecondFactorResetService(deps, second_factor),
         # A-60 (VIG-180): la zona nace con su sobre GateState inicial firmado.

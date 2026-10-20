@@ -244,6 +244,10 @@ async def test_upgrade_head_applies_laz_0030(superuser: Any) -> None:
             expected.add("provider_concession_scope")
         if table in ORGANIZATION_ONLY_TABLES:
             expected.add("provider_context_denied")
+        if table == "email_provider_message_key":
+            # laz_0036 (TASK-325): igual que identity.invitation_lookup (nuc_0011), solo dentro
+            # de notifications.email_provider_message_lookup.
+            expected.add("email_provider_message_lookup")
         assert set(named) == expected, table
         isolation = named["organization_isolation"]
         assert (isolation["permissive"], isolation["cmd"]) == ("PERMISSIVE", "ALL"), table
@@ -259,6 +263,11 @@ async def test_upgrade_head_applies_laz_0030(superuser: Any) -> None:
             assert (denied["permissive"], denied["cmd"]) == ("RESTRICTIVE", "ALL"), table
             for clause in (denied["qual"], denied["with_check"]):
                 assert clause == "(NOT identity.rls_provider_context())", table
+        if "email_provider_message_lookup" in named:
+            lookup = named["email_provider_message_lookup"]
+            assert (lookup["permissive"], lookup["cmd"]) == ("PERMISSIVE", "SELECT"), table
+            assert "vigia.email_provider_message_lookup" in lookup["qual"], table
+            assert lookup["with_check"] is None, table
 
     # Ningún DELETE ni TRUNCATE; SELECT e INSERT en las entidades; las claves, solo SELECT.
     for table in NOTIFICATIONS_TABLES:

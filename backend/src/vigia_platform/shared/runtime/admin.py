@@ -46,7 +46,7 @@ from vigia_platform.fleet.application.revocation_list_task import (
 from vigia_platform.identity.application.admin_cli import AdminConfig, AdminRuntime
 from vigia_platform.identity.application.common import IdentityDependencies
 from vigia_platform.identity.application.hierarchy import OrganizationGenesis
-from vigia_platform.identity.application.invitations import EmailSenderRegistry
+from vigia_platform.notifications.registration import EMAIL_SENDERS
 from vigia_platform.shared.archive.partitions import PartitionMaintenance
 from vigia_platform.shared.archive.restore_drill import RestoreDrills
 from vigia_platform.shared.clock import Clock, SystemClock
@@ -163,7 +163,7 @@ async def compose_admin_runtime(
         authorizer=services.authorizer,
         genesis=OrganizationGenesis(
             deps,
-            senders=EmailSenderRegistry(),
+            senders=EMAIL_SENDERS,
             link_base=config.link_base if config.link_base is not None else _UNSET_LINK_BASE,
         ),
         signing=services.signing,
