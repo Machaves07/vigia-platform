@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import exact_query, no_store
@@ -95,9 +95,9 @@ class NotificationPageOut(_Strict):
 
 
 class NotificationPreferenceUpdateIn(_Strict):
-    email_enabled_normal: bool
-    email_enabled_digest: bool
-    weekly_digest_weekday: Annotated[int, Field(ge=1, le=7)]
+    email_enabled_normal: StrictBool
+    email_enabled_digest: StrictBool
+    weekly_digest_weekday: Annotated[StrictInt, Field(ge=1, le=7)]
 
 
 class NotificationPreferenceOut(_Strict):
