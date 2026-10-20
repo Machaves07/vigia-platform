@@ -45,6 +45,10 @@ from vigia_platform.fleet.application.inventory_read import FleetInventory
 from vigia_platform.identity.authz.authorize import Authorizer
 from vigia_platform.ledger.application.audit_writer import AuditWriter
 from vigia_platform.ledger.application.coverage import CoverageService
+from vigia_platform.ledger.application.evidence_read import (
+    EvidenceService as LedgerEvidenceService,
+)
+from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
@@ -53,6 +57,7 @@ from vigia_platform.loop.application.actions import ActionService
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
+from vigia_platform.loop.application.detail import FindingDetailService
 from vigia_platform.loop.application.evidence import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.reopening import ReopeningService
@@ -188,6 +193,7 @@ def _loop(services: LazServices) -> Mapping[str, object]:
                 clock=services.clock,
             ),
             inbox=InboxService(database=database, authorizer=services.authorizer),  # TASK-307
+            detail=_detail(services),  # TASK-342
             review_queue=ReviewQueueService(  # TASK-309
                 database=database,
                 writer=services.writer,
@@ -210,6 +216,40 @@ class _NoSigner:
 
     async def presign_attachment_get(self, *args: object, **kwargs: object) -> Any:
         raise AssertionError("una descarga fuera de alcance no firma ninguna URL")
+
+
+class _NoClipReads:
+    """El detalle de un hallazgo de B responde ``not_found`` antes de pedir ninguna URL."""
+
+    async def head_object(self, *args: object, **kwargs: object) -> Any:
+        raise AssertionError("un detalle fuera de alcance no lee ningún clip")
+
+    async def presign_get(self, *args: object, **kwargs: object) -> Any:
+        raise AssertionError("un detalle fuera de alcance no firma ninguna URL")
+
+
+def _detail(services: LazServices) -> FindingDetailService:
+    """El detalle (TASK-342) con los puertos reales de U-02 y de U-03 sobre la base de la prueba."""
+    database: Any = services.database
+    ports = catalog_query_ports(database)
+    return FindingDetailService(
+        database=database,
+        authorizer=services.authorizer,
+        reader=LectorExpediente(database=database, audit=services.audit, clock=services.clock),
+        evidence=LedgerEvidenceService(
+            database=database, audit=services.audit, storage=_NoClipReads()
+        ),
+        catalog=ports.catalog,
+        gates=ports.gates,
+        fleet=FleetInventory(
+            database=database,
+            authorizer=services.authorizer,
+            audit=services.audit,
+            clock=services.clock,
+            provider_organization_id=_NO_PROVIDER,
+        ),
+        coverage=CoverageService(database=database, audit=services.audit, clock=services.clock),
+    )
 
 
 def _accreditation(services: LazServices) -> Mapping[str, object]:
@@ -495,6 +535,17 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         Case(
             Kind.RESOURCE, lambda i: Call("GET", "/loop/findings", params={"zone_id": str(i.zone)})
         ),
+    ),
+    # VIG-232 (TASK-342): el detalle y el historial de un hallazgo de B responden igual que los de
+    # uno inexistente (not_found, nunca gate_state_unavailable ni una sección degradada); no se
+    # lee el expediente de B ni se pide ninguna URL de sus clips.
+    (
+        ("GET", "/loop/findings/{finding_state_id}"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.record}")),
+    ),
+    (
+        ("GET", "/loop/findings/{finding_state_id}/classifications"),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.record}/classifications")),
     ),
     # VIG-229 (TASK-313): el panel de vencidos de una planta de B responde igual que el de una
     # inexistente (not_found, nunca forbidden ni una página vacía con el umbral de B).

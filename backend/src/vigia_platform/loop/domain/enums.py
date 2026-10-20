@@ -47,6 +47,7 @@ __all__ = [
     "EvidenceRefKind",
     "ExportState",
     "ExposureStatus",
+    "FindingDetailNotice",
     "FindingLifecycleState",
     "InboxFindingNotice",
     "InboxPartitionNotice",
@@ -311,6 +312,27 @@ class InboxFindingNotice(enum.StrEnum):
     MISSING_SEGMENTS_DECLARED = "missing_segments_declared"
 
 
+class FindingDetailNotice(enum.StrEnum):
+    """``finding_detail_notice``: los avisos del detalle de un hallazgo (TASK-342; BR-LAZ-10, 11,
+    150, 152 y 155; PAT-LAZ-RES-04). Los cuatro primeros son los de la bandeja; los demás declaran
+    una sección degradada o la versión posterior del estándar. **Ninguno oculta el hallazgo** y
+    ninguno afirma que la zona estuviera observada."""
+
+    AGREEMENT_REVOKED = "agreement_revoked"
+    WALK_TEST_REGRESSION_PENDING = "walk_test_regression_pending"
+    EVIDENCE_FLAGGED = "evidence_flagged"
+    MISSING_SEGMENTS_DECLARED = "missing_segments_declared"
+    LATER_STANDARD_VERSION = "later_standard_version"
+    """BR-LAZ-152: se evaluó con la versión citada; rige una posterior desde ``since``."""
+    STANDARD_TEXT_UNAVAILABLE = "standard_text_unavailable"
+    """Sin el texto del estándar: se muestra la cita ``(standard_id, version)``."""
+    COVERAGE_UNAVAILABLE = "coverage_unavailable"
+    NODE_STATE_UNAVAILABLE = "node_state_unavailable"
+    EVIDENCE_URL_UNAVAILABLE = "evidence_url_unavailable"
+    """Sin URL de lectura (almacén caído): se muestra la referencia del clip."""
+    SEGMENT_RECORDS_LIMITED = "segment_records_limited"
+
+
 class EffectOnLoop(enum.StrEnum):
     """``effect_on_loop`` de una clasificación (§2.3)."""
 
@@ -490,6 +512,7 @@ LOOP_LABEL_BINDINGS: Final[Mapping[str, type[enum.Enum]]] = {
     "inbox_zone_notice": InboxZoneNotice,
     "inbox_partition_notice": InboxPartitionNotice,
     "inbox_finding_notice": InboxFindingNotice,
+    "finding_detail_notice": FindingDetailNotice,
 }
 """Enumeraciones del lazo con etiqueta en ``labels.loop.es.json`` (NFR-LAZ-52)."""
 

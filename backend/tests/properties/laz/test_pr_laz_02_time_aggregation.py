@@ -11,25 +11,47 @@ PAT-LAZ-MAN-05).
   ``false``, la marca es la exacta (al milisegundo de la vista). La fila no cambia: la agregación
   es solo de presentación (el ``content_hash`` del registro no se toca: lo comprueba
   ``tests/integration/test_loop_inbox_routes.py`` contra el expediente real).
+- Ampliada al **detalle** y al **historial** (TASK-342): sobre ``detail_inputs`` (todo lo que el
+  servicio lee, con cada puerto respondiendo o no), las marcas de la respuesta HTTP son
+  **exactamente** las del oráculo ``marks``, cada una presentada (en zona unipersonal, el inicio
+  de su ventana; si no, la exacta al milisegundo): ninguna falta, ninguna sobra y ninguna sale
+  sin agregar. Ningún campo de marca (``*_at``, ``since``, ``effective_*``) sale en otro formato.
+  Lo leído no cambia y el ``content_hash`` de cada registro sale tal cual (contra el expediente
+  real: ``tests/integration/test_loop_detail_routes.py``).
 """
 
 from __future__ import annotations
 
 import copy
+import re
+from collections import Counter
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from tests.properties.laz.strategies.detail import (
+    classification_rows,
+    detail_inputs,
+    history_marks,
+    marks,
+)
 from tests.properties.laz.strategies.inbox import (
+    PrivacyZone,
     findings_over_time,
     instants,
     windows,
     zones_with_privacy,
 )
-from vigia_platform.loop.adapters.http.findings_routes import item_view
+from vigia_platform.loop.adapters.http.findings_routes import (
+    detail_view,
+    history_view,
+    item_view,
+)
+from vigia_platform.loop.application.detail import classification_history, finding_detail
 from vigia_platform.loop.application.inbox import inbox_item
 from vigia_platform.loop.domain.time_aggregation import (
     GRID_ORIGIN,
@@ -156,3 +178,77 @@ def test_pr_laz_02_every_mark_of_an_item_is_aggregated_only_in_single_occupancy_
                 assert shown == format_timestamp(real.astimezone(UTC)), (name, shown)
         # El cursor es el cubo de la proyección, nunca la marca exacta.
         assert item.cursor.occurred_at_bucket == datetime.fromisoformat(row["occurred_at_bucket"])
+
+
+# --- el detalle y el historial (TASK-342) -------------------------------------------------------
+
+_STAMP: Final = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+_MARK_KEYS: Final = re.compile(r"(_at|^since|^effective_from|^effective_until|_since)$")
+
+
+def _leaves(value: Any, key: str = "") -> Iterator[tuple[str, Any]]:
+    """``(clave, valor)`` de cada hoja de la respuesta JSON, recursivamente."""
+    if isinstance(value, dict):
+        for name, item in value.items():
+            yield from _leaves(item, name)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _leaves(item, key)
+    else:
+        yield key, value
+
+
+def _expected(real: list[datetime], zone: PrivacyZone) -> Counter[str]:
+    return Counter(
+        format_timestamp(
+            presented(
+                moment, single_occupancy=zone.single_occupancy, window_minutes=zone.window_minutes
+            )
+        )
+        for moment in real
+    )
+
+
+def _assert_marks(view: dict[str, Any], real: list[datetime], zone: PrivacyZone) -> None:
+    leaves = list(_leaves(view))
+    for key, value in leaves:
+        if _MARK_KEYS.search(key):
+            assert value is None or _STAMP.fullmatch(value), (key, value)
+    stamps = [value for _, value in leaves if isinstance(value, str) and _STAMP.fullmatch(value)]
+    assert Counter(stamps) == _expected(real, zone)
+    if zone.single_occupancy:
+        for stamp in stamps:
+            assert _on_grid(datetime.fromisoformat(stamp), zone.window_minutes), stamp
+
+
+@given(st.data(), zones_with_privacy())
+def test_pr_laz_02_every_mark_of_the_detail_is_aggregated_only_in_single_occupancy_zones(
+    data: st.DataObject, zone: PrivacyZone
+) -> None:
+    inputs = data.draw(detail_inputs(zone))
+    read = (inputs.subject, inputs.episode, inputs.classifications, inputs.actions)
+    before = copy.deepcopy((*read, inputs.analyses))
+    view = detail_view(finding_detail(inputs)).model_dump(mode="json")
+    assert (*read, inputs.analyses) == before  # lo leído no cambia: solo es presentación
+    assert view["time_aggregated"] is zone.single_occupancy
+    assert view["aggregation_window_minutes"] == (
+        zone.window_minutes if zone.single_occupancy else None
+    )
+    _assert_marks(view, marks(inputs), zone)
+    assert [r["content_hash"] for r in view["records"]] == [r.content_hash for r in inputs.records]
+
+
+@given(st.data(), zones_with_privacy())
+def test_pr_laz_02_every_mark_of_the_history_is_aggregated_only_in_single_occupancy_zones(
+    data: st.DataObject, zone: PrivacyZone
+) -> None:
+    (subject,) = data.draw(findings_over_time(zone, min_size=1, max_size=1))
+    rows = data.draw(classification_rows())
+    before = copy.deepcopy(rows)
+    view = history_view(classification_history(subject, rows)).model_dump(mode="json")
+    assert rows == before
+    assert view["time_aggregated"] is zone.single_occupancy
+    assert [c["sequence_in_subject"] for c in view["classifications"]] == [
+        r["sequence_in_subject"] for r in rows
+    ]
+    _assert_marks(view, history_marks(rows), zone)
