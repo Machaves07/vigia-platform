@@ -4,7 +4,7 @@
   un informe JSON con la semilla, la inyección, lo esperado, lo observado y el resultado.
 - Un escenario que falla deja el informe con ``failed`` y el error, y el fallo sale tal cual.
 - El generador del escenario solo depende de la semilla y del identificador.
-- Solo admite identificadores ``FS-NUC-nn`` (con letra de variante) o ``NFR-NUC-nn``.
+- Solo admite los identificadores cerrados FS-NUC/GOB/LAZ, DR-LAZ y NFR-NUC.
 """
 
 from __future__ import annotations
@@ -80,3 +80,15 @@ def test_only_closed_scenario_ids_are_accepted(scenario_id: str) -> None:
         scenario(scenario_id, title="t", injection="i", expected="e"),
     ):
         pass
+
+
+@pytest.mark.parametrize("scenario_id", ["FS-LAZ-01", "FS-LAZ-05a", "DR-LAZ-01", "DR-LAZ-02"])
+def test_laz_scenarios_use_the_same_seeded_report(
+    scenario_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(REPORT_DIR_VARIABLE, str(tmp_path))
+    with scenario(scenario_id, title="U-04", injection="sintética", expected="informe"):
+        pass
+    report = _report(tmp_path, scenario_id)
+    assert report["seed"] == str(session_seed())
+    assert report["outcome"] == "passed"
