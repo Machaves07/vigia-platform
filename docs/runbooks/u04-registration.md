@@ -75,7 +75,7 @@ Se reutiliza la orden de U-02: mantiene `event_id`, reinicia la entrega y conser
 de cola muerta. El despachador vuelve a aplicar el consumidor idempotente; el efecto existente
 no se duplica. La prueba administrativa reproduce este caso sobre `review_queue` real.
 
-## Verificación y limitación registrada
+## Verificación
 
 `test_laz_startup_checks.py` retira las 61 piezas de dominio/registro/puerto y comprueba las
 tres raíces y sus códigos de salida; los trabajos internos adicionales siguen comprobados
@@ -83,8 +83,14 @@ por `test_laz_bootstrap_closed.py`. También se alteran unidad, horario e iterac
 y se quita o intercambia el mamparo de cada consumidor. `test_registered_tasks.py` fija las
 cadencias de forma independiente de los manejadores.
 
-**PR-LAZ-48 sigue pendiente**: la igualdad literal de notificaciones entre ejecución continua y
-caída de 48 h no concuerda con la separación entre envíos de U04-H-07. El contraejemplo local
-de VIG-241 deja 3 `review_overdue` en ejecución continua y 1 al volver. No se ha alterado esa
-semántica ni se declara aprobada la propiedad transversal de las diez tareas. La decisión
-pendiente está registrada en VIG-267, que bloquea el cierre de VIG-241.
+`tests/properties/laz/test_pr_laz_48_tasks_idempotent.py` (PR-LAZ-48) recorre secuencias de
+reloj con huecos de días con las diez tareas periódicas: ejecución continua, dos veces seguidas
+y caída de 48 h dejan el mismo estado final. Tras una caída:
+
+- `review_reminders` envía **un** recordatorio y los siguientes respetan
+  `reminder_interval_hours` desde ese envío; no recupera los omitidos (decisión del dueño en
+  VIG-241 del 2026-10-20, U04-H-07).
+- `email_grouping` y `digest_weekly` agrupan lo acumulado en un solo envío.
+- `adoption_check` publica la racha que sigue abierta, con los días transcurridos; una racha que
+  empezó y terminó dentro de la caída no se alerta a posteriori.
+- `verify_loop_projection` no registra muestras de los días que no corrió.
