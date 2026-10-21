@@ -35,7 +35,7 @@ from vigia_platform.accreditation.exposure.indicator import (
 from vigia_platform.loop.domain.enums import ExposureStatus
 from vigia_platform.shared.context import Role, ScopeLevel
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 _NOT_COMPUTABLE = "accreditation_exposure_not_computable"
 _FIGURES = ("confirmed_minutes", "pending_classification_minutes", "observable_coverage_percent")
