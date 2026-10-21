@@ -60,9 +60,9 @@ evaluaciones en tasas, márgenes y duraciones; una en los hechos únicos) y el r
 atiende en la descripción. ``periodic-task-stale-<tarea>`` se instancia por cada una de las diez
 periódicas de ``U04_TASKS`` (las nueve de LC-LAZ-37 y ``email_delivery_events_poll`` de
 TASK-325; ``rebuild_loop_projection`` es a demanda, U04-H-14). Toda alarma de aplicación vigila
-una métrica que el código emite: donde la del módulo de nombres de U-04 aún no tiene emisor, la de
-U-02 que el despachador o el planificador ya emiten por ``consumer`` o ``task``
-(:data:`LOOP_METRIC_SUBSTITUTES`). Las tablas literales las contrasta la prueba cruzada del
+una métrica canónica de U-04 emitida por el código. La tasa de rebotes sigue leyendo el conjunto
+de SES (:data:`LOOP_METRIC_SUBSTITUTES`): no se infiere de observaciones del backend.
+Las tablas literales las contrasta la prueba cruzada del
 backend (``tests/unit/test_laz_metrics_cross.py``).
 
 Interruptores de las hipótesis (§14.2), todos apagados en ``config/pilot.py``:
@@ -226,33 +226,41 @@ EXPORT_CONSUMER: Final = "export_worker"
 """La entrega de ``export_requested`` queda abierta mientras dura la exportación (TASK-317)."""
 
 LOOP_APPLICATION_ALARM_METRICS: Final = {
-    "loop-dead-letter": (("dead_letter_created_total", ("consumer",)),),
+    "loop-dead-letter": (("loop_dead_letter_entries_total", ("consumer",)),),
     "assistant-unavailable": (("assistant_unavailable", ()),),
-    "export-stuck": (("outbox_oldest_pending_age_seconds", ("consumer",)),),
+    "export-stuck": (("export_stuck_or_failed", ()),),
     "export-failed": (("export_failed_total", ()),),
     "loop-projection-divergence": (("loop_projection_divergences_total", ()),),
     "periodic-task-stale-verify-loop-projection": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "periodic-task-stale-review-reminders": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "periodic-task-stale-evaluate-deadlines": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "periodic-task-stale-unclosable-review-due": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "periodic-task-stale-metrics-materialize": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
-    "periodic-task-stale-monthly-package": (("periodic_task_last_success_age_seconds", ("task",)),),
-    "periodic-task-stale-adoption-check": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "periodic-task-stale-monthly-package": (
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-adoption-check": (
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
+    ),
     "periodic-task-stale-email-delivery-events-poll": (
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
-    "periodic-task-stale-email-grouping": (("periodic_task_last_success_age_seconds", ("task",)),),
-    "periodic-task-stale-digest-weekly": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "periodic-task-stale-email-grouping": (
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-digest-weekly": (
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
+    ),
     "assistant-token-budget": (("assistant_token_budget_used_ratio", ()),),
     "assistant-rate-margin": (("assistant_rate_limit_headroom_ratio", ()),),
 }
@@ -295,17 +303,10 @@ LOOP_CONDITION_ALARMS: Final = {
 """Cada condición de NFR-LAZ-42 (``LOOP_ALARM_CONDITIONS`` del backend) y sus alarmas."""
 
 LOOP_METRIC_SUBSTITUTES: Final = {
-    "loop_dead_letter_entries_total": ("dead_letter_created_total",),
-    "export_stuck_or_failed": ("outbox_oldest_pending_age_seconds", "export_failed_total"),
     "email_messages_total": ("AWS/SES:Bounce", "AWS/SES:Send"),
-    "loop_periodic_task_last_success_age_seconds": ("periodic_task_last_success_age_seconds",),
 }
 """Métrica de una condición de NFR-LAZ-42 que la alarma no vigila → lo que vigila en su lugar:
 
-- la cola muerta y la edad del último éxito, sin emisor en U-04: las de U-02 que el despachador y
-  el planificador ya emiten para los consumidores y las tareas de U-04 (por ``consumer`` y
-  ``task``);
-- la exportación: más de 60 min con su entrega abierta y el contador de dos fallos seguidos;
 - la tasa de rebotes: las métricas del conjunto de configuración (origen de §10.3)."""
 
 EXPORT_STUCK_SECONDS: Final = 3_600
@@ -1015,7 +1016,11 @@ class LoopStack(VigiaStack):
         worker = WORKER_SERVICE
         dead_letters = {
             f"d{index}": self._app_metric(
-                "dead_letter_created_total", worker, "Sum", FIVE_MINUTES, {"consumer": consumer}
+                "loop_dead_letter_entries_total",
+                worker,
+                "Sum",
+                FIVE_MINUTES,
+                {"consumer": consumer},
             )
             for index, consumer in enumerate(LOOP_CONSUMERS)
         }
@@ -1053,15 +1058,14 @@ class LoopStack(VigiaStack):
             LoopAlarm(
                 "export-stuck",
                 self._app_metric(
-                    "outbox_oldest_pending_age_seconds",
+                    "export_stuck_or_failed",
                     worker,
                     "Maximum",
                     FIVE_MINUTES,
-                    {"consumer": EXPORT_CONSUMER},
                 ),
-                EXPORT_STUCK_SECONDS,
-                _GT,
-                "Una exportacion con su entrega abierta mas de 60 min, en dos evaluaciones "
+                1,
+                _GE,
+                "Una exportacion con mas de 60 min o dos fallos seguidos, en dos evaluaciones "
                 f"(NFR-LAZ-42). {RUNBOOK_EXPORT}.",
                 evaluation_periods=2,
             )
@@ -1091,7 +1095,7 @@ class LoopStack(VigiaStack):
                 LoopAlarm(
                     stale_alarm_key(task),
                     self._app_metric(
-                        "periodic_task_last_success_age_seconds",
+                        "loop_periodic_task_last_success_age_seconds",
                         worker,
                         "Maximum",
                         FIVE_MINUTES,

@@ -60,6 +60,7 @@ from vigia_platform.accreditation.export.lease import ExportLeaseSettings, SqlEx
 from vigia_platform.accreditation.export.request import ExportRequests
 from vigia_platform.accreditation.export.volumes import ExportLocation
 from vigia_platform.accreditation.export.worker import (
+    ExportAlarm,
     ExportWorker,
     register_export_worker,
 )
@@ -474,7 +475,7 @@ class ExportStack:
         composer: Any = None,
         checkpoints: CountingCheckpoints | None = None,
         uploads: Any = None,
-        alarm: RecordingAlarm | None = None,
+        alarm: ExportAlarm | None = None,
         database: Database | None = None,
         sleep: Any = None,
         owner: str | None = None,

@@ -54,6 +54,7 @@ from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[impor
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 
+from vigia_platform.notifications.metrics import record_email
 from vigia_platform.shared.api.errors import ExternalDependencyDown
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext
@@ -381,8 +382,9 @@ class EmailDeliveryEventsConsumer:
         async with self._database.transaction(context) as transaction:
             if notice.is_complaint:
                 await self._apply_complaint(transaction, found, now)
-                return
-            await self._apply_bounce(transaction, found, notice, now)
+            else:
+                await self._apply_bounce(transaction, found, notice, now)
+        record_email("complained" if notice.is_complaint else "bounced", found.organization_id)
 
     @staticmethod
     async def _apply_complaint(transaction: Any, found: _Found, now: datetime) -> None:
