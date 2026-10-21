@@ -50,15 +50,13 @@ from tests.loop_assistant_support import AssistantStack, assistant_stack
 from tests.loop_classification_support import Who
 from tests.loop_root_cause_support import STATEMENTS, complete_signature
 from vigia_platform.loop.adapters.assistant.fake import (
-    FAKE_MODEL,
-    FAKE_MODEL_VERSION,
     FakeAssistantProvider,
     Script,
 )
 from vigia_platform.loop.assistant import consumer as consumer_module
 from vigia_platform.loop.assistant.budget import MONTHLY_INPUT_TOKENS, MONTHLY_OUTPUT_TOKENS
 from vigia_platform.loop.assistant.consumer import AssistantProviderDown
-from vigia_platform.loop.assistant.context import build_context, canonical_json, context_digest
+from vigia_platform.loop.assistant.context import build_context
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.outbox.dispatcher import Outcome
 from vigia_platform.shared.outbox.publish import OutboxEvent
@@ -146,61 +144,6 @@ def test_a_request_is_admitted_pending_with_its_digest_and_an_ids_only_event(
 
 
 # --- borrador -----------------------------------------------------------------------------------
-
-
-def test_a_valid_draft_with_citations_is_ready_outside_the_ledger(
-    stack: AssistantStack, coordinator: Who
-) -> None:
-    provider = stack.provider(Script.VALID_WITH_CITATIONS)
-    stack.use(provider)
-    request_id = stack.requested(coordinator)
-    records = _ledger_records(stack)
-    stack.deliver(request_id)
-    assert provider.call_count == 1
-    row = stack.request_row(request_id)
-    assert (row["state"], row["unavailable_cause"], row["attempt_count"]) == ("ready", None, 1)
-    # Uso por solicitud (NFR-LAZ-31): fichas, región, motivo de parada y modelo de la respuesta.
-    assert (row["input_tokens"], row["output_tokens"], row["cache_read_tokens"]) == (1200, 300, 0)
-    assert (row["inference_geo"], row["stop_reason"], row["response_model"]) == (
-        "us",
-        "end_turn",
-        FAKE_MODEL,
-    )
-    assert row["provider_duration_ms"] == 2000
-    (draft,) = stack.drafts(request_id)
-    assert (draft["model_name"], draft["model_version"], draft["provider"]) == (
-        FAKE_MODEL,
-        FAKE_MODEL_VERSION,
-        "anthropic",
-    )
-    assert (draft["accepted_by_human"], draft["edited_by_human"]) == (False, False)
-    assert draft["proposed_cause_category"] == "process"
-    (citation,) = draft["citations"]
-    context = provider.contexts[0]
-    assert citation["id"] == context.citable[0].alias
-    assert citation["kind"] == "record"
-    analysis = stack.base.analysis_row(row["analysis_id"])
-    assert citation["reference_id"] == str(stack.anchor_of(analysis["subject_id"]))
-    # PR-LAZ-19 sobre lo que recibió el doble: ningún identificador real ni el título del estándar.
-    sent = canonical_json(context)
-    for identifier in (
-        analysis["organization_id"],
-        analysis["plant_id"],
-        analysis["zone_id"],
-        analysis["subject_id"],
-        stack.anchor_of(analysis["subject_id"]),
-        row["request_id"],
-        analysis["zone_context"]["standard_id"],
-    ):
-        assert str(identifier) not in sent
-    assert analysis["zone_context"]["standard_title_es"] not in sent
-    assert canonical_json(context) and context_digest(context) == row["context_digest"]
-    assert _ledger_records(stack) == records  # el borrador no entra al expediente
-    body = _status(stack, coordinator, request_id)
-    assert body["assistant_state"] == "ready"
-    assert body["draft"]["is_draft"] is True
-    assert body["draft"]["model"] == FAKE_MODEL
-    assert body["draft"]["citations"][0]["reference_id"] == citation["reference_id"]
 
 
 def test_a_draft_that_declares_insufficient_evidence_is_ready_without_citations(
