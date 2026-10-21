@@ -229,7 +229,7 @@ def task_problems(ages: Mapping[str, int], alarms: MetricTable) -> list[str]:
         if ages.get(name) != OWN_WINDOWS.get(name, HOURS_26):
             problems.append(f"{name}: ventana {ages.get(name)}")
         key = f"periodic-task-stale-{name.replace('_', '-')}"
-        if alarms.get(key) != (("periodic_task_last_success_age_seconds", ("task",)),):
+        if alarms.get(key) != (("loop_periodic_task_last_success_age_seconds", ("task",)),):
             problems.append(f"{name}: sin alarma {key}")
         if name not in allowed:
             problems.append(f"{name}: fuera de la lista cerrada task")
@@ -274,8 +274,7 @@ def test_panels_are_the_five_of_nfr_laz_44_each_with_metrics() -> None:
 
 
 def test_the_emission_scan_sees_the_known_emitters() -> None:
-    """Sonda del analizador: lo que emiten el asistente, la verificación de la proyección, el
-    despachador, el planificador y ``export_worker`` cuenta; lo declarado sin emisor, no."""
+    """Sonda del analizador: U-02 y todos los nombres de U-04 tienen productores."""
     for name in (
         "assistant_requests_total",
         "assistant_unavailable",
@@ -287,8 +286,8 @@ def test_the_emission_scan_sees_the_known_emitters() -> None:
         "periodic_task_duration_ms",
     ):
         assert name in EMITTED, name
-    for name in ("loop_overdue_findings", "loop_unclassified_findings", "export_stuck_or_failed"):
-        assert name not in EMITTED, name
+    for spec in LOOP_CATALOG:
+        assert spec.name in EMITTED, spec.name
 
 
 # --- Condiciones de NFR-LAZ-42 ---------------------------------------------------------------
@@ -331,7 +330,7 @@ def test_dead_letter_consumers_are_the_u04_consumers_of_the_closed_list() -> Non
 
 # --- El contraste detecta una tabla alterada ------------------------------------------------
 
-_UNEMITTED: Final = sorted(set(SPECS) - EMITTED)
+_NAMED: Final = sorted(SPECS)
 _ALARM_KEYS: Final = sorted(ALARMS)
 _PANEL_KEYS: Final = sorted(PANEL_METRICS)
 
@@ -348,15 +347,19 @@ def test_an_unknown_metric_name_is_reported(table: str, data: st.DataObject, nam
     assert any(unknown in p for p in metric_problems(altered, EMITTED))
 
 
-@given(st.sampled_from(sorted(TABLES)), st.data(), st.sampled_from(_UNEMITTED))
+@given(st.sampled_from(sorted(TABLES)), st.data(), st.sampled_from(_NAMED))
 def test_a_named_metric_without_emitter_is_reported(
     table: str, data: st.DataObject, name: str
 ) -> None:
-    """A-64: un nombre del módulo que el código no emite no puede ir en una alarma ni en un panel
-    (``loop_overdue_findings``, ``export_stuck_or_failed``…)."""
+    """A-64: se retira hipotéticamente el emisor de un nombre publicado y el contraste lo detecta.
+
+    La muestra no depende de que queden métricas sin implementar en producción.
+    """
     key = data.draw(st.sampled_from(sorted(TABLES[table])))
     altered = {**TABLES, table: {**TABLES[table], key: ((name, ()), *TABLES[table][key])}}
-    assert f"{table}/{key}: {name} no la emite el código" in metric_problems(altered, EMITTED)
+    assert f"{table}/{key}: {name} no la emite el código" in metric_problems(
+        altered, EMITTED - {name}
+    )
 
 
 @given(

@@ -21,7 +21,6 @@ import pytest
 from config import EnvironmentConfig
 from stacks.loop import (
     CONFIGURATION_SET_DIMENSION,
-    EXPORT_CONSUMER,
     LOOP_APPLICATION_ALARM_METRICS,
     LOOP_CONDITION_ALARMS,
     LOOP_CONSUMERS,
@@ -66,7 +65,7 @@ EXPECTED: dict[str, tuple[float, str, int, int, str]] = {
     # Las ocho condiciones de NFR-LAZ-42 (nueve recursos más las periódicas).
     "loop-dead-letter": (1, GE, 1, FIVE_MINUTES, "7.2"),
     "assistant-unavailable": (1, GE, 1, HALF_HOUR, "7.4"),
-    "export-stuck": (3_600, GT, 2, FIVE_MINUTES, "7.6"),
+    "export-stuck": (1, GE, 2, FIVE_MINUTES, "7.6"),
     "export-failed": (1, GE, 1, FIVE_MINUTES, "7.6"),
     "email-bounce-rate": (5, GT, 2, DAY, "7.5"),
     "loop-projection-divergence": (1, GE, 1, FIVE_MINUTES, "7.1"),
@@ -289,7 +288,8 @@ def test_application_alarms_read_the_deployment_worker_and_its_dimension_values(
     dead = [_dimensions(m)["consumer"] for m in _metric_stats(alarms["loop-dead-letter"])]
     assert sorted(dead) == sorted(LOOP_CONSUMERS)
     (stuck,) = _metric_stats(alarms["export-stuck"])
-    assert _dimensions(stuck)["consumer"] == EXPORT_CONSUMER == "export_worker"
+    assert stuck["MetricName"] == "export_stuck_or_failed"
+    assert set(_dimensions(stuck)) == FIXED_DIMENSIONS
     for task in U04_PERIODIC:
         (metric,) = _metric_stats(alarms[stale_alarm_key(task)])
         assert _dimensions(metric)["task"] == task

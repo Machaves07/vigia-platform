@@ -400,6 +400,12 @@ def test_collector_declarations_only_use_closed_low_cardinality_attributes() -> 
         "consumer",
         "assistant_state",
         "token_direction",
+        # VIG-270: agregados por planta, estados y veredictos del catálogo de U-04.
+        "plant_id",
+        "export_state",
+        "email_state",
+        "text_validator",
+        "verdict",
     }
     for sets, selectors in _collector_declarations():
         for dimensions in sets:

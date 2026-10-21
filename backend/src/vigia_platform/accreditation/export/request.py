@@ -71,6 +71,7 @@ from vigia_platform.ledger.application.audit_writer import (
     ResourceRef,
 )
 from vigia_platform.loop.domain.enums import ExportState, PackageForm
+from vigia_platform.loop.observability.metrics import LoopMetricName, get_loop_metrics
 from vigia_platform.shared.api.errors import MAX_RETRY_AFTER_SECONDS
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext, repository
@@ -275,6 +276,9 @@ class ExportRequests:
                     ),
                 ),
             )
+        get_loop_metrics().counter(LoopMetricName.EXPORT_REQUESTS_TOTAL).add(
+            1, {"export_state": "requested", "organization_id": str(authorized.organization_id)}
+        )
         return ExportStatus(
             export_id=export_id,
             organization_id=authorized.organization_id,

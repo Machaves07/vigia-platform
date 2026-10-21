@@ -264,15 +264,25 @@ EMAIL_PANEL_METRICS: Final = ("Send", "Delivery", "Bounce", "Complaint", "Reject
 
 LOOP_PANEL_METRICS: Final = {
     "Estado del lazo (U-04, n 23)": (
-        ("outbox_oldest_pending_age_seconds", ("consumer",)),
-        ("periodic_task_duration_ms", ("result", "task")),
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_unclassified_findings", ("organization_id", "plant_id")),
+        ("loop_unclassified_oldest_age_seconds", ("organization_id", "plant_id")),
+        ("loop_overdue_findings", ("organization_id", "plant_id")),
+        ("loop_consumer_pending", ("consumer",)),
+        ("loop_consumer_oldest_pending_age_seconds", ("consumer",)),
+        ("loop_dead_letter_entries_total", ("consumer",)),
+        ("loop_text_validations_total", ("text_validator", "verdict")),
+        ("loop_periodic_task_duration_ms", ("result", "task")),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "Trabajos diferidos (U-04, n 23)": (
+        ("export_requests_total", ("export_state",)),
+        ("export_duration_ms", ("export_state",)),
+        ("export_package_size_bytes", ()),
+        ("export_stuck_or_failed", ()),
         ("export_failed_total", ()),
-        ("outbox_oldest_pending_age_seconds", ("consumer",)),
-        ("periodic_task_duration_ms", ("result", "task")),
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_consumer_oldest_pending_age_seconds", ("consumer",)),
+        ("loop_periodic_task_duration_ms", ("result", "task")),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "Asistente (U-04, n 23)": (
         ("assistant_rate_limit_headroom_ratio", ()),
@@ -283,13 +293,14 @@ LOOP_PANEL_METRICS: Final = {
         ("assistant_unavailable", ()),
     ),
     "Correo (U-04, n 23)": (
-        ("outbox_oldest_pending_age_seconds", ("consumer",)),
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("email_messages_total", ("email_state",)),
+        ("loop_consumer_oldest_pending_age_seconds", ("consumer",)),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
     "Salud de la proyeccion (U-04, n 23)": (
         ("loop_projection_divergences_total", ()),
-        ("periodic_task_duration_ms", ("result", "task")),
-        ("periodic_task_last_success_age_seconds", ("task",)),
+        ("loop_periodic_task_duration_ms", ("result", "task")),
+        ("loop_periodic_task_last_success_age_seconds", ("task",)),
     ),
 }
 """Panel de U-04 → métricas de ``Vigia/Platform`` que dibuja, con sus atributos además de
@@ -1903,7 +1914,7 @@ class ObservabilityStack(VigiaStack):
     ) -> tuple[list[cloudwatch.IMetric], list[cloudwatch.IMetric], list[cloudwatch.IMetric]]:
         """Duración p95 de los éxitos, fallos y edad del último éxito de cada tarea."""
         worker, m5 = WORKER_SERVICE, FIVE_MINUTES
-        name = "periodic_task_duration_ms"
+        name = "loop_periodic_task_duration_ms"
         return (
             [
                 self._app_metric(name, worker, "p95", m5, {"task": t, "result": "succeeded"})
@@ -1915,7 +1926,11 @@ class ObservabilityStack(VigiaStack):
             ],
             [
                 self._app_metric(
-                    "periodic_task_last_success_age_seconds", worker, "Maximum", m5, {"task": t}
+                    "loop_periodic_task_last_success_age_seconds",
+                    worker,
+                    "Maximum",
+                    m5,
+                    {"task": t},
                 )
                 for t in tasks
             ],
@@ -1925,7 +1940,7 @@ class ObservabilityStack(VigiaStack):
         """Entrega pendiente más vieja de cada consumidor de U-04 (``consumer``)."""
         return [
             self._app_metric(
-                "outbox_oldest_pending_age_seconds",
+                "loop_consumer_oldest_pending_age_seconds",
                 WORKER_SERVICE,
                 "Maximum",
                 FIVE_MINUTES,
@@ -1953,20 +1968,11 @@ class ObservabilityStack(VigiaStack):
             label=queue,
         )
 
-    def _pending_emitter(self, names: str) -> cloudwatch.TextWidget:
-        """Lo que el panel debería mostrar y el código aún no emite (A-64: sin panel vacío)."""
-        return cloudwatch.TextWidget(
-            markdown=f"Sin emisor en el codigo, fuera del panel (A-64; VIG-270): {names}.",
-            width=24,
-            height=1,
-        )
-
     def _loop_panels(self) -> list[tuple[str, list[cloudwatch.IWidget]]]:
         """Los cinco paneles de NFR-LAZ-44 (nº 23, U-04 §10.4) sobre las métricas que el código
         emite (``LOOP_PANEL_METRICS``; A-64): las del módulo ``loop.observability.metrics`` que
-        ya tienen emisor, las de U-02 por ``task`` y ``consumer`` para las tareas y los
-        consumidores de U-04, y las del conjunto de configuración y las colas del correo. Lo que
-        aún no tiene emisor queda escrito en el panel, sin widget."""
+        tienen emisor, y las del conjunto de configuración y las colas del correo.
+        Los agregados de hallazgos son por planta; el detalle por zona vive en la bandeja."""
         api, worker = API_SERVICE, WORKER_SERVICE
         m5, month = FIVE_MINUTES, Duration.days(30)
         state, deferred, assistant, email, projection = LOOP_PANELS
@@ -2000,10 +2006,47 @@ class ObservabilityStack(VigiaStack):
                         "Consumidores del lazo: entrega pendiente mas vieja (s)",
                         self._oldest_delivery(("loop_projection", "review_queue")),
                     ),
-                    self._pending_emitter(
-                        "sin clasificar por planta y antiguedad (loop_unclassified_findings, "
-                        "loop_unclassified_oldest_age_seconds) y vencidos por planta "
-                        "(loop_overdue_findings)"
+                    self._graph(
+                        "Hallazgos por planta: sin clasificar y vencidos",
+                        [
+                            search(name, worker, "Maximum", m5, "organization_id", "plant_id")
+                            for name in ("loop_unclassified_findings", "loop_overdue_findings")
+                        ],
+                    ),
+                    self._graph(
+                        "Sin clasificar: antiguedad maxima por planta (s)",
+                        [
+                            search(
+                                "loop_unclassified_oldest_age_seconds",
+                                worker,
+                                "Maximum",
+                                m5,
+                                "organization_id",
+                                "plant_id",
+                            )
+                        ],
+                    ),
+                    self._graph(
+                        "Pendientes por consumidor del lazo",
+                        [search("loop_consumer_pending", worker, "Maximum", m5, "consumer")],
+                    ),
+                    self._graph(
+                        "Cola muerta por consumidor",
+                        [search("loop_dead_letter_entries_total", worker, "Sum", m5, "consumer")],
+                    ),
+                    self._graph(
+                        "Validaciones de texto por validador y veredicto",
+                        [
+                            search(
+                                "loop_text_validations_total",
+                                service,
+                                "Sum",
+                                m5,
+                                "text_validator",
+                                "verdict",
+                            )
+                            for service in (api, worker)
+                        ],
                     ),
                 ],
             ),
@@ -2025,9 +2068,23 @@ class ObservabilityStack(VigiaStack):
                         height=6,
                     ),
                     self._graph("Paquete mensual: edad del ultimo exito (s)", package_age),
-                    self._pending_emitter(
-                        "exportaciones por estado, duracion, tamano e intentos "
-                        "(export_requests_total, export_duration_ms, export_package_size_bytes)"
+                    self._graph(
+                        "Exportaciones por estado (transiciones e intentos)",
+                        [
+                            search("export_requests_total", service, "Sum", m5, "export_state")
+                            for service in (api, worker)
+                        ],
+                    ),
+                    self._graph(
+                        "Exportaciones: duracion p95 por resultado (ms)",
+                        [search("export_duration_ms", worker, "p95", m5, "export_state")],
+                    ),
+                    self._graph(
+                        "Paquetes: tamano maximo (bytes) y exportacion atascada o fallida",
+                        [
+                            self._app_metric("export_package_size_bytes", worker, "Maximum", m5),
+                            self._app_metric("export_stuck_or_failed", worker, "Maximum", m5),
+                        ],
                     ),
                 ],
             ),
@@ -2114,8 +2171,9 @@ class ObservabilityStack(VigiaStack):
                         width=8,
                         height=6,
                     ),
-                    self._pending_emitter(
-                        "agrupados y degraded_app_only (email_messages_total por email_state)"
+                    self._graph(
+                        "Correo por estado: enviados, rebotes, quejas, agrupados y degradados",
+                        [search("email_messages_total", worker, "Sum", m5, "email_state")],
                     ),
                 ],
             ),
@@ -2139,10 +2197,6 @@ class ObservabilityStack(VigiaStack):
                         right=projection_failures,
                         width=8,
                         height=6,
-                    ),
-                    self._pending_emitter(
-                        "edad de la ultima verificacion por planta (el catalogo no tiene metrica "
-                        "por planta; verify_loop_projection corre por organizacion)"
                     ),
                 ],
             ),
