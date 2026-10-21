@@ -88,6 +88,7 @@ __all__ = [
     "LAZ_CASES",
     "LAZ_DENIED_UNDER_CONCESSION",
     "LAZ_EVENT_REGISTRARS",
+    "LAZ_OPERATION_CASES",
     "LAZ_STATE",
     "LazServices",
     "laz_state",
@@ -851,6 +852,65 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
+
+
+LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
+    "SUP-U05-01": frozenset({("GET", "/loop/findings")}),
+    "SUP-U05-02": frozenset({("GET", "/loop/findings/{finding_state_id}")}),
+    "SUP-U05-03": frozenset({("POST", "/loop/findings/{finding_state_id}/classifications")}),
+    "SUP-U05-04": frozenset({("GET", "/loop/findings/{finding_state_id}/classifications")}),
+    "SUP-U05-05": frozenset({("GET", "/loop/review-queue")}),
+    "SUP-U05-06": frozenset({("POST", "/loop/review-queue/{detection_id}/resolution")}),
+    "SUP-U05-07": frozenset({("POST", "/loop/findings/{finding_state_id}/actions")}),
+    "SUP-U05-08": frozenset({("POST", "/loop/actions/{action_id}/evidence")}),
+    "SUP-U05-09": frozenset({("POST", "/loop/actions/{action_id}/attachments/upload-grant")}),
+    "SUP-U05-10": frozenset({("POST", "/loop/attachments/{attachment_id}/read-url")}),
+    "SUP-U05-11": frozenset({("POST", "/loop/findings/{finding_state_id}/closure")}),
+    "SUP-U05-12": frozenset({("POST", "/loop/findings/{finding_state_id}/unclosable")}),
+    "SUP-U05-13": frozenset({("POST", "/loop/unclosable/{declaration_id}/reviews")}),
+    "SUP-U05-14": frozenset({("POST", "/loop/findings/{finding_state_id}/reopening")}),
+    "SUP-U05-15": frozenset({("GET", "/loop/overdue")}),
+    "SUP-U05-16": frozenset({("POST", "/loop/findings/{finding_state_id}/root-cause-analyses")}),
+    "SUP-U05-17": frozenset(
+        {("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}")}
+    ),
+    "SUP-U05-18": frozenset({("POST", "/loop/root-cause-analyses/{analysis_id}/signature")}),
+    "SUP-U05-19": frozenset(
+        {("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests")}
+    ),
+    "SUP-U05-20": frozenset({("GET", "/loop/assistant-requests/{request_id}")}),
+    "SUP-U05-21": frozenset({("POST", "/accreditation/exports")}),
+    "SUP-U05-22": frozenset({("GET", "/accreditation/exports/{export_id}")}),
+    "SUP-U05-23": frozenset({("POST", "/accreditation/exports/{export_id}/download-url")}),
+    "SUP-U05-24": frozenset({("GET", "/accreditation/monthly-packages")}),
+    "SUP-U05-25": frozenset({("GET", "/accreditation/monthly-packages/{package_id}/sample")}),
+    "SUP-U05-26": frozenset({("POST", "/accreditation/sample-items/{sample_item_id}/result")}),
+    "SUP-U05-27": frozenset({("POST", "/accreditation/monthly-packages/{package_id}/commitments")}),
+    "SUP-U05-28": frozenset({("PATCH", "/accreditation/commitments/{commitment_id}")}),
+    "SUP-U05-29": frozenset({("GET", "/accreditation/commitments")}),
+    "SUP-U05-30": frozenset({("GET", "/accreditation/metrics")}),
+    "SUP-U05-31": frozenset({("GET", "/accreditation/exposure")}),
+    "SUP-U05-32": frozenset({("GET", "/accreditation/adoption")}),
+    "SUP-U05-33": frozenset({("GET", "/notifications")}),
+    "SUP-U05-34": frozenset({("POST", "/notifications/{notification_id}/read")}),
+    # La operación de preferencias tiene lectura y escritura sobre el mismo recurso propio.
+    "SUP-U05-35": frozenset(
+        {("GET", "/notifications/preferences"), ("PUT", "/notifications/preferences")}
+    ),
+    "SUP-U05-36": frozenset({("GET", "/loop/vocabulary")}),
+    "SUP-U05-37": frozenset({("POST", "/loop/vocabulary/changes")}),
+    "SUP-U05-38": frozenset({("GET", "/loop/plants/{plant_id}/configuration")}),
+    "SUP-U05-39": frozenset({("PUT", "/loop/plants/{plant_id}/configuration")}),
+    "SUP-U05-40": frozenset({("GET", "/accreditation/exports/{export_id}/download")}),
+    "SUP-U05-41": frozenset(
+        {("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download")}
+    ),
+}
+"""Las 41 operaciones de LC-LAZ §6 y sus rutas.
+
+``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias; por eso las 41 operaciones
+ocupan 42 rutas declaradas y 42 casos de aislamiento.
+"""
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
     {
