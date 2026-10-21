@@ -14,8 +14,8 @@ Tres rutas, solo lectura, sobre lo que ``monthly.task.MonthlyPackageTask`` sella
 - ``GET /accreditation/monthly-packages/{plant_id}/{period}/download`` (SUP-U05-41): una URL
   prefirmada de 15 minutos **por zona dentro del alcance del actor** con paquete sellado para
   ``period``; las zonas fuera de alcance, o sin paquete sellado, simplemente no aparecen en la
-   lista (nunca un error por ellas): es una ruta de lista, no de un solo recurso. Una planta fuera
-   de alcance responde ``404``; dentro del alcance, sin paquetes sellados, ``409``. Cada URL
+  lista (nunca un error por ellas): es una ruta de lista, no de un solo recurso. Una planta fuera
+  de alcance responde ``404``; dentro del alcance, sin paquetes sellados, ``409``. Cada URL
   deja una entrada de auditoría ``monthly_package_download_granted`` en la misma transacción en
   la que se emite (PAT-LAZ-SEG-04, como ``export.download``).
 
