@@ -36,6 +36,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, cast
 
+from tests.laz_process_support import U04_VARIABLE, add_u04, export_hook
 from tests.resilience.gob_support import TaskWrapper, add_u03, process_units
 from tests.resilience.processes import EffectHandler, u02_catalog
 from tests.worker_process import LoggedProbe, _config
@@ -124,6 +125,9 @@ async def build_runtime(config: WorkerConfig, environ: Mapping[str, str]) -> Wor
     )
     # U-03 en el mismo catálogo que ya usa la ``Outbox`` (las tareas publican con ella).
     built = add_u03(catalog, units.services, wrap=_slow_task(environ, owner))
+    if environ.get(U04_VARIABLE):
+        # U-04 cargado (TASK-353), con el gancho de exportación si la prueba lo pide.
+        add_u04(built, units.services, export_handler=export_hook(environ, units.services, owner))
 
     async def synchronize_catalog() -> None:
         await units.synchronize_record_types(contexts.provider_audit_context())

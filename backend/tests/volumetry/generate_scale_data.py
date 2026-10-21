@@ -45,6 +45,14 @@ las dos una tras otra: la base de U-02 se borra antes, así que el disco no se s
   falla) y las métricas de presupuesto de NFR-GOB-07 (``fleet_heartbeat_rows_per_day``,
   ``fleet_upload_grants_per_day`` y ``catalog_versions_per_day``, por día y a escala objetivo).
 
+**U-04** (TASK-353; NFR-LAZ-06 y 09, sección ``u04``; ``--part laz`` solo ella, también en
+``all``, después de U-03 y con su propia base): ``tests/volumetry/laz_scale.py`` con el perfil
+``nightly`` de ``tests/load/laz_profiles.py`` en ``target`` (un año de 30 zonas a 77 episodios por
+zona y día, extrapolado a 300 zonas; ``loop_rows_per_day`` y ``loop_bytes_per_table`` frente a la
+tabla de NFR-LAZ-06, y la paginación por clave de ``GET /notifications`` sobre un millón de avisos
+con el archivado a los 60 días) y ``ci`` en ``smoke``. Falla si la paginación pierde o repite o si
+el archivado borra; las cifras son tendencia.
+
 El informe JSON (``--out``, por defecto ``.benchmarks/volumetry-<escala>.json``) es el artefacto de
 ``nightly``. El script termina con error si la generación o la verificación de la cadena fallan;
 un objetivo no cumplido se declara en el informe y no cambia el código de salida.
@@ -97,7 +105,9 @@ from tests.integration.conftest import (  # noqa: E402
     postgres_endpoint_session,
 )
 from tests.integration.test_coverage_port import COVERAGE_TYPES, scoped  # noqa: E402
+from tests.load.laz_profiles import VOLUMETRY_PROFILES  # noqa: E402
 from tests.verify_support import CHECKPOINT_KEY, StaticKeys  # noqa: E402
+from tests.volumetry.laz_scale import run_laz  # noqa: E402
 from tests.volumetry.scale_data import (  # noqa: E402
     CatalogZone,
     FleetNode,
@@ -1508,6 +1518,22 @@ def _gob_summary(section: dict[str, Any]) -> None:
     )
 
 
+def _laz_summary(section: dict[str, Any]) -> None:
+    print("U-04 (NFR-LAZ-06, tendencia): bytes al año a 300 zonas por grupo")
+    for group in section["nfr_laz_06"]["groups"]:
+        print(
+            f"  {group['group']}: {group['measured_bytes_per_year'] / 1e9:.2f} GB"
+            f" (estimado {group['estimated_bytes_per_year'] / 1e9:.0f} GB) — {group['trend']}"
+        )
+    pagination = section["pagination"]
+    print(
+        f"U-04 (NFR-LAZ-09): {pagination['seen_before_archive']} avisos recorridos por clave en"
+        f" {pagination['pages_before_archive']} páginas;"
+        f" archivados {section['archive']['archived']}"
+        f" sin borrar ninguno; comprobaciones {section['checks']}"
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scale", choices=sorted(SCALES), default="target")
@@ -1516,9 +1542,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument(
         "--part",
-        choices=("all", "nuc", "gob"),
+        choices=("all", "nuc", "gob", "laz"),
         default="all",
-        help="nuc: U-02 (NFR-NUC-05); gob: U-03 (NFR-GOB-11); all: las dos, una tras otra",
+        help=(
+            "nuc: U-02 (NFR-NUC-05); gob: U-03 (NFR-GOB-11); laz: U-04 (NFR-LAZ-06 y 09);"
+            " all: las tres, una tras otra"
+        ),
     )
     args = parser.parse_args(argv)
     scale = SCALES[args.scale]
@@ -1546,6 +1575,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                     raise
             _write(out, report)
             _gob_summary(report["u03"])
+        if args.part in {"all", "laz"}:
+            # Con su propia base, que se borra al terminar (como las de U-02 y U-03).
+            laz_profile = VOLUMETRY_PROFILES["nightly" if scale.name == "target" else "ci"]
+            try:
+                report["u04"] = run_laz(endpoint, laz_profile, log=_log)
+            except Exception as error:
+                report["u04"] = {"error": f"{type(error).__name__}: {error}"}
+                _write(out, report)
+                raise
+            _write(out, report)
+            _laz_summary(report["u04"])
+            failed = [name for name, ok in report["u04"]["checks"].items() if not ok]
+            if failed:
+                raise SystemExit(f"U-04: comprobaciones fallidas: {failed}")
         print(f"informe: {out}")
     return 0
 

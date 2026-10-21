@@ -40,6 +40,7 @@ from tests.authz_support import SYSTEM_ACTOR_ID
 from tests.examples.test_auth_routes import ORIGIN, STATIC, Passwords
 from tests.hierarchy_support import FakeActivationPasswords, FakeActivationSecondFactor
 from tests.integration.conftest import LOCALSTACK_ACCESS_KEY_ID, LOCALSTACK_SECRET_ACCESS_KEY
+from tests.laz_process_support import U04_VARIABLE, add_u04, u04_api_state
 from tests.resilience.gob_support import process_units
 from tests.resilience.processes import EffectHandler, resilience_catalog
 from tests.session_support import ORIGIN_KEY, FakeSecondFactor
@@ -167,6 +168,12 @@ def build(environ: Mapping[str, str]) -> Any:
         storage=StubStorage(),
         cpu_pool=get_cpu_pool(),  # el pool del proceso, como compose_api_runtime (VIG-160)
     )
+    state = units.state()
+    if environ.get(U04_VARIABLE):
+        # U-04 cargado (TASK-353): sus consumidores y tareas (la bandeja crea las entregas de lo
+        # que publica la API) y el estado de sus rutas.
+        add_u04(catalog, units.services)
+        state = {**state, **u04_api_state(units.services)}
     writer = units.services.writer
     free_text = units.services.free_text
     deps = IdentityDependencies(
@@ -241,7 +248,7 @@ def build(environ: Mapping[str, str]) -> Any:
         sessions=contexts,
         origin_secret=ORIGIN_KEY,
         identity=identity,
-        state=units.state(),
+        state=state,
     )
     return create_app(config, runtime=runtime)
 
