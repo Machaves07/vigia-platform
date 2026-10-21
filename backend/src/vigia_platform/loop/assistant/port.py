@@ -17,6 +17,13 @@
 del clasificador (200 con ``refusal``) es ``refusal`` y un tope de fichas (``max_tokens``)
 truncaría el borrador, ``budget_exceeded``; ninguno produce borrador (``provider_error``).
 
+``probe(*, timeout)`` es la **sonda del cortacircuito** (PAT-LAZ-RES-04, VIG-272): una petición
+mínima **sin contexto y sin fichas** (en el adaptador real, la ficha del modelo configurado) que
+solo dice si el proveedor responde. Devuelve ``None`` si respondió y el ``AssistantFailure``
+clasificado si no; nunca lanza por un fallo del proveedor. El consumidor la usa cuando la entrega
+de la sonda del circuito no llega a llamar a ``complete`` (la solicitud ya estaba resuelta o se
+resolvió sin llamada), para no cerrar el circuito sin haber preguntado a la dependencia.
+
 ``configured`` es ``False`` sin clave del proveedor: el consumidor responde ``no_api_key`` sin
 llamar (BR-LAZ-74). El puerto no tiene ningún método para cerrar, firmar ni escribir en el
 expediente (BR-LAZ-72).
@@ -123,6 +130,11 @@ class AssistantProviderPort(Protocol):
 
     async def complete(self, context: AssistantContext, *, timeout: timedelta) -> AssistantOutcome:
         """Un intento con ``timeout`` como tope; nunca lanza por un fallo del proveedor."""
+        ...
+
+    async def probe(self, *, timeout: timedelta) -> AssistantFailure | None:
+        """La sonda del cortacircuito, sin contexto ni fichas: ``None`` si el proveedor respondió;
+        nunca lanza por un fallo del proveedor."""
         ...
 
 
