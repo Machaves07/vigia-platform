@@ -454,772 +454,829 @@
       "label": "laz_assistant [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 43.935,
-      "p95": 63.126,
+      "median": 18.263,
+      "p95": 19.984,
       "objective": 60000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "provider": "double",
         "trace_segments": {
           "assistant_requested_to_ready": {
-            "median_ms": 42.906002,
-            "p95_ms": 65.494581,
-            "samples": 103
+            "median_ms": 17.993999,
+            "p95_ms": 22.933816,
+            "samples": 23
           },
           "total": {
-            "median_ms": 44.08607,
-            "p95_ms": 66.928473,
-            "samples": 103
+            "median_ms": 18.424949,
+            "p95_ms": 23.415933,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_close_two_attachments": {
       "label": "laz_close_two_attachments [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 182.775,
-      "p95": 240.781,
+      "median": 85.536,
+      "p95": 91.772,
       "objective": 500,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "trace_segments": {
           "evidence_two_attachments": {
-            "median_ms": 104.490914,
-            "p95_ms": 142.283342,
-            "samples": 103
+            "median_ms": 50.890169,
+            "p95_ms": 54.202626,
+            "samples": 23
           },
           "signed_closure": {
-            "median_ms": 73.876207,
-            "p95_ms": 114.078101,
-            "samples": 103
+            "median_ms": 34.670239,
+            "p95_ms": 37.295821,
+            "samples": 23
           },
           "total": {
-            "median_ms": 182.645046,
-            "p95_ms": 240.674782,
-            "samples": 103
+            "median_ms": 85.701646,
+            "p95_ms": 91.682873,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_detail": {
       "label": "laz_detail [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 122.742,
-      "p95": 142.791,
+      "median": 58.114,
+      "p95": 69.782,
       "objective": 1200,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
+        "findings": 1,
+        "clips": 2,
+        "full_density_task": "VIG-246",
         "trace_segments": {
           "audited_detail": {
-            "median_ms": 122.806415,
-            "p95_ms": 146.769744,
-            "samples": 103
+            "median_ms": 58.329052,
+            "p95_ms": 74.692745,
+            "samples": 23
           },
           "catalog.standard_version": {
-            "median_ms": 7.266633,
-            "p95_ms": 9.455833,
-            "samples": 103
+            "median_ms": 3.179721,
+            "p95_ms": 3.823492,
+            "samples": 23
           },
           "coverage.estado_en": {
-            "median_ms": 16.514829,
-            "p95_ms": 20.946817,
-            "samples": 103
+            "median_ms": 7.646372,
+            "p95_ms": 11.683355,
+            "samples": 23
           },
           "evidence.url_lectura": {
-            "median_ms": 21.212390499999998,
-            "p95_ms": 25.476764,
-            "samples": 206
+            "median_ms": 11.024759,
+            "p95_ms": 12.651806,
+            "samples": 46
           },
           "fleet.nodes_by_zone": {
-            "median_ms": 7.451512,
-            "p95_ms": 9.69183,
-            "samples": 103
+            "median_ms": 3.577559,
+            "p95_ms": 5.604432,
+            "samples": 23
           },
           "gates.state_at": {
-            "median_ms": 6.810154,
-            "p95_ms": 8.444608,
-            "samples": 103
+            "median_ms": 2.793734,
+            "p95_ms": 3.218153,
+            "samples": 23
           },
           "reader.get": {
-            "median_ms": 12.323957,
-            "p95_ms": 15.4243,
-            "samples": 103
+            "median_ms": 5.553315,
+            "p95_ms": 9.397466,
+            "samples": 23
           },
           "total": {
-            "median_ms": 122.875569,
-            "p95_ms": 146.847195,
-            "samples": 103
+            "median_ms": 58.394927,
+            "p95_ms": 74.784919,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_evaluate_deadlines_org": {
       "label": "laz_evaluate_deadlines_org [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 311.013,
-      "p95": 390.39,
+      "median": 131.456,
+      "p95": 172.792,
       "objective": 30000.0,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "pending_per_round": 5,
         "trace_segments": {
           "evaluate_deadlines": {
-            "median_ms": 308.884514,
-            "p95_ms": 390.235026,
-            "samples": 103
+            "median_ms": 97.914958,
+            "p95_ms": 172.632842,
+            "samples": 23
           },
           "total": {
-            "median_ms": 308.956565,
-            "p95_ms": 390.312335,
-            "samples": 103
+            "median_ms": 97.994678,
+            "p95_ms": 172.707723,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_export_maximum": {
       "label": "laz_export_maximum [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 607.923,
-      "p95": 886.342,
+      "median": 774.714,
+      "p95": 1133.37,
       "objective": 3600000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
-        "zones": 1,
+        "profile": "nightly",
+        "rounds": 20,
+        "zones": 3,
         "days": 31,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "maximum_scope_bounded": true,
         "median_objective_ms": null,
         "trace_segments": {
           "accreditation.export.artifact.audit": {
-            "median_ms": 0.634122,
-            "p95_ms": 0.841527,
-            "samples": 103
+            "median_ms": 0.410262,
+            "p95_ms": 0.543319,
+            "samples": 23
           },
           "accreditation.export.artifact.checkpoint": {
-            "median_ms": 0.662347,
-            "p95_ms": 0.828868,
-            "samples": 103
+            "median_ms": 0.432984,
+            "p95_ms": 0.56593,
+            "samples": 23
           },
           "accreditation.export.artifact.coverage": {
-            "median_ms": 0.70581,
-            "p95_ms": 0.943859,
-            "samples": 103
+            "median_ms": 0.453874,
+            "p95_ms": 0.795015,
+            "samples": 69
           },
           "accreditation.export.artifact.document": {
-            "median_ms": 7.478241,
-            "p95_ms": 9.544853,
-            "samples": 103
+            "median_ms": 6.063609,
+            "p95_ms": 6.691016,
+            "samples": 23
           },
           "accreditation.export.artifact.findings_json": {
-            "median_ms": 1.104933,
-            "p95_ms": 1.327952,
-            "samples": 103
+            "median_ms": 0.825422,
+            "p95_ms": 1.084073,
+            "samples": 69
           },
           "accreditation.export.artifact.manifest": {
-            "median_ms": 0.818018,
-            "p95_ms": 1.005366,
-            "samples": 103
+            "median_ms": 0.816204,
+            "p95_ms": 0.874093,
+            "samples": 23
           },
           "accreditation.export.artifact.public_key": {
-            "median_ms": 0.632475,
-            "p95_ms": 0.889968,
-            "samples": 103
+            "median_ms": 0.419589,
+            "p95_ms": 0.503493,
+            "samples": 23
           },
           "accreditation.export.artifact.verifier": {
-            "median_ms": 4.911357,
-            "p95_ms": 5.477814,
-            "samples": 103
+            "median_ms": 4.519696,
+            "p95_ms": 4.756006,
+            "samples": 23
           },
           "catalog.single_occupancy_many": {
-            "median_ms": 7.164868,
-            "p95_ms": 8.85744,
-            "samples": 103
+            "median_ms": 3.164006,
+            "p95_ms": 3.428947,
+            "samples": 23
           },
           "catalog.standards_at_many": {
-            "median_ms": 7.550181,
-            "p95_ms": 9.211554,
-            "samples": 103
+            "median_ms": 3.381537,
+            "p95_ms": 3.86668,
+            "samples": 23
           },
           "checkpoints.checkpoint_public_keys": {
-            "median_ms": 0.027672,
-            "p95_ms": 0.040621,
-            "samples": 103
+            "median_ms": 0.024797,
+            "p95_ms": 0.028253,
+            "samples": 23
           },
           "checkpoints.checkpoints_by_ids": {
-            "median_ms": 14.39173,
-            "p95_ms": 19.006475,
-            "samples": 103
+            "median_ms": 5.912891,
+            "p95_ms": 6.855879,
+            "samples": 23
           },
           "compose_artifacts_and_upload": {
-            "median_ms": 604.832651,
-            "p95_ms": 886.065094,
-            "samples": 103
+            "median_ms": 780.3368,
+            "p95_ms": 1148.94678,
+            "samples": 23
           },
           "coverage.linea_de_tiempo": {
-            "median_ms": 16.155191,
-            "p95_ms": 21.362838,
-            "samples": 103
+            "median_ms": 7.49925,
+            "p95_ms": 9.124341,
+            "samples": 69
           },
           "episodes.episodes_received_before": {
-            "median_ms": 6.927874,
-            "p95_ms": 8.993254,
-            "samples": 103
+            "median_ms": 2.61203,
+            "p95_ms": 3.026641,
+            "samples": 69
           },
           "fleet.assignment_history": {
-            "median_ms": 7.315893,
-            "p95_ms": 9.578549,
-            "samples": 103
+            "median_ms": 3.004188,
+            "p95_ms": 3.617352,
+            "samples": 69
           },
           "gates.gate_history": {
-            "median_ms": 6.903168,
-            "p95_ms": 8.738432,
-            "samples": 103
+            "median_ms": 2.818086,
+            "p95_ms": 3.150555,
+            "samples": 69
           },
           "markers.resultados_marca": {
-            "median_ms": 7.30931,
-            "p95_ms": 9.412923,
-            "samples": 103
+            "median_ms": 3.007113,
+            "p95_ms": 3.913829,
+            "samples": 69
           },
           "places.places": {
-            "median_ms": 6.934282,
-            "p95_ms": 8.371513,
-            "samples": 103
+            "median_ms": 2.779954,
+            "p95_ms": 3.438827,
+            "samples": 23
           },
           "reader.list": {
-            "median_ms": 22.2128395,
-            "p95_ms": 57.281431,
-            "samples": 206
+            "median_ms": 13.490099999999998,
+            "p95_ms": 21.447113,
+            "samples": 138
           },
           "reader.list_audit": {
-            "median_ms": 10.178295,
-            "p95_ms": 12.897231,
-            "samples": 103
+            "median_ms": 4.629022,
+            "p95_ms": 5.233621,
+            "samples": 69
           },
           "signer.sign": {
-            "median_ms": 0.189567,
-            "p95_ms": 0.229285,
-            "samples": 103
+            "median_ms": 0.167444,
+            "p95_ms": 0.208632,
+            "samples": 23
           },
           "total": {
-            "median_ms": 604.955609,
-            "p95_ms": 886.21542,
-            "samples": 103
+            "median_ms": 780.45885,
+            "p95_ms": 1149.081863,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_export_month": {
       "label": "laz_export_month [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 650.601,
-      "p95": 921.49,
+      "median": 538.571,
+      "p95": 867.197,
       "objective": 300000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "zones": 1,
         "days": 31,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "maximum_scope_bounded": false,
         "median_objective_ms": 120000,
         "trace_segments": {
           "accreditation.export.artifact.audit": {
-            "median_ms": 0.703542,
-            "p95_ms": 1.380021,
-            "samples": 103
+            "median_ms": 0.41497,
+            "p95_ms": 0.527582,
+            "samples": 23
           },
           "accreditation.export.artifact.checkpoint": {
-            "median_ms": 0.710224,
-            "p95_ms": 1.199987,
-            "samples": 103
+            "median_ms": 0.44112,
+            "p95_ms": 0.545034,
+            "samples": 23
           },
           "accreditation.export.artifact.coverage": {
-            "median_ms": 0.765876,
-            "p95_ms": 1.257082,
-            "samples": 103
+            "median_ms": 0.45785,
+            "p95_ms": 0.606731,
+            "samples": 23
           },
           "accreditation.export.artifact.document": {
-            "median_ms": 7.930582,
-            "p95_ms": 10.229554,
-            "samples": 103
+            "median_ms": 6.07318,
+            "p95_ms": 6.375732,
+            "samples": 23
           },
           "accreditation.export.artifact.findings_json": {
-            "median_ms": 1.171213,
-            "p95_ms": 2.088278,
-            "samples": 103
+            "median_ms": 0.844298,
+            "p95_ms": 0.935208,
+            "samples": 23
           },
           "accreditation.export.artifact.manifest": {
-            "median_ms": 0.880041,
-            "p95_ms": 1.418265,
-            "samples": 103
+            "median_ms": 0.621728,
+            "p95_ms": 0.682944,
+            "samples": 23
           },
           "accreditation.export.artifact.public_key": {
-            "median_ms": 0.693933,
-            "p95_ms": 1.23186,
-            "samples": 103
+            "median_ms": 0.420511,
+            "p95_ms": 0.480494,
+            "samples": 23
           },
           "accreditation.export.artifact.verifier": {
-            "median_ms": 5.015172,
-            "p95_ms": 6.461251,
-            "samples": 103
+            "median_ms": 4.522502,
+            "p95_ms": 4.605099,
+            "samples": 23
           },
           "catalog.single_occupancy_many": {
-            "median_ms": 7.665798,
-            "p95_ms": 10.459862,
-            "samples": 103
+            "median_ms": 3.031389,
+            "p95_ms": 3.299362,
+            "samples": 23
           },
           "catalog.standards_at_many": {
-            "median_ms": 8.122111,
-            "p95_ms": 12.952332,
-            "samples": 103
+            "median_ms": 3.380956,
+            "p95_ms": 3.950757,
+            "samples": 23
           },
           "checkpoints.checkpoint_public_keys": {
-            "median_ms": 0.029751,
-            "p95_ms": 0.043059,
-            "samples": 103
+            "median_ms": 0.0267,
+            "p95_ms": 0.036749,
+            "samples": 23
           },
           "checkpoints.checkpoints_by_ids": {
-            "median_ms": 15.252946,
-            "p95_ms": 21.781608,
-            "samples": 103
+            "median_ms": 6.003266,
+            "p95_ms": 8.067087,
+            "samples": 23
           },
           "compose_artifacts_and_upload": {
-            "median_ms": 651.392349,
-            "p95_ms": 956.378638,
-            "samples": 103
+            "median_ms": 539.361002,
+            "p95_ms": 870.346161,
+            "samples": 23
           },
           "coverage.linea_de_tiempo": {
-            "median_ms": 17.343804,
-            "p95_ms": 33.656635,
-            "samples": 103
+            "median_ms": 7.691049,
+            "p95_ms": 8.193684,
+            "samples": 23
           },
           "episodes.episodes_received_before": {
-            "median_ms": 7.539926,
-            "p95_ms": 10.887422,
-            "samples": 103
+            "median_ms": 2.708883,
+            "p95_ms": 3.071345,
+            "samples": 23
           },
           "fleet.assignment_history": {
-            "median_ms": 7.874562,
-            "p95_ms": 10.497676,
-            "samples": 103
+            "median_ms": 3.032702,
+            "p95_ms": 3.565112,
+            "samples": 23
           },
           "gates.gate_history": {
-            "median_ms": 7.421217,
-            "p95_ms": 11.006601,
-            "samples": 103
+            "median_ms": 2.796116,
+            "p95_ms": 3.089918,
+            "samples": 23
           },
           "markers.resultados_marca": {
-            "median_ms": 8.002593,
-            "p95_ms": 11.670241,
-            "samples": 103
+            "median_ms": 3.084971,
+            "p95_ms": 4.075081,
+            "samples": 23
           },
           "places.places": {
-            "median_ms": 7.274514,
-            "p95_ms": 10.171981,
-            "samples": 103
+            "median_ms": 2.776269,
+            "p95_ms": 3.387459,
+            "samples": 23
           },
           "reader.list": {
-            "median_ms": 24.7079245,
-            "p95_ms": 59.576241,
-            "samples": 206
+            "median_ms": 13.1442365,
+            "p95_ms": 20.745234,
+            "samples": 46
           },
           "reader.list_audit": {
-            "median_ms": 11.086267,
-            "p95_ms": 20.034685,
-            "samples": 103
+            "median_ms": 4.791789,
+            "p95_ms": 5.596273,
+            "samples": 23
           },
           "signer.sign": {
-            "median_ms": 0.190627,
-            "p95_ms": 0.254453,
-            "samples": 103
+            "median_ms": 0.169258,
+            "p95_ms": 0.214454,
+            "samples": 23
           },
           "total": {
-            "median_ms": 651.574723,
-            "p95_ms": 956.539711,
-            "samples": 103
+            "median_ms": 539.52424,
+            "p95_ms": 870.472379,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_exposure": {
       "label": "laz_exposure [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 74.098,
-      "p95": 91.141,
+      "median": 46.54,
+      "p95": 52.259,
       "objective": 3000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
+        "zones": 20,
+        "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "trace_segments": {
           "exposure_with_timeline": {
-            "median_ms": 74.392409,
-            "p95_ms": 100.604282,
-            "samples": 103
+            "median_ms": 46.456345,
+            "p95_ms": 52.262338,
+            "samples": 23
           },
           "total": {
-            "median_ms": 74.478038,
-            "p95_ms": 100.728812,
-            "samples": 103
+            "median_ms": 46.534663,
+            "p95_ms": 52.347779,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_immediate_email": {
       "label": "laz_immediate_email [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 35.432,
-      "p95": 62.93,
+      "median": 8.698,
+      "p95": 9.827,
       "objective": 60000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "provider": "double",
         "trace_segments": {
           "queued_to_provider_accepted": {
-            "median_ms": 35.441013,
-            "p95_ms": 62.768125,
-            "samples": 103
+            "median_ms": 8.607209,
+            "p95_ms": 11.060835,
+            "samples": 23
           },
           "total": {
-            "median_ms": 35.519505,
-            "p95_ms": 62.851452,
-            "samples": 103
+            "median_ms": 8.668484,
+            "p95_ms": 11.125076,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_inbox_200": {
       "label": "laz_inbox_200 [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 114.033,
-      "p95": 120.349,
+      "median": 30.326,
+      "p95": 33.334,
       "objective": 700,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "zones": 20,
         "days": 366,
         "findings": 318,
-        "episodes_per_zone_day": "2 por semana en 3 zonas (ci acotado)",
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
+        "selected_zones": 3,
         "trace_segments": {
           "projection_page": {
-            "median_ms": 114.080983,
-            "p95_ms": 120.47166,
-            "samples": 103
+            "median_ms": 30.254434,
+            "p95_ms": 35.553191,
+            "samples": 23
           },
           "total": {
-            "median_ms": 114.196948,
-            "p95_ms": 120.606441,
-            "samples": 103
+            "median_ms": 30.409396,
+            "p95_ms": 35.722499,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_metrics_materialize": {
       "label": "laz_metrics_materialize [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 79.26,
-      "p95": 92.135,
+      "median": 39.923,
+      "p95": 43.729,
       "objective": 5000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
+        "zones": 20,
+        "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "trace_segments": {
           "metrics_compute_and_store": {
-            "median_ms": 78.516077,
-            "p95_ms": 93.397152,
-            "samples": 103
+            "median_ms": 39.883256,
+            "p95_ms": 49.590342,
+            "samples": 23
           },
           "total": {
-            "median_ms": 78.593167,
-            "p95_ms": 93.490837,
-            "samples": 103
+            "median_ms": 39.965141,
+            "p95_ms": 49.66922,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_metrics_panel": {
       "label": "laz_metrics_panel [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 3801.583,
-      "p95": 4980.319,
+      "median": 1419.31,
+      "p95": 1462.98,
       "objective": 1500,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "zones": 20,
+        "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "auxiliary_empty_zones": 1,
         "months": 12,
         "trace_segments": {
           "materialized_month": {
-            "median_ms": 324.23328,
-            "p95_ms": 452.748426,
-            "samples": 1236
+            "median_ms": 117.7421975,
+            "p95_ms": 137.583248,
+            "samples": 276
           },
           "total": {
-            "median_ms": 3860.148829,
-            "p95_ms": 4980.237331,
-            "samples": 103
+            "median_ms": 1423.57032,
+            "p95_ms": 1476.739619,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_monthly_package": {
       "label": "laz_monthly_package [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 301.096,
-      "p95": 373.037,
+      "median": 122.237,
+      "p95": 145.702,
       "objective": 90000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
+        "findings_per_organization": 1,
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SQL por fila",
         "trace_segments": {
           "checkpoints.checkpoint_public_keys": {
-            "median_ms": 0.027174,
-            "p95_ms": 0.0383,
-            "samples": 103
+            "median_ms": 0.027181,
+            "p95_ms": 0.056947,
+            "samples": 23
           },
           "checkpoints.write_checkpoints_now": {
-            "median_ms": 59.165896,
-            "p95_ms": 81.222257,
-            "samples": 103
+            "median_ms": 23.49806,
+            "p95_ms": 32.226798,
+            "samples": 23
           },
           "evidence.put_object": {
-            "median_ms": 7.210085,
-            "p95_ms": 9.046603,
-            "samples": 103
+            "median_ms": 4.866217,
+            "p95_ms": 5.025777,
+            "samples": 23
           },
           "monthly_compose_and_seal": {
-            "median_ms": 301.049331,
-            "p95_ms": 372.788756,
-            "samples": 103
+            "median_ms": 122.334526,
+            "p95_ms": 145.591836,
+            "samples": 23
           },
           "program_metrics.snapshot": {
-            "median_ms": 121.411073,
-            "p95_ms": 159.037748,
-            "samples": 103
+            "median_ms": 46.27854,
+            "p95_ms": 51.578305,
+            "samples": 23
           },
           "reader.list": {
-            "median_ms": 16.255582,
-            "p95_ms": 21.719392,
-            "samples": 103
+            "median_ms": 8.612352,
+            "p95_ms": 10.857373,
+            "samples": 23
           },
           "repository.acquire_lease": {
-            "median_ms": 1.642918,
-            "p95_ms": 2.449114,
-            "samples": 103
+            "median_ms": 0.862922,
+            "p95_ms": 1.262563,
+            "samples": 23
           },
           "repository.adoption_days": {
-            "median_ms": 1.576363,
-            "p95_ms": 2.265944,
-            "samples": 103
+            "median_ms": 0.773414,
+            "p95_ms": 1.024827,
+            "samples": 23
           },
           "repository.claim": {
-            "median_ms": 1.743611,
-            "p95_ms": 2.627505,
-            "samples": 103
+            "median_ms": 0.917245,
+            "p95_ms": 1.574259,
+            "samples": 23
           },
           "repository.coordinator_user_id": {
-            "median_ms": 1.343596,
-            "p95_ms": 2.33839,
-            "samples": 103
+            "median_ms": 0.54247,
+            "p95_ms": 1.087555,
+            "samples": 23
           },
           "repository.insert_audit_sample": {
-            "median_ms": 1.809768,
-            "p95_ms": 2.829841,
-            "samples": 103
+            "median_ms": 0.932563,
+            "p95_ms": 1.279515,
+            "samples": 23
           },
           "repository.insert_audit_sample_items": {
-            "median_ms": 1.580724,
-            "p95_ms": 2.136271,
-            "samples": 103
+            "median_ms": 0.800826,
+            "p95_ms": 1.055715,
+            "samples": 23
           },
           "repository.lease_still_valid": {
-            "median_ms": 1.668875,
-            "p95_ms": 2.328549,
-            "samples": 103
+            "median_ms": 0.83486,
+            "p95_ms": 1.042259,
+            "samples": 23
           },
           "repository.previous_commitments": {
-            "median_ms": 1.221874,
-            "p95_ms": 1.728464,
-            "samples": 103
+            "median_ms": 0.502585,
+            "p95_ms": 0.911714,
+            "samples": 23
           },
           "repository.release_lease": {
-            "median_ms": 1.910758,
-            "p95_ms": 2.687869,
-            "samples": 103
+            "median_ms": 1.08459,
+            "p95_ms": 1.333747,
+            "samples": 23
           },
           "repository.seal": {
-            "median_ms": 1.856657,
-            "p95_ms": 2.406874,
-            "samples": 103
+            "median_ms": 1.147648,
+            "p95_ms": 1.390654,
+            "samples": 23
           },
           "signer.sign": {
-            "median_ms": 0.163359,
-            "p95_ms": 0.237125,
-            "samples": 103
+            "median_ms": 0.157836,
+            "p95_ms": 0.165411,
+            "samples": 23
           },
           "total": {
-            "median_ms": 301.150356,
-            "p95_ms": 372.904154,
-            "samples": 103
+            "median_ms": 122.425537,
+            "p95_ms": 145.716661,
+            "samples": 23
           },
           "writer.write": {
-            "median_ms": 12.122461,
-            "p95_ms": 15.748715,
-            "samples": 103
+            "median_ms": 6.359256,
+            "p95_ms": 7.290888,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_notification": {
       "label": "laz_notification [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 73.532,
-      "p95": 126.603,
+      "median": 42.688,
+      "p95": 44.88,
       "objective": 10000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "outbox_delivery_budget_ms": 5000,
         "trace_segments": {
           "event_to_notification": {
-            "median_ms": 40.743567,
-            "p95_ms": 89.081828,
-            "samples": 103
+            "median_ms": 14.881458,
+            "p95_ms": 21.076829,
+            "samples": 23
           },
           "total": {
-            "median_ms": 74.999886,
-            "p95_ms": 134.360003,
-            "samples": 103
+            "median_ms": 42.812939,
+            "p95_ms": 48.325163,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_rebuild_year": {
       "label": "laz_rebuild_year [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 18195.423,
-      "p95": 20153.245,
+      "median": 8492.068,
+      "p95": 8634.495,
       "objective": 1800000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "zones": 20,
         "days": 366,
         "findings": 318,
-        "episodes_per_zone_day": "2 por semana en 3 zonas (ci acotado)",
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "trace_segments": {
           "rebuild_plant": {
-            "median_ms": 18250.724886,
-            "p95_ms": 20155.110121,
-            "samples": 103
+            "median_ms": 8464.929464,
+            "p95_ms": 8633.881069,
+            "samples": 23
           },
           "total": {
-            "median_ms": 18252.46933,
-            "p95_ms": 20159.890602,
-            "samples": 103
+            "median_ms": 8465.40643,
+            "p95_ms": 8634.385426,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_timeline_366": {
       "label": "laz_timeline_366 [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 301.616,
-      "p95": 386.701,
+      "median": 89.311,
+      "p95": 91.252,
       "objective": 8000,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
+        "zones": 20,
         "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+        "full_density_task": "VIG-246",
+        "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         "segments": 12,
         "trace_segments": {
           "coverage_366_days": {
-            "median_ms": 303.65588,
-            "p95_ms": 386.54115,
-            "samples": 103
+            "median_ms": 89.604313,
+            "p95_ms": 95.267024,
+            "samples": 23
           },
           "total": {
-            "median_ms": 303.753827,
-            "p95_ms": 386.617091,
-            "samples": 103
+            "median_ms": 89.673493,
+            "p95_ms": 95.336525,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_validators_1000_chars": {
       "label": "laz_validators_1000_chars [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 2.36,
-      "p95": 2.733,
+      "median": 3.051,
+      "p95": 3.2,
       "objective": 20.0,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 100,
         "chars": 1000,
         "validators": [
           "blocked_vocabulary",
@@ -1227,62 +1284,63 @@
         ],
         "trace_segments": {
           "both_validators": {
-            "median_ms": 2.299645,
-            "p95_ms": 2.667167,
+            "median_ms": 2.971585,
+            "p95_ms": 3.084508,
             "samples": 103
           },
           "total": {
-            "median_ms": 2.335603,
-            "p95_ms": 2.705568,
+            "median_ms": 3.016199,
+            "p95_ms": 3.165832,
             "samples": 103
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "laz_writes": {
       "label": "laz_writes [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 83.007,
-      "p95": 137.347,
+      "median": 35.331,
+      "p95": 60.354,
       "objective": 250,
       "regression_factor": 1.5,
       "details": {
-        "profile": "ci",
+        "profile": "nightly",
+        "rounds": 20,
         "trace_segments": {
           "action": {
-            "median_ms": 86.818635,
-            "p95_ms": 110.556542,
-            "samples": 26
+            "median_ms": 35.534409,
+            "p95_ms": 48.87624,
+            "samples": 6
           },
           "classification": {
-            "median_ms": 71.48832949999999,
-            "p95_ms": 96.629308,
-            "samples": 26
+            "median_ms": 32.3552915,
+            "p95_ms": 93.162997,
+            "samples": 6
           },
           "reopening": {
-            "median_ms": 129.6804645,
-            "p95_ms": 152.753002,
-            "samples": 26
+            "median_ms": 60.189703,
+            "p95_ms": 65.44196,
+            "samples": 6
           },
           "review_resolution": {
-            "median_ms": 74.577519,
-            "p95_ms": 111.533415,
-            "samples": 25
+            "median_ms": 34.320112,
+            "p95_ms": 48.185741,
+            "samples": 5
           },
           "total": {
-            "median_ms": 83.923888,
-            "p95_ms": 148.985326,
-            "samples": 103
+            "median_ms": 35.805632,
+            "p95_ms": 65.515449,
+            "samples": 23
           }
         }
       },
+      "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
       "measured_at": "2026-10-21",
-      "runner": "local",
-      "runner_class": "local:Manu"
+      "runner": "GitHub Actions 1000008921"
     },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",
