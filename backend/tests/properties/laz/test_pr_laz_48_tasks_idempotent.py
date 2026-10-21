@@ -47,9 +47,10 @@ intervalo, que ``reminders_sent`` cuenta envíos reales y que la vuelta envía e
 
 **Lo que la caída cambia por diseño** (y la propiedad no iguala): la agrupación de correo emite
 **un solo envío** con lo acumulado, así que la caída puede dejar menos lotes que la continua (nunca
-una ráfaga); ``adoption_check`` publica la racha una vez con los días transcurridos hasta la
-vuelta; ``verify_loop_projection`` no inventa muestras de los días que no corrió; y las marcas de
-tiempo de supresión llevan la hora en que se procesó el aviso del proveedor.
+una ráfaga); ``adoption_check`` publica las mismas rachas, pero cada una con los días
+transcurridos hasta la vuelta o hasta su cierre; ``verify_loop_projection`` no inventa muestras de
+los días que no corrió; y las marcas de tiempo de supresión llevan la hora en que se procesó el
+aviso del proveedor.
 
 ``rebuild_loop_projection`` no es periódica (U04-H-14): su exclusión la prueba PR-LAZ-51.
 ``email_delivery_events_poll`` solo publica el pulso; lo que se repite es la ronda del
@@ -70,10 +71,9 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
-from zoneinfo import ZoneInfo
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from tests.adoption_support import AdoptionStack, adoption_stack
@@ -686,15 +686,18 @@ def adoption(postgres_endpoint: PostgresEndpoint) -> Iterator[Harness[AdoptionSt
     threshold=st.integers(1, 3),
     active_steps=st.sets(st.integers(0, 6), max_size=2),
 )
+# La racha llega al umbral, la continua la alerta y una actividad la cierra dentro de la caída:
+# la vuelta tiene que publicarla a posteriori (NFR-LAZ-13), con cualquier semilla.
+@example(timeline=Timeline(steps=(24, 24, 24), down_at=0), threshold=1, active_steps={2})
 def test_pr_laz_48_adoption_check(
     adoption: Harness[AdoptionStack], timeline: Timeline, threshold: int, active_steps: set[int]
 ) -> None:
     """Una alerta y un aviso por racha, nunca dos, en los tres; ``once`` y ``twice`` idénticos.
 
-    La caída no inventa alertas: publica cada racha que **sigue abierta** al volver una sola vez,
-    con los días transcurridos hasta entonces (nunca menos que la continua). Una racha que empezó
-    y terminó (por actividad) dentro de la caída no se alerta a posteriori: ``adoption_check`` mira
-    el silencio vigente (PAT-LAZ-RES-05 solo pide no emitir dos veces por la misma racha)."""
+    La caída deja **el mismo conjunto de rachas alertadas** que la continua (NFR-LAZ-13, decisión
+    del dueño en VIG-241): también la que llegó al umbral y se cerró por actividad dentro de las
+    48 h sale a posteriori, una vez. Solo cambia ``silent_days``: la caída lo publica con los días
+    transcurridos hasta la vuelta o hasta el cierre, nunca menos que la continua."""
     stack = adoption.built
     organizations = {mode: stack.organization() for mode in MODES}
     for organization in organizations.values():
@@ -703,12 +706,9 @@ def test_pr_laz_48_adoption_check(
     zones = {mode: stack.site_zone(o) for mode, o in organizations.items()}
     for zone in zones.values():
         stack.activate(zone)
-    timezone = ZoneInfo(stack.timezone(organizations[ONCE]))
-    activity: list[datetime] = []
 
     def at_step(index: int) -> None:
         if index in active_steps:
-            activity.append(stack.now())
             for zone in zones.values():
                 stack.record(zone, "classification")
 
@@ -728,18 +728,13 @@ def test_pr_laz_48_adoption_check(
         assert len({m["streak_start"] for m in marks}) == len(marks), mode
         streaks[mode] = [(m["streak_start"], m["threshold_days"], m["silent_days"]) for m in marks]
     assert streaks[ONCE] == streaks[TWICE], trace
-    assert {s[0] for s in streaks[OUTAGE]} <= {s[0] for s in streaks[ONCE]}, (streaks, trace)
-    assert trace.recovered_at is not None
-    recovered_at = trace.recovered_at
+    assert sorted(s[0] for s in streaks[OUTAGE]) == sorted(s[0] for s in streaks[ONCE]), (
+        streaks,
+        trace,
+    )
     continuous = {start: silent for start, _, silent in streaks[ONCE]}
     for start, _, silent in streaks[OUTAGE]:
         assert silent >= continuous[start], (streaks, trace)
-    for start, _, _ in streaks[ONCE]:
-        open_at_recovery = not [
-            t for t in activity if t <= recovered_at and t.astimezone(timezone).date() >= start
-        ]
-        if open_at_recovery:
-            assert start in {s[0] for s in streaks[OUTAGE]}, (start, streaks, trace)
     world = stack.actions.world.stack
     world.run(world.release())
 

@@ -91,6 +91,9 @@ y caída de 48 h dejan el mismo estado final. Tras una caída:
   `reminder_interval_hours` desde ese envío; no recupera los omitidos (decisión del dueño en
   VIG-241 del 2026-10-20, U04-H-07).
 - `email_grouping` y `digest_weekly` agrupan lo acumulado en un solo envío.
-- `adoption_check` publica la racha que sigue abierta, con los días transcurridos; una racha que
-  empezó y terminó dentro de la caída no se alerta a posteriori.
+- `adoption_check` publica, una vez cada una, las mismas rachas que la ejecución continua: la que
+  sigue abierta, con los días transcurridos, y también la que llegó al umbral y se cerró por
+  actividad dentro de la caída, con sus días de silencio (NFR-LAZ-13, decisión del dueño en VIG-241
+  del 2026-10-21). Mira `MAX_CATCHUP_DAYS` (31) hacia atrás desde el día en que la racha llegó al
+  umbral; si se baja `adoption_silence_days`, puede alertar rachas cerradas de ese margen.
 - `verify_loop_projection` no registra muestras de los días que no corrió.

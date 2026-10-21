@@ -147,6 +147,13 @@ def test_rebuild_cli_repairs_only_its_plant_and_retries_without_new_records(
             "UPDATE loop.finding_state SET evidence_flagged = true WHERE organization_id=$1",
             subject.organization.organization_id,
         )
+    # Otra planta de la misma organización, con su proyección divergente: no se toca.
+    second_plant = world.add_plant(first)
+    second_zone = uuid.uuid4()
+    world.stack.authz.add_zone(first.organization_id, second_plant, second_zone)
+    sibling = world.clone_row(subjects[0], zone_id=second_zone, plant_id=second_plant)
+    (sibling_before,) = world.rows(first, subject_id=sibling)
+    assert sibling_before["evidence_flagged"] is True
     records = _records(world, first.organization_id)
     code, result, error = admin_world.rebuild(first)
     assert code == 0, error
@@ -154,6 +161,7 @@ def test_rebuild_cli_repairs_only_its_plant_and_retries_without_new_records(
     row = world.finding_state(subjects[0])
     assert row is not None and row["evidence_flagged"] is False
     assert world.finding_state(subjects[1])["evidence_flagged"] is True
+    assert world.rows(first, subject_id=sibling) == [sibling_before]
     assert world.checkpoint(first)["state"] == "healthy"
     code, repeated, error = admin_world.rebuild(first)
     assert code == 0, error
