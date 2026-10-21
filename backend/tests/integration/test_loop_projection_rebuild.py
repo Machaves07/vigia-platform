@@ -145,6 +145,31 @@ def test_divergence_escalates_to_incident_after_three(world: LoopWorld) -> None:
         assert payload["full_scan"] is True
 
 
+def test_missing_finding_delivery_is_declared_as_projection_divergence(world: LoopWorld) -> None:
+    """Un evento perdido no puede convertir una partición con expediente en ``healthy``."""
+    organization = world.organization()
+    subject = world.ingest_finding(organization)
+    assert world.finding_state(subject) is None
+
+    rebuilder = _rebuilder(world, world.projection_consumer()[1])
+    verifier = _verifier(world, rebuilder)
+    outcome = world.stack.run(
+        verifier.verify_plant(world.context(organization), organization.plant_id)
+    )
+
+    assert outcome.is_diverged
+    assert subject.subject_id in outcome.diverged
+    rows = world.stack.fetch(
+        _DIVERGENCE_EVENTS,
+        organization.organization_id,
+        PROJECTION_DIVERGENCE_EVENT,
+    )
+    assert len(rows) == 1
+    payload = json.loads(rows[0]["payload"])
+    assert payload["rows_diverged"] == 1
+    assert world.finding_state(subject) is not None
+
+
 def test_bandeja_declares_rebuilding(world: LoopWorld) -> None:
     organization = world.organization()
     subject = world.ingest_finding(organization)
