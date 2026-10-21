@@ -115,6 +115,12 @@ CHUNK_DAYS: Final = 30
 PAGINATION_CHUNK: Final = 100_000
 INCLUDE_ARCHIVED_PAGES: Final = 3
 """Páginas con ``include_archived`` que se miden después del archivado (tendencia)."""
+PAGE_PACING_SECONDS: Final = 0.11
+"""Avance del reloj simulado por petición: algo menos de 600 por minuto, el límite de la sesión
+(``SESSION_BUDGET``, NFR-NUC-25), que la aplicación mide con ese reloj. Sin él, un recorrido de un
+millón (5 000 páginas en una sesión) recibe ``rate_limited`` (nightly 39584457311)."""
+MAX_RATE_LIMIT_WAITS: Final = 50
+"""Esperas de ``retry_after_seconds`` permitidas por recorrido antes de dar el 429 por fallo."""
 SAME_ORIGIN: Final = {"Sec-Fetch-Site": "same-origin"}
 REASON_TEXT: Final = (
     "Confirmado en sitio: la condición de coexistencia observada coincide con el estándar "
@@ -591,6 +597,7 @@ class _Traversal:
     ids: list[uuid.UUID]
     pages: int
     latencies_ms: list[float]
+    rate_limited_waits: int = 0
 
 
 def _percentile(values: Sequence[float], fraction: float) -> float:
@@ -642,12 +649,15 @@ class _Pagination:
         cookie = self._env.open_session(self._organization, self._member)
         headers = {**SAME_ORIGIN, "Cookie": f"{SESSION_COOKIE_NAME}={cookie.value}"}
 
+        clock = self._env.sessions.clock
+
         async def walk() -> _Traversal:
             ids: list[uuid.UUID] = []
             latencies: list[float] = []
             previous: tuple[str, str] | None = None
             after: str | None = None
             pages = 0
+            waits = 0
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=self.app),
                 base_url="http://testserver",
@@ -659,9 +669,17 @@ class _Pagination:
                         params["include_archived"] = "true"
                     if after is not None:
                         params["after"] = after
+                    # Como un cliente que respeta el límite de la sesión (600 por minuto,
+                    # NFR-NUC-25): el límite mide con el reloj simulado de la aplicación.
+                    clock.advance(PAGE_PACING_SECONDS)
                     began = WALL.monotonic()
                     response = await client.get("/notifications", params=params, headers=headers)
                     latencies.append((WALL.monotonic() - began) * 1000)
+                    if response.status_code == 429 and waits < MAX_RATE_LIMIT_WAITS:
+                        # Espera lo que pide ``retry_after_seconds`` y repite la misma página.
+                        waits += 1
+                        clock.advance(float(response.json()["retry_after_seconds"]))
+                        continue
                     if response.status_code != 200:
                         raise AssertionError(f"GET /notifications: {response.text}")
                     body = response.json()
@@ -675,7 +693,7 @@ class _Pagination:
                     after = body["next_after"]
                     if after is None or (max_pages is not None and pages >= max_pages):
                         break
-            return _Traversal(ids, pages, latencies)
+            return _Traversal(ids, pages, latencies, waits)
 
         result: _Traversal = self._env.run(walk())
         return result
@@ -923,6 +941,9 @@ def run_laz(
             "seen_after_archive_default": len(after_default.ids),
             "page_ms_p50": _percentile(latencies, 0.5),
             "page_ms_p95": _percentile(latencies, 0.95),
+            "rate_limited_waits": before.rate_limited_waits
+            + after_default.rate_limited_waits
+            + with_archived.rate_limited_waits,
             "include_archived_pages": with_archived.pages,
             "include_archived_page_ms_p50": _percentile(with_archived.latencies_ms, 0.5),
             "include_archived_page_ms_max": _percentile(with_archived.latencies_ms, 1.0),
