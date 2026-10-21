@@ -20,7 +20,7 @@ import pytest
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_actions_support import ActionsStack, Who, actions_stack
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 
 @pytest.fixture(scope="module")

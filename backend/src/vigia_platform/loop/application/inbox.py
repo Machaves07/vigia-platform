@@ -18,8 +18,9 @@ PAT-LAZ-ESC-03) y **una sola sentencia** (``InboxQuery``), sin auditoría de con
 4. **Lo que se declara** (P2; BR-LAZ-04, 149, 153 y 156): cada zona consultada sale con su aviso
    (``InboxZoneNotice``), su nodo asignado hoy y el ``communication_state`` que U-03 proyecta,
    **también si no tiene ningún elemento**: la bandeja nunca dice «sin hallazgos» ni presenta la
-   zona como observada. Una planta con la proyección en ``rebuilding`` o ``diverged`` sale en
-   ``partitions`` con su código cerrado (``InboxPartitionNotice``).
+   zona como observada. Una planta con la proyección en ``rebuilding`` o ``diverged``, incluido
+   un checkpoint atrasado respecto a la ingesta, sale en ``partitions`` con su código cerrado
+   (``InboxPartitionNotice``) y no sirve filas hasta recuperar la proyección (DR-LAZ-01).
 5. **Avisos de cada elemento** desde las columnas enriquecidas (BR-LAZ-10, 11, 150 y 155):
    acuerdo revocado (con su fecha), acta no vigente (con su causa), evidencia marcada y tramos
    faltantes. BR-LAZ-12: un hecho sin la compuerta de uso aprobada no se muestra.

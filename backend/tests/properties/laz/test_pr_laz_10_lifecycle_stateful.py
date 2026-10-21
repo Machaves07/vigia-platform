@@ -653,6 +653,7 @@ def test_pr_laz_10_platform_state_machine(
 
 
 @pytest.mark.integration
+@pytest.mark.laz_examples
 def test_pr_laz_10_permanent_counterexamples(lifecycle_machine_stack: Any) -> None:
     """Las reducciones de la revisión y recorridos profundos usan la misma comparación estatal."""
     for name, in_review, commands, final_state in REGRESSIONS:
@@ -670,6 +671,7 @@ def test_pr_laz_10_permanent_counterexamples(lifecycle_machine_stack: Any) -> No
             machine.teardown()
 
 
+@pytest.mark.laz_examples
 def test_pr_laz_10_rejection_and_frozen_deadline_regressions() -> None:
     """El modelo conserva los códigos de la tabla para contrastarlos con la plataforma."""
     model = LifecycleModel()

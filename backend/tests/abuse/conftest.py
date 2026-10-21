@@ -7,6 +7,7 @@ sus propias organizaciones, así que no se pisan.
   (``tests/platform_support.py``);
 - ``gob``: el de U-03 de los quince escenarios G-1 a G-15, con **todas** las unidades de
   ``platform_units()`` y LocalStack (``tests/gob_platform_support.py``).
+- ``classification``: clasificación real de U-04 para L-1, L-8 y L-9.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 
 from tests.gob_platform_support import GobPlatform, gob_platform
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
+from tests.loop_classification_support import ClassificationStack, classification_stack
 from tests.platform_support import Platform, platform_world
 
 
@@ -46,3 +48,9 @@ def gob(_gob_world: GobPlatform) -> GobPlatform:
     """El mundo de U-03, con la hora simulada en la de la base al empezar cada escenario."""
     _gob_world.resync()
     return _gob_world
+
+
+@pytest.fixture(scope="module")
+def classification(postgres_endpoint: PostgresEndpoint) -> Iterator[ClassificationStack]:
+    with classification_stack(postgres_endpoint, "laz_abuse") as built:
+        yield built

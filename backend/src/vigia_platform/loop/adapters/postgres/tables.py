@@ -509,6 +509,7 @@ LOOP_PROJECTION_CHECKPOINT: Final = Table(
     _uuid("organization_id", primary_key=True),
     _uuid("plant_id", primary_key=True),
     Column("last_applied_ledger_sequence", BigInteger, nullable=False),
+    Column("ingestion_frontier", BigInteger, nullable=False),
     _uuid("last_applied_event_id", nullable=True),
     _text("projection_digest", nullable=True),
     _instant("rebuilt_at", nullable=True),
