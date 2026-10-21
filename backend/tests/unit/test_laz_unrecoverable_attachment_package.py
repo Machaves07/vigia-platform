@@ -340,7 +340,7 @@ def test_the_verifier_accepts_the_declaration(single: bool) -> None:
         directory = Path(temporary) / "paquete"
         composed = compose_to_directory(sealed, directory)
         (record,) = _records(composed, "closure_attachment_unrecoverable")
-        assert ("content" in record) is not single
+        assert "content" in record  # también en la zona unipersonal (A-7x de VIG-274)
         report = verify_export(directory)
         assert report.failure is None, report.failure
         assert (report.status, report.anchored_by) == ("intact", ["manifest_signature"])
@@ -429,6 +429,18 @@ FORGERIES: Final = [
 ]
 
 
+@pytest.fixture(scope="module")
+def single_package() -> Iterator[tuple[Path, Composed]]:
+    """El mismo paquete en una zona unipersonal (registros sin contenido, BR-LAZ-99)."""
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary) / "paquete"
+        yield (
+            directory,
+            compose_to_directory(seal_world(world(declared=True, single=True)), directory),
+        )
+
+
+@pytest.mark.parametrize("single", [False, True], ids=["con_contenido", "unipersonal"])
 @pytest.mark.parametrize(
     ("change", "drop_kept"),
     [(change, drop) for _, change, drop in FORGERIES],
@@ -436,11 +448,21 @@ FORGERIES: Final = [
 )
 def test_the_verifier_rejects_an_absent_attachment_that_is_not_declared(
     package: tuple[Path, Composed],
+    single_package: tuple[Path, Composed],
+    single: bool,
     change: Callable[[dict[str, Any]], None],
     drop_kept: bool,
     tmp_path: Path,
 ) -> None:
-    original, composed = package
+    original, composed = single_package if single else package
+    if single:
+        # La forma unipersonal: solo la declaración lleva contenido; la entrada, sus adjuntos.
+        (evidence,) = _records(composed, "action_evidence_added")
+        assert "content" not in evidence
+        assert {item["attachment_id"] for item in evidence["attachment_refs"]} == {
+            str(LOST),
+            str(KEPT),
+        }
     directory = tmp_path / "alterado"
     directory.mkdir()
     for volume in volume_paths(original):

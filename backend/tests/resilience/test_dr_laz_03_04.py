@@ -14,9 +14,12 @@ proveedor (NFR-LAZ-35): ninguna llamada de más.
 servicio real de adjuntos de cierre: un adjunto verificado se borra (marca de borrado) o se
 sobrescribe; la lectura lo **declara** ilegible (``AttachmentUnreadable`` con auditoría
 ``ERROR``, nunca otros bytes) y la **versión anterior** restaurada vuelve a servirse con el
-``sha256`` declarado. Sin versión anterior, la lectura sigue declarándolo ilegible: nunca silencio.
-La declaración estructurada «no recuperable» en el hallazgo y en el manifiesto que pide el paso 4
-del runbook **no existe todavía en ``src``**: la registra VIG-274 (seguimiento de VIG-248).
+``sha256`` declarado. Sin versión anterior, la lectura sigue declarándolo ilegible: nunca silencio;
+y el paso 4 del runbook (VIG-274, A-7x) deja la declaración estructurada «no recuperable» en el
+hallazgo y en el manifiesto: sobre PostgreSQL real, la orden ``vigia-admin
+declare-unrecoverable-attachment`` escribe ``closure_attachment_unrecoverable`` y la exportación
+posterior del alcance se compone y lo declara con el **mismo** campo estructurado (hash, fecha,
+identificadores) que el registro del hallazgo (``tests.unrecoverable_support``).
 
 Solo datos generados (bytes sintéticos de ``tests.attachment_support``).
 """
@@ -38,9 +41,13 @@ from tests.integration.test_loop_attachments_localstack import (
     _subject,
     _upload,
 )
+from tests.laz_support import register_u04_and_catalog
+from tests.loop_actions_support import actions_stack
 from tests.resilience.harness import scenario
 from tests.resilience.laz_consumers import CONSUMERS, consumer_case
 from tests.resilience.laz_support import PROFILES, resilience_storage
+from tests.unrecoverable_support import checkpoint_service, declare_and_export, prepare
+from vigia_platform.accreditation.manifest.model import ATTACHMENT_UNRECOVERABLE_ES
 from vigia_platform.ledger.application.audit_writer import AuditOutcome
 from vigia_platform.loop.adapters.attachments.read import AttachmentUnreadable
 from vigia_platform.loop.adapters.attachments.repository import StoredAttachment
@@ -154,9 +161,43 @@ def _errors(flow: Any) -> int:
     return sum(1 for entry in flow.audit.entries if entry.outcome == str(AuditOutcome.ERROR))
 
 
+def _declare_in_finding_and_manifest(endpoint: PostgresEndpoint, nightly: bool) -> dict[str, Any]:
+    """Runbook 7.3, paso 4, sobre PostgreSQL real (``tests.unrecoverable_support``): la orden
+    ``vigia-admin declare-unrecoverable-attachment`` y la exportación posterior del alcance. El
+    campo estructurado del manifiesto es **igual** al registro del hallazgo."""
+    with actions_stack(
+        endpoint, f"dr_laz_04_{int(nightly)}", register=register_u04_and_catalog
+    ) as stack:
+        lost = prepare(stack)
+        declared = declare_and_export(stack, lost, checkpoint_service(stack.world))
+        (in_finding,) = [
+            r
+            for r in declared.exported["records"]
+            if r["record_type"] == "closure_attachment_unrecoverable"
+        ]
+        assert in_finding["record_id"] == declared.record_id
+        assert in_finding["content"] == declared.content
+        assert declared.content["sha256"] == lost.lost["sha256"]
+        assert declared.content["previous_version_available"] is False
+        assert declared.entry["available"] is False and declared.entry["path"] is None
+        assert declared.entry["unrecoverable"] == {
+            "record_id": declared.record_id,
+            "declaration_id": declared.content["declaration_id"],
+            "sha256": declared.content["sha256"],
+            "detected_at": declared.content["detected_at"],
+            "reason_es": ATTACHMENT_UNRECOVERABLE_ES,
+        }
+        assert declared.exported["lifecycle_state"] == "closed"
+        return {
+            "declared_in_finding_and_manifest": True,
+            "manifest_equals_finding": True,
+            "export_composed": True,
+        }
+
+
 @pytest.mark.parametrize("nightly", PROFILES)
 def test_dr_laz_04_lost_closure_object_is_restored_or_declared(
-    localstack_endpoint: LocalStackEndpoint, nightly: bool
+    localstack_endpoint: LocalStackEndpoint, postgres_endpoint: PostgresEndpoint, nightly: bool
 ) -> None:
     with (
         scenario(
@@ -164,7 +205,8 @@ def test_dr_laz_04_lost_closure_object_is_restored_or_declared(
             title="Pérdida de un objeto de closure/",
             injection="Borrado y sobrescritura de un adjunto; borrado de su única versión",
             expected="Versión anterior restaurada con su sha256; sin ella, lectura declarada "
-            "ilegible (la declaración estructurada es VIG-274)",
+            "ilegible y el adjunto declarado no recuperable con el mismo hash y fecha en el "
+            "hallazgo y en el manifiesto",
         ) as run,
         versioned_bucket(localstack_endpoint.aws_client("s3"), "dr-laz-04") as bucket,
     ):
@@ -200,10 +242,13 @@ def test_dr_laz_04_lost_closure_object_is_restored_or_declared(
                 assert (
                     _read(flow, verified.attachment_id) is None
                 )  # sigue declarado, nunca silencio
+                # Paso 4: la declaración en el hallazgo y en el manifiesto (VIG-274, A-7x).
+                structured = _declare_in_finding_and_manifest(postgres_endpoint, nightly)
                 observed[loss] = {
                     "restored": False,
                     "declared_unreadable": True,
                     "sha256": declared,
+                    **structured,
                 }
                 continue
             (found,) = previous
@@ -211,4 +256,4 @@ def test_dr_laz_04_lost_closure_object_is_restored_or_declared(
             restored = _read(flow, verified.attachment_id)
             assert restored == body and hashlib.sha256(restored).hexdigest() == declared
             observed[loss] = {"restored": True, "sha256_matches": True}
-        run.observe(**observed, structured_declaration="VIG-274")
+        run.observe(**observed)

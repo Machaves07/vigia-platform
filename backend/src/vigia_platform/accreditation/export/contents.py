@@ -1258,8 +1258,19 @@ def _record_json(record: LedgerRecordView, single: bool, window: int) -> dict[st
         "record_hash": record.record_hash,
         "evidence_ids": [str(evidence.evidence_id) for evidence in record.evidences],
     }
-    if not single:
+    if not single or record.record_type == _UNRECOVERABLE:
+        # La declaración de un adjunto no recuperable no lleva nada de una persona ni del
+        # instante del hallazgo: viaja con su contenido también en una zona unipersonal, para
+        # que el verificador la contraste con el manifiesto (DR-LAZ-04, A-7x de VIG-274).
         document["content"] = record.document()
+    elif record.record_type == _EVIDENCE_ENTRY:
+        # Solo la lista de adjuntos (identificador y hash), sin la descripción, las marcas ni
+        # quién la añadió (BR-LAZ-99): el verificador exige que cada uno viaje o conste no
+        # recuperable. No está atada al ``content_hash`` (el contenido no viaja).
+        document["attachment_refs"] = [
+            {"attachment_id": str(item["attachment_id"]), "sha256": str(item["sha256"])}
+            for item in record.document().get("attachments") or ()
+        ]
     return document
 
 

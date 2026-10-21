@@ -44,7 +44,9 @@ control, y le añade la lectura del paquete exportado con estas defensas, en est
    los adjuntos y las entradas ausentes del manifiesto frente a lo que el paquete lleva. Un
    adjunto que cita una entrada de evidencia viaja con sus bytes o consta **no recuperable**
    (manifiesto 2, DR-LAZ-04) con la declaración ``closure_attachment_unrecoverable`` del hallazgo
-   (mismo hash y fecha); uno ausente sin declarar es ``manifest_mismatch``.
+   (mismo hash y fecha); uno ausente sin declarar es ``manifest_mismatch``. También en una zona
+   unipersonal: la declaración viaja siempre con su contenido y la entrada de evidencia, sin él,
+   con su lista ``attachment_refs`` (identificador y hash de cada adjunto).
 7. Solo si todo lo anterior está íntegro **y anclado** y se pide ``--extract``, se escriben los
    archivos en un directorio vacío, volviendo a comprobar cada hash mientras se escriben.
 
@@ -1211,10 +1213,17 @@ class _Content:
         """Lo que el expediente dice de los adjuntos (DR-LAZ-04): qué citan las entradas de
         evidencia y qué declaró no recuperable. Solo de los registros con contenido."""
         self.record_ids[record["record_id"]] = record
-        content = record.get("content")
-        if not isinstance(content, dict):
-            return
         kind = record.get("record_type")
+        content = record.get("content")
+        if kind == "action_evidence_added" and "content" not in record:
+            # Zona unipersonal: la entrada viaja sin contenido, con su lista de adjuntos.
+            content = {"attachments": record.get("attachment_refs")}
+            if not isinstance(content["attachments"], list):
+                raise self._invalid(artifact, pointer + "/attachment_refs", "adjuntos")
+        if not isinstance(content, dict):
+            if kind == UNRECOVERABLE_RECORD_TYPE:
+                raise self._invalid(artifact, pointer, "adjunto no recuperable sin contenido")
+            return
         if kind == "action_evidence_added":
             items = content.get("attachments", [])
             if not isinstance(items, list):
@@ -1369,7 +1378,7 @@ class _Content:
                 "adjunto no recuperable sin su registro en el hallazgo", pointer + "/unrecoverable"
             )
         content = self.lost.get(str(attachment.get("attachment_id")))
-        if "content" in record and (
+        if (
             content is None
             or content["record_id"] != declaration["record_id"]
             or content.get("declaration_id") != declaration["declaration_id"]
