@@ -1,8 +1,12 @@
 """Bancos de U-04: datos sintéticos y tramos medidos, nunca presupuestos inventados.
 
-El perfil ci conserva el año y las 20 zonas del panel, pero siembra dos episodios
-semanales en tres zonas; nightly usa 77 diarios por zona (RNF-DES-03/05).
+Ambos perfiles conservan el año y las 20 zonas del panel, con dos episodios
+semanales en tres zonas (318 hallazgos). La densidad completa es de VIG-246,
+por decisión del dueño del 21-10; estos bancos no acreditan RNF-DES-05.
 La preparación no forma parte de la medida. No se optimiza código de producción.
+Cada operación mide 20 rondas, salvo los validadores (100). El reloj SQL de la
+base desechable sustituye clock_timestamp y los DEFAULT de recepción/auditoría
+por ledger.bench_now(): una lectura SECURITY DEFINER por fila, cuyo coste se mide.
 """
 
 from __future__ import annotations
@@ -61,6 +65,14 @@ from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepos
 from vigia_platform.shared.context import ScopeContext
 from vigia_platform.shared.signing import SigningService
 from vigia_platform.shared.storage import S3Storage
+
+LAZ_ROUNDS = 20
+YEAR_DAYS = 366
+YEAR_ZONES = 20
+DAY_STEP = 7
+ACTIVE_ZONES = 3
+FINDINGS_PER_DAY = 2
+YEAR_FINDINGS = len(range(0, YEAR_DAYS, DAY_STEP)) * ACTIVE_ZONES * FINDINGS_PER_DAY
 
 
 class Traces:
@@ -157,8 +169,9 @@ def measured(
     *,
     setup: Callable[[], Any] | None = None,
     details: dict[str, Any] | None = None,
+    rounds: int = LAZ_ROUNDS,
 ) -> Result:
-    """100 rondas; cada banco comprueba el resultado funcional dentro de su operación."""
+    """20 rondas declaradas; cada operación comprueba también su resultado funcional."""
     traces = Traces()
     segments: dict[str, Any] = {}
     try:
@@ -167,9 +180,11 @@ def measured(
             f"{name} [objetivo propio]",
             lambda: traces.call("total", lambda: operation(traces)),
             setup=setup,
+            rounds=rounds,
             objective_ms=objective_ms,
             details={
                 "profile": settings.get_current_profile_name(),
+                "rounds": rounds,
                 **(details or {}),
                 "trace_segments": segments,
             },
@@ -249,11 +264,11 @@ class LazBench:
         return {
             "profile": settings.get_current_profile_name(),
             "zones": len(self.zones),
-            "days": 366,
+            "days": YEAR_DAYS,
             "findings": self.count,
-            "episodes_per_zone_day": 77
-            if settings.get_current_profile_name() == "nightly"
-            else "2 por semana en 3 zonas (ci acotado)",
+            "episodes_per_zone_day": "2 por semana en 3 zonas (densidad acotada)",
+            "full_density_task": "VIG-246",
+            "database_clock": "ledger.bench_now(): lectura SECURITY DEFINER por fila",
         }
 
 
@@ -272,7 +287,7 @@ def seed_year(
     organization = world.organization()
     sites = [organization]
     # La bandeja usa tres zonas; el panel conserva 20 aun en ci.
-    for _ in range(19):
+    for _ in range(YEAR_ZONES - 1):
         zone_id = uuid.uuid4()
         actions.execute(
             "INSERT INTO identity.zone (zone_id, organization_id, plant_id, code, name,"
@@ -319,10 +334,9 @@ def seed_year(
             ),
             start - timedelta(days=400),
         )
-    nightly = settings.get_current_profile_name() == "nightly"
     count = 0
     rotated = False
-    for day in range(0, 366, 1 if nightly else 7):
+    for day in range(0, YEAR_DAYS, DAY_STEP):
         clock.set(start + timedelta(days=day, hours=12))
         actions.execute("UPDATE ledger.bench_clock SET at=$1", actions.now())
         if day >= 350 and not rotated:
@@ -342,13 +356,14 @@ def seed_year(
                 for s in sites
             ]
             rotated = True
-        for site in sites if nightly else sites[:3]:
-            for _ in range(77 if nightly else 2):
+        for site in sites[:ACTIVE_ZONES]:
+            for _ in range(FINDINGS_PER_DAY):
                 subject = world.ingest_finding(site)
                 assert world.project(subject).applied
                 count += 1
     clock.set(start + timedelta(days=367))
     actions.execute("UPDATE ledger.bench_clock SET at=$1", actions.now())
+    assert count == YEAR_FINDINGS
     return (
         sites[0],
         tuple(site.zone_id for site in sites),

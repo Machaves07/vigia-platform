@@ -19,9 +19,9 @@ el que declara el banco:
   en cada entrada.
 - U-04 (NFR-LAZ-01/02, PAT-LAZ-REN-06): 1,5 (``LAZ_REGRESSION_FACTOR``).
   Solo se comparan el mismo runner (clase estable en GitHub hospedado) y el mismo perfil de datos:
-  una base de ci
-  no sustituye a la de nightly. Una base no comparable falla con diagnóstico,
-  salvo durante su actualización explícita; nunca se declara «sin regresión».
+  una base de ci no sustituye a la de nightly. Por decisión del dueño (21-10),
+  una base no comparable informa «sin base comparable» y no bloquea; nunca se
+  declara «sin regresión». La entrada publicada es la del hospedado/nightly.
 
 Se compara la mediana y no el p95: con 100 rondas en un equipo compartido, el p95 depende de una
 o dos rondas y fallaría por ruido; el p95, el p99 y su razón frente a la base van en el informe
@@ -141,11 +141,28 @@ class Report:
     def add(self, result: Result) -> Result:
         base = self.baseline.get("benchmarks", {}).get(result.name)
         if base is not None:
+            if result.name.startswith("laz_"):
+                environment = _environment()
+                profile = result.details.get("profile")
+                baseline_profile = base.get("details", {}).get("profile")
+                same_runner = (
+                    base["runner_class"] == environment["runner_class"]
+                    if base.get("runner_class") is not None
+                    else base.get("runner", environment["runner"]) == environment["runner"]
+                )
+                if not same_runner:
+                    result.comparison = "different_runner"
+                elif profile and baseline_profile and profile != baseline_profile:
+                    result.comparison = "different_profile"
             if base.get("regression_factor") is not None:
                 result.regression_factor = float(base["regression_factor"])
             factor = result.regression_factor
             result.baseline_median = float(base["median"])
             result.baseline_p95 = None if base.get("p95") is None else float(base["p95"])
+            if result.comparison != "same_runner":
+                # No calcular razones entre equipos o conjuntos de datos distintos.
+                self.results[result.name] = result
+                return result
             result.median_ratio = result.median / result.baseline_median
             if result.p95 is not None and result.baseline_p95:
                 result.p95_ratio = result.p95 / result.baseline_p95
@@ -153,22 +170,6 @@ class Report:
                 result.regression = result.median > factor * result.baseline_median
             else:
                 result.regression = result.median < result.baseline_median / factor
-            if result.name.startswith("laz_"):
-                environment = _environment()
-                runner = environment["runner"]
-                profile = result.details.get("profile")
-                baseline_profile = base.get("details", {}).get("profile")
-                same_runner = (
-                    base["runner_class"] == environment["runner_class"]
-                    if base.get("runner_class") is not None
-                    else base.get("runner", runner) == runner
-                )
-                if not same_runner:
-                    result.comparison = "different_runner"
-                    result.regression = None
-                elif profile and baseline_profile and profile != baseline_profile:
-                    result.comparison = "different_profile"
-                    result.regression = None
         self.results[result.name] = result
         return result
 
@@ -184,11 +185,7 @@ class Report:
                 pytrace=False,
             )
         if result.comparison != "same_runner":
-            pytest.fail(
-                f"el banco {result.name} necesita base del mismo runner y perfil:"
-                f" {result.comparison}; mídela con {UPDATE_VARIABLE}=1",
-                pytrace=False,
-            )
+            return
         if result.regression:
             relation = "más lenta" if result.kind == "latency" else "más baja"
             margin = round((result.regression_factor - 1) * 100)
@@ -475,7 +472,7 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         if result.median_ratio is not None:
             ratio = f" | razón base {result.median_ratio:.2f} (factor {result.regression_factor})"
         if result.comparison != "same_runner":
-            ratio += f" | tendencia: {result.comparison} (no comparable)"
+            ratio += f" | sin base comparable: {result.comparison} (solo tendencia)"
         terminalreporter.write_line(
             f"{result.name}: mediana {result.median:,.1f}{p95} {result.unit}{objective}{ratio}"
         )

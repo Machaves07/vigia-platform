@@ -10,7 +10,7 @@ clasificados y con su acción asignada) y lleva el reloj simulado hasta su plazo
 
 El objetivo, **p95 ≤ 30 s por organización**, es ``[objetivo propio]`` (NFR-LAZ-01): el informe
 dice si se cumple y nunca decide el resultado. TASK-330 fija su línea base y
-regresión relativa del 50 % bloqueante, con 100 rondas en ci y nightly. Solo datos generados.
+regresión relativa del 50 % bloqueante, con 20 rondas en ci y nightly. Solo datos generados.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.integration
 
 OBJECTIVE_MS: Final = 30_000.0
 PENDING_PER_ROUND: Final = 5
-ROUNDS: Final = 100
+ROUNDS: Final = 20
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +42,7 @@ def test_laz_evaluate_deadlines_org(stack: DeadlinesStack, measure: Measure) -> 
     """Fila 6. [objetivo propio] p95 ≤30 s por organización.
 
     Composición: candidatos por índice + candados ordenados + action_overdue
-    y sus eventos + proyección atómica, cinco acciones nuevas por ronda.
+    y sus eventos + proyección atómica, cinco acciones nuevas por ronda, 20 rondas.
     Tramos: total → evaluate_deadlines (contexto de tarea periódica real).
     """
     organization = stack.actions.world.organization()

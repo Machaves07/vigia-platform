@@ -19,13 +19,18 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from tests.benchmarks import conftest as framework
+from tests.benchmarks import laz_support as support
+from tests.benchmarks import test_nfr_laz_01_operations as operations
 from tests.benchmarks.conftest import (
     BASELINE,
     GOB_REGRESSION_FACTOR,
@@ -38,7 +43,10 @@ from tests.benchmarks.conftest import (
     unit_regression_factor,
 )
 from tests.benchmarks.laz_support import Traces, measured
+from tests.fleet_ingest_support import IngestSite
 from tests.integration.conftest import PostgresEndpoint
+from tests.laz_support import LoopOrganization
+from vigia_platform.shared.clock import SimulatedClock
 
 BASE_MS = 10.0
 
@@ -235,10 +243,12 @@ def test_laz_never_compares_different_runners_or_profiles(
     result = _result("laz_probe", BASE_MS * 100)
     result.details = {"profile": "ci"}
     report.add(result)
-    with pytest.raises(pytest.fail.Exception, match="mismo runner y perfil"):
-        report.check(result)
+    report.check(result)
     assert result.regression is None
     assert result.comparison == expected
+    assert result.median_ratio is None and result.p95_ratio is None
+    entry = report.document()["benchmarks"]["laz_probe"]
+    assert entry["regression"] is None and entry["comparison"] == expected
 
 
 def test_laz_hosted_runner_class_is_stable_between_instances(
@@ -295,7 +305,7 @@ def test_laz_hosted_names_do_not_disable_relative_gate(
         report.check(result)
 
 
-def test_laz_different_runner_classes_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_laz_different_runner_classes_are_only_a_trend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         framework,
         "_environment",
@@ -316,8 +326,129 @@ def test_laz_different_runner_classes_fail_closed(monkeypatch: pytest.MonkeyPatc
     )
     result = report.add(_result("laz_probe", BASE_MS))
     assert result.comparison == "different_runner"
-    with pytest.raises(pytest.fail.Exception, match="mismo runner y perfil"):
-        report.check(result)
+    report.check(result)
+    assert result.regression is None and result.median_ratio is None
+
+
+def test_laz_terminal_explicitly_reports_no_comparable_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = _report({"laz_probe": {**U02_ENTRY, "runner": "otro-equipo"}})
+    report.add(_result("laz_probe", BASE_MS * 2))
+    monkeypatch.setattr(framework, "_REPORT", report)
+    lines: list[str] = []
+    framework.pytest_terminal_summary(
+        SimpleNamespace(section=lambda _: None, write_line=lines.append)
+    )
+    assert "sin base comparable: different_runner (solo tendencia)" in lines[0]
+    assert "razón base" not in lines[0]
+
+
+@pytest.mark.parametrize("profile", ["ci", "nightly"])
+def test_laz_seed_is_bounded_in_both_profiles(
+    profile: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Controla la preparación real sin base ni HTTP: el doble rechaza el hallazgo 319."""
+    from hypothesis import settings
+
+    clock = SimulatedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    site = IngestSite(
+        **{
+            name: uuid.UUID(int=index)
+            for index, name in enumerate(
+                (
+                    "organization_id",
+                    "plant_id",
+                    "node_id",
+                    "zone_id",
+                    "other_zone_id",
+                    "camera_id",
+                    "signal_id",
+                    "standard_id",
+                ),
+                start=1,
+            )
+        },
+        certificate=object(),
+    )
+    org = LoopOrganization(site)
+    ingested: list[tuple[uuid.UUID, datetime]] = []
+
+    def ingest(organization: LoopOrganization) -> object:
+        ingested.append((organization.zone_id, clock.now()))
+        assert len(ingested) <= 318, "la densidad completa pertenece a VIG-246"
+        return object()
+
+    world = SimpleNamespace(
+        organization=lambda: org,
+        ingest_finding=ingest,
+        project=lambda _: SimpleNamespace(applied=True),
+        stack=SimpleNamespace(
+            authz=SimpleNamespace(
+                operator_id=uuid.UUID(int=9),
+                sessions=SimpleNamespace(clock=clock, admin=object()),
+            ),
+            authority=object(),
+            publish_catalog=Mock(),
+            usage=Mock(),
+        ),
+    )
+    actions = SimpleNamespace(world=world, now=clock.now, execute=Mock(), run=asyncio.run)
+    monkeypatch.setattr(support, "issue", AsyncMock(return_value=(object(), None)))
+    previous = settings.get_current_profile_name()
+    try:
+        settings.load_profile(profile)
+        _, zones, start, end, count = support.seed_year(actions)
+    finally:
+        settings.load_profile(previous)
+    assert len(zones) == 20 and (end - start).days == 366
+    assert count == len(ingested) == 318
+    assert len({zone for zone, _ in ingested}) == 3
+    assert len({at for _, at in ingested}) == 53
+
+
+@pytest.mark.parametrize("rounds", [20, 100])
+def test_laz_measured_forwards_declared_rounds(rounds: int) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_measure(name: str, label: str, target: Any, **kwargs: Any) -> Result:
+        captured.update(kwargs)
+        return _result(name, BASE_MS)
+
+    kwargs = {} if rounds == 20 else {"rounds": rounds}
+    measured(fake_measure, "laz_probe", 10, lambda _: None, **kwargs)
+    assert captured["rounds"] == captured["details"]["rounds"] == rounds
+
+
+@pytest.mark.parametrize("profile", ["ci", "nightly"])
+@pytest.mark.parametrize("maximum,zones", [(False, 1), (True, 3)])
+def test_laz_export_scope_is_bounded_in_both_profiles(
+    profile: str,
+    maximum: bool,
+    zones: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hypothesis import settings
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(operations, "measured", lambda *a, **kw: captured.update(kw))
+    laz = SimpleNamespace(
+        composer=lambda: object(),
+        zones=tuple(uuid.UUID(int=i) for i in range(1, 21)),
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        dimensions=lambda: {"findings": 318},
+    )
+    previous = settings.get_current_profile_name()
+    try:
+        settings.load_profile(profile)
+        operations.export_bench(laz, lambda: None, maximum=maximum)
+    finally:
+        settings.load_profile(previous)
+    assert captured["details"]["zones"] == zones
+    assert captured["details"]["days"] == 31
+    assert captured["details"]["maximum_scope_bounded"] is maximum
+    assert captured["details"]["findings"] == 318
 
 
 def test_laz_update_keeps_other_units(laz_baseline: dict[str, Any]) -> None:
@@ -441,5 +572,5 @@ def test_u04_seventeen_rows_have_composition_and_baseline() -> None:
         assert not entry.get("informative", False)
         assert entry["median"] > 0 and entry["p95"] >= entry["median"]
         segments = entry["details"]["trace_segments"]
-        assert segments["total"]["samples"] >= 100
+        assert segments["total"]["samples"] >= 20
         assert len(segments) >= 2

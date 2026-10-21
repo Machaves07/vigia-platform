@@ -2,6 +2,11 @@
 
 Los otros dos bancos son validadores y evaluate_deadlines, reutilizados de sus
 tareas de origen. Ningún banco cronometra una respuesta idempotente vacía.
+Decisión del dueño (21-10): 20 rondas y densidad acotada en ci y nightly;
+318 hallazgos semanales en 3 de 20 zonas, año de 366 días. El volumen completo
+y la exportación máxima completa se miden en VIG-246, no en estos bancos.
+El mundo anual usa ledger.bench_now() en el disparador y los DEFAULT de
+recepción/auditoría: lectura SQL SECURITY DEFINER por fila incluida en la medida.
 """
 
 from __future__ import annotations
@@ -46,7 +51,8 @@ pytestmark = pytest.mark.integration
 def test_laz_inbox_200(laz: LazBench, measure: Measure) -> None:
     """Fila 1. [objetivo propio] p95 ≤ 700 ms.
 
-    Composición: una página de 200 desde FindingState, 3 zonas y 366 días;
+    Composición: una página de 200 desde FindingState, 318 hallazgos,
+    3 zonas y 366 días, densidad acotada, 20 rondas;
     cero puertos de U-02/U-03. Tramos: total → projection_page.
     """
     service = InboxService(
@@ -73,7 +79,9 @@ def test_laz_detail(laz: LazBench, postgres_endpoint: PostgresEndpoint, measure:
     """Fila 2. [objetivo propio] p95 ≤ 1 200 ms.
 
     Composición: expediente auditado ≤300 ms + estándar/compuerta/nodo 3 por 5 ms
-    + estado_en ≤50 ms + URL ≤100 ms. Tramos: total → audited_detail.
+    + estado_en ≤50 ms + URL ≤100 ms. Un expediente con 2 clips, pila aparte
+    casi vacía, 20 rondas; no representa el año de RNF-DES-05 (VIG-246).
+    Tramos: total → audited_detail.
     """
     with detail_stack(postgres_endpoint, "bench_laz_detail") as stack:
         ingest = stack.world.stack
@@ -112,7 +120,13 @@ def test_laz_detail(laz: LazBench, postgres_endpoint: PostgresEndpoint, measure:
                 )
             assert response.status_code == 200, response.text
 
-        measured(measure, "laz_detail", 1_200, operation)
+        measured(
+            measure,
+            "laz_detail",
+            1_200,
+            operation,
+            details={"findings": 1, "clips": 2, "full_density_task": "VIG-246"},
+        )
 
 
 def test_laz_writes(laz: LazBench, measure: Measure) -> None:
@@ -120,6 +134,7 @@ def test_laz_writes(laz: LazBench, measure: Measure) -> None:
 
     Composición: escritura U-02 ≤150 ms + ambos validadores + proyección
     atómica. Se recorren clasificar/asignar/reabrir y resolver cola.
+    20 rondas; ledger.bench_now() añade una lectura SQL por fila.
     Tramos: total → classification/action/reopening/review_resolution.
     """
     stack = laz.actions
@@ -206,6 +221,7 @@ def test_laz_close_two_attachments(laz: LazBench, measure: Measure) -> None:
 
     Composición: entrada con 2 adjuntos ya subidos, verificación real del
     almacén y firma de cierre; U-02 ≤400 ms + validadores + proyección.
+    20 rondas; ledger.bench_now() añade una lectura SQL por fila.
     Tramos: total → evidence_two_attachments → signed_closure.
     """
     stack = laz.actions
@@ -253,6 +269,8 @@ def test_laz_metrics_materialize(laz: LazBench, measure: Measure) -> None:
 
     Composición: lectura del expediente + cálculo de siete métricas y exposición
     + persistencia de ProgramMetricSnapshot con inputs_digest; no hit de caché.
+    Año de 318 hallazgos en 3 de 20 zonas, densidad acotada, 20 rondas.
+    Recepción/auditoría con ledger.bench_now(), lectura SQL por fila incluida.
     Tramos: total → metrics_compute_and_store.
     """
     period = period_of(laz.start + timedelta(days=40), "America/Bogota")
@@ -271,7 +289,14 @@ def test_laz_metrics_materialize(laz: LazBench, measure: Measure) -> None:
         )
         assert len(result.values) == 7 and len(result.inputs_digest) == 64
 
-    measured(measure, "laz_metrics_materialize", 5_000, operation, setup=prepare)
+    measured(
+        measure,
+        "laz_metrics_materialize",
+        5_000,
+        operation,
+        setup=prepare,
+        details=laz.dimensions(),
+    )
 
 
 def test_laz_exposure(laz: LazBench, measure: Measure) -> None:
@@ -279,6 +304,8 @@ def test_laz_exposure(laz: LazBench, measure: Measure) -> None:
 
     Composición: episodios confirmados + historia de compuertas + cobertura del
     mes + indicador persistido. Tramos: total → exposure_with_timeline.
+    Año de 318 hallazgos en 3 de 20 zonas, densidad acotada, 20 rondas;
+    auditoría con ledger.bench_now(), lectura SQL por fila incluida.
     """
     period = period_of(laz.start + timedelta(days=40), "America/Bogota")
 
@@ -297,7 +324,7 @@ def test_laz_exposure(laz: LazBench, measure: Measure) -> None:
         )
         assert result is not None
 
-    measured(measure, "laz_exposure", 3_000, operation, setup=prepare)
+    measured(measure, "laz_exposure", 3_000, operation, setup=prepare, details=laz.dimensions())
 
 
 def test_laz_metrics_panel(laz: LazBench, measure: Measure) -> None:
@@ -305,6 +332,8 @@ def test_laz_metrics_panel(laz: LazBench, measure: Measure) -> None:
 
     Composición: 20 zonas configuradas por 12 meses materializados, más la zona
     auxiliar vacía del sitio de ingesta (medición conservadora); sin recálculo.
+    Año de 318 hallazgos, densidad acotada, 20 rondas; auditoría con
+    ledger.bench_now(), lectura SQL por fila incluida.
     Tramos: total → materialized_month (12 peticiones en proceso).
     """
     periods = sorted(
@@ -330,7 +359,7 @@ def test_laz_metrics_panel(laz: LazBench, measure: Measure) -> None:
         "laz_metrics_panel",
         1_500,
         operation,
-        details={"zones": 20, "auxiliary_empty_zones": 1, "months": len(periods)},
+        details={**laz.dimensions(), "auxiliary_empty_zones": 1, "months": len(periods)},
     )
 
 
@@ -339,6 +368,8 @@ def test_laz_timeline_366(laz: LazBench, measure: Measure) -> None:
 
     Composición: 12 lecturas de cobertura de ≤31 días, concatenación y fusión;
     solo worker. Tramos: total → coverage_366_days.
+    Año de 318 hallazgos en 3 de 20 zonas, densidad acotada, 20 rondas;
+    auditoría con ledger.bench_now(), lectura SQL por fila incluida.
     """
 
     def operation(trace: Traces) -> None:
@@ -352,7 +383,9 @@ def test_laz_timeline_366(laz: LazBench, measure: Measure) -> None:
         )
         assert result is not None
 
-    measured(measure, "laz_timeline_366", 8_000, operation, details={"days": 366, "segments": 12})
+    measured(
+        measure, "laz_timeline_366", 8_000, operation, details={**laz.dimensions(), "segments": 12}
+    )
 
 
 def test_laz_monthly_package(laz: LazBench, measure: Measure) -> None:
@@ -361,6 +394,8 @@ def test_laz_monthly_package(laz: LazBench, measure: Measure) -> None:
     Composición: checkpoint previo + muestra estratificada + siete métricas y
     exposición + documento/manifiesto + S3 + sellado del expediente.
     Tramos: total → monthly_compose_and_seal. Zona nueva por ronda, no no-op.
+    Un hallazgo por organización nueva, 20 rondas: no representa el año de
+    RNF-DES-05 (VIG-246). ledger.bench_now() añade una lectura SQL por fila.
     """
     composer = laz.monthly()
     prepared: dict[str, Any] = {}
@@ -414,15 +449,25 @@ def test_laz_monthly_package(laz: LazBench, measure: Measure) -> None:
             )
         assert result is not None
 
-    measured(measure, "laz_monthly_package", 90_000, operation, setup=prepare)
+    measured(
+        measure,
+        "laz_monthly_package",
+        90_000,
+        operation,
+        setup=prepare,
+        details={
+            "findings_per_organization": 1,
+            "full_density_task": "VIG-246",
+            "database_clock": "ledger.bench_now(): lectura SQL por fila",
+        },
+    )
 
 
 def export_bench(laz: LazBench, measure: Measure, *, maximum: bool) -> None:
     composer = laz.composer()
     prepared: dict[str, Any] = {}
-    full = maximum and settings.get_current_profile_name() == "nightly"
-    zones = laz.zones if full else laz.zones[:1]
-    end = laz.end if full else laz.start + timedelta(days=31)
+    zones = laz.zones[:3] if maximum else laz.zones[:1]
+    end = laz.start + timedelta(days=31)
 
     def prepare() -> None:
         checkpoints = laz.run(
@@ -493,9 +538,10 @@ def export_bench(laz: LazBench, measure: Measure, *, maximum: bool) -> None:
         operation,
         setup=prepare,
         details={
+            **laz.dimensions(),
             "zones": len(zones),
             "days": (end - laz.start).days,
-            "maximum_scope_bounded": maximum and not full,
+            "maximum_scope_bounded": maximum,
             "median_objective_ms": None if maximum else 120_000,
         },
     )
@@ -506,6 +552,8 @@ def test_laz_export_month(laz: LazBench, measure: Measure) -> None:
 
     Composición: checkpoint + expediente + catálogos por lote + cobertura +
     artefactos/documento/manifiesto firmados + multipart S3, 1 zona/31 días sin clips.
+    20 rondas sobre el año acotado de 318 hallazgos; auditoría con
+    ledger.bench_now(), lectura SQL por fila incluida.
     Tramos: total → compose_artifacts_and_upload (progreso por artefacto).
     """
     export_bench(laz, measure, maximum=False)
@@ -514,8 +562,10 @@ def test_laz_export_month(laz: LazBench, measure: Measure) -> None:
 def test_laz_export_maximum(laz: LazBench, measure: Measure) -> None:
     """Fila 13. [objetivo propio] ≤60 min, progreso cada 30 s.
 
-    Composición: mismo flujo real que el mensual para 20 zonas/366 días en
-    nightly; en ci 1 zona/31 días. Bytes TBD-por-medición, sin clips (R5).
+    Composición: mismo flujo real que el mensual para 3 zonas/31 días en
+    ci y nightly; año acotado de 318 hallazgos, 20 rondas, sin clips (R5).
+    El máximo completo y los bytes son de VIG-246; no se acreditan aquí.
+    Auditoría con ledger.bench_now(), lectura SQL por fila incluida.
     Tramos: total → compose_artifacts_and_upload; sin compositor sintético.
     """
     export_bench(laz, measure, maximum=True)
@@ -532,6 +582,7 @@ def test_laz_assistant(assistant: AssistantStack, measure: Measure) -> None:
 
     Composición: requested → contexto permitido → proveedor doble → validadores
     → ready persistido. Tramos: total → assistant_requested_to_ready.
+    20 rondas, un borrador nuevo con el proveedor doble por ronda.
     """
     prepared: dict[str, Any] = {}
     assistant.use(assistant.provider())
@@ -563,6 +614,7 @@ def test_laz_notification(notifications: NotificationWorld, measure: Measure) ->
     Composición: entrega outbox (objetivo U-02 ≤5 s) + identidad + plantilla +
     Notification y Delivery persistidos. Tramos: total → event_to_notification.
     El reloj de pared mide el motor; la espera de entrega se declara, no se simula durmiendo.
+    20 rondas, un evento nuevo por ronda; densidad acotada.
     """
     world = notifications
     org, plant, zone = world.new_organization()
@@ -610,6 +662,7 @@ def test_laz_immediate_email(notifications: NotificationWorld, measure: Measure)
 
     Composición: admisión queued + cliente SES doble aceptando + sent persistido;
     sin red al proveedor real. Tramos: total → queued_to_provider_accepted.
+    20 rondas con un correo nuevo por ronda; densidad acotada.
     """
     world = notifications
     org, _, _ = world.new_organization()
@@ -659,6 +712,8 @@ def test_laz_rebuild_year(laz: LazBench, measure: Measure) -> None:
     Composición: arrendamiento y aviso rebuilding + lectura del año de expediente
     + pliegue y enriquecimiento reales + reemplazo de proyección + healthy.
     Tramos: total → rebuild_plant. El expediente no se borra ni altera.
+    Año de 318 hallazgos en 3 de 20 zonas, densidad acotada, 20 rondas;
+    auditoría con ledger.bench_now(), lectura SQL por fila incluida.
     """
     rebuilder = ProjectionRebuilder(
         database=laz.actions.database,

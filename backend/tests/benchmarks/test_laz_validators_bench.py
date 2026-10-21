@@ -12,8 +12,8 @@ fechas y un equipo con marca declarada, para que el patrón de nombre propio rec
 
 El objetivo, **p95 ≤ 20 ms**, es ``[objetivo propio]`` (NFR-LAZ-04): el informe dice si se cumple
 y nunca decide el resultado. Falla si la mediana empeora más de un 50 % frente
-a la base del mismo runner y perfil; una base ausente o incompatible exige
-actualización explícita (TASK-330), nunca una comparación entre equipos distintos.
+a la base del mismo runner y perfil; una entrada ausente exige actualización
+explícita, y una incompatible informa «sin base comparable» sin bloquear.
 
 Solo datos generados.
 """
@@ -64,7 +64,7 @@ def test_laz_validators_1000_chars(measure: Measure) -> None:
     """Fila 5. [objetivo propio] p95 ≤20 ms.
 
     Composición: política base y forma canónica de U-02 + blocked_vocabulary
-    y person_attribution con cachés calientes; sin red ni base.
+    y person_attribution con cachés calientes; sin red ni base, 100 rondas.
     Tramos: total → both_validators (1 000 caracteres permitidos, peor caso).
     """
     organization = uuid.uuid4()
@@ -98,5 +98,6 @@ def test_laz_validators_1000_chars(measure: Measure) -> None:
             "both_validators", lambda: registry.apply(text, FIELD, organization_id=organization)
         ),
         details={"chars": TEXT_CHARS, "validators": [BLOCKED_VOCABULARY, PERSON_ATTRIBUTION]},
+        rounds=100,
     )
     assert result.samples == 100
