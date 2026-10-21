@@ -48,7 +48,9 @@ from tests.properties.laz.strategies.lifecycle import (
     LifecycleCommand,
     Reassign,
     Tick,
-    lifecycle_command_sequences,
+)
+from tests.properties.laz.strategies.lifecycle import (
+    action_command_sequences as lifecycle_command_sequences,
 )
 from vigia_platform.loop.application.actions import ActionRejected, AssignmentResult
 from vigia_platform.loop.calendar import BusinessCalendar, business_deadline

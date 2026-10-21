@@ -79,6 +79,7 @@ __all__ = [
     "RevokeGate",
     "RevokedPolicyState",
     "Tick",
+    "action_command_sequences",
     "action_texts",
     "deadline_command_sequences",
     "deadline_ranges",
@@ -581,22 +582,22 @@ def _commands() -> st.SearchStrategy[LifecycleCommand]:
     )
 
 
-def lifecycle_command_sequences(
+def action_command_sequences(
     max_size: int = 8,
 ) -> st.SearchStrategy[list[LifecycleCommand]]:
     """Una secuencia de comandos sobre un hallazgo abierto (incluida la vacía)."""
     return st.lists(_commands(), max_size=max_size)
 
 
-def stateful_lifecycle_command_sequences(
+def lifecycle_command_sequences(
     max_size: int = 50,
     *,
     min_size: int = 0,
 ) -> st.SearchStrategy[list[LifecycleCommand]]:
     """Los catorce comandos de PR-LAZ-10, incluida la secuencia vacía.
 
-    La estrategia histórica se conserva para las propiedades de tareas anteriores que usan una
-    aplicación parcial; esta es la variante completa que consume la máquina estatal.
+    Las propiedades anteriores de acciones usan ``action_command_sequences``: su alfabeto parcial
+    no sustituye al generador central de los catorce comandos de BLM §12.
     """
     return st.lists(
         st.one_of(
@@ -622,6 +623,13 @@ def stateful_lifecycle_command_sequences(
         min_size=min_size,
         max_size=max_size,
     )
+
+
+def stateful_lifecycle_command_sequences(
+    max_size: int = 50, *, min_size: int = 0
+) -> st.SearchStrategy[list[LifecycleCommand]]:
+    """Alias compatible del generador central de PR-LAZ-10."""
+    return lifecycle_command_sequences(max_size, min_size=min_size)
 
 
 def _deadline_commands() -> st.SearchStrategy[LifecycleCommand]:

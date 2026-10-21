@@ -1,15 +1,16 @@
 """PR-LAZ-10: oráculo estatal independiente del ciclo de vida del hallazgo.
 
 El modelo de referencia se escribió desde DE §4.1 y §4.2 y no importa la máquina de producción.
-La máquina pura recorre los catorce comandos; la prueba de integración verifica en PostgreSQL el
-tramo crítico que materializa acción, evidencia y cierre, con el mismo reloj inyectado.
+Ambas máquinas recorren los catorce comandos; la de integración compara tras cada paso los
+servicios reales y PostgreSQL con el oráculo, usando un único reloj inyectado.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from datetime import timedelta
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import pytest
 from hypothesis import HealthCheck, settings
@@ -17,6 +18,7 @@ from hypothesis import seed as hypothesis_seed
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule, run_state_machine_as_test
 
 from tests.conftest import _seeds_for_profile
+from tests.examples.regressions.lifecycle import REGRESSIONS
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_actions_support import actions_stack
 from tests.loop_deadlines_support import CONFIGURATION_REASON
@@ -48,20 +50,34 @@ from tests.properties.laz.strategies.lifecycle import (
     ReviewUnclosable,
     RevokeGate,
     Tick,
-    stateful_lifecycle_command_sequences,
+    lifecycle_command_sequences,
 )
 from vigia_platform.catalog.adapters.postgres.query_ports import catalog_query_ports
+from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.loop.application.deadlines import DeadlineEvaluator
+from vigia_platform.loop.application.inbox import InboxService
 from vigia_platform.loop.application.review_queue import ReviewQueueService
 from vigia_platform.loop.application.unclosable import UnclosableService, add_months
+from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.context import Role
 from vigia_platform.shared.signing.keys import format_timestamp
 
 _STEPS: Final = 50
 _PLATFORM_STEPS: Final = 12
-"""El recorrido real queda bajo el presupuesto de cinco minutos: las cuatro combinaciones de
-entrada/semilla ejecutan hasta 48 comandos con transacción PostgreSQL. El modelo puro conserva
-los 50 pasos del perfil para explorar secuencias más largas sin rebajar la cobertura de comandos."""
+"""Hasta 12 comandos por secuencia CI (≤ 50); nightly amplía también la longitud a 50.
+Las cuatro combinaciones entrada/semilla CI exploran 32 secuencias, no un único ejemplo afortunado.
+El tiempo real se publica en la salida del runner, sin confundirlo con el job entero.
+"""
+SERVICE_EXAMPLES: Final = 8
+"""Secuencias reales por semilla, como las demás máquinas estatales con PostgreSQL."""
+
+
+def _service_examples() -> int:
+    """Amplía la exploración nocturna sin alterar el presupuesto de CI."""
+
+    if settings.get_current_profile_name() == "nightly":
+        return SERVICE_EXAMPLES * 2
+    return SERVICE_EXAMPLES
 
 
 def _apply(model: LifecycleModel, command: LifecycleCommand) -> str | None:
@@ -85,8 +101,8 @@ def _apply(model: LifecycleModel, command: LifecycleCommand) -> str | None:
             )
         case ReviewUnclosable(attempt=attempt):
             return model.review_unclosable(attempt.outcome, attempt.license, attempt.review_months)
-        case ReopenFinding():
-            return model.reopen(reason_present=True)
+        case ReopenFinding(deadline_days=days):
+            return model.reopen(reason_present=True, deadline_days=days)
         case Tick(seconds=seconds):
             model.advance_clock(seconds)
         case LateSegment():
@@ -95,8 +111,15 @@ def _apply(model: LifecycleModel, command: LifecycleCommand) -> str | None:
             model.deactivate_assignee()
         case RevokeGate():
             model.revoke_gate()
-        case ChangeDeadlineRange(default_days=default_days):
-            return model.change_configuration(default_days)
+        case ChangeDeadlineRange(
+            min_days=minimum_days,
+            default_days=default_days,
+            max_days=maximum_days,
+            working_weekdays=working_weekdays,
+        ):
+            return model.change_configuration(
+                minimum_days, default_days, maximum_days, working_weekdays
+            )
         case _:
             raise AssertionError(f"comando sin modelo: {command!r}")
     return None
@@ -110,7 +133,7 @@ class LifecycleReferenceMachine(RuleBasedStateMachine):
         self.model = LifecycleModel()
         self.commands: list[LifecycleCommand] = []
 
-    @rule(command=stateful_lifecycle_command_sequences(max_size=1, min_size=1))
+    @rule(command=lifecycle_command_sequences(max_size=1, min_size=1))
     def apply_one(self, command: list[LifecycleCommand]) -> None:
         if command:
             self.commands.append(command[0])
@@ -162,12 +185,13 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
         self.organization = self.stack.world.organization()
-        self.coordinator = self.stack.member(self.organization)
         self.assignee = self.stack.user(self.organization)
         self.model = LifecycleModel(state="in_review" if self.starts_in_review else "received")
         self.action_id: uuid.UUID | None = None
         self.declaration_id: uuid.UUID | None = None
         self.frozen_due_at: dict[uuid.UUID, object] = {}
+        self.frozen_review_due_at: object | None = None
+        self.frozen_declarations: dict[uuid.UUID, object] = {}
         self.gates.override = None
         if self.starts_in_review:
             self.subject = self.stack.world.ingest_detection(self.organization)
@@ -180,21 +204,26 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
             )
         else:
             self.subject = self.stack.received(self.organization)
+        self.model.sync_platform_clock(self.stack.now())
 
     def _context(self) -> Any:
-        return self.stack.context(self.coordinator)
+        # El avance del reloj inyectado también vence sesiones por inactividad. Cada comando usa
+        # una sesión real recién abierta, como lo haría una persona que vuelve a operar la bandeja.
+        return self.stack.context(self.stack.member(self.organization))
 
     def _state_id(self) -> uuid.UUID:
-        return self.stack.finding_state_id(self.subject)
+        return cast(uuid.UUID, self.stack.finding_state_id(self.subject))
 
     def _code(self, operation: Any) -> tuple[str | None, Any | None]:
         try:
             return None, self.stack.run(operation())
         except Exception as error:
+            if isinstance(error, ResourceNotFound):
+                return "not_found", None
             detail = getattr(error, "detail_code", None)
             if detail is None:
                 if getattr(error, "api_code", None) is not None:
-                    return "invalid_request", None
+                    return str(error.api_code.value), None
                 raise
             return str(detail.value).removeprefix("loop_"), None
 
@@ -221,11 +250,14 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
             )
         return body
 
-    @rule(command=stateful_lifecycle_command_sequences(max_size=1, min_size=1))
+    @rule(command=lifecycle_command_sequences(max_size=1, min_size=1))
     def apply_command(self, command: list[LifecycleCommand]) -> None:
         """Ejecuta uno de los catorce comandos contra modelo y plataforma reales."""
         if not command:
             return
+        # Las fixtures también avanzan el reloj al ingresar sujetos o eventos. Sincronizar no
+        # ejecuta las tareas periódicas ni adopta nunca el estado que devuelve la producción.
+        self.model.sync_platform_clock(self.stack.now())
         item = command[0]
         match item:
             case ClassifyFinding(outcome=outcome, reinforced=reinforced):
@@ -258,9 +290,6 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                 self._assert_code(expected, actual)
             case ResolveQueue(outcome=outcome):
                 expected = _apply(self.model, item)
-                if not self.starts_in_review:
-                    assert expected == "transition_not_allowed"
-                    return
                 category = (
                     "real_coexistence" if outcome == "review_confirmed" else "no_person_present"
                 )
@@ -291,12 +320,13 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                 if result is not None:
                     self.action_id = result.action_id
                     self.frozen_due_at[result.action_id] = result.due_at
-            case AddEvidence() if self.action_id is not None:
+                    self.model.observe_action_deadline(result.due_at)
+            case AddEvidence():
                 expected = _apply(self.model, item)
                 actual, _result = self._code(
                     lambda: self.stack.evidence.add(
                         self._context(),
-                        self.action_id,
+                        self.action_id or uuid.UUID(int=0),
                         description="Resguardo instalado y anclado en el acceso de la zona",
                         performed_at=format_timestamp(self.stack.now() - timedelta(hours=1)),
                         performed_by_role="Técnico de mantenimiento",
@@ -329,7 +359,9 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                 self._assert_code(expected, actual)
                 if result is not None:
                     self.declaration_id = result.declaration_id
-            case ReviewUnclosable(attempt=attempt) if self.declaration_id is not None:
+                    self.frozen_review_due_at = result.review_due_at
+                    self.frozen_declarations[self.declaration_id] = result.review_due_at
+            case ReviewUnclosable(attempt=attempt):
                 expected = _apply(self.model, item)
                 body: dict[str, object] = {
                     "outcome": attempt.outcome,
@@ -345,14 +377,28 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                         "action_type": "engineering",
                         "action_description": "Instalar un resguardo fijo en el acceso de la zona",
                         "expected_outcome": "Eliminar el cruce por el frente del equipo",
-                        "assignee_user_id": str(self.assignee),
+                        "assignee_user_id": self.assignee,
                     }
                 actual, result = self._code(
-                    lambda: self.unclosable.review(self._context(), self.declaration_id, **body)
+                    lambda: self.unclosable.review(
+                        self._context(), self.declaration_id or uuid.UUID(int=0), **body
+                    )
                 )
                 self._assert_code(expected, actual)
                 if result is not None and attempt.outcome == "converted_to_action":
                     self.action_id = result.new_action_id
+                    assert self.action_id is not None
+                    (action,) = [
+                        row
+                        for row in self.stack.action_rows(self.subject)
+                        if row["action_id"] == self.action_id
+                    ]
+                    self.frozen_due_at[self.action_id] = action["due_at"]
+                    self.model.observe_action_deadline(action["due_at"])
+                if result is not None and result.new_review_due_at is not None:
+                    self.frozen_review_due_at = result.new_review_due_at
+                    assert self.declaration_id is not None
+                    self.frozen_declarations[self.declaration_id] = result.new_review_due_at
             case ReopenFinding(action_type=action_type, deadline_days=days):
                 expected = _apply(self.model, item)
                 actual, result = self._code(
@@ -372,9 +418,12 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                 self._assert_code(expected, actual)
                 if result is not None:
                     self.action_id = result.action.action_id
+                    self.frozen_due_at[self.action_id] = result.action.due_at
+                    self.model.observe_action_deadline(result.action.due_at)
             case Tick(seconds=seconds):
                 _apply(self.model, item)
                 self.stack.tick(seconds)
+                self.model.sync_platform_clock(self.stack.now())
 
                 async def evaluate() -> Any:
                     context = self.stack.world.event_context(self.organization)
@@ -382,6 +431,13 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                         return await self.deadlines.evaluate(transaction)
 
                 self.stack.run(evaluate())
+
+                async def mark_review_due() -> Any:
+                    context = self.stack.world.event_context(self.organization)
+                    async with self.stack.database.transaction(context) as transaction:
+                        return await self.unclosable.mark_due(transaction)
+
+                self.stack.run(mark_review_due())
             case LateSegment():
                 expected = _apply(self.model, item)
                 receipt, step = self.stack.world.write(
@@ -402,6 +458,20 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
             case DeactivateAssignee():
                 _apply(self.model, item)
                 self.stack.deactivate(self.assignee)
+                consumer, _ports = self.stack.world.projection_consumer(
+                    database=self.stack.database
+                )
+                event = self.stack.world.synthetic_event(
+                    self.organization,
+                    "user_deactivated",
+                    {
+                        "user_id": str(self.assignee),
+                        "deactivated_by": str(self.stack.world.stack.authz.operator_id),
+                        "deactivated_at": format_timestamp(self.stack.now()),
+                    },
+                    plant=False,
+                )
+                self.stack.world.deliver(consumer, event, database=self.stack.database)
             case RevokeGate():
                 _apply(self.model, item)
                 consumer, _ports = self.stack.world.projection_consumer(
@@ -434,10 +504,6 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
                     )
                 )
                 self._assert_code(expected, None)
-            case AddEvidence() | ReviewUnclosable():
-                # Estas rutas se dirigen por identificador: sin una acción o declaración creada por
-                # la misma secuencia no existe un recurso del ciclo de vida que invocar.
-                _apply(self.model, item)
             case _:
                 raise AssertionError(f"comando sin plataforma: {item!r}")
 
@@ -446,22 +512,54 @@ class LifecyclePlatformMachine(RuleBasedStateMachine):
         row = self.stack.world.finding_state(self.subject)
         assert row is not None
         assert row["lifecycle_state"] == self.model.state, (row, self.model)
+        if self.action_id is not None:
+            assert row["due_at"] == self.model.observed_due_at
+            assert len(self.stack.entry_rows(self.action_id)) == self.model.evidence_entries
+            assert row["assignee_inactive"] == self.model.assignee_inactive
         for action in self.stack.action_rows(self.subject):
             expected_due_at = self.frozen_due_at.get(action["action_id"])
             if expected_due_at is not None:
                 assert action["due_at"] == expected_due_at
+        for declaration in self.stack.fetch(
+            "SELECT declaration_id, review_due_at FROM loop.unclosable_declaration"
+            " WHERE organization_id = $1 AND subject_id = $2",
+            self.organization.organization_id,
+            self.subject.subject_id,
+        ):
+            assert (
+                declaration["review_due_at"]
+                == self.frozen_declarations[declaration["declaration_id"]]
+            )
         if self.model.state == "closed":
-            (closure,) = self.stack.records_of(self.subject, "closure")
+            closure = self.stack.records_of(self.subject, "closure")[-1]
             assert closure["content"]["evidence_entry_ids"]
             assert closure["content"]["signer"]["professional_license"]
         if self.model.state == "unclosable":
-            (declaration,) = self.stack.records_of(self.subject, "unclosable_state_declared")
+            declaration = self.stack.records_of(self.subject, "unclosable_state_declared")[-1]
             assert declaration["content"]["policy"]["document_sha256"]
+            for field in (
+                "evaluated_alternative",
+                "rejection_reason",
+                "responsible_user_id",
+                "decision_date",
+                "compensatory_measure",
+            ):
+                assert declaration["content"][field]
             assert row["unclosable_review_due_at"] is not None
-        if self.model.state == "overdue":
-            assert self.stack.records_of(self.subject, "closure") == []
+            assert row["unclosable_review_due_at"] == self.frozen_review_due_at
+            assert (
+                int(row["unclosable_review_due_at"].timestamp())
+                == self.model.unclosable_review_due_at
+            )
+            assert row["unclosable_pending_review"] == self.model.unclosable_pending_review
         if self.model.gate_revoked:
             assert row["zone_agreement_revoked"]
+        if self.model.state == "overdue":
+            inbox = InboxService(
+                database=self.stack.database, authorizer=self.stack.world.stack.authz.authorizer
+            )
+            page = self.stack.run(inbox.page(self._context()))
+            assert self._state_id() in {item.finding_state_id for item in page.items}
 
 
 class ReceivedLifecyclePlatformMachine(LifecyclePlatformMachine):
@@ -485,9 +583,9 @@ def test_pr_laz_10_reference_state_machine() -> None:
             )
 
 
-@pytest.mark.integration
-def test_pr_laz_10_platform_state_machine(postgres_endpoint: PostgresEndpoint) -> None:
-    """El recorrido estatal contrasta los catorce comandos con PostgreSQL real."""
+@pytest.fixture
+def lifecycle_machine_stack(postgres_endpoint: PostgresEndpoint) -> Iterator[Any]:
+    """Servicios reales compartidos por exploración y regresiones; cada sujeto tiene su planta."""
     with actions_stack(postgres_endpoint, "pr_laz_10_platform") as stack:
         _consumer, repository = stack.world.review_queue_consumer(database=stack.database)
         gates = Gates(catalog_query_ports(stack.database).gates)
@@ -515,25 +613,61 @@ def test_pr_laz_10_platform_state_machine(postgres_endpoint: PostgresEndpoint) -
             clock=stack.world.stack.authz.sessions.clock,
             configuration=stack.configuration.repository,
         )
-        for value in _seeds_for_profile():
-            for machine in (LifecyclePlatformMachine, ReceivedLifecyclePlatformMachine):
-                seeded = hypothesis_seed(value)(machine)
-                run_state_machine_as_test(
-                    seeded,
-                    settings=settings(
-                        # Cada combinación semilla/entrada recorre doce comandos (48 comandos de
-                        # plataforma como máximo por corrida). Un solo ejemplo mantiene la propiedad
-                        # de integración bajo cinco minutos; el oráculo puro usa el perfil completo.
-                        max_examples=1,
-                        stateful_step_count=_PLATFORM_STEPS,
-                        deadline=None,
-                        database=None,
-                        suppress_health_check=[
-                            HealthCheck.too_slow,
-                            HealthCheck.function_scoped_fixture,
-                        ],
+        yield stack
+
+
+@pytest.mark.integration
+def test_pr_laz_10_platform_state_machine(
+    lifecycle_machine_stack: Any, request: pytest.FixtureRequest
+) -> None:
+    """El recorrido estatal contrasta los catorce comandos con PostgreSQL real."""
+    # Solo el presupuesto de pared se mide con el reloj real. Ninguna fecha de negocio sale de él.
+    budget_clock = SystemClock()
+    started = budget_clock.monotonic()
+    for value in _seeds_for_profile():
+        for machine in (LifecyclePlatformMachine, ReceivedLifecyclePlatformMachine):
+            seeded = hypothesis_seed(value)(machine)
+            run_state_machine_as_test(
+                seeded,
+                settings=settings(
+                    max_examples=_service_examples(),
+                    stateful_step_count=(
+                        _STEPS
+                        if settings.get_current_profile_name() == "nightly"
+                        else _PLATFORM_STEPS
                     ),
-                )
+                    deadline=None,
+                    database=None,
+                    suppress_health_check=[
+                        HealthCheck.too_slow,
+                        HealthCheck.function_scoped_fixture,
+                    ],
+                ),
+            )
+    elapsed = budget_clock.monotonic() - started
+    reporter = request.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(f"PR-LAZ-10 PostgreSQL: {elapsed:.2f} s (presupuesto CI: 300 s)")
+    if settings.get_current_profile_name() in {"ci", "pr"}:
+        assert elapsed < 300, f"PR-LAZ-10 excedió el presupuesto: {elapsed:.2f} s"
+
+
+@pytest.mark.integration
+def test_pr_laz_10_permanent_counterexamples(lifecycle_machine_stack: Any) -> None:
+    """Las reducciones de la revisión y recorridos profundos usan la misma comparación estatal."""
+    for name, in_review, commands, final_state in REGRESSIONS:
+        machine = (LifecyclePlatformMachine if in_review else ReceivedLifecyclePlatformMachine)()
+        try:
+            machine.platform_and_model_keep_the_same_observable_lifecycle()
+            for command in commands:
+                machine.apply_command([command])
+                machine.platform_and_model_keep_the_same_observable_lifecycle()
+            assert machine.model.state == final_state
+        except Exception as error:
+            error.add_note(f"Regresión permanente: {name}")
+            raise
+        finally:
+            machine.teardown()
 
 
 def test_pr_laz_10_rejection_and_frozen_deadline_regressions() -> None:
@@ -547,7 +681,7 @@ def test_pr_laz_10_rejection_and_frozen_deadline_regressions() -> None:
     assert model.classify("confirmed", reinforced=False) == "transition_not_allowed"
     assert model.assign_action(1) is None
     original_due_at = model.due_at
-    assert model.change_configuration(30) is None
+    assert model.change_configuration(1, 30, 180, (1, 2, 3, 4, 5)) is None
     assert model.due_at == original_due_at
     model.advance_clock(2 * 86_400)
     assert model.state == "overdue"
@@ -609,6 +743,9 @@ def test_pr_laz_10_production_mutation_regressions(postgres_endpoint: PostgresEn
         ]
         (action,) = matching_actions
         assert format_timestamp(action["due_at"]) == frozen_due_at
+        projected = stack.world.finding_state(finding)
+        assert projected is not None
+        assert format_timestamp(projected["due_at"]) == frozen_due_at
 
         stack.tick((action["due_at"] - stack.now() + timedelta(seconds=1)).total_seconds())
         evaluator = DeadlineEvaluator(
