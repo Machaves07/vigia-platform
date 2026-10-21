@@ -39,6 +39,7 @@ from typing import Any, Final
 import pytest
 
 from tests.integration.conftest import PostgresEndpoint
+from tests.laz_metrics_support import MetricCapture, metric_capture, unscoped_rows  # noqa: F401
 from tests.laz_support import IngestedSubject, LoopOrganization
 from tests.loop_actions_support import LICENSE, Who
 from tests.loop_deadlines_support import DeadlinesStack, deadlines_stack
@@ -52,7 +53,8 @@ from vigia_platform.loop.application.deadlines import (
     overdue_id,
 )
 from vigia_platform.loop.domain.enums import EscalationLevel
-from vigia_platform.loop.registration import LOOP_TASKS, U04_TASKS
+from vigia_platform.loop.observability.worker import _FINDINGS, _PENDING, LoopWorkerTelemetry
+from vigia_platform.loop.registration import LOOP_TASKS, U04_CONSUMERS, U04_TASKS
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.outbox.registries import Schedule, ScheduleKind, TaskIteration
@@ -67,6 +69,23 @@ LOCK_WAIT_SECONDS: Final = 60.0
 CLOSURE_TEXT: Final = "Resguardo fijo verificado y anclado en el acceso de la zona"
 _NOT_FOUND: Final = (404, "not_found")
 _INVALID: Final = (400, "invalid_request")
+
+
+def _seed_pending(stack: DeadlinesStack, organization: LoopOrganization) -> None:
+    """Entregas sintéticas de eventos reales, incluso con próximo intento aún no vencido."""
+    world = stack.actions.world
+    world.stack.execute(
+        "INSERT INTO shared.consumer (consumer_name, unit) VALUES ('loop_projection', 'U-04')"
+        " ON CONFLICT DO NOTHING"
+    )
+    world.stack.execute(
+        "INSERT INTO shared.outbox_delivery"
+        " (event_id, consumer_name, organization_id, next_attempt_at)"
+        " SELECT event_id, 'loop_projection', organization_id, $2 FROM shared.outbox_event"
+        " WHERE organization_id = $1 ON CONFLICT DO NOTHING",
+        organization.organization_id,
+        stack.now() + DAY,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -103,6 +122,114 @@ def test_the_task_is_hourly_per_organization_in_the_u04_manifest() -> None:
     assert LOOP_TASKS[EVALUATE_DEADLINES_TASK] == expected
     assert U04_TASKS[EVALUATE_DEADLINES_TASK] == expected
     assert Schedule(ScheduleKind.EVERY, 3600) == EVALUATE_DEADLINES_SCHEDULE
+
+
+def test_live_finding_metrics_group_by_plant_and_keep_empty_plants(
+    stack: DeadlinesStack,
+    capture: MetricCapture,
+) -> None:
+    world = stack.actions.world
+    organization = world.organization()
+    empty_plant = world.add_plant(organization)
+    received = world.ingest_finding(organization)
+    world.project(received)
+    coordinator, assignee = _people(stack, organization)
+    finding, _, due_at = stack.with_action(organization, coordinator, assignee)
+    _seed_pending(stack, organization)
+    telemetry = LoopWorkerTelemetry(
+        database=stack.actions.database,
+        contexts=world.stack.authz.contexts,
+        clock=world.stack.authz.sessions.clock,
+        task=stack.task,
+    )
+    stack.tick_to(due_at - SECOND)
+    stack.run(telemetry.report_once())
+
+    def value(name: str, plant: uuid.UUID) -> float:
+        (point,) = [
+            p
+            for p in capture.points(name)
+            if p.attributes
+            == {"organization_id": str(organization.organization_id), "plant_id": str(plant)}
+        ]
+        return float(point.value)
+
+    assert value("loop_unclassified_findings", organization.plant_id) == 1
+    assert value("loop_unclassified_findings", empty_plant) == 0
+    assert value("loop_unclassified_oldest_age_seconds", empty_plant) == 0
+    state = world.finding_state(received)
+    assert state is not None
+    assert (
+        value("loop_unclassified_oldest_age_seconds", organization.plant_id)
+        == (stack.now() - state["occurred_at_exact"]).total_seconds()
+    )
+    assert value("loop_overdue_findings", organization.plant_id) == 0
+    stack.tick_to(due_at)
+    stack.run(telemetry.report_once())
+    assert value("loop_overdue_findings", organization.plant_id) == 1
+    assert value("loop_overdue_findings", empty_plant) == 0
+    stack.evaluate(organization)
+    assert stack.state(finding) == "overdue"
+    stack.run(telemetry.report_once())
+    assert value("loop_overdue_findings", organization.plant_id) == 1
+
+    # El monitor cuenta entregas reales, no cabezas vencidas: una ya entregada no suma.
+    world.stack.execute(
+        "UPDATE shared.outbox_delivery SET status = 'delivered', delivered_at = $2"
+        " WHERE organization_id = $1 AND consumer_name = 'loop_projection'",
+        organization.organization_id,
+        stack.now(),
+    )
+    stack.run(telemetry.report_once())
+    expected = stack.fetch(
+        "SELECT d.consumer_name, count(*) AS pending, min(e.created_at) AS oldest"
+        " FROM shared.outbox_delivery d JOIN shared.outbox_event e ON e.event_id = d.event_id"
+        " JOIN shared.vigia_active_organizations() a ON a.organization_id = e.organization_id"
+        " WHERE d.status IN ('pending', 'retrying') GROUP BY d.consumer_name"
+    )
+    counts = {row["consumer_name"]: row["pending"] for row in expected}
+    ages = {
+        row["consumer_name"]: max(0, (stack.now() - row["oldest"]).total_seconds())
+        for row in expected
+    }
+    for name, reference in (
+        ("loop_consumer_pending", counts),
+        ("loop_consumer_oldest_pending_age_seconds", ages),
+    ):
+        assert {p.attributes["consumer"]: p.value for p in capture.points(name)} == {
+            consumer: reference.get(consumer, 0) for consumer in U04_CONSUMERS
+        }
+
+
+@pytest.mark.parametrize("query", ["findings", "pending"])
+def test_metric_queries_explicitly_bound_the_organization_without_rls(
+    stack: DeadlinesStack,
+    query: str,
+) -> None:
+    world = stack.actions.world
+    first, second = world.organization(), world.organization()
+    subject = world.ingest_finding(second)
+    world.project(subject)
+    _seed_pending(stack, second)
+    admin = world.stack.authz.sessions.admin
+    if query == "findings":
+        rows = stack.run(
+            unscoped_rows(admin, _FINDINGS, organization_id=first.organization_id, now=stack.now())
+        )
+        assert {row["plant_id"] for row in rows} == {first.plant_id}
+        assert rows[0]["unclassified"] == 0
+        return
+    actual = stack.run(unscoped_rows(admin, _PENDING, organization_id=first.organization_id))
+    expected = stack.fetch(
+        "SELECT d.consumer_name, count(*) AS pending, min(e.created_at) AS oldest"
+        " FROM shared.outbox_delivery d JOIN shared.outbox_event e ON e.event_id = d.event_id"
+        " WHERE d.organization_id = $1 AND d.status IN ('pending', 'retrying')"
+        " GROUP BY d.consumer_name",
+        first.organization_id,
+    )
+    assert {row["consumer_name"]: (row["pending"], row["oldest"]) for row in actual} == {
+        row["consumer_name"]: (row["pending"], row["oldest"]) for row in expected
+    }
 
 
 # --- bordes ---------------------------------------------------------------------------------------

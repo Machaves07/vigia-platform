@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 
+from vigia_platform.loop.observability.worker import LoopWorkerTelemetry
 from vigia_platform.shared.clock import Clock, SystemClock
 from vigia_platform.shared.db import ProcessKind
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
@@ -77,6 +78,14 @@ async def compose_worker_runtime(
         archive=s3_storage(runtime, archive_bucket, clock),
     )
     services = core.services
+    loop_task = core.catalog.periodic_tasks.get("evaluate_deadlines")
+    telemetry = (
+        LoopWorkerTelemetry(
+            database=database, contexts=services.contexts, clock=clock, task=loop_task
+        )
+        if loop_task is not None
+        else None
+    )
     return WorkerRuntime(
         clock=clock,
         database=database,
@@ -91,10 +100,12 @@ async def compose_worker_runtime(
             contexts=services.contexts,
             clock=clock,
             metrics=metrics,
+            telemetry=telemetry,
         ),
         contexts=services.contexts,
         registries=core.synchronizers,
         # NFR-GOB-20: la lista de revocación firma con vigia-node-ca; sin su clave no arranca.
         node_ca=node_ca_check(core.kms, node_ca_key),
         metrics=metrics,
+        telemetry=telemetry,
     )

@@ -70,6 +70,7 @@ from vigia_platform.notifications.delivery import (
     EMAIL_SENDER_ABSENT,
     EmailSenders,
 )
+from vigia_platform.notifications.metrics import record_email
 from vigia_platform.notifications.preferences import preference_for
 from vigia_platform.notifications.reader import archive_read_notifications
 from vigia_platform.shared.clock import Clock
@@ -321,6 +322,7 @@ class DigestGrouperBase:
                 .where(DIGEST_BATCH.c.digest_batch_id == digest_batch_id)
                 .values(status=_STATUS_DEGRADED)
             )
+            record_email("degraded_app_only", organization_id, len(candidates))
             return
         # El presupuesto ya se comprobó en ``_close_window``, antes de insertar el lote y
         # reclamar las entregas: aquí solo queda escribir el envío.
@@ -343,6 +345,7 @@ class DigestGrouperBase:
             .where(DIGEST_BATCH.c.digest_batch_id == digest_batch_id)
             .values(sent_at=now, status=_STATUS_SENT)
         )
+        record_email("digested", organization_id)
 
 
 @repository

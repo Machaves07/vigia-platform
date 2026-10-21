@@ -53,6 +53,7 @@ from vigia_platform.notifications.adapters.postgres.tables import (
     NOTIFICATION_SOURCE_KEY,
 )
 from vigia_platform.notifications.catalog import CatalogEntry
+from vigia_platform.notifications.metrics import record_email
 from vigia_platform.notifications.recipients import DeepLink
 from vigia_platform.notifications.templates import RenderedNotification
 from vigia_platform.shared.clock import Clock
@@ -234,4 +235,6 @@ async def write_notification(
             **delivery,
         )
     )
+    if kind is EmailPlan.DEGRADED:
+        record_email("degraded_app_only", organization_id)
     return notification_id

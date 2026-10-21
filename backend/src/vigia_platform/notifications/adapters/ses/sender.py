@@ -43,6 +43,7 @@ from vigia_platform.identity.application.invitations import InvitationEmail
 from vigia_platform.loop.http.client_factory import HttpClientFactory
 from vigia_platform.notifications.adapters.postgres.tables import EMAIL_MESSAGE
 from vigia_platform.notifications.adapters.ses.circuit import EmailCircuitBreaker
+from vigia_platform.notifications.metrics import record_email
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ScopeContext, repository
 from vigia_platform.shared.ids import uuid7
@@ -251,6 +252,7 @@ class SesEmailSender:
                 )
                 .values(sent_at=now, status=_STATUS_SENT, provider_message_id=provider_message_id)
             )
+        record_email("sent", context.organization_id)
 
     async def _mark_failed(self, context: ScopeContext, admitted: _Admitted) -> None:
         async with self._database.transaction(context) as transaction:

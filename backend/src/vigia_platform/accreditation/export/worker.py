@@ -198,6 +198,7 @@ class ExportWorker:
         owner: str | None = None,
         sleep: Sleep = asyncio.sleep,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
+        metrics: LoopMetrics | None = None,
     ) -> None:
         if not tick_seconds > 0:
             raise ValueError("tick_seconds debe ser positivo")
@@ -210,6 +211,7 @@ class ExportWorker:
         self._owner = owner if owner is not None else worker_owner_id()
         self._sleep = sleep
         self._settings = _Settings(tick_seconds)
+        self._metrics = metrics if metrics is not None else get_loop_metrics()
 
     @property
     def owner(self) -> str:
@@ -233,6 +235,9 @@ class ExportWorker:
                 return
             raise ExportBusy()
         lease = acquisition.lease
+        started = self._clock.monotonic()
+        self._state(lease, "in_progress")
+        result = "in_progress"
         if lease.attempt_count == ALARM_AFTER_FAILURES + 1:
             self._raise_alarm(lease)
         try:
@@ -240,8 +245,15 @@ class ExportWorker:
             package = await _Run(self, context, lease).compose()
             now = self._now()
             await self._leases.finish_ready(context, lease, package, now, now + DOWNLOAD_VALIDITY)
+            result = "ready"
+            self._state(lease, result)
+            self._metrics.histogram(LoopMetricName.EXPORT_PACKAGE_SIZE_BYTES).record(
+                package.size_bytes
+            )
         except ExportInputUnavailable as failure:
             await self._leases.finish_failed(context, lease, failure.failure_code, self._now())
+            result = "failed"
+            self._state(lease, result)
             if lease.attempt_count == ALARM_AFTER_FAILURES:
                 self._raise_alarm(lease)
         except LeaseLost:
@@ -251,6 +263,15 @@ class ExportWorker:
             with contextlib.suppress(Exception):
                 await self._leases.release(context, lease)
             raise
+        finally:
+            self._metrics.histogram(LoopMetricName.EXPORT_DURATION_MS).record(
+                max(0.0, (self._clock.monotonic() - started) * 1000), {"export_state": result}
+            )
+
+    def _state(self, lease: ExportLease, state: str) -> None:
+        self._metrics.counter(LoopMetricName.EXPORT_REQUESTS_TOTAL).add(
+            1, {"export_state": state, "organization_id": str(lease.organization_id)}
+        )
 
     async def _prepare(self, context: ScopeContext, lease: ExportLease) -> ExportLease:
         if lease.retaken:

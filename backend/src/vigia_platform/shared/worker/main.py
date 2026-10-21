@@ -67,6 +67,7 @@ from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import configure_logging, get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.worker import WorkerTelemetry
 from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.runtime.config import report_invalid
 from vigia_platform.shared.secrets import KmsPort
@@ -215,6 +216,7 @@ class WorkerRuntime:
     node_ca: Callable[[], Awaitable[None]] | None = None
     """Comprobación de arranque de ``vigia-node-ca`` (lista de revocación), como en la API."""
     metrics: PlatformMetrics | None = None
+    telemetry: WorkerTelemetry | None = None
     owner: str = field(default_factory=worker_owner_id)
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
@@ -246,6 +248,7 @@ class OutboxAgeMonitor:
         contexts: TaskContexts,
         clock: Clock,
         metrics: PlatformMetrics,
+        telemetry: WorkerTelemetry | None = None,
         interval_seconds: float = MONITOR_SECONDS,
     ) -> None:
         self._database = database
@@ -253,6 +256,7 @@ class OutboxAgeMonitor:
         self._contexts = contexts
         self._clock = clock
         self._metrics = metrics
+        self._telemetry = telemetry
         self._interval = interval_seconds
         # La dimensión ``consumer`` solo admite nombres registrados (NFR-NUC-41).
         for consumer in catalog.consumers.consumers():
@@ -271,6 +275,8 @@ class OutboxAgeMonitor:
                 ages[name] = 0.0 if oldest is None else max((now - oldest).total_seconds(), 0.0)
         for name, age in ages.items():
             self._metrics.outbox_oldest_pending_age_seconds.set(age, {"consumer": name})
+        if self._telemetry is not None:
+            await self._telemetry.report_once()
         return ages
 
     async def run(self, stop: asyncio.Event) -> None:
@@ -329,6 +335,7 @@ class WorkerProcess:
             owner=runtime.owner,
             metrics=metrics,
             poll_seconds=config.scheduler_poll_seconds,
+            telemetry=runtime.telemetry,
             handler_timeout_seconds=config.handler_timeout_seconds,
         )
         self.monitor = OutboxAgeMonitor(
@@ -338,6 +345,7 @@ class WorkerProcess:
             clock=runtime.clock,
             metrics=metrics,
             interval_seconds=config.monitor_seconds,
+            telemetry=runtime.telemetry,
         )
         self.app = create_worker_app()
         self.started = asyncio.Event()

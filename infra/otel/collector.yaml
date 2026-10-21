@@ -107,11 +107,11 @@ exporters:
       - dimensions:
           - [service, environment, task]
         metric_name_selectors:
-          - "^periodic_task_last_success_age_seconds$"
+          - "^(loop_)?periodic_task_last_success_age_seconds$"
       - dimensions:
           - [service, environment, result, task]
         metric_name_selectors:
-          - "^periodic_task_duration_ms$"
+          - "^(loop_)?periodic_task_duration_ms$"
       - dimensions:
           - [service, environment, pool_class]
         metric_name_selectors:
@@ -149,6 +149,33 @@ exporters:
           - [service, environment, consumer]
         metric_name_selectors:
           - "^(dead_letter_created_total|outbox_oldest_pending_age_seconds)$"
+          - "^loop_(consumer_pending|consumer_oldest_pending_age_seconds|dead_letter_entries_total)$"
+      - dimensions:
+          - [service, environment, organization_id, plant_id]
+        metric_name_selectors:
+          - "^loop_(unclassified_findings|unclassified_oldest_age_seconds|overdue_findings)$"
+      - dimensions:
+          - [service, environment, export_state]
+          - [service, environment, organization_id, export_state]
+        metric_name_selectors:
+          - "^export_requests_total$"
+      - dimensions:
+          - [service, environment, export_state]
+        metric_name_selectors:
+          - "^export_duration_ms$"
+      - dimensions:
+          - [service, environment, organization_id]
+        metric_name_selectors:
+          - "^export_stuck_or_failed$"
+      - dimensions:
+          - [service, environment, email_state]
+          - [service, environment, organization_id, email_state]
+        metric_name_selectors:
+          - "^email_messages_total$"
+      - dimensions:
+          - [service, environment, text_validator, verdict]
+        metric_name_selectors:
+          - "^loop_text_validations_total$"
       - dimensions:
           - [service, environment, assistant_state]
         metric_name_selectors:
