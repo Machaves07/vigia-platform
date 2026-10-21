@@ -36,7 +36,7 @@ from tests.loop_deadlines_support import DeadlinesStack, deadlines_stack
 from vigia_platform.loop.adapters.postgres.inbox_query import InboxFilters
 from vigia_platform.loop.domain.enums import FindingLifecycleState
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 DAY: Final = timedelta(days=1)
 HIGHLIGHT_DAYS: Final = 30

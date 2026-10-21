@@ -40,7 +40,7 @@ from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.shared.api.errors import ApiErrorCode, from_ledger_rejection
 from vigia_platform.shared.context import ActorUnit
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 ATTRIBUTION = "El operario omitió el bloqueo de energía antes de intervenir la prensa."
 REWRITTEN = "El bloqueo de energía no estaba exigido antes de intervenir la prensa."
