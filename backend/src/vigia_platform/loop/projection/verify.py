@@ -7,7 +7,9 @@ cada planta de la organización, toma una muestra registrada (``loop.loop_projec
 planta** ``[objetivos propios]`` y recalcula, desde el expediente, el ``projection_digest`` de
 cada fila muestreada (incluidos los campos enriquecidos: el mismo ``enrich_finding`` que usa la
 reconstrucción, así que con el mismo estado externo produce el mismo valor, PR-LAZ-44). El primer
-día del mes ``[objetivo propio]`` la muestra es el total de la planta.
+día del mes ``[objetivo propio]`` la muestra es el total de la planta. Además, compara la
+población de sujetos iniciales del expediente con ``finding_state`` para que un sujeto que no
+llegó a proyectarse tampoco pueda quedar fuera de la muestra.
 
 Ante cualquier divergencia: ``LoopProjectionCheckpoint.state = diverged``, el contador
 ``divergence_count`` avanza (se reinicia si la última divergencia fue hace más de 24 horas) y se
@@ -145,7 +147,13 @@ class SampleRun:
 
 @dataclass(frozen=True)
 class DivergenceOutcome:
-    """Lo que hizo una pasada de ``verify_loop_projection`` sobre una planta."""
+    """Lo que hizo una pasada de ``verify_loop_projection`` sobre una planta.
+
+    ``diverged`` contiene dos clases de identificador: ``subject_id`` para sujetos iniciales
+    ausentes de ``finding_state`` y ``finding_state_id`` para filas de la muestra cuyo digest no
+    coincide. ``checked`` (y ``rows_checked`` del evento) cuenta solo la muestra de filas
+    existentes; los sujetos ausentes se suman a ``rows_diverged`` sin formar parte de ella.
+    """
 
     plant_id: uuid.UUID
     run: SampleRun
@@ -183,8 +191,17 @@ _INSERT_RUN: Final = text(
     " RETURNING sample_day, seed, population, sample_size, started_at"
 )
 _POPULATION: Final = text(
-    "SELECT finding_state_id FROM loop.finding_state"
+    "SELECT finding_state_id, subject_id FROM loop.finding_state"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+)
+_EXPECTED_SUBJECTS: Final = text(
+    "SELECT CASE record_type"
+    " WHEN 'finding_received' THEN content_json -> 'episode' ->> 'episode_id'"
+    " WHEN 'detection_for_review_received' THEN content_json ->> 'detection_id'"
+    " END AS subject_id"
+    " FROM ledger.ledger_record"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    " AND record_type = ANY(CAST(:record_types AS text[]))"
 )
 # Las columnas vienen de `dataclasses.fields(...)`, nunca de la petición (NFR-NUC-19); se arman
 # aparte y `text()` solo envuelve el resultado ya hecho (VIG001).
@@ -334,18 +351,19 @@ class ProjectionVerifier:
                 _ENSURE_CHECKPOINT,
                 {"organization_id": context.organization_id, "plant_id": plant_id},
             )
-            population = [
-                _uuid(row.finding_state_id)
-                for row in (
-                    await transaction.execute(
-                        _POPULATION,
-                        {"organization_id": context.organization_id, "plant_id": plant_id},
-                    )
-                ).all()
-            ]
+            expected_subjects = await self._expected_subjects(transaction, context, plant_id)
+            population_rows = (
+                await transaction.execute(
+                    _POPULATION,
+                    {"organization_id": context.organization_id, "plant_id": plant_id},
+                )
+            ).all()
+            population = [_uuid(row.finding_state_id) for row in population_rows]
+            projected_subjects = {_uuid(row.subject_id) for row in population_rows}
             run = await self._run(transaction, context, plant_id, day, population, full_scan)
             selected = select_sample(bytes.fromhex(run.seed), population, run.sample_size)
-            diverged = await self._check(transaction, context, plant_id, selected)
+            missing_subjects = expected_subjects - projected_subjects
+            diverged = await self._check(transaction, context, plant_id, selected, missing_subjects)
             outcome = await self._record(transaction, context, plant_id, run, selected, diverged)
         if outcome.rebuild_triggered:
             with contextlib.suppress(AlreadyRebuilding):
@@ -394,15 +412,37 @@ class ProjectionVerifier:
 
     # --- comparación ---------------------------------------------------------------------------
 
+    async def _expected_subjects(
+        self, transaction: Transaction, context: ScopeContext, plant_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Los sujetos que los registros iniciales del expediente obligan a proyectar.
+
+        La muestra solo puede comprobar filas que ya existen. Esta población complementaria se
+        lee completa para que una entrega perdida no pueda ocultar el primer estado de un sujeto.
+        """
+        rows = (
+            await transaction.execute(
+                _EXPECTED_SUBJECTS,
+                {
+                    "organization_id": context.organization_id,
+                    "plant_id": plant_id,
+                    "record_types": ["finding_received", "detection_for_review_received"],
+                },
+            )
+        ).all()
+        return {_uuid(row.subject_id) for row in rows}
+
     async def _check(
         self,
         transaction: Transaction,
         context: ScopeContext,
         plant_id: uuid.UUID,
         selected: Sequence[uuid.UUID],
+        missing_subjects: set[uuid.UUID],
     ) -> tuple[uuid.UUID, ...]:
+        diverged = sorted(missing_subjects, key=lambda subject_id: subject_id.bytes)
         if not selected:
-            return ()
+            return tuple(diverged)
         stored_rows = (
             await transaction.execute(
                 _SELECTED,
@@ -415,7 +455,6 @@ class ProjectionVerifier:
         ).all()
         stored = {_uuid(row.finding_state_id): _decode_finding(row) for row in stored_rows}
         now = self._clock.now()
-        diverged: list[uuid.UUID] = []
         for finding_state_id in selected:
             live = stored.get(finding_state_id)
             if live is None:
