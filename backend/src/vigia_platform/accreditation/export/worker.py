@@ -38,8 +38,8 @@ Un intento:
 seguidos** de la misma solicitud, una sola vez: al adquirir el tercer intento (los dos anteriores
 fallaron, por excepción o por muerte del proceso) o, si el segundo intento falla declarado y no
 habrá tercero, en ese momento. Las dos transiciones son únicas (``attempt_count`` pasa de 2 a 3 en
-una sola sentencia; ``failed`` es terminal). La métrica y el evento los da ``ExportAlarm``; el
-nombre definitivo de la métrica lo fija el módulo de métricas de U-04 (TASK-349).
+una sola sentencia; ``failed`` es terminal). La métrica y el evento los da ``ExportAlarm``; la
+métrica es ``export_failed_total`` del módulo de nombres de U-04 (``loop.observability.metrics``).
 """
 
 from __future__ import annotations
@@ -71,11 +71,11 @@ from vigia_platform.accreditation.export.lease import (
 from vigia_platform.accreditation.export.state import DOWNLOAD_VALIDITY
 from vigia_platform.accreditation.export.volumes import ExportLocation
 from vigia_platform.ledger.chain.checkpoints import ChainKind, CheckpointChain, CheckpointResult
+from vigia_platform.loop.observability.metrics import LoopMetricName, LoopMetrics, get_loop_metrics
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorUnit, ScopeContext, repository
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.observability.logging import get_logger
-from vigia_platform.shared.observability.metrics import METER_NAME
 from vigia_platform.shared.outbox.publish import OutboxEvent
 from vigia_platform.shared.outbox.registries import Consumer, ConsumerRegistry
 from vigia_platform.shared.signing.keys import to_millisecond
@@ -103,8 +103,8 @@ ALARM_AFTER_FAILURES: Final = 2
 """Fallos seguidos de una solicitud que disparan la alarma (PAT-LAZ-RES-01, NFR-LAZ-42)."""
 EXPORT_FAILED_ALARM: Final = "export-failed"
 """Nombre del evento de alarma (registro estructurado)."""
-EXPORT_FAILED_METRIC: Final = "export_failed_total"
-"""Métrica de la alarma; TASK-349 la lleva al módulo único de nombres de U-04."""
+EXPORT_FAILED_METRIC: Final = LoopMetricName.EXPORT_FAILED_TOTAL
+"""Métrica de la alarma, del módulo único de nombres de U-04 (TASK-332)."""
 
 DEFAULT_TICK_SECONDS: Final = 1.0
 """Cada cuánto mira el acompañante el ``Clock`` (las decisiones son del reloj inyectado)."""
@@ -143,12 +143,9 @@ class LoggingExportAlarm:
     """La alarma de producción: contador ``export_failed_total`` y registro ``export-failed``."""
 
     def __init__(self, meter: otel_metrics.Meter | None = None) -> None:
-        meter = meter if meter is not None else otel_metrics.get_meter(METER_NAME)
-        self._counter = meter.create_counter(
-            EXPORT_FAILED_METRIC,
-            unit="1",
-            description="Exportaciones con dos fallos seguidos (NFR-LAZ-42)",
-        )
+        # El instrumento del catálogo de U-04: con el medidor global, el mismo de ``LoopMetrics``.
+        metrics = LoopMetrics(meter) if meter is not None else get_loop_metrics()
+        self._counter = metrics.counter(EXPORT_FAILED_METRIC)
 
     def export_failed(
         self,

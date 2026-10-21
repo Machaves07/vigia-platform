@@ -141,6 +141,26 @@ exporters:
           - [service, environment, app_version]
         metric_name_selectors:
           - "^health_ready$"
+      # U-04 (TASK-332, NFR-LAZ-41, 42 y 44): la cola muerta y la entrega abierta más vieja por
+      # consumidor (lista cerrada de nombres registrados), las solicitudes al asistente por estado
+      # y las fichas y el presupuesto por organización. Alarmas y paneles de stacks/loop.py y
+      # stacks/observability.py.
+      - dimensions:
+          - [service, environment, consumer]
+        metric_name_selectors:
+          - "^(dead_letter_created_total|outbox_oldest_pending_age_seconds)$"
+      - dimensions:
+          - [service, environment, assistant_state]
+        metric_name_selectors:
+          - "^assistant_request(s_total|_duration_ms)$"
+      - dimensions:
+          - [service, environment, organization_id, token_direction]
+        metric_name_selectors:
+          - "^assistant_tokens_total$"
+      - dimensions:
+          - [service, environment, organization_id]
+        metric_name_selectors:
+          - "^assistant_token_budget_used_ratio$"
 
   awsxray:
     region: ${env:AWS_REGION}
