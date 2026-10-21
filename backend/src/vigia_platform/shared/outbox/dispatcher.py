@@ -78,6 +78,7 @@ from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
 from vigia_platform.shared.observability.tracing import TRACER_NAME, span_name
+from vigia_platform.shared.observability.worker import WorkerTelemetry
 from vigia_platform.shared.outbox.breaker import (
     BreakerAction,
     BreakerState,
@@ -301,6 +302,7 @@ class Dispatcher:
         clock: Clock,
         jitter: Callable[[], float] = _system_jitter,
         metrics: PlatformMetrics | None = None,
+        telemetry: WorkerTelemetry | None = None,
         tracer: otel_trace.Tracer | None = None,
         batch_size: int = DEFAULT_BATCH_SIZE,
         idle_seconds: float = DEFAULT_IDLE_SECONDS,
@@ -314,6 +316,7 @@ class Dispatcher:
         self._clock = clock
         self._jitter = jitter
         self._metrics = metrics if metrics is not None else get_metrics()
+        self._telemetry = telemetry
         self._tracer = tracer if tracer is not None else otel_trace.get_tracer(TRACER_NAME)
         self._batch_size = batch_size
         self._idle_seconds = idle_seconds
@@ -495,6 +498,8 @@ class Dispatcher:
             self._metrics.dead_letter_created_total.add(
                 1, {"consumer": consumer.consumer_name, "event_type": event.event_name}
             )
+            if self._telemetry is not None:
+                self._telemetry.dead_letter(consumer.consumer_name)
             _log.error(
                 "entrega enviada a la cola muerta",
                 consumer=consumer.consumer_name,

@@ -248,6 +248,10 @@ def test_pending_23_five_panels_of_nfr_laz_44_in_the_shared_dashboard(
     assert [panel.removesuffix(" (U-04, n 23)") for panel in LOOP_PANELS] == list(NFR_LAZ_44)
     assert set(LOOP_PANEL_METRICS) == set(LOOP_PANELS)
     assert panel_problems(widgets) == []
+    assert all(
+        "Sin emisor en el codigo" not in w.get("properties", {}).get("markdown", "")
+        for w in widgets
+    )
 
 
 def test_pilot_dashboard_is_vigia_pilot_with_the_loop_panels(pilot: Synthesized) -> None:

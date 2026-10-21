@@ -69,6 +69,7 @@ from vigia_platform.shared.db import Transaction, TransientDatabaseError
 from vigia_platform.shared.observability import redaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics, get_metrics
+from vigia_platform.shared.observability.worker import WorkerTelemetry
 from vigia_platform.shared.outbox.dispatcher import error_code
 from vigia_platform.shared.outbox.registries import (
     DiscardedCycle,
@@ -279,6 +280,7 @@ class PeriodicScheduler:
         clock: Clock,
         owner: str,
         metrics: PlatformMetrics | None = None,
+        telemetry: WorkerTelemetry | None = None,
         poll_seconds: float = DEFAULT_POLL_SECONDS,
         handler_timeout_seconds: float = DEFAULT_HANDLER_TIMEOUT_SECONDS,
         on_renewal: Callable[[Lease], None] | None = None,
@@ -296,6 +298,7 @@ class PeriodicScheduler:
         self._clock = clock
         self._owner = owner
         self._metrics = metrics if metrics is not None else get_metrics()
+        self._telemetry = telemetry
         self._poll_seconds = poll_seconds
         self._on_renewal = on_renewal
         # Las métricas solo admiten valores registrados (NFR-NUC-41), como en el despachador.
@@ -354,6 +357,8 @@ class PeriodicScheduler:
                 self._metrics.periodic_task_last_success_age_seconds.set(
                     age, {"task": row.task_name}
                 )
+                if self._telemetry is not None:
+                    self._telemetry.task_age(row.task_name, age)
 
     # --- Una ejecución ----------------------------------------------------------------------
 
@@ -501,6 +506,8 @@ class PeriodicScheduler:
         holder.lease = advanced
         elapsed_ms = max((self._clock.monotonic() - started) * 1000, 0.0)
         outcome = _outcome(failure)
+        if self._telemetry is not None:
+            self._telemetry.task_duration(task.task_name, outcome.value, elapsed_ms)
         self._metrics.periodic_task_duration_ms.record(
             elapsed_ms,
             {
@@ -570,6 +577,8 @@ class PeriodicScheduler:
             failure = error
         elapsed_ms = max((self._clock.monotonic() - started) * 1000, 0.0)
         outcome = _outcome(failure)
+        if self._telemetry is not None:
+            self._telemetry.task_duration(task.task_name, outcome.value, elapsed_ms)
         self._metrics.periodic_task_duration_ms.record(
             elapsed_ms, {"task": task.task_name, "result": outcome.value}
         )

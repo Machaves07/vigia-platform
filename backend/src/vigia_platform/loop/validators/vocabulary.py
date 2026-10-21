@@ -38,6 +38,7 @@ from typing import Final, Literal
 
 from vigia_platform.ledger.free_text import FreeTextCandidate, FreeTextField, FreeTextRejected
 from vigia_platform.loop.domain.enums import BlockedTermCategory, BlockedTermForm, BlockedTermOrigin
+from vigia_platform.loop.observability.metrics import LoopMetricName, get_loop_metrics
 from vigia_platform.loop.record_types import VALIDATOR_EXEMPT_PATHS
 from vigia_platform.loop.validators import lexicon
 from vigia_platform.loop.validators.folding import validation_form
@@ -284,5 +285,12 @@ class BlockedVocabularyValidator:
         if field.path in VALIDATOR_EXEMPT_PATHS.get(field.record_type, ()):
             return  # BR-LAZ-83: el término que se prohíbe no se valida contra la lista
         verdict = self.verdict(candidate)
+        get_loop_metrics().counter(LoopMetricName.LOOP_TEXT_VALIDATIONS_TOTAL).add(
+            1,
+            {
+                "text_validator": BLOCKED_VOCABULARY,
+                "verdict": "accepted" if verdict is None else "rejected_blocked_vocabulary",
+            },
+        )
         if verdict is not None:
             raise BlockedVocabularyRejected(field, verdict)

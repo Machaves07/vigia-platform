@@ -21,7 +21,6 @@ import pytest
 from config import EnvironmentConfig
 from stacks.loop import (
     CONFIGURATION_SET_DIMENSION,
-    EXPORT_CONSUMER,
     LOOP_APPLICATION_ALARM_METRICS,
     LOOP_CONDITION_ALARMS,
     LOOP_CONSUMERS,
@@ -66,7 +65,7 @@ EXPECTED: dict[str, tuple[float, str, int, int, str]] = {
     # Las ocho condiciones de NFR-LAZ-42 (nueve recursos más las periódicas).
     "loop-dead-letter": (1, GE, 1, FIVE_MINUTES, "7.2"),
     "assistant-unavailable": (1, GE, 1, HALF_HOUR, "7.4"),
-    "export-stuck": (3_600, GT, 2, FIVE_MINUTES, "7.6"),
+    "export-stuck": (1, GE, 2, FIVE_MINUTES, "7.6"),
     "export-failed": (1, GE, 1, FIVE_MINUTES, "7.6"),
     "email-bounce-rate": (5, GT, 2, DAY, "7.5"),
     "loop-projection-divergence": (1, GE, 1, FIVE_MINUTES, "7.1"),
@@ -289,7 +288,8 @@ def test_application_alarms_read_the_deployment_worker_and_its_dimension_values(
     dead = [_dimensions(m)["consumer"] for m in _metric_stats(alarms["loop-dead-letter"])]
     assert sorted(dead) == sorted(LOOP_CONSUMERS)
     (stuck,) = _metric_stats(alarms["export-stuck"])
-    assert _dimensions(stuck)["consumer"] == EXPORT_CONSUMER == "export_worker"
+    assert stuck["MetricName"] == "export_stuck_or_failed"
+    assert set(_dimensions(stuck)) == FIXED_DIMENSIONS
     for task in U04_PERIODIC:
         (metric,) = _metric_stats(alarms[stale_alarm_key(task)])
         assert _dimensions(metric)["task"] == task
@@ -376,6 +376,34 @@ def test_collector_publishes_every_application_dimension_set(
                 for sets, selectors in declarations
             ), f"{key}: {name} {sorted(dimensions)}"
     assert seen
+
+
+@pytest.mark.parametrize(
+    ("metric", "expected"),
+    [
+        ("export_duration_ms", {FIXED_DIMENSIONS, FIXED_DIMENSIONS | {"export_state"}}),
+        (
+            "export_requests_total",
+            {
+                FIXED_DIMENSIONS,
+                FIXED_DIMENSIONS | {"export_state"},
+                FIXED_DIMENSIONS | {"organization_id", "export_state"},
+            },
+        ),
+    ],
+)
+def test_export_collector_dimensions_match_the_catalog(
+    metric: str, expected: set[frozenset[str]]
+) -> None:
+    """La duración no lleva organización; las solicitudes sí, además de sus agregados."""
+    actual = {
+        dimensions
+        for sets, selectors in _collector_declarations()
+        if any(re.search(selector, metric) for selector in selectors)
+        for dimensions in sets
+    }
+    # route y component solo se publican si están presentes; no son atributos de exportación.
+    assert actual - {FIXED_DIMENSIONS | {"route"}, FIXED_DIMENSIONS | {"component"}} == expected
 
 
 # --- Las reglas detectan una alarma alterada ------------------------------------------------

@@ -169,8 +169,8 @@ LOOP_CATALOG: Final[tuple[LoopMetricSpec, ...]] = (
           "NFR-LAZ-41", "export_state"),
     _spec(_N.EXPORT_PACKAGE_SIZE_BYTES, _H, "By", "Tamaño del paquete exportado.", "NFR-LAZ-41"),
     _spec(_N.EXPORT_STUCK_OR_FAILED, _G, "1",
-          "Exportación de la organización por encima de 60 min o con dos fallos seguidos (1) o no "
-          "(0).", "NFR-LAZ-42", _ORG),
+          "Exportación abierta de la organización por encima de 60 min o con dos fallos seguidos "
+          "(1) o no (0).", "NFR-LAZ-42", _ORG),
     # NFR-LAZ-42 · el contador que ``export_worker`` (TASK-317) suma a los dos fallos seguidos de
     # una solicitud: la alarma ``export-failed`` (TASK-332).
     _spec(_N.EXPORT_FAILED_TOTAL, _C, "{request}",

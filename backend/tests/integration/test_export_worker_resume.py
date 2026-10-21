@@ -48,15 +48,226 @@ from tests.export_support import (
     synthetic_package,
 )
 from tests.integration.conftest import PostgresEndpoint
+from tests.laz_metrics_support import MetricCapture, metric_capture, unscoped_rows  # noqa: F401
 from vigia_platform.accreditation.export.lease import ExportLease, LeaseLost
-from vigia_platform.accreditation.export.worker import EXPORT_WORKER, ExportBusy
+from vigia_platform.accreditation.export.worker import EXPORT_WORKER, ExportBusy, LoggingExportAlarm
 from vigia_platform.loop.domain.enums import ExportState, PackageForm
+from vigia_platform.loop.observability.worker import _EXPORT, LoopWorkerTelemetry
+from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.outbox.dispatcher import Outcome
+from vigia_platform.shared.outbox.registries import PeriodicTaskRegistry, Schedule
 
 pytestmark = pytest.mark.integration
 
 COVERAGE = "accreditation_coverage_unavailable"
 STATES = {state.value for state in ExportState}
+
+
+def _telemetry(stack: ExportStack) -> LoopWorkerTelemetry:
+    async def idle(transaction: Any) -> None:
+        pass
+
+    task = PeriodicTaskRegistry().register(
+        "evaluate_deadlines", Schedule.every(3600), idle, unit=ActorUnit.U04
+    )
+    return LoopWorkerTelemetry(
+        database=stack.database, contexts=stack.authz.contexts, clock=stack.clock, task=task
+    )
+
+
+def test_export_producers_emit_states_duration_and_size(
+    stack: ExportStack,
+    capture: MetricCapture,
+) -> None:
+    organization, export_id = _requested(stack)
+
+    class MeasuredComposer(SyntheticComposer):
+        async def compose(self, job: Any, sink: Any) -> Any:
+            stack.clock.advance(0.125)
+            return await super().compose(job, sink)
+
+    worker = stack.export_worker(composer=MeasuredComposer())
+    stack.run(worker.run(stack.event_context(organization), export_id))
+    stack.run(worker.run(stack.event_context(organization), export_id))
+    points = capture.points("export_requests_total")
+    assert {p.attributes["export_state"]: p.value for p in points} == {
+        "requested": 1,
+        "in_progress": 1,
+        "ready": 1,
+    }
+    assert all(p.attributes["organization_id"] == str(organization) for p in points)
+    (duration,) = capture.points("export_duration_ms")
+    assert (duration.attributes["export_state"], duration.count, duration.sum) == ("ready", 1, 125)
+    (size,) = capture.points("export_package_size_bytes")
+    assert (size.count, size.sum) == (1, stack.package_row(export_id)["size_bytes"])
+
+
+@pytest.mark.parametrize("terminal", [False, True], ids=["reintentable", "terminal"])
+def test_export_monitor_checks_sixty_minutes_and_two_failures(
+    stack: ExportStack,
+    capture: MetricCapture,
+    terminal: bool,
+) -> None:
+    organization, export_id = _requested(stack)
+    telemetry = _telemetry(stack)
+    requested_at = stack.export_row(export_id)["requested_at"]
+
+    def flag() -> int:
+        stack.run(telemetry.report_once())
+        (point,) = [
+            p
+            for p in capture.points("export_stuck_or_failed")
+            if p.attributes["organization_id"] == str(organization)
+        ]
+        return int(point.value)
+
+    stack.clock.set(requested_at + timedelta(hours=1))
+    assert flag() == 0
+    stack.tick(0.001)
+    assert flag() == 1
+    worker = stack.export_worker()
+    stack.run(worker.run(stack.event_context(organization), export_id))
+    assert flag() == 0
+
+    other_org, other_id = _requested(stack)
+    other_context = stack.event_context(other_org)
+    composer = (
+        SyntheticComposer(fail_attempts={1}, declared={2: COVERAGE})
+        if terminal
+        else SyntheticComposer(fail_attempts={1, 2})
+    )
+    broken = stack.export_worker(composer=composer)
+    with pytest.raises(Undeclared):
+        stack.run(broken.run(other_context, other_id))
+    stack.run(telemetry.report_once())
+    assert (
+        next(
+            p.value
+            for p in capture.points("export_stuck_or_failed")
+            if p.attributes["organization_id"] == str(other_org)
+        )
+        == 0
+    )
+    if terminal:
+        stack.run(broken.run(other_context, other_id))
+    else:
+        with pytest.raises(Undeclared):
+            stack.run(broken.run(other_context, other_id))
+    stack.run(telemetry.report_once())
+    assert next(
+        p.value
+        for p in capture.points("export_stuck_or_failed")
+        if p.attributes["organization_id"] == str(other_org)
+    ) == int(not terminal)
+    assert flag() == 0  # La otra organización no contamina la ya recuperada.
+    # El predicado se prueba también sin RLS para no esconder su retirada detrás de la política.
+    (row,) = stack.run(
+        unscoped_rows(
+            stack.authz.sessions.admin,
+            _EXPORT,
+            organization_id=organization,
+            now=stack.now(),
+            cutoff=stack.now() - timedelta(hours=1),
+        )
+    )
+    assert row["unhealthy"] is False
+    if not terminal:
+        leases = stack.leases()
+        acquisition = stack.run(leases.acquire(other_context, other_id, "prueba", stack.now()))
+        assert acquisition.lease is not None and acquisition.lease.attempt_count == 3
+        stack.run(telemetry.report_once())
+        assert (
+            next(
+                p.value
+                for p in capture.points("export_stuck_or_failed")
+                if p.attributes["organization_id"] == str(other_org)
+            )
+            == 1
+        )
+        stack.run(leases.release(other_context, acquisition.lease))
+        stack.run(stack.export_worker().run(other_context, other_id))
+        stack.run(telemetry.report_once())
+        assert (
+            next(
+                p.value
+                for p in capture.points("export_stuck_or_failed")
+                if p.attributes["organization_id"] == str(other_org)
+            )
+            == 0
+        )
+
+
+def test_terminal_failure_clears_export_flag_and_a_later_stuck_request_rearms_it(
+    stack: ExportStack,
+    capture: MetricCapture,
+) -> None:
+    """Regresión VIG-270: fallo terminal del segundo intento, +90 días y nuevo atasco."""
+    site = stack.site(plants=1, zones=1)
+    plant = next(iter(site.plants))
+    person = stack.member(site)
+
+    def request() -> uuid.UUID:
+        response = stack.request_export(
+            person,
+            export_body(plant, list(site.plants[plant]), start=stack.now() - timedelta(days=5)),
+        )
+        assert response.status_code == 202, response.text
+        return uuid.UUID(response.json()["export_id"])
+
+    telemetry = _telemetry(stack)
+
+    def flag() -> int:
+        stack.run(telemetry.report_once())
+        (point,) = [
+            p
+            for p in capture.points("export_stuck_or_failed")
+            if p.attributes["organization_id"] == str(site.organization_id)
+        ]
+        return int(point.value)
+
+    export_id = request()
+    context = stack.event_context(site.organization_id)
+    worker = stack.export_worker(
+        composer=SyntheticComposer(fail_attempts={1}, declared={2: COVERAGE}),
+        alarm=LoggingExportAlarm(),
+    )
+    with pytest.raises(Undeclared):
+        stack.run(worker.run(context, export_id))
+    stack.tick(3600.001)
+    assert flag() == 1
+    stack.run(worker.run(context, export_id))
+    row = stack.export_row(export_id)
+    assert (row["state"], row["attempt_count"]) == ("failed", 2)
+    (failure,) = capture.points("export_failed_total")
+    assert failure.value == 1  # La alarma de fallos conserva el hecho sin enclavar el gauge.
+    assert flag() == 0
+    stack.tick(90 * 24 * 3600)
+    assert flag() == 0
+    assert stack.export_row(export_id)["state"] == "failed"  # Sin borrar el histórico.
+
+    later_id = request()
+    assert flag() == 0
+    stack.tick(3600)
+    assert flag() == 0
+    stack.tick(0.001)
+    assert flag() == 1
+    stack.run(stack.export_worker().run(context, later_id))
+    assert flag() == 0
+
+
+def test_declared_failure_is_observed_without_a_package(
+    stack: ExportStack,
+    capture: MetricCapture,
+) -> None:
+    organization, export_id = _requested(stack)
+    worker = stack.export_worker(composer=SyntheticComposer(declared={1: COVERAGE}))
+    stack.run(worker.run(stack.event_context(organization), export_id))
+    assert {
+        p.attributes["export_state"]: p.value for p in capture.points("export_requests_total")
+    } == {"requested": 1, "in_progress": 1, "failed": 1}
+    assert capture.points("export_package_size_bytes") == []
+    (duration,) = capture.points("export_duration_ms")
+    assert (duration.attributes["export_state"], duration.count) == ("failed", 1)
 
 
 @pytest.fixture(scope="module")
