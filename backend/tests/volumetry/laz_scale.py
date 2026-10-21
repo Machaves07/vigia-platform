@@ -30,13 +30,17 @@ destinatario, repartidos en el año con marcas repetidas de tres en tres (empate
 aplicación real (``create_app`` con la cadena fija de middleware, sesión del destinatario y
 ``NotificationReader``), página a página con ``after`` hasta el final:
 
-- antes del archivado, con ``include_archived``: **todos** los avisos, ninguno repetido, en orden
-  estrictamente decreciente de ``(created_at, notification_id)``;
+- antes del archivado (ninguno archivado, el listado por defecto): **todos** los avisos, ninguno
+  repetido, en orden estrictamente decreciente de ``(created_at, notification_id)``;
 - **archivado de lo leído a los 60 días** (``archive_read_notifications``, lo que corre
   ``EmailGroupingTask``): el recuento de filas del destinatario es el mismo antes y después (nada
   se borra) y los archivados son exactamente los leídos hace más de 60 días;
 - después, sin ``include_archived`` (lo que ve la bandeja por defecto): exactamente los no
-  archivados, sin pérdidas ni repeticiones.
+  archivados, sin pérdidas ni repeticiones;
+- con ``include_archived``, solo las primeras ``INCLUDE_ARCHIVED_PAGES`` páginas y como tendencia:
+  el índice de la lista (``notification_recipient_list``) es parcial (``archived_at IS NULL``), así
+  que cada página con lo archivado ordena todos los avisos del destinatario (hallazgo de esta
+  medición, en el informe).
 
 Solo datos generados. Una conexión de escritura (regla de recursos compartidos); topes de la
 base largos (retro 15): ninguno decide un resultado.
@@ -109,6 +113,8 @@ WALL: Final = SystemClock()
 CHUNK_DAYS: Final = 30
 """Días por sentencia de clonado: acota el tamaño de cada transacción."""
 PAGINATION_CHUNK: Final = 100_000
+INCLUDE_ARCHIVED_PAGES: Final = 3
+"""Páginas con ``include_archived`` que se miden después del archivado (tendencia)."""
 SAME_ORIGIN: Final = {"Sec-Fetch-Site": "same-origin"}
 REASON_TEXT: Final = (
     "Confirmado en sitio: la condición de coexistencia observada coincide con el estándar "
@@ -631,7 +637,8 @@ class _Pagination:
             },
         )
 
-    def traverse(self, *, include_archived: bool) -> _Traversal:
+    def traverse(self, *, include_archived: bool, max_pages: int | None = None) -> _Traversal:
+        """Página a página hasta el final (o hasta ``max_pages``), comprobando el orden."""
         cookie = self._env.open_session(self._organization, self._member)
         headers = {**SAME_ORIGIN, "Cookie": f"{SESSION_COOKIE_NAME}={cookie.value}"}
 
@@ -666,7 +673,7 @@ class _Pagination:
                         previous = key
                         ids.append(uuid.UUID(item["notification_id"]))
                     after = body["next_after"]
-                    if after is None:
+                    if after is None or (max_pages is not None and pages >= max_pages):
                         break
             return _Traversal(ids, pages, latencies)
 
@@ -869,13 +876,20 @@ def run_laz(
             }
         pagination = _Pagination(env, organization, member, profile.page_size)
         try:
-            before = pagination.traverse(include_archived=True)
+            # Antes del archivado ningún aviso está archivado: el listado por defecto los recorre
+            # todos (y usa el índice parcial ``notification_recipient_list``).
+            before = pagination.traverse(include_archived=False)
             log(f"[laz] recorrido 1: {before.pages} páginas")
             archive_seconds = pagination.archive(now)
             total_after = count()
             archived = count("archived_at IS NOT NULL")
             after_default = pagination.traverse(include_archived=False)
             log(f"[laz] recorrido 2 (sin lo archivado): {after_default.pages} páginas")
+            # Con lo archivado, solo las primeras páginas como medición: el índice de la lista es
+            # parcial (``archived_at IS NULL``) y cada página ordena todos los avisos del usuario.
+            with_archived = pagination.traverse(
+                include_archived=True, max_pages=INCLUDE_ARCHIVED_PAGES
+            )
         finally:
             pagination.close()
         visible = {
@@ -909,6 +923,9 @@ def run_laz(
             "seen_after_archive_default": len(after_default.ids),
             "page_ms_p50": _percentile(latencies, 0.5),
             "page_ms_p95": _percentile(latencies, 0.95),
+            "include_archived_pages": with_archived.pages,
+            "include_archived_page_ms_p50": _percentile(with_archived.latencies_ms, 0.5),
+            "include_archived_page_ms_max": _percentile(with_archived.latencies_ms, 1.0),
             "seed_seconds": round(seed_seconds, 1),
         },
         "archive": {
