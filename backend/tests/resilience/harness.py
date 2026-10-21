@@ -2,9 +2,10 @@
 
 Lo comparten los escenarios ``FS-NUC-01`` a ``FS-NUC-10`` (``test_fs_nuc_*.py``), los
 ``FS-GOB-01`` a ``FS-GOB-10`` de U-03 (``test_fs_gob_*.py``, con lo que añade
-``tests/resilience/gob_support.py``: LC-GOB-22), los ``FS-LAZ-01`` a ``FS-LAZ-06`` y los ensayos
-``DR-LAZ-01`` y ``DR-LAZ-02`` de U-04 (``test_fs_laz_*.py`` y ``test_dr_laz_01_02.py``, con lo que
-añade ``tests/resilience/laz_support.py``: LC-LAZ-42) y la suite con dos procesos
+``tests/resilience/gob_support.py``: LC-GOB-22), los ``FS-LAZ-01`` a ``FS-LAZ-12`` y los ensayos
+``DR-LAZ-01`` a ``DR-LAZ-04`` de U-04 (``test_fs_laz_*.py`` y ``test_dr_laz_*.py``, con lo que
+añaden ``tests/resilience/laz_support.py`` y ``laz_consumers.py``: LC-LAZ-42) y la suite con dos
+procesos
 (``test_two_processes.py``):
 
 - **Contenedores propios** (``dedicated_postgres``, ``dedicated_localstack``): PostgreSQL 16 y
