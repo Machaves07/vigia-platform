@@ -464,7 +464,7 @@ def scenario(
     El generador del escenario se deriva de la semilla de la sesión y del identificador, así que
     dos escenarios no comparten secuencia y cada uno se repite con la misma semilla.
     """
-    if not re.fullmatch(r"FS-(?:NUC|GOB)-\d{2}[a-z]?|NFR-NUC-\d{2}", scenario_id):
+    if not re.fullmatch(r"FS-(?:NUC|GOB|LAZ)-\d{2}[a-z]?|DR-LAZ-\d{2}|NFR-NUC-\d{2}", scenario_id):
         raise ValueError(f"identificador de escenario no válido: {scenario_id!r}")
     seed = session_seed()
     record = ScenarioRecord(
