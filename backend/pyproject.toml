@@ -183,6 +183,7 @@ xfail_strict = true
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
+  "laz_examples: historias críticas y regresiones de U-04 (NFR-LAZ-50, PBT-10)",
   "nightly: prueba que solo corre con el perfil nightly (--hypothesis-profile=nightly)",
   "integration: prueba con PostgreSQL o LocalStack en contenedores (testcontainers; requiere Docker)",
 ]

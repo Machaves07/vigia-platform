@@ -114,6 +114,7 @@ from vigia_platform.loop.assistant.consumer import (
 )
 from vigia_platform.loop.assistant.context import AssistantContext
 from vigia_platform.loop.assistant.port import (
+    AssistantFailure,
     AssistantOutcome,
     AssistantProviderPort,
     provider_credentials_present,
@@ -514,6 +515,9 @@ class AssistantProviderOnFirstUse:
 
     async def complete(self, context: AssistantContext, *, timeout: timedelta) -> AssistantOutcome:
         return await self._resolved().complete(context, timeout=timeout)
+
+    async def probe(self, *, timeout: timedelta) -> AssistantFailure | None:
+        return await self._resolved().probe(timeout=timeout)
 
 
 def _register_assistant_worker(registry: ConsumerRegistry, services: UnitServices) -> None:

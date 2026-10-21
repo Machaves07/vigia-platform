@@ -163,10 +163,83 @@ def test_a_plant_whose_projection_is_rebuilding_or_diverged_is_declared(
     stack.checkpoint_state(organization, state)
     body = _body(stack.get(who))
     assert body["partitions"] == [{"plant_id": str(organization.plant_id), "notice": notice}]
-    # Los elementos siguen visibles: la declaración no inventa ni esconde estado.
-    assert [item["finding_state_id"] for item in body["items"]] == [str(finding.record_id)]
+    # Una partición no saludable se declara, pero no se sirve hasta recuperarla (DR-LAZ-01).
+    assert body["items"] == []
     stack.checkpoint_state(organization, "healthy")
     assert _body(stack.get(who))["partitions"] == []
+    assert [item["finding_state_id"] for item in _body(stack.get(who))["items"]] == [
+        str(finding.record_id)
+    ]
+
+
+@pytest.mark.parametrize("kind", ["finding", "detection"])
+def test_first_ingestion_without_checkpoint_is_declared(stack: InboxStack, kind: str) -> None:
+    organization = stack.world.organization()
+    if kind == "finding":
+        stack.world.ingest_finding(organization)
+    else:
+        stack.world.ingest_detection(organization)
+    assert stack.world.checkpoint(organization) is None
+    body = _body(stack.get(stack.member(organization)))
+    assert body["items"] == []
+    assert body["partitions"] == [
+        {"plant_id": str(organization.plant_id), "notice": "projection_diverged"}
+    ]
+
+
+def test_stale_partition_does_not_hide_healthy_plant_or_leak_outside_scope(
+    stack: InboxStack,
+) -> None:
+    """La marca atrasada de otra planta no invalida ni declara la planta sana."""
+    organization = stack.world.organization()
+    finding = stack.finding(organization)
+    other_plant = stack.world.add_plant(organization)
+    other_zone = stack.zone_in(organization, other_plant)
+    hidden_row = stack.row(finding, plant_id=other_plant, zone_id=other_zone)
+    event = stack.world.outbox_event(finding)
+    # Metadato de ingesta generado: otra planta sin checkpoint, con secuencia mayor.
+    stack.execute(
+        "INSERT INTO shared.outbox_event (event_id, organization_id, plant_id, event_name,"
+        " ledger_sequence, payload, correlation_id, created_at)"
+        " SELECT $1, organization_id, $2, event_name, ledger_sequence + 100, payload,"
+        " correlation_id, created_at FROM shared.outbox_event WHERE event_id = $3",
+        uuid.uuid4(),
+        other_plant,
+        event.event_id,
+    )
+    coordinator = stack.member(organization)
+    body = _body(stack.get(coordinator))
+    assert [item["finding_state_id"] for item in body["items"]] == [str(finding.record_id)]
+    assert body["partitions"] == [{"plant_id": str(other_plant), "notice": "projection_diverged"}]
+    assert str(hidden_row) not in [item["finding_state_id"] for item in body["items"]]
+    for who, params in (
+        (coordinator, {"zone_id": str(organization.zone_id)}),
+        (stack.member(organization, level=ScopeLevel.PLANT, scope=organization.plant_id), None),
+        (stack.member(organization, level=ScopeLevel.ZONE, scope=organization.zone_id), None),
+    ):
+        scoped = _body(stack.get(who, params))
+        assert scoped["partitions"] == []
+        assert [item["finding_state_id"] for item in scoped["items"]] == [str(finding.record_id)]
+    other = stack.world.organization()
+    other_body = _body(stack.get(stack.member(other)))
+    assert other_body["items"] == [] and other_body["partitions"] == []
+
+
+def test_unrelated_event_sequence_does_not_block_ingestion_health(stack: InboxStack) -> None:
+    organization = stack.world.organization()
+    finding = stack.finding(organization)
+    event = stack.world.outbox_event(finding)
+    stack.execute(
+        "INSERT INTO shared.outbox_event (event_id, organization_id, plant_id, event_name,"
+        " ledger_sequence, payload, correlation_id, created_at)"
+        " SELECT $1, organization_id, plant_id, 'node_revoked', ledger_sequence + 100, payload,"
+        " correlation_id, created_at FROM shared.outbox_event WHERE event_id = $2",
+        uuid.uuid4(),
+        event.event_id,
+    )
+    body = _body(stack.get(stack.member(organization)))
+    assert body["partitions"] == []
+    assert [item["finding_state_id"] for item in body["items"]] == [str(finding.record_id)]
 
 
 # --- avisos de cada elemento ------------------------------------------------------------------
@@ -492,7 +565,6 @@ def test_serving_the_inbox_makes_zero_port_calls_and_a_single_statement(
     finding = stack.finding(organization)
     for _ in range(5):
         stack.row(finding)
-    stack.checkpoint_state(organization, "rebuilding")
     with counting_ports(monkeypatch, stack.database) as calls:
         # Control positivo: una llamada real a un puerto sí se cuenta.
         coverage = stack.world.real_ports(stack.database).coverage
@@ -509,7 +581,6 @@ def test_serving_the_inbox_makes_zero_port_calls_and_a_single_statement(
     # Una sentencia por página (la apertura del contexto de la transacción no cuenta).
     assert len(log.queries) == 2, log.queries
     assert all("FROM loop.finding_state f" in statement for statement in log.queries)
-    stack.checkpoint_state(organization, "healthy")
 
 
 def test_the_statement_uses_the_partial_inbox_index(stack: InboxStack) -> None:

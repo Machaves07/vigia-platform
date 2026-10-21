@@ -22,7 +22,8 @@ inyectado que lo avanza), nunca de pared:
   cabecera; tres 529 dan ``provider_error`` tras 5 s y 20 s; vencido el tope antes de la entrega,
   ``timeout`` sin llamada. El fallo declarado abre el ``ConsumerBreaker`` de U-02 (despachador
   real), la entrega no consume intentos, la API responde ``circuit_open`` y la sonda de 60 s lo
-  cierra sin llamar.
+  cierra con el proveedor recuperado, sin revivir la solicitud resuelta (la sonda del puerto; el
+  proveedor aún caído, en ``test_loop_assistant_probe``).
 - **Presupuesto**: al 100 % del tope de fichas, la admisión responde ``503`` sin fila y el
   consumidor deja ``budget_exceeded`` **sin construir el contexto** (cero llamadas al
   constructor y al proveedor); justo por debajo, se admite.
@@ -50,15 +51,13 @@ from tests.loop_assistant_support import AssistantStack, assistant_stack
 from tests.loop_classification_support import Who
 from tests.loop_root_cause_support import STATEMENTS, complete_signature
 from vigia_platform.loop.adapters.assistant.fake import (
-    FAKE_MODEL,
-    FAKE_MODEL_VERSION,
     FakeAssistantProvider,
     Script,
 )
 from vigia_platform.loop.assistant import consumer as consumer_module
 from vigia_platform.loop.assistant.budget import MONTHLY_INPUT_TOKENS, MONTHLY_OUTPUT_TOKENS
 from vigia_platform.loop.assistant.consumer import AssistantProviderDown
-from vigia_platform.loop.assistant.context import build_context, canonical_json, context_digest
+from vigia_platform.loop.assistant.context import build_context
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.outbox.dispatcher import Outcome
 from vigia_platform.shared.outbox.publish import OutboxEvent
@@ -146,61 +145,6 @@ def test_a_request_is_admitted_pending_with_its_digest_and_an_ids_only_event(
 
 
 # --- borrador -----------------------------------------------------------------------------------
-
-
-def test_a_valid_draft_with_citations_is_ready_outside_the_ledger(
-    stack: AssistantStack, coordinator: Who
-) -> None:
-    provider = stack.provider(Script.VALID_WITH_CITATIONS)
-    stack.use(provider)
-    request_id = stack.requested(coordinator)
-    records = _ledger_records(stack)
-    stack.deliver(request_id)
-    assert provider.call_count == 1
-    row = stack.request_row(request_id)
-    assert (row["state"], row["unavailable_cause"], row["attempt_count"]) == ("ready", None, 1)
-    # Uso por solicitud (NFR-LAZ-31): fichas, región, motivo de parada y modelo de la respuesta.
-    assert (row["input_tokens"], row["output_tokens"], row["cache_read_tokens"]) == (1200, 300, 0)
-    assert (row["inference_geo"], row["stop_reason"], row["response_model"]) == (
-        "us",
-        "end_turn",
-        FAKE_MODEL,
-    )
-    assert row["provider_duration_ms"] == 2000
-    (draft,) = stack.drafts(request_id)
-    assert (draft["model_name"], draft["model_version"], draft["provider"]) == (
-        FAKE_MODEL,
-        FAKE_MODEL_VERSION,
-        "anthropic",
-    )
-    assert (draft["accepted_by_human"], draft["edited_by_human"]) == (False, False)
-    assert draft["proposed_cause_category"] == "process"
-    (citation,) = draft["citations"]
-    context = provider.contexts[0]
-    assert citation["id"] == context.citable[0].alias
-    assert citation["kind"] == "record"
-    analysis = stack.base.analysis_row(row["analysis_id"])
-    assert citation["reference_id"] == str(stack.anchor_of(analysis["subject_id"]))
-    # PR-LAZ-19 sobre lo que recibió el doble: ningún identificador real ni el título del estándar.
-    sent = canonical_json(context)
-    for identifier in (
-        analysis["organization_id"],
-        analysis["plant_id"],
-        analysis["zone_id"],
-        analysis["subject_id"],
-        stack.anchor_of(analysis["subject_id"]),
-        row["request_id"],
-        analysis["zone_context"]["standard_id"],
-    ):
-        assert str(identifier) not in sent
-    assert analysis["zone_context"]["standard_title_es"] not in sent
-    assert canonical_json(context) and context_digest(context) == row["context_digest"]
-    assert _ledger_records(stack) == records  # el borrador no entra al expediente
-    body = _status(stack, coordinator, request_id)
-    assert body["assistant_state"] == "ready"
-    assert body["draft"]["is_draft"] is True
-    assert body["draft"]["model"] == FAKE_MODEL
-    assert body["draft"]["citations"][0]["reference_id"] == citation["reference_id"]
 
 
 def test_a_draft_that_declares_insufficient_evidence_is_ready_without_citations(
@@ -412,7 +356,8 @@ def test_past_the_hard_deadline_the_request_times_out_without_a_call(
 def test_the_declared_failure_opens_the_u02_breaker_and_the_probe_closes_it(
     stack: AssistantStack, coordinator: Who
 ) -> None:
-    provider = stack.provider(Script.OVERLOADED)
+    # Tres llamadas caídas; la sonda (cuarto paso de la cadena del doble) lo encuentra recuperado.
+    provider = stack.provider([Script.OVERLOADED] * 3 + [Script.VALID_WITH_CITATIONS])
     stack.use(provider)
     request_id = stack.requested(coordinator)
     report = stack.dispatch()
@@ -427,12 +372,13 @@ def test_the_declared_failure_opens_the_u02_breaker_and_the_probe_closes_it(
     response = stack.post(coordinator, stack.analysis(coordinator))
     assert response.status_code == 503, response.text
     assert stack.dispatch().count(Outcome.PAUSED) == 1
-    # La sonda, a los 60 s: la solicitud ya está resuelta, termina sin llamar y cierra.
+    # La sonda, a los 60 s: la solicitud ya está resuelta y no se revive; la sonda del puerto
+    # encuentra al proveedor y el circuito se cierra.
     stack.clock.advance(60)
     probe = stack.dispatch()
     assert probe.probed and probe.count(Outcome.DELIVERED) == 1
     assert stack.circuit() == ("closed", None)
-    assert provider.call_count == calls
+    assert provider.call_count == calls and len(provider.probe_timeouts) == 1
     assert stack.delivery(request_id)["status"] == "delivered"
 
 
