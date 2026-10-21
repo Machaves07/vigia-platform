@@ -18,7 +18,6 @@ from tests.isolation.route_cases import Kind
 from vigia_platform.identity.authz.matrix import permissions_of
 from vigia_platform.shared.api.app import build_openapi_app
 from vigia_platform.shared.api.declarations import DeclaredRoute, iter_declared_routes
-from vigia_platform.shared.api.request_state import MIDDLEWARE_CHAIN, ChainStep
 from vigia_platform.shared.context import Role
 
 RouteKey = tuple[str, str]
@@ -38,6 +37,29 @@ U04_NEW_PERMISSIONS: Final = frozenset(
     }
 )
 DENIED_REUSED_PERMISSIONS: Final = frozenset({"hierarchy.read", "notifications.read"})
+U04_PERMISSIONS: Final = frozenset(
+    {
+        "actions.manage",
+        "closure_attachments.read",
+        "commitments.write",
+        "executive_summary.read",
+        "export.create",
+        "exposure.read",
+        "findings.classify",
+        "findings.close_and_sign",
+        "findings.read",
+        "metrics.read",
+        "notifications.read",
+        "organization.settings",
+        "review_package.read",
+        "review_queue.resolve",
+        "root_cause.analyze",
+        "vocabulary.manage",
+    }
+)
+# LC §6.10 añade hierarchy.read para SUP-U05-38 a las 16 claves del lazo. La nota del
+# ticket conserva el recuento anterior; solo esta operación puede reutilizar la decimoséptima.
+HIERARCHY_ROUTE: Final = ("GET", "/loop/plants/{plant_id}/configuration")
 
 
 def u04_routes() -> dict[RouteKey, DeclaredRoute]:
@@ -77,11 +99,16 @@ def test_pr_laz_62_every_operation_has_a_private_declared_route_and_case() -> No
     assert set(case_by_key) == set(routes)
     assert len(case_by_key) == 42  # SUP-U05-35 tiene GET y PUT.
     assert uncovered_operation_cases(routes) == []
-    assert ChainStep.CSRF in MIDDLEWARE_CHAIN
+    # La barrera CSRF por cada ruta (incluidos cuerpos y verbos) se ejecuta en PR-NUC-53:
+    # tests/properties/test_csrf_barrier.py, no mediante pertenencia a una constante global.
+    assert len(U04_PERMISSIONS) == 16
 
     for key, route in routes.items():
         (declaration,) = route.declarations
         assert declaration.permission is not None, key
+        assert declaration.permission in U04_PERMISSIONS or (
+            key == HIERARCHY_ROUTE and declaration.permission == "hierarchy.read"
+        ), key
         assert declaration.unauthenticated is None, key
         assert declaration.session is None, key
         assert declaration.node is None, key

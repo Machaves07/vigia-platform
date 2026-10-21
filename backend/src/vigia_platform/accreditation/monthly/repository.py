@@ -33,7 +33,7 @@ from typing import Any, Final, Protocol
 
 from sqlalchemy import text
 
-from vigia_platform.shared.context import ScopeContext, repository
+from vigia_platform.shared.context import ScopeContext, ScopeLevel, repository
 from vigia_platform.shared.db import Transaction
 
 __all__ = [
@@ -291,7 +291,11 @@ _ZONE_PLANT: Final = text(
 )
 
 _PLANT_OF_ORGANIZATION: Final = text(
-    "SELECT 1 FROM identity.plant WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    "SELECT 1 FROM identity.plant p WHERE p.organization_id = :organization_id"
+    " AND p.plant_id = :plant_id AND (:organization_wide"
+    " OR p.plant_id = ANY(CAST(:plant_ids AS uuid[]))"
+    " OR EXISTS (SELECT 1 FROM identity.zone z WHERE z.organization_id = p.organization_id"
+    " AND z.plant_id = p.plant_id AND z.zone_id = ANY(CAST(:zone_ids AS uuid[]))))"
 )
 
 _FIND_PACKAGE: Final = text(
@@ -714,17 +718,32 @@ class MonthlyPackageRepository:
         return None if row is None else uuid.UUID(str(row.plant_id))
 
     async def plant_in_scope(self, transaction: Transaction, plant_id: uuid.UUID) -> bool:
-        """¿``plant_id`` es una planta de la organización del contexto?
+        """¿La planta existe y el contexto reducido tiene alcance sobre ella o alguna zona?
 
         Sin esta comprobación, la planta de otra organización (o una inexistente) no sale como
         ``not_found``: la lista de descargas (vacía por el filtro de ``organization_id``) echa
         igual el ``plant_id`` pedido en la respuesta, lo que la deja distinguible de un
         identificador realmente inexistente (PR-NUC-01).
         """
+        scopes = transaction.context.allowed_scopes
         row = (
             await transaction.execute(
                 _PLANT_OF_ORGANIZATION,
-                {"organization_id": transaction.context.organization_id, "plant_id": plant_id},
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "plant_id": plant_id,
+                    "organization_wide": any(
+                        scope.scope_level is ScopeLevel.ORGANIZATION
+                        and scope.scope_id == transaction.context.organization_id
+                        for scope in scopes
+                    ),
+                    "plant_ids": [
+                        scope.scope_id for scope in scopes if scope.scope_level is ScopeLevel.PLANT
+                    ],
+                    "zone_ids": [
+                        scope.scope_id for scope in scopes if scope.scope_level is ScopeLevel.ZONE
+                    ],
+                },
             )
         ).first()
         return row is not None

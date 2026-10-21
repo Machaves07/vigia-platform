@@ -14,8 +14,8 @@ Tres rutas, solo lectura, sobre lo que ``monthly.task.MonthlyPackageTask`` sella
 - ``GET /accreditation/monthly-packages/{plant_id}/{period}/download`` (SUP-U05-41): una URL
   prefirmada de 15 minutos **por zona dentro del alcance del actor** con paquete sellado para
   ``period``; las zonas fuera de alcance, o sin paquete sellado, simplemente no aparecen en la
-  lista (nunca un error por ellas): es una ruta de lista, no de un solo recurso. Una planta sin
-  ninguna zona visible, o sin ningún paquete sellado, da una lista vacía con ``200``. Cada URL
+   lista (nunca un error por ellas): es una ruta de lista, no de un solo recurso. Una planta fuera
+   de alcance responde ``404``; dentro del alcance, sin paquetes sellados, ``409``. Cada URL
   deja una entrada de auditoría ``monthly_package_download_granted`` en la misma transacción en
   la que se emite (PAT-LAZ-SEG-04, como ``export.download``).
 
@@ -79,7 +79,7 @@ from vigia_platform.accreditation.monthly.repository import (
     object_key,
 )
 from vigia_platform.accreditation.record_types import MAX_COMMITMENTS
-from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound
+from vigia_platform.identity.authz.authorize import Authorizer, Resource, ResourceNotFound, narrowed
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import exact_query, no_store
 from vigia_platform.ledger.application.audit_writer import AuditOperation, AuditWriter, ResourceRef
@@ -463,14 +463,21 @@ class MonthlyPackageReads:
 
         Las zonas fuera de alcance se omiten en silencio dentro de una lista no vacía: es un
         filtro de una ruta de lista, nunca un ``404``/``403`` de la petición entera. ``plant_id``
-        en sí sí se comprueba: una planta de otra organización (o inexistente) responde
+        en sí sí se comprueba: una planta fuera del alcance de lectura (o inexistente) responde
         ``not_found``, en vez de una lista vacía que delataría, por el ``plant_id`` que la
         respuesta repite, que el identificador pedido no es el de una planta real (PR-NUC-01).
         Si la lista queda vacía (ninguna zona en alcance tiene un paquete sellado de ``period``),
         ``monthly_package_not_available`` (409), alineado con LC-LAZ-26 §6.7 (nota U04-H-03):
         «un paquete sin sellar responde monthly_package_not_available».
         """
-        async with self._database.transaction(context) as transaction:
+        reduced = narrowed(
+            context,
+            PermissionKey.REVIEW_PACKAGE_READ,
+            provider_organization_id=self._authorizer.provider_organization_id,
+        )
+        if reduced is None:
+            raise ResourceNotFound()
+        async with self._database.transaction(reduced) as transaction:
             if not await self._repository.plant_in_scope(transaction, plant_id):
                 raise ResourceNotFound()
             packages = await self._repository.sealed_packages_of_plant(

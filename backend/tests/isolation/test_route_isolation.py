@@ -58,7 +58,7 @@ from typing import Any, Final
 
 import httpx
 import pytest
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.routing import BaseRoute
 
 from tests.api_support import World
@@ -2435,7 +2435,7 @@ def test_after_revocation_no_route_answers_the_provider(isolation: Isolation) ->
         assert not _mentions(response, b.ids), (method, path)
 
 
-# --- U-03 (TASK-228, VIG-165): alcance de planta y de zona, concesión vencida y A-48 ------------
+# --- U-03/U-04 (TASK-228/327): planta y zona, concesión vencida y A-48 -------------------------
 
 
 def _scoped(isolation: Isolation, level: ScopeLevel, scope_id: uuid.UUID) -> SessionCookie:
@@ -2451,6 +2451,16 @@ def _scoped(isolation: Isolation, level: ScopeLevel, scope_id: uuid.UUID) -> Ses
 def _u03_cases(isolation: Isolation, kinds: set[Kind]) -> list[tuple[tuple[str, str], Case]]:
     u03 = u03_person_routes(isolation.app.routes)
     return [(key, case) for key, case in _with_key(isolation, kinds) if key in u03]
+
+
+def _u03_and_laz_cases(
+    isolation: Isolation, kinds: set[Kind]
+) -> list[tuple[tuple[str, str], Case]]:
+    """Mantiene los casos de U-03 y ejercita también todo el catálogo de U-04 (TASK-327)."""
+    return [
+        *_u03_cases(isolation, kinds),
+        *((key, case) for key, case in LAZ_CASES if case.kind in kinds),
+    ]
 
 
 @pytest.mark.integration
@@ -2472,7 +2482,7 @@ def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organizat
         ),
     }
     failures: list[str] = []
-    cases = _u03_cases(isolation, {Kind.RESOURCE})
+    cases = _u03_and_laz_cases(isolation, {Kind.RESOURCE})
     assert len(cases) >= 40
     for (method, path), case in cases:
         route = f"{method} {path}"
@@ -2504,6 +2514,56 @@ def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organizat
             assert response.status_code == 200, (path, response.text)
     fleet_node = isolation.send(Call("GET", f"/fleet/nodes/{a.ids.node}"), plant)
     assert fleet_node.status_code == 200, fleet_node.text
+    # SUP-U05-41: el alcance propio sí llega a la decisión de disponibilidad, aun sin paquete
+    # sellado; no se arregla el aislamiento devolviendo not_found para todas las plantas.
+    for cookie in (plant, zone):
+        response = isolation.send(
+            Call("GET", f"/accreditation/monthly-packages/{a.ids.plant}/2026-01/download"), cookie
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail_code"] == "accreditation_monthly_package_not_available"
+
+
+@pytest.mark.integration
+def test_laz_monthly_download_uses_only_scopes_with_the_read_permission(
+    isolation: Isolation,
+) -> None:
+    """Administración en B no amplía la lectura del coordinador de A (misma organización)."""
+    authz, a = isolation.authz, isolation.a
+    user = authz.add_user(a.ids.organization)
+    authz.assign(a.ids.organization, user, Role.COORDINATOR_SST, ScopeLevel.PLANT, a.ids.plant)
+    authz.assign(
+        a.ids.organization, user, Role.ADMINISTRATOR, ScopeLevel.PLANT, a.other_plant.plant
+    )
+    cookie = authz.open_session(a.ids.organization, user)
+    outside = isolation.send(
+        Call("GET", f"/accreditation/monthly-packages/{a.other_plant.plant}/2026-01/download"),
+        cookie,
+    )
+    absent = isolation.send(
+        Call("GET", f"/accreditation/monthly-packages/{uuid7()}/2026-01/download"), cookie
+    )
+    assert _comparable(outside) == _comparable(absent)
+    assert _code(outside) == "not_found"
+
+
+@pytest.mark.integration
+def test_laz_own_routes_do_not_return_resources_outside_plant_or_zone_scope(
+    isolation: Isolation,
+) -> None:
+    """Vocabulario y preferencias son propios de organización/actor, no recursos de otra zona."""
+    a = isolation.a
+    foreign_before = isolation.fingerprint(isolation.b.ids.organization)
+    for cookie in (
+        _scoped(isolation, ScopeLevel.PLANT, a.ids.plant),
+        _scoped(isolation, ScopeLevel.ZONE, a.ids.zone),
+    ):
+        for key, case in LAZ_CASES:
+            if case.kind is Kind.OWN:
+                response = isolation.send(_call(case, a.other_plant), cookie)
+                assert not _mentions(response, a.other_plant), (key, response.text)
+                assert response.status_code != 403, (key, response.text)
+    assert isolation.fingerprint(isolation.b.ids.organization) == foreign_before
 
 
 @pytest.mark.integration
@@ -2522,7 +2582,7 @@ def test_an_expired_concession_answers_like_a_missing_resource_on_every_u03_rout
     )
     before = isolation.fingerprint(b.ids.organization)
     failures: list[str] = []
-    for (method, path), case in _u03_cases(isolation, {Kind.RESOURCE, Kind.OWN}):
+    for (method, path), case in _u03_and_laz_cases(isolation, {Kind.RESOURCE, Kind.OWN}):
         route = f"{method} {path}"
         own = isolation.send(_call(case, b.ids), cookie, concession)
         missing = isolation.send(_call(case, Ids.missing()), cookie, concession)
@@ -2583,6 +2643,79 @@ def test_a_48_the_provider_query_is_written_before_the_u03_route_runs(
         ("GET", "/fleet/nodes/{node_id}")
     ]
     assert seen.audit
+
+
+@pytest.mark.integration
+def test_a_48_every_laz_route_records_before_execution_and_fails_closed(
+    isolation: Isolation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Las claves denegadas no ejecutan la ruta. A-48 se prueba además tras abrir solo el rol.
+
+    La sonda de endpoint no ejecuta negocio: observa el registro ya confirmado antes de entrar.
+    Abrir el rol exclusivamente en esta prueba permite verificar el fallo cerrado de las 42
+    rutas, incluso las que hoy no pasan la matriz del instalador. No amplía permisos reales.
+    """
+    from vigia_platform.loop.adapters.http.attachment_routes import attachment_service
+    from vigia_platform.shared.api.middleware import authorization
+
+    # La fixture transversal no instala el almacén de adjuntos: la sonda no lo usa, pero
+    # FastAPI resuelve sus dependencias antes de llamar al endpoint instrumentado.
+    monkeypatch.setitem(isolation.app.dependency_overrides, attachment_service, lambda: None)
+
+    authz, b = isolation.authz, isolation.b
+    installer, cookie = isolation.installer()
+    concession = authz.add_concession(b.ids.organization, installer, granted_at=authz.now() - HOUR)
+    routes = {
+        (method, str(context.path)): context
+        for context in iter_route_contexts(isolation.app.routes)
+        if isinstance(context.original_route, APIRoute)
+        for method in context.methods
+    }
+    for key, case in LAZ_CASES:
+        seen = _observe(isolation, _call(case, b.ids), cookie, concession)
+        assert _code(seen.response) == "not_found", (key, seen.response.text)
+        expected = [key] if _permission(isolation.app.routes, key) in INSTALLER_KEYS else []
+        assert [(q["method"], q["resource"]) for q in seen.queries] == expected, key
+
+    monkeypatch.setattr(
+        authorization, "route_role", lambda *args, **kwargs: Role.PROVIDER_INSTALLER
+    )
+    committed: list[tuple[str, str]] = []
+    write_query = isolation.queries.write_provider_query
+
+    async def record(context: Any, content: Mapping[str, str], plant_id: uuid.UUID | None) -> None:
+        await write_query(context, content, plant_id)
+        committed.append((content["method"], content["resource"]))
+
+    monkeypatch.setattr(isolation.queries, "write_provider_query", record)
+    for key, case in LAZ_CASES:
+        entered: list[bool] = []
+        before = len(isolation.provider_queries(b.ids.organization, concession))
+        committed.clear()
+
+        async def endpoint_probe(
+            _key: tuple[str, str] = key, _entered: list[bool] = entered, **kwargs: Any
+        ) -> dict[str, bool]:
+            assert committed == [_key]
+            _entered.append(True)
+            return {"probe": True}
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(routes[key].dependant, "call", endpoint_probe)
+            # Al escribir el rastro, llega al endpoint sonda, independientemente de su esquema
+            # de respuesta (puede rechazar la respuesta sintética después de observarla).
+            response = isolation.send(_call(case, b.ids), cookie, concession)
+            assert entered == [True], (key, response.text)
+            assert len(isolation.provider_queries(b.ids.organization, concession)) == before + 1
+            entered.clear()
+            committed.clear()
+            isolation.queries.failing = True
+            try:
+                response = isolation.send(_call(case, b.ids), cookie, concession)
+                assert response.status_code >= 500, (key, response.text)
+                assert entered == [], key
+            finally:
+                isolation.queries.failing = False
 
 
 # --- Seguimientos de VIG-86: etiquetas de dos organizaciones y dos plantas -----------------------
