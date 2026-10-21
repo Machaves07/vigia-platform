@@ -2,8 +2,9 @@
 
 ``test_route_isolation.py`` concatena ``LAZ_CASES`` a su ``CASES``, y ``uncovered`` exige un caso
 por cada ruta registrada: una ruta de ``/loop/*``, ``/accreditation/*`` o ``/notifications/*``
-sin su caso aquí deja la prueba en rojo. **Ninguna tarea de U-04 edita
-``test_route_isolation.py``**: cada tarea que registra una ruta añade aquí su caso, con los tipos
+sin su caso aquí deja la prueba en rojo. Las tareas de rutas no editan
+``test_route_isolation.py``: cada una añade aquí su caso; TASK-327 completa el mundo y endurece
+el arnés transversal por petición de la revisión. Se usan los tipos
 de ``tests.isolation.route_cases``::
 
     (("GET", "/loop/findings/{finding_state_id}"), Case(Kind.RESOURCE, call=...)),
@@ -27,6 +28,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
+from tests.attachment_support import MemoryStore
+from tests.examples.test_ledger_routes import StubEvidenceStorage
+from tests.integration.test_monthly_package_routes import FakeSigner
 from tests.isolation.route_cases import Call, Case, Kind
 from vigia_platform.accreditation.adapters.http.monthly_routes import MonthlyPackageReads
 from vigia_platform.accreditation.adapters.http.services import (
@@ -54,9 +58,12 @@ from vigia_platform.ledger.application.evidence_read import (
 from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.ledger.application.writer import EscritorExpediente
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
+from vigia_platform.loop.adapters.http.attachment_routes import ATTACHMENTS_STATE_KEY
 from vigia_platform.loop.adapters.http.services import LOOP_STATE_KEY, LoopHttp
 from vigia_platform.loop.adapters.postgres.review_queue_repository import ReviewQueueRepository
 from vigia_platform.loop.application.actions import ActionService
+from vigia_platform.loop.application.attachments import build_attachment_service
 from vigia_platform.loop.application.classification import ClassificationService
 from vigia_platform.loop.application.closure import ClosureService
 from vigia_platform.loop.application.deadlines import OverdueService
@@ -88,6 +95,7 @@ __all__ = [
     "LAZ_CASES",
     "LAZ_DENIED_UNDER_CONCESSION",
     "LAZ_EVENT_REGISTRARS",
+    "LAZ_OPERATION_CASES",
     "LAZ_STATE",
     "LazServices",
     "laz_state",
@@ -151,6 +159,13 @@ def _loop(services: LazServices) -> Mapping[str, object]:
         clock=services.clock,
     )
     return {
+        ATTACHMENTS_STATE_KEY: build_attachment_service(
+            repository=PostgresAttachmentRepository(database),
+            storage=MemoryStore(services.clock),
+            authorizer=services.authorizer,
+            audit=services.audit,
+            clock=services.clock,
+        ),
         LOOP_STATE_KEY: LoopHttp(
             configuration=LoopConfigurationService(
                 repository=PostgresLoopConfigurationRepository(database),
@@ -243,23 +258,6 @@ def _loop(services: LazServices) -> Mapping[str, object]:
     }
 
 
-class _NoSigner:
-    """Las descargas de B nunca llegan al almacén: responden ``not_found`` antes de firmar."""
-
-    async def presign_attachment_get(self, *args: object, **kwargs: object) -> Any:
-        raise AssertionError("una descarga fuera de alcance no firma ninguna URL")
-
-
-class _NoClipReads:
-    """El detalle de un hallazgo de B responde ``not_found`` antes de pedir ninguna URL."""
-
-    async def head_object(self, *args: object, **kwargs: object) -> Any:
-        raise AssertionError("un detalle fuera de alcance no lee ningún clip")
-
-    async def presign_get(self, *args: object, **kwargs: object) -> Any:
-        raise AssertionError("un detalle fuera de alcance no firma ninguna URL")
-
-
 def _detail(services: LazServices) -> FindingDetailService:
     """El detalle (TASK-342) con los puertos reales de U-02 y de U-03 sobre la base de la prueba."""
     database: Any = services.database
@@ -269,7 +267,7 @@ def _detail(services: LazServices) -> FindingDetailService:
         authorizer=services.authorizer,
         reader=LectorExpediente(database=database, audit=services.audit, clock=services.clock),
         evidence=LedgerEvidenceService(
-            database=database, audit=services.audit, storage=_NoClipReads()
+            database=database, audit=services.audit, storage=StubEvidenceStorage()
         ),
         catalog=ports.catalog,
         gates=ports.gates,
@@ -304,7 +302,7 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 database=services.database,
                 authorizer=services.authorizer,
                 audit=services.audit,
-                storage=_NoSigner(),
+                storage=FakeSigner(services.clock),
                 clock=services.clock,
             ),
             monthly_packages=MonthlyPackageReads(  # TASK-344
@@ -312,7 +310,7 @@ def _accreditation(services: LazServices) -> Mapping[str, object]:
                 repository=MonthlyPackageRepository(database=services.database),
                 authorizer=services.authorizer,
                 audit=services.audit,
-                storage=_NoSigner(),
+                storage=FakeSigner(services.clock),
             ),
             exposure=_exposure(services),  # TASK-322
             metrics=ProgramMetricsService(
@@ -437,7 +435,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/findings/{i.record}/classifications",
+                f"/loop/findings/{i.finding}/classifications",
                 json={
                     "outcome": "confirmed",
                     "reason_category": "real_coexistence",
@@ -459,7 +457,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/review-queue/{i.record}/resolution",
+                f"/loop/review-queue/{i.detection}/resolution",
                 json={
                     "outcome": "review_confirmed",
                     "reason_category": "real_coexistence",
@@ -477,7 +475,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/findings/{i.record}/actions",
+                f"/loop/findings/{i.finding}/actions",
                 json={
                     "action_type": "engineering",
                     "action_description": "Instalar un resguardo fijo en el acceso a la zona",
@@ -492,7 +490,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/actions/{i.record}/evidence",
+                f"/loop/actions/{i.action}/evidence",
                 json={
                     "description": "Resguardo fijo instalado y anclado al piso en el acceso",
                     "performed_at": "2026-10-01T10:00:00.000Z",
@@ -509,7 +507,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/findings/{i.record}/closure",
+                f"/loop/findings/{i.finding}/closure",
                 json={
                     "closure_description": (
                         "Resguardo fijo verificado y anclado en el acceso de la zona"
@@ -525,7 +523,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/findings/{i.record}/reopening",
+                f"/loop/findings/{i.finding}/reopening",
                 json={
                     "reason_text": "El resguardo se retiró durante el mantenimiento mayor",
                     "action_type": "engineering",
@@ -541,7 +539,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("POST", f"/loop/findings/{i.record}/root-cause-analyses"),
+            lambda i: Call("POST", f"/loop/findings/{i.finding}/root-cause-analyses"),
         ),
     ),
     (
@@ -549,7 +547,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         Case(
             Kind.RESOURCE,
             lambda i: Call(
-                "PUT", f"/loop/root-cause-analyses/{i.record}/steps/1", json=_ANALYSIS_STEP
+                "PUT", f"/loop/root-cause-analyses/{i.analysis}/steps/1", json=_ANALYSIS_STEP
             ),
         ),
     ),
@@ -559,7 +557,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/root-cause-analyses/{i.record}/signature",
+                f"/loop/root-cause-analyses/{i.analysis}/signature",
                 json=_ANALYSIS_SIGNATURE,
             ),
         ),
@@ -571,12 +569,14 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("POST", f"/loop/root-cause-analyses/{i.record}/assistant-requests"),
+            lambda i: Call("POST", f"/loop/root-cause-analyses/{i.analysis}/assistant-requests"),
         ),
     ),
     (
         ("GET", "/loop/assistant-requests/{request_id}"),
-        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/assistant-requests/{i.record}")),
+        Case(
+            Kind.RESOURCE, lambda i: Call("GET", f"/loop/assistant-requests/{i.assistant_request}")
+        ),
     ),
     # VIG-222 (TASK-307): la bandeja con una zona de B en la consulta responde igual que con una
     # inexistente (not_found, nunca forbidden ni una página vacía con avisos de B).
@@ -591,11 +591,11 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     # lee el expediente de B ni se pide ninguna URL de sus clips.
     (
         ("GET", "/loop/findings/{finding_state_id}"),
-        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.record}")),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.finding}")),
     ),
     (
         ("GET", "/loop/findings/{finding_state_id}/classifications"),
-        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.record}/classifications")),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/loop/findings/{i.finding}/classifications")),
     ),
     # VIG-229 (TASK-313): el panel de vencidos de una planta de B responde igual que el de una
     # inexistente (not_found, nunca forbidden ni una página vacía con el umbral de B).
@@ -607,8 +607,8 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
     ),
     # VIG-220 (TASK-350): la lista de vocabulario es ``own`` (de la organización del contexto, sin
     # identificador): nunca muestra ni toca la de B; bajo concesión, ``not_found``
-    # (vocabulary.manage no está en la columna del instalador). El escritor de esta prueba no
-    # registra los tipos de U-04, así que el cambio pide retirar un término que no está vigente:
+    # (vocabulary.manage no está en la columna del instalador). El cambio pide retirar un
+    # término que no está vigente:
     # recorre la transacción de A (candado, fila y términos) y termina en ``invalid_request`` sin
     # escribir. La escritura completa y que otra organización no la ve ni la toca:
     # ``tests/integration/test_loop_vocabulary_routes.py``.
@@ -636,7 +636,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/loop/findings/{i.record}/unclosable",
+                f"/loop/findings/{i.finding}/unclosable",
                 json={**_UNCLOSABLE_DECLARATION, "responsible_user_id": str(i.user)},
             ),
         ),
@@ -645,7 +645,9 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("POST", "/loop/unclosable/{declaration_id}/reviews"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("POST", f"/loop/unclosable/{i.record}/reviews", json=_UNCLOSABLE_REVIEW),
+            lambda i: Call(
+                "POST", f"/loop/unclosable/{i.declaration}/reviews", json=_UNCLOSABLE_REVIEW
+            ),
         ),
     ),
     # TASK-310: adjuntos de evidencia de cierre (SUP-U05-09 y 10).
@@ -655,7 +657,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             call=lambda ids: Call(
                 "POST",
-                f"/loop/actions/{ids.record}/attachments/upload-grant",
+                f"/loop/actions/{ids.action}/attachments/upload-grant",
                 json={"content_type": "image/png", "size_bytes": 1, "sha256": "a" * 64},
             ),
         ),
@@ -664,7 +666,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("POST", "/loop/attachments/{attachment_id}/read-url"),
         Case(
             Kind.RESOURCE,
-            call=lambda ids: Call("POST", f"/loop/attachments/{ids.evidence}/read-url"),
+            call=lambda ids: Call("POST", f"/loop/attachments/{ids.attachment}/read-url"),
         ),
     ),
     # VIG-215 (TASK-317): una zona de B en el cuerpo responde igual que una inexistente
@@ -676,36 +678,32 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call("POST", "/accreditation/exports", json=_export_body(i.plant, i.zone)),
         ),
     ),
-    # La exportación de otra organización no es visible: igual que una inexistente (la prueba con
-    # una exportación real de B está en tests/integration/test_export_request_routes.py).
+    # La solicitud existente de otra organización no es visible: igual que una inexistente.
     (
         ("GET", "/accreditation/exports/{export_id}"),
-        Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.event}")),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.export}")),
     ),
-    # VIG-226 (TASK-345): las descargas de una exportación de otra organización responden como
-    # una inexistente y no firman ni auditan ninguna concesión (las pruebas con una exportación
-    # lista de B están en tests/integration/test_export_download_routes.py).
+    # VIG-226 (TASK-345): la solicitud sembrada aún no está lista (409 propio, 404 ajeno).
+    # Las pruebas con una exportación lista están en test_export_download_routes.py.
     (
         ("GET", "/accreditation/exports/{export_id}/download"),
-        Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.event}/download")),
+        Case(Kind.RESOURCE, lambda i: Call("GET", f"/accreditation/exports/{i.export}/download")),
     ),
     (
         ("POST", "/accreditation/exports/{export_id}/download-url"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("POST", f"/accreditation/exports/{i.event}/download-url"),
+            lambda i: Call("POST", f"/accreditation/exports/{i.export}/download-url"),
         ),
     ),
     # VIG-217 (TASK-324): la lista propia (SUP-U05-33, forma mínima) nunca muestra un aviso de B
     # ni de otro usuario; ``notifications.read`` la tienen los siete roles (lista propia, OWN).
     (("GET", "/notifications"), Case(Kind.OWN, lambda i: Call("GET", "/notifications"))),
-    # TASK-348 (SUP-U05-34, PR-LAZ-61): marcar leído un aviso ajeno o inexistente responde
-    # ``not_found`` y no deja efecto (lista propia, OWN; sin identificador real de B que probar
-    # aquí, el caso de ``not_found`` sobre un aviso real de otro usuario está en
-    # ``tests/properties/laz/test_pr_laz_61_preference_ownership.py``).
+    # TASK-348 (SUP-U05-34, PR-LAZ-61): el aviso sembrado pertenece a i.user. Su dueño lo
+    # marca leído; otro usuario u organización recibe not_found y no cambia su fila.
     (
         ("POST", "/notifications/{notification_id}/read"),
-        Case(Kind.OWN, lambda i: Call("POST", f"/notifications/{i.record}/read")),
+        Case(Kind.RESOURCE, lambda i: Call("POST", f"/notifications/{i.notification}/read")),
     ),
     # TASK-348 (SUP-U05-35, PR-LAZ-61): las preferencias son siempre las del propio actor.
     (
@@ -737,7 +735,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call(
                 "GET",
                 "/accreditation/monthly-packages",
-                params={"zone_id": str(i.zone), "period": "2026-01"},
+                params={"zone_id": str(i.zone), "period": i.period},
             ),
         ),
     ),
@@ -745,14 +743,14 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         ("GET", "/accreditation/monthly-packages/{package_id}/sample"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.record}/sample"),
+            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.package}/sample"),
         ),
     ),
     (
         ("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download"),
         Case(
             Kind.RESOURCE,
-            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.plant}/2026-01/download"),
+            lambda i: Call("GET", f"/accreditation/monthly-packages/{i.plant}/{i.period}/download"),
         ),
     ),
     # TASK-347 (SUP-U05-26 a 29): el resultado de un elemento de la muestra, los compromisos de
@@ -767,7 +765,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/accreditation/sample-items/{i.record}/result",
+                f"/accreditation/sample-items/{i.sample_item}/result",
                 json={"outcome": "consistent_criterion"},
             ),
         ),
@@ -778,7 +776,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             Kind.RESOURCE,
             lambda i: Call(
                 "POST",
-                f"/accreditation/monthly-packages/{i.record}/commitments",
+                f"/accreditation/monthly-packages/{i.package}/commitments",
                 json={
                     "commitments": [
                         {
@@ -796,7 +794,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
         Case(
             Kind.RESOURCE,
             lambda i: Call(
-                "PATCH", f"/accreditation/commitments/{i.record}", json={"state": "done"}
+                "PATCH", f"/accreditation/commitments/{i.commitment}", json={"state": "done"}
             ),
         ),
     ),
@@ -807,7 +805,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call(
                 "GET",
                 "/accreditation/commitments",
-                params={"zone_id": str(i.zone), "period": "2026-01"},
+                params={"zone_id": str(i.zone), "period": i.period},
             ),
         ),
     ),
@@ -821,7 +819,7 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call(
                 "GET",
                 "/accreditation/exposure",
-                params={"zone_id": str(i.zone), "period": "2026-01"},
+                params={"zone_id": str(i.zone), "period": i.period},
             ),
         ),
     ),
@@ -845,12 +843,111 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call(
                 "GET",
                 "/accreditation/metrics",
-                params={"zone_id": str(i.zone), "period": "2026-01"},
+                params={"zone_id": str(i.zone), "period": i.period},
             ),
         ),
     ),
 ]
 """``((MÉTODO, /plantilla), Case)`` de cada ruta de U-04."""
+
+LAZ_OWN_BUSINESS_RESPONSES: Final = {
+    # El grafo ya tiene clasificación y acción vigentes: no se pueden repetir como altas.
+    ("POST", "/loop/findings/{finding_state_id}/classifications"): (
+        409,
+        "conflict",
+        "loop_transition_not_allowed",
+    ),
+    ("POST", "/loop/findings/{finding_state_id}/actions"): (
+        409,
+        "conflict",
+        "loop_transition_not_allowed",
+    ),
+    # No se declara una política firmada ni se mueve el hallazgo a incerrable en esta siembra.
+    ("POST", "/loop/findings/{finding_state_id}/unclosable"): (
+        400,
+        "invalid_request",
+        "loop_unclosable_policy_not_signed",
+    ),
+    ("POST", "/loop/unclosable/{declaration_id}/reviews"): (
+        409,
+        "conflict",
+        "loop_transition_not_allowed",
+    ),
+    # La ficha del adjunto existe, pero su objeto no está en el almacén sintético.
+    ("POST", "/loop/attachments/{attachment_id}/read-url"): (409, "conflict", None),
+    # Solicitud real existente, todavía no compuesta: export_state=requested.
+    ("GET", "/accreditation/exports/{export_id}/download"): (409, "conflict", None),
+    ("POST", "/accreditation/exports/{export_id}/download-url"): (409, "conflict", None),
+    # El catálogo mínimo no declara señal dura: rechazo honesto, no un 400 de esquema/periodo.
+    ("GET", "/accreditation/exposure"): (
+        400,
+        "invalid_request",
+        "accreditation_exposure_not_computable",
+    ),
+}
+"""Rechazos de negocio exactos del grafo sembrado, después de autorizar el recurso existente.
+
+Los demás RESOURCE deben alcanzar 2xx; ningún 404 ni 400 genérico satisface la antivacuidad.
+"""
+
+
+LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
+    "SUP-U05-01": frozenset({("GET", "/loop/findings")}),
+    "SUP-U05-02": frozenset({("GET", "/loop/findings/{finding_state_id}")}),
+    "SUP-U05-03": frozenset({("POST", "/loop/findings/{finding_state_id}/classifications")}),
+    "SUP-U05-04": frozenset({("GET", "/loop/findings/{finding_state_id}/classifications")}),
+    "SUP-U05-05": frozenset({("GET", "/loop/review-queue")}),
+    "SUP-U05-06": frozenset({("POST", "/loop/review-queue/{detection_id}/resolution")}),
+    "SUP-U05-07": frozenset({("POST", "/loop/findings/{finding_state_id}/actions")}),
+    "SUP-U05-08": frozenset({("POST", "/loop/actions/{action_id}/evidence")}),
+    "SUP-U05-09": frozenset({("POST", "/loop/actions/{action_id}/attachments/upload-grant")}),
+    "SUP-U05-10": frozenset({("POST", "/loop/attachments/{attachment_id}/read-url")}),
+    "SUP-U05-11": frozenset({("POST", "/loop/findings/{finding_state_id}/closure")}),
+    "SUP-U05-12": frozenset({("POST", "/loop/findings/{finding_state_id}/unclosable")}),
+    "SUP-U05-13": frozenset({("POST", "/loop/unclosable/{declaration_id}/reviews")}),
+    "SUP-U05-14": frozenset({("POST", "/loop/findings/{finding_state_id}/reopening")}),
+    "SUP-U05-15": frozenset({("GET", "/loop/overdue")}),
+    "SUP-U05-16": frozenset({("POST", "/loop/findings/{finding_state_id}/root-cause-analyses")}),
+    "SUP-U05-17": frozenset(
+        {("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}")}
+    ),
+    "SUP-U05-18": frozenset({("POST", "/loop/root-cause-analyses/{analysis_id}/signature")}),
+    "SUP-U05-19": frozenset(
+        {("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests")}
+    ),
+    "SUP-U05-20": frozenset({("GET", "/loop/assistant-requests/{request_id}")}),
+    "SUP-U05-21": frozenset({("POST", "/accreditation/exports")}),
+    "SUP-U05-22": frozenset({("GET", "/accreditation/exports/{export_id}")}),
+    "SUP-U05-23": frozenset({("POST", "/accreditation/exports/{export_id}/download-url")}),
+    "SUP-U05-24": frozenset({("GET", "/accreditation/monthly-packages")}),
+    "SUP-U05-25": frozenset({("GET", "/accreditation/monthly-packages/{package_id}/sample")}),
+    "SUP-U05-26": frozenset({("POST", "/accreditation/sample-items/{sample_item_id}/result")}),
+    "SUP-U05-27": frozenset({("POST", "/accreditation/monthly-packages/{package_id}/commitments")}),
+    "SUP-U05-28": frozenset({("PATCH", "/accreditation/commitments/{commitment_id}")}),
+    "SUP-U05-29": frozenset({("GET", "/accreditation/commitments")}),
+    "SUP-U05-30": frozenset({("GET", "/accreditation/metrics")}),
+    "SUP-U05-31": frozenset({("GET", "/accreditation/exposure")}),
+    "SUP-U05-32": frozenset({("GET", "/accreditation/adoption")}),
+    "SUP-U05-33": frozenset({("GET", "/notifications")}),
+    "SUP-U05-34": frozenset({("POST", "/notifications/{notification_id}/read")}),
+    # La operación de preferencias tiene lectura y escritura sobre el mismo recurso propio.
+    "SUP-U05-35": frozenset(
+        {("GET", "/notifications/preferences"), ("PUT", "/notifications/preferences")}
+    ),
+    "SUP-U05-36": frozenset({("GET", "/loop/vocabulary")}),
+    "SUP-U05-37": frozenset({("POST", "/loop/vocabulary/changes")}),
+    "SUP-U05-38": frozenset({("GET", "/loop/plants/{plant_id}/configuration")}),
+    "SUP-U05-39": frozenset({("PUT", "/loop/plants/{plant_id}/configuration")}),
+    "SUP-U05-40": frozenset({("GET", "/accreditation/exports/{export_id}/download")}),
+    "SUP-U05-41": frozenset(
+        {("GET", "/accreditation/monthly-packages/{plant_id}/{period}/download")}
+    ),
+}
+"""Las 41 operaciones de LC-LAZ §6 y sus rutas.
+
+``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias; por eso las 41 operaciones
+ocupan 42 rutas declaradas y 42 casos de aislamiento.
+"""
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(
     {

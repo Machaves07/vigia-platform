@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from tests.factories import uuid7
@@ -58,13 +58,26 @@ class Ids:
     """Paso abierto de esa sesión (VIG-150)."""
     commissioning_record: uuid.UUID
     """Acta cerrada de otra sesión de la zona (VIG-158)."""
+    finding: uuid.UUID = field(default_factory=uuid7)
+    detection: uuid.UUID = field(default_factory=uuid7)
+    action: uuid.UUID = field(default_factory=uuid7)
+    analysis: uuid.UUID = field(default_factory=uuid7)
+    assistant_request: uuid.UUID = field(default_factory=uuid7)
+    declaration: uuid.UUID = field(default_factory=uuid7)
+    attachment: uuid.UUID = field(default_factory=uuid7)
+    export: uuid.UUID = field(default_factory=uuid7)
+    package: uuid.UUID = field(default_factory=uuid7)
+    sample_item: uuid.UUID = field(default_factory=uuid7)
+    commitment: uuid.UUID = field(default_factory=uuid7)
+    notification: uuid.UUID = field(default_factory=uuid7)
+    period: str = "2026-01"
 
     @classmethod
     def missing(cls) -> Ids:
-        return cls(*(uuid7() for _ in cls.__dataclass_fields__))
+        return cls(**{name: uuid7() for name in cls.__dataclass_fields__ if name != "period"})
 
     def values(self) -> tuple[uuid.UUID, ...]:
-        return tuple(getattr(self, name) for name in self.__dataclass_fields__)
+        return tuple(getattr(self, name) for name in self.__dataclass_fields__ if name != "period")
 
 
 @dataclass(frozen=True)
