@@ -303,8 +303,9 @@ def test_laz_exposure(laz: LazBench, measure: Measure) -> None:
 def test_laz_metrics_panel(laz: LazBench, measure: Measure) -> None:
     """Fila 9. [objetivo propio] p95 ≤ 1 500 ms.
 
-    Composición: 20 zonas por 12 meses de ProgramMetricSnapshot ya materializados,
-    sin recálculo. Tramos: total → materialized_month (12 peticiones en proceso).
+    Composición: 20 zonas configuradas por 12 meses materializados, más la zona
+    auxiliar vacía del sitio de ingesta (medición conservadora); sin recálculo.
+    Tramos: total → materialized_month (12 peticiones en proceso).
     """
     periods = sorted(
         {period_of(laz.start + timedelta(days=31 * i), "America/Bogota") for i in range(12)}
@@ -329,7 +330,7 @@ def test_laz_metrics_panel(laz: LazBench, measure: Measure) -> None:
         "laz_metrics_panel",
         1_500,
         operation,
-        details={"zones": 20, "months": len(periods)},
+        details={"zones": 20, "auxiliary_empty_zones": 1, "months": len(periods)},
     )
 
 

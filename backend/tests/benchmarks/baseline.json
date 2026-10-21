@@ -1,8 +1,8 @@
 {
-  "description": "Línea base de los bancos de NFR-NUC-01 y 02 (TASK-142) y de NFR-GOB-01 a 10 (TASK-233). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1 y conserva lo que no se midió. Una mediana peor que la de su entrada más allá de su regression_factor (1,5 si no lo lleva; 1,2 en U-03) falla nightly.",
+  "description": "Línea base de los bancos de NFR-NUC-01 y 02 (TASK-142) y de NFR-GOB-01 a 10 (TASK-233) y NFR-LAZ-01/02 (TASK-330). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1 y conserva lo que no se midió. Una mediana peor que la de su entrada más allá de su regression_factor (1,5 si no lo lleva; 1,2 en U-03 y 1,5 en U-04) falla nightly.",
   "measured_at": "2026-10-21",
   "environment": {
-    "commit": "96caa7d",
+    "commit": "ebe0b3f",
     "python": "3.12.14",
     "machine": "x86_64",
     "system": "Linux",
@@ -476,6 +476,37 @@
       "measured_at": "2026-10-21",
       "runner": "local"
     },
+    "laz_close_two_attachments": {
+      "label": "laz_close_two_attachments [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 182.775,
+      "p95": 240.781,
+      "objective": 500,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "evidence_two_attachments": {
+            "median_ms": 104.490914,
+            "p95_ms": 142.283342,
+            "samples": 103
+          },
+          "signed_closure": {
+            "median_ms": 73.876207,
+            "p95_ms": 114.078101,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 182.645046,
+            "p95_ms": 240.674782,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
     "laz_detail": {
       "label": "laz_detail [objetivo propio]",
       "kind": "latency",
@@ -559,6 +590,276 @@
       "measured_at": "2026-10-21",
       "runner": "local"
     },
+    "laz_export_maximum": {
+      "label": "laz_export_maximum [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 607.923,
+      "p95": 886.342,
+      "objective": 3600000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "zones": 1,
+        "days": 31,
+        "maximum_scope_bounded": true,
+        "median_objective_ms": null,
+        "trace_segments": {
+          "accreditation.export.artifact.audit": {
+            "median_ms": 0.634122,
+            "p95_ms": 0.841527,
+            "samples": 103
+          },
+          "accreditation.export.artifact.checkpoint": {
+            "median_ms": 0.662347,
+            "p95_ms": 0.828868,
+            "samples": 103
+          },
+          "accreditation.export.artifact.coverage": {
+            "median_ms": 0.70581,
+            "p95_ms": 0.943859,
+            "samples": 103
+          },
+          "accreditation.export.artifact.document": {
+            "median_ms": 7.478241,
+            "p95_ms": 9.544853,
+            "samples": 103
+          },
+          "accreditation.export.artifact.findings_json": {
+            "median_ms": 1.104933,
+            "p95_ms": 1.327952,
+            "samples": 103
+          },
+          "accreditation.export.artifact.manifest": {
+            "median_ms": 0.818018,
+            "p95_ms": 1.005366,
+            "samples": 103
+          },
+          "accreditation.export.artifact.public_key": {
+            "median_ms": 0.632475,
+            "p95_ms": 0.889968,
+            "samples": 103
+          },
+          "accreditation.export.artifact.verifier": {
+            "median_ms": 4.911357,
+            "p95_ms": 5.477814,
+            "samples": 103
+          },
+          "catalog.single_occupancy_many": {
+            "median_ms": 7.164868,
+            "p95_ms": 8.85744,
+            "samples": 103
+          },
+          "catalog.standards_at_many": {
+            "median_ms": 7.550181,
+            "p95_ms": 9.211554,
+            "samples": 103
+          },
+          "checkpoints.checkpoint_public_keys": {
+            "median_ms": 0.027672,
+            "p95_ms": 0.040621,
+            "samples": 103
+          },
+          "checkpoints.checkpoints_by_ids": {
+            "median_ms": 14.39173,
+            "p95_ms": 19.006475,
+            "samples": 103
+          },
+          "compose_artifacts_and_upload": {
+            "median_ms": 604.832651,
+            "p95_ms": 886.065094,
+            "samples": 103
+          },
+          "coverage.linea_de_tiempo": {
+            "median_ms": 16.155191,
+            "p95_ms": 21.362838,
+            "samples": 103
+          },
+          "episodes.episodes_received_before": {
+            "median_ms": 6.927874,
+            "p95_ms": 8.993254,
+            "samples": 103
+          },
+          "fleet.assignment_history": {
+            "median_ms": 7.315893,
+            "p95_ms": 9.578549,
+            "samples": 103
+          },
+          "gates.gate_history": {
+            "median_ms": 6.903168,
+            "p95_ms": 8.738432,
+            "samples": 103
+          },
+          "markers.resultados_marca": {
+            "median_ms": 7.30931,
+            "p95_ms": 9.412923,
+            "samples": 103
+          },
+          "places.places": {
+            "median_ms": 6.934282,
+            "p95_ms": 8.371513,
+            "samples": 103
+          },
+          "reader.list": {
+            "median_ms": 22.2128395,
+            "p95_ms": 57.281431,
+            "samples": 206
+          },
+          "reader.list_audit": {
+            "median_ms": 10.178295,
+            "p95_ms": 12.897231,
+            "samples": 103
+          },
+          "signer.sign": {
+            "median_ms": 0.189567,
+            "p95_ms": 0.229285,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 604.955609,
+            "p95_ms": 886.21542,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_export_month": {
+      "label": "laz_export_month [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 650.601,
+      "p95": 921.49,
+      "objective": 300000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "zones": 1,
+        "days": 31,
+        "maximum_scope_bounded": false,
+        "median_objective_ms": 120000,
+        "trace_segments": {
+          "accreditation.export.artifact.audit": {
+            "median_ms": 0.703542,
+            "p95_ms": 1.380021,
+            "samples": 103
+          },
+          "accreditation.export.artifact.checkpoint": {
+            "median_ms": 0.710224,
+            "p95_ms": 1.199987,
+            "samples": 103
+          },
+          "accreditation.export.artifact.coverage": {
+            "median_ms": 0.765876,
+            "p95_ms": 1.257082,
+            "samples": 103
+          },
+          "accreditation.export.artifact.document": {
+            "median_ms": 7.930582,
+            "p95_ms": 10.229554,
+            "samples": 103
+          },
+          "accreditation.export.artifact.findings_json": {
+            "median_ms": 1.171213,
+            "p95_ms": 2.088278,
+            "samples": 103
+          },
+          "accreditation.export.artifact.manifest": {
+            "median_ms": 0.880041,
+            "p95_ms": 1.418265,
+            "samples": 103
+          },
+          "accreditation.export.artifact.public_key": {
+            "median_ms": 0.693933,
+            "p95_ms": 1.23186,
+            "samples": 103
+          },
+          "accreditation.export.artifact.verifier": {
+            "median_ms": 5.015172,
+            "p95_ms": 6.461251,
+            "samples": 103
+          },
+          "catalog.single_occupancy_many": {
+            "median_ms": 7.665798,
+            "p95_ms": 10.459862,
+            "samples": 103
+          },
+          "catalog.standards_at_many": {
+            "median_ms": 8.122111,
+            "p95_ms": 12.952332,
+            "samples": 103
+          },
+          "checkpoints.checkpoint_public_keys": {
+            "median_ms": 0.029751,
+            "p95_ms": 0.043059,
+            "samples": 103
+          },
+          "checkpoints.checkpoints_by_ids": {
+            "median_ms": 15.252946,
+            "p95_ms": 21.781608,
+            "samples": 103
+          },
+          "compose_artifacts_and_upload": {
+            "median_ms": 651.392349,
+            "p95_ms": 956.378638,
+            "samples": 103
+          },
+          "coverage.linea_de_tiempo": {
+            "median_ms": 17.343804,
+            "p95_ms": 33.656635,
+            "samples": 103
+          },
+          "episodes.episodes_received_before": {
+            "median_ms": 7.539926,
+            "p95_ms": 10.887422,
+            "samples": 103
+          },
+          "fleet.assignment_history": {
+            "median_ms": 7.874562,
+            "p95_ms": 10.497676,
+            "samples": 103
+          },
+          "gates.gate_history": {
+            "median_ms": 7.421217,
+            "p95_ms": 11.006601,
+            "samples": 103
+          },
+          "markers.resultados_marca": {
+            "median_ms": 8.002593,
+            "p95_ms": 11.670241,
+            "samples": 103
+          },
+          "places.places": {
+            "median_ms": 7.274514,
+            "p95_ms": 10.171981,
+            "samples": 103
+          },
+          "reader.list": {
+            "median_ms": 24.7079245,
+            "p95_ms": 59.576241,
+            "samples": 206
+          },
+          "reader.list_audit": {
+            "median_ms": 11.086267,
+            "p95_ms": 20.034685,
+            "samples": 103
+          },
+          "signer.sign": {
+            "median_ms": 0.190627,
+            "p95_ms": 0.254453,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 651.574723,
+            "p95_ms": 956.539711,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
     "laz_exposure": {
       "label": "laz_exposure [objetivo propio]",
       "kind": "latency",
@@ -625,7 +926,7 @@
         "zones": 20,
         "days": 366,
         "findings": 318,
-        "episodes_per_zone_day": "1 por semana (ci acotado)",
+        "episodes_per_zone_day": "2 por semana en 3 zonas (ci acotado)",
         "trace_segments": {
           "projection_page": {
             "median_ms": 114.080983,
@@ -679,6 +980,7 @@
       "details": {
         "profile": "ci",
         "zones": 20,
+        "auxiliary_empty_zones": 1,
         "months": 12,
         "trace_segments": {
           "materialized_month": {
@@ -689,6 +991,117 @@
           "total": {
             "median_ms": 3860.148829,
             "p95_ms": 4980.237331,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_monthly_package": {
+      "label": "laz_monthly_package [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 301.096,
+      "p95": 373.037,
+      "objective": 90000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "checkpoints.checkpoint_public_keys": {
+            "median_ms": 0.027174,
+            "p95_ms": 0.0383,
+            "samples": 103
+          },
+          "checkpoints.write_checkpoints_now": {
+            "median_ms": 59.165896,
+            "p95_ms": 81.222257,
+            "samples": 103
+          },
+          "evidence.put_object": {
+            "median_ms": 7.210085,
+            "p95_ms": 9.046603,
+            "samples": 103
+          },
+          "monthly_compose_and_seal": {
+            "median_ms": 301.049331,
+            "p95_ms": 372.788756,
+            "samples": 103
+          },
+          "program_metrics.snapshot": {
+            "median_ms": 121.411073,
+            "p95_ms": 159.037748,
+            "samples": 103
+          },
+          "reader.list": {
+            "median_ms": 16.255582,
+            "p95_ms": 21.719392,
+            "samples": 103
+          },
+          "repository.acquire_lease": {
+            "median_ms": 1.642918,
+            "p95_ms": 2.449114,
+            "samples": 103
+          },
+          "repository.adoption_days": {
+            "median_ms": 1.576363,
+            "p95_ms": 2.265944,
+            "samples": 103
+          },
+          "repository.claim": {
+            "median_ms": 1.743611,
+            "p95_ms": 2.627505,
+            "samples": 103
+          },
+          "repository.coordinator_user_id": {
+            "median_ms": 1.343596,
+            "p95_ms": 2.33839,
+            "samples": 103
+          },
+          "repository.insert_audit_sample": {
+            "median_ms": 1.809768,
+            "p95_ms": 2.829841,
+            "samples": 103
+          },
+          "repository.insert_audit_sample_items": {
+            "median_ms": 1.580724,
+            "p95_ms": 2.136271,
+            "samples": 103
+          },
+          "repository.lease_still_valid": {
+            "median_ms": 1.668875,
+            "p95_ms": 2.328549,
+            "samples": 103
+          },
+          "repository.previous_commitments": {
+            "median_ms": 1.221874,
+            "p95_ms": 1.728464,
+            "samples": 103
+          },
+          "repository.release_lease": {
+            "median_ms": 1.910758,
+            "p95_ms": 2.687869,
+            "samples": 103
+          },
+          "repository.seal": {
+            "median_ms": 1.856657,
+            "p95_ms": 2.406874,
+            "samples": 103
+          },
+          "signer.sign": {
+            "median_ms": 0.163359,
+            "p95_ms": 0.237125,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 301.150356,
+            "p95_ms": 372.904154,
+            "samples": 103
+          },
+          "writer.write": {
+            "median_ms": 12.122461,
+            "p95_ms": 15.748715,
             "samples": 103
           }
         }
@@ -716,6 +1129,36 @@
           "total": {
             "median_ms": 74.999886,
             "p95_ms": 134.360003,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_rebuild_year": {
+      "label": "laz_rebuild_year [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 18195.423,
+      "p95": 20153.245,
+      "objective": 1800000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "zones": 20,
+        "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "2 por semana en 3 zonas (ci acotado)",
+        "trace_segments": {
+          "rebuild_plant": {
+            "median_ms": 18250.724886,
+            "p95_ms": 20155.110121,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 18252.46933,
+            "p95_ms": 20159.890602,
             "samples": 103
           }
         }
@@ -775,6 +1218,47 @@
           "total": {
             "median_ms": 2.335603,
             "p95_ms": 2.705568,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_writes": {
+      "label": "laz_writes [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 83.007,
+      "p95": 137.347,
+      "objective": 250,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "action": {
+            "median_ms": 86.818635,
+            "p95_ms": 110.556542,
+            "samples": 26
+          },
+          "classification": {
+            "median_ms": 71.48832949999999,
+            "p95_ms": 96.629308,
+            "samples": 26
+          },
+          "reopening": {
+            "median_ms": 129.6804645,
+            "p95_ms": 152.753002,
+            "samples": 26
+          },
+          "review_resolution": {
+            "median_ms": 74.577519,
+            "p95_ms": 111.533415,
+            "samples": 25
+          },
+          "total": {
+            "median_ms": 83.923888,
+            "p95_ms": 148.985326,
             "samples": 103
           }
         }

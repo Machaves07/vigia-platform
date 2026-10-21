@@ -17,7 +17,6 @@ from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
-import pytest
 from hypothesis import settings
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -25,9 +24,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from tests.benchmarks.conftest import Measure, Result, median, percentile
 from tests.integration.conftest import (
+    POSTGRES_DATABASE,
+    POSTGRES_IMAGE,
+    POSTGRES_PASSWORD,
+    POSTGRES_PORT,
+    POSTGRES_USER,
     LocalStackEndpoint,
     PostgresEndpoint,
-    postgres_endpoint_session,
+    _start,
     versioned_bucket,
 )
 from tests.laz_support import LoopOrganization, LoopWorld
@@ -73,7 +77,12 @@ class Traces:
         self.tracer = self.provider.get_tracer("vigia.benchmarks.laz")
 
     def call(self, step: str, target: Callable[[], Any]) -> Any:
-        with self.tracer.start_as_current_span("benchmark.laz.step", attributes={"step": step}):
+        with self.tracer.start_as_current_span(
+            "benchmark.laz.step",
+            attributes={"step": step},
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
             return target()
 
     def breakdown(self) -> dict[str, Any]:
@@ -125,7 +134,10 @@ class TimedPort:
 
             async def async_call(*args: Any, **kwargs: Any) -> Any:
                 with self.trace.tracer.start_as_current_span(
-                    "benchmark.laz.port", attributes={"step": name}
+                    "benchmark.laz.port",
+                    attributes={"step": name},
+                    record_exception=False,
+                    set_status_on_exception=False,
                 ):
                     return await member(*args, **kwargs)
 
@@ -148,6 +160,7 @@ def measured(
 ) -> Result:
     """100 rondas; cada banco comprueba el resultado funcional dentro de su operación."""
     traces = Traces()
+    segments: dict[str, Any] = {}
     try:
         result = measure(
             name,
@@ -155,11 +168,17 @@ def measured(
             lambda: traces.call("total", lambda: operation(traces)),
             setup=setup,
             objective_ms=objective_ms,
-            details={"profile": settings.get_current_profile_name(), **(details or {})},
+            details={
+                "profile": settings.get_current_profile_name(),
+                **(details or {}),
+                "trace_segments": segments,
+            },
         )
-        result.details["trace_segments"] = traces.breakdown()
         return result
     finally:
+        # ``measure`` puede fallar por regresión después de guardar Result. El
+        # diccionario anidado compartido conserva el diagnóstico también en rojo.
+        segments.update(traces.breakdown())
         traces.close()
 
 
@@ -244,7 +263,7 @@ def seed_year(
     """Un año por el escritor y el pliegue reales; ninguna copia de filas sustituye al expediente.
 
     Los sitios comparten organización/planta. El reloj se fija antes de emitir sus
-    certificados y los renueva durante el año bisiesto del banco.
+    certificados y los renueva durante el periodo de 366 días del banco.
     """
     world = actions.world
     clock = world.stack.authz.sessions.clock
@@ -339,18 +358,44 @@ def seed_year(
     )
 
 
-@pytest.fixture(scope="module")
+@contextlib.contextmanager
 def laz_postgres() -> Iterator[PostgresEndpoint]:
     """Clúster propio: migrar otra pila rota los roles globales de PostgreSQL.
 
     Las pilas de detalle, asistente y correo no deben invalidar las conexiones
     nuevas de este mundo mientras sus pools siguen vivos (no son roles por base).
     """
-    with contextlib.contextmanager(postgres_endpoint_session)() as endpoint:
-        yield endpoint
+    from testcontainers.community.postgres import PostgresContainer
+
+    def build() -> PostgresContainer:
+        return (
+            PostgresContainer(
+                image=POSTGRES_IMAGE,
+                username=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                dbname=POSTGRES_DATABASE,
+                driver=None,
+            )
+            .with_env("TZ", "UTC")
+            .with_env("PGTZ", "UTC")
+        )
+
+    # También con VIGIA_TEST_USE_COMPOSE=1 se necesita un clúster distinto:
+    # una segunda base del mismo servidor no aísla sus roles globales.
+    container = _start(build)
+    try:
+        yield PostgresEndpoint(
+            host=container.get_container_host_ip(),
+            port=int(container.get_exposed_port(POSTGRES_PORT)),
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            database=POSTGRES_DATABASE,
+        )
+    finally:
+        container.stop()
 
 
-@pytest.fixture(scope="module")
+@contextlib.contextmanager
 def laz(
     laz_postgres: PostgresEndpoint, localstack_endpoint: LocalStackEndpoint
 ) -> Iterator[LazBench]:

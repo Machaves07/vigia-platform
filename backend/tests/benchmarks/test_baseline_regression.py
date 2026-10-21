@@ -1,6 +1,7 @@
 """El factor de regresión por entrada de la línea base (NFR-NUC-01 y NFR-GOB-64; TASK-233).
 
-Sin base de datos ni ``pytest-benchmark``: corre en el perfil ``ci``. Comprueba que
+Las políticas corren sin medir en el perfil ``ci``; solo la prueba marcada de
+aislamiento de clúster necesita PostgreSQL en Docker. Comprueba que
 
 - una entrada de U-03 (``regression_factor`` 1,2) falla con una mediana más de un 20 % peor y pasa
   justo por debajo, y que una entrada de U-02 (sin factor escrito: 1,5) pasa con la misma mediana
@@ -34,7 +35,7 @@ from tests.benchmarks.conftest import (
     pytest_collection_modifyitems,
     unit_regression_factor,
 )
-from tests.benchmarks.laz_support import Traces
+from tests.benchmarks.laz_support import Traces, measured
 from tests.integration.conftest import PostgresEndpoint
 
 BASE_MS = 10.0
@@ -255,6 +256,12 @@ def test_laz_trace_ports_preserve_results_without_recording_arguments() -> None:
         async def fetch(self, value: str) -> str:
             return value
 
+        async def fail(self, value: str) -> None:
+            raise ValueError(value)
+
+        def fail_sync(self, value: str) -> None:
+            raise ValueError(value)
+
     port = Port()
     owner = SimpleNamespace(port=port)
     text = "Contenido sintético que no debe convertirse en atributo de traza"
@@ -263,14 +270,36 @@ def test_laz_trace_ports_preserve_results_without_recording_arguments() -> None:
         with trace.instrument(owner, ("port",)):
             assert owner.port.read(text) == text
             assert asyncio.run(owner.port.fetch(text)) == text
+            with pytest.raises(ValueError, match="Contenido sintético"):
+                asyncio.run(owner.port.fail(text))
+            with pytest.raises(ValueError, match="Contenido sintético"):
+                owner.port.fail_sync(text)
         assert owner.port is port
-        assert set(trace.breakdown()) == {"port.read", "port.fetch"}
+        assert set(trace.breakdown()) == {"port.read", "port.fetch", "port.fail", "port.fail_sync"}
         for span in trace.exporter.get_finished_spans():
             assert span.attributes is not None
             assert set(span.attributes) == {"step"}
             assert text not in span.attributes.values()
+            assert not span.events
+            assert span.status.description is None
     finally:
         trace.close()
+
+
+def test_laz_keeps_trace_breakdown_when_regression_fails() -> None:
+    captured: list[Result] = []
+
+    def failing_measure(name: str, label: str, target: Any, *, details: Any, **_: Any) -> Result:
+        target()
+        result = _result(name, BASE_MS * 2)
+        result.details = dict(details)
+        captured.append(result)
+        pytest.fail("regresión sintética")
+
+    with pytest.raises(pytest.fail.Exception, match="regresión sintética"):
+        measured(failing_measure, "laz_probe", 10, lambda trace: trace.call("read", lambda: None))
+    assert set(captured[0].details["trace_segments"]) == {"total", "read"}
+    assert captured[0].details["trace_segments"]["total"]["samples"] == 1
 
 
 @pytest.mark.parametrize(
@@ -316,17 +345,19 @@ def test_u04_seventeen_rows_have_composition_and_baseline() -> None:
         if isinstance(node, ast.FunctionDef) and node.name.startswith("test_laz_")
     ]
     assert len(banks) == 17
+    for bank in banks:
+        doc = ast.get_docstring(bank)
+        assert doc and "Composición:" in doc and "Tramos:" in doc, bank.name
+        assert "[objetivo propio]" in doc, bank.name
     entries = json.loads(BASELINE.read_text())["benchmarks"]
     assert {name for name in entries if name.startswith("laz_")} == {
         bank.name.removeprefix("test_") for bank in banks
     }
     for bank in banks:
-        doc = ast.get_docstring(bank)
-        assert doc and "Composición:" in doc and "Tramos:" in doc, bank.name
-        assert "[objetivo propio]" in doc, bank.name
         assert bank.name.removeprefix("test_") in entries, bank.name
         entry = entries[bank.name.removeprefix("test_")]
         assert entry["regression_factor"] == LAZ_REGRESSION_FACTOR
+        assert not entry.get("informative", False)
         assert entry["median"] > 0 and entry["p95"] >= entry["median"]
         segments = entry["details"]["trace_segments"]
         assert segments["total"]["samples"] >= 100

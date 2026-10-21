@@ -50,14 +50,15 @@ from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import pytest
 
 from tests.gob_platform_support import GobPlatform, gob_platform
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
 
-pytest_plugins = ["tests.benchmarks.laz_support"]
+if TYPE_CHECKING:
+    from tests.benchmarks.laz_support import LazBench
 
 BACKEND: Final = Path(__file__).resolve().parents[2]
 BASELINE: Final = Path(__file__).with_name("baseline.json")
@@ -395,6 +396,26 @@ def _gob_world(
     """La aplicación completa de U-03 (``tests/gob_platform_support.py``), una vez por paquete y
     solo si algún banco de U-03 la pide; cada banco crea sus propias organizaciones."""
     with gob_platform(postgres_endpoint, localstack_endpoint, "bench_gob") as world:
+        yield world
+
+
+@pytest.fixture(scope="module")
+def laz_postgres() -> Iterator[PostgresEndpoint]:
+    """El clúster aislado se construye solo al seleccionar bancos de U-04."""
+    from tests.benchmarks.laz_support import laz_postgres as isolated_cluster
+
+    with isolated_cluster() as endpoint:
+        yield endpoint
+
+
+@pytest.fixture(scope="module")
+def laz(
+    laz_postgres: PostgresEndpoint, localstack_endpoint: LocalStackEndpoint
+) -> Iterator[LazBench]:
+    """Delegación local, sin plugins que alteren la colección de toda la suite."""
+    from tests.benchmarks.laz_support import laz as laz_world
+
+    with laz_world(laz_postgres, localstack_endpoint) as world:
         yield world
 
 
