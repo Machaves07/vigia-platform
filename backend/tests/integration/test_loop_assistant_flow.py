@@ -22,7 +22,8 @@ inyectado que lo avanza), nunca de pared:
   cabecera; tres 529 dan ``provider_error`` tras 5 s y 20 s; vencido el tope antes de la entrega,
   ``timeout`` sin llamada. El fallo declarado abre el ``ConsumerBreaker`` de U-02 (despachador
   real), la entrega no consume intentos, la API responde ``circuit_open`` y la sonda de 60 s lo
-  cierra sin llamar.
+  cierra con el proveedor recuperado, sin revivir la solicitud resuelta (la sonda del puerto; el
+  proveedor aún caído, en ``test_loop_assistant_probe``).
 - **Presupuesto**: al 100 % del tope de fichas, la admisión responde ``503`` sin fila y el
   consumidor deja ``budget_exceeded`` **sin construir el contexto** (cero llamadas al
   constructor y al proveedor); justo por debajo, se admite.
@@ -355,7 +356,8 @@ def test_past_the_hard_deadline_the_request_times_out_without_a_call(
 def test_the_declared_failure_opens_the_u02_breaker_and_the_probe_closes_it(
     stack: AssistantStack, coordinator: Who
 ) -> None:
-    provider = stack.provider(Script.OVERLOADED)
+    # Tres llamadas caídas; la sonda (cuarto paso de la cadena del doble) lo encuentra recuperado.
+    provider = stack.provider([Script.OVERLOADED] * 3 + [Script.VALID_WITH_CITATIONS])
     stack.use(provider)
     request_id = stack.requested(coordinator)
     report = stack.dispatch()
@@ -370,12 +372,13 @@ def test_the_declared_failure_opens_the_u02_breaker_and_the_probe_closes_it(
     response = stack.post(coordinator, stack.analysis(coordinator))
     assert response.status_code == 503, response.text
     assert stack.dispatch().count(Outcome.PAUSED) == 1
-    # La sonda, a los 60 s: la solicitud ya está resuelta, termina sin llamar y cierra.
+    # La sonda, a los 60 s: la solicitud ya está resuelta y no se revive; la sonda del puerto
+    # encuentra al proveedor y el circuito se cierra.
     stack.clock.advance(60)
     probe = stack.dispatch()
     assert probe.probed and probe.count(Outcome.DELIVERED) == 1
     assert stack.circuit() == ("closed", None)
-    assert provider.call_count == calls
+    assert provider.call_count == calls and len(provider.probe_timeouts) == 1
     assert stack.delivery(request_id)["status"] == "delivered"
 
 
