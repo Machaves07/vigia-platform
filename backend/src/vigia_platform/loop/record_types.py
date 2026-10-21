@@ -1,7 +1,9 @@
 """Tipos de registro del lazo (domain-entities.md de U-04, §5.1, §5.2 y §5.3).
 
-Trece de los diecisiete tipos de U-04; los otros cuatro (exportación, paquete mensual, auditoría
-por muestra y compromisos) están en ``accreditation.record_types``. Todos los escribe U-04 en su
+Trece de los diecisiete tipos de U-04 del diseño; los otros cuatro (exportación, paquete mensual,
+auditoría por muestra y compromisos) están en ``accreditation.record_types``. El decimoctavo,
+``closure_attachment_unrecoverable`` (VIG-274), declara un adjunto de cierre perdido sin versión
+anterior (DR-LAZ-04, runbook 7.3, paso 4). Todos los escribe U-04 en su
 versión 1, con un modelo de contenido estricto (``ContentModel``), en la cadena de **planta**
 salvo ``vocabulary_list_changed``, que es de **organización** (la lista es por organización,
 respuesta 10). Ninguno declara ``evidence_paths``: los clips ya los registró y verificó U-03 en
@@ -600,6 +602,30 @@ class LoopConfigurationChanged(ContentModel):
     applies_to_new_items_only: Literal[True]
 
 
+class ClosureAttachmentUnrecoverable(ContentModel):
+    """Un adjunto de cierre perdido del depósito **sin versión anterior** (DR-LAZ-04, runbook 7.3,
+    paso 4; VIG-274): consta como no recuperable con su hash y su fecha.
+
+    No reescribe nada (P4, P5): la entrada de evidencia y el cierre siguen como están, y el cierre
+    sigue siendo válido con su descripción estructurada. ``declaration_id`` es el UUID v5 del
+    adjunto, así que un adjunto se declara una sola vez y repetir la orden con los mismos datos es
+    un duplicado aceptado."""
+
+    declaration_id: UUID
+    subject_kind: SubjectKind
+    subject_id: UUID
+    action_id: UUIDv7
+    evidence_entry_id: UUIDv7
+    evidence_record_id: UUID
+    attachment_id: UUIDv7
+    sha256: Sha256Hex
+    size_bytes: Annotated[StrictInt, Field(ge=1, le=MAX_ATTACHMENT_BYTES)]
+    content_type: AttachmentContentType
+    detected_at: Timestamp
+    """Cuándo se comprobó la pérdida sin versión anterior (la declara el operador)."""
+    previous_version_available: Literal[False]
+
+
 class LateSegmentAttached(ContentModel):
     """Un tramo que llega tarde se adjunta al episodio; nunca reabre el lazo (§5.2)."""
 
@@ -639,8 +665,10 @@ NARRATIVE_FREE_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
     "reopening": ("/reason_text",),
     "loop_configuration_changed": ("/reason",),
     "late_segment_attached": (),
+    "closure_attachment_unrecoverable": (),
 }
-"""La columna «Rutas de texto libre» de §5.1 para los tipos del lazo, exactamente."""
+"""La columna «Rutas de texto libre» de §5.1 para los tipos del lazo, exactamente (más
+``closure_attachment_unrecoverable``, VIG-274, sin texto libre)."""
 
 SNAPSHOT_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
     "classification": ("/signer/display_name",),
@@ -673,6 +701,7 @@ SNAPSHOT_TEXT_PATHS: Final[Mapping[str, tuple[str, ...]]] = {
     "reopening": ("/reopened_by/display_name",),
     "loop_configuration_changed": ("/changed_by/display_name",),
     "late_segment_attached": (),
+    "closure_attachment_unrecoverable": (),
 }
 """Cadenas de instantánea y de términos que la metapropiedad de U-02 cuenta como texto libre."""
 
@@ -809,12 +838,19 @@ LOOP_RECORD_TYPES: Final[tuple[RecordType, ...]] = (
         "/segment_record_id",
         ("late_segment_attached",),
     ),
+    _u04(
+        "closure_attachment_unrecoverable",
+        ClosureAttachmentUnrecoverable,
+        "/declaration_id",
+        (),
+    ),
 )
 """Los trece tipos del lazo, en el orden de §5.1, cada uno con todas sus versiones en orden: todos
-en la 1 y ``vocabulary_list_changed`` también en la 2 (TASK-350)."""
+en la 1 y ``vocabulary_list_changed`` también en la 2 (TASK-350); detrás,
+``closure_attachment_unrecoverable`` (VIG-274, DR-LAZ-04), que no publica eventos."""
 
 
 def register_loop_record_types(registry: RecordTypeRegistry) -> None:
-    """Registra los trece tipos del lazo (con todas sus versiones) al arrancar."""
+    """Registra los catorce tipos del lazo (con todas sus versiones) al arrancar."""
     for definition in LOOP_RECORD_TYPES:
         registry.register(definition)

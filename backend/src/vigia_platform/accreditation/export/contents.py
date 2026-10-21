@@ -44,7 +44,11 @@ BR-LAZ-88 a 101; PAT-LAZ-REN-04 y 05; NFR-LAZ-03).
 2. **Escribir** con ``ExportStream`` (TASK-345), en orden fijo: un ``findings_json`` y un
    ``coverage`` por zona, la auditoría, los puntos de control, las claves, los clips (solo en la
    forma ``with_clips``: los bytes verificados contra su SHA-256) y los adjuntos de cierre con su
-   declaración, el verificador endurecido ``vigia_verify.py`` (TASK-346,
+   declaración (salvo los que el expediente declara **no recuperables** con
+   ``closure_attachment_unrecoverable``, DR-LAZ-04 y runbook 7.3: no se leen y el manifiesto los
+   declara con su hash y su fecha, así que el paquete se compone y es el mismo en cada intento;
+   un adjunto ausente **sin** esa declaración sigue haciendo fallar la exportación), el
+   verificador endurecido ``vigia_verify.py`` (TASK-346,
    ``accreditation.verifier_bundle``, con su versión en ``verifier_version``) y el documento
    portátil (``accreditation.document``, TASK-319); el manifiesto (``accreditation.manifest``,
    que declara ``manifest_signature``) al final, en ``vol-01``, y detrás de él
@@ -113,6 +117,7 @@ from vigia_platform.accreditation.manifest.model import (
     RevokedGate,
     StandardCited,
     StateCounts,
+    UnrecoverableDeclaration,
     ZoneEntry,
 )
 from vigia_platform.accreditation.verifier_bundle import (
@@ -202,7 +207,7 @@ bytes, que nadie puede confundir con la de un documento real. El compositor real
 el documento, así que nunca cae en este valor."""
 
 LOOP_RECORD_TYPES: Final = tuple(sorted(U03_RECORD_TYPES | U04_RECORD_TYPES))
-"""Los tipos que se leen de cada zona para sus hallazgos (los 2 de U-03 y los 17 de U-04)."""
+"""Los tipos que se leen de cada zona para sus hallazgos (los 2 de U-03 y los 18 de U-04)."""
 GOVERNANCE_RECORD_TYPES: Final = (
     "use_agreement_signed",
     "walk_test_regression_cleared",
@@ -212,6 +217,7 @@ GOVERNANCE_RECORD_TYPES: Final = (
 ASSIGNMENT_OVERLAP_ALARM: Final = "export-assignment-overlap"
 
 _EVIDENCE_ENTRY: Final = "action_evidence_added"
+_UNRECOVERABLE: Final = "closure_attachment_unrecoverable"
 _NOT_FINDINGS: Final = frozenset(
     {
         "export_produced",
@@ -464,10 +470,11 @@ def _fact_instants(record: LedgerRecordView) -> tuple[datetime, ...]:
 
 
 def _subject_of(record: LedgerRecordView, document: Mapping[str, Any]) -> uuid.UUID | None:
-    """El sujeto del lazo del registro (también la entrada de evidencia de una acción)."""
+    """El sujeto del lazo del registro (también la entrada de evidencia de una acción y la
+    declaración de un adjunto no recuperable, que no cambian su estado)."""
     if record.record_type in _NOT_FINDINGS:
         return None
-    if record.record_type == _EVIDENCE_ENTRY:
+    if record.record_type in (_EVIDENCE_ENTRY, _UNRECOVERABLE):
         return _optional_uuid(document.get("subject_id"))
     return subject_id_of(_input(record, document))
 
@@ -927,7 +934,7 @@ def _fold_findings(
         for record, document in items:
             if record.chain_sequence < first.chain_sequence:
                 continue
-            if record.record_type != _EVIDENCE_ENTRY:
+            if record.record_type not in (_EVIDENCE_ENTRY, _UNRECOVERABLE):
                 result = step(episode, row, _input(record, document))
                 episode, row = result.episode, result.finding
             applied.append(record)
@@ -1010,6 +1017,7 @@ class _ZoneDraft:
         clips: list[tuple[DeclaredClip, EvidenceReference]] = []
         attachments: list[tuple[DeclaredAttachment, str]] = []
         for finding in findings:
+            lost = _unrecoverable(finding)
             for record in finding.records:
                 for evidence in record.evidences:
                     extension = _CLIP_EXTENSIONS.get(evidence.content_type, "bin")
@@ -1033,7 +1041,7 @@ class _ZoneDraft:
                         )
                     )
                 if record.record_type == _EVIDENCE_ENTRY:
-                    attachments.extend(_attachments(job, self.zone_id, finding, record))
+                    attachments.extend(_attachments(job, self.zone_id, finding, record, lost))
         return ZoneContents(
             zone=zone,
             findings=findings,
@@ -1045,13 +1053,49 @@ class _ZoneDraft:
         )
 
 
+def _unrecoverable(finding: ExportedFinding) -> dict[uuid.UUID, UnrecoverableDeclaration]:
+    """Los adjuntos del hallazgo que el expediente declara no recuperables (DR-LAZ-04), por su
+    identificador; solo cuenta la declaración del mismo hash que la entrada de evidencia."""
+    declared: dict[uuid.UUID, tuple[str, UnrecoverableDeclaration]] = {}
+    for record in finding.records:
+        if record.record_type != _UNRECOVERABLE:
+            continue
+        document = record.document()
+        declared.setdefault(
+            _uuid(document["attachment_id"]),
+            (
+                str(document["sha256"]),
+                UnrecoverableDeclaration(
+                    record_id=record.record_id,
+                    declaration_id=_uuid(document["declaration_id"]),
+                    detected_at=_instant(document["detected_at"]),
+                ),
+            ),
+        )
+    hashes: dict[uuid.UUID, str] = {}
+    for record in finding.records:
+        if record.record_type == _EVIDENCE_ENTRY:
+            for item in record.document().get("attachments") or ():
+                hashes[_uuid(item["attachment_id"])] = str(item["sha256"])
+    return {
+        attachment_id: declaration
+        for attachment_id, (sha256, declaration) in declared.items()
+        if hashes.get(attachment_id) == sha256
+    }
+
+
 def _attachments(
-    job: ExportJob, zone_id: uuid.UUID, finding: ExportedFinding, record: LedgerRecordView
+    job: ExportJob,
+    zone_id: uuid.UUID,
+    finding: ExportedFinding,
+    record: LedgerRecordView,
+    lost: Mapping[uuid.UUID, UnrecoverableDeclaration],
 ) -> list[tuple[DeclaredAttachment, str]]:
     found: list[tuple[DeclaredAttachment, str]] = []
     for item in record.document().get("attachments") or ():
         attachment_id = _uuid(item["attachment_id"])
         content_type = str(item["content_type"])
+        unrecoverable = lost.get(attachment_id)
         key = attachment_storage_key(
             organization_id=job.organization_id,
             plant_id=job.plant_id,
@@ -1069,7 +1113,10 @@ def _attachments(
                     sha256=str(item["sha256"]),
                     size_bytes=int(item["size_bytes"]),
                     content_type=content_type,
-                    path=f"attachments/{attachment_id}.{_ATTACHMENT_EXTENSIONS[content_type]}",
+                    path=None
+                    if unrecoverable is not None
+                    else f"attachments/{attachment_id}.{_ATTACHMENT_EXTENSIONS[content_type]}",
+                    unrecoverable=unrecoverable,
                 ),
                 key,
             )
@@ -1344,22 +1391,33 @@ def _plan(contents: PackageContents, with_clips: bool) -> list[tuple[str, str, _
             if clip.path is not None:
                 plan.append((clip.path, "clip", _Blob(evidence=evidence)))
     attachments = sorted(
-        {
-            attachment.path: (attachment, key)
-            for zone in contents.zones
-            for attachment, key in zone.attachments
-        }.values(),
-        key=lambda item: item[0].path,
+        (
+            (attachment.path, attachment, key)
+            for attachment, key in _unique_attachments(contents)
+            if attachment.path is not None
+        ),
+        key=lambda item: item[0],
     )
-    for attachment, key in attachments:
+    for path, attachment, key in attachments:
+        # Un adjunto declarado no recuperable (DR-LAZ-04) no se lee: el manifiesto lo declara.
         plan.append(
             (
-                attachment.path,
+                path,
                 "attachment",
                 _Blob(storage_key=key, sha256=attachment.sha256, size_bytes=attachment.size_bytes),
             )
         )
     return plan
+
+
+def _unique_attachments(contents: PackageContents) -> list[tuple[DeclaredAttachment, str]]:
+    """Cada adjunto del paquete una vez, por su identificador, con su clave de almacén."""
+    unique = {
+        attachment.attachment_id: (attachment, key)
+        for zone in contents.zones
+        for attachment, key in zone.attachments
+    }
+    return list(unique.values())
 
 
 def _checkpoint_json(item: StoredCheckpoint) -> dict[str, Any]:
@@ -1382,10 +1440,7 @@ def _manifest_inputs(
     verifier_version: str,
 ) -> ManifestInputs:
     requested = job.requested_by
-    attachments: dict[str, DeclaredAttachment] = {}
-    for zone in contents.zones:
-        for declared, _ in zone.attachments:
-            attachments[declared.path] = declared
+    attachments = [declared for declared, _ in _unique_attachments(contents)]
     return ManifestInputs(
         export_id=job.export_id,
         package_form=job.package_form.value,
@@ -1406,7 +1461,7 @@ def _manifest_inputs(
         revoked_gates=tuple(item for zone in contents.zones for item in zone.revoked),
         standards_cited=contents.standards,
         clips=tuple(declared for zone in contents.zones for declared, _ in zone.clips),
-        attachments=tuple(attachments.values()),
+        attachments=tuple(attachments),
         artifacts=tuple(
             ArtifactEntry(
                 path=item.path,

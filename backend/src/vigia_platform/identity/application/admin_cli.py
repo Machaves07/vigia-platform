@@ -33,6 +33,9 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
 - ``rebuild-loop-projection --organization --plant --operator`` (TASK-326): reconstruye una
   planta a demanda desde el expediente; ``--dry-run`` solo valida, ``--yes`` confirma. El operador
   queda auditado en la proveedora; el trabajo usa el contexto de iteración del sistema U-04.
+- ``declare-unrecoverable-attachment --organization --plant --attachment --sha256 --detected-at
+  --operator`` (VIG-274, runbook 7.3, paso 4): escribe ``closure_attachment_unrecoverable`` en el
+  expediente con el contexto de U-04, como la anterior; ``--dry-run`` y ``--yes`` igual.
 
 **Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
 almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
@@ -181,6 +184,7 @@ CRL_OBJECT_KEY: Final = "ca/crl.pem"
 _LINK_BASE: Final = r"^https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$"
 _MONTH: Final = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
+_INSTANT: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z")
 
 BOOTSTRAP_KEY_ORDER: Final = (
     SigningPurpose.KEY_SET,
@@ -431,6 +435,22 @@ class LoopProjectionRebuild(Protocol):
     ) -> Mapping[str, object]: ...
 
 
+class UnrecoverableAttachmentDeclaration(Protocol):
+    """Runbook 7.3, paso 4 de U-04 (``loop.application.unrecoverable``, VIG-274)."""
+
+    async def run(
+        self,
+        operator: ScopeContext,
+        organization_id: uuid.UUID,
+        plant_id: uuid.UUID,
+        attachment_id: uuid.UUID,
+        *,
+        sha256: str,
+        detected_at: datetime,
+        dry_run: bool,
+    ) -> Mapping[str, object]: ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AdminRuntime:
     """Dependencias ya construidas de ``vigia-admin`` (las crea la raíz de composición)."""
@@ -454,6 +474,8 @@ class AdminRuntime:
     """Con ``VIGIA_NODE_CA_KEY_ARN``, ``VIGIA_EDGE_BUCKET`` y ``VIGIA_NODE_TRUST_STORE_ARN``
     (``regenerate-revocation-list`` y ``revocation-list publish``)."""
     loop_projection: LoopProjectionRebuild | None = None
+    unrecoverable_attachments: UnrecoverableAttachmentDeclaration | None = None
+    """``declare-unrecoverable-attachment`` (runbook 7.3, paso 4; VIG-274)."""
     registries: tuple[Callable[[], Awaitable[None]], ...] = ()
     """Sincronizadores de los registros (tipos de registro y de evento): solo antes de escribir,
     nunca con ``--dry-run``."""
@@ -601,6 +623,21 @@ def _month_argument(value: str) -> date:
     if match is None:
         raise argparse.ArgumentTypeError("debe ser un mes AAAA-MM")
     return date(int(match.group(1)), int(match.group(2)), 1)
+
+
+def _sha256_argument(value: str) -> str:
+    if _SHA256.fullmatch(value) is None:
+        raise argparse.ArgumentTypeError("debe ser un sha256 en hexadecimal (64 minúsculas)")
+    return value
+
+
+def _instant_argument(value: str) -> datetime:
+    if _INSTANT.fullmatch(value) is None:
+        raise argparse.ArgumentTypeError("debe ser una marca AAAA-MM-DDTHH:MM:SS.mmmZ")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise argparse.ArgumentTypeError("no es una fecha válida") from None
 
 
 def _add_common(parser: argparse.ArgumentParser, *, confirm: bool = False) -> None:
@@ -757,6 +794,38 @@ def build_parser() -> argparse.ArgumentParser:
     rebuild.add_argument("--plant", required=True, type=_uuid_argument, metavar="UUID")
     _add_operator(rebuild)
     _add_common(rebuild, confirm=True)
+
+    unrecoverable = commands.add_parser(
+        "declare-unrecoverable-attachment",
+        help="declara no recuperable un adjunto de cierre perdido sin versión anterior",
+        description=(
+            "Runbook 7.3, paso 4 (DR-LAZ-04): deja en el hallazgo que el adjunto consta como\n"
+            "no recuperable, con su hash y la fecha de la comprobación. No altera el hallazgo\n"
+            "ni el cierre. Solo después de comprobar con vigia-restore que no hay versión\n"
+            "anterior que restaurar."
+        ),
+    )
+    unrecoverable.add_argument("--organization", required=True, type=_uuid_argument, metavar="UUID")
+    unrecoverable.add_argument("--plant", required=True, type=_uuid_argument, metavar="UUID")
+    unrecoverable.add_argument(
+        "--attachment", required=True, type=_uuid_argument, metavar="UUID", help="attachment_id"
+    )
+    unrecoverable.add_argument(
+        "--sha256",
+        required=True,
+        type=_sha256_argument,
+        metavar="HEX",
+        help="el sha256 que el expediente declara para el adjunto (confirmación)",
+    )
+    unrecoverable.add_argument(
+        "--detected-at",
+        required=True,
+        type=_instant_argument,
+        metavar="AAAA-MM-DDTHH:MM:SS.mmmZ",
+        help="cuándo se comprobó que no hay versión anterior (UTC)",
+    )
+    _add_operator(unrecoverable)
+    _add_common(unrecoverable, confirm=True)
 
     partitions = commands.add_parser(
         "create-partitions",
@@ -1617,6 +1686,36 @@ async def _rebuild_loop_projection(
     _emit(streams, {"command": "rebuild-loop-projection", "dry_run": args.dry_run, **result})
 
 
+async def _declare_unrecoverable_attachment(
+    args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
+) -> None:
+    _require_provider(config)
+    operator = await _operator_context(args, runtime)
+    if runtime.unrecoverable_attachments is None:
+        raise AdminError("unrecoverable_unavailable", "no está registrada la orden de U-04")
+    if not args.dry_run:
+        _confirm(
+            args,
+            streams,
+            "declare-unrecoverable-attachment",
+            "declarar para siempre que el adjunto no es recuperable",
+        )
+        await _synchronize(runtime)
+    result = await runtime.unrecoverable_attachments.run(
+        operator,
+        args.organization,
+        args.plant,
+        args.attachment,
+        sha256=args.sha256,
+        detected_at=args.detected_at,
+        dry_run=args.dry_run,
+    )
+    _emit(
+        streams,
+        {"command": "declare-unrecoverable-attachment", "dry_run": args.dry_run, **result},
+    )
+
+
 type Command = Callable[[argparse.Namespace, AdminConfig, AdminRuntime, Streams], Awaitable[None]]
 
 COMMANDS: Final[Mapping[str, Command]] = {
@@ -1626,6 +1725,7 @@ COMMANDS: Final[Mapping[str, Command]] = {
     "rotate-node-ca": _rotate_node_ca,
     "replay-dead-letter": _replay_dead_letter,
     "rebuild-loop-projection": _rebuild_loop_projection,
+    "declare-unrecoverable-attachment": _declare_unrecoverable_attachment,
     "create-partitions": _create_partitions,
     "restore-audit-partition": _restore_audit_partition,
     "record-restore-drill": _record_restore_drill,

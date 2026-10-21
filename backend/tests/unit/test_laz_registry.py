@@ -394,7 +394,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
 def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
     # 25 eventos de §11.3 más los trabajos internos export_requested (TASK-317),
     # assistant_requested (TASK-316) y email_delivery_events_poll (TASK-325).
-    assert len(registration.U04_RECORD_TYPES) == 17 and len(registration.U04_EVENT_TYPES) == 28
+    # 17 de §5.1 más closure_attachment_unrecoverable (VIG-274).
+    assert len(registration.U04_RECORD_TYPES) == 18 and len(registration.U04_EVENT_TYPES) == 28
     # Trece tipos del lazo; ``vocabulary_list_changed`` también en su versión 2 (TASK-350).
     assert len({definition.record_type for definition in LOOP_RECORD_TYPES}) == 13
     assert [
