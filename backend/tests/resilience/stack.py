@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tests.identity_db import MigratedDatabase, migrated_database
 from tests.integration.conftest import PostgresEndpoint
@@ -29,7 +29,19 @@ from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
 from vigia_platform.shared.observability.metrics import PlatformMetrics
 
-__all__ = ["LedgerStack", "ledger_stack"]
+if TYPE_CHECKING:
+    from tests.laz_support import LoopWorld
+
+__all__ = ["LedgerStack", "laz_stack", "ledger_stack"]
+
+
+@contextlib.contextmanager
+def laz_stack(prefix: str) -> Iterator[tuple[LoopWorld, Container]]:
+    """Mundo U-04 sobre un contenedor propio, para copias y restauraciones destructivas."""
+    from tests.laz_support import loop_world
+
+    with dedicated_postgres() as (endpoint, container), loop_world(endpoint, prefix) as world:
+        yield world, container
 
 
 @dataclass

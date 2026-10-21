@@ -155,6 +155,11 @@ async def build_runtime(config: WorkerConfig, environ: Mapping[str, str]) -> Wor
 
 
 def run(environ: Mapping[str, str]) -> int:
+    if "VIGIA_TEST_LAZ_CASE" in environ:
+        from tests.resilience.laz_support import run_worker_case
+
+        run_worker_case(json.loads(environ["VIGIA_TEST_LAZ_CASE"]))
+        return 0
     configure_logging()
     config = _config(environ)
 

@@ -160,6 +160,16 @@ class ProcessGroup:
     directory: Path
     spawned: dict[str, Spawned] = field(default_factory=dict)
 
+    def start_laz_case(self, name: str, spec: Mapping[str, Any]) -> Spawned:
+        """Un consumidor U-04 real con dependencias guionizadas, solo en el módulo de pruebas."""
+        return self.start(
+            name,
+            "tests.resilience.worker_process",
+            {
+                "VIGIA_TEST_LAZ_CASE": json.dumps(dict(spec)),
+            },
+        )
+
     def start(self, name: str, module: str, environ: Mapping[str, str]) -> Spawned:
         output_path = self.directory / f"{name}.out"
         output = output_path.open("wb")
