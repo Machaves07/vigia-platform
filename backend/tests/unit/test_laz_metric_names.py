@@ -5,7 +5,9 @@ Las listas esperadas están escritas **a mano** desde el requisito (no se deriva
 - ``EXPECTED_NFR_LAZ_41``: cada partida de NFR-LAZ-41 con las métricas que la cubren;
 - ``EXPECTED_ALARMS``: las ocho alarmas de NFR-LAZ-42 con la métrica que dispara cada una;
 - ``EXPECTED_TRANSVERSAL``: las de los mamparos (LC-LAZ-40) y de la fábrica de clientes
-  (LC-LAZ-39), fuera de las dos listas.
+  (LC-LAZ-39), fuera de las dos listas;
+- ``EXPECTED_EXPORT_FAILED``: el contador de ``export_worker`` que dispara ``export-failed``
+  (TASK-332 lo trae al módulo desde TASK-317).
 
 El catálogo es **exactamente** su unión (igualdad de conjuntos): una métrica de más o de menos, o
 una alarma sin su métrica, cae en rojo. Además: ninguna métrica de U-04 lleva dimensión de usuario
@@ -24,6 +26,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from vigia_platform.loop.observability.metrics import (
     EGRESS_BLOCKED_ALARM,
+    EXPORT_FAILED_ALARM,
     LOOP_ALARM_CONDITIONS,
     LOOP_CATALOG,
     NFR_LAZ_41,
@@ -86,6 +89,9 @@ EXPECTED_ALARMS: Final[dict[str, str]] = {
     "assistant_rate_limit_headroom": "assistant_rate_limit_headroom_ratio",
 }
 
+EXPECTED_EXPORT_FAILED: Final = "export_failed_total"
+"""El contador de ``export_worker`` para ``export-failed`` (TASK-317 y TASK-332)."""
+
 EXPECTED_TRANSVERSAL: Final = {
     "loop_bulkhead_in_use",
     "loop_bulkhead_size",
@@ -107,7 +113,9 @@ def _names() -> set[str]:
 def test_catalog_is_exactly_nfr_laz_41_plus_nfr_laz_42_plus_transversal() -> None:
     from_requirement = set().union(*EXPECTED_NFR_LAZ_41.values())
     from_alarms = set(EXPECTED_ALARMS.values())
-    assert _names() == from_requirement | from_alarms | EXPECTED_TRANSVERSAL
+    assert _names() == (
+        from_requirement | from_alarms | EXPECTED_TRANSVERSAL | {EXPECTED_EXPORT_FAILED}
+    )
     assert len(LOOP_CATALOG) == len(_names()), "nombre repetido en el catálogo"
 
 
@@ -121,7 +129,7 @@ def test_the_eight_alarms_of_nfr_laz_42_each_with_its_metric() -> None:
     assert {c.key: c.metric.value for c in LOOP_ALARM_CONDITIONS} == EXPECTED_ALARMS
     assert len(LOOP_ALARM_CONDITIONS) == 8
     names = _names()
-    for condition in (*LOOP_ALARM_CONDITIONS, EGRESS_BLOCKED_ALARM):
+    for condition in (*LOOP_ALARM_CONDITIONS, EGRESS_BLOCKED_ALARM, EXPORT_FAILED_ALARM):
         assert condition.metric.value in names
         if condition.denominator is not None:
             assert condition.denominator.value in names
@@ -134,6 +142,7 @@ def test_the_eight_alarms_of_nfr_laz_42_each_with_its_metric() -> None:
 def test_transversal_metrics_are_the_bulkheads_and_the_factory() -> None:
     assert {name.value for name in TRANSVERSAL_METRICS} == EXPECTED_TRANSVERSAL
     assert EGRESS_BLOCKED_ALARM.metric.value == "loop_egress_blocked_total"
+    assert EXPORT_FAILED_ALARM.metric.value == EXPECTED_EXPORT_FAILED
 
 
 def test_no_user_or_node_dimension_and_only_organization_and_plant_ids() -> None:

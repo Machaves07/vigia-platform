@@ -12,7 +12,7 @@ posteriores de U-04 **añaden** aquí sus constantes; ninguna construye una mét
 - ``NFR_LAZ_41``: cada partida del requisito con las métricas que la cubren.
 - ``LOOP_ALARM_CONDITIONS``: las **ocho** alarmas de NFR-LAZ-42, cada una con la métrica que la
   dispara. ``EGRESS_BLOCKED_ALARM`` es la alerta de la fábrica de clientes (LC-LAZ-39), fuera de
-  las ocho.
+  las ocho, y ``EXPORT_FAILED_ALARM`` el contador de ``export_worker`` para ``export-failed``.
 - ``LONG_JOB_ATTRIBUTE_KEYS`` y ``long_job_attributes``: los atributos de traza del trabajo largo
   (NFR-LAZ-43): ``correlation_id``, ``export_request_id`` o ``assistant_request_id``, artefacto o
   paso, modelo, esfuerzo, fichas y motivo de parada. **Sin texto libre, sin contenido del contexto
@@ -38,6 +38,7 @@ from vigia_platform.shared.observability.metrics import METER_NAME, MetricKind
 
 __all__ = [
     "EGRESS_BLOCKED_ALARM",
+    "EXPORT_FAILED_ALARM",
     "LONG_JOB_ATTRIBUTE_KEYS",
     "LOOP_ALARM_CONDITIONS",
     "LOOP_CATALOG",
@@ -80,6 +81,7 @@ class LoopMetricName(enum.StrEnum):
     EXPORT_DURATION_MS = "export_duration_ms"
     EXPORT_PACKAGE_SIZE_BYTES = "export_package_size_bytes"
     EXPORT_STUCK_OR_FAILED = "export_stuck_or_failed"
+    EXPORT_FAILED_TOTAL = "export_failed_total"
     # Proyección y estado del lazo
     LOOP_PROJECTION_DIVERGENCES_TOTAL = "loop_projection_divergences_total"
     LOOP_OVERDUE_FINDINGS = "loop_overdue_findings"
@@ -169,6 +171,11 @@ LOOP_CATALOG: Final[tuple[LoopMetricSpec, ...]] = (
     _spec(_N.EXPORT_STUCK_OR_FAILED, _G, "1",
           "Exportación de la organización por encima de 60 min o con dos fallos seguidos (1) o no "
           "(0).", "NFR-LAZ-42", _ORG),
+    # NFR-LAZ-42 · el contador que ``export_worker`` (TASK-317) suma a los dos fallos seguidos de
+    # una solicitud: la alarma ``export-failed`` (TASK-332).
+    _spec(_N.EXPORT_FAILED_TOTAL, _C, "{request}",
+          "Exportaciones con dos fallos seguidos de la misma solicitud.", "NFR-LAZ-42",
+          _ORG, _PLANT),
     # NFR-LAZ-41 · proyección y estado del lazo, por organización y planta.
     _spec(_N.LOOP_PROJECTION_DIVERGENCES_TOTAL, _C, "{divergence}",
           "Divergencias entre la proyección y el expediente.", "NFR-LAZ-41", _ORG),
@@ -268,6 +275,10 @@ EGRESS_BLOCKED_ALARM: Final = LoopAlarmCondition(
     "loop_egress_blocked", _N.LOOP_EGRESS_BLOCKED_TOTAL
 )
 """La alerta de la fábrica de clientes (LC-LAZ-39): una sola salida bloqueada."""
+
+EXPORT_FAILED_ALARM: Final = LoopAlarmCondition("export_failed", _N.EXPORT_FAILED_TOTAL)
+"""La mitad «dos fallos seguidos» de ``export_stuck_or_failed``: el contador que ``export_worker``
+emite al ocurrir (hecho único de PAT-LAZ-MAN-01), fuera de las ocho condiciones."""
 
 TRANSVERSAL_METRICS: Final[frozenset[LoopMetricName]] = frozenset(
     {
