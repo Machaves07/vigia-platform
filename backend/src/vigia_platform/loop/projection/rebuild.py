@@ -190,7 +190,8 @@ _CHECKPOINT_EVENT: Final = text(
 )
 _FINISH: Final = text(
     "UPDATE loop.loop_projection_checkpoint SET state = 'healthy', rebuilt_at = :rebuilt_at,"
-    " last_applied_ledger_sequence = :sequence, last_applied_event_id = :event_id,"
+    " last_applied_ledger_sequence = :sequence, ingestion_frontier = :sequence,"
+    " last_applied_event_id = :event_id,"
     " projection_digest = :projection_digest, rebuild_owner = NULL, rebuild_lease_until = NULL"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
 )
