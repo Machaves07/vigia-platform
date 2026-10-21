@@ -397,7 +397,8 @@ def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
     # 17 de §5.1 más closure_attachment_unrecoverable (VIG-274).
     assert len(registration.U04_RECORD_TYPES) == 18 and len(registration.U04_EVENT_TYPES) == 28
     # Trece tipos del lazo; ``vocabulary_list_changed`` también en su versión 2 (TASK-350).
-    assert len({definition.record_type for definition in LOOP_RECORD_TYPES}) == 13
+    # 13 del lazo de §5.1 y closure_attachment_unrecoverable (VIG-274).
+    assert len({definition.record_type for definition in LOOP_RECORD_TYPES}) == 14
     assert [
         (definition.record_type, definition.schema_version)
         for definition in LOOP_RECORD_TYPES
