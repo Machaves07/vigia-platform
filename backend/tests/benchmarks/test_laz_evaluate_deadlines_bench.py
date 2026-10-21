@@ -9,8 +9,8 @@ Cada ronda prepara **fuera de la medida** sus hallazgos (ingresados por la ruta 
 clasificados y con su acción asignada) y lleva el reloj simulado hasta su plazo.
 
 El objetivo, **p95 ≤ 30 s por organización**, es ``[objetivo propio]`` (NFR-LAZ-01): el informe
-dice si se cumple y nunca decide el resultado. Es **informativo** (tendencia): su línea base la
-fija VIG-244 (TASK-330, los 17 bancos de U-04). Perfil ``nightly``. Solo datos generados.
+dice si se cumple y nunca decide el resultado. TASK-330 fija su línea base y
+regresión relativa del 50 % bloqueante, con 100 rondas en ci y nightly. Solo datos generados.
 """
 
 from __future__ import annotations
@@ -21,14 +21,15 @@ from typing import Final
 import pytest
 
 from tests.benchmarks.conftest import Measure
+from tests.benchmarks.laz_support import measured
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_deadlines_support import DeadlinesStack, deadlines_stack
 
-pytestmark = [pytest.mark.nightly, pytest.mark.integration]
+pytestmark = pytest.mark.integration
 
 OBJECTIVE_MS: Final = 30_000.0
 PENDING_PER_ROUND: Final = 5
-ROUNDS: Final = 20
+ROUNDS: Final = 100
 
 
 @pytest.fixture(scope="module")
@@ -38,6 +39,12 @@ def stack(postgres_endpoint: PostgresEndpoint) -> Iterator[DeadlinesStack]:
 
 
 def test_laz_evaluate_deadlines_org(stack: DeadlinesStack, measure: Measure) -> None:
+    """Fila 6. [objetivo propio] p95 ≤30 s por organización.
+
+    Composición: candidatos por índice + candados ordenados + action_overdue
+    y sus eventos + proyección atómica, cinco acciones nuevas por ronda.
+    Tramos: total → evaluate_deadlines (contexto de tarea periódica real).
+    """
     organization = stack.actions.world.organization()
     declared: list[int] = []
 
@@ -53,15 +60,13 @@ def test_laz_evaluate_deadlines_org(stack: DeadlinesStack, measure: Measure) -> 
     def run() -> None:
         declared.append(len(stack.evaluate(organization)))
 
-    result = measure(
+    result = measured(
+        measure,
         "laz_evaluate_deadlines_org",
-        f"evaluate_deadlines en una organización con {PENDING_PER_ROUND} vencimientos nuevos",
-        run,
+        OBJECTIVE_MS,
+        lambda trace: trace.call("evaluate_deadlines", run),
         setup=prepare,
-        objective_ms=OBJECTIVE_MS,
-        rounds=ROUNDS,
         details={"pending_per_round": PENDING_PER_ROUND},
-        informative=True,
     )
     assert result.samples == ROUNDS
     # Cada medida declara al menos los de su ronda y al final no queda ninguno sin declarar.

@@ -1,8 +1,8 @@
 {
   "description": "Línea base de los bancos de NFR-NUC-01 y 02 (TASK-142) y de NFR-GOB-01 a 10 (TASK-233). La regenera VIGIA_BENCHMARK_UPDATE_BASELINE=1 y conserva lo que no se midió. Una mediana peor que la de su entrada más allá de su regression_factor (1,5 si no lo lleva; 1,2 en U-03) falla nightly.",
-  "measured_at": "2026-10-18",
+  "measured_at": "2026-10-21",
   "environment": {
-    "commit": "b6e76b7",
+    "commit": "96caa7d",
     "python": "3.12.14",
     "machine": "x86_64",
     "system": "Linux",
@@ -449,14 +449,337 @@
       "objective": 3000.0,
       "regression_factor": 1.2
     },
-    "laz_validators_1000_chars": {
-      "label": "Validadores de texto de U-04 (blocked_vocabulary y person_attribution) sobre 1 000 caracteres",
+    "laz_assistant": {
+      "label": "laz_assistant [objetivo propio]",
       "kind": "latency",
       "unit": "ms",
-      "median": 2.332,
-      "p95": 2.628,
+      "median": 43.935,
+      "p95": 63.126,
+      "objective": 60000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "provider": "double",
+        "trace_segments": {
+          "assistant_requested_to_ready": {
+            "median_ms": 42.906002,
+            "p95_ms": 65.494581,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 44.08607,
+            "p95_ms": 66.928473,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_detail": {
+      "label": "laz_detail [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 122.742,
+      "p95": 142.791,
+      "objective": 1200,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "audited_detail": {
+            "median_ms": 122.806415,
+            "p95_ms": 146.769744,
+            "samples": 103
+          },
+          "catalog.standard_version": {
+            "median_ms": 7.266633,
+            "p95_ms": 9.455833,
+            "samples": 103
+          },
+          "coverage.estado_en": {
+            "median_ms": 16.514829,
+            "p95_ms": 20.946817,
+            "samples": 103
+          },
+          "evidence.url_lectura": {
+            "median_ms": 21.212390499999998,
+            "p95_ms": 25.476764,
+            "samples": 206
+          },
+          "fleet.nodes_by_zone": {
+            "median_ms": 7.451512,
+            "p95_ms": 9.69183,
+            "samples": 103
+          },
+          "gates.state_at": {
+            "median_ms": 6.810154,
+            "p95_ms": 8.444608,
+            "samples": 103
+          },
+          "reader.get": {
+            "median_ms": 12.323957,
+            "p95_ms": 15.4243,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 122.875569,
+            "p95_ms": 146.847195,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_evaluate_deadlines_org": {
+      "label": "laz_evaluate_deadlines_org [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 311.013,
+      "p95": 390.39,
+      "objective": 30000.0,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "pending_per_round": 5,
+        "trace_segments": {
+          "evaluate_deadlines": {
+            "median_ms": 308.884514,
+            "p95_ms": 390.235026,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 308.956565,
+            "p95_ms": 390.312335,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_exposure": {
+      "label": "laz_exposure [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 74.098,
+      "p95": 91.141,
+      "objective": 3000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "exposure_with_timeline": {
+            "median_ms": 74.392409,
+            "p95_ms": 100.604282,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 74.478038,
+            "p95_ms": 100.728812,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_immediate_email": {
+      "label": "laz_immediate_email [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 35.432,
+      "p95": 62.93,
+      "objective": 60000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "provider": "double",
+        "trace_segments": {
+          "queued_to_provider_accepted": {
+            "median_ms": 35.441013,
+            "p95_ms": 62.768125,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 35.519505,
+            "p95_ms": 62.851452,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_inbox_200": {
+      "label": "laz_inbox_200 [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 114.033,
+      "p95": 120.349,
+      "objective": 700,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "zones": 20,
+        "days": 366,
+        "findings": 318,
+        "episodes_per_zone_day": "1 por semana (ci acotado)",
+        "trace_segments": {
+          "projection_page": {
+            "median_ms": 114.080983,
+            "p95_ms": 120.47166,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 114.196948,
+            "p95_ms": 120.606441,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_metrics_materialize": {
+      "label": "laz_metrics_materialize [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 79.26,
+      "p95": 92.135,
+      "objective": 5000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "trace_segments": {
+          "metrics_compute_and_store": {
+            "median_ms": 78.516077,
+            "p95_ms": 93.397152,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 78.593167,
+            "p95_ms": 93.490837,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_metrics_panel": {
+      "label": "laz_metrics_panel [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 3801.583,
+      "p95": 4980.319,
+      "objective": 1500,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "zones": 20,
+        "months": 12,
+        "trace_segments": {
+          "materialized_month": {
+            "median_ms": 324.23328,
+            "p95_ms": 452.748426,
+            "samples": 1236
+          },
+          "total": {
+            "median_ms": 3860.148829,
+            "p95_ms": 4980.237331,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_notification": {
+      "label": "laz_notification [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 73.532,
+      "p95": 126.603,
+      "objective": 10000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "outbox_delivery_budget_ms": 5000,
+        "trace_segments": {
+          "event_to_notification": {
+            "median_ms": 40.743567,
+            "p95_ms": 89.081828,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 74.999886,
+            "p95_ms": 134.360003,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_timeline_366": {
+      "label": "laz_timeline_366 [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 301.616,
+      "p95": 386.701,
+      "objective": 8000,
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "days": 366,
+        "segments": 12,
+        "trace_segments": {
+          "coverage_366_days": {
+            "median_ms": 303.65588,
+            "p95_ms": 386.54115,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 303.753827,
+            "p95_ms": 386.617091,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
+      "runner": "local"
+    },
+    "laz_validators_1000_chars": {
+      "label": "laz_validators_1000_chars [objetivo propio]",
+      "kind": "latency",
+      "unit": "ms",
+      "median": 2.36,
+      "p95": 2.733,
       "objective": 20.0,
-      "measured_at": "2026-10-18",
+      "regression_factor": 1.5,
+      "details": {
+        "profile": "ci",
+        "chars": 1000,
+        "validators": [
+          "blocked_vocabulary",
+          "person_attribution"
+        ],
+        "trace_segments": {
+          "both_validators": {
+            "median_ms": 2.299645,
+            "p95_ms": 2.667167,
+            "samples": 103
+          },
+          "total": {
+            "median_ms": 2.335603,
+            "p95_ms": 2.705568,
+            "samples": 103
+          }
+        }
+      },
+      "measured_at": "2026-10-21",
       "runner": "local"
     },
     "ledger_list_200_scoped": {

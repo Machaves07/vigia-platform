@@ -1,4 +1,4 @@
-"""Marco de los bancos de NFR-NUC-01 y 02 (TASK-142, VIG-91; PAT-NUC-REN-07) y de U-03 (TASK-233).
+"""Marco de los bancos de U-02, U-03 y U-04 (TASK-142, 233 y 330).
 
 Cada banco de operación corre con ``pytest-benchmark`` (``pedantic``: 100 rondas de una
 iteración, con calentamiento; la preparación de cada ronda queda fuera de la medida) contra
@@ -17,6 +17,10 @@ el que declara el banco:
   defecto; sus entradas no lo llevan escrito;
 - U-03 (NFR-GOB-01 y 64: «regresión superior al 20 %»): 1,2 (``GOB_REGRESSION_FACTOR``), escrito
   en cada entrada.
+- U-04 (NFR-LAZ-01/02, PAT-LAZ-REN-06): 1,5 (``LAZ_REGRESSION_FACTOR``).
+  Solo se comparan el mismo runner y el mismo perfil de datos: una base de ci
+  no sustituye a la de nightly. Una base no comparable falla con diagnóstico,
+  salvo durante su actualización explícita; nunca se declara «sin regresión».
 
 Se compara la mediana y no el p95: con 100 rondas en un equipo compartido, el p95 depende de una
 o dos rondas y fallaría por ruido; el p95, el p99 y su razón frente a la base van en el informe
@@ -53,6 +57,8 @@ import pytest
 from tests.gob_platform_support import GobPlatform, gob_platform
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint
 
+pytest_plugins = ["tests.benchmarks.laz_support"]
+
 BACKEND: Final = Path(__file__).resolve().parents[2]
 BASELINE: Final = Path(__file__).with_name("baseline.json")
 DEFAULT_REPORT: Final = BACKEND / ".benchmarks" / "vigia-benchmarks.json"
@@ -65,6 +71,17 @@ REGRESSION_FACTOR: Final = 1.5
 """Regresión superior al 50 % frente a la base (NFR-NUC-01): el de las entradas de U-02."""
 GOB_REGRESSION_FACTOR: Final = 1.2
 """Regresión superior al 20 % frente a la base (NFR-GOB-01 y 64): el de las entradas de U-03."""
+LAZ_REGRESSION_FACTOR: Final = 1.5
+"""Regresión superior al 50 % en U-04; los absolutos solo son tendencia (A-65)."""
+
+
+def unit_regression_factor(name: str) -> float:
+    """Política por unidad, también para una base antigua sin factor explícito."""
+    if name.startswith("laz_"):
+        return LAZ_REGRESSION_FACTOR
+    if name.startswith("gob_"):
+        return GOB_REGRESSION_FACTOR
+    return REGRESSION_FACTOR
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -107,6 +124,7 @@ class Result:
     median_ratio: float | None = None
     p95_ratio: float | None = None
     regression: bool | None = None
+    comparison: str = "same_runner"
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -133,6 +151,16 @@ class Report:
                 result.regression = result.median > factor * result.baseline_median
             else:
                 result.regression = result.median < result.baseline_median / factor
+            if result.name.startswith("laz_"):
+                runner = _environment()["runner"]
+                profile = result.details.get("profile")
+                baseline_profile = base.get("details", {}).get("profile")
+                if base.get("runner", runner) != runner:
+                    result.comparison = "different_runner"
+                    result.regression = None
+                elif profile and baseline_profile and profile != baseline_profile:
+                    result.comparison = "different_profile"
+                    result.regression = None
         self.results[result.name] = result
         return result
 
@@ -145,6 +173,12 @@ class Report:
             pytest.fail(
                 f"el banco {result.name} no tiene línea base en {BASELINE.name}: mídela y "
                 f"guárdala con {UPDATE_VARIABLE}=1",
+                pytrace=False,
+            )
+        if result.comparison != "same_runner":
+            pytest.fail(
+                f"el banco {result.name} necesita base del mismo runner y perfil:"
+                f" {result.comparison}; mídela con {UPDATE_VARIABLE}=1",
                 pytrace=False,
             )
         if result.regression:
@@ -165,6 +199,7 @@ class Report:
             "rounds": ROUNDS,
             "regression_factor": REGRESSION_FACTOR,
             "gob_regression_factor": GOB_REGRESSION_FACTOR,
+            "laz_regression_factor": LAZ_REGRESSION_FACTOR,
             "baseline": {
                 "path": str(BASELINE.relative_to(BACKEND)),
                 "measured_at": self.baseline.get("measured_at"),
@@ -193,15 +228,19 @@ class Report:
                 entry["regression_factor"] = result.regression_factor
             if result.informative:
                 entry["informative"] = True
+            if name.startswith("laz_"):
+                entry["regression_factor"] = LAZ_REGRESSION_FACTOR
+                entry["details"] = result.details
             entry["measured_at"] = measured_at
             entry["runner"] = runner
             benchmarks[name] = entry
         return {
             "description": (
                 "Línea base de los bancos de NFR-NUC-01 y 02 (TASK-142) y de NFR-GOB-01 a 10"
-                f" (TASK-233). La regenera {UPDATE_VARIABLE}=1 y conserva lo que no se midió."
+                f" (TASK-233) y NFR-LAZ-01/02 (TASK-330). La regenera {UPDATE_VARIABLE}=1"
+                " y conserva lo que no se midió."
                 " Una mediana peor que la de su entrada más allá de su regression_factor (1,5"
-                " si no lo lleva; 1,2 en U-03) falla nightly."
+                " si no lo lleva; 1,2 en U-03 y 1,5 en U-04) falla nightly."
             ),
             "measured_at": datetime.now(UTC).date().isoformat(),  # noqa: TID251
             "environment": _environment(),
@@ -233,6 +272,27 @@ def _environment() -> dict[str, Any]:
 
 
 _REPORT: Report | None = None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Los bancos largos se ejecutan explícitamente, no dentro del CI funcional completo.
+
+    A diferencia de ``nightly``, se pueden medir con datos acotados mediante la
+    orden local del Test Plan, sin cambiar los perfiles globales de Hypothesis.
+    """
+    from hypothesis import settings
+
+    explicit = any("benchmarks" in str(argument) for argument in config.args)
+    if explicit or settings.get_current_profile_name() == "nightly":
+        return
+    files = {
+        "test_nfr_laz_01_operations.py",
+        "test_laz_validators_bench.py",
+        "test_laz_evaluate_deadlines_bench.py",
+    }
+    for item in items:
+        if item.path.name in files:
+            item.add_marker(pytest.mark.skip(reason="banco largo: seleccionar tests/benchmarks"))
 
 
 @pytest.fixture(scope="session")
@@ -278,7 +338,7 @@ def measure(benchmark: Any, benchmark_report: Report) -> Measure:
         objective_ms: float | None = None,
         rounds: int = ROUNDS,
         details: dict[str, Any] | None = None,
-        regression_factor: float = REGRESSION_FACTOR,
+        regression_factor: float | None = None,
         informative: bool = False,
     ) -> Result:
         benchmark.group = name
@@ -306,7 +366,9 @@ def measure(benchmark: Any, benchmark_report: Report) -> Measure:
                 objective_met=None
                 if objective_ms is None
                 else percentile(times, 0.95) <= objective_ms,
-                regression_factor=regression_factor,
+                regression_factor=regression_factor
+                if regression_factor is not None
+                else unit_regression_factor(name),
                 informative=informative,
                 details=dict(details or {}),
             )
@@ -347,7 +409,7 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     """Tabla del informe: mediana, p95, p99, objetivo y razón frente a la base con su factor."""
     if _REPORT is None or not _REPORT.results:
         return
-    terminalreporter.section("bancos de NFR-NUC-01 y 02 y de NFR-GOB-01 a 10 (informe)")
+    terminalreporter.section("bancos NFR-NUC, NFR-GOB y NFR-LAZ-01 (informe; absolutos: tendencia)")
     for result in sorted(_REPORT.results.values(), key=lambda item: item.name):
         p95 = "" if result.p95 is None else f" p95 {result.p95:,.1f}"
         p95 += "" if result.p99 is None else f" p99 {result.p99:,.1f}"
@@ -358,6 +420,8 @@ def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
         ratio = ""
         if result.median_ratio is not None:
             ratio = f" | razón base {result.median_ratio:.2f} (factor {result.regression_factor})"
+        if result.comparison != "same_runner":
+            ratio += f" | tendencia: {result.comparison} (no comparable)"
         terminalreporter.write_line(
             f"{result.name}: mediana {result.median:,.1f}{p95} {result.unit}{objective}{ratio}"
         )
