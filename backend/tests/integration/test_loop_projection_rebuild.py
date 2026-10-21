@@ -27,6 +27,7 @@ from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.loop.application.inbox import InboxFilters, InboxService, PartitionDeclaration
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
 from vigia_platform.loop.domain.enums import InboxPartitionNotice
+from vigia_platform.loop.projection.consumer import LOOP_PROJECTION
 from vigia_platform.loop.projection.fold import FindingStateRow
 from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
 from vigia_platform.loop.projection.verify import (
@@ -103,6 +104,18 @@ def _diverge(world: LoopWorld, subject: IngestedSubject) -> None:
     )
 
 
+def _mark_loop_projection_delivery_delivered(world: LoopWorld, subject: IngestedSubject) -> None:
+    """Confirma la entrega para probar tanto su descarte selectivo como una aplicación manual."""
+    event = world.outbox_event(subject)
+    world.stack.execute(
+        "UPDATE shared.outbox_delivery SET status = 'delivered', delivered_at = $1"
+        " WHERE event_id = $2 AND consumer_name = $3",
+        world.stack.now(),
+        event.event_id,
+        LOOP_PROJECTION,
+    )
+
+
 def test_divergence_escalates_to_incident_after_three(world: LoopWorld) -> None:
     organization = world.organization()
     consumer, ports = world.projection_consumer()
@@ -150,6 +163,7 @@ def test_missing_finding_delivery_is_declared_as_projection_divergence(world: Lo
     organization = world.organization()
     subject = world.ingest_finding(organization)
     assert world.finding_state(subject) is None
+    _mark_loop_projection_delivery_delivered(world, subject)
 
     rebuilder = _rebuilder(world, world.projection_consumer()[1])
     verifier = _verifier(world, rebuilder)
@@ -168,6 +182,30 @@ def test_missing_finding_delivery_is_declared_as_projection_divergence(world: Lo
     payload = json.loads(rows[0]["payload"])
     assert payload["rows_diverged"] == 1
     assert world.finding_state(subject) is not None
+
+
+def test_delivered_finding_in_another_plant_does_not_diverge_this_plant(world: LoopWorld) -> None:
+    """La población del expediente se limita a la planta aunque la organización sea la misma."""
+    organization = world.organization()
+    consumer, ports = world.projection_consumer()
+    subject = world.ingest_finding(organization)
+    assert world.deliver(consumer, world.outbox_event(subject)) == 1
+    _mark_loop_projection_delivery_delivered(world, subject)
+    other_plant = world.add_plant(organization)
+
+    verifier = _verifier(world, _rebuilder(world, ports))
+    context = world.context(organization)
+    own = world.stack.run(verifier.verify_plant(context, organization.plant_id))
+    other = world.stack.run(verifier.verify_plant(context, other_plant))
+
+    assert not own.is_diverged
+    assert not other.is_diverged
+    rows = world.stack.fetch(
+        _DIVERGENCE_EVENTS,
+        organization.organization_id,
+        PROJECTION_DIVERGENCE_EVENT,
+    )
+    assert rows == []
 
 
 def test_bandeja_declares_rebuilding(world: LoopWorld) -> None:

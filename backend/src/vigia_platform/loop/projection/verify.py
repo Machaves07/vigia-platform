@@ -7,7 +7,9 @@ cada planta de la organización, toma una muestra registrada (``loop.loop_projec
 planta** ``[objetivos propios]`` y recalcula, desde el expediente, el ``projection_digest`` de
 cada fila muestreada (incluidos los campos enriquecidos: el mismo ``enrich_finding`` que usa la
 reconstrucción, así que con el mismo estado externo produce el mismo valor, PR-LAZ-44). El primer
-día del mes ``[objetivo propio]`` la muestra es el total de la planta.
+día del mes ``[objetivo propio]`` la muestra es el total de la planta. Además, compara la
+población de sujetos iniciales del expediente con ``finding_state`` para que un sujeto que no
+llegó a proyectarse tampoco pueda quedar fuera de la muestra.
 
 Ante cualquier divergencia: ``LoopProjectionCheckpoint.state = diverged``, el contador
 ``divergence_count`` avanza (se reinicia si la última divergencia fue hace más de 24 horas) y se
@@ -145,7 +147,13 @@ class SampleRun:
 
 @dataclass(frozen=True)
 class DivergenceOutcome:
-    """Lo que hizo una pasada de ``verify_loop_projection`` sobre una planta."""
+    """Lo que hizo una pasada de ``verify_loop_projection`` sobre una planta.
+
+    ``diverged`` contiene dos clases de identificador: ``subject_id`` para sujetos iniciales
+    ausentes de ``finding_state`` y ``finding_state_id`` para filas de la muestra cuyo digest no
+    coincide. ``checked`` (y ``rows_checked`` del evento) cuenta solo la muestra de filas
+    existentes; los sujetos ausentes se suman a ``rows_diverged`` sin formar parte de ella.
+    """
 
     plant_id: uuid.UUID
     run: SampleRun
@@ -343,6 +351,7 @@ class ProjectionVerifier:
                 _ENSURE_CHECKPOINT,
                 {"organization_id": context.organization_id, "plant_id": plant_id},
             )
+            expected_subjects = await self._expected_subjects(transaction, context, plant_id)
             population_rows = (
                 await transaction.execute(
                     _POPULATION,
@@ -350,7 +359,6 @@ class ProjectionVerifier:
                 )
             ).all()
             population = [_uuid(row.finding_state_id) for row in population_rows]
-            expected_subjects = await self._expected_subjects(transaction, context, plant_id)
             projected_subjects = {_uuid(row.subject_id) for row in population_rows}
             run = await self._run(transaction, context, plant_id, day, population, full_scan)
             selected = select_sample(bytes.fromhex(run.seed), population, run.sample_size)
