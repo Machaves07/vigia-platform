@@ -28,6 +28,8 @@ from pydantic import BaseModel, create_model
 
 from vigia_platform.loop.adapters.postgres.inbox_query import InboxFilters
 from vigia_platform.loop.registration import loop_routers
+from vigia_platform.shared.api.app import build_openapi_app
+from vigia_platform.shared.api.declarations import iter_declared_routes
 
 PERSON_WORDS: Final = frozenset(
     {
@@ -171,6 +173,18 @@ SIGNER_FIELDS: Final = frozenset(
             "response",
             "policy_document_sha256",
         ),
+        # El documento de la exportación es el artefacto generado, no un documento de identidad.
+        ("POST", "/accreditation/exports", "response", "document_sha256"),
+        ("GET", "/accreditation/exports/{export_id}", "response", "document_sha256"),
+        (
+            "POST",
+            "/accreditation/exports/{export_id}/download-url",
+            "response",
+            "document_sha256",
+        ),
+        # El nombre de un volumen y el nombre cerrado de un evento no identifican a una persona.
+        ("GET", "/accreditation/exports/{export_id}/download", "response", "name"),
+        ("GET", "/notifications", "response", "event_name"),
     }
 )
 """Excepciones nombradas una a una: el **firmante** de un cambio (P8) es un usuario de la
@@ -180,11 +194,11 @@ política de la planta cita el texto que el abogado firmó. La bandeja no tiene 
 decide sobre el catálogo completo."""
 
 
-def violations(routes: Iterable[Any]) -> list[str]:
-    """Las rutas de ``/loop/*`` con un parámetro o un campo de persona, como ``MÉTODO ruta: …``."""
+def violations(routes: Iterable[Any], prefixes: tuple[str, ...] = ("/loop",)) -> list[str]:
+    """Las rutas de ``prefixes`` con un parámetro o un campo de persona."""
     found: list[str] = []
     for route in routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/loop/"):
+        if not isinstance(route, APIRoute) or not route.path.startswith(prefixes):
             continue
         for method in sorted(route.methods):
             for place, name in route_names(route):
@@ -201,6 +215,14 @@ REGISTERED: Final = tuple(
 )
 """El catálogo de operaciones de ``/loop/*`` que la raíz monta."""
 
+REGISTERED_U04: Final = tuple(
+    declared.route
+    for declared in iter_declared_routes(build_openapi_app().routes)
+    if isinstance(declared.route, APIRoute)
+    and declared.path.startswith(("/loop", "/accreditation", "/notifications"))
+)
+"""Las 42 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT)."""
+
 
 def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field() -> None:
     # La metapropiedad mira de verdad: la bandeja está registrada y tiene parámetros y campos.
@@ -213,8 +235,16 @@ def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field(
     # Las excepciones existen y no tapan nada de la bandeja.
     assert all(path != "/loop/findings" for _, path, _, _ in SIGNER_FIELDS)
     for method, path, place, name in SIGNER_FIELDS:
+        if not path.startswith("/loop"):
+            continue
         (route,) = [r for r in REGISTERED if r.path == path and method in r.methods]
         assert (place, name) in set(route_names(route))
+
+
+def test_pr_laz_01_no_u04_operation_has_a_person_parameter_or_field() -> None:
+    """La misma ausencia estructural se mantiene en la acreditación y las notificaciones."""
+    assert len(REGISTERED_U04) == 42
+    assert violations(REGISTERED_U04, ("/loop", "/accreditation", "/notifications")) == []
 
 
 def test_the_inbox_filters_are_exactly_the_five_criteria_of_br_laz_02() -> None:

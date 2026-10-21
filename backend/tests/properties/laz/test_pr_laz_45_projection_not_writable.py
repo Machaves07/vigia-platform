@@ -40,6 +40,7 @@ from fastapi.routing import APIRoute
 from hypothesis import given
 from pydantic import BaseModel
 
+from tests.isolation.laz_cases import LAZ_CASES, LAZ_OPERATION_CASES
 from tests.properties.laz.strategies.projection import loop_projection_commands
 from vigia_platform.accreditation.registration import accreditation_routers
 from vigia_platform.loop.adapters.postgres.tables import FINDING_STATE
@@ -181,6 +182,20 @@ def _u04_routes() -> list[APIRoute]:
 def test_no_u04_operation_accepts_a_projection_state_field() -> None:
     violations = [found for route in _u04_routes() for found in writable_state_fields(route)]
     assert violations == []
+
+
+def test_pr_laz_45_covers_the_complete_u04_operation_catalog() -> None:
+    """La ausencia de escritura aplica a cada una de las 41 operaciones, no solo a ``loop``."""
+    routes = {
+        (method, declared.path)
+        for declared in iter_declared_routes(build_openapi_app().routes)
+        if declared.path.startswith(("/loop", "/accreditation", "/notifications"))
+        for method in declared.methods
+    }
+    case_keys = {key for key, _ in LAZ_CASES}
+    operation_keys = {key for keys in LAZ_OPERATION_CASES.values() for key in keys}
+    assert len(LAZ_OPERATION_CASES) == 41
+    assert routes == case_keys == operation_keys
 
 
 class _Canary(BaseModel):

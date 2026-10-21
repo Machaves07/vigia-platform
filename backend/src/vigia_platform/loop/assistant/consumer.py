@@ -43,9 +43,21 @@ y, para la solicitud ``pending``, en este orden:
 la solicitud queda ``unavailable`` (``timeout`` o ``provider_error``) en su propia transacción
 y la entrega termina con ``AssistantProviderDown`` (``ExternalDependencyDown``): el
 ``ConsumerBreaker`` de U-02 abre el circuito al primer fallo declarado, sin consumir intentos ni
-producir cola muerta, y lo sondea cada 60 s. La sonda vuelve a entregar ese evento; como la
-solicitud ya está resuelta, termina sin llamar y el circuito se cierra: la siguiente solicitud
-real vuelve a probar al proveedor.
+producir cola muerta, y lo sondea cada 60 s.
+
+**Sonda** (BR-NUC-79; VIG-272): el despachador la hace volviendo a entregar la cabeza más antigua,
+casi siempre el evento de la solicitud que declaró la caída, ya resuelta. Esa solicitud **no se
+revive** (ni llamada ni fichas a su cuenta), pero la entrega tampoco termina sin preguntar al
+proveedor: si el circuito no está cerrado (``shared.consumer``, leído en la transacción de la
+entrega) y la entrega no llamó a ``complete`` (solicitud ya resuelta, o resuelta sin llamada por
+el tope duro, el presupuesto o el resumen), el consumidor hace ``AssistantProviderPort.probe``,
+sin contexto y sin fichas, con el tope de un intento. Si el fallo es transitorio o de tiempo, la
+entrega termina con ``AssistantProviderDown``: el circuito sigue abierto desde ahora y la próxima
+sonda llega 60 s después; si el proveedor respondió (también con un error permanente: la
+dependencia respondió), la entrega termina y el circuito se cierra. Una entrega de la sonda que sí
+llamó a ``complete`` ya es la prueba de la dependencia. Sin clave del proveedor no hay nada que
+sondear. Con el circuito cerrado, una entrega repetida de una solicitud resuelta sigue terminando
+sin llamar.
 
 Las escrituras de la solicitud van en transacciones propias (``database.transaction`` con el
 contexto de la entrega), no en la de la entrega: así quedan confirmadas aunque la entrega termine
@@ -98,6 +110,7 @@ from vigia_platform.shared.context import ActorUnit, ScopeContext
 from vigia_platform.shared.db import Transaction
 from vigia_platform.shared.ids import uuid7_at
 from vigia_platform.shared.observability.logging import get_logger
+from vigia_platform.shared.outbox.breaker import CircuitState
 from vigia_platform.shared.outbox.publish import OutboxEvent
 from vigia_platform.shared.outbox.registries import Consumer, ConsumerRegistry
 from vigia_platform.shared.signing.keys import to_millisecond
@@ -149,6 +162,7 @@ _LOCK: Final = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))
 _IDLE_TIMEOUT: Final = text(
     "SELECT set_config('idle_in_transaction_session_timeout', :ms, true)"
 ).bindparams(ms=str(int(DELIVERY_IDLE_TIMEOUT.total_seconds() * 1000)))
+_CIRCUIT: Final = text("SELECT circuit_state FROM shared.consumer WHERE consumer_name = :consumer")
 _REQUEST: Final = text(
     "SELECT r.request_id, r.analysis_id, r.state, r.requested_at, r.context_digest,"
     " a.zone_context, a.plant_id, a.zone_id, a.subject_id"
@@ -287,6 +301,20 @@ class _Pending:
     anchor_record_id: uuid.UUID | None
 
 
+class _Contact(enum.Enum):
+    """Qué supo la entrega del proveedor."""
+
+    NONE = enum.auto()
+    """No llamó a ``complete``: sin clave, tope duro, presupuesto o resumen distinto."""
+    ANSWERED = enum.auto()
+    """El proveedor respondió (con contenido o con un fallo permanente)."""
+    DOWN = enum.auto()
+    """Fallo declarado: intentos agotados por fallos transitorios o por tiempo."""
+
+
+_DOWN_KINDS: Final = frozenset({FailureKind.TRANSIENT, FailureKind.TIMEOUT})
+
+
 @dataclass(frozen=True, slots=True)
 class _Resolution:
     state: AssistantRequestState
@@ -336,28 +364,33 @@ class AssistantWorker:
         await transaction.execute(_IDLE_TIMEOUT)
         pending = await self._pending(transaction, request_id)
         if pending is None:
-            return  # ya resuelta (o inexistente): idempotente
-        resolution, declared = await self._attend(transaction, context, pending)
+            # Ya resuelta (o inexistente): idempotente; si es la sonda del circuito, sin revivirla.
+            await self._probe(transaction)
+            return
+        resolution, contact = await self._attend(transaction, context, pending)
         await self._resolve(context, pending, resolution)
-        if declared:
+        if contact is _Contact.DOWN:
             raise AssistantProviderDown(ASSISTANT_WORKER)
+        if contact is _Contact.NONE:
+            await self._probe(transaction)
 
     # --- pasos -----------------------------------------------------------------------------------
 
     async def _attend(
         self, transaction: Transaction, context: ScopeContext, pending: _Pending
-    ) -> tuple[_Resolution, bool]:
-        """La resolución de la solicitud y si hubo fallo declarado del proveedor."""
+    ) -> tuple[_Resolution, _Contact]:
+        """La resolución de la solicitud y lo que la entrega supo del proveedor."""
         unavailable = AssistantRequestState.UNAVAILABLE
+        none = _Contact.NONE
         if not self._provider.configured:
-            return _Resolution(unavailable, AssistantUnavailableCause.NO_API_KEY), False
+            return _Resolution(unavailable, AssistantUnavailableCause.NO_API_KEY), none
         deadline = pending.requested_at + HARD_DEADLINE
         if self._clock.now() >= deadline:
-            return _Resolution(unavailable, AssistantUnavailableCause.TIMEOUT), False
+            return _Resolution(unavailable, AssistantUnavailableCause.TIMEOUT), none
         budget = await token_budget(transaction, context.organization_id, self._clock.now())
         report_budget(self._metrics, context.organization_id, budget)
         if budget.exhausted:
-            return _Resolution(unavailable, AssistantUnavailableCause.BUDGET_EXCEEDED), False
+            return _Resolution(unavailable, AssistantUnavailableCause.BUDGET_EXCEEDED), none
         built = build_context(
             pending.zone_context,
             request_id=pending.request_id,
@@ -365,13 +398,14 @@ class AssistantWorker:
         )
         if built.digest != pending.context_digest:
             _log.error("el contexto recompuesto no coincide con el admitido: no sale nada")
-            return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
+            return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), none
         return await self._attempts(context, pending, built, deadline)
 
     async def _attempts(
         self, context: ScopeContext, pending: _Pending, built: BuiltContext, deadline: datetime
-    ) -> tuple[_Resolution, bool]:
+    ) -> tuple[_Resolution, _Contact]:
         unavailable = AssistantRequestState.UNAVAILABLE
+        answered = _Contact.ANSWERED
         last: FailureKind = FailureKind.TIMEOUT
         for call in range(MAX_CALLS):
             remaining = deadline - self._clock.now()
@@ -382,10 +416,10 @@ class AssistantWorker:
             if isinstance(outcome, AssistantCompletion):
                 failure = completion_failure(outcome)
                 if failure is None:
-                    return await self._assessed(context, built, outcome), False
-                return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
-            if outcome.kind not in (FailureKind.TRANSIENT, FailureKind.TIMEOUT):
-                return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), False
+                    return await self._assessed(context, built, outcome), answered
+                return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), answered
+            if outcome.kind not in _DOWN_KINDS:
+                return _Resolution(unavailable, AssistantUnavailableCause.PROVIDER_ERROR), answered
             last = outcome.kind
             if call == MAX_CALLS - 1:
                 break
@@ -401,7 +435,25 @@ class AssistantWorker:
             if last is FailureKind.TIMEOUT or self._clock.now() >= deadline
             else AssistantUnavailableCause.PROVIDER_ERROR
         )
-        return _Resolution(unavailable, cause), True
+        return _Resolution(unavailable, cause), _Contact.DOWN
+
+    async def _probe(self, transaction: Transaction) -> None:
+        """La sonda del puerto si el circuito no está cerrado y la entrega no llamó al proveedor:
+        ``AssistantProviderDown`` si sigue caído. Sin fichas, sin contexto y sin esperas propias:
+        un solo intento con su tope."""
+        if not self._provider.configured:
+            return  # sin clave no hay dependencia que sondear: todo es ``no_api_key``
+        state = (await transaction.execute(_CIRCUIT, {"consumer": ASSISTANT_WORKER})).scalar()
+        if state is None or state == CircuitState.CLOSED.value:
+            return
+        try:
+            async with asyncio.timeout((ATTEMPT_TIMEOUT + GUARD).total_seconds()):
+                failure = await self._provider.probe(timeout=ATTEMPT_TIMEOUT)
+        except TimeoutError:
+            failure = AssistantFailure(kind=FailureKind.TIMEOUT)
+        if failure is not None and failure.kind in _DOWN_KINDS:
+            _log.warning("sonda del asistente: el proveedor sigue sin responder")
+            raise AssistantProviderDown(ASSISTANT_WORKER)
 
     async def _call(
         self, context: ScopeContext, pending: _Pending, built: BuiltContext, timeout: timedelta

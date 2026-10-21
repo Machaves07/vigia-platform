@@ -58,7 +58,7 @@ from typing import Any, Final
 
 import httpx
 import pytest
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from starlette.routing import BaseRoute
 
 from tests.api_support import World
@@ -80,17 +80,21 @@ from tests.isolation.laz_cases import (
     LAZ_CASES,
     LAZ_DENIED_UNDER_CONCESSION,
     LAZ_EVENT_REGISTRARS,
+    LAZ_OWN_BUSINESS_RESPONSES,
     LazServices,
     laz_state,
 )
+from tests.isolation.laz_resources import seed_laz_resources
 from tests.isolation.route_cases import Call, Case, Ids, Kind
 from tests.ledger_database import evidence_values, insert_evidence, set_organization
 from tests.live_view_support import LIVE_VIEW_URL, LiveViewEnvironment, live_view_environment
+from tests.loop_actions_support import production_free_text
 from tests.middleware_support import UnlimitedRateLimiter
 from tests.second_factor_support import FakeKms
 from tests.session_support import ORIGIN_KEY
 from tests.signing_support import ENVIRONMENT
 from tests.writer_support import save_record_types, unit_context
+from vigia_platform.accreditation.record_types import register_accreditation_record_types
 from vigia_platform.catalog.adapters.http import CATALOG_STATE_KEY, CatalogHttp
 from vigia_platform.catalog.adapters.postgres.admission_repository import (
     PostgresAdmissionRepository,
@@ -200,9 +204,10 @@ from vigia_platform.ledger.application.reader import LectorExpediente
 from vigia_platform.ledger.application.writer import EscritorExpediente, Receipt
 from vigia_platform.ledger.chain.checkpoints import CheckpointService
 from vigia_platform.ledger.evidence import EvidenceVerifier
-from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
 from vigia_platform.ledger.record_types.u02 import U02_RECORD_TYPES
 from vigia_platform.ledger.registry import RecordTypeRegistry
+from vigia_platform.loop.events import register_loop_event_types
+from vigia_platform.loop.record_types import register_loop_record_types
 from vigia_platform.node_api.router import node_router
 from vigia_platform.node_api.versioning import VersionPolicy
 from vigia_platform.shared.adapters.http import PlatformHttp
@@ -1043,7 +1048,8 @@ _U02_U03_CASES: Final[dict[tuple[str, str], Case]] = {
 
 CASES: Final[dict[tuple[str, str], Case]] = {**_U02_U03_CASES, **dict(LAZ_CASES)}
 """Un caso por método y plantilla registrados (``uncovered`` lo exige). Los de U-04 viven en
-``laz_cases.py`` (TASK-302): ninguna tarea de U-04 edita este archivo."""
+``laz_cases.py`` (TASK-302); TASK-327 amplía el mundo y las comprobaciones compartidas, sin
+modificar los casos de U-02/U-03."""
 
 
 def test_the_u04_cases_neither_repeat_nor_replace_a_route() -> None:
@@ -1288,6 +1294,8 @@ class Organization:
     ids: Ids
     other_plant: Ids
     """Los mismos tipos de recurso en la segunda planta (para la concesión de una planta)."""
+    sibling: Ids
+    """Recursos U-04 reales en la zona hermana de la primera planta."""
 
 
 class SwitchableProviderQueries:
@@ -1605,25 +1613,28 @@ class Isolation:
         retired_node = self.fleet_node(organization_id, plant_id, user_id, revoked=True)
         self.catalog(site, plant_id, zone_id, user_id)
         walk_test_id, step_id = self.walk_test(site, plant_id, zone_id, node_id, user_id)
-        return Ids(
-            organization=organization_id,
-            plant=plant_id,
-            zone=zone_id,
-            user=user_id,
-            assignment=assignment_id,
-            concession=concession_id,
-            record=record["record_id"],
-            evidence=evidence_id,
-            event=self.dead_letter(organization_id, plant_id),
-            label=label_id,
-            node=fleet_node,
-            spare_zone=spare_zone,
-            retired_node=retired_node,
-            agreement=self.agreement(site, plant_id, zone_id, user_id),
-            walk_test=walk_test_id,
-            step=step_id,
-            commissioning_record=self.commissioning_record(
-                site, plant_id, zone_id, node_id, user_id
+        return seed_laz_resources(
+            self,
+            Ids(
+                organization=organization_id,
+                plant=plant_id,
+                zone=zone_id,
+                user=user_id,
+                assignment=assignment_id,
+                concession=concession_id,
+                record=record["record_id"],
+                evidence=evidence_id,
+                event=self.dead_letter(organization_id, plant_id),
+                label=label_id,
+                node=fleet_node,
+                spare_zone=spare_zone,
+                retired_node=retired_node,
+                agreement=self.agreement(site, plant_id, zone_id, user_id),
+                walk_test=walk_test_id,
+                step=step_id,
+                commissioning_record=self.commissioning_record(
+                    site, plant_id, zone_id, node_id, user_id
+                ),
             ),
         )
 
@@ -1651,7 +1662,21 @@ class Isolation:
 
     def organization(self) -> Organization:
         site = self.authz.add_site(plants=2, zones_per_plant=1)
-        return Organization(site, self.resources(site, 0), self.resources(site, 1))
+        own, other = self.resources(site, 0), self.resources(site, 1)
+        self.gate(site, own.plant, own.spare_zone)
+        self.catalog(site, own.plant, own.spare_zone, own.user)
+        sibling = seed_laz_resources(
+            self,
+            replace(
+                Ids.missing(),
+                organization=own.organization,
+                plant=own.plant,
+                zone=own.spare_zone,
+                user=own.user,
+                node=own.node,
+            ),
+        )
+        return Organization(site, own, other, sibling)
 
     # --- Personas ---------------------------------------------------------------------------
 
@@ -1680,7 +1705,8 @@ class Isolation:
             " FROM pg_catalog.pg_attribute AS a"
             " JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid"
             " JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace"
-            " WHERE n.nspname IN ('identity', 'ledger', 'shared', 'catalog', 'fleet')"
+            " WHERE n.nspname IN ('identity', 'ledger', 'shared', 'catalog', 'fleet',"
+            " 'loop', 'accreditation', 'notifications')"
             " AND a.attname = 'organization_id' AND NOT a.attisdropped"
             " AND c.relkind IN ('r', 'p') AND NOT c.relispartition"
         )
@@ -1745,10 +1771,13 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             *(compiled.definition for compiled in fleet_types.latest()),
         ):
             registry.register(definition)
+        register_loop_record_types(registry)
+        register_accreditation_record_types(registry)
         # Los eventos de la revocación y la baja de un nodo (VIG-147), además de los de U-02.
         events = OutboxCatalog()
         register_u02_event_types(events.event_types)
         register_fleet_event_types(events.event_types)
+        register_loop_event_types(events.event_types)
         # Los eventos que publican las rutas de U-04 (laz_cases.py, desde TASK-317).
         for register_laz_events in LAZ_EVENT_REGISTRARS:
             register_laz_events(events.event_types)
@@ -1762,7 +1791,7 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
 
         env.run(synchronize())
         storage = StubEvidenceStorage()
-        free_text = FreeTextPolicyRegistry()
+        free_text = production_free_text()
         writer = EscritorExpediente(
             database=sessions.database,
             registry=registry,
@@ -2104,9 +2133,9 @@ def isolation(postgres_endpoint: PostgresEndpoint) -> Iterator[Isolation]:
             transport=httpx.ASGITransport(app=app), base_url="http://testserver", timeout=30.0
         )
         world = Isolation(env, client, app, writer, passwords, queries)
-        world.a = world.organization()
-        world.b = world.organization()
         try:
+            world.a = world.organization()
+            world.b = world.organization()
             yield world
         finally:
             env.run(client.aclose())
@@ -2172,6 +2201,36 @@ def test_the_fixture_app_registers_exactly_the_cataloged_routes(isolation: Isola
 
 
 @pytest.mark.integration
+def test_laz_resource_cases_reach_existing_owned_resources(isolation: Isolation) -> None:
+    """Antivacuidad: cada recurso conocido de A/B existe también para su dueño.
+
+    Las escrituras dependientes del estado pueden llegar a un rechazo de negocio explícito,
+    nunca se acepta un 404, un error de esquema genérico ni un fallo de infraestructura.
+    """
+    failures = []
+    for organization in (isolation.a, isolation.b):
+        for ids in (organization.ids, organization.sibling, organization.other_plant):
+            for role in (Role.ADMINISTRATOR, Role.COORDINATOR_SST):
+                isolation.authz.assign(ids.organization, ids.user, role)
+            cookie = isolation.authz.open_session(ids.organization, ids.user)
+            for key, case in LAZ_CASES:
+                if case.kind is not Kind.RESOURCE:
+                    continue
+                response = isolation.send(_call(case, ids), cookie)
+                expected = LAZ_OWN_BUSINESS_RESPONSES.get(key)
+                if expected is not None:
+                    body = response.json()
+                    actual = (response.status_code, body.get("code"), body.get("detail_code"))
+                    if actual != expected:
+                        failures.append(f"{key}: {actual} != {expected}")
+                    if "/exports/" in key[1]:
+                        assert body.get("export_state") == "requested", response.text
+                elif not 200 <= response.status_code < 300:
+                    failures.append(f"{key}: {response.status_code} {response.text}")
+    assert not failures, "\n".join(failures)
+
+
+@pytest.mark.integration
 def test_pr_nuc_01_a_known_resource_of_b_answers_exactly_like_a_missing_one(
     isolation: Isolation,
 ) -> None:
@@ -2195,6 +2254,8 @@ def test_pr_nuc_01_a_known_resource_of_b_answers_exactly_like_a_missing_one(
             failures.append(f"{route}: {_comparable(foreign)} != {_comparable(missing)}")
         if foreign.status_code == 403 or _code(foreign) == "forbidden":
             failures.append(f"{route}: forbidden revela que el recurso existe")
+        if (method, path) in dict(LAZ_CASES) and _code(foreign) != "not_found":
+            failures.append(f"{route}: recurso ajeno sin not_found: {foreign.text}")
         if _mentions(foreign, b.ids, trail):
             failures.append(f"{route}: devuelve identificadores de B {_mentions(foreign, b.ids)}")
         if changed:
@@ -2435,7 +2496,7 @@ def test_after_revocation_no_route_answers_the_provider(isolation: Isolation) ->
         assert not _mentions(response, b.ids), (method, path)
 
 
-# --- U-03 (TASK-228, VIG-165): alcance de planta y de zona, concesión vencida y A-48 ------------
+# --- U-03/U-04 (TASK-228/327): planta y zona, concesión vencida y A-48 -------------------------
 
 
 def _scoped(isolation: Isolation, level: ScopeLevel, scope_id: uuid.UUID) -> SessionCookie:
@@ -2453,6 +2514,16 @@ def _u03_cases(isolation: Isolation, kinds: set[Kind]) -> list[tuple[tuple[str, 
     return [(key, case) for key, case in _with_key(isolation, kinds) if key in u03]
 
 
+def _u03_and_laz_cases(
+    isolation: Isolation, kinds: set[Kind]
+) -> list[tuple[tuple[str, str], Case]]:
+    """Mantiene los casos de U-03 y ejercita también todo el catálogo de U-04 (TASK-327)."""
+    return [
+        *_u03_cases(isolation, kinds),
+        *((key, case) for key, case in LAZ_CASES if case.kind in kinds),
+    ]
+
+
 @pytest.mark.integration
 def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organization(
     isolation: Isolation,
@@ -2460,19 +2531,17 @@ def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organizat
     a = isolation.a
     plant = _scoped(isolation, ScopeLevel.PLANT, a.ids.plant)
     zone = _scoped(isolation, ScopeLevel.ZONE, a.ids.zone)
-    # La zona hermana de la misma planta (sin nada más): solo cambia la zona respecto de un
-    # inexistente.
-    sibling = replace(Ids.missing(), organization=a.ids.organization, plant=a.ids.plant,
-                      zone=a.ids.spare_zone)  # fmt: skip
+    # La zona hermana también contiene todo el grafo U-04, no identificadores inexistentes.
+    sibling = a.sibling
     hidden: dict[str, tuple[SessionCookie, list[tuple[Ids, Ids]]]] = {
         "planta": (plant, [(a.other_plant, Ids.missing())]),
         "zona": (
             zone,
-            [(a.other_plant, Ids.missing()), (sibling, replace(sibling, zone=uuid7()))],
+            [(a.other_plant, Ids.missing()), (sibling, Ids.missing())],
         ),
     }
     failures: list[str] = []
-    cases = _u03_cases(isolation, {Kind.RESOURCE})
+    cases = _u03_and_laz_cases(isolation, {Kind.RESOURCE})
     assert len(cases) >= 40
     for (method, path), case in cases:
         route = f"{method} {path}"
@@ -2480,11 +2549,24 @@ def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organizat
             for outside, absent in pairs:
                 seen = isolation.send(_call(case, outside), cookie)
                 missing = isolation.send(_call(case, absent), cookie)
+                if (
+                    path == "/accreditation/monthly-packages/{plant_id}/{period}/download"
+                    and outside.plant == a.ids.plant
+                ):
+                    # Lista por planta: la zona hermana no es un filtro de esta petición.
+                    # Debe servir solo el paquete de la zona propia, jamás el de la hermana.
+                    if seen.status_code != 200:
+                        failures.append(f"{route} ({label}): {seen.text}")
+                    elif {item["zone_id"] for item in seen.json()["zones"]} != {str(a.ids.zone)}:
+                        failures.append(f"{route} ({label}): devuelve otra zona: {seen.text}")
+                    continue
                 if _comparable(seen) != _comparable(missing):
                     failures.append(f"{route} ({label}): {_comparable(seen)} != "
                                     f"{_comparable(missing)}")  # fmt: skip
                 if seen.status_code == 403 or _code(seen) == "forbidden":
                     failures.append(f"{route} ({label}): forbidden")
+                if (method, path) in dict(LAZ_CASES) and _code(seen) != "not_found":
+                    failures.append(f"{route} ({label}): sin not_found: {seen.text}")
                 leaked = [
                     value
                     for value in (outside.plant, outside.zone, outside.node, outside.agreement)
@@ -2504,6 +2586,56 @@ def test_pr_gob_12_a_plant_or_zone_scope_never_reaches_the_rest_of_its_organizat
             assert response.status_code == 200, (path, response.text)
     fleet_node = isolation.send(Call("GET", f"/fleet/nodes/{a.ids.node}"), plant)
     assert fleet_node.status_code == 200, fleet_node.text
+    # SUP-U05-41: el alcance propio sí llega a la decisión de disponibilidad, aun sin paquete
+    # sellado; no se arregla el aislamiento devolviendo not_found para todas las plantas.
+    for cookie in (plant, zone):
+        response = isolation.send(
+            Call("GET", f"/accreditation/monthly-packages/{a.ids.plant}/2026-01/download"), cookie
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail_code"] == "accreditation_monthly_package_not_available"
+
+
+@pytest.mark.integration
+def test_laz_monthly_download_uses_only_scopes_with_the_read_permission(
+    isolation: Isolation,
+) -> None:
+    """Administración en B no amplía la lectura del coordinador de A (misma organización)."""
+    authz, a = isolation.authz, isolation.a
+    user = authz.add_user(a.ids.organization)
+    authz.assign(a.ids.organization, user, Role.COORDINATOR_SST, ScopeLevel.PLANT, a.ids.plant)
+    authz.assign(
+        a.ids.organization, user, Role.ADMINISTRATOR, ScopeLevel.PLANT, a.other_plant.plant
+    )
+    cookie = authz.open_session(a.ids.organization, user)
+    outside = isolation.send(
+        Call("GET", f"/accreditation/monthly-packages/{a.other_plant.plant}/2026-01/download"),
+        cookie,
+    )
+    absent = isolation.send(
+        Call("GET", f"/accreditation/monthly-packages/{uuid7()}/2026-01/download"), cookie
+    )
+    assert _comparable(outside) == _comparable(absent)
+    assert _code(outside) == "not_found"
+
+
+@pytest.mark.integration
+def test_laz_own_routes_do_not_return_resources_outside_plant_or_zone_scope(
+    isolation: Isolation,
+) -> None:
+    """Vocabulario y preferencias son propios de organización/actor, no recursos de otra zona."""
+    a = isolation.a
+    foreign_before = isolation.fingerprint(isolation.b.ids.organization)
+    for cookie in (
+        _scoped(isolation, ScopeLevel.PLANT, a.ids.plant),
+        _scoped(isolation, ScopeLevel.ZONE, a.ids.zone),
+    ):
+        for key, case in LAZ_CASES:
+            if case.kind is Kind.OWN:
+                response = isolation.send(_call(case, a.other_plant), cookie)
+                assert not _mentions(response, a.other_plant), (key, response.text)
+                assert response.status_code != 403, (key, response.text)
+    assert isolation.fingerprint(isolation.b.ids.organization) == foreign_before
 
 
 @pytest.mark.integration
@@ -2522,7 +2654,7 @@ def test_an_expired_concession_answers_like_a_missing_resource_on_every_u03_rout
     )
     before = isolation.fingerprint(b.ids.organization)
     failures: list[str] = []
-    for (method, path), case in _u03_cases(isolation, {Kind.RESOURCE, Kind.OWN}):
+    for (method, path), case in _u03_and_laz_cases(isolation, {Kind.RESOURCE, Kind.OWN}):
         route = f"{method} {path}"
         own = isolation.send(_call(case, b.ids), cookie, concession)
         missing = isolation.send(_call(case, Ids.missing()), cookie, concession)
@@ -2583,6 +2715,74 @@ def test_a_48_the_provider_query_is_written_before_the_u03_route_runs(
         ("GET", "/fleet/nodes/{node_id}")
     ]
     assert seen.audit
+
+
+@pytest.mark.integration
+def test_a_48_every_laz_route_records_before_execution_and_fails_closed(
+    isolation: Isolation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Las claves denegadas no ejecutan la ruta. A-48 se prueba además tras abrir solo el rol.
+
+    La sonda de endpoint no ejecuta negocio: observa el registro ya confirmado antes de entrar.
+    Abrir el rol exclusivamente en esta prueba permite verificar el fallo cerrado de las 42
+    rutas, incluso las que hoy no pasan la matriz del instalador. No amplía permisos reales.
+    """
+    from vigia_platform.shared.api.middleware import authorization
+
+    authz, b = isolation.authz, isolation.b
+    installer, cookie = isolation.installer()
+    concession = authz.add_concession(b.ids.organization, installer, granted_at=authz.now() - HOUR)
+    routes = {
+        (method, str(context.path)): context
+        for context in iter_route_contexts(isolation.app.routes)
+        if isinstance(context.original_route, APIRoute)
+        for method in context.methods
+    }
+    for key, case in LAZ_CASES:
+        seen = _observe(isolation, _call(case, b.ids), cookie, concession)
+        assert _code(seen.response) == "not_found", (key, seen.response.text)
+        expected = [key] if _permission(isolation.app.routes, key) in INSTALLER_KEYS else []
+        assert [(q["method"], q["resource"]) for q in seen.queries] == expected, key
+
+    monkeypatch.setattr(
+        authorization, "route_role", lambda *args, **kwargs: Role.PROVIDER_INSTALLER
+    )
+    committed: list[tuple[str, str]] = []
+    write_query = isolation.queries.write_provider_query
+
+    async def record(context: Any, content: Mapping[str, str], plant_id: uuid.UUID | None) -> None:
+        await write_query(context, content, plant_id)
+        committed.append((content["method"], content["resource"]))
+
+    monkeypatch.setattr(isolation.queries, "write_provider_query", record)
+    for key, case in LAZ_CASES:
+        entered: list[bool] = []
+        before = len(isolation.provider_queries(b.ids.organization, concession))
+        committed.clear()
+
+        async def endpoint_probe(
+            _key: tuple[str, str] = key, _entered: list[bool] = entered, **kwargs: Any
+        ) -> dict[str, bool]:
+            assert committed == [_key]
+            _entered.append(True)
+            return {"probe": True}
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(routes[key].dependant, "call", endpoint_probe)
+            # Al escribir el rastro, llega al endpoint sonda, independientemente de su esquema
+            # de respuesta (puede rechazar la respuesta sintética después de observarla).
+            response = isolation.send(_call(case, b.ids), cookie, concession)
+            assert entered == [True], (key, response.text)
+            assert len(isolation.provider_queries(b.ids.organization, concession)) == before + 1
+            entered.clear()
+            committed.clear()
+            isolation.queries.failing = True
+            try:
+                response = isolation.send(_call(case, b.ids), cookie, concession)
+                assert response.status_code >= 500, (key, response.text)
+                assert entered == [], key
+            finally:
+                isolation.queries.failing = False
 
 
 # --- Seguimientos de VIG-86: etiquetas de dos organizaciones y dos plantas -----------------------

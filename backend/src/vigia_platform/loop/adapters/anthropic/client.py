@@ -41,6 +41,10 @@ modelo que respondió puede no ser el pedido (nota fechada de DE §2.11). Las ca
 ``anthropic-ratelimit-*`` de cada respuesta (también de un error) fijan
 ``assistant_rate_limit_headroom_ratio`` (el margen más bajo de los cupos informados).
 
+**Sonda** (``probe``, VIG-272): ``client.models.retrieve(model)``, la ficha del modelo
+configurado. No gasta fichas ni lleva contexto, y comprueba destino, credencial y modelo; tope de
+la sonda, a lo sumo 60 s. Sus errores se clasifican con la misma tabla.
+
 **Errores**: ``loop.adapters.anthropic.errors.classify``, por tipo. El adaptador nunca lanza por
 un fallo del proveedor; ``EgressBlocked`` (destino fuera de la lista) sí sale: es un defecto.
 """
@@ -284,3 +288,23 @@ class AnthropicAssistantProvider:
         except ValueError:  # cuerpo que no es JSON (``json.JSONDecodeError``)
             return AssistantFailure(kind=FailureKind.PERMANENT, status_code=200)
         return read_response(body, request_id=raw.request_id)
+
+    async def probe(self, *, timeout: timedelta) -> AssistantFailure | None:
+        """La ficha del modelo configurado: ``None`` si el proveedor respondió."""
+        attempt = min(timeout, CLIENT_TIMEOUT)
+        if attempt <= timedelta(0):
+            return AssistantFailure(kind=FailureKind.TIMEOUT)
+        seconds = attempt.total_seconds()
+        try:
+            async with asyncio.timeout(seconds):
+                await self._client.call(
+                    lambda client: client.models.retrieve(self.model, timeout=seconds)
+                )
+        except TimeoutError:
+            return AssistantFailure(kind=FailureKind.TIMEOUT)
+        except anthropic.APIStatusError as error:
+            self._record_headroom(error.response.headers)
+            return classify(error)
+        except anthropic.AnthropicError as error:
+            return classify(error)
+        return None

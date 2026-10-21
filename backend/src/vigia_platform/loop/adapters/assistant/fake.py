@@ -18,10 +18,16 @@ omisión** en pruebas y cuando no hay clave (``FakeAssistantProvider.unconfigure
    llamada): una llamada que empieza antes espera hasta entonces o hasta su tope;
 10. ``bad_request``: 400 permanente.
 
-Los guiones se encadenan por llamada (``scripts``: el último se repite). La espera simulada usa el
-``sleep`` inyectado, el mismo temporizador que el consumidor (en pruebas, uno que avanza el reloj
-simulado): **ningún tope de pared**. ``calls`` cuenta las llamadas y ``contexts`` guarda el
-objeto de cada una, para comprobar que nada sale sin llamada y qué salió.
+Los guiones se encadenan por llamada y por sonda, en el orden en que llegan (``scripts``: el último
+se repite). La espera simulada usa el ``sleep`` inyectado, el mismo temporizador que el consumidor
+(en pruebas, uno que avanza el reloj simulado): **ningún tope de pared**. ``calls`` cuenta las
+llamadas y ``contexts`` guarda el objeto de cada una, para comprobar que nada sale sin llamada y
+qué salió.
+
+**Sonda** (``probe``, VIG-272): sin contexto ni fichas; ``probe_timeouts`` guarda el tope de cada
+una. Con su guion, ``rate_limited`` y ``overloaded`` devuelven su fallo transitorio, ``timeout``
+espera como una llamada, ``bad_request`` su fallo permanente (el proveedor respondió) y el resto,
+``None`` (el proveedor respondió).
 """
 
 from __future__ import annotations
@@ -145,6 +151,7 @@ class FakeAssistantProvider:
         self._gate = gate
         self._first_call_at: datetime | None = None
         self.calls: list[_Call] = []
+        self.probe_timeouts: list[timedelta] = []
 
     @classmethod
     def unconfigured(cls) -> FakeAssistantProvider:
@@ -163,9 +170,10 @@ class FakeAssistantProvider:
     def contexts(self) -> list[AssistantContext]:
         return [call.context for call in self.calls]
 
-    def _script(self) -> Script:
-        index = min(len(self.calls) - 1, len(self._scripts) - 1)
-        return self._scripts[index]
+    def _next_script(self) -> Script:
+        """El guion del paso recién anotado (llamadas y sondas comparten la cadena)."""
+        step = len(self.calls) + len(self.probe_timeouts) - 1
+        return self._scripts[min(step, len(self._scripts) - 1)]
 
     async def _wait(self, seconds: float) -> None:
         if seconds > 0:
@@ -173,19 +181,32 @@ class FakeAssistantProvider:
 
     async def complete(self, context: AssistantContext, *, timeout: timedelta) -> AssistantOutcome:
         self.calls.append(_Call(context, timeout))
+        script = self._next_script()
         if self._gate is not None:
             await self._gate.wait()
-        script = self._script()
         if script is Script.TIMEOUT:
-            return await self._hang(context, timeout)
+            hung = await self._hang(timeout)
+            return hung if hung is not None else self._respond(Script.VALID_WITH_CITATIONS, context)
         if self._latency >= timeout:
             await self._wait(timeout.total_seconds())
             return AssistantFailure(kind=FailureKind.TIMEOUT)
         await self._wait(self._latency.total_seconds())
         return self._respond(script, context)
 
-    async def _hang(self, context: AssistantContext, timeout: timedelta) -> AssistantOutcome:
-        """No responde hasta ``hang_until`` desde la primera llamada; después, un borrador."""
+    async def probe(self, *, timeout: timedelta) -> AssistantFailure | None:
+        """La sonda del cortacircuito: sin contexto ni fichas; ``None`` si el guion responde."""
+        self.probe_timeouts.append(timeout)
+        script = self._next_script()
+        if script is Script.TIMEOUT:
+            return await self._hang(timeout)
+        if self._latency >= timeout:
+            await self._wait(timeout.total_seconds())
+            return AssistantFailure(kind=FailureKind.TIMEOUT)
+        await self._wait(self._latency.total_seconds())
+        return self._failure(script)
+
+    async def _hang(self, timeout: timedelta) -> AssistantFailure | None:
+        """No responde hasta ``hang_until`` desde la primera llamada; después, ``None``."""
         if self._clock is None:
             await self._wait(timeout.total_seconds())
             return AssistantFailure(kind=FailureKind.TIMEOUT)
@@ -197,9 +218,26 @@ class FakeAssistantProvider:
             await self._wait(timeout.total_seconds())
             return AssistantFailure(kind=FailureKind.TIMEOUT)
         await self._wait(max(remaining, self._latency).total_seconds())
-        return self._respond(Script.VALID_WITH_CITATIONS, context)
+        return None
+
+    def _failure(self, script: Script) -> AssistantFailure | None:
+        """El fallo sin contenido del guion; ``None`` si el proveedor responde con contenido."""
+        match script:
+            case Script.RATE_LIMITED:
+                return AssistantFailure(
+                    kind=FailureKind.TRANSIENT, status_code=429, retry_after=self._retry_after
+                )
+            case Script.OVERLOADED:
+                return AssistantFailure(kind=FailureKind.TRANSIENT, status_code=529)
+            case Script.BAD_REQUEST:
+                return AssistantFailure(kind=FailureKind.PERMANENT, status_code=400)
+            case _:
+                return None
 
     def _respond(self, script: Script, context: AssistantContext) -> AssistantOutcome:
+        failure = self._failure(script)
+        if failure is not None:
+            return failure
         completion = _completion(self._content)
         match script:
             case Script.VALID_WITH_CITATIONS:
@@ -240,15 +278,7 @@ class FakeAssistantProvider:
                 return completion(REFUSAL, None)
             case Script.MAX_TOKENS:
                 return completion(MAX_TOKENS, '{"draft_text": "La señal de ener')
-            case Script.RATE_LIMITED:
-                return AssistantFailure(
-                    kind=FailureKind.TRANSIENT, status_code=429, retry_after=self._retry_after
-                )
-            case Script.OVERLOADED:
-                return AssistantFailure(kind=FailureKind.TRANSIENT, status_code=529)
-            case Script.BAD_REQUEST:
-                return AssistantFailure(kind=FailureKind.PERMANENT, status_code=400)
-            case Script.TIMEOUT:  # pragma: no cover - lo atiende ``_hang``
+            case _:  # pragma: no cover - los fallos los da ``_failure`` y ``timeout``, ``_hang``
                 return AssistantFailure(kind=FailureKind.TIMEOUT)
 
 
