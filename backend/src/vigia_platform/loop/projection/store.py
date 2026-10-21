@@ -124,7 +124,8 @@ _ENSURE_CHECKPOINT: Final = text(
     " VALUES (:organization_id, :plant_id) ON CONFLICT (organization_id, plant_id) DO NOTHING"
 )
 _LOCK_CHECKPOINT: Final = text(
-    "SELECT last_applied_ledger_sequence, last_applied_event_id, projection_digest"
+    "SELECT last_applied_ledger_sequence, last_applied_event_id, projection_digest,"
+    " ingestion_frontier"
     " FROM loop.loop_projection_checkpoint"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id FOR UPDATE"
 )
@@ -134,6 +135,45 @@ _ADVANCE_CHECKPOINT: Final = text(
     " last_applied_event_id = COALESCE(:event_id, last_applied_event_id),"
     " projection_digest = :projection_digest"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+)
+
+# VIG-273: bajo el candado existente del checkpoint, certifica SOLO el prefijo sin huecos.
+# Cada ingesta de hallazgo debe estar en los tramos de su episodio (también los tardíos);
+# cada detección, en su fila, incluso tras resolverla. Los demás caminos no mueven esta marca.
+# El índice parcial limita el trabajo al delta desde la última frontera certificada, nunca al
+# outbox histórico completo. La publicación atómica bajo el candado de cadena impide que una
+# ingesta con secuencia menor aparezca después de haber certificado una secuencia mayor.
+_ADVANCE_INGESTION_FRONTIER: Final = text(
+    """
+    UPDATE loop.loop_projection_checkpoint c
+    SET ingestion_frontier = COALESCE((
+        SELECT e.ledger_sequence - 1
+        FROM shared.outbox_event e
+        WHERE e.organization_id = :organization_id AND e.plant_id = :plant_id
+          AND e.event_name IN ('finding_received', 'detection_for_review_received')
+          AND e.ledger_sequence > :frontier
+          AND e.ledger_sequence <= :sequence
+          AND ((e.event_name = 'finding_received' AND NOT EXISTS (
+                    SELECT 1 FROM loop.episode ep
+                    WHERE ep.organization_id = :organization_id AND ep.plant_id = :plant_id
+                      AND ep.episode_id = (
+                          SELECT CAST(CAST(convert_from(r.content, 'UTF8') AS jsonb)
+                                      ->'episode'->>'episode_id' AS uuid)
+                          FROM ledger.ledger_record r
+                          WHERE r.organization_id = :organization_id
+                            AND r.record_id = CAST(e.payload->>'platform_record_id' AS uuid)
+                      )
+                      AND ep.segment_record_ids @>
+                          ARRAY[CAST(e.payload->>'platform_record_id' AS uuid)]
+               )) OR (e.event_name = 'detection_for_review_received' AND NOT EXISTS (
+                    SELECT 1 FROM loop.finding_state f
+                    WHERE f.organization_id = :organization_id AND f.plant_id = :plant_id
+                      AND f.finding_state_id = CAST(e.payload->>'platform_record_id' AS uuid)
+               )))
+        ORDER BY e.ledger_sequence LIMIT 1
+    ), :sequence)
+    WHERE c.organization_id = :organization_id AND c.plant_id = :plant_id
+    """
 )
 
 _EPISODE_MUTABLE: Final = (
@@ -450,6 +490,15 @@ class LoopProjectionStore:
                 "projection_digest": digest,
             },
         )
+        if item.record_type in {"finding_received", "detection_for_review_received"}:
+            await transaction.execute(
+                _ADVANCE_INGESTION_FRONTIER,
+                {
+                    **partition,
+                    "frontier": checkpoint.ingestion_frontier,
+                    "sequence": max(checkpoint.last_applied_ledger_sequence, item.chain_sequence),
+                },
+            )
         if isinstance(source, Receipt) and activity_at is not None:
             known = result.finding if result.finding is not None else finding
             document_subject = item.document.get("subject_id")
