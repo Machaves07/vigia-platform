@@ -82,6 +82,8 @@ NOT_LOOP_ACTIVITY: Final = frozenset(
         # Lo escribe el sistema (tareas y consumidores).
         "action_overdue",
         "late_segment_attached",
+        # Lo escribe una orden administrativa del runbook 7.3 (VIG-274), no quien atiende la zona.
+        "closure_attachment_unrecoverable",
         # Acreditación, vocabulario y configuración: no son atención de una zona.
         "export_produced",
         "monthly_package_produced",

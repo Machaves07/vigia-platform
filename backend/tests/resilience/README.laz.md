@@ -24,7 +24,8 @@ TASK-333/VIG-249; hoy el trabajo ya corre `tests/resilience` entero con el perfi
   consume intentos), y reprocesa con la orden real `vigia-admin replay-dead-letter`.
 - DR-LAZ-04: la versión anterior se restaura retirando las versiones posteriores (LocalStack no
   copia una versión sobre su misma clave); sin versión anterior, la lectura se declara ilegible.
-  La declaración estructurada «no recuperable» en el hallazgo y el manifiesto es VIG-274.
+  Sin versión anterior, además, la orden `vigia-admin declare-unrecoverable-attachment` deja la
+  declaración estructurada en el hallazgo y el manifiesto con el mismo campo (VIG-274).
 - Perfil `nightly`: más rondas (FS-LAZ-07, 10 y 11), más eventos por partición (FS-LAZ-08, 09 y
   DR-LAZ-03) y más destinatarios limpios frente al tope (FS-LAZ-12).
 

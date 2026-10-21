@@ -11,7 +11,8 @@ TASK-303 y TASK-340) o ``API_STATE``.
 PAT-LAZ-RES-07): la composición contrasta lo registrado por **todas** las unidades con los
 manifiestos de U-04, escritos **a mano** (no derivados de los registros):
 
-- ``U04_RECORD_TYPES``: los 17 tipos de §5.1 (13 del lazo y 4 de la acreditación);
+- ``U04_RECORD_TYPES``: los 17 tipos de §5.1 (13 del lazo y 4 de la acreditación) y
+  ``closure_attachment_unrecoverable`` (VIG-274, DR-LAZ-04);
 - ``U04_EVENT_TYPES``: los 25 eventos de §11.3 (nota R14 de §7: 25, no 20; 21 del lazo y 4 de
   la acreditación; ``user_invited`` no es de U-04, U04-H-13) y el trabajo interno
   ``export_requested`` del consumidor ``export_worker`` (TASK-317);
@@ -225,6 +226,8 @@ U04_RECORD_TYPES: Final = frozenset(
         "reopening",
         "loop_configuration_changed",
         "late_segment_attached",
+        # loop, fuera de §5.1: el adjunto de cierre no recuperable (VIG-274, runbook 7.3)
+        "closure_attachment_unrecoverable",
         # accreditation (4)
         "export_produced",
         "monthly_package_produced",
@@ -232,7 +235,7 @@ U04_RECORD_TYPES: Final = frozenset(
         "commitments_recorded",
     }
 )
-"""Los 17 tipos de registro de U-04 (domain-entities §5.1)."""
+"""Los 17 tipos de registro de U-04 (domain-entities §5.1) y el de VIG-274."""
 
 U04_EVENT_TYPES: Final = frozenset(
     {

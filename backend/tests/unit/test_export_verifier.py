@@ -313,7 +313,8 @@ def _set_manifest(key: str, value: Any) -> Callable[[Package], None]:
             "artifact_hash_mismatch",
             FINDINGS,
         ),
-        (_set_manifest("manifest_version", 2), "manifest_invalid", "manifest.json"),
+        (_set_manifest("manifest_version", 0), "manifest_invalid", "manifest.json"),
+        (_set_manifest("manifest_version", 3), "manifest_invalid", "manifest.json"),
         (_set_manifest("manifest_version", True), "manifest_invalid", "manifest.json"),
         (_set_manifest("artifacts", {}), "manifest_invalid", "manifest.json"),
         (_set_manifest("verifier_version", None), "manifest_invalid", "manifest.json"),
@@ -654,7 +655,7 @@ def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as raised:
         export_main(["--version"])
     assert raised.value.code == 0
-    assert "export-verifier.1" in capsys.readouterr().out
+    assert capsys.readouterr().out == "vigia_verify export-verifier.2\n"
 
 
 # --- listas cerradas frente a la plataforma ------------------------------------------------------

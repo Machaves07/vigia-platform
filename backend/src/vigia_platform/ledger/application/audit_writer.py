@@ -132,6 +132,10 @@ class AuditOperation(enum.StrEnum):
     DEAD_LETTER_REPLAYED = "dead_letter_replayed"
     LOOP_PROJECTION_REBUILD = "loop_projection_rebuild"
     """Intención y finalización de la reconstrucción administrativa a demanda (TASK-326)."""
+    CLOSURE_ATTACHMENT_UNRECOVERABLE_DECLARED = "closure_attachment_unrecoverable_declared"
+    """``vigia-admin declare-unrecoverable-attachment`` (runbook 7.3, paso 4; VIG-274): intención y
+    resultado, en la proveedora, con ``filters`` ``{organization_id, plant_id, attachment_id,
+    sha256, detected_at}`` (y ``completed`` y ``record_id`` al terminar)."""
     RESTORE_DRILL_RECORDED = "restore_drill_recorded"
     NODE_CA_ROOT_REQUESTED = "node_ca_root_requested"
     """``vigia-admin`` va a publicar ``ca/root.pem`` (intención, antes de escribir; TASK-132)."""

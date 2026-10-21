@@ -9,8 +9,9 @@
   alguna zona es unipersonal, revocación si alguna compuerta de uso se revocó en el periodo) y las
   comprobaciones que hacen imposible un manifiesto que esconda algo: una sola organización por
   construcción, un resumen de cobertura por zona que **suma exactamente** la duración del periodo
-  (nunca se omite un tramo, BR-LAZ-93), hallazgos solo de las zonas pedidas y entradas ausentes
-  solo con su motivo fijo.
+  (nunca se omite un tramo, BR-LAZ-93), hallazgos solo de las zonas pedidas, entradas ausentes
+  solo con su motivo fijo y un adjunto sin bytes solo si el expediente lo declara no recuperable
+  (DR-LAZ-04, VIG-274).
 - ``manifest_json(manifest)``: la forma JSON (marcas ISO 8601 UTC con milisegundos y ``Z``;
   el periodo, además, en la hora local de la planta).
 
@@ -30,6 +31,7 @@ from vigia_platform.accreditation.manifest.model import (
     ABSENT_KINDS,
     AGGREGATION_NOTICE_ES,
     ASSIGNMENT_HISTORY_UNAVAILABLE_ES,
+    ATTACHMENT_UNRECOVERABLE_ES,
     DOCUMENT_ABSENT_ES,
     MANIFEST_VERSION,
     REVOCATION_NOTICE_ES,
@@ -63,6 +65,7 @@ __all__ = [
     "build_manifest",
     "count_states",
     "manifest_json",
+    "unrecoverable_json",
 ]
 
 S = FindingLifecycleState
@@ -163,6 +166,13 @@ def _check(inputs: ManifestInputs) -> None:
             raise ManifestInvalid("un clip de una zona que no se pidió")
         if (clip.path is None) != (form is PackageForm.WITHOUT_CLIPS):
             raise ManifestInvalid("los clips llevan bytes solo en la forma con clips")
+    for attachment in inputs.attachments:
+        if (attachment.path is None) != (attachment.unrecoverable is not None):
+            # DR-LAZ-04: un adjunto sin bytes solo con su declaración de no recuperable.
+            raise ManifestInvalid("un adjunto va con sus bytes o declarado no recuperable")
+    attachment_ids = [attachment.attachment_id for attachment in inputs.attachments]
+    if len(set(attachment_ids)) != len(attachment_ids):
+        raise ManifestInvalid("un adjunto aparece dos veces")
     kinds = [entry.kind for entry in inputs.absent]
     if len(set(kinds)) != len(kinds) or any(kind not in ABSENT_KINDS for kind in kinds):
         raise ManifestInvalid("entrada ausente desconocida o repetida")
@@ -225,9 +235,7 @@ def build_manifest(inputs: ManifestInputs) -> ExportManifest:
             )
         ),
         clips=tuple(sorted(inputs.clips, key=lambda clip: str(clip.evidence_id))),
-        attachments=tuple(
-            sorted(inputs.attachments, key=lambda item: (str(item.attachment_id), item.path))
-        ),
+        attachments=tuple(sorted(inputs.attachments, key=lambda item: str(item.attachment_id))),
         aggregated_zone_ids=aggregated,
         artifacts=tuple(inputs.artifacts),
         absent=tuple(sorted(inputs.absent, key=lambda entry: entry.kind)),
@@ -382,6 +390,21 @@ def _clip(item: DeclaredClip) -> dict[str, Any]:
     }
 
 
+def unrecoverable_json(item: DeclaredAttachment) -> dict[str, Any] | None:
+    """La declaración ``unrecoverable`` de un adjunto en el manifiesto (DR-LAZ-04): el mismo
+    hash y la misma fecha que su registro ``closure_attachment_unrecoverable``."""
+    declaration = item.unrecoverable
+    if declaration is None:
+        return None
+    return {
+        "record_id": str(declaration.record_id),
+        "declaration_id": str(declaration.declaration_id),
+        "sha256": item.sha256,
+        "detected_at": _stamp(declaration.detected_at),
+        "reason_es": ATTACHMENT_UNRECOVERABLE_ES,
+    }
+
+
 def _attachment(item: DeclaredAttachment) -> dict[str, Any]:
     return {
         "attachment_id": str(item.attachment_id),
@@ -391,7 +414,9 @@ def _attachment(item: DeclaredAttachment) -> dict[str, Any]:
         "size_bytes": item.size_bytes,
         "content_type": item.content_type,
         "declaration": "no_identifiable_person_declared",
+        "available": item.unrecoverable is None,
         "path": item.path,
+        "unrecoverable": unrecoverable_json(item),
     }
 
 
