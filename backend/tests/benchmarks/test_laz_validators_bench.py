@@ -11,9 +11,9 @@ cachés se cargan antes de medir (PAT-LAZ-REN-02). El texto cita equipos con may
 fechas y un equipo con marca declarada, para que el patrón de nombre propio recorra pares.
 
 El objetivo, **p95 ≤ 20 ms**, es ``[objetivo propio]`` (NFR-LAZ-04): el informe dice si se cumple
-y nunca decide el resultado. En el perfil ``ci`` el banco es **informativo** (no compara con la
-base: el equipo del CI no es el de la medición); en ``nightly`` falla si la mediana empeora más
-de un 50 % frente a ``baseline.json`` (factor por defecto, como U-02).
+y nunca decide el resultado. Falla si la mediana empeora más de un 50 % frente
+a la base del mismo runner y perfil; una entrada ausente exige actualización
+explícita, y una incompatible informa «sin base comparable» sin bloquear.
 
 Solo datos generados.
 """
@@ -25,10 +25,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Final
 
-from hypothesis import settings
-
 from tests.benchmarks.conftest import Measure
-from tests.conftest import NIGHTLY_PROFILE
+from tests.benchmarks.laz_support import measured
 from tests.vocabulary_support import FIELD, MemoryStore, customer_term
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry, FreeTextPreparation, RowReader
 from vigia_platform.loop.validators.attribution import (
@@ -63,6 +61,12 @@ class _Names:
 
 
 def test_laz_validators_1000_chars(measure: Measure) -> None:
+    """Fila 5. [objetivo propio] p95 ≤20 ms.
+
+    Composición: política base y forma canónica de U-02 + blocked_vocabulary
+    y person_attribution con cachés calientes; sin red ni base, 100 rondas.
+    Tramos: total → both_validators (1 000 caracteres permitidos, peor caso).
+    """
     organization = uuid.uuid4()
     vocabulary = VocabularyList(
         version=2, terms=(customer_term("montacargas"), customer_term("umbral"))
@@ -86,13 +90,14 @@ def test_laz_validators_1000_chars(measure: Measure) -> None:
     assert len(text) == TEXT_CHARS
     assert registry.apply(text, FIELD, organization_id=organization) == text  # permitido
 
-    result = measure(
+    result = measured(
+        measure,
         "laz_validators_1000_chars",
-        "Validadores de texto de U-04 (blocked_vocabulary y person_attribution) sobre 1 000"
-        " caracteres",
-        lambda: registry.apply(text, FIELD, organization_id=organization),
-        objective_ms=OBJECTIVE_MS,
+        OBJECTIVE_MS,
+        lambda trace: trace.call(
+            "both_validators", lambda: registry.apply(text, FIELD, organization_id=organization)
+        ),
         details={"chars": TEXT_CHARS, "validators": [BLOCKED_VOCABULARY, PERSON_ATTRIBUTION]},
-        informative=settings.get_current_profile_name() != NIGHTLY_PROFILE,
+        rounds=100,
     )
     assert result.samples == 100
