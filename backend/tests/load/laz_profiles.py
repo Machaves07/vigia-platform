@@ -16,11 +16,11 @@ Los clips viven en LocalStack como una **reserva** de ``clip_pool`` objetos sint
 varias evidencias apuntan al mismo objeto y cada una lo descarga entero con ``get_object``. Así el
 paquete de 10 GB no exige 10 GB más de clips en el disco del runner (unos 20 GB libres).
 
-Lo **funcional bloquea** (paquete ``ready``, verificador ``intact``, el mismo manifiesto en dos
-corridas, ``/tmp`` por debajo de 32 MiB y la memoria que retiene el intento con el paquete grande
-sin crecer más de ``MEMORY_GROWTH_LIMIT_KIB`` sobre la del pequeño); las cifras absolutas
-(duración, memoria máxima del proceso y su crecimiento, y la memoria de la composición frente al
-presupuesto de 512 MB) son **tendencia** en el informe (A-65).
+**Bloquean** lo funcional (paquete ``ready``, verificador ``intact``, el mismo manifiesto en dos
+corridas, ``/tmp`` por debajo de 32 MiB) y la memoria máxima del proceso (RSS): con el paquete
+grande no supera la del pequeño en más de ``RSS_GROWTH_LIMIT_KIB`` y la composición nunca pasa de
+``ABSOLUTE_MEMORY_BUDGET_MIB`` por encima del uso base. La duración y el pico de memoria de Python
+(``tracemalloc``) son **tendencia** en el informe (A-65).
 
 **Volumetría** (``VolumetryProfile``, NFR-LAZ-06 y 09): un año completo de ``zones`` zonas de la
 organización mayor a ritmo pleno (``LazRates``), extrapolado a 300 zonas, más ``notifications``
@@ -39,9 +39,9 @@ __all__ = [
     "EPISODES_PER_ZONE_DAY",
     "EXPORT_DAYS",
     "EXPORT_PROFILES",
-    "MEMORY_GROWTH_LIMIT_KIB",
     "NFR_LAZ_06",
     "NFR_LAZ_06_TOTAL_BYTES",
+    "RSS_GROWTH_LIMIT_KIB",
     "TARGET_ZONES",
     "TMP_LIMIT_BYTES",
     "VOLUMETRY_PROFILES",
@@ -61,16 +61,19 @@ TARGET_ZONES: Final = 300
 
 TMP_LIMIT_BYTES: Final = 32 * MIB
 """``/tmp`` por debajo de 32 MiB (infraestructura §6.2, ``[objetivo propio]``): bloqueante."""
-MEMORY_GROWTH_LIMIT_KIB: Final = 64 * 1024
-"""El margen de NFR-LAZ-49, **fijado con la primera medición** (TASK-345, 2026-10-18: 200 MB, 1 GB
-y 2,5 GB del compositor sintético sin crecer más de 64 MiB): la memoria que retiene el intento
-(máximo de Python vivo a la vez) con el paquete grande no supera la del pequeño en más de esto. Es
-lo que demuestra que el paquete se escribe en flujo; bloqueante. Medido con el compositor real el
-2026-10-21: +2,8 MiB entre 100 MB y 1 GB."""
+RSS_GROWTH_LIMIT_KIB: Final = 192 * 1024
+"""El margen de NFR-LAZ-49, **fijado por el dueño con las cifras medidas** (PR #184, 2026-10-21):
+la memoria máxima del proceso (RSS, ``ru_maxrss``) con el paquete grande no supera la del pequeño
+en más de 192 MiB; bloqueante. Origen: el RSS máximo creció de 1 GB a 10 GB +131 MiB (nightly
+39562753838), +163 MiB (39584457311) y +111 MiB (39598804277, 378 → 489 MiB) en el runner de
+GitHub, y +121 MiB en local (320 → 441 MiB). El crecimiento es **nativo** (el pico de Python de
+``tracemalloc`` sigue plano, +2,8 a +8,4 MiB) y aparece al pasar de un volumen a dos: a clip
+constante de 4 MB, 1 GB en un volumen da 352 MiB y 3 GB en dos, 424 MiB (sondas de la revisión
+del PR #184). La causa exacta dentro del flujo no se midió; queda como dato para VIG-226."""
 ABSOLUTE_MEMORY_BUDGET_MIB: Final = 512
-"""Memoria de la composición por encima del uso base del proceso (infraestructura §6.2,
-``[objetivo propio]``): se informa como tendencia (A-65), no decide el resultado. Primera medición
-(2026-10-21, servidor de 4 núcleos): 99 MiB con 1 GB y 220 MiB con 10 GB."""
+"""Memoria de la composición (RSS máximo menos el uso base del proceso) con cualquier paquete
+(infraestructura §6.2, ``[objetivo propio]``); bloqueante. Medido con 10 GB: 220 MiB en local y
+257 a 309 MiB en el runner."""
 
 
 @dataclass(frozen=True)

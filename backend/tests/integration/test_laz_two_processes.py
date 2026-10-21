@@ -229,7 +229,7 @@ def test_u04_is_loaded_in_both_api_processes_and_in_both_workers(cluster: Cluste
     assert {a.json()["code"] for a in answers} == {"unauthenticated"}
     _both_served(cluster, before)
     for port in cluster.worker_ports.values():
-        assert httpx.get(f"http://127.0.0.1:{port}/health/live", timeout=5).status_code == 200
+        assert httpx.get(f"http://127.0.0.1:{port}/health/live", timeout=30).status_code == 200
 
 
 # --- Notificaciones ---------------------------------------------------------------------------

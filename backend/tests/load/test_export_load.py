@@ -18,18 +18,18 @@ zona y 31 días a 77 hallazgos por día (2 387 hallazgos con un clip cada uno) s
    firma del manifiesto, leyendo los volúmenes **por rangos** desde LocalStack (nunca se copian a
    disco); el manifiesto y el ``archive_sha256`` de la segunda corrida son los mismos; cada volumen
    no pasa de 2 GB y sube en partes de 16 MiB (``PartsCount`` y la primera parte); ``/tmp`` nunca
-   pasa de 32 MiB; y la **memoria que retiene el intento** (el máximo de Python vivo a la vez,
-   ``tracemalloc``: trozos, partes, clips y búferes del ZIP) con el paquete grande no supera la
-   del pequeño en más de ``MEMORY_GROWTH_LIMIT_KIB``. Es lo que falla si el paquete deja de
-   escribirse en flujo (sonda: sin subir partes hasta cerrar el volumen, +460 MiB).
-4. **Tendencia** (A-65): duración, memoria máxima del proceso (RSS) y su crecimiento entre los dos
-   paquetes, memoria de la composición frente al presupuesto de 512 MB por encima de la base y
-   tamaño del paquete van al informe ``export-load-<perfil>.json`` de ``VIGIA_LOAD_REPORT_DIR``
-   (el artefacto ``informe-carga`` de ``nightly``) y a la salida. El RSS suma lo nativo y lo que
-   el asignador no devuelve: con el número de hallazgos fijo, el paquete diez veces mayor tiene
-   clips diez veces mayores, y cada clip se lee entero (``BlobSource.clip_bytes``), así que el RSS
-   máximo sigue al tamaño del clip y no al del paquete (primera medición, 2026-10-21: 1 GB 320 MiB,
-   10 GB 441 MiB, con la memoria de Python plana).
+   pasa de 32 MiB.
+4. **La memoria máxima del proceso bloquea** (RSS, ``ru_maxrss`` del hijo; decisión del dueño en
+   el PR #184): con el paquete grande no supera la del pequeño en más de
+   ``RSS_GROWTH_LIMIT_KIB`` (192 MiB) y la composición (RSS máximo menos el uso base) nunca pasa de
+   ``ABSOLUTE_MEMORY_BUDGET_MIB`` (512 MiB). El margen sale de las cifras medidas en el runner
+   (+111 a +163 MiB de 1 GB a 10 GB; ver ``laz_profiles``). Ese crecimiento es **nativo**: el pico
+   de Python (``tracemalloc``) sigue plano y aparece al pasar de un volumen a dos (a clip
+   constante de 4 MB, 352 MiB con un volumen y 424 MiB con dos); no sigue al tamaño del clip. La
+   causa exacta no se midió (dato para VIG-226).
+5. **Tendencia** (A-65): duración, pico de memoria de Python y tamaño del paquete van al informe
+   ``export-load-<perfil>.json`` de ``VIGIA_LOAD_REPORT_DIR`` (el artefacto ``informe-carga`` de
+   ``nightly``) junto con las cifras bloqueantes, y a la salida.
 
 ``ci`` corre en el check «backend (carga ci)»; ``small`` en local (``-k small``); ``nightly``
 solo con ``--hypothesis-profile=nightly`` (trabajo ``carga`` de ``nightly.yml``).
@@ -60,7 +60,7 @@ from tests.load.export_load_child import ClipPool
 from tests.load.laz_profiles import (
     ABSOLUTE_MEMORY_BUDGET_MIB,
     EXPORT_PROFILES,
-    MEMORY_GROWTH_LIMIT_KIB,
+    RSS_GROWTH_LIMIT_KIB,
     TMP_LIMIT_BYTES,
     ExportLoadProfile,
 )
@@ -358,6 +358,7 @@ def _export(
             "composition_mib": round(
                 (measured["max_rss_kib"] - measured["base_rss_kib"]) / 1024, 1
             ),
+            "base_rss_kib": measured["base_rss_kib"],
             "max_rss_kib": measured["max_rss_kib"],
             "python_peak_mib": round(measured["python_peak_kib"] / 1024, 1),
             "python_peak_kib": measured["python_peak_kib"],
@@ -384,8 +385,8 @@ def _run_profile(
     large = _export(
         stack, bucket, profile, profile.large_bytes, tmp_path_factory.mktemp("tmp-grande")
     )
-    retained_growth = large["python_peak_kib"] - small["python_peak_kib"]
     rss_growth = large["max_rss_kib"] - small["max_rss_kib"]
+    python_growth = large["python_peak_kib"] - small["python_peak_kib"]
     budget = ABSOLUTE_MEMORY_BUDGET_MIB
     report = {
         "nfr": "NFR-LAZ-49",
@@ -396,18 +397,21 @@ def _run_profile(
         "volume_max_bytes": VOLUME_MAX_BYTES,
         "small": small,
         "large": large,
-        "retained_growth_mib": round(retained_growth / 1024, 1),
-        "retained_growth_limit_mib": MEMORY_GROWTH_LIMIT_KIB // 1024,
+        "rss_growth_mib": round(rss_growth / 1024, 1),
+        "rss_growth_limit_mib": RSS_GROWTH_LIMIT_KIB // 1024,
+        "rss_growth_limit_origin": (
+            "decisión del dueño (PR #184, 2026-10-21) con las cifras medidas en el runner: de 1 GB"
+            " a 10 GB, +131, +163 y +111 MiB (nightly 39562753838, 39584457311 y 39598804277)"
+        ),
+        "absolute_budget_mib": budget,
+        "composition_mib": [small["composition_mib"], large["composition_mib"]],
         "tmp_limit_bytes": TMP_LIMIT_BYTES,
         "trend": {
-            "rss_growth_mib": round(rss_growth / 1024, 1),
-            "absolute_budget_mib": budget,
-            "composition_mib": large["composition_mib"],
-            "within_budget": large["composition_mib"] <= budget,
+            "python_growth_mib": round(python_growth / 1024, 1),
             "note": (
-                "tendencia (A-65): el crecimiento del RSS y el presupuesto absoluto no deciden el"
-                " resultado; el RSS incluye lo nativo y lo que el asignador no devuelve, que sigue"
-                " al tamaño de cada clip (se lee entero), no al del paquete"
+                "tendencia (A-65): el pico de Python (tracemalloc) no decide el resultado; el"
+                " crecimiento del RSS es nativo, tracemalloc no lo ve, y aparece al pasar de un"
+                " volumen a dos (a clip constante); la causa exacta no se midió (dato para VIG-226)"
             ),
         },
     }
@@ -417,7 +421,9 @@ def _run_profile(
     print(
         f"\nNFR-LAZ-49 ({profile.name}): {json.dumps(report, ensure_ascii=False)}\ninforme: {path}"
     )
-    assert retained_growth <= MEMORY_GROWTH_LIMIT_KIB, report
+    assert rss_growth <= RSS_GROWTH_LIMIT_KIB, report
+    for measured in (small, large):
+        assert measured["max_rss_kib"] - measured["base_rss_kib"] <= budget * 1024, report
     return report
 
 
