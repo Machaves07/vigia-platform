@@ -18,7 +18,7 @@ from hypothesis import seed as hypothesis_seed
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule, run_state_machine_as_test
 
 from tests.conftest import _seeds_for_profile
-from tests.examples.regressions.lifecycle import REGRESSIONS
+from tests.examples.regressions.test_pr_laz_10_lifecycle import REGRESSIONS
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_actions_support import actions_stack
 from tests.loop_deadlines_support import CONFIGURATION_REASON

@@ -1,8 +1,10 @@
 """La forma de ``tests/examples/regressions/`` (NFR-NUC-48, NFR-GOB-62, PBT-10).
 
 Cada módulo de la carpeta es un contraejemplo reducido de una propiedad: se llama
-``test_pr_nuc_NN_*.py`` (U-02) o ``test_pr_gob_NN_*.py`` (U-03, TASK-229) y su docstring nombra la
-propiedad (``PR-NUC-NN`` o ``PR-GOB-NN``) y cómo se reproduce (semilla o ``@reproduce_failure``).
+``test_pr_nuc_NN_*.py`` (U-02), ``test_pr_gob_NN_*.py`` (U-03, TASK-229) o
+``test_pr_laz_NN_*.py`` (U-04, TASK-314) y su docstring nombra la propiedad
+(``PR-NUC-NN``, ``PR-GOB-NN`` o ``PR-LAZ-NN``) y cómo se reproduce (semilla o
+``@reproduce_failure``).
 Sin módulos todavía, la comprobación pasa; con uno mal formado, lo nombra.
 """
 
@@ -14,7 +16,7 @@ from pathlib import Path
 from typing import Final
 
 REGRESSIONS: Final = Path(__file__).resolve().parent / "regressions"
-_NAME: Final = re.compile(r"test_pr_(nuc|gob)_(\d{2})_[a-z0-9_]+\.py")
+_NAME: Final = re.compile(r"test_pr_(nuc|gob|laz)_(\d{2})_[a-z0-9_]+\.py")
 _REPRODUCTION: Final = re.compile(r"semilla|seed|reproduce_failure", re.IGNORECASE)
 
 
@@ -26,7 +28,7 @@ def problems(directory: Path) -> list[str]:
             continue
         match = _NAME.fullmatch(path.name)
         if match is None:
-            found.append(f"{path.name}: el nombre no es test_pr_(nuc|gob)_NN_<qué>.py")
+            found.append(f"{path.name}: el nombre no es test_pr_(nuc|gob|laz)_NN_<qué>.py")
             continue
         unit, number = match.groups()
         prop = f"PR-{unit.upper()}-{number}"
@@ -54,7 +56,7 @@ def test_a_malformed_regression_is_named(tmp_path: Path) -> None:
         '"""PR-NUC-25: partición; semilla 20260929."""\n', encoding="utf-8"
     )
     assert problems(tmp_path) == [
-        "test_fallo_suelto.py: el nombre no es test_pr_(nuc|gob)_NN_<qué>.py",
+        "test_fallo_suelto.py: el nombre no es test_pr_(nuc|gob|laz)_NN_<qué>.py",
         "test_pr_nuc_13_cadena.py: el docstring no nombra PR-NUC-13",
         "test_pr_nuc_13_cadena.py: el docstring no dice cómo se reproduce (semilla)",
     ]
@@ -74,5 +76,27 @@ def test_a_malformed_u03_regression_is_named(tmp_path: Path) -> None:
     assert problems(tmp_path) == [
         "test_pr_gob_12_aislamiento.py: el docstring no nombra PR-GOB-12",
         "test_pr_gob_20_concesion.py: el docstring no dice cómo se reproduce (semilla)",
-        "test_pr_gob_7_corto.py: el nombre no es test_pr_(nuc|gob)_NN_<qué>.py",
+        "test_pr_gob_7_corto.py: el nombre no es test_pr_(nuc|gob|laz)_NN_<qué>.py",
+    ]
+
+
+def test_a_well_formed_u04_regression_is_accepted(tmp_path: Path) -> None:
+    (tmp_path / "test_pr_laz_10_ciclo.py").write_text(
+        '"""PR-LAZ-10: ciclo de vida; semilla 1111."""\n', encoding="utf-8"
+    )
+    assert problems(tmp_path) == []
+
+
+def test_a_malformed_u04_regression_is_named(tmp_path: Path) -> None:
+    (tmp_path / "test_pr_laz_10_ciclo.py").write_text(
+        '"""PR-GOB-10: otra propiedad; semilla 1111."""\n', encoding="utf-8"
+    )
+    (tmp_path / "test_pr_laz_11_cierre.py").write_text(
+        '"""PR-LAZ-11: sin reproducción."""\n', encoding="utf-8"
+    )
+    (tmp_path / "test_pr_laz_7_corto.py").write_text('"""PR-LAZ-07."""\n', encoding="utf-8")
+    assert problems(tmp_path) == [
+        "test_pr_laz_10_ciclo.py: el docstring no nombra PR-LAZ-10",
+        "test_pr_laz_11_cierre.py: el docstring no dice cómo se reproduce (semilla)",
+        "test_pr_laz_7_corto.py: el nombre no es test_pr_(nuc|gob|laz)_NN_<qué>.py",
     ]

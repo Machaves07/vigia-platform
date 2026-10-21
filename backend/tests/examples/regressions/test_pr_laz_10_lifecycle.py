@@ -2,6 +2,10 @@
 
 Los dos casos tras resolver cola detectaron VIG-268: se ejecutan sin xfail contra los servicios
 corregidos. Los demás protegen el oráculo y el arnés, no codifican errores 500 como válidos.
+
+Reproducción: desde backend, ``uv run pytest -q --hypothesis-profile=ci
+tests/properties/laz/test_pr_laz_10_lifecycle_stateful.py -k permanent_counterexamples
+--hypothesis-seed=1111`` ejecuta las secuencias fijas contra PostgreSQL.
 """
 
 from datetime import UTC, datetime
