@@ -15,9 +15,11 @@ orden de sus pasos:
    ``reason_too_short``; una categoría de otra lista o un texto más largo o con caracteres que la
    política base rechaza, ``invalid_request`` sin ``detail_code`` (esquema).
 4. **Motivo reforzado**: toda reclasificación (``sequence_in_subject > 1``) exige
-   ``reinforced_reason = true``; si no, ``reason_required`` (BR-LAZ-23). El registro guarda
-   ``reinforced_reason`` verdadero exactamente en las reclasificaciones: en la primera
-   clasificación no hay motivo que reforzar y la declaración se ignora.
+   ``reinforced_reason = true``; si no, ``reason_required`` (BR-LAZ-23). El registro conserva
+   el motivo reforzado que exige la transición: en la primera
+   clasificación desde ``received`` no hay motivo que reforzar y la declaración se ignora.
+   Después de resolver la cola, T15/T17/T18 sí exigen motivo reforzado, aunque sea el primer
+   registro ``classification``: T05/T06 no incrementan su contador ni crean historial ficticio.
 5. El contenido ``classification`` (DE §5.2) con ``effect_on_loop`` de la transición y los eventos
    de su fila de §4.1 (``finding_confirmed``, ``finding_discarded``, ``finding_reclassified``,
    ``loop_suspended`` o ``loop_resumed``), que citan el ``record_id`` del registro.
@@ -180,6 +182,10 @@ _PREVIOUS: Final = text(
     "SELECT record_id FROM loop.classification"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id AND zone_id = :zone_id"
     " AND subject_id = :subject_id AND sequence_in_subject = :sequence"
+)
+_PREVIOUS_REVIEW: Final = text(
+    "SELECT outcome, reason_category FROM loop.review_resolution"
+    " WHERE organization_id = :organization_id AND detection_id = :subject_id"
 )
 _INSERT: Final = text(
     "INSERT INTO loop.classification (classification_id, organization_id, plant_id, zone_id,"
@@ -476,6 +482,7 @@ class ClassificationService:
         sequence = current.classification_count + 1
         is_reclassification = sequence > 1
         transition_id = accepted.transition.transition_id
+        reinforced_reason = transition_id not in ("T03", "T04")
         effect = EFFECT_BY_TRANSITION[transition_id]
         classification_id = uuid7(self._clock, self._random_bytes)
         record_id = uuid7(self._clock, self._random_bytes)
@@ -500,7 +507,7 @@ class ClassificationService:
             "reason_category": category,
             "reason_text": reason,
             "is_reclassification": is_reclassification,
-            "reinforced_reason": is_reclassification,
+            "reinforced_reason": reinforced_reason,
             "effect_on_loop": effect.value,
             "standard": {
                 "standard_id": str(current.standard_id),
@@ -516,7 +523,17 @@ class ClassificationService:
             content["previous_outcome"] = current.current_outcome.value
         if previous_record is not None:
             content["previous_classification_record_id"] = str(previous_record)
-        events = self._events(accepted, current, outcome, classification_id, record_id)
+        previous_review_outcome = None
+        if current.current_outcome is None and "finding_reclassified" in accepted.transition.events:
+            previous_review_outcome = await self._previous_review_outcome(transaction, current)
+        events = self._events(
+            accepted,
+            current,
+            outcome,
+            classification_id,
+            record_id,
+            previous_review_outcome=previous_review_outcome,
+        )
         written, step = await self._store.write_and_apply(
             transaction,
             self._writer,
@@ -541,7 +558,7 @@ class ClassificationService:
             outcome=outcome,
             reason_category=category,
             is_reclassification=is_reclassification,
-            reinforced_reason=is_reclassification,
+            reinforced_reason=reinforced_reason,
             effect_on_loop=effect,
             transition_id=transition_id,
             lifecycle_state=finding.state,
@@ -565,6 +582,8 @@ class ClassificationService:
         outcome: ClassificationOutcome,
         classification_id: uuid.UUID,
         record_id: uuid.UUID,
+        *,
+        previous_review_outcome: ClassificationOutcome | None = None,
     ) -> tuple[NewEvent, ...]:
         """Los eventos de la fila de §4.1: solo identificadores y valores de listas cerradas."""
         base: dict[str, Any] = {
@@ -581,11 +600,40 @@ class ClassificationService:
                 payload["outcome"] = outcome.value
                 payload["family"] = current.family
             if name == "finding_reclassified":
-                if current.current_outcome is None:  # pragma: no cover - T18 a T20 ya clasificados
+                previous = current.current_outcome or previous_review_outcome
+                if previous is None:  # pragma: no cover - una decisión anterior debe existir
                     raise RuntimeError("una reclasificación sin salida anterior")
-                payload["previous_outcome"] = current.current_outcome.value
+                payload["previous_outcome"] = previous.value
             events.append(NewEvent(event_name=name, payload=payload))
         return tuple(events)
+
+    @staticmethod
+    async def _previous_review_outcome(
+        transaction: Transaction, current: _Subject
+    ) -> ClassificationOutcome:
+        """T18/T19/T20 sin clasificación previa: la decisión de revisión para el evento.
+
+        Se relee la resolución bajo la exclusión del sujeto y el mismo contexto autorizado.
+        No es una clasificación anterior: no se añade al contador, al historial ni a sus
+        referencias. El expediente conserva la salida original ``review_discarded``.
+        """
+        row = (
+            await transaction.execute(
+                _PREVIOUS_REVIEW,
+                {"organization_id": current.organization_id, "subject_id": current.subject_id},
+            )
+        ).first()
+        if row is not None:
+            if row.outcome == "review_confirmed":
+                return ClassificationOutcome.CONFIRMED
+            category = str(row.reason_category)
+            for outcome in (
+                ClassificationOutcome.AUTHORIZED_OPERATION,
+                ClassificationOutcome.FALSE_POSITIVE,
+            ):
+                if category in REASONS_BY_OUTCOME[outcome]:
+                    return outcome
+        raise RuntimeError("el sujeto sin clasificación no tiene una resolución válida")
 
     @staticmethod
     async def _previous_record(transaction: Transaction, current: _Subject) -> uuid.UUID | None:

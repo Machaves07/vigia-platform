@@ -49,6 +49,7 @@ from vigia_platform.accreditation.events import (
 )
 from vigia_platform.accreditation.export.download import ExportDownloads
 from vigia_platform.accreditation.exposure.service import ExposureService
+from vigia_platform.accreditation.metrics.task import METRICS_MATERIALIZE, METRICS_SCHEDULE
 from vigia_platform.accreditation.monthly.audit import SampleAuditService
 from vigia_platform.accreditation.monthly.commitments import CommitmentService
 from vigia_platform.accreditation.monthly.task import MONTHLY_PACKAGE, MONTHLY_PACKAGE_SCHEDULE
@@ -245,6 +246,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("GET", "/accreditation/commitments"),
                 ("GET", "/accreditation/exposure"),
                 ("GET", "/accreditation/adoption"),
+                ("GET", "/accreditation/metrics"),
             ]
             assert set(state) == {ACCREDITATION_STATE_KEY}
             http = state[ACCREDITATION_STATE_KEY]
@@ -295,6 +297,7 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
             Schedule.every(3600),
             TaskIteration.PER_ORGANIZATION,
         ),
+        (METRICS_MATERIALIZE, ActorUnit.U04, METRICS_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         (MONTHLY_PACKAGE, ActorUnit.U04, MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ("review_reminders", ActorUnit.U04, Schedule.every(3600), TaskIteration.PER_ORGANIZATION),
         (UNCLOSABLE_REVIEW_DUE, ActorUnit.U04, UNCLOSABLE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
@@ -347,12 +350,14 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
     assert len(notifications_registration.CONSUMER_REGISTRARS) == 3
     assert len(registration.CONSUMER_REGISTRARS) == 3
     # monthly_package (TASK-342 a 344) y adoption_check (TASK-323).
-    assert len(accreditation_registration.TASK_REGISTRARS) == 2
+    assert len(accreditation_registration.TASK_REGISTRARS) == 3
     assert accreditation_registration.ACCREDITATION_TASKS == {
+        METRICS_MATERIALIZE: (METRICS_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         MONTHLY_PACKAGE: (MONTHLY_PACKAGE_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         ADOPTION_CHECK: (ADOPTION_CHECK_SCHEDULE, TaskIteration.PER_ORGANIZATION),
     }
     assert {
+        METRICS_MATERIALIZE: (METRICS_SCHEDULE, TaskIteration.PER_ORGANIZATION),
         registration.VERIFY_LOOP_PROJECTION: (
             registration.VERIFY_LOOP_PROJECTION_SCHEDULE,
             TaskIteration.PER_ORGANIZATION,

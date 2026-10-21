@@ -188,6 +188,11 @@ TASK_CASES: Final[dict[str, TaskCase]] = {
         " accreditation y de catalog) se prueba en tests/integration/test_adoption_task.py::"
         "test_the_task_only_marks_and_publishes_in_its_organization",
     ),
+    "metrics_materialize": TaskCase(
+        TaskKind.INHERITED,
+        "tarea U-04 por organización; aislamiento de candidatos y guardado en"
+        " tests/integration/test_metrics_routes.py::test_task_only_materializes_its_organization",
+    ),
     # --- U-04 (TASK-348) ---
     "email_grouping": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),
     "digest_weekly": TaskCase(TaskKind.INHERITED, _U04_GROUPING_WHY),

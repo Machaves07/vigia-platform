@@ -40,9 +40,10 @@ confirmarse (nunca un ``monthly_package_produced`` sin su fila sellada, ni al re
   trabajo de otra magnitud. Este módulo genera en su lugar un PDF mínimo y determinista
   (``_render_document``), sin ``WeasyPrint`` ni plantillas: cumple «el paquete contiene el
   documento» sin inventar una adaptación completa del renderizador de exportación.
-- **Métricas y exposición**: el puerto de métricas (TASK-321) y el de exposición (TASK-3xx,
-  VIG-231/237) no existen todavía en ``main``. Cada métrica se declara ``not_computable`` y la
-  exposición también (BR-LAZ-115: nunca un valor inventado, nunca cero en su lugar).
+- **Métricas**: ``ProgramMetricsPort`` (TASK-321) aporta las siete métricas a la fila, el
+  manifiesto firmado y el registro. Sin puerto instalado se conserva la declaración explícita
+  ``not_computable`` (compatibilidad de compositores aislados). La exposición detallada sigue
+  pendiente de su propia integración; su métrica sí llega por el puerto del programa.
 - **Cobertura** (``coverage_summary``): no hay aquí integración con ``CoverageService``; se
   declara vacía (``{}``, objeto jsonb por ``monthly_package_coverage``), nunca una cifra inventada.
 - **Revisor de la muestra** (``audit_sample.reviewer_user_id``): obligatorio en el esquema (quien
@@ -87,6 +88,7 @@ from typing import Any, Final, Protocol
 
 from vigia_platform.accreditation.export.lease import RecordWriter
 from vigia_platform.accreditation.export.worker import covered_chains
+from vigia_platform.accreditation.metrics.model import ProgramMetricsPort
 from vigia_platform.accreditation.monthly.repository import (
     AuditSampleItemRow,
     MonthlyPackageLease,
@@ -513,8 +515,10 @@ class MonthlyPackageComposer:
         clock: Clock,
         signer: ManifestSigner,
         owner: str | None = None,
+        program_metrics: ProgramMetricsPort | None = None,
     ) -> None:
         self._database = database
+        self._program_metrics = program_metrics
         self._reader = reader
         self._repository = repository
         self._evidence = evidence
@@ -606,6 +610,16 @@ class MonthlyPackageComposer:
         checkpoint_chain, stored_checkpoint = await self._fetch_checkpoint(context, zone.plant_id)
         checkpoint_id = stored_checkpoint.entry_id
         public_keys = self._checkpoints.checkpoint_public_keys()
+        metric_snapshot = (
+            None
+            if self._program_metrics is None
+            else await self._program_metrics.snapshot(context, zone.zone_id, period)
+        )
+        metric_values = (
+            _metrics_not_computable()
+            if metric_snapshot is None
+            else [metric.model_dump(mode="json") for metric in metric_snapshot.values]
+        )
 
         zip_bytes = self._build_zip(
             package_id=package_id,
@@ -616,6 +630,7 @@ class MonthlyPackageComposer:
             checkpoint_chain=checkpoint_chain,
             stored_checkpoint=stored_checkpoint,
             public_keys=public_keys,
+            metric_values=metric_values,
         )
         package_sha256 = hashlib.sha256(zip_bytes).hexdigest()
 
@@ -660,7 +675,24 @@ class MonthlyPackageComposer:
             "period": period,
             "findings_summary": findings,
             "recurrence_summary": recurrence,
-            "metrics": _metrics_not_computable(),
+            # El registro v1 conserva su esquema; el manifiesto lleva además motivos y detalle.
+            "metrics": [
+                {
+                    key: value
+                    for key, value in metric.items()
+                    if key
+                    in {
+                        "key",
+                        "status",
+                        "value",
+                        "numerator",
+                        "denominator",
+                        "unit",
+                        "excluded_unclosable_count",
+                    }
+                }
+                for metric in metric_values
+            ],
             "exposure": _exposure_not_computable(),
             "adoption": adoption,
             "audit_sample": audit_sample,
@@ -683,6 +715,7 @@ class MonthlyPackageComposer:
             commitments=previous_commitments,
             generated_at=generated_at,
             content=content,
+            metric_snapshot_id=None if metric_snapshot is None else metric_snapshot.snapshot_id,
         )
         await self._release_lease(context, zone, period)
         if record_id is None:
@@ -882,6 +915,7 @@ class MonthlyPackageComposer:
         commitments: Sequence[Mapping[str, Any]],
         generated_at: datetime,
         content: Mapping[str, Any],
+        metric_snapshot_id: uuid.UUID | None = None,
     ) -> uuid.UUID | None:
         """Escribe ``monthly_package_produced`` y sella la fila en una sola transacción.
 
@@ -920,7 +954,7 @@ class MonthlyPackageComposer:
                     package_id=package_id,
                     findings_summary=findings,
                     recurrence_summary=recurrence,
-                    metric_snapshot_id=None,
+                    metric_snapshot_id=metric_snapshot_id,
                     exposure_indicator_id=None,
                     coverage_summary=_COVERAGE_NOT_COMPUTABLE,
                     commitments_from_previous_period=commitments,
@@ -950,6 +984,7 @@ class MonthlyPackageComposer:
         checkpoint_chain: CheckpointChain,
         stored_checkpoint: StoredCheckpoint,
         public_keys: Sequence[CheckpointPublicKey],
+        metric_values: Sequence[Mapping[str, Any]] | None = None,
     ) -> bytes:
         """El zip del paquete, verificable por el ``vigia_verify.py`` que incluye (rework 1,
         VIG-239: ``accreditation.export_verifier`` lo exige, también para un paquete mensual sin
@@ -1030,7 +1065,7 @@ class MonthlyPackageComposer:
             # P6/BR-LAZ-115: declaradas no calculables también en el manifiesto firmado, no solo
             # en el contenido del expediente (``content`` de ``_insert_sample``/``_seal_and_write``
             # más abajo) — el paquete mensual no integra ``CoverageService`` ni ``ExposureService``.
-            "metrics": _metrics_not_computable(),
+            "metrics": _metrics_not_computable() if metric_values is None else list(metric_values),
             "exposure": _exposure_not_computable(),
             "coverage_summary": dict(_COVERAGE_NOT_COMPUTABLE),
             "artifacts": artifacts,

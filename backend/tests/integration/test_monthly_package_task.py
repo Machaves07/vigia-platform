@@ -45,6 +45,9 @@ import pytest
 from tests.integration.conftest import LocalStackEndpoint, PostgresEndpoint, versioned_bucket
 from tests.laz_support import IngestedSubject, LoopOrganization, LoopWorld, loop_world
 from tests.signing_support import bootstrapped_world
+from vigia_platform.accreditation.metrics.compute import compute_metrics, missing
+from vigia_platform.accreditation.metrics.model import ProgramMetricSnapshot
+from vigia_platform.accreditation.metrics.repository import MetricsRepository
 from vigia_platform.accreditation.monthly.package import ComposeOutcome, MonthlyPackageComposer
 from vigia_platform.accreditation.monthly.repository import (
     MonthlyPackageRepository,
@@ -60,6 +63,7 @@ from vigia_platform.ledger.chain.checkpoints import CheckpointService
 from vigia_platform.loop.calendar import local_date, month_bounds, today
 from vigia_platform.loop.config.parameters import LoopSettings, PlantLoopConfiguration
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.domain.enums import MetricKey, MetricUnit
 from vigia_platform.shared.clock import Clock, SimulatedClock
 from vigia_platform.shared.storage import S3Storage
 
@@ -711,3 +715,88 @@ def test_sealed_package_verifies_intact_with_the_embedded_verifier(world: World)
     assert manifest["coverage_summary"] == {"status": "not_computable"}, manifest[
         "coverage_summary"
     ]
+
+
+def test_monthly_consumes_program_metrics_in_manifest_record_and_foreign_key(world: World) -> None:
+    """TASK-321: el consumidor usa los mismos valores, no el sustituto no calculable."""
+    world.clock.set(_BASELINE)
+    organization = world.loop.organization()
+    world.configure(organization)
+    world.grant_coordinator(organization)
+    zone = world.zone(organization)
+    period = "2026-09"
+    start, end = month_bounds(BOGOTA, period)
+    world.clock.set(end + timedelta(days=5))
+    values = compute_metrics(
+        (),
+        organization_id=zone.organization_id,
+        plant_id=zone.plant_id,
+        zone_id=zone.zone_id,
+        start=start,
+        end=end,
+        previous_start=start - timedelta(days=31),
+        cutoff=end,
+        timezone=BOGOTA,
+        approved=True,
+        adoption_count=7,
+        exposure=missing(MetricKey.EXPOSURE, MetricUnit.MINUTES, "Falta el insumo sintético."),
+    )
+    snapshot = ProgramMetricSnapshot(
+        snapshot_id=uuid.uuid4(),
+        organization_id=zone.organization_id,
+        plant_id=zone.plant_id,
+        zone_id=zone.zone_id,
+        period=period,
+        period_from=start,
+        period_to=end,
+        values=values,
+        materialized_at=world.clock.now(),
+        recomputed_at=None,
+        inputs_digest="a" * 64,
+    )
+    context = world.loop.event_context(organization)
+
+    async def save() -> None:
+        async with world.database.transaction(context) as tx:
+            await MetricsRepository().save(tx, snapshot, timezone=BOGOTA, expired_before=start)
+
+    world.loop.stack.run(save())
+
+    class MetricsPort:
+        async def snapshot(self, *args: Any) -> ProgramMetricSnapshot:
+            return snapshot
+
+    composer = world.composer()
+    composer._program_metrics = MetricsPort()
+    outcome = world.loop.stack.run(
+        composer.compose_and_seal(
+            context,
+            zone,
+            period,
+            BOGOTA,
+            sample_percent=_SAMPLE_PERCENT,
+            sample_min=_SAMPLE_MIN,
+            sample_max=_SAMPLE_MAX,
+        )
+    )
+    assert isinstance(outcome, ComposeOutcome)
+    (row,) = world.loop.stack.fetch(
+        "SELECT metric_snapshot_id FROM accreditation.monthly_package WHERE package_id=$1",
+        outcome.package_id,
+    )
+    assert row["metric_snapshot_id"] == snapshot.snapshot_id
+    key = object_key(
+        organization_id=zone.organization_id,
+        plant_id=zone.plant_id,
+        zone_id=zone.zone_id,
+        period=period,
+    )
+    data = world.loop.stack.run(world.evidence.get_object(key))
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        metrics = json.loads(archive.read("manifest.json"))["metrics"]
+    assert metrics == [v.model_dump(mode="json") for v in values]
+    (record,) = world.loop.stack.fetch(
+        "SELECT content_json FROM ledger.ledger_record WHERE record_id=$1", outcome.record_id
+    )
+    content = json.loads(record["content_json"])
+    assert {v["key"]: v["value"] for v in content["metrics"]}["adoption"] == 7.0
