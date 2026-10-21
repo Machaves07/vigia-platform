@@ -35,7 +35,9 @@ from tests.properties.laz.strategies.lifecycle import (
     Reassign,
     ReopenFinding,
     Tick,
-    lifecycle_command_sequences,
+)
+from tests.properties.laz.strategies.lifecycle import (
+    action_command_sequences as lifecycle_command_sequences,
 )
 
 pytestmark = pytest.mark.integration
