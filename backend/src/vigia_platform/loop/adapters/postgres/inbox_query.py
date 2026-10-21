@@ -10,11 +10,12 @@ transacción) y devuelve, en una fila, tres listas ``jsonb``:
 - ``zones``: cada zona consultada con su nodo asignado hoy (``identity.zone_node_assignment``) y
   el ``communication_state`` que U-03 proyecta en ``fleet.node_inventory`` (BR-LAZ-149 y 153);
 - ``partitions``: el control de la proyección de cada planta consultada que no está ``healthy``
-  (``rebuilding`` o ``diverged``, BR-LAZ-156), o cuyo checkpoint va detrás de la ingesta.
+  (``rebuilding`` o ``diverged``, BR-LAZ-156), o cuya frontera comprobada va detrás de la ingesta.
 
 **Cero llamadas a U-03** (NFR-LAZ-03): todo sale de tablas; ningún puerto. La sentencia nunca lee
 el expediente (BR-LAZ-09: la bandeja no genera auditoría de consulta).
-La secuencia del evento de ingesta se publica en la misma transacción que el registro. Permite
+La secuencia del evento de ingesta se publica en la misma transacción que el registro. Su índice
+parcial y la frontera contigua comprobada en la escritura (no el máximo compartido) permiten
 declarar el atraso antes de la primera lectura, también tras restaurar una copia física, sin leer
 cargas ni ``outbox_delivery`` ni esperar al verificador diario. El retraso incremental normal se
 trata igual (fallo cerrado): no hay una ventana de gracia que pueda ocultar una copia atrasada.
@@ -84,12 +85,13 @@ WITH zones AS (
 partition_health AS MATERIALIZED (
     SELECT p.plant_id,
            CASE WHEN c.state IN ('rebuilding', 'diverged') THEN c.state
-                WHEN EXISTS (
-                    SELECT 1 FROM shared.outbox_event e
+                WHEN COALESCE((
+                    SELECT e.ledger_sequence FROM shared.outbox_event e
                     WHERE e.organization_id = :organization_id AND e.plant_id = p.plant_id
                       AND e.event_name IN ('finding_received', 'detection_for_review_received')
-                      AND e.ledger_sequence > COALESCE(c.last_applied_ledger_sequence, 0)
-                ) THEN 'diverged'
+                      AND e.ledger_sequence IS NOT NULL
+                    ORDER BY e.ledger_sequence DESC LIMIT 1
+                ), 0) > COALESCE(c.ingestion_frontier, 0) THEN 'diverged'
                 ELSE 'healthy' END AS state
     FROM (SELECT DISTINCT plant_id FROM zones) p
     LEFT JOIN loop.loop_projection_checkpoint c

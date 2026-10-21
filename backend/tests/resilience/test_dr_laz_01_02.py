@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import io
 import tarfile
+import uuid
 
 import pytest
 from sqlalchemy import text
 
 from tests.identity_db import MigratedDatabase
 from tests.integration.conftest import POSTGRES_USER, PostgresEndpoint
-from tests.laz_support import InstrumentedPorts, loop_world
+from tests.laz_support import IngestedSubject, InstrumentedPorts, LoopWorld, loop_world
 from tests.resilience.harness import dedicated_postgres, restored_postgres
 from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.loop.application.inbox import InboxService, PartitionDeclaration
@@ -20,6 +21,57 @@ from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
 
 pytestmark = pytest.mark.integration
+
+
+def _cross_gap(world: LoopWorld, first: IngestedSubject, path: str) -> set[uuid.UUID]:
+    """Avanza la marca compartida por vías reales, nunca con un UPDATE de la fixture."""
+    if path == "review_queue":
+        detection = world.ingest_detection(first.organization)
+        consumer, _ = world.review_queue_consumer()
+        assert world.deliver_review_queue(consumer, world.review_queue_event(detection))
+        return {detection.record_id}
+    if path == "write":
+        _, applied = world.write(
+            first.organization, "classification", world.classification_content(first)
+        )
+        assert applied is not None and applied.applied
+    if path == "later_finding":
+        later = world.ingest_finding(first.organization)
+        consumer, _ = world.projection_consumer()
+        world.deliver(consumer, world.outbox_event(later))
+        return {later.record_id}
+    return set()
+
+
+@pytest.mark.parametrize("path", ["review_queue", "write", "later_finding"])
+def test_shared_checkpoint_cannot_hide_an_ingestion_gap(
+    postgres_endpoint: PostgresEndpoint, path: str
+) -> None:
+    """Un consumidor distinto, U-04 o una entrega fuera de orden no certifican el hueco."""
+    with loop_world(postgres_endpoint, "crossed_gap") as world:
+        org = world.a
+        consumer, _ = world.projection_consumer()
+        first = world.ingest_finding(org)
+        world.deliver(consumer, world.outbox_event(first))
+        lost = world.ingest_finding(org)
+        extra = _cross_gap(world, first, path)
+        assert (
+            world.checkpoint(org)["last_applied_ledger_sequence"]
+            > world.outbox_event(lost).ledger_sequence
+        )
+        service = InboxService(
+            database=world.stack.primary.database, authorizer=world.stack.authz.authorizer
+        )
+        page = world.stack.run(service.page(world.context(org)))
+        assert page.partitions and not page.items, "La marca compartida no certifica la ingesta"
+        world.deliver(consumer, world.outbox_event(lost))
+        recovered = world.stack.run(service.page(world.context(org)))
+        assert not recovered.partitions
+        assert {item.finding_state_id for item in recovered.items} == {
+            first.record_id,
+            lost.record_id,
+            *extra,
+        }
 
 
 def test_checkpoint_behind_ingestion_is_not_served(postgres_endpoint: PostgresEndpoint) -> None:
@@ -44,7 +96,8 @@ def test_checkpoint_behind_ingestion_is_not_served(postgres_endpoint: PostgresEn
         assert not recovered.partitions
 
 
-def test_restored_stale_projection_is_not_served() -> None:
+@pytest.mark.parametrize("path", ["none", "review_queue", "write"])
+def test_restored_stale_projection_is_not_served(path: str) -> None:
     """pg_basebackup y otro PostgreSQL 16, sin worker ni UPDATE de salud desde la fixture."""
     with dedicated_postgres() as (endpoint, source), loop_world(endpoint, "dr_laz_01") as world:
         org = world.a
@@ -52,9 +105,19 @@ def test_restored_stale_projection_is_not_served() -> None:
         first = world.ingest_finding(org)
         world.deliver(consumer, world.outbox_event(first))
         lost = world.ingest_finding(org)
+        extra = _cross_gap(world, first, path)
         checkpoint = world.checkpoint(org)
         assert checkpoint is not None and checkpoint["state"] == "healthy"
-        assert checkpoint["last_applied_ledger_sequence"] < world.outbox_event(lost).ledger_sequence
+        if path == "none":
+            assert (
+                checkpoint["last_applied_ledger_sequence"]
+                < world.outbox_event(lost).ledger_sequence
+            )
+        else:
+            assert (
+                checkpoint["last_applied_ledger_sequence"]
+                > world.outbox_event(lost).ledger_sequence
+            )
 
         code, output = source.exec(
             [
@@ -147,14 +210,15 @@ def test_restored_stale_projection_is_not_served() -> None:
                         clock=sessions.clock,
                     )
                     rebuilt = await rebuilder.rebuild_plant(context, org.plant_id)
-                    assert rebuilt.findings_written == 2
+                    assert rebuilt.findings_written == 2 + len(extra)
                     assert rebuilt.projection_digest == expected_digest
                     after = await service.page(context)
-                    assert len(after.items) == 2
+                    assert len(after.items) == 2 + len(extra)
                     assert not after.partitions
                     assert {item.finding_state_id for item in after.items} == {
                         first.record_id,
                         lost.record_id,
+                        *extra,
                     }
                     async with database.transaction(context) as tx:
                         state = (

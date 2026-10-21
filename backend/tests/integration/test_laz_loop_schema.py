@@ -285,9 +285,13 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         if MIGRATION.app_updatable_columns(table)
     }
     expected["assistant_request"] |= set(USAGE.USAGE_COLUMNS)
-    # El arrendamiento de la reconstrucción (laz_0037, TASK-306): dos columnas más, aditivas
-    # sobre lo que laz_0029 ya dejaba actualizable en loop_projection_checkpoint.
-    expected["loop_projection_checkpoint"] |= {"rebuild_owner", "rebuild_lease_until"}
+    # Arrendamiento (laz_0037, TASK-306) y frontera de ingesta (laz_0040, VIG-273): columnas
+    # aditivas sobre lo que laz_0029 ya dejaba actualizable en loop_projection_checkpoint.
+    expected["loop_projection_checkpoint"] |= {
+        "rebuild_owner",
+        "rebuild_lease_until",
+        "ingestion_frontier",
+    }
     # El vocabulario declarado de la lista (laz_0039, TASK-350): una columna más, aditiva sobre
     # lo que laz_0029 ya dejaba actualizable en blocked_vocabulary_list.
     expected["blocked_vocabulary_list"] |= {"declared_names"}
