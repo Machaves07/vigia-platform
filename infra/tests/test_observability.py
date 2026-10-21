@@ -51,26 +51,28 @@ FIXED_DIMENSIONS = frozenset({"service", "environment"})
 COLLECTOR = INFRA / "otel" / "collector.yaml"
 DELETE_LOG_ACTIONS = ("logs:DeleteLogGroup", "logs:DeleteLogStream")
 NODE_DIMENSION = "node_id"
-BACKEND_CATALOG = (
-    INFRA.parent / "backend" / "src" / "vigia_platform" / "shared" / "observability" / "metrics.py"
-)
+BACKEND_SOURCE = INFRA.parent / "backend" / "src" / "vigia_platform"
+BACKEND_CATALOG = BACKEND_SOURCE / "shared" / "observability" / "metrics.py"
+LOOP_CATALOG_FILE = BACKEND_SOURCE / "loop" / "observability" / "metrics.py"
 
 
-def _backend_metrics() -> dict[str, str]:
-    """Nombre → clase (``_C``, ``_H`` o ``_G``) de cada métrica de ``CATALOG`` del backend, leído
-    con ``ast`` (la infraestructura no instala el backend)."""
-    tree = ast.parse(BACKEND_CATALOG.read_text(encoding="utf-8"))
+def _backend_metrics(
+    path: Path = BACKEND_CATALOG, enum: str = "MetricName", catalog: str = "CATALOG"
+) -> dict[str, str]:
+    """Nombre → clase (``_C``, ``_H`` o ``_G``) de cada métrica de ``CATALOG`` del backend (o de
+    ``LOOP_CATALOG`` de U-04), leído con ``ast`` (la infraestructura no instala el backend)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: dict[str, str] = {}
     kinds: dict[str, str] = {}
     for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == "MetricName":
+        if isinstance(node, ast.ClassDef) and node.name == enum:
             for item in node.body:
                 if isinstance(item, ast.Assign) and isinstance(item.value, ast.Constant):
                     (member,) = item.targets
                     assert isinstance(member, ast.Name)
                     names[member.id] = str(item.value.value)
         target = node.target if isinstance(node, ast.AnnAssign) else None
-        if isinstance(target, ast.Name) and target.id == "CATALOG":
+        if isinstance(target, ast.Name) and target.id == catalog:
             assert isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.Tuple)
             for call in node.value.elts:
                 assert isinstance(call, ast.Call)
@@ -82,6 +84,8 @@ def _backend_metrics() -> dict[str, str]:
 
 
 BACKEND_METRICS = _backend_metrics()
+LOOP_METRICS = _backend_metrics(LOOP_CATALOG_FILE, "LoopMetricName", "LOOP_CATALOG")
+"""Las de U-04 (``loop.observability.metrics``): mismo espacio y mismo medidor (TASK-332)."""
 
 
 def _service_alarm_keys(config: EnvironmentConfig) -> set[str]:
@@ -391,6 +395,11 @@ def test_collector_declarations_only_use_closed_low_cardinality_attributes() -> 
         "app_version",
         "alarm_kind",
         "organization_id",
+        # U-04 (TASK-332): nombres registrados de consumidor, estado de la solicitud al asistente
+        # y sentido de las fichas, todos de lista cerrada.
+        "consumer",
+        "assistant_state",
+        "token_direction",
     }
     for sets, selectors in _collector_declarations():
         for dimensions in sets:
@@ -884,8 +893,9 @@ def test_fleet_section_draws_each_panel_from_published_metrics(deployment: Synth
 
 
 def test_dashboard_metrics_are_published_with_their_dimensions(deployment: Synthesized) -> None:
-    """Toda métrica de ``Vigia/Platform`` del tablero existe en el catálogo y ``awsemf`` la publica
-    con ese conjunto de dimensiones; ``node_id`` solo en contadores y medidores por nodo."""
+    """Toda métrica de ``Vigia/Platform`` del tablero existe en el catálogo (el del núcleo o el de
+    U-04) y ``awsemf`` la publica con ese conjunto de dimensiones; ``node_id`` solo en contadores
+    y medidores por nodo."""
     _, widgets = _dashboard(deployment)
     declarations = _collector_declarations()
     seen = 0
@@ -894,7 +904,7 @@ def test_dashboard_metrics_are_published_with_their_dimensions(deployment: Synth
             continue
         for name, dimensions, _ in _widget_metrics(widget):
             seen += 1
-            assert name in BACKEND_METRICS, name
+            assert name in BACKEND_METRICS or name in LOOP_METRICS, name
             assert any(
                 dimensions in sets and any(re.search(s, name) for s in selectors)
                 for sets, selectors in declarations
