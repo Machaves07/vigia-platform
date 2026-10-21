@@ -2,7 +2,9 @@
 
 Lo comparten los escenarios ``FS-NUC-01`` a ``FS-NUC-10`` (``test_fs_nuc_*.py``), los
 ``FS-GOB-01`` a ``FS-GOB-10`` de U-03 (``test_fs_gob_*.py``, con lo que añade
-``tests/resilience/gob_support.py``: LC-GOB-22) y la suite con dos procesos
+``tests/resilience/gob_support.py``: LC-GOB-22), los ``FS-LAZ-01`` a ``FS-LAZ-06`` y los ensayos
+``DR-LAZ-01`` y ``DR-LAZ-02`` de U-04 (``test_fs_laz_*.py`` y ``test_dr_laz_01_02.py``, con lo que
+añade ``tests/resilience/laz_support.py``: LC-LAZ-42) y la suite con dos procesos
 (``test_two_processes.py``):
 
 - **Contenedores propios** (``dedicated_postgres``, ``dedicated_localstack``): PostgreSQL 16 y
@@ -464,7 +466,7 @@ def scenario(
     El generador del escenario se deriva de la semilla de la sesión y del identificador, así que
     dos escenarios no comparten secuencia y cada uno se repite con la misma semilla.
     """
-    if not re.fullmatch(r"FS-(?:NUC|GOB)-\d{2}[a-z]?|NFR-NUC-\d{2}", scenario_id):
+    if not re.fullmatch(r"FS-(?:NUC|GOB|LAZ)-\d{2}[a-z]?|DR-LAZ-\d{2}|NFR-NUC-\d{2}", scenario_id):
         raise ValueError(f"identificador de escenario no válido: {scenario_id!r}")
     seed = session_seed()
     record = ScenarioRecord(
