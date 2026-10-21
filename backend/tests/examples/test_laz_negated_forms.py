@@ -25,6 +25,7 @@ from vigia_platform.loop.validators.vocabulary import (
 )
 
 POLICY = initial_policy()
+pytestmark = pytest.mark.laz_examples
 
 
 def _lemma(value: str) -> uuid.UUID:

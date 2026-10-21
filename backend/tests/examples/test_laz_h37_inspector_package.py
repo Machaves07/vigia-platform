@@ -80,6 +80,8 @@ from vigia_platform.loop.domain.enums import AttachmentContentType, PackageForm
 from vigia_platform.loop.projection.fold import ProjectionInput
 from vigia_platform.shared.signing.keys import KeyStatus
 
+pytestmark = pytest.mark.laz_examples
+
 ids = _Ids(uuid.UUID(int=0x37))
 ORG_A: Final = ids.next()
 ORG_B: Final = ids.next()
