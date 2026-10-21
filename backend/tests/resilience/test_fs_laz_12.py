@@ -8,11 +8,14 @@ el motor real con un aviso ``immediate``:
 - cada rebote duro marca a su usuario (``bounce_kind = hard``, ``failed``, supresión) y queda
   declarado; cada queja silencia ``normal`` y ``digest`` (``suppressed_by_preference``) y **nunca**
   ``immediate``; la reentrega de los 200 avisos no cambia nada;
+- cada rebote y cada queja quedan también en ``email_messages_total`` por estado (VIG-270), leído
+  del exportador en memoria;
 - la tasa de rebotes de 24 h por encima del 5 % alarma solo a la **segunda** evaluación
   consecutiva (``EMAIL_BOUNCE_RATE_PERCENT`` y ``evaluation_periods = 2`` de
-  ``infra/stacks/loop.py``). En producción la evalúa CloudWatch con las métricas del conjunto de
-  configuración de SES; ningún código de la aplicación emite ``email_messages_total``, así que la
-  tasa se calcula aquí con los mismos hechos (``email_message`` enviados y rebotados);
+  ``infra/stacks/loop.py``). En producción la evalúa CloudWatch con ``Bounce / Send`` del conjunto
+  de configuración de SES, no con ``email_messages_total``, que es un contador de observaciones
+  (una reentrega se vuelve a contar, ``notifications.metrics``): la tasa se calcula aquí con los
+  mismos hechos que cuenta SES (``email_message`` enviados y rebotados);
 - el tope de 200 ``EmailMessage`` de resumen por hora y organización frena el reenvío: con 250
   destinatarios limpios pendientes salen 200, una segunda ejecución en la misma hora no envía
   nada y el resto sale en la hora siguiente.
@@ -45,8 +48,9 @@ from tests.properties.laz.test_pr_laz_58_bounces_complaints import (
     _seed_sent_email,
 )
 from tests.resilience.harness import scenario
-from tests.resilience.laz_support import PROFILES, consecutive_breaches
+from tests.resilience.laz_support import PROFILES, consecutive_breaches, loop_metrics_export
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.observability.metrics import LoopMetricName
 from vigia_platform.notifications.digest import DigestWeeklyTask, register_digest_weekly
 from vigia_platform.notifications.grouping import (
     ORGANIZATION_EMAIL_CAP_PER_HOUR,
@@ -64,6 +68,7 @@ BOUNCE_ALARM_RATIO: Final = 0.05
 """``EMAIL_BOUNCE_RATE_PERCENT`` (5 %) de ``infra/stacks/loop.py``, mayor que."""
 EVALUATION_PERIODS: Final = 2
 DAY: Final = timedelta(days=1)
+EMAIL_STATES: Final = LoopMetricName.EMAIL_MESSAGES_TOTAL
 
 
 def _bounce_rate(world: NotificationWorld, organization_id: uuid.UUID) -> float:
@@ -140,9 +145,19 @@ def _run_task(
 
 @pytest.mark.parametrize("nightly", PROFILES)
 def test_burst_of_bounces_and_complaints_under_the_hourly_cap(
-    postgres_endpoint: PostgresEndpoint, nightly: bool
+    postgres_endpoint: PostgresEndpoint, monkeypatch: pytest.MonkeyPatch, nightly: bool
 ) -> None:
     assert ORGANIZATION_EMAIL_CAP_PER_HOUR == CAP
+    # ``email_messages_total`` (VIG-270) en un exportador en memoria, sin tocar el proveedor global.
+    export = loop_metrics_export()
+    monkeypatch.setattr(
+        "vigia_platform.notifications.metrics.get_loop_metrics", lambda: export.metrics
+    )
+
+    def observed(state: str) -> float:
+        value = export.value(EMAIL_STATES, email_state=state, organization_id=str(organization))
+        return 0.0 if value is None else value
+
     with (
         scenario(
             "FS-LAZ-12",
@@ -209,12 +224,17 @@ def test_burst_of_bounces_and_complaints_under_the_hourly_cap(
             assert email["complaint_at"] is not None and email["status"] == "sent"
             assert preference["email_suppressed_complaint"] is True
             assert preference["email_suppressed_hard_bounce"] is False
-        # Reentregar los 200 avisos (fuera de orden) no cambia ninguna marca.
+        # Cada aviso queda declarado también en la métrica por estado del exportador.
+        burst = {state: observed(state) for state in ("bounced", "complained")}
+        assert burst == {"bounced": len(bounced), "complained": len(complained)}
+        # Reentregar los 200 avisos (fuera de orden) no cambia ninguna marca. El contador es de
+        # observaciones (``notifications.metrics``): la reentrega se vuelve a observar.
         before = _state(world, organization)
         for body in reversed(bodies):
             sqs.enqueue(body)
         _poll(world, sqs)
         assert _state(world, organization) == before
+        assert observed("bounced") == 2 * len(bounced)
 
         # El reenvío: entregas normal pendientes para los 200 suprimidos y 250 limpios.
         clean = [
@@ -238,6 +258,7 @@ def test_burst_of_bounces_and_complaints_under_the_hourly_cap(
         normal = _delivery_status(world, organization, "normal")
         assert all(normal[m.user_id] == ("suppressed_by_preference", False) for m in suppressed)
         assert _digest_emails(world, organization) == CAP
+        assert observed("digested") == CAP  # lo que ve el panel «Correo» en la hora del tope
         waiting = [m for m in clean if not normal[m.user_id][1]]
         assert len(waiting) == len(clean) - CAP and all(
             normal[m.user_id] == ("pending", False) for m in waiting
@@ -250,6 +271,7 @@ def test_burst_of_bounces_and_complaints_under_the_hourly_cap(
         world.clock.advance(3600)
         _run_task(world, organization, register_email_grouping, grouping)
         assert _digest_emails(world, organization) == len(clean)
+        assert observed("digested") == len(clean)
         sent_to = {
             row["to_user_id"]
             for row in world.fetch(
@@ -295,6 +317,7 @@ def test_burst_of_bounces_and_complaints_under_the_hourly_cap(
             complaints=len(complained),
             bounce_ratios=ratios,
             bounce_alarm_evaluation=alarm_at,
+            email_messages_total_after_burst=burst,
             clean_recipients=len(clean),
             digest_emails_first_hour=CAP,
             digest_emails_total=len(clean),

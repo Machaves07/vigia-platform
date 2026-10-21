@@ -13,9 +13,11 @@ tarea: ``loop_world``, ``assistant_stack``, ``export_stack`` o ``notification_wo
 - eventos publicados de verdad (con sus entregas) en dos particiones distintas
   (``produce(0 | 1)``) y su entrega directa (``deliver``), con la frontera transaccional del
   despachador;
-- el ``Dispatcher`` real con métricas en un exportador en memoria (``dead_letter_created_total``,
-  la alarma a la primera entrada) y la orden real ``vigia-admin replay-dead-letter``
-  (``admin_cli.run`` con la raíz de composición administrativa, como ``vigia_app``);
+- el ``Dispatcher`` real con métricas en exportadores en memoria (``dead_letter_created_total`` de
+  U-02 y ``loop_dead_letter_entries_total`` de U-04 por ``LoopWorkerTelemetry``, como lo compone
+  la raíz del worker: las alarmas a la primera entrada) y la orden real
+  ``vigia-admin replay-dead-letter`` (``admin_cli.run`` con la raíz de composición
+  administrativa, como ``vigia_app``);
 - ``effects()`` (lo escrito por el consumidor, para comparar el estado final) y ``shape(evento)``
   (el efecto de un evento sin identificadores, para comparar particiones).
 
@@ -40,8 +42,11 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from tests.dispatch_support import metric_points, metrics_with_reader
 from tests.integration.conftest import PostgresEndpoint
+from tests.resilience.laz_support import LoopMetricsExport, loop_metrics_export
 from tests.runtime_support import FakeReader, database_secret, runtime_environ
 from vigia_platform.identity.application import admin_cli
+from vigia_platform.loop.observability.metrics import LoopMetricName
+from vigia_platform.loop.observability.worker import LoopWorkerTelemetry
 from vigia_platform.shared.context import ActorUnit
 from vigia_platform.shared.observability.metrics import MetricName
 from vigia_platform.shared.outbox.dispatcher import Dispatcher, DispatchReport, Outcome
@@ -103,6 +108,7 @@ class ConsumerCase:
     extra: dict[str, Any] = field(default_factory=dict)
     reader: InMemoryMetricReader | None = None
     metrics: Any = None
+    loop_export: LoopMetricsExport | None = None
 
     # --- entregas -----------------------------------------------------------------------------
 
@@ -117,8 +123,12 @@ class ConsumerCase:
         self.run(run())
 
     def dispatcher(self) -> Dispatcher:
+        """El despachador real con las dos métricas de la alarma en memoria: la de U-02
+        (``dead_letter_created_total``) y la de U-04 (``loop_dead_letter_entries_total``, por la
+        telemetría que la raíz del worker le pasa)."""
         if self.metrics is None:
             self.metrics, self.reader = metrics_with_reader()
+            self.loop_export = loop_metrics_export()
         return Dispatcher(
             database=self.database,
             catalog=self.catalog,
@@ -127,6 +137,13 @@ class ConsumerCase:
             clock=self.clock,
             jitter=lambda: 0.5,
             metrics=self.metrics,
+            telemetry=LoopWorkerTelemetry(
+                database=self.database,
+                contexts=self.contexts,
+                clock=self.clock,
+                task=None,  # type: ignore[arg-type]  # solo report_once la usa
+                metrics=self.loop_export.metrics,
+            ),
         )
 
     def dispatch(self) -> DispatchReport:
@@ -143,14 +160,18 @@ class ConsumerCase:
         return {uuid.UUID(str(row["event_id"])): str(row["status"]) for row in rows}
 
     def drain(self, events: list[OutboxEvent], *, settled: set[str]) -> list[DispatchReport]:
-        """Rondas del despachador (con el reloj avanzando más que el retroceso) hasta que cada
-        entrega de ``events`` esté en ``settled``; tope de rondas generoso, nunca de pared."""
+        """Rondas del despachador hasta que cada entrega de ``events`` esté en ``settled``; tope de
+        rondas generoso, nunca de pared. El reloj solo avanza (más que el retroceso) tras una
+        ronda que no entregó nada: si avanzara siempre, la segunda solicitud de una partición
+        pasaría su tope duro de 120 s antes de entregarse."""
         reports = []
-        for _ in range(len(events) * (MAX_ATTEMPTS + 1) + 2):
+        for _ in range((len(events) + 2) * (MAX_ATTEMPTS + 2)):
             if set(self.statuses(events).values()) <= settled:
                 break
-            reports.append(self.dispatch())
-            self.tick(RETRY_TICK_SECONDS)
+            report = self.dispatch()
+            reports.append(report)
+            if not report.count(Outcome.DELIVERED):
+                self.tick(RETRY_TICK_SECONDS)
         assert set(self.statuses(events).values()) <= settled, self.statuses(events)
         return reports
 
@@ -168,6 +189,16 @@ class ConsumerCase:
             )
             if attributes.get("consumer") == self.name
         )
+
+    def loop_dead_letter_alarms(self) -> float:
+        """``loop_dead_letter_entries_total`` de este consumidor (la alarma ``loop-dead-letter``
+        de U-04) en el exportador en memoria."""
+        if self.loop_export is None:
+            return 0.0
+        value = self.loop_export.value(
+            LoopMetricName.LOOP_DEAD_LETTER_ENTRIES_TOTAL, consumer=self.name
+        )
+        return 0.0 if value is None else value
 
     def dead_letter_rows(self, events: list[OutboxEvent]) -> list[Any]:
         return self.fetch(

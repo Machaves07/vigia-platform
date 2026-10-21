@@ -5,8 +5,9 @@ Para cada consumidor (``laz_consumers.consumer_case``), con el despachador real 
 1. un evento se entrega bien (la referencia);
 2. el manejador falla de forma permanente (error no declarado) y el evento agota los ocho intentos
    de ``RetryPolicy`` con su retroceso en el reloj inyectado: va a la cola muerta y la alarma
-   salta **a la primera entrada** (``dead_letter_created_total`` = 1 en el exportador en memoria y
-   un ``dead_letter_created`` en la bandeja); entregado + cola muerta = publicado;
+   salta **a la primera entrada** (``dead_letter_created_total`` de U-02 y
+   ``loop_dead_letter_entries_total`` de U-04 = 1 en el exportador en memoria, y un
+   ``dead_letter_created`` en la bandeja); entregado + cola muerta = publicado;
 3. recuperado el manejador, la partición sigue: un evento posterior se entrega;
 4. la orden real ``vigia-admin replay-dead-letter`` devuelve la entrega a ``pending`` con el
    **mismo** ``event_id``, el despachador la entrega y el efecto es el de un evento sin caída; un
@@ -51,17 +52,20 @@ def test_dead_letter_alarms_once_and_replay_duplicates_nothing(
         expected_shape = case.shape(healthy)
 
         case.outage.down = True
-        poisoned = [case.produce(1) for _ in range(2 if nightly else 1)]
-        first = poisoned[0]
+        # El primero llega solo a la cola muerta (en export_worker cada evento es otra partición).
+        first = case.produce(1)
         reports = case.drain([first], settled={"dead_letter"})
         assert dispatched(reports, Outcome.DEAD_LETTERED) == 1
         assert dispatched(reports, Outcome.RETRIED) == MAX_ATTEMPTS - 1
         assert case.outage.failures == MAX_ATTEMPTS
-        # La alarma salta a la primera entrada: una métrica y un evento, ni antes ni después.
+        # La alarma salta a la primera entrada: la métrica de U-02, la de U-04 (la que vigila
+        # ``loop-dead-letter``) y el evento, ni antes ni después.
         assert case.dead_letter_alarms() == 1
+        assert case.loop_dead_letter_alarms() == 1
         assert [row["event_id"] for row in case.dead_letter_events([first])] == [
             str(first.event_id)
         ]
+        poisoned = [first, *(case.produce(1) for _ in range(1 if nightly else 0))]
         case.drain(poisoned, settled={"dead_letter"})
         assert len(case.dead_letter_rows(poisoned)) == len(poisoned)
         assert case.dead_letter_alarms() >= len(poisoned)
