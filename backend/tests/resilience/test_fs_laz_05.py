@@ -111,11 +111,11 @@ def test_killed_export_is_restarted_without_orphans(
         assert row["state"] == "ready" and row["attempt_count"] == 2
         assert row["multipart_upload_id"] is None
         assert stack.package_row(export_id)["archive_sha256"] == observed["archive_sha256"]
-        assert (
-            s3.list_multipart_uploads(Bucket=bucket, Prefix=location.prefix).get("Uploads", [])
-            == []
+        orphans = s3.list_multipart_uploads(Bucket=bucket, Prefix=location.prefix).get(
+            "Uploads", []
         )
-        run.observe(pending_uploads_after_recovery=0)
+        assert orphans == []
+        run.observe(pending_uploads_after_recovery=len(orphans))
         events = read_lines(progress)[offset:]
         assert events[0] == {"event": "abort", "upload_id": killed_upload}
         assert next(e["artifact"] for e in events if e["event"] == "started") == "document"

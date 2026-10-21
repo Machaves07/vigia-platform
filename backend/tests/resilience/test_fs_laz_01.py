@@ -43,3 +43,5 @@ def test_provider_down_for_three_minutes(
         assert observed["signature_status"] == 201
         assert observed["circuit_states"] == ["open", "open", "open", "closed"]
         assert observed["probes"] == [False, True, True, True]
+        assert observed["probe_calls"] == 3
+        assert observed["request_after_recovery"] == "ready"

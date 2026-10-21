@@ -37,12 +37,14 @@ def test_corruption_rebuilds_without_a_mixed_snapshot(
         for subject in subjects:
             assert world.deliver(consumer, world.outbox_event(subject)) == 1
         pairs = [mutate_projection(world, subject) for subject in subjects]
-        old, new = {a for a, _ in pairs}, {b for _, b in pairs}
+        # ``mutate_projection`` devuelve (digest inyectado, digest del expediente): durante el
+        # intercambio una lectura ve una generación entera o la otra, nunca una mezcla.
+        corrupted, pristine = {a for a, _ in pairs}, {b for _, b in pairs}
         database = world.stack.primary.database
         context = world.context(org)
         samples: list[set[str]] = []
 
-        async def exercise() -> None:
+        async def exercise() -> int:
             staged, release, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
             inbox = InboxService(database=database, authorizer=world.stack.authz.authorizer)
 
@@ -73,7 +75,7 @@ def test_corruption_rebuilds_without_a_mixed_snapshot(
                     assert len(rows) == len(subjects)
                     values = {str(row.projection_digest) for row in rows}
                     samples.append(values)
-                    assert values <= old or values <= new, values
+                    assert values <= corrupted or values <= pristine, values
                     page = await inbox.page(context)
                     assert (
                         not page.items or len({item.evidence_flagged for item in page.items}) == 1
@@ -99,15 +101,16 @@ def test_corruption_rebuilds_without_a_mixed_snapshot(
                 release.set()
                 result = await asyncio.wait_for(task, 120)
                 assert result.is_diverged and result.divergence_count == 1
+                return len(alarms)
             finally:
                 release.set()
                 stop.set()
                 await asyncio.gather(reader, task)
 
-        world.stack.run(exercise())
+        alarms = world.stack.run(exercise())
         assert samples
-        assert {world.finding_state(s)["projection_digest"] for s in subjects} == new
+        assert {world.finding_state(s)["projection_digest"] for s in subjects} == pristine
         assert world.checkpoint(org)["state"] == "healthy"
         run.observe(
-            rows=len(subjects), snapshots=len(samples), alarm_count=1, final_state="healthy"
+            rows=len(subjects), snapshots=len(samples), alarm_count=alarms, final_state="healthy"
         )

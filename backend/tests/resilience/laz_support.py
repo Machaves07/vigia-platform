@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pytest
@@ -23,6 +23,16 @@ from vigia_platform.shared.outbox.publish import OutboxEvent
 
 # El caso pequeño corre siempre; -m nightly selecciona también los tamaños nocturnos.
 PROFILES = [False, pytest.param(True, marks=pytest.mark.nightly, id="nightly")]
+
+
+def resilience_storage(endpoint: Any, bucket: str, clock: Any) -> Any:
+    """S3 real con topes de fixture de 60 s: la pared no decide estos escenarios."""
+    from vigia_platform.shared.storage import S3Storage
+
+    settings = replace(
+        endpoint.storage_settings(bucket), connect_timeout_seconds=60, read_timeout_seconds=60
+    )
+    return S3Storage(settings, clock)
 
 
 @contextmanager
@@ -128,6 +138,7 @@ def assistant_outage(spec: dict[str, Any]) -> dict[str, Any]:
 
             def __init__(self) -> None:
                 self.calls: list[str] = []
+                self.probes: list[str] = []
                 self.delegate = FakeAssistantProvider(
                     clock=clock, sleep=stack.sleep, latency=timedelta(0)
                 )
@@ -138,6 +149,13 @@ def assistant_outage(spec: dict[str, Any]) -> dict[str, Any]:
                     # El adaptador traduce el rechazo de conexión a fallo transitorio.
                     return AssistantFailure(FailureKind.TRANSIENT)
                 return await self.delegate.complete(context, timeout=timeout)
+
+            async def probe(self, *, timeout: Any) -> Any:
+                """La sonda del cortacircuito (VIG-272): sin contexto ni fichas, misma ventana."""
+                self.probes.append(clock.now().isoformat())
+                if clock.now() < started + timedelta(minutes=3):
+                    return AssistantFailure(FailureKind.TRANSIENT)
+                return None
 
         provider = TimedProvider()
         stack.use(provider)
@@ -151,6 +169,8 @@ def assistant_outage(spec: dict[str, Any]) -> dict[str, Any]:
         denied = stack.post(who, analysis)
         assert denied.status_code == 503
         assert denied.json()["detail_code"] == "loop_assistant_unavailable"
+        # La espera que anuncia la interfaz es la de la sonda (60 s): el circuito abierto responde
+        # de inmediato y sin llamada externa, no es el tope de fichas ni un tiempo agotado.
         assert denied.headers["retry-after"] == "60"
         assert len(provider.calls) == calls and len(stack.sleep.waits) == waits
         for index, statement in enumerate(STATEMENTS, 1):
@@ -177,6 +197,7 @@ def assistant_outage(spec: dict[str, Any]) -> dict[str, Any]:
         return {
             "circuit_states": states,
             "probes": probes,
+            "probe_calls": len(provider.probes),
             "calls": provider.calls,
             "dead_letters": dead[0]["n"],
             "signature_status": signed.status_code,
@@ -288,7 +309,6 @@ def export_attempt(spec: dict[str, Any]) -> dict[str, Any]:
     from vigia_platform.shared.clock import SimulatedClock
     from vigia_platform.shared.context import ActorKind, ActorUnit
     from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind, SslMode
-    from vigia_platform.shared.storage import S3Storage
 
     clock = SimulatedClock(datetime.fromisoformat(spec["now"]))
     scope = SyntheticScope(
@@ -297,7 +317,7 @@ def export_attempt(spec: dict[str, Any]) -> dict[str, Any]:
             for index in range(4)
         )
     )
-    storage = S3Storage(LocalStackEndpoint(spec["s3_url"]).storage_settings(spec["bucket"]), clock)
+    storage = resilience_storage(LocalStackEndpoint(spec["s3_url"]), spec["bucket"], clock)
 
     class Sink:
         def __init__(self, real: Any) -> None:

@@ -11,9 +11,8 @@ from tests.attachment_support import png, sha256_hex
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_actions_support import actions_stack
 from tests.resilience.harness import dedicated_localstack, scenario
-from tests.resilience.laz_support import PROFILES, started_api
+from tests.resilience.laz_support import PROFILES, resilience_storage, started_api
 from vigia_platform.loop.application.attachments import build_attachment_service
-from vigia_platform.shared.storage import S3Storage
 
 pytestmark = pytest.mark.integration
 
@@ -42,7 +41,7 @@ def test_attachment_outage_does_not_prevent_signed_closure(
         port = stack.attachments
         real = build_attachment_service(
             repository=port.repository,
-            storage=S3Storage(endpoint.storage_settings(bucket), port.clock),
+            storage=resilience_storage(endpoint, bucket, port.clock),
             authorizer=port.authorizer,
             audit=port.audit,
             clock=port.clock,
@@ -90,13 +89,14 @@ def test_attachment_outage_does_not_prevent_signed_closure(
             assert closed.status_code == 201, closed.text
             assert len(stack.records_of(finding, "closure")) == 1
             assert stack.world.finding_state(finding)["lifecycle_state"] == "closed"
-            assert stack.run(stack.client.get("/health/ready")).status_code == ready
+            after_ready = stack.run(stack.client.get("/health/ready")).status_code
+            assert after_ready == ready
             run.observe(
                 grant_status=refused.status_code,
                 read_status=read.status_code,
                 closure_status=closed.status_code,
                 ready_before=ready,
-                ready_after=ready,
+                ready_after=after_ready,
             )
         finally:
             container.start()
