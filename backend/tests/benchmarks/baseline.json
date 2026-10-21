@@ -8,7 +8,8 @@
     "system": "Linux",
     "release": "6.18.54.1-microsoft-standard-WSL2",
     "cpus": 20,
-    "runner": "local"
+    "runner": "local",
+    "runner_class": "local:Manu"
   },
   "benchmarks": {
     "auth_login": {
@@ -474,7 +475,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_close_two_attachments": {
       "label": "laz_close_two_attachments [objetivo propio]",
@@ -505,7 +507,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_detail": {
       "label": "laz_detail [objetivo propio]",
@@ -561,7 +564,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_evaluate_deadlines_org": {
       "label": "laz_evaluate_deadlines_org [objetivo propio]",
@@ -588,7 +592,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_export_maximum": {
       "label": "laz_export_maximum [objetivo propio]",
@@ -723,7 +728,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_export_month": {
       "label": "laz_export_month [objetivo propio]",
@@ -858,7 +864,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_exposure": {
       "label": "laz_exposure [objetivo propio]",
@@ -884,7 +891,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_immediate_email": {
       "label": "laz_immediate_email [objetivo propio]",
@@ -911,7 +919,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_inbox_200": {
       "label": "laz_inbox_200 [objetivo propio]",
@@ -941,7 +950,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_metrics_materialize": {
       "label": "laz_metrics_materialize [objetivo propio]",
@@ -967,7 +977,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_metrics_panel": {
       "label": "laz_metrics_panel [objetivo propio]",
@@ -996,7 +1007,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_monthly_package": {
       "label": "laz_monthly_package [objetivo propio]",
@@ -1107,7 +1119,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_notification": {
       "label": "laz_notification [objetivo propio]",
@@ -1134,7 +1147,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_rebuild_year": {
       "label": "laz_rebuild_year [objetivo propio]",
@@ -1164,7 +1178,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_timeline_366": {
       "label": "laz_timeline_366 [objetivo propio]",
@@ -1192,7 +1207,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_validators_1000_chars": {
       "label": "laz_validators_1000_chars [objetivo propio]",
@@ -1223,7 +1239,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "laz_writes": {
       "label": "laz_writes [objetivo propio]",
@@ -1264,7 +1281,8 @@
         }
       },
       "measured_at": "2026-10-21",
-      "runner": "local"
+      "runner": "local",
+      "runner_class": "local:Manu"
     },
     "ledger_list_200_scoped": {
       "label": "Lista de 200 registros con alcance de planta (3 zonas) sobre 1 año",

@@ -18,7 +18,8 @@ el que declara el banco:
 - U-03 (NFR-GOB-01 y 64: «regresión superior al 20 %»): 1,2 (``GOB_REGRESSION_FACTOR``), escrito
   en cada entrada.
 - U-04 (NFR-LAZ-01/02, PAT-LAZ-REN-06): 1,5 (``LAZ_REGRESSION_FACTOR``).
-  Solo se comparan el mismo runner y el mismo perfil de datos: una base de ci
+  Solo se comparan el mismo runner (clase estable en GitHub hospedado) y el mismo perfil de datos:
+  una base de ci
   no sustituye a la de nightly. Una base no comparable falla con diagnóstico,
   salvo durante su actualización explícita; nunca se declara «sin regresión».
 
@@ -153,10 +154,16 @@ class Report:
             else:
                 result.regression = result.median < result.baseline_median / factor
             if result.name.startswith("laz_"):
-                runner = _environment()["runner"]
+                environment = _environment()
+                runner = environment["runner"]
                 profile = result.details.get("profile")
                 baseline_profile = base.get("details", {}).get("profile")
-                if base.get("runner", runner) != runner:
+                same_runner = (
+                    base["runner_class"] == environment["runner_class"]
+                    if base.get("runner_class") is not None
+                    else base.get("runner", runner) == runner
+                )
+                if not same_runner:
                     result.comparison = "different_runner"
                     result.regression = None
                 elif profile and baseline_profile and profile != baseline_profile:
@@ -232,6 +239,7 @@ class Report:
             if name.startswith("laz_"):
                 entry["regression_factor"] = LAZ_REGRESSION_FACTOR
                 entry["details"] = result.details
+                entry["runner_class"] = runner_class()
             entry["measured_at"] = measured_at
             entry["runner"] = runner
             benchmarks[name] = entry
@@ -247,6 +255,30 @@ class Report:
             "environment": _environment(),
             "benchmarks": dict(sorted(benchmarks.items())),
         }
+
+
+def runner_class() -> str:
+    """Identidad comparable, no el nombre efímero de una instancia de GitHub.
+
+    En WSL/local se exige el mismo host; en self-hosted, el mismo runner nombrado.
+    En hospedados, sistema/arquitectura/imagen y dotación de CPU deben coincidir.
+    El nombre de la instancia se conserva aparte como procedencia de la medida.
+    """
+    kind = os.environ.get("RUNNER_ENVIRONMENT")
+    name = os.environ.get("RUNNER_NAME")
+    if kind == "github-hosted":
+        return ":".join(
+            (
+                kind,
+                os.environ.get("RUNNER_OS", platform.system()),
+                os.environ.get("RUNNER_ARCH", platform.machine()),
+                os.environ.get("ImageOS", "unknown-image"),  # noqa: SIM112 - nombre oficial de GitHub
+                str(os.cpu_count()),
+            )
+        )
+    if name:
+        return f"{kind or 'named'}:{name}"
+    return f"local:{platform.node()}"
 
 
 def _environment() -> dict[str, Any]:
@@ -269,6 +301,7 @@ def _environment() -> dict[str, Any]:
         "release": platform.release(),
         "cpus": os.cpu_count(),
         "runner": os.environ.get("RUNNER_NAME") or os.environ.get("GITHUB_RUN_ID") or "local",
+        "runner_class": runner_class(),
     }
 
 

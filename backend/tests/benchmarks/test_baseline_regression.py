@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from tests.benchmarks import conftest as framework
 from tests.benchmarks.conftest import (
     BASELINE,
     GOB_REGRESSION_FACTOR,
@@ -33,6 +34,7 @@ from tests.benchmarks.conftest import (
     Report,
     Result,
     pytest_collection_modifyitems,
+    runner_class,
     unit_regression_factor,
 )
 from tests.benchmarks.laz_support import Traces, measured
@@ -237,6 +239,85 @@ def test_laz_never_compares_different_runners_or_profiles(
         report.check(result)
     assert result.regression is None
     assert result.comparison == expected
+
+
+def test_laz_hosted_runner_class_is_stable_between_instances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_NAME", "GitHub Actions 1")
+    monkeypatch.setenv("RUNNER_OS", "Linux")
+    monkeypatch.setenv("RUNNER_ARCH", "X64")
+    monkeypatch.setenv("ImageOS", "ubuntu24")
+    monkeypatch.setattr(framework.os, "cpu_count", lambda: 4)
+    first = runner_class()
+    monkeypatch.setenv("RUNNER_NAME", "GitHub Actions 2")
+    assert runner_class() == first == "github-hosted:Linux:X64:ubuntu24:4"
+    monkeypatch.setattr(framework.os, "cpu_count", lambda: 8)
+    assert runner_class() != first
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
+    second = runner_class()
+    monkeypatch.setenv("RUNNER_NAME", "otro-runner")
+    assert runner_class() != second
+
+
+@pytest.mark.parametrize("ratio,regression", [(1.49, False), (1.51, True)])
+def test_laz_hosted_names_do_not_disable_relative_gate(
+    ratio: float, regression: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = "github-hosted:Linux:X64:ubuntu24:4"
+    monkeypatch.setattr(
+        framework,
+        "_environment",
+        lambda: {
+            "runner": "GitHub Actions 2",
+            "runner_class": identity,
+        },
+    )
+    report = _report(
+        {
+            "laz_probe": {
+                "median": BASE_MS,
+                "p95": 12.0,
+                "regression_factor": 1.5,
+                "runner": "GitHub Actions 1",
+                "runner_class": identity,
+            }
+        }
+    )
+    result = report.add(_result("laz_probe", BASE_MS * ratio))
+    assert result.comparison == "same_runner"
+    assert result.regression is regression
+    if regression:
+        with pytest.raises(pytest.fail.Exception, match="más allá del 50 %"):
+            report.check(result)
+    else:
+        report.check(result)
+
+
+def test_laz_different_runner_classes_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        framework,
+        "_environment",
+        lambda: {
+            "runner": "GitHub Actions 2",
+            "runner_class": "github-hosted:Linux:X64:ubuntu24:8",
+        },
+    )
+    report = _report(
+        {
+            "laz_probe": {
+                "median": BASE_MS,
+                "p95": 12.0,
+                "regression_factor": 1.5,
+                "runner_class": "github-hosted:Linux:X64:ubuntu24:4",
+            }
+        }
+    )
+    result = report.add(_result("laz_probe", BASE_MS))
+    assert result.comparison == "different_runner"
+    with pytest.raises(pytest.fail.Exception, match="mismo runner y perfil"):
+        report.check(result)
 
 
 def test_laz_update_keeps_other_units(laz_baseline: dict[str, Any]) -> None:
