@@ -41,10 +41,10 @@ _PENDING: Final = text(
     " WHERE e.organization_id = :organization_id AND d.status IN ('pending', 'retrying')"
     " GROUP BY d.consumer_name"
 )
+# Los fallos terminales quedan en export_failed_total: no deben enclavar el gauge de atasco.
 _EXPORT: Final = text(
     "SELECT COALESCE(bool_or("
     " (state IN ('requested', 'in_progress') AND requested_at < :cutoff)"
-    " OR (state = 'failed' AND attempt_count >= 2)"
     " OR (state = 'in_progress' AND (attempt_count >= 3 OR (attempt_count >= 2"
     " AND (lease_owner IS NULL OR lease_until < :now))))"
     "), false) AS unhealthy FROM accreditation.export_request"

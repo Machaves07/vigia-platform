@@ -158,7 +158,11 @@ exporters:
           - [service, environment, export_state]
           - [service, environment, organization_id, export_state]
         metric_name_selectors:
-          - "^export_(requests_total|duration_ms)$"
+          - "^export_requests_total$"
+      - dimensions:
+          - [service, environment, export_state]
+        metric_name_selectors:
+          - "^export_duration_ms$"
       - dimensions:
           - [service, environment, organization_id]
         metric_name_selectors:

@@ -199,12 +199,15 @@ async def test_degraded_delivery_and_digest_states_reach_the_reader(capture: Met
             digest_batch_id=uuid.UUID(int=3),
             recipient_user_id=uuid.UUID(int=2),
             subject_prefix="Resumen",
-            candidates=[Candidate(uuid.UUID(int=4), clock.now(), None, "Aviso", "Condición")],
+            candidates=[
+                Candidate(uuid.UUID(int=value), clock.now(), None, "Aviso", "Condición")
+                for value in (4, 5)
+            ],
             failure_code=failure_code,
         )
     points = capture.points("email_messages_total")
     assert {p.attributes["email_state"]: p.value for p in points} == {
-        "degraded_app_only": 2,
+        "degraded_app_only": 3,
         "digested": 1,
     }
     assert all(set(p.attributes) == {"email_state", "organization_id"} for p in points)

@@ -26,14 +26,27 @@ se consulta en la bandeja (NFR-GOB-13).
   desde adquirir hasta cerrar/liberar el intento; un intento interrumpido sigue `in_progress`.
   El tamaño solo se observa tras confirmar un paquete `ready`.
 - `export_stuck_or_failed` se recalcula por organización: solicitud abierta con más de 60 min
-  desde la admisión, fallo terminal con al menos dos intentos, tercer intento tras dos fallos,
+  desde la admisión, tercer intento tras dos fallos,
   o segundo intento fallido/liberado o con arrendamiento vencido. A los 60 min exactos o durante
   un segundo intento todavía vigente no alarma por esos motivos. Una composición recuperada
-  y cerrada `ready` retira la condición; un fallo terminal de dos intentos sigue visible.
+  y cerrada `ready` o `failed` retira la condición: los fallos terminales los observa
+  `export_failed_total` mediante la alarma `export-failed`, no este gauge. Así, un fallo histórico
+  no enclava `export-stuck` ni impide notificar un atasco posterior, sin borrar ninguna fila.
 - El correo observa `sent` en SES, `bounced`/`complained` al procesar sus avisos, `digested`
   por lote de agrupación/resumen generado y `degraded_app_only` por aviso degradado. Estos son
   contadores operativos de observaciones, no una garantía transaccional/exactamente una vez:
   una reentrega del proveedor o un intento que luego se revierte puede volver a contar.
+  Las unidades dependen del estado:
+
+  | `email_state` | Unidad de cada incremento |
+  |---|---|
+  | `sent` | Un mensaje marcado como enviado por SES |
+  | `bounced` / `complained` | Un aviso de rebote / queja procesado del proveedor |
+  | `digested` | Un lote de agrupación/resumen generado, aunque contenga varios avisos |
+  | `degraded_app_only` | Un aviso degradado; un lote con N candidatos incrementa N |
+
+  «Correo por estado» separa esas unidades en series distintas: no sumar los estados como si
+  fueran un total de mensajes ni calcular con ellos tasas de entrega o degradación.
 - Cada validador observa su veredicto al ejecutar su interfaz de validación; las rutas exentas
   no cuentan. Ni el término ni su `term_id`, el texto o el patrón coincidente son dimensiones.
 

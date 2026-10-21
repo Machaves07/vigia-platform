@@ -378,6 +378,34 @@ def test_collector_publishes_every_application_dimension_set(
     assert seen
 
 
+@pytest.mark.parametrize(
+    ("metric", "expected"),
+    [
+        ("export_duration_ms", {FIXED_DIMENSIONS, FIXED_DIMENSIONS | {"export_state"}}),
+        (
+            "export_requests_total",
+            {
+                FIXED_DIMENSIONS,
+                FIXED_DIMENSIONS | {"export_state"},
+                FIXED_DIMENSIONS | {"organization_id", "export_state"},
+            },
+        ),
+    ],
+)
+def test_export_collector_dimensions_match_the_catalog(
+    metric: str, expected: set[frozenset[str]]
+) -> None:
+    """La duración no lleva organización; las solicitudes sí, además de sus agregados."""
+    actual = {
+        dimensions
+        for sets, selectors in _collector_declarations()
+        if any(re.search(selector, metric) for selector in selectors)
+        for dimensions in sets
+    }
+    # route y component solo se publican si están presentes; no son atributos de exportación.
+    assert actual - {FIXED_DIMENSIONS | {"route"}, FIXED_DIMENSIONS | {"component"}} == expected
+
+
 # --- Las reglas detectan una alarma alterada ------------------------------------------------
 
 

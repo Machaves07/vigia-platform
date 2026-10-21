@@ -50,7 +50,7 @@ from tests.export_support import (
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_metrics_support import MetricCapture, metric_capture, unscoped_rows  # noqa: F401
 from vigia_platform.accreditation.export.lease import ExportLease, LeaseLost
-from vigia_platform.accreditation.export.worker import EXPORT_WORKER, ExportBusy
+from vigia_platform.accreditation.export.worker import EXPORT_WORKER, ExportBusy, LoggingExportAlarm
 from vigia_platform.loop.domain.enums import ExportState, PackageForm
 from vigia_platform.loop.observability.worker import _EXPORT, LoopWorkerTelemetry
 from vigia_platform.shared.context import ActorUnit
@@ -154,14 +154,11 @@ def test_export_monitor_checks_sixty_minutes_and_two_failures(
         with pytest.raises(Undeclared):
             stack.run(broken.run(other_context, other_id))
     stack.run(telemetry.report_once())
-    assert (
-        next(
-            p.value
-            for p in capture.points("export_stuck_or_failed")
-            if p.attributes["organization_id"] == str(other_org)
-        )
-        == 1
-    )
+    assert next(
+        p.value
+        for p in capture.points("export_stuck_or_failed")
+        if p.attributes["organization_id"] == str(other_org)
+    ) == int(not terminal)
     assert flag() == 0  # La otra organización no contamina la ya recuperada.
     # El predicado se prueba también sin RLS para no esconder su retirada detrás de la política.
     (row,) = stack.run(
@@ -198,6 +195,64 @@ def test_export_monitor_checks_sixty_minutes_and_two_failures(
             )
             == 0
         )
+
+
+def test_terminal_failure_clears_export_flag_and_a_later_stuck_request_rearms_it(
+    stack: ExportStack,
+    capture: MetricCapture,
+) -> None:
+    """Regresión VIG-270: fallo terminal del segundo intento, +90 días y nuevo atasco."""
+    site = stack.site(plants=1, zones=1)
+    plant = next(iter(site.plants))
+    person = stack.member(site)
+
+    def request() -> uuid.UUID:
+        response = stack.request_export(
+            person,
+            export_body(plant, list(site.plants[plant]), start=stack.now() - timedelta(days=5)),
+        )
+        assert response.status_code == 202, response.text
+        return uuid.UUID(response.json()["export_id"])
+
+    telemetry = _telemetry(stack)
+
+    def flag() -> int:
+        stack.run(telemetry.report_once())
+        (point,) = [
+            p
+            for p in capture.points("export_stuck_or_failed")
+            if p.attributes["organization_id"] == str(site.organization_id)
+        ]
+        return int(point.value)
+
+    export_id = request()
+    context = stack.event_context(site.organization_id)
+    worker = stack.export_worker(
+        composer=SyntheticComposer(fail_attempts={1}, declared={2: COVERAGE}),
+        alarm=LoggingExportAlarm(),
+    )
+    with pytest.raises(Undeclared):
+        stack.run(worker.run(context, export_id))
+    stack.tick(3600.001)
+    assert flag() == 1
+    stack.run(worker.run(context, export_id))
+    row = stack.export_row(export_id)
+    assert (row["state"], row["attempt_count"]) == ("failed", 2)
+    (failure,) = capture.points("export_failed_total")
+    assert failure.value == 1  # La alarma de fallos conserva el hecho sin enclavar el gauge.
+    assert flag() == 0
+    stack.tick(90 * 24 * 3600)
+    assert flag() == 0
+    assert stack.export_row(export_id)["state"] == "failed"  # Sin borrar el histórico.
+
+    later_id = request()
+    assert flag() == 0
+    stack.tick(3600)
+    assert flag() == 0
+    stack.tick(0.001)
+    assert flag() == 1
+    stack.run(stack.export_worker().run(context, later_id))
+    assert flag() == 0
 
 
 def test_declared_failure_is_observed_without_a_package(
