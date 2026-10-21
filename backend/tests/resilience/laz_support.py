@@ -6,19 +6,27 @@ consumidor, como un defecto en el transporte. Solo se utiliza desde pruebas.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pytest
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import (
+    HistogramDataPoint,
+    InMemoryMetricReader,
+    NumberDataPoint,
+)
 
 from tests.laz_support import IngestedSubject, LoopWorld
 from vigia_platform.ledger.application.evidence_read import EvidenceService
 from vigia_platform.loop.config.repository import PostgresLoopConfigurationRepository
+from vigia_platform.loop.observability.metrics import LoopMetricName, LoopMetrics
 from vigia_platform.loop.projection.consumer import LoopProjectionConsumer
 from vigia_platform.loop.projection.fold import FindingStateRow
 from vigia_platform.loop.projection.rebuild import ProjectionRebuilder
+from vigia_platform.shared.observability.metrics import METER_NAME
 from vigia_platform.shared.outbox.publish import OutboxEvent
 
 # El caso pequeño corre siempre; -m nightly selecciona también los tamaños nocturnos.
@@ -390,6 +398,72 @@ def export_attempt(spec: dict[str, Any]) -> dict[str, Any]:
             await database.dispose()
 
     return asyncio.run(execute())
+
+
+@dataclass
+class LoopMetricsExport:
+    """Métricas de U-04 sobre un exportador en memoria (TASK-352): lo que leería la alarma."""
+
+    metrics: LoopMetrics
+    reader: InMemoryMetricReader
+
+    def points(self, name: LoopMetricName) -> list[tuple[dict[str, Any], float]]:
+        """``(atributos, valor)`` de cada punto de un contador o un indicador."""
+        return [
+            (attributes, float(point.value))
+            for attributes, point in self._points(name)
+            if isinstance(point, NumberDataPoint)
+        ]
+
+    def value(self, name: LoopMetricName, **attributes: str) -> float | None:
+        """El valor del único punto cuyos atributos incluyen ``attributes``; ``None`` sin él."""
+        found = [
+            value
+            for point, value in self.points(name)
+            if all(point.get(key) == wanted for key, wanted in attributes.items())
+        ]
+        assert len(found) <= 1, found
+        return found[0] if found else None
+
+    def histogram(self, name: LoopMetricName) -> list[tuple[dict[str, Any], int, float]]:
+        """``(atributos, cuenta, máximo)`` de cada punto de un histograma."""
+        return [
+            (attributes, int(point.count), float(point.max))
+            for attributes, point in self._points(name)
+            if isinstance(point, HistogramDataPoint)
+        ]
+
+    def _points(self, name: LoopMetricName) -> list[tuple[dict[str, Any], Any]]:
+        data = self.reader.get_metrics_data()
+        found: list[tuple[dict[str, Any], Any]] = []
+        for resource in data.resource_metrics if data is not None else ():
+            for scope in resource.scope_metrics:
+                for metric in scope.metrics:
+                    if metric.name == name.value:
+                        found.extend(
+                            (dict(point.attributes or {}), point)
+                            for point in metric.data.data_points
+                        )
+        return found
+
+
+def loop_metrics_export() -> LoopMetricsExport:
+    """``LoopMetrics`` propio de la prueba, leído por ``InMemoryMetricReader`` (sin red)."""
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    return LoopMetricsExport(LoopMetrics(provider.get_meter(METER_NAME)), reader)
+
+
+def consecutive_breaches(ratios: Sequence[float], threshold: float, periods: int) -> int:
+    """Índice de la evaluación en que salta una alarma «por encima de ``threshold`` en
+    ``periods`` evaluaciones consecutivas» (la regla de ``infra/stacks/loop.py``); -1 si no
+    salta."""
+    streak = 0
+    for index, ratio in enumerate(ratios):
+        streak = streak + 1 if ratio > threshold else 0
+        if streak >= periods:
+            return index
+    return -1
 
 
 @dataclass
