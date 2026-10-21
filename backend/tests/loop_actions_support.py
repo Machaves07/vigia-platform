@@ -23,7 +23,7 @@ from __future__ import annotations
 import contextlib
 import json
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Final
@@ -33,7 +33,13 @@ import httpx
 from tests.api_support import World
 from tests.attachment_support import MemoryStore, RecordingAudit, png, sha256_hex
 from tests.integration.conftest import PostgresEndpoint
-from tests.laz_support import IngestedSubject, LoopOrganization, LoopWorld, loop_world
+from tests.laz_support import (
+    IngestedSubject,
+    LoopOrganization,
+    LoopWorld,
+    loop_world,
+    register_u04,
+)
 from vigia_platform.catalog.application.free_text_validator import (
     register_u03_free_text_validator,
 )
@@ -42,6 +48,7 @@ from vigia_platform.identity.auth.sessions import SESSION_COOKIE_NAME, SessionCo
 from vigia_platform.ledger.application.writer import EscritorExpediente, Receipt
 from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import FreeTextPolicyRegistry
+from vigia_platform.ledger.registry import RecordTypeRegistry
 from vigia_platform.loop.adapters.attachments.repository import PostgresAttachmentRepository
 from vigia_platform.loop.adapters.attachments.rules import attachment_storage_key
 from vigia_platform.loop.adapters.http.actions_routes import ACTIONS_PATH, EVIDENCE_PATH
@@ -64,6 +71,7 @@ from vigia_platform.loop.registration import loop_free_text
 from vigia_platform.shared.api.middleware import ContextAuthorizer
 from vigia_platform.shared.context import Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.db import Database
+from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
@@ -558,9 +566,13 @@ class ActionsStack:
 
 @contextlib.contextmanager
 def actions_stack(
-    endpoint: PostgresEndpoint, prefix: str, *, pool: int = 8
+    endpoint: PostgresEndpoint,
+    prefix: str,
+    *,
+    pool: int = 8,
+    register: Callable[[RecordTypeRegistry, OutboxCatalog], None] = register_u04,
 ) -> Iterator[ActionsStack]:
-    with loop_world(endpoint, prefix) as world:
+    with loop_world(endpoint, prefix, register=register) as world:
         stack = world.stack
         authz = stack.authz
         clock = authz.sessions.clock

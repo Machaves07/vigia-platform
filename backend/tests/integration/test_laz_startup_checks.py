@@ -1,7 +1,8 @@
 """TASK-326: retirada exhaustiva del catálogo de U-04 en las tres raíces reales.
 
 18 tipos (17 de §5.1 y el de VIG-274), 25 eventos de dominio (+3 internos), 6 consumidores, 10
-periódicas (9 del diseño + el sondeo de correo), 2 validadores y el puerto. Reconstruir sigue a demanda (U04-H-14).
+periódicas (9 del diseño + el sondeo de correo), 2 validadores y el puerto. Reconstruir sigue a
+demanda (U04-H-14).
 """
 
 from __future__ import annotations
