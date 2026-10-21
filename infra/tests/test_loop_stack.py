@@ -1,7 +1,7 @@
 """Pila ``vigia-loop`` de U-04 (TASK-331 y TASK-351): pruebas de plantilla, solo ``cdk synth``.
 
 Infrastructure-design de U-04 §2.2 (pila e importaciones por el contrato nº 38), §2.3 (las siete
-pruebas bloqueantes; la 5, de alarmas, sin alarmas hasta TASK-332), §3.2 (punto privado y
+pruebas bloqueantes; la 5, de alarmas, con las de TASK-332), §3.2 (punto privado y
 ``sg-queue-endpoint``), §4 (identidad de correo, los siete registros DNS, DMARC y conjunto de
 configuración con sus dos destinos), §5 (tema, cola y cola muerta), §8 (clave y secreto), §9.1
 (política ``vigia-loop-worker`` con ``ses:SendEmail``) y §14.2 (interruptores H-LAZ-9, 10 y 11).
@@ -31,6 +31,8 @@ from stacks.loop import (
     CONSUME_ACTIONS,
     DMARC_REPORTS_PARAMETER,
     ENDPOINT_ACTIONS,
+    LOOP_APPLICATION_ALARM_METRICS,
+    LOOP_SERVICE_ALARM_METRICS,
     LoopStack,
     assistant_secret_name,
     configuration_set_name,
@@ -101,6 +103,8 @@ def expected_loop_resources(config: EnvironmentConfig) -> Counter[str]:
             IDENTITY: 1,
             CONFIGURATION_SET: 1,
             EVENT_DESTINATION: 2,
+            # Las quince alarmas de §10.3 (TASK-332), con ``periodic-task-stale-*`` diez veces.
+            ALARM: len(LOOP_APPLICATION_ALARM_METRICS) + len(LOOP_SERVICE_ALARM_METRICS),
         }
     )
     if config.loop.assistant_secret:
@@ -267,6 +271,8 @@ def test_loop_reads_u02_only_through_the_contract(loop: tuple[Synthesized, JsonO
         *(
             f"{prefix}/{name}"
             for name in (
+                # ``vigia-alerts``: la acción de las alarmas de U-04 (TASK-332).
+                "alerts-topic-arn",
                 "worker-task-role-arn",
                 "vpc-id",
                 "app-subnet-a-id",
@@ -445,8 +451,11 @@ def _alarms_not_routed_to_alerts(template: JsonObject, config: EnvironmentConfig
 
 
 def test_every_loop_alarm_notifies_vigia_alerts(loop: tuple[Synthesized, JsonObject]) -> None:
-    """Sin alarmas hasta TASK-332, que las añade a esta misma regla."""
+    """Las 24 alarmas de TASK-332 (las quince de §10.3), cada una con su acción hacia
+    ``vigia-alerts`` y ninguna otra."""
     deployment, template = loop
+    alarms = list(_of_type(template, ALARM))
+    assert len(alarms) == 24
     assert not _alarms_not_routed_to_alerts(template, deployment.config)
 
 
@@ -470,10 +479,11 @@ def test_alarm_rule_detects_alarms_without_vigia_alerts() -> None:
     alarm("Elsewhere", sns.Topic(stack, "Other"))
     template = dict(Template.from_stack(stack).to_json())
     wrong = _alarms_not_routed_to_alerts(template, config)
+    # Las de la pila (``Alarm-<clave>``) avisan a ``vigia-alerts``, como la de la sonda «Routed».
     assert sorted(wrong) == sorted(
         logical_id
         for logical_id, _ in _of_type(template, ALARM)
-        if not logical_id.startswith("Routed")
+        if not logical_id.startswith(("Routed", "Alarm"))
     )
     assert len(wrong) == 2
 
@@ -495,6 +505,18 @@ def test_api_task_definition_does_not_reference_the_assistant_secret(
     )
     text = json.dumps(api)
     assert assistant_secret_name(config) not in text
+    # El colector (``AOT_CONFIG_CONTENT``) nombra las métricas ``assistant_*`` (TASK-332): fuera de
+    # su contenido, nada en la definición dice «assistant»; dentro, ni secreto ni clave.
+    collector = [
+        str(variable["Value"])
+        for container in properties(api)["ContainerDefinitions"]
+        for variable in container.get("Environment", [])
+        if variable["Name"] == "AOT_CONFIG_CONTENT"
+    ]
+    assert collector
+    for content in collector:
+        assert "api-key" not in content and "secret" not in content.lower()
+        text = text.replace(json.dumps(content)[1:-1], "")
     assert "assistant" not in text
     (api_policy,) = (
         r
@@ -831,8 +853,10 @@ def test_assistant_secret_is_absent_in_staging(staging: Synthesized) -> None:
     template = _loop(staging)
     assert not list(_of_type(template, SECRET))
     assert not list(_of_type(template, "AWS::SecretsManager::ResourcePolicy"))
-    assert "assistant" not in json.dumps(template)
-    assert "secretsmanager" not in json.dumps(template)
+    # «assistant» sí aparece en las alarmas del asistente y en el consumidor ``assistant_worker``.
+    text = json.dumps(template)
+    assert "assistant/api-key" not in text and assistant_secret_name(staging.config) not in text
+    assert "secretsmanager" not in text
 
 
 # --- §9.1: política gestionada ``vigia-loop-worker`` ----------------------------------
@@ -1238,7 +1262,9 @@ def test_h_laz_11_switch_sends_email_health_events_to_vigia_alerts() -> None:
     config = _config()
     off = _loop_alone(config)
     assert not list(_of_type(off, RULE))
-    assert "alerts-topic-arn" not in json.dumps(off)
+    # Apagado, ``vigia-alerts`` solo es la acción de las alarmas (TASK-332).
+    alerts = _parameter(off, "/vigia/pilot/alerts-topic-arn")
+    assert all(r["Type"] == ALARM for _, r in resources(off) if json.dumps(alerts) in json.dumps(r))
     switched = replace(config, loop=replace(config.loop, ses_reputation_subscription=True))
     on = _loop_alone(switched)
     _, rule = _one(on, RULE)

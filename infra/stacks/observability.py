@@ -37,9 +37,11 @@ La disponibilidad de NFR-NUC-10 es un **sondeo interno**: la salud de ``tg-api``
 
 Tablero ``vigia-<despliegue>`` (``vigia-pilot``, §9.3) con los paneles de NFR-NUC-44, el de la
 aplicación (nº 12), los de flota de U-03 (nº 18, ``FLEET_PANELS`` sobre métricas publicadas) y los
-cinco de U-04 (nº 23). Una métrica que una alarma vigila y su unidad aún no publica va en
-``PENDING_UNIT_METRICS``: la alarma queda en ``INSUFFICIENT_DATA`` hasta que la unidad la emita
-con ese nombre. U-03 ya publica todas las suyas (VIG-167).
+cinco de U-04 (nº 23, ``LOOP_PANELS``, TASK-332), solo sobre las métricas que el código emite
+(``LOOP_PANEL_METRICS``, A-64); las alarmas de U-04 viven en ``vigia-loop``. Una métrica que una
+alarma vigila y su unidad aún no publica va en ``PENDING_UNIT_METRICS``: la alarma queda en
+``INSUFFICIENT_DATA`` hasta que la unidad la emita con ese nombre. U-03 ya publica todas las suyas
+(VIG-167).
 """
 
 from __future__ import annotations
@@ -82,6 +84,13 @@ from stacks.foundation import (
     ZONES,
     FoundationStack,
     KeyName,
+)
+from stacks.loop import (
+    CONFIGURATION_SET_DIMENSION,
+    EXPORT_CONSUMER,
+    configuration_set_name,
+    email_events_dlq_name,
+    email_events_name,
 )
 
 # --- Registros (§9.2) -----------------------------------------------------------------------
@@ -235,6 +244,57 @@ FLEET_PANELS: Final = (
 """Los once paneles de U-03 §8.2 (NFR-GOB-58) sobre métricas que el código publica. «Alarmas
 abiertas por clase» y «certificados por vencer» leen ``fleet_alarms_open`` (VIG-187): el segundo,
 su clase ``certificate_expiring``."""
+
+LOOP_PANELS: Final = (
+    "Estado del lazo (U-04, n 23)",
+    "Trabajos diferidos (U-04, n 23)",
+    "Asistente (U-04, n 23)",
+    "Correo (U-04, n 23)",
+    "Salud de la proyeccion (U-04, n 23)",
+)
+"""Los cinco paneles de NFR-LAZ-44 en este tablero (nº 23, A-24): U-04 no crea tablero propio."""
+
+LOOP_STATE_TASKS: Final = ("evaluate_deadlines", "review_reminders", "unclosable_review_due")
+"""Las tareas del lazo que calculan vencidos, recordatorios y revisiones sin cierre posible."""
+
+LOOP_EMAIL_TASKS: Final = ("email_delivery_events_poll", "email_grouping", "digest_weekly")
+
+EMAIL_PANEL_METRICS: Final = ("Send", "Delivery", "Bounce", "Complaint", "Reject")
+"""Las del destino ``cloudwatch`` del conjunto de configuración (§4.2)."""
+
+LOOP_PANEL_METRICS: Final = {
+    "Estado del lazo (U-04, n 23)": (
+        ("outbox_oldest_pending_age_seconds", ("consumer",)),
+        ("periodic_task_duration_ms", ("result", "task")),
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "Trabajos diferidos (U-04, n 23)": (
+        ("export_failed_total", ()),
+        ("outbox_oldest_pending_age_seconds", ("consumer",)),
+        ("periodic_task_duration_ms", ("result", "task")),
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "Asistente (U-04, n 23)": (
+        ("assistant_rate_limit_headroom_ratio", ()),
+        ("assistant_request_duration_ms", ("assistant_state",)),
+        ("assistant_requests_total", ("assistant_state",)),
+        ("assistant_token_budget_used_ratio", ("organization_id",)),
+        ("assistant_tokens_total", ("organization_id", "token_direction")),
+        ("assistant_unavailable", ()),
+    ),
+    "Correo (U-04, n 23)": (
+        ("outbox_oldest_pending_age_seconds", ("consumer",)),
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "Salud de la proyeccion (U-04, n 23)": (
+        ("loop_projection_divergences_total", ()),
+        ("periodic_task_duration_ms", ("result", "task")),
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+}
+"""Panel de U-04 → métricas de ``Vigia/Platform`` que dibuja, con sus atributos además de
+``service`` y ``environment`` (ordenados). La prueba cruzada del backend
+(``tests/unit/test_laz_metrics_cross.py``) exige que el código emita cada una (A-64)."""
 
 APPLICATION_ALARM_METRICS: Final = {
     # NFR-NUC-38 y §9.4.
@@ -1838,33 +1898,254 @@ class ObservabilityStack(VigiaStack):
             )
         ]
 
+    def _task_metrics(
+        self, tasks: Sequence[str]
+    ) -> tuple[list[cloudwatch.IMetric], list[cloudwatch.IMetric], list[cloudwatch.IMetric]]:
+        """Duración p95 de los éxitos, fallos y edad del último éxito de cada tarea."""
+        worker, m5 = WORKER_SERVICE, FIVE_MINUTES
+        name = "periodic_task_duration_ms"
+        return (
+            [
+                self._app_metric(name, worker, "p95", m5, {"task": t, "result": "succeeded"})
+                for t in tasks
+            ],
+            [
+                self._app_metric(name, worker, "SampleCount", m5, {"task": t, "result": "failed"})
+                for t in tasks
+            ],
+            [
+                self._app_metric(
+                    "periodic_task_last_success_age_seconds", worker, "Maximum", m5, {"task": t}
+                )
+                for t in tasks
+            ],
+        )
+
+    def _oldest_delivery(self, consumers: Sequence[str]) -> list[cloudwatch.IMetric]:
+        """Entrega pendiente más vieja de cada consumidor de U-04 (``consumer``)."""
+        return [
+            self._app_metric(
+                "outbox_oldest_pending_age_seconds",
+                WORKER_SERVICE,
+                "Maximum",
+                FIVE_MINUTES,
+                {"consumer": consumer},
+            )
+            for consumer in consumers
+        ]
+
+    def _email_metric(self, name: str, period: Duration) -> cloudwatch.IMetric:
+        return cloudwatch.Metric(
+            namespace="AWS/SES",
+            metric_name=name,
+            dimensions_map={CONFIGURATION_SET_DIMENSION: configuration_set_name(self.config)},
+            statistic="Sum",
+            period=period,
+        )
+
+    def _queue_metric(self, name: str, queue: str) -> cloudwatch.IMetric:
+        return cloudwatch.Metric(
+            namespace="AWS/SQS",
+            metric_name=name,
+            dimensions_map={"QueueName": queue},
+            statistic="Maximum",
+            period=FIVE_MINUTES,
+            label=queue,
+        )
+
+    def _pending_emitter(self, names: str) -> cloudwatch.TextWidget:
+        """Lo que el panel debería mostrar y el código aún no emite (A-64: sin panel vacío)."""
+        return cloudwatch.TextWidget(
+            markdown=f"Sin emisor en el codigo, fuera del panel (A-64; VIG-270): {names}.",
+            width=24,
+            height=1,
+        )
+
     def _loop_panels(self) -> list[tuple[str, list[cloudwatch.IWidget]]]:
-        """Los cinco paneles de NFR-LAZ-44 (nº 23, U-04 §10.4). Sus métricas son las del módulo
-        ``loop.observability.metrics`` (LC-LAZ-38), que aún no existe: cada panel declara su
-        contenido y se llena con esos nombres cuando U-04 los publique."""
-        panels = {
-            "Estado del lazo": "sin clasificar por zona y antiguedad; vencidos por zona; cola de "
-            "revision pendiente",
-            "Trabajos diferidos": "exportaciones y paquetes mensuales por estado y duracion; "
-            "intentos",
-            "Asistente": "solicitudes por estado, latencia, fichas por organizacion y mes, "
-            "margen de limite de tasa",
-            "Correo": "enviados, rebotes, quejas, agrupados, degraded_app_only; profundidad y "
-            "antiguedad de la cola",
-            "Salud de la proyeccion": "divergencias y edad de la ultima verificacion por planta",
-        }
+        """Los cinco paneles de NFR-LAZ-44 (nº 23, U-04 §10.4) sobre las métricas que el código
+        emite (``LOOP_PANEL_METRICS``; A-64): las del módulo ``loop.observability.metrics`` que
+        ya tienen emisor, las de U-02 por ``task`` y ``consumer`` para las tareas y los
+        consumidores de U-04, y las del conjunto de configuración y las colas del correo. Lo que
+        aún no tiene emisor queda escrito en el panel, sin widget."""
+        api, worker = API_SERVICE, WORKER_SERVICE
+        m5, month = FIVE_MINUTES, Duration.days(30)
+        state, deferred, assistant, email, projection = LOOP_PANELS
+        loop_duration, loop_failures, loop_age = self._task_metrics(LOOP_STATE_TASKS)
+        package_duration, package_failures, package_age = self._task_metrics(("monthly_package",))
+        _, _, email_age = self._task_metrics(LOOP_EMAIL_TASKS)
+        projection_duration, projection_failures, projection_age = self._task_metrics(
+            ("verify_loop_projection",)
+        )
+
+        def search(
+            name: str, service: str, statistic: str, period: Duration, *dims: str
+        ) -> cloudwatch.IMetric:
+            """Una serie por valor de ``dims`` (estado, organización o sentido)."""
+            return self._expression(self._search(name, service, statistic, period, *dims), period)
+
+        by_state = "assistant_state"
         return [
             (
-                f"{title} (U-04, n 23)",
+                state,
                 [
-                    cloudwatch.TextWidget(
-                        markdown=f"{content}. Pendiente de LC-LAZ-38 (U-04).",
-                        width=24,
-                        height=2,
-                    )
+                    self._graph("Tareas del lazo: edad del ultimo exito (s)", loop_age),
+                    cloudwatch.GraphWidget(
+                        title="Tareas del lazo: duracion p95 (ms) y fallos",
+                        left=loop_duration,
+                        right=loop_failures,
+                        width=8,
+                        height=6,
+                    ),
+                    self._graph(
+                        "Consumidores del lazo: entrega pendiente mas vieja (s)",
+                        self._oldest_delivery(("loop_projection", "review_queue")),
+                    ),
+                    self._pending_emitter(
+                        "sin clasificar por planta y antiguedad (loop_unclassified_findings, "
+                        "loop_unclassified_oldest_age_seconds) y vencidos por planta "
+                        "(loop_overdue_findings)"
+                    ),
                 ],
-            )
-            for title, content in panels.items()
+            ),
+            (
+                deferred,
+                [
+                    cloudwatch.GraphWidget(
+                        title="Exportaciones: entrega abierta mas vieja (s) y fallidas",
+                        left=self._oldest_delivery((EXPORT_CONSUMER,)),
+                        right=[self._app_metric("export_failed_total", worker, "Sum", m5)],
+                        width=8,
+                        height=6,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Paquete mensual: duracion p95 (ms) y fallos",
+                        left=package_duration,
+                        right=package_failures,
+                        width=8,
+                        height=6,
+                    ),
+                    self._graph("Paquete mensual: edad del ultimo exito (s)", package_age),
+                    self._pending_emitter(
+                        "exportaciones por estado, duracion, tamano e intentos "
+                        "(export_requests_total, export_duration_ms, export_package_size_bytes)"
+                    ),
+                ],
+            ),
+            (
+                assistant,
+                [
+                    self._graph(
+                        "Solicitudes por estado",
+                        [
+                            search("assistant_requests_total", service, "Sum", m5, by_state)
+                            for service in (api, worker)
+                        ],
+                    ),
+                    self._graph(
+                        "Latencia p95 por estado (ms)",
+                        [search("assistant_request_duration_ms", worker, "p95", m5, by_state)],
+                    ),
+                    self._graph(
+                        "Fichas por organizacion y mes",
+                        [
+                            search(
+                                "assistant_tokens_total",
+                                worker,
+                                "Sum",
+                                month,
+                                "organization_id",
+                                "token_direction",
+                            )
+                        ],
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Presupuesto por organizacion, margen de tasa y no disponible",
+                        left=[
+                            search(
+                                "assistant_token_budget_used_ratio",
+                                service,
+                                "Maximum",
+                                ONE_HOUR,
+                                "organization_id",
+                            )
+                            for service in (api, worker)
+                        ],
+                        right=[
+                            self._app_metric(
+                                "assistant_rate_limit_headroom_ratio", worker, "Minimum", m5
+                            ),
+                            self._app_metric("assistant_unavailable", worker, "Maximum", m5),
+                        ],
+                        width=24,
+                        height=6,
+                    ),
+                ],
+            ),
+            (
+                email,
+                [
+                    self._graph(
+                        "Enviados, entregados, rebotes, quejas y rechazos",
+                        [self._email_metric(name, ONE_HOUR) for name in EMAIL_PANEL_METRICS],
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Cola de eventos de entrega: profundidad y antiguedad (s)",
+                        left=[
+                            self._queue_metric("ApproximateNumberOfMessagesVisible", queue)
+                            for queue in (
+                                email_events_name(self.config),
+                                email_events_dlq_name(self.config),
+                            )
+                        ],
+                        right=[
+                            self._queue_metric(
+                                "ApproximateAgeOfOldestMessage", email_events_name(self.config)
+                            )
+                        ],
+                        width=8,
+                        height=6,
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="Correo: tareas (edad del ultimo exito) y consumidores (s)",
+                        left=email_age,
+                        right=self._oldest_delivery(
+                            ("notification_engine", "email_delivery_events")
+                        ),
+                        width=8,
+                        height=6,
+                    ),
+                    self._pending_emitter(
+                        "agrupados y degraded_app_only (email_messages_total por email_state)"
+                    ),
+                ],
+            ),
+            (
+                projection,
+                [
+                    self._graph(
+                        "Divergencias de proyeccion",
+                        [
+                            self._app_metric(
+                                "loop_projection_divergences_total", worker, "Sum", ONE_HOUR
+                            )
+                        ],
+                    ),
+                    self._graph(
+                        "verify_loop_projection: edad del ultimo exito (s)", projection_age
+                    ),
+                    cloudwatch.GraphWidget(
+                        title="verify_loop_projection: duracion p95 (ms) y fallos",
+                        left=projection_duration,
+                        right=projection_failures,
+                        width=8,
+                        height=6,
+                    ),
+                    self._pending_emitter(
+                        "edad de la ultima verificacion por planta (el catalogo no tiene metrica "
+                        "por planta; verify_loop_projection corre por organizacion)"
+                    ),
+                ],
+            ),
         ]
 
 
