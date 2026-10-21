@@ -57,7 +57,14 @@ from vigia_platform.catalog.domain.regression import WalkTestRegression
 from vigia_platform.catalog.domain.standard import DeclaredStandardVersion, standard_valid_at
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.ledger.application.writer import LedgerDatabase
-from vigia_platform.shared.context import ScopeContext, ScopeLevel, repository
+from vigia_platform.shared.context import (
+    ActorKind,
+    ActorUnit,
+    ContextOrigin,
+    ScopeContext,
+    ScopeLevel,
+    repository,
+)
 
 __all__ = ["PostgresCatalogQuery", "scope_parameters"]
 
@@ -195,9 +202,15 @@ _REGRESSION: Final = text(
 def scope_parameters(context: ScopeContext) -> dict[str, Any]:
     """La organización y ``allowed_scopes`` del contexto como parámetros de las sentencias."""
     scopes = context.allowed_scopes
+    internal = (
+        context.actor.kind is ActorKind.SYSTEM
+        and context.actor.unit is ActorUnit.U04
+        and context.origin in {ContextOrigin.PERIODIC_ITERATION, ContextOrigin.OUTBOX_EVENT}
+    )
     return {
         "organization_id": context.organization_id,
-        "whole_organization": any(
+        "whole_organization": internal
+        or any(
             s.scope_level is ScopeLevel.ORGANIZATION and s.scope_id == context.organization_id
             for s in scopes
         ),

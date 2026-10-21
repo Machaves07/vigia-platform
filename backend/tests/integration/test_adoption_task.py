@@ -18,7 +18,9 @@ aplicación real para ``GET /accreditation/adoption`` (``adoption_stack``):
   siguiente no publica otra; una actividad abre otra racha que vuelve a alertar a los ``N`` días;
   el día de la activación no cuenta; una zona no activa (sin compuertas, en puesta en marcha o con
   el uso revocado) nunca alerta; tras una caída, la primera ejecución publica una vez con los días
-  acumulados; ``ProductiveZones`` toma la última de las dos aprobaciones.
+  acumulados, también las rachas que se cerraron por actividad durante la caída (NFR-LAZ-13),
+  hasta ``max_catchup_days`` desde el día en que llegaron al umbral; ``ProductiveZones`` toma la
+  última de las dos aprobaciones.
 - **Una sola vez a la vez** (tabla de garantías del PR): dos ejecuciones simultáneas, las dos ya
   dentro de su transacción antes de mirar la marca, dejan una marca y un evento, en tres rondas.
 - **Organización**: la tarea solo marca y publica en la de su transacción.
@@ -36,6 +38,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -340,6 +343,79 @@ def test_after_an_outage_the_first_run_publishes_once_with_the_days_so_far(
     assert stack.run_check(organization) == ()
 
 
+def test_a_streak_closed_during_an_outage_is_published_once_on_recovery(
+    stack: AdoptionStack,
+) -> None:
+    """NFR-LAZ-13 (decisión del dueño, VIG-241): la racha que llegó al umbral y se cerró por
+    actividad mientras la tarea no corría se publica a posteriori, una vez, con sus días."""
+    organization, zone, _ = _silent_world(stack, 2)
+    for _ in range(3):
+        stack.next_morning(organization)
+    first_start = stack.local_today(organization) - 2 * DAY
+    stack.to_local(organization, stack.local_today(organization), 15)
+    stack.record(zone, "classification")
+    active_at = stack.now()
+
+    stack.next_morning(organization)
+    (alert,) = stack.run_check(organization)
+    assert (alert.zone_id, alert.streak.start, alert.streak.silent_days) == (
+        zone.zone_id,
+        first_start,
+        2,
+    )
+    assert stack.adoption_events(organization) == [
+        {
+            "plant_id": organization.plant_id,
+            "zone_id": str(zone.zone_id),
+            "silent_days": 2,
+            "last_activity_at": None,
+        }
+    ]
+    assert stack.run_check(organization) == ()
+    stack.next_morning(organization)
+    assert stack.run_check(organization) == (), "la racha nueva aún no llega al umbral"
+
+    # La racha nueva se cierra también sin que la tarea corra: sale con la actividad anterior.
+    stack.next_morning(organization)
+    stack.to_local(organization, stack.local_today(organization), 15)
+    stack.record(zone, "classification")
+    stack.next_morning(organization)
+    (second,) = stack.run_check(organization)
+    assert (second.streak.start, second.streak.silent_days) == (first_start + 3 * DAY, 2)
+    assert stack.adoption_events(organization)[1]["last_activity_at"] == format_timestamp(active_at)
+    assert [mark["streak_start"] for mark in stack.alert_rows(organization)] == [
+        first_start,
+        first_start + 3 * DAY,
+    ]
+
+
+def test_the_recovery_looks_back_max_catchup_days_from_the_day_the_threshold_was_reached(
+    stack: AdoptionStack,
+) -> None:
+    organization, zone, activated = _silent_world(stack, 1)
+    activation_day = activated.astimezone(ZoneInfo(stack.timezone(organization))).date()
+    for _ in range(4):
+        stack.next_morning(organization)
+    stack.to_local(organization, stack.local_today(organization), 15)
+    stack.record(zone, "classification")
+    for _ in range(2):
+        stack.next_morning(organization)
+    # La racha cerrada empezó el día siguiente a la activación y llegó al umbral al otro día.
+    closed_start = activation_day + DAY
+    reached = closed_start + DAY
+    margin = (stack.local_today(organization) - reached).days
+    open_start = stack.local_today(organization) - DAY
+
+    narrow = stack.check_like(stack.real_activations(), max_catchup_days=margin - 1)
+    assert [a.streak.start for a in stack.run_check(organization, narrow)] == [open_start]
+    wide = stack.check_like(stack.real_activations(), max_catchup_days=margin)
+    (late,) = stack.run_check(organization, wide)
+    assert (late.streak.start, late.streak.silent_days) == (closed_start, 3)
+    for invalid in (0, -1):
+        with pytest.raises(ValueError, match="max_catchup_days"):
+            stack.check_like(stack.real_activations(), max_catchup_days=invalid)
+
+
 def test_the_default_threshold_is_fourteen_days(stack: AdoptionStack) -> None:
     organization = stack.organization()
     stack.next_morning(organization, hour=10)
@@ -402,6 +478,27 @@ def test_two_runs_at_once_publish_one_alert(stack: AdoptionStack) -> None:
         assert len(stack.adoption_events(organization)) == 1
         assert len(stack.alert_rows(organization)) == 1
         assert stack.adoption_events(organization)[0]["zone_id"] == str(zone.zone_id)
+
+
+def test_two_recoveries_at_once_publish_a_closed_streak_once(stack: AdoptionStack) -> None:
+    """Garantía: la racha cerrada durante la caída usa la misma marca única, antes de publicar."""
+    for _ in range(ROUNDS):
+        organization, zone, _ = _silent_world(stack, 1)
+        stack.next_morning(organization)
+        stack.next_morning(organization)
+        stack.to_local(organization, stack.local_today(organization), 15)
+        stack.record(zone, "classification")
+        stack.next_morning(organization)
+        check = stack.check_like(_Barrier(stack.real_activations(), 2))
+        results = stack.run(_two_runs(stack, organization, check))
+        assert sorted(len(alerts) for alerts in results) == [0, 1]
+        ((alert,),) = [alerts for alerts in results if alerts]
+        assert (alert.streak.start, alert.streak.silent_days) == (
+            stack.local_today(organization) - 2 * DAY,
+            1,
+        )
+        assert len(stack.adoption_events(organization)) == 1
+        assert len(stack.alert_rows(organization)) == 1
 
 
 # --- organización -----------------------------------------------------------------------------

@@ -457,3 +457,47 @@ def test_the_long_job_attributes_are_only_identifiers_enumerations_and_counts() 
         "effort": "other",
         "stop_reason": "other",
     }
+
+
+def test_all_registered_consumers_and_tasks_export_named_bounded_series() -> None:
+    """TASK-326: emite para cada nombre real, sin ejecutar aquí los manejadores de negocio.
+
+    Una política nueva evita que el orden de otras pruebas o los registros dinámicos del
+    planificador oculten un nombre ausente de la lista cerrada de producción.
+    """
+    from vigia_platform.loop.registration import U04_CONSUMERS, U04_TASKS
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    metrics = LoopMetrics(provider.get_meter(METER_NAME), policy=redaction.AttributePolicy())
+    attributes = {
+        "organization_id": uuid.UUID(int=1),
+        "plant_id": uuid.UUID(int=2),
+        "user_id": uuid.UUID(int=3),
+        "node_id": uuid.UUID(int=4),
+        "context": "contenido sintético que no debe salir",
+    }
+    try:
+        for name in U04_CONSUMERS:
+            values = {**attributes, "consumer": name}
+            metrics.gauge(N.LOOP_CONSUMER_PENDING).set(1, values)
+            metrics.gauge(N.LOOP_CONSUMER_OLDEST_PENDING_AGE_SECONDS).set(1, values)
+        for name in U04_TASKS:
+            values = {**attributes, "task": name}
+            metrics.histogram(N.LOOP_PERIODIC_TASK_DURATION_MS).record(1, values)
+            metrics.gauge(N.LOOP_PERIODIC_TASK_LAST_SUCCESS_AGE_SECONDS).set(0, values)
+        points = exported(reader)
+        assert violations(points) == []
+        for metric in (N.LOOP_CONSUMER_PENDING, N.LOOP_CONSUMER_OLDEST_PENDING_AGE_SECONDS):
+            assert {p.value_of("consumer") for p in points if p.metric == metric} == set(
+                U04_CONSUMERS
+            )
+        for metric in (
+            N.LOOP_PERIODIC_TASK_DURATION_MS,
+            N.LOOP_PERIODIC_TASK_LAST_SUCCESS_AGE_SECONDS,
+        ):
+            assert {p.value_of("task") for p in points if p.metric == metric} == set(U04_TASKS)
+        assert len(points) == 2 * (len(U04_CONSUMERS) + len(U04_TASKS))
+        assert all(not (p.keys & FORBIDDEN_KEYS) for p in points)
+    finally:
+        provider.shutdown()

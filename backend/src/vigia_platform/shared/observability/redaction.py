@@ -164,6 +164,18 @@ DEFAULT_ENUMERATIONS: Final[Mapping[str, tuple[str, ...]]] = {
         "mark_orphan_clips",
         "expire_walk_test_sessions",
         "alert_expiring_certificates",
+        # U-04 (TASK-326): catálogo completo desde el arranque, también los nombres largos
+        # que el registro dinámico rechaza por parecer material sensible.
+        "evaluate_deadlines",
+        "review_reminders",
+        "unclosable_review_due",
+        "monthly_package",
+        "metrics_materialize",
+        "adoption_check",
+        "email_grouping",
+        "digest_weekly",
+        "verify_loop_projection",
+        "email_delivery_events_poll",
     ),
     "dependency": ("secrets_manager", "kms"),
     "purpose": ("catalog", "gate", "live_view_token", "key_set", "checkpoint"),

@@ -30,6 +30,9 @@ aplicación** que la interfaz (``OrganizationGenesis``, ``SigningService``, ``De
   NFR-GOB-21, runbook 6.2): el ciclo de ``regenerate_revocation_list`` forzado, sin esperar a la
   marca; deja ``revocation_list_regenerated`` en la auditoría de la proveedora y sale con 5 si no
   publica (el paso de la restauración antes de admitir tráfico de nodos).
+- ``rebuild-loop-projection --organization --plant --operator`` (TASK-326): reconstruye una
+  planta a demanda desde el expediente; ``--dry-run`` solo valida, ``--yes`` confirma. El operador
+  queda auditado en la proveedora; el trabajo usa el contexto de iteración del sistema U-04.
 
 **Rotaciones siempre auditadas** (revisión de VIG-93): una clave Ed25519 se rota solo si el
 almacén escribe sus registros y su auditoría ``key_rotated`` en la **misma** transacción que la
@@ -127,7 +130,11 @@ from vigia_platform.shared.observability.logging import configure_logging, get_l
 from vigia_platform.shared.outbox.registries import REGISTRY_NAME
 from vigia_platform.shared.outbox.replay import ReplayReceipt
 from vigia_platform.shared.ratelimit import MAX_BRAKE_PER_MINUTE, brake_filters
-from vigia_platform.shared.runtime.config import RuntimeConfigInvalid
+from vigia_platform.shared.runtime.config import (
+    RegistrationIncomplete,
+    RuntimeConfigInvalid,
+    report_invalid,
+)
 from vigia_platform.shared.secrets import SecretsUnavailable
 from vigia_platform.shared.signing.keys import (
     KeySetPublicationRecord,
@@ -411,6 +418,19 @@ class RevocationListRegenerator(Protocol):
     async def regenerate(self, *, dry_run: bool) -> RevocationListResult: ...
 
 
+class LoopProjectionRebuild(Protocol):
+    """Orden de mantenimiento a demanda de U-04."""
+
+    async def run(
+        self,
+        operator: ScopeContext,
+        organization_id: uuid.UUID,
+        plant_id: uuid.UUID,
+        *,
+        dry_run: bool,
+    ) -> Mapping[str, object]: ...
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AdminRuntime:
     """Dependencias ya construidas de ``vigia-admin`` (las crea la raíz de composición)."""
@@ -433,6 +453,7 @@ class AdminRuntime:
     revocation_list: RevocationListRegenerator | None = None
     """Con ``VIGIA_NODE_CA_KEY_ARN``, ``VIGIA_EDGE_BUCKET`` y ``VIGIA_NODE_TRUST_STORE_ARN``
     (``regenerate-revocation-list`` y ``revocation-list publish``)."""
+    loop_projection: LoopProjectionRebuild | None = None
     registries: tuple[Callable[[], Awaitable[None]], ...] = ()
     """Sincronizadores de los registros (tipos de registro y de evento): solo antes de escribir,
     nunca con ``--dry-run``."""
@@ -726,6 +747,16 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("consumer", metavar="CONSUMIDOR", help="nombre del consumidor")
     _add_operator(replay)
     _add_common(replay)
+
+    rebuild = commands.add_parser(
+        "rebuild-loop-projection",
+        help="reconstruye la proyección del lazo de una planta desde el expediente",
+        description="Mantenimiento a demanda, sin cadencia (LC-LAZ-03; U04-H-14).",
+    )
+    rebuild.add_argument("--organization", required=True, type=_uuid_argument, metavar="UUID")
+    rebuild.add_argument("--plant", required=True, type=_uuid_argument, metavar="UUID")
+    _add_operator(rebuild)
+    _add_common(rebuild, confirm=True)
 
     partitions = commands.add_parser(
         "create-partitions",
@@ -1570,6 +1601,22 @@ async def _regenerate_revocation_list(
         )
 
 
+async def _rebuild_loop_projection(
+    args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
+) -> None:
+    _require_provider(config)
+    operator = await _operator_context(args, runtime)
+    if runtime.loop_projection is None:
+        raise AdminError("loop_projection_unavailable", "no está registrada la orden de U-04")
+    if not args.dry_run:
+        _confirm(args, streams, "rebuild-loop-projection", "reconstruir la proyección de la planta")
+        await _synchronize(runtime)
+    result = await runtime.loop_projection.run(
+        operator, args.organization, args.plant, dry_run=args.dry_run
+    )
+    _emit(streams, {"command": "rebuild-loop-projection", "dry_run": args.dry_run, **result})
+
+
 type Command = Callable[[argparse.Namespace, AdminConfig, AdminRuntime, Streams], Awaitable[None]]
 
 COMMANDS: Final[Mapping[str, Command]] = {
@@ -1578,6 +1625,7 @@ COMMANDS: Final[Mapping[str, Command]] = {
     "rotate-key": _rotate_key,
     "rotate-node-ca": _rotate_node_ca,
     "replay-dead-letter": _replay_dead_letter,
+    "rebuild-loop-projection": _rebuild_loop_projection,
     "create-partitions": _create_partitions,
     "restore-audit-partition": _restore_audit_partition,
     "record-restore-drill": _record_restore_drill,
@@ -1641,6 +1689,11 @@ async def execute(
     except ArchiveVerificationFailed as error:
         _fail(streams, "archive_invalid", "el archivo no verifica: " + error.reason.value)
         return ExitCode.REJECTED
+    except RegistrationIncomplete as error:
+        from vigia_platform.shared.api.app import STARTUP_FAILURE_EXIT_CODE
+
+        report_invalid(error, streams.stderr)
+        return STARTUP_FAILURE_EXIT_CODE
     except RuntimeConfigInvalid as error:
         # Variable ausente o secreto de la base que no existe: nombra la variable, sin valores.
         _log.error("configuración de vigia-admin no válida: revisa las variables VIGIA_*")

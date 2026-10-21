@@ -42,6 +42,7 @@ from vigia_platform.accreditation.adapters.http.services import (
 from vigia_platform.accreditation.adoption.counter import write_activity
 from vigia_platform.accreditation.adoption.reads import AdoptionReads
 from vigia_platform.accreditation.adoption.task import (
+    MAX_CATCHUP_DAYS,
     AdoptionAlert,
     AdoptionCheck,
     ProductiveZones,
@@ -283,14 +284,18 @@ class AdoptionStack:
         )
         return context
 
-    def check_like(self, activations: ZoneActivations) -> AdoptionCheck:
-        """Otra ``AdoptionCheck`` sobre la misma base con otras activaciones (con ganchos)."""
+    def check_like(
+        self, activations: ZoneActivations, *, max_catchup_days: int = MAX_CATCHUP_DAYS
+    ) -> AdoptionCheck:
+        """Otra ``AdoptionCheck`` sobre la misma base con otras activaciones (con ganchos) o con
+        otro margen de recuperación."""
         world = self.actions.world
         return AdoptionCheck(
             activations=activations,
             configuration=PostgresLoopConfigurationRepository(self.actions.database),
             outbox=world.stack.outbox,
             clock=world.stack.authz.sessions.clock,
+            max_catchup_days=max_catchup_days,
         )
 
     def real_activations(self) -> ProductiveZones:

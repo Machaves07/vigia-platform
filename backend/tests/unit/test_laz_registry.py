@@ -76,8 +76,10 @@ from vigia_platform.loop.application.attachments import ClosureAttachmentService
 from vigia_platform.loop.application.unclosable import SCHEDULE as UNCLOSABLE_SCHEDULE
 from vigia_platform.loop.application.unclosable import TASK_NAME as UNCLOSABLE_REVIEW_DUE
 from vigia_platform.loop.events import LOOP_EVENT_TYPES, LOOP_INTERNAL_EVENT_TYPES
+from vigia_platform.loop.observability.metrics import get_loop_metrics
 from vigia_platform.loop.projection.consumer import LOOP_PROJECTION_EVENTS
 from vigia_platform.loop.record_types import LOOP_RECORD_TYPES
+from vigia_platform.loop.worker.bulkheads import ConsumerBulkhead
 from vigia_platform.notifications import registration as notifications_registration
 from vigia_platform.notifications.adapters.http.routes import notifications_router
 from vigia_platform.notifications.adapters.http.services import (
@@ -560,19 +562,42 @@ def probe_manifests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registration, "U04_CONSUMERS", {"u04_probe_consumer": 2})
 
 
+def _probe_consumer(admission: ConsumerBulkhead | None) -> Consumer:
+    return Consumer(
+        consumer_name="u04_probe_consumer",
+        unit=ActorUnit.U04,
+        subscribed_events=("finding_closed",),
+        handler=_never,
+        admission=admission,
+    )
+
+
 @pytest.mark.usefixtures("probe_manifests")
 def test_a_declared_task_and_consumer_pass_when_registered_as_declared() -> None:
+    """Como se declara desde TASK-326: el consumidor de U-04 lleva su mamparo (LC-LAZ-40)."""
     types, _ = _root()
     catalog = _with_task()
-    catalog.consumers.register(
-        Consumer(
-            consumer_name="u04_probe_consumer",
-            unit=ActorUnit.U04,
-            subscribed_events=("finding_closed",),
-            handler=_never,
-        )
-    )
+    bulkhead = ConsumerBulkhead("u04_probe_consumer", 2, get_loop_metrics())
+    catalog.consumers.register(_probe_consumer(bulkhead))
     assert registration.missing_u04_registrations(types, catalog) == ()
+
+
+@pytest.mark.usefixtures("probe_manifests")
+@pytest.mark.parametrize(
+    "admission",
+    [None, "ajeno"],
+    ids=["sin-mamparo", "mamparo-de-otro-consumidor"],
+)
+def test_a_consumer_without_its_own_bulkhead_is_named(admission: str | None) -> None:
+    types, _ = _root()
+    catalog = _with_task()
+    bulkhead = (
+        None if admission is None else ConsumerBulkhead("review_queue", 2, get_loop_metrics())
+    )
+    catalog.consumers.register(_probe_consumer(bulkhead))
+    assert registration.missing_u04_registrations(types, catalog) == (
+        ("consumer", "u04_probe_consumer"),
+    )
 
 
 @pytest.mark.usefixtures("probe_manifests")

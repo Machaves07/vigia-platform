@@ -18,14 +18,26 @@ organización no detiene a las demás, BR-LAZ-141), recorre sus plantas en orden
 4. si la racha llega al umbral, la **marca** de la racha en ``accreditation.adoption_alert``
    (``INSERT … ON CONFLICT DO NOTHING``, clave ``(organization_id, zone_id, streak_start)``) y,
    **solo si la marca es nueva**, el evento ``adoption_low`` con ``zone_id``, en la misma
-   transacción.
+   transacción;
+5. antes de la racha vigente, las rachas **ya cerradas** por una actividad que llegaron al umbral
+   sin que la tarea corriera (``_CLOSED_STREAKS``), con la misma marca y el mismo evento.
+
+**La recuperación no se salta nada** (NFR-LAZ-13; decisión del dueño en VIG-241, 2026-10-21). Una
+racha que alcanza el umbral y se cierra por actividad mientras la tarea no corre (una caída de
+48 h, un hueco del planificador, o la actividad del día en que se cumple el umbral antes de la
+hora de arranque) se publica a posteriori, una vez, con sus días completos de silencio. Así la
+ejecución tras una caída deja el mismo conjunto de rachas alertadas que la continua (PR-LAZ-48).
+La recuperación mira ``max_catchup_days`` hacia atrás (``MAX_CATCHUP_DAYS``): una racha que llegó
+al umbral antes ya no se alerta. Se evalúa con el umbral vigente: bajarlo puede alertar rachas
+cerradas dentro de ese margen que con el anterior no llegaban.
 
 **Una sola vez por racha** (PAT-LAZ-RES-05: clave ``(zone_id, día)``, aquí el día de inicio de la
 racha): la tarea corrida dos veces el mismo día, o dos a la vez (arrendamiento vencido), no publica
 dos ``adoption_low``: la segunda inserción espera a la primera en la clave única y, confirmada
 esta, no inserta nada y no publica. Al día siguiente la racha sigue con la misma clave y tampoco
 vuelve a publicar; una actividad nueva o una activación nueva empiezan otra racha (otra clave).
-Tras una caída, la primera ejecución publica la racha que alcanzó el umbral mientras tanto, una vez.
+Tras una caída, la primera ejecución publica, una vez cada una, las rachas que alcanzaron el umbral
+mientras tanto: las cerradas y la vigente.
 Si la transacción se revierte, no queda ni la marca ni el evento.
 
 **Candados**: solo la fila nueva de ``adoption_alert`` (la clave única). No lee con ``FOR UPDATE``
@@ -41,7 +53,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Final, Protocol
 
 from sqlalchemy import text
@@ -70,6 +82,7 @@ __all__ = [
     "ADOPTION_CHECK",
     "ADOPTION_CHECK_SCHEDULE",
     "ADOPTION_LOW",
+    "MAX_CATCHUP_DAYS",
     "AdoptionAlert",
     "AdoptionCheck",
     "ProductiveZones",
@@ -83,6 +96,11 @@ ADOPTION_CHECK_SCHEDULE: Final = Schedule.daily(hour=5)
 """Diaria a las 05:00 UTC ``[estimación propia]``: el diseño no fija la frecuencia; el día que
 cuenta es el local de cada planta, no esta hora."""
 ADOPTION_LOW: Final = "adoption_low"
+MAX_CATCHUP_DAYS: Final = 31
+"""Días hacia atrás en que la recuperación busca rachas ya cerradas que llegaron al umbral
+``[estimación propia]``: cubre de sobra la caída de 48 h de NFR-LAZ-13 y acota el trabajo de un
+ciclo; una alerta de hace meses ya no ayuda a reactivar la zona."""
+_ONE_DAY: Final = timedelta(days=1)
 
 _PLANTS: Final = text(
     "SELECT plant_id, timezone FROM identity.plant WHERE organization_id = :organization_id"
@@ -94,6 +112,19 @@ _LAST_ACTIVITY: Final = text(
     " AND plant_id = :plant_id AND zone_id = ANY(CAST(:zone_ids AS uuid[]))"
     " GROUP BY zone_id"
 )
+_CLOSED_STREAKS: Final = text(
+    "SELECT zone_id, day, previous_day, previous_at FROM ("
+    " SELECT zone_id, day, lag(day) OVER zone_days AS previous_day,"
+    " lag(last_activity_at) OVER zone_days AS previous_at"
+    " FROM accreditation.adoption_counter WHERE organization_id = :organization_id"
+    " AND plant_id = :plant_id AND zone_id = ANY(CAST(:zone_ids AS uuid[])) AND day >= :floor"
+    " WINDOW zone_days AS (PARTITION BY zone_id ORDER BY day)) AS gaps"
+    " WHERE day >= :since ORDER BY zone_id, day"
+)
+"""Cada día con actividad desde ``since`` y el día con actividad anterior de su zona: entre los
+dos hay una racha cerrada. ``floor`` (``since`` menos el umbral y un día) acota la lectura; un
+anterior más viejo que ``floor`` no cambia nada, porque esa racha llegó al umbral antes de
+``since``."""
 _MARK: Final = text(
     "INSERT INTO accreditation.adoption_alert (organization_id, plant_id, zone_id, streak_start,"
     " silent_days, threshold_days, evaluated_day, emitted_at)"
@@ -196,11 +227,15 @@ class AdoptionCheck:
         configuration: PostgresLoopConfigurationRepository,
         outbox: OutboxPort,
         clock: Clock,
+        max_catchup_days: int = MAX_CATCHUP_DAYS,
     ) -> None:
+        if type(max_catchup_days) is not int or max_catchup_days < 1:
+            raise ValueError("max_catchup_days debe ser al menos 1")
         self._activations = activations
         self._configuration = configuration
         self._outbox = outbox
         self._clock = clock
+        self._max_catchup_days = max_catchup_days
 
     def __repr__(self) -> str:
         return "AdoptionCheck()"
@@ -229,21 +264,60 @@ class AdoptionCheck:
         now = to_millisecond(self._clock.now())
         day = today(self._clock, plant.timezone)
         zones = sorted(active)
+        since = day - self._max_catchup_days * _ONE_DAY
+        active_since = {zone: local_date(at, plant.timezone) for zone, at in active.items()}
+        closed = await self._closed_streaks(
+            transaction, plant.plant_id, active_since, threshold, since
+        )
         last = await self._last_activity(transaction, plant.plant_id, zones)
         alerts: list[AdoptionAlert] = []
         for zone_id in zones:
             last_day, last_at = last.get(zone_id, (None, None))
             streak = silence_streak(
-                today=day,
-                active_since=local_date(active[zone_id], plant.timezone),
-                last_activity_day=last_day,
+                today=day, active_since=active_since[zone_id], last_activity_day=last_day
             )
-            if not adoption_due(streak, threshold):
-                continue
-            alert = AdoptionAlert(plant.plant_id, zone_id, streak, threshold, last_at)
-            if await self._publish_once(transaction, alert, day, now):
-                alerts.append(alert)
+            due = [*closed.get(zone_id, ())]
+            if adoption_due(streak, threshold):
+                due.append(AdoptionAlert(plant.plant_id, zone_id, streak, threshold, last_at))
+            for alert in due:
+                if await self._publish_once(transaction, alert, day, now):
+                    alerts.append(alert)
         return alerts
+
+    async def _closed_streaks(
+        self,
+        transaction: Transaction,
+        plant_id: uuid.UUID,
+        active_since: Mapping[uuid.UUID, date],
+        threshold: int,
+        since: date,
+    ) -> dict[uuid.UUID, list[AdoptionAlert]]:
+        """Las rachas que una actividad cerró después de llegar al umbral, en orden, desde las
+        que lo alcanzaron el día ``since``: la ejecución continua las habría publicado ese día."""
+        rows = (
+            await transaction.execute(
+                _CLOSED_STREAKS,
+                {
+                    "organization_id": transaction.context.organization_id,
+                    "plant_id": plant_id,
+                    "zone_ids": [str(zone) for zone in sorted(active_since)],
+                    "since": since,
+                    "floor": since - (threshold + 1) * _ONE_DAY,
+                },
+            )
+        ).all()
+        closed: dict[uuid.UUID, list[AdoptionAlert]] = {}
+        for row in rows:
+            zone_id = _uuid(row.zone_id)
+            streak = silence_streak(
+                today=row.day,
+                active_since=active_since[zone_id],
+                last_activity_day=row.previous_day,
+            )
+            if adoption_due(streak, threshold) and streak.start + threshold * _ONE_DAY >= since:
+                alert = AdoptionAlert(plant_id, zone_id, streak, threshold, row.previous_at)
+                closed.setdefault(zone_id, []).append(alert)
+        return closed
 
     async def _last_activity(
         self, transaction: Transaction, plant_id: uuid.UUID, zones: Sequence[uuid.UUID]
