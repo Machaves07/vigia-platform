@@ -1,4 +1,4 @@
-"""Pila ``vigia-loop`` de U-04 (infrastructure-design de U-04 §2.2; TASK-331 y TASK-351).
+"""Pila ``vigia-loop`` de U-04 (infrastructure-design de U-04 §2.2; TASK-331, TASK-351 y TASK-332).
 
 U-04 no despliega servicios: sus componentes corren en ``vigia-api`` y ``vigia-worker``. Esta pila
 guarda los recursos propios de U-04 y se despliega la última, después de las de U-02. Lee lo que
@@ -12,8 +12,8 @@ pila ajena y sin ``Fn::ImportValue``:
 
 La zona ``vigia-zone`` (``import_hosted_zone``) y el tema ``vigia-alerts`` (``import_alerts_topic``,
 productor nuevo en ``vigia-foundation``) se importan donde se usan: la zona solo con los registros
-DNS de ``pilot`` (``staging-<n>`` lee solo su nombre) y el tema con la suscripción de reputación
-y las alarmas (TASK-332): una importación sin uso deja en la plantilla un parámetro sin
+DNS de ``pilot`` (``staging-<n>`` lee solo su nombre) y el tema por las alarmas (TASK-332) y la
+suscripción de reputación: una importación sin uso deja en la plantilla un parámetro sin
 referencia (W2001 de la validación).
 
 Contiene (parte 1, TASK-331):
@@ -54,6 +54,17 @@ Contiene (parte 2, TASK-351):
   rebotes y sin registros en la zona. Lleva su propio nombre porque una identidad es única por
   cuenta y región: la de ``pilot`` ya existe. Desaparece con ``cdk destroy``.
 
+Contiene (parte 3, TASK-332): las quince alarmas de §10.3 en 24 recursos, todas hacia
+``vigia-alerts`` y solo esa acción (NFR-LAZ-28), con la histéresis de PAT-LAZ-MAN-01 (dos
+evaluaciones en tasas, márgenes y duraciones; una en los hechos únicos) y el runbook que las
+atiende en la descripción. ``periodic-task-stale-<tarea>`` se instancia por cada una de las diez
+periódicas de ``U04_TASKS`` (las nueve de LC-LAZ-37 y ``email_delivery_events_poll`` de
+TASK-325; ``rebuild_loop_projection`` es a demanda, U04-H-14). Toda alarma de aplicación vigila
+una métrica que el código emite: donde la del módulo de nombres de U-04 aún no tiene emisor, la de
+U-02 que el despachador o el planificador ya emiten por ``consumer`` o ``task``
+(:data:`LOOP_METRIC_SUBSTITUTES`). Las tablas literales las contrasta la prueba cruzada del
+backend (``tests/unit/test_laz_metrics_cross.py``).
+
 Interruptores de las hipótesis (§14.2), todos apagados en ``config/pilot.py``:
 
 - H-LAZ-9 (§5): ``email_topic_service_managed_key`` apagado deja el tema con ``vigia-queue``;
@@ -78,8 +89,12 @@ verificación por DNS y la salida del arenero no es una opción (deployment-arch
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Final
 
 from aws_cdk import Annotations, Duration, RemovalPolicy, Tags
+from aws_cdk import aws_cloudwatch as cloudwatch
+from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
@@ -95,6 +110,7 @@ from constructs import Construct
 
 from config import BOOTSTRAP_QUALIFIER, EnvironmentConfig
 from stacks.base import VigiaStack
+from stacks.compute import API_SERVICE, METRICS_NAMESPACE, WORKER_SERVICE
 from stacks.data import BucketUsage
 from stacks.foundation import HTTPS_PORT, KEY_ADMIN_ACTIONS, KEY_ROTATION_ADMIN_ACTIONS
 from stacks.outputs import (
@@ -177,6 +193,149 @@ CONFIGURATION_SET_CONDITION_KEY = "ses:ConfigurationSetName"
 REPUTATION_EVENT_PATTERN_SERVICE = "SES"
 REPUTATION_RULE = "ses-reputation"
 
+# --- Alarmas (§10.3; NFR-LAZ-28 y 42; PAT-LAZ-MAN-01) -------------------------------------
+# Tablas literales: la prueba cruzada del backend (``tests/unit/test_laz_metrics_cross.py``) las
+# lee con ``ast.literal_eval`` y ``tests/test_loop_alarms.py`` las contrasta con la síntesis.
+
+LOOP_PERIODIC_TASK_MAX_AGE_SECONDS: Final = {
+    "verify_loop_projection": 93_600,  # 26 h
+    "review_reminders": 93_600,
+    "evaluate_deadlines": 93_600,
+    "unclosable_review_due": 93_600,
+    "metrics_materialize": 3_024_000,  # 35 días [objetivo propio]
+    "monthly_package": 3_024_000,
+    "adoption_check": 93_600,
+    "email_delivery_events_poll": 93_600,
+    "email_grouping": 93_600,
+    "digest_weekly": 777_600,  # 9 días [objetivo propio]
+}
+"""Las diez periódicas de ``U04_TASKS`` con su ventana: ``periodic-task-stale-<tarea>`` por cada
+una. ``rebuild_loop_projection`` corre a demanda y no tiene alarma (U04-H-14)."""
+
+LOOP_CONSUMERS: Final = (
+    "loop_projection",
+    "review_queue",
+    "notification_engine",
+    "assistant_worker",
+    "export_worker",
+    "email_delivery_events",
+)
+"""Los seis consumidores de ``U04_CONSUMERS``: ``loop-dead-letter`` suma su cola muerta."""
+
+EXPORT_CONSUMER: Final = "export_worker"
+"""La entrega de ``export_requested`` queda abierta mientras dura la exportación (TASK-317)."""
+
+LOOP_APPLICATION_ALARM_METRICS: Final = {
+    "loop-dead-letter": (("dead_letter_created_total", ("consumer",)),),
+    "assistant-unavailable": (("assistant_unavailable", ()),),
+    "export-stuck": (("outbox_oldest_pending_age_seconds", ("consumer",)),),
+    "export-failed": (("export_failed_total", ()),),
+    "loop-projection-divergence": (("loop_projection_divergences_total", ()),),
+    "periodic-task-stale-verify-loop-projection": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-review-reminders": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-evaluate-deadlines": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-unclosable-review-due": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-metrics-materialize": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-monthly-package": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "periodic-task-stale-adoption-check": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "periodic-task-stale-email-delivery-events-poll": (
+        ("periodic_task_last_success_age_seconds", ("task",)),
+    ),
+    "periodic-task-stale-email-grouping": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "periodic-task-stale-digest-weekly": (("periodic_task_last_success_age_seconds", ("task",)),),
+    "assistant-token-budget": (("assistant_token_budget_used_ratio", ()),),
+    "assistant-rate-margin": (("assistant_rate_limit_headroom_ratio", ()),),
+}
+"""Alarma → métricas de ``Vigia/Platform`` que vigila, con los atributos que usa como dimensión
+además de ``service`` y ``environment``. Solo métricas que el código emite (A-64)."""
+
+LOOP_SERVICE_ALARM_METRICS: Final = {
+    "email-bounce-rate": (("AWS/SES", "Bounce"), ("AWS/SES", "Send")),
+    "email-events-dlq": (("AWS/SQS", "ApproximateNumberOfMessagesVisible"),),
+    "email-events-queue-age": (("AWS/SQS", "ApproximateAgeOfOldestMessage"),),
+    "email-send-quota-high": (("AWS/SES", "Send"),),
+    "email-bounce-rate-warning": (("AWS/SES", "Bounce"), ("AWS/SES", "Send")),
+    "email-complaint-rate-warning": (("AWS/SES", "Complaint"), ("AWS/SES", "Send")),
+    "email-complaint-rate": (("AWS/SES", "Complaint"), ("AWS/SES", "Send")),
+}
+"""Alarma → métricas de servicio (espacio, nombre): las del conjunto de configuración, la cuenta
+del servicio de correo y las dos colas."""
+
+LOOP_CONDITION_ALARMS: Final = {
+    "loop_dead_letter": ("loop-dead-letter",),
+    "assistant_unavailable": ("assistant-unavailable",),
+    "export_stuck_or_failed": ("export-stuck", "export-failed"),
+    "email_bounce_rate": ("email-bounce-rate",),
+    "loop_projection_divergence": ("loop-projection-divergence",),
+    "loop_periodic_task_stale": (
+        "periodic-task-stale-verify-loop-projection",
+        "periodic-task-stale-review-reminders",
+        "periodic-task-stale-evaluate-deadlines",
+        "periodic-task-stale-unclosable-review-due",
+        "periodic-task-stale-metrics-materialize",
+        "periodic-task-stale-monthly-package",
+        "periodic-task-stale-adoption-check",
+        "periodic-task-stale-email-delivery-events-poll",
+        "periodic-task-stale-email-grouping",
+        "periodic-task-stale-digest-weekly",
+    ),
+    "assistant_token_budget": ("assistant-token-budget",),
+    "assistant_rate_limit_headroom": ("assistant-rate-margin",),
+}
+"""Cada condición de NFR-LAZ-42 (``LOOP_ALARM_CONDITIONS`` del backend) y sus alarmas."""
+
+LOOP_METRIC_SUBSTITUTES: Final = {
+    "loop_dead_letter_entries_total": ("dead_letter_created_total",),
+    "export_stuck_or_failed": ("outbox_oldest_pending_age_seconds", "export_failed_total"),
+    "email_messages_total": ("AWS/SES:Bounce", "AWS/SES:Send"),
+    "loop_periodic_task_last_success_age_seconds": ("periodic_task_last_success_age_seconds",),
+}
+"""Métrica de una condición de NFR-LAZ-42 que la alarma no vigila → lo que vigila en su lugar:
+
+- la cola muerta y la edad del último éxito, sin emisor en U-04: las de U-02 que el despachador y
+  el planificador ya emiten para los consumidores y las tareas de U-04 (por ``consumer`` y
+  ``task``);
+- la exportación: más de 60 min con su entrega abierta y el contador de dos fallos seguidos;
+- la tasa de rebotes: las métricas del conjunto de configuración (origen de §10.3)."""
+
+EXPORT_STUCK_SECONDS: Final = 3_600
+ASSISTANT_UNAVAILABLE_MINUTES: Final = 30
+ASSISTANT_TOKEN_BUDGET_RATIO: Final = 0.8
+ASSISTANT_RATE_MARGIN_RATIO: Final = 0.2
+EMAIL_BOUNCE_RATE_PERCENT: Final = 5.0  # H-LAZ-5
+EMAIL_COMPLAINT_RATE_PERCENT: Final = 0.1  # H-LAZ-5
+# Informativas al 60 % de cada umbral, escritas sin redondeo de coma flotante.
+EMAIL_BOUNCE_WARNING_PERCENT: Final = 3.0
+EMAIL_COMPLAINT_WARNING_PERCENT: Final = 0.06
+EMAIL_EVENTS_MAX_AGE_SECONDS: Final = 900  # 15 min [objetivo propio]
+EMAIL_DAILY_SEND_QUOTA: Final = 50_000
+"""Cuota diaria que se pide al salir del arenero (§4.3 y §11) ``[hipótesis]``: el runbook 7.5
+(parte A) la sustituye por la concedida."""
+EMAIL_SEND_QUOTA_FRACTION: Final = 0.8
+
+RUNBOOK_DEAD_LETTER = "Runbook 7.2 de U-04, camino A (reproceso de cola muerta del lazo)"
+RUNBOOK_EMAIL_DLQ = "Runbook 7.2 de U-04, camino B (cola muerta gestionada del correo)"
+RUNBOOK_PROJECTION = "Runbook 7.1 de U-04 (reconstruccion de la proyeccion por planta)"
+RUNBOOK_ASSISTANT = "Runbook 7.4 de U-04 (proveedor del asistente)"
+RUNBOOK_EMAIL = "Runbook 7.5 de U-04 (reputacion y cuotas del correo)"
+RUNBOOK_EXPORT = "Runbook 7.6 de U-04 (exportacion atascada o fallida)"
+TASK_RUNBOOKS: Final = {
+    "verify_loop_projection": RUNBOOK_PROJECTION,
+    "monthly_package": RUNBOOK_EXPORT,
+    "email_delivery_events_poll": RUNBOOK_EMAIL_DLQ,
+}
+"""Tareas con runbook propio; las demás remiten a los registros de ``vigia-worker``."""
+
 
 def email_events_name(config: EnvironmentConfig) -> str:
     """``vigia-email-events-<entorno>``: nombre del tema y de la cola (§5 y §6.3)."""
@@ -211,6 +370,32 @@ def configuration_set_name(config: EnvironmentConfig) -> str:
 def reputation_rule_name(config: EnvironmentConfig) -> str:
     """``vigia-ses-reputation`` con el sufijo del despliegue (H-LAZ-11)."""
     return config.resource_name(REPUTATION_RULE)
+
+
+def stale_alarm_key(task: str) -> str:
+    """``email_grouping`` → ``periodic-task-stale-email-grouping`` (como las de U-02 y U-03)."""
+    return f"periodic-task-stale-{task.replace('_', '-')}"
+
+
+@dataclass(frozen=True)
+class LoopAlarm:
+    """Una alarma de U-04: métrica o expresión, umbral y evaluaciones (PAT-LAZ-MAN-01)."""
+
+    key: str
+    metric: cloudwatch.IMetric
+    threshold: float
+    comparison: cloudwatch.ComparisonOperator
+    description: str
+    evaluation_periods: int = 1
+    missing: cloudwatch.TreatMissingData = cloudwatch.TreatMissingData.NOT_BREACHING
+
+
+_GT = cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD
+_GE = cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD
+_LT = cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD
+FIVE_MINUTES = Duration.minutes(5)
+ONE_HOUR = Duration.hours(1)
+ONE_DAY = Duration.days(1)
 
 
 class LoopStack(VigiaStack):
@@ -268,9 +453,13 @@ class LoopStack(VigiaStack):
         self.email_identity = self._email_identity()
         if self.zone is not None:
             self._email_records(self.zone)
+        self.alerts_topic = import_alerts_topic(self, "AlertsTopic", config)
         if config.loop.ses_reputation_subscription:
             self._reputation_subscription()
         self.loop_worker_policy = self._loop_worker_policy()
+        self.alarms: dict[str, cloudwatch.Alarm] = {}
+        self._application_alarms()
+        self._service_alarms()
 
     # --- Principales ----------------------------------------------------------------------
 
@@ -669,7 +858,7 @@ class LoopStack(VigiaStack):
                 detail={"service": [REPUTATION_EVENT_PATTERN_SERVICE]},
             ),
         )
-        rule.add_target(targets.SnsTopic(import_alerts_topic(self, "AlertsTopic", self.config)))
+        rule.add_target(targets.SnsTopic(self.alerts_topic))
         return rule
 
     # --- Identidad (§9.1) -----------------------------------------------------------------
@@ -756,6 +945,287 @@ class LoopStack(VigiaStack):
             roles=[self.worker_role],
         )
 
+    # --- Alarmas (§10.3) ------------------------------------------------------------------
+
+    def _alarm(self, spec: LoopAlarm) -> cloudwatch.Alarm:
+        """Una alarma hacia ``vigia-alerts`` (NFR-LAZ-28), sin otra acción."""
+        if spec.key in self.alarms:
+            raise ValueError(f"Alarma duplicada: {spec.key}")
+        alarm = cloudwatch.Alarm(
+            self,
+            f"Alarm-{spec.key}",
+            alarm_name=self.config.resource_name(spec.key),
+            alarm_description=spec.description,
+            metric=spec.metric,
+            threshold=spec.threshold,
+            comparison_operator=spec.comparison,
+            evaluation_periods=spec.evaluation_periods,
+            datapoints_to_alarm=spec.evaluation_periods,
+            treat_missing_data=spec.missing,
+        )
+        alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        self.alarms[spec.key] = alarm
+        return alarm
+
+    def _app_metric(
+        self,
+        name: str,
+        service: str,
+        statistic: str,
+        period: Duration,
+        dimensions: Mapping[str, str] | None = None,
+    ) -> cloudwatch.Metric:
+        """Métrica de ``Vigia/Platform`` de un servicio del despliegue (§10.1)."""
+        return cloudwatch.Metric(
+            namespace=METRICS_NAMESPACE,
+            metric_name=name,
+            dimensions_map={
+                "service": service,
+                "environment": self.config.deployment,
+                **(dimensions or {}),
+            },
+            statistic=statistic,
+            period=period,
+        )
+
+    def _email_metric(self, name: str, period: Duration) -> cloudwatch.Metric:
+        """Métrica del destino ``cloudwatch`` del conjunto de configuración (§4.2)."""
+        return cloudwatch.Metric(
+            namespace="AWS/SES",
+            metric_name=name,
+            dimensions_map={CONFIGURATION_SET_DIMENSION: configuration_set_name(self.config)},
+            statistic="Sum",
+            period=period,
+        )
+
+    def _email_rate(self, name: str) -> cloudwatch.MathExpression:
+        """``100 · <name> / Send`` del conjunto en 24 h (0 sin envíos)."""
+        return cloudwatch.MathExpression(
+            expression="IF(FILL(s, 0) > 0, 100 * FILL(n, 0) / FILL(s, 0), 0)",
+            using_metrics={
+                "n": self._email_metric(name, ONE_DAY),
+                "s": self._email_metric("Send", ONE_DAY),
+            },
+            period=ONE_DAY,
+            label=f"{name} % en 24 h",
+        )
+
+    def _application_alarms(self) -> None:
+        """Las ocho condiciones de NFR-LAZ-42 en sus recursos (§10.3, PAT-LAZ-MAN-01)."""
+        worker = WORKER_SERVICE
+        dead_letters = {
+            f"d{index}": self._app_metric(
+                "dead_letter_created_total", worker, "Sum", FIVE_MINUTES, {"consumer": consumer}
+            )
+            for index, consumer in enumerate(LOOP_CONSUMERS)
+        }
+        self._alarm(
+            LoopAlarm(
+                "loop-dead-letter",
+                cloudwatch.MathExpression(
+                    expression=" + ".join(f"FILL({key}, 0)" for key in dead_letters),
+                    using_metrics=dead_letters,
+                    period=FIVE_MINUTES,
+                    label="cola muerta de U-04",
+                ),
+                1,
+                _GE,
+                "Una entrada en la cola muerta de un consumidor de U-04 en 5 min (NFR-LAZ-39, "
+                f"42). {RUNBOOK_DEAD_LETTER}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "assistant-unavailable",
+                self._app_metric(
+                    "assistant_unavailable",
+                    worker,
+                    "Minimum",
+                    Duration.minutes(ASSISTANT_UNAVAILABLE_MINUTES),
+                ),
+                1,
+                _GE,
+                "Asistente no disponible (circuito abierto o solicitudes unavailable) de forma "
+                f"continua durante 30 min (NFR-LAZ-42). {RUNBOOK_ASSISTANT}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "export-stuck",
+                self._app_metric(
+                    "outbox_oldest_pending_age_seconds",
+                    worker,
+                    "Maximum",
+                    FIVE_MINUTES,
+                    {"consumer": EXPORT_CONSUMER},
+                ),
+                EXPORT_STUCK_SECONDS,
+                _GT,
+                "Una exportacion con su entrega abierta mas de 60 min, en dos evaluaciones "
+                f"(NFR-LAZ-42). {RUNBOOK_EXPORT}.",
+                evaluation_periods=2,
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "export-failed",
+                self._app_metric("export_failed_total", worker, "Sum", FIVE_MINUTES),
+                1,
+                _GE,
+                f"Dos fallos seguidos de la misma exportacion (NFR-LAZ-42). {RUNBOOK_EXPORT}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "loop-projection-divergence",
+                self._app_metric("loop_projection_divergences_total", worker, "Sum", FIVE_MINUTES),
+                1,
+                _GE,
+                "Una divergencia entre la proyeccion del lazo y el expediente (NFR-LAZ-39, 42). "
+                f"{RUNBOOK_PROJECTION}.",
+            )
+        )
+        for task, max_age in LOOP_PERIODIC_TASK_MAX_AGE_SECONDS.items():
+            runbook = TASK_RUNBOOKS.get(task, "Sin runbook propio: registros de vigia-worker")
+            self._alarm(
+                LoopAlarm(
+                    stale_alarm_key(task),
+                    self._app_metric(
+                        "periodic_task_last_success_age_seconds",
+                        worker,
+                        "Maximum",
+                        FIVE_MINUTES,
+                        {"task": task},
+                    ),
+                    max_age,
+                    _GT,
+                    f"{task} sin exito en {max_age} s (NFR-LAZ-42). {runbook}.",
+                    missing=cloudwatch.TreatMissingData.MISSING,
+                )
+            )
+        # La admisión (vigia-api) y el consumidor (vigia-worker) informan el presupuesto.
+        self._alarm(
+            LoopAlarm(
+                "assistant-token-budget",
+                cloudwatch.MathExpression(
+                    expression="MAX([ba, bw])",
+                    using_metrics={
+                        "ba": self._app_metric(
+                            "assistant_token_budget_used_ratio", API_SERVICE, "Maximum", ONE_HOUR
+                        ),
+                        "bw": self._app_metric(
+                            "assistant_token_budget_used_ratio", worker, "Maximum", ONE_HOUR
+                        ),
+                    },
+                    period=ONE_HOUR,
+                    label="assistant_token_budget_used_ratio",
+                ),
+                ASSISTANT_TOKEN_BUDGET_RATIO,
+                _GT,
+                "Consumo mensual de fichas de una organizacion por encima del 80 % del tope, en "
+                f"dos evaluaciones (NFR-LAZ-35, 42). {RUNBOOK_ASSISTANT}.",
+                evaluation_periods=2,
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "assistant-rate-margin",
+                self._app_metric(
+                    "assistant_rate_limit_headroom_ratio", worker, "Minimum", FIVE_MINUTES
+                ),
+                ASSISTANT_RATE_MARGIN_RATIO,
+                _LT,
+                "Margen de limite de tasa del proveedor por debajo del 20 %, en dos evaluaciones "
+                f"(NFR-LAZ-42). {RUNBOOK_ASSISTANT}.",
+                evaluation_periods=2,
+            )
+        )
+
+    def _service_alarms(self) -> None:
+        """Las cinco propias de los recursos nuevos y ``email-complaint-rate`` (§10.3, I-2)."""
+        self._alarm(
+            LoopAlarm(
+                "email-bounce-rate",
+                self._email_rate("Bounce"),
+                EMAIL_BOUNCE_RATE_PERCENT,
+                _GT,
+                "Tasa de rebotes por encima del 5 % en 24 h, en dos evaluaciones (NFR-LAZ-42). "
+                f"{RUNBOOK_EMAIL}.",
+                evaluation_periods=2,
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "email-events-dlq",
+                self.email_events_dlq.metric_approximate_number_of_messages_visible(
+                    period=FIVE_MINUTES, statistic="Maximum"
+                ),
+                1,
+                _GE,
+                f"Primera entrada en {email_events_dlq_name(self.config)} (NFR-LAZ-39). "
+                f"{RUNBOOK_EMAIL_DLQ}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "email-events-queue-age",
+                self.email_events_queue.metric_approximate_age_of_oldest_message(
+                    period=FIVE_MINUTES, statistic="Maximum"
+                ),
+                EMAIL_EVENTS_MAX_AGE_SECONDS,
+                _GT,
+                "Evento de entrega del correo con mas de 15 min en la cola, en dos evaluaciones. "
+                f"{RUNBOOK_EMAIL_DLQ}.",
+                evaluation_periods=2,
+            )
+        )
+        quota = EMAIL_SEND_QUOTA_FRACTION * EMAIL_DAILY_SEND_QUOTA
+        self._alarm(
+            LoopAlarm(
+                "email-send-quota-high",
+                cloudwatch.Metric(
+                    namespace="AWS/SES", metric_name="Send", statistic="Sum", period=ONE_DAY
+                ),
+                quota,
+                _GT,
+                f"Envios de la cuenta en 24 h por encima del 80 % de la cuota diaria "
+                f"({EMAIL_DAILY_SEND_QUOTA}, hipotesis hasta el runbook 7.5 A), en dos "
+                f"evaluaciones. {RUNBOOK_EMAIL}.",
+                evaluation_periods=2,
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "email-bounce-rate-warning",
+                self._email_rate("Bounce"),
+                EMAIL_BOUNCE_WARNING_PERCENT,
+                _GT,
+                "Informativa: tasa de rebotes por encima del 60 % del umbral (3 % en 24 h). "
+                f"{RUNBOOK_EMAIL}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "email-complaint-rate-warning",
+                self._email_rate("Complaint"),
+                EMAIL_COMPLAINT_WARNING_PERCENT,
+                _GT,
+                "Informativa: tasa de quejas por encima del 60 % del umbral (0,06 % en 24 h). "
+                f"{RUNBOOK_EMAIL}.",
+            )
+        )
+        self._alarm(
+            LoopAlarm(
+                "email-complaint-rate",
+                self._email_rate("Complaint"),
+                EMAIL_COMPLAINT_RATE_PERCENT,
+                _GT,
+                "Tasa de quejas por encima del 0,1 % en 24 h, en dos evaluaciones (respuesta 2, "
+                f"I-2). {RUNBOOK_EMAIL}.",
+                evaluation_periods=2,
+            )
+        )
+
 
 def _event_type(event: ses.EmailSendingEvent) -> str:
     """Tipo de evento como lo escribe CloudFormation (``delivery``, ``bounce``…)."""
@@ -779,9 +1249,17 @@ def _statement(
 __all__ = [
     "CLOUDWATCH_EVENTS",
     "CONFIGURATION_SET_CONDITION_KEY",
+    "CONFIGURATION_SET_DIMENSION",
     "CONSUME_ACTIONS",
     "DMARC_REPORTS_PARAMETER",
     "ENDPOINT_ACTIONS",
+    "EXPORT_CONSUMER",
+    "LOOP_APPLICATION_ALARM_METRICS",
+    "LOOP_CONDITION_ALARMS",
+    "LOOP_CONSUMERS",
+    "LOOP_METRIC_SUBSTITUTES",
+    "LOOP_PERIODIC_TASK_MAX_AGE_SECONDS",
+    "LOOP_SERVICE_ALARM_METRICS",
     "MAX_RECEIVE_COUNT",
     "TOPIC_EVENTS",
     "LoopStack",
@@ -792,4 +1270,5 @@ __all__ = [
     "loop_worker_policy_name",
     "queue_endpoint_name",
     "reputation_rule_name",
+    "stale_alarm_key",
 ]
