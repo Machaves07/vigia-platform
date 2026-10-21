@@ -24,7 +24,7 @@ from tests.integration.conftest import PostgresEndpoint
 from tests.monthly_review_support import MonthlyReviewStack, monthly_review_stack
 from vigia_platform.shared.context import Role, ScopeLevel
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 COMMENT = "La reclasificación no cita evidencia que contradiga la coexistencia del clip"
 

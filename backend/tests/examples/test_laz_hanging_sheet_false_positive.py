@@ -20,7 +20,7 @@ import pytest
 from tests.integration.conftest import PostgresEndpoint
 from tests.loop_review_queue_support import ReviewQueueStack, Who, review_queue_stack
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 HANGING_SHEET_REASON = (
     "El clip muestra una lámina plástica colgante en el borde de la zona, agitada por el "

@@ -47,7 +47,7 @@ from vigia_platform.loop.application.unclosable import TASK_NAME, add_months
 from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.signing.keys import format_timestamp
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.laz_examples]
 
 _NOT_SIGNED: Final = (400, "loop_unclosable_policy_not_signed")
 _REASON: Final = "Ajuste sintético de los meses de revisión del incerrable"
