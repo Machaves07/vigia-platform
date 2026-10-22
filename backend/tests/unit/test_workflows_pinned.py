@@ -22,7 +22,8 @@ canalización promete y un cambio descuidado rompería sin que nadie lo viera:
 - **Herramientas de CI fijadas por suma**: ``coverage`` y ``pip-audit`` con ``--require-hashes``.
 - **Descargas verificadas**: toda orden que descarga con ``curl`` comprueba la suma con
   ``sha256sum -c`` en el mismo paso.
-- **ci.yml**: conserva los cuatro checks obligatorios y tiene los trabajos de cobertura (que
+- **ci.yml**: conserva los nombres de los catorce trabajos, incluidos los checks obligatorios,
+  y tiene los trabajos de cobertura (que
   ejecuta ``tools/check_coverage.py``), licencias, pip-audit, imagen arm64 con ``--ssh default``,
   auditoría de la imagen y arranque N-1.
 - **Imágenes base por digest**: cada ``FROM`` de ``backend/Dockerfile`` es una etapa anterior o una
@@ -38,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -60,8 +62,18 @@ DEPENDABOT = REPOSITORY / ".github" / "dependabot.yml"
 
 REQUIRED_CHECKS = (
     "escaneo de secretos",
+    "backend (lint y tipos)",
+    "backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)",
     "backend (lint, tipos y pruebas sin integración)",
+    "backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)",
     "backend (pruebas de integración)",
+    "backend (pruebas de integración, segunda mitad)",
+    "backend (carga ci)",
+    "cobertura (≥ 90 % identity y ledger, ≥ 80 % global)",
+    "dependencias (licencias y pip-audit)",
+    "imagen arm64 (construcción, auditoría, arranque y escaneo)",
+    "arranque N-1 contra el esquema N",
+    "flujos (actionlint)",
     "infra (pruebas y cdk synth)",
 )
 """Los checks obligatorios de la rama (AGENTS.md): renombrarlos deja la rama sin protección."""
@@ -669,6 +681,7 @@ def test_ci_keeps_the_required_checks_and_runs_on_pull_requests_and_main() -> No
     names = [job["name"] for job in ci["jobs"].values()]
     for check in REQUIRED_CHECKS:
         assert names.count(check) == 1, check
+    assert len(names) == len(REQUIRED_CHECKS)
     assert _triggers(ci) == {"pull_request", "push"}
 
 
@@ -1193,9 +1206,27 @@ def test_long_nightly_suites_are_not_duplicated_in_the_general_jobs() -> None:
     volume = _run_text(jobs["volumetria"])
     assert "--part all" not in volume and "--part laz" not in volume
     assert "--part nuc" in volume and "--part gob" in volume
-    # Los auxiliares sin base tampoco desaparecen al moverlos de «propiedades» a sus trabajos.
+    # Los auxiliares sin base de carga no desaparecen al moverlos desde «propiedades».
+    # Volumetría solo tiene pruebas de integración: «not integration» recolectaba cero y fallaba.
     assert _suite_is_selected(jobs["carga"], "tests/load", "not integration", "nightly")
-    assert _suite_is_selected(jobs["volumetria"], "tests/volumetry", "not integration", "nightly")
+
+
+def test_each_nightly_volumetry_pytest_command_collects_tests() -> None:
+    steps = _workflow("nightly")["jobs"]["volumetria"]["steps"]
+    commands = [step["run"] for step in steps if "pytest" in str(step.get("run"))]
+    assert commands
+    for command in commands:
+        tokens = shlex.split(command)
+        arguments = tokens[tokens.index("pytest") + 1 :]
+        answer = subprocess.run(
+            [sys.executable, "-m", "pytest", *arguments, "--collect-only"],
+            cwd=REPOSITORY / "backend",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert answer.returncode == 0, answer.stdout + answer.stderr
 
 
 def test_dependency_job_covers_the_new_u04_packages_without_a_narrow_inventory() -> None:
@@ -1250,6 +1281,34 @@ def test_u04_benchmarks_keep_the_fifty_percent_policy_without_changing_other_uni
     laz = {name: entry for name, entry in baseline["benchmarks"].items() if name.startswith("laz_")}
     assert len(laz) >= 17
     assert all(entry["regression_factor"] == 1.5 for entry in laz.values())
+    assert _workflow("nightly")["jobs"]["bancos"]["name"] == (
+        "bancos (regresión del 20 % en U-03 y del 50 % en U-02 y U-04)"
+    )
+
+
+@pytest.mark.parametrize("job_id", ["staging", "pilot"])
+def test_real_deployments_fail_closed_until_u04_checks_have_an_owner_contract(
+    tmp_path: Path, job_id: str
+) -> None:
+    job = _workflow("release")["jobs"][job_id]
+    assert AWS_GATE in job["if"]
+    assert not job.get("continue-on-error")
+    guard = job["steps"][0]
+    assert guard.get("id") == "contrato-u04"
+    assert not guard.get("if") and not guard.get("continue-on-error")
+    summary = tmp_path / "summary.md"
+    answer = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", guard["run"]],
+        env={"PATH": os.defpath, "GITHUB_STEP_SUMMARY": str(summary)},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert answer.returncode == 1, answer.stdout + answer.stderr
+    message = "comprobaciones nº 14 y 15 pendientes de contrato del dueño: VIG-252"
+    assert message in answer.stderr
+    assert summary.read_text("utf-8").strip() == message
 
 
 @pytest.mark.parametrize("synthesis", ["success", "failure"])
@@ -1306,3 +1365,6 @@ def test_the_real_release_summary_runs_without_aws_and_reports_failures_honestly
     assert "Sin AWS (A-47)" in text and "vigia-loop" in text
     assert f"| sintesis | {synthesis} |" in text
     assert "Se omitieron ECR" in text
+    assert "comprobaciones nº 14 y 15 pendientes de contrato del dueño: VIG-252" in text
+    assert "No se ejecutaron las comprobaciones nº 14" in text
+    assert "no son comprobaciones superadas" in text

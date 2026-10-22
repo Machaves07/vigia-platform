@@ -223,7 +223,7 @@ jobs:
           retention-days: 90
 
   bancos:
-    name: bancos (regresión del 20 % en U-03 y del 50 % en U-02)
+    name: bancos (regresión del 20 % en U-03 y del 50 % en U-02 y U-04)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
@@ -306,8 +306,6 @@ jobs:
         env:
           VIGIA_LOAD_REPORT_DIR: ${{ runner.temp }}/informes
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "integration and nightly" tests/volumetry/test_laz_volumetry.py
-      - name: pruebas sin integración del generador de volumetría
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" tests/volumetry
       - name: informe de volumetría
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
