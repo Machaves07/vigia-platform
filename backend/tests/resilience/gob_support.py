@@ -385,6 +385,10 @@ class PausingDatabase:
         await self._fire()
         return await self.target.read(*arguments, **options)
 
+    async def read_many(self, *arguments: Any, **options: Any) -> Any:
+        await self._fire()
+        return await self.target.read_many(*arguments, **options)
+
 
 # --- Zonas de una misma planta -----------------------------------------------------------------
 
