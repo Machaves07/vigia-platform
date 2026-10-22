@@ -102,6 +102,9 @@ class PausingDatabase:
     async def read(self, context: ScopeContext, statement: Any, parameters: Any = None) -> Any:
         return await self.database.read(context, statement, parameters)
 
+    async def read_many(self, context: ScopeContext, work: Any) -> Any:
+        return await self.database.read_many(context, work)
+
     def transaction(self, context: ScopeContext) -> contextlib.AbstractAsyncContextManager[Any]:
         return self._transaction(context)
 

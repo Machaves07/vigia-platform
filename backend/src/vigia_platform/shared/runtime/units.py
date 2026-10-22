@@ -38,7 +38,7 @@ import enum
 import os
 import re
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -257,7 +257,7 @@ from vigia_platform.shared.archive.restore_drill import (
 from vigia_platform.shared.clock import Clock
 from vigia_platform.shared.context import ActorKind, ContextOrigin, Role, ScopeContext, ScopeLevel
 from vigia_platform.shared.cpu_pool import CpuPool
-from vigia_platform.shared.db import DatabaseHealth, Transaction
+from vigia_platform.shared.db import DatabaseHealth, ReadRows, Transaction
 from vigia_platform.shared.key_rotation import (
     key_rotation_reminder_handler,
     register_key_rotation_reminder,
@@ -313,6 +313,8 @@ class RuntimeDatabase(Protocol):
         statement: Executable,
         parameters: Mapping[str, Any] | None = None,
     ) -> Sequence[Row[Any]]: ...
+
+    async def read_many[T](self, context: Any, work: Callable[[ReadRows], Awaitable[T]]) -> T: ...
 
     async def health(self, *, timeout_seconds: float) -> DatabaseHealth: ...
 

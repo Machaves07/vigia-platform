@@ -13,7 +13,9 @@ de verificación; el primer fallo fija el código (como BR-CTR-32):
 4. **texto libre**: cada ruta de ``free_text_paths`` pasa ``FreeTextPolicy``; se guarda el texto
    en NFC (``free_text_rejected``, con el ``detail_code`` del validador que lo rechazó si lo
    lleva). Si algún validador registró un preparador, corre antes, con la organización del
-   contexto y una lectura de la base (PAT-LAZ-REN-02): el validador no consulta la base;
+   contexto y una lectura de la base (PAT-LAZ-REN-02): el validador no consulta la base. Sin la
+   transacción del llamador, esa lectura y la consulta del paso 5 comparten una transacción de
+   lectura (``Database.read_many``); la fila encontrada se mira igual en el paso 5;
 5. **idempotencia** por (organización, tipo, ``source_key``): mismo ``content_hash`` →
    ``accepted_duplicate`` con el recibo original y sin registro nuevo; distinto →
    ``idempotency_conflict`` (BR-NUC-48);
@@ -121,7 +123,7 @@ from vigia_platform.shared.context import (
     repository,
 )
 from vigia_platform.shared.cpu_pool import CpuPool, get_cpu_pool
-from vigia_platform.shared.db import ChainLockedTimeout, Transaction
+from vigia_platform.shared.db import ChainLockedTimeout, ReadRows, Transaction
 from vigia_platform.shared.ids import uuid7
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import Operation, PlatformMetrics, get_metrics
@@ -353,6 +355,12 @@ class LedgerDatabase(Protocol):
         parameters: Mapping[str, Any] | None = None,
     ) -> Sequence[Row[Any]]: ...
 
+    async def read_many[T](
+        self, context: ScopeContext, work: Callable[[ReadRows], Awaitable[T]]
+    ) -> T:
+        """Varias lecturas en una sola transacción ``READ ONLY`` (``Database.read_many``)."""
+        ...
+
 
 class EvidenceReferenceVerifier(Protocol):
     """``EvidenceVerifier.verify_references`` (LC-NUC-15)."""
@@ -421,6 +429,23 @@ class _Prepared:
     label: LabelProjection | None
     label_evidence_ids: tuple[uuid.UUID, ...]
     events: tuple[NewEvent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _SourceKeyLookup:
+    """La búsqueda del paso 5 hecha junto con los preparadores; ``row`` es ``None`` sin registro."""
+
+    row: Row[Any] | None
+
+
+def _source_key_parameters(
+    context: ScopeContext, compiled: CompiledType, source_key: str
+) -> dict[str, Any]:
+    return {
+        "organization_id": context.organization_id,
+        "record_type": compiled.record_type,
+        "source_key": source_key,
+    }
 
 
 class _Rejected(Exception):
@@ -721,23 +746,38 @@ class EscritorExpediente:
         # (4) texto libre, sobre el documento ya válido: se guarda el texto en NFC. Las rutas de
         # la clave y de la etiqueta nunca son texto libre (el registro lo exige): no cambian. Los
         # preparadores (la versión de la lista de vocabulario de U-04) leen antes de validar.
+        prefetched: _SourceKeyLookup | None = None
         if compiled.definition.free_text_paths and self._free_text.has_preparers:
-            await self._free_text.prepare(
-                FreeTextPreparation(
-                    organization_id=context.organization_id,
-                    rows=self._row_reader(context, transaction),
-                    clock=self._clock,
+            if transaction is None and source_key is not None:
+                # Sin la transacción del llamador, las lecturas de los preparadores y la búsqueda
+                # de la clave del paso 5 van en una sola transacción de lectura, no en dos
+                # (VIG-261: la ingesta del nodo). El orden de los rechazos no cambia: la fila
+                # encontrada solo se mira en el paso 5.
+                prefetched = await self._database.read_many(
+                    context,
+                    lambda rows: self._prepare_and_look_up(context, compiled, source_key, rows),
                 )
-            )
+            else:
+                await self._free_text.prepare(
+                    FreeTextPreparation(
+                        organization_id=context.organization_id,
+                        rows=self._row_reader(context, transaction),
+                        clock=self._clock,
+                    )
+                )
         self._apply_free_text(compiled, document, context.organization_id)
         content_bytes = await self._canonical(document)
         content_hash = hashlib.sha256(content_bytes).hexdigest()
-        # (1) con la base: la zona de una sesión existe y es de la planta del registro. Es la
-        # primera consulta: los pasos 1 a 4 nunca la alcanzan con un contenido inválido.
+        # (1) con la base: la zona de una sesión existe y es de la planta del registro. Los pasos
+        # 1 a 4 nunca la alcanzan con un contenido inválido.
         await self._require_zone_of_plant(context, document, scope, transaction)
         # (5) idempotencia.
         if source_key is not None:
-            existing = await self._by_source_key(context, compiled, source_key)
+            existing = (
+                prefetched.row
+                if prefetched is not None
+                else await self._by_source_key(context, compiled, source_key)
+            )
             if existing is not None:
                 return self._resolve_duplicate(existing, content_hash)
         # (6) evidencias.
@@ -876,15 +916,21 @@ class EscritorExpediente:
         self, context: ScopeContext, compiled: CompiledType, source_key: str
     ) -> Row[Any] | None:
         rows = await self._database.read(
-            context,
-            _BY_SOURCE_KEY,
-            {
-                "organization_id": context.organization_id,
-                "record_type": compiled.record_type,
-                "source_key": source_key,
-            },
+            context, _BY_SOURCE_KEY, _source_key_parameters(context, compiled, source_key)
         )
         return rows[0] if rows else None
+
+    async def _prepare_and_look_up(
+        self, context: ScopeContext, compiled: CompiledType, source_key: str, rows: ReadRows
+    ) -> _SourceKeyLookup:
+        """Los preparadores y la búsqueda de la clave con el lector de una misma transacción."""
+        await self._free_text.prepare(
+            FreeTextPreparation(
+                organization_id=context.organization_id, rows=rows, clock=self._clock
+            )
+        )
+        found = await rows(_BY_SOURCE_KEY, _source_key_parameters(context, compiled, source_key))
+        return _SourceKeyLookup(found[0] if found else None)
 
     @staticmethod
     def _resolve_duplicate(existing: Row[Any], content_hash: str) -> Receipt:

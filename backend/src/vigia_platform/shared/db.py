@@ -12,7 +12,9 @@ Toda consulta de datos pasa por aquí y solo con un ``ScopeContext``:
 - ``await db.read(context, statement)``: la misma apertura en una transacción ``READ ONLY``;
   si falla por conexión antes del ``COMMIT`` se reintenta **una sola vez** tras 100 ms con otra
   conexión; si vuelve a fallar, ``TemporarilyUnavailable``. Tras enviar el ``COMMIT`` nunca se
-  reintenta (PR-NUC-41).
+  reintenta (PR-NUC-41). ``await db.read_many(context, work)`` hace lo mismo con varias lecturas
+  en una sola transacción: ``work`` recibe el lector de filas, solo lee y se repite entero en el
+  reintento (el escritor del expediente junta así las de sus pasos 4 y 5, VIG-261).
 - ``async with tx.savepoint()``: subtransacción; si el bloque falla se deshace solo lo suyo y la
   transacción sigue usable (el despachador de la bandeja marca así el intento fallido de un
   manejador en la misma transacción, TASK-129).
@@ -111,6 +113,7 @@ __all__ = [
     "PoolClass",
     "PoolPort",
     "ProcessKind",
+    "ReadRows",
     "RouteClass",
     "SslMode",
     "TemporarilyUnavailable",
@@ -131,6 +134,9 @@ RETRY_AFTER_SECONDS: Final = 5
 """``retry_after_seconds`` de ``temporarily_unavailable`` ``[objetivo propio]``."""
 COMMAND_TIMEOUT_MARGIN_SECONDS: Final = 1.0
 """Holgura del tope de cada comando en el cliente sobre ``statement_timeout``."""
+
+type ReadRows = Callable[[Executable, Mapping[str, Any] | None], Awaitable[Sequence[Row[Any]]]]
+"""El lector de filas de ``read_many``: una sentencia de la transacción de lectura."""
 
 _log = get_logger("shared.db")
 
@@ -1022,12 +1028,29 @@ class Database:
         parameters: Mapping[str, Any] | None = None,
     ) -> Sequence[Row[Any]]:
         """Lectura en transacción ``READ ONLY``: un único reintento tras un fallo de conexión."""
+
+        async def one(rows: ReadRows) -> Sequence[Row[Any]]:
+            return await rows(statement, parameters)
+
+        return await self.read_many(context, one)
+
+    async def read_many[T](
+        self, context: ScopeContext, work: Callable[[ReadRows], Awaitable[T]]
+    ) -> T:
+        """Varias lecturas en **una** transacción ``READ ONLY``: un ``BEGIN``, un ``SET LOCAL`` y un
+        ``COMMIT`` para todas (``read`` es el caso de una sola sentencia).
+
+        ``work`` recibe el lector de filas de la transacción y **solo lee**: igual que ``read``,
+        tras un fallo de conexión antes del ``COMMIT`` se repite entero una vez con otra conexión,
+        y el tope del intento cubre todo ``work``. Lo que ``work`` lance sin ser de la base sale
+        tal cual, con la conexión devuelta al pool.
+        """
         context = self._require_context(context)
         pool = self._pool()
         for attempt in range(1, MAX_READ_ATTEMPTS + 1):
             progress = _Attempt()
             try:
-                return await self._attempt_read(pool, context, statement, parameters, progress)
+                return await self._attempt_read(pool, context, work, progress)
             except TimeoutError as error:  # venció el tope del intento
                 if progress.committing:
                     # El COMMIT ya se envió: nunca se reintenta (PR-NUC-41).
@@ -1046,14 +1069,13 @@ class Database:
             await self._sleep(READ_RETRY_DELAY_SECONDS)
         raise AssertionError("inalcanzable")  # pragma: no cover
 
-    async def _attempt_read(
+    async def _attempt_read[T](
         self,
         pool: PoolPort,
         context: ScopeContext,
-        statement: Executable,
-        parameters: Mapping[str, Any] | None,
+        work: Callable[[ReadRows], Awaitable[T]],
         progress: _Attempt,
-    ) -> Sequence[Row[Any]]:
+    ) -> T:
         """Un intento de lectura con el tope del intento.
 
         Si vence con una conexión ya entregada, se corta su transporte: el intento colgado falla
@@ -1062,7 +1084,7 @@ class Database:
         abandoned = _Abandoned()
         try:
             return await self._within(
-                self._read_once(pool, scope_parameters(context), statement, parameters, progress),
+                self._read_once(pool, scope_parameters(context), work, progress),
                 self._attempt_timeout,
                 abandoned=abandoned,
             )
@@ -1070,20 +1092,26 @@ class Database:
             if abandoned.value and progress.connection is not None:
                 progress.connection.terminate()
 
-    async def _read_once(
+    async def _read_once[T](
         self,
         pool: PoolPort,
         scope: Mapping[str, str],
-        statement: Executable,
-        parameters: Mapping[str, Any] | None,
+        work: Callable[[ReadRows], Awaitable[T]],
         progress: _Attempt,
-    ) -> Sequence[Row[Any]]:
+    ) -> T:
         connection: ConnectionPort | None = None
         try:
             connection = progress.connection = await pool.acquire()
             await connection.begin(read_only=True)
             await connection.execute(_SET_SCOPE, scope)
-            rows = (await connection.execute(statement, parameters)).all()
+            opened = connection
+
+            async def rows(
+                statement: Executable, parameters: Mapping[str, Any] | None = None
+            ) -> Sequence[Row[Any]]:
+                return (await opened.execute(statement, parameters)).all()
+
+            result = await work(rows)
             progress.committing = True
             await connection.commit()
         except Exception as error:
@@ -1109,7 +1137,7 @@ class Database:
         # La devolución tiene su propio tope (``_release``): el llamador ya no la corta.
         progress.connection = None
         await self._release(connection)
-        return rows
+        return result
 
     async def health(self, *, timeout_seconds: float) -> DatabaseHealth:
         """Comprobación de ``/health/ready`` (NFR-NUC-13): una lectura, sin reintento, con tope.
@@ -1142,7 +1170,10 @@ class Database:
                 progress.connection.terminate()
 
     async def _health_once(self, pool: PoolPort, progress: _Attempt) -> DatabaseHealth:
-        rows = await self._read_once(pool, _HEALTH_SCOPE, _HEALTH_STATEMENT, None, progress)
+        async def health(read: ReadRows) -> Sequence[Row[Any]]:
+            return await read(_HEALTH_STATEMENT, None)
+
+        rows = await self._read_once(pool, _HEALTH_SCOPE, health, progress)
         visible, version = rows[0]
         if type(visible) is not int or (version is not None and type(version) is not int):
             raise TypeError("la comprobación de salud devolvió tipos inesperados")
