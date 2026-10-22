@@ -9,6 +9,9 @@ TASK-303 (BR-LAZ-79 a 81; LC-LAZ-16). Sobre la lista inicial de BLM §14.1 a §1
   ``list_version = 1``; el ``detail_code`` es ``loop_blocked_vocabulary_term``;
 - además, de forma exhaustiva, cada flexión de cada lema y cada instancia de cada patrón;
 - **todo texto generado del vocabulario permitido se acepta** y vuelve en NFC;
+- **lo que la lista excluye por diseño se acepta** («N % de cobertura observable» y «cero falsos
+  negativos en N pases» de §14.2, las negaciones de D-9) y el generador de textos bloqueados nunca
+  lo produce (VIG-275);
 - **nada rechazado se persiste** (integración, ``EscritorExpediente`` real como ``vigia_app``):
   un registro de U-03 con un término bloqueado en su texto libre responde ``free_text_rejected``
   con ``detail_code = loop_blocked_vocabulary_term`` en ``/note`` y no deja **ninguna** fila
@@ -23,9 +26,10 @@ from __future__ import annotations
 import unicodedata
 import uuid
 from collections.abc import Iterator
+from typing import Final
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 
 from tests.identity_db import migrated_database
 from tests.integration.conftest import PostgresEndpoint
@@ -34,6 +38,8 @@ from tests.properties.laz.strategies.texts import (
     BlockedText,
     allowed_texts,
     blocked_vocabulary_texts,
+    design_exclusion_texts,
+    excluded_by_design,
     inflections,
 )
 from tests.vocabulary_support import FIELD, initial_policy, vocabulary_writer
@@ -77,6 +83,16 @@ def _rejection(text: str) -> BlockedVocabularyRejected:
     return raised.value
 
 
+_COVERAGE_TERM: Final = next(term for term in INITIAL_TERMS if "cobertura" in term.value)
+"""El patrón «N % de cobertura» de §14.2, que excluye «cobertura observable»."""
+_COVERAGE_NEIGHBOUR: Final = BlockedText(
+    text="100 % de cobertura observada en la zona",
+    term_ids=frozenset({_COVERAGE_TERM.term_id}),
+)
+"""Vecino de la exclusión por diseño: la anticipación negativa pide «observable», no «observada»."""
+
+
+@example(blocked=_COVERAGE_NEIGHBOUR)
 @given(blocked=blocked_vocabulary_texts())
 def test_every_inflection_or_pattern_instance_is_rejected_naming_the_term(
     blocked: BlockedText,
@@ -130,6 +146,22 @@ def test_every_allowed_text_is_accepted(text: str) -> None:
     )
 
 
+@example(text="100 % de cobertura observable")
+@given(text=design_exclusion_texts())
+def test_a_form_the_list_excludes_by_design_is_accepted_and_never_generated_as_blocked(
+    text: str,
+) -> None:
+    """§14.2 y D-9: lo que la lista deja pasar a propósito se acepta, y el generador lo descarta.
+
+    El ejemplo es el texto con el que el nightly de VIG-249 (semilla 2397435745) esperó un
+    rechazo que la política, con razón, no da (VIG-275).
+    """
+    assert excluded_by_design(text)
+    assert POLICY.apply(text, FIELD, organization_id=uuid.uuid4()) == unicodedata.normalize(
+        "NFC", text
+    )
+
+
 # --- Integración: nada rechazado se persiste ------------------------------------------------------
 
 
@@ -143,6 +175,7 @@ def environment(postgres_endpoint: PostgresEndpoint) -> Iterator[WriterEnvironme
 
 
 @pytest.mark.integration
+@example(blocked=_COVERAGE_NEIGHBOUR)
 @given(blocked=blocked_vocabulary_texts())
 def test_a_rejected_text_leaves_no_row(
     environment: WriterEnvironment, blocked: BlockedText
