@@ -30,3 +30,9 @@ b5a03d19f2d870482d70b435b2b7c7cc8eccc594:backend/tests/load/test_load_units.py:p
 # de la zona en una prueba del calendario; no es un secreto. El commit siguiente compara con la
 # constante SANTIAGO.
 15fd4d98e860b33b95d7a32c1fb1c9998b26d397:backend/tests/properties/laz/test_laz_calendar.py:generic-api-key:303
+#
+# VIG-250: sonda sintética con forma de clave de acceso de AWS («AKIA» y dieciséis letras en
+# orden alfabético) con que la prueba comprueba que los patrones de secretos de los runbooks la
+# detectan; no es una credencial. El commit siguiente arma las sondas por partes en tiempo de
+# ejecución.
+58b6ac91adba00c2529613945807cf0e287b4a05:backend/tests/unit/test_u04_runbooks.py:aws-access-token:443
