@@ -40,6 +40,7 @@ validador si lo lleva (U-04: ``loop_blocked_vocabulary_term``).
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import re
 import unicodedata
@@ -228,6 +229,31 @@ type FreeTextPreparer = Callable[[FreeTextPreparation], Awaitable[None]]
 """Preparador: deja en memoria lo que su validador usará, para que este no lea la base."""
 
 
+def _shared_reads(rows: RowReader) -> RowReader:
+    """``rows`` con las lecturas repetidas servidas de memoria, solo durante una preparación.
+
+    La clave es la identidad de la sentencia (las de los adaptadores son constantes del módulo) y
+    sus parámetros; unos parámetros que no se pueden comparar se leen siempre.
+    """
+    read: dict[tuple[int, tuple[tuple[str, Any], ...]], tuple[Executable, Sequence[Row[Any]]]]
+    read = {}
+
+    async def shared(statement: Executable, parameters: Mapping[str, Any]) -> Sequence[Row[Any]]:
+        try:
+            key = (id(statement), tuple(sorted(parameters.items())))
+            hash(key)
+        except TypeError:
+            return await rows(statement, parameters)
+        found = read.get(key)
+        if found is not None and found[0] is statement:
+            return found[1]
+        result = tuple(await rows(statement, parameters))
+        read[key] = (statement, result)
+        return result
+
+    return shared
+
+
 def _reject(reason: FreeTextRejection, field: FreeTextField) -> FreeTextRejected:
     return FreeTextRejected(reason.value, field, _MESSAGES[reason])
 
@@ -299,9 +325,16 @@ class FreeTextPolicyRegistry:
         return bool(self._preparers)
 
     async def prepare(self, preparation: FreeTextPreparation) -> None:
-        """Corre los preparadores al abrir la escritura, antes de validar (PAT-LAZ-REN-02)."""
+        """Corre los preparadores al abrir la escritura, antes de validar (PAT-LAZ-REN-02).
+
+        Los preparadores de una misma escritura **comparten sus lecturas**: la misma sentencia con
+        los mismos parámetros va a la base una sola vez (los dos de U-04 comprueban la misma fila
+        de ``loop.blocked_vocabulary_list``). Sin la transacción del llamador cada lectura es una
+        transacción propia, y repetirla encarecía toda ingesta del nodo con texto libre (VIG-261).
+        """
+        shared = dataclasses.replace(preparation, rows=_shared_reads(preparation.rows))
         for preparer in self._preparers.values():
-            await preparer(preparation)
+            await preparer(shared)
 
     def apply(
         self, text: str, field: FreeTextField, *, organization_id: uuid.UUID | None = None

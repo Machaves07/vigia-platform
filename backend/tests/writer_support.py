@@ -33,7 +33,7 @@ import os
 import threading
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -88,7 +88,14 @@ from vigia_platform.shared.context import (
     ScopeLevel,
     _seal_scope_context,
 )
-from vigia_platform.shared.db import ConnectionPort, Database, PoolPort, ProcessKind, Transaction
+from vigia_platform.shared.db import (
+    ConnectionPort,
+    Database,
+    PoolPort,
+    ProcessKind,
+    ReadRows,
+    Transaction,
+)
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
 from vigia_platform.shared.storage import (
@@ -384,6 +391,11 @@ class ProbedDatabase:
         parameters: Mapping[str, Any] | None = None,
     ) -> Sequence[Row[Any]]:
         return await self.database.read(context, statement, parameters)
+
+    async def read_many[T](
+        self, context: ScopeContext, work: Callable[[ReadRows], Awaitable[T]]
+    ) -> T:
+        return await self.database.read_many(context, work)
 
 
 # --- Almacén instrumentado --------------------------------------------------------------------

@@ -449,7 +449,65 @@ def test_without_context_no_connection_is_requested(value: object) -> None:
         database.transaction(cast(ScopeContext, value))
     with pytest.raises(ContextAbsent):
         _run(database.read(cast(ScopeContext, value), USER_STATEMENT))
+    with pytest.raises(ContextAbsent):
+        _run(database.read_many(cast(ScopeContext, value), _three_reads([])))
     assert journal.attempts == 0
+
+
+# --- Varias lecturas en una transacción (``read_many``, VIG-261) -------------------------------
+
+
+def _three_reads(calls: list[int]) -> Any:
+    """``work`` de ``read_many``: tres sentencias con el mismo lector; anota cada ejecución."""
+
+    async def work(rows: Any) -> list[list[tuple[Any, ...]]]:
+        calls.append(len(calls) + 1)
+        return [[tuple(row) for row in await rows(USER_STATEMENT, None)] for _ in range(3)]
+
+    return work
+
+
+def test_read_many_runs_every_read_in_one_read_only_transaction() -> None:
+    journal = Journal()
+    calls: list[int] = []
+    database = _api_database(journal, [])
+
+    outcome = _run(database.read_many(make_context(), _three_reads(calls)))
+
+    assert outcome == [[(1,)]] * 3
+    assert (journal.attempts, calls, journal.user_statements) == (1, [1], 3)
+    assert journal.begins == [True]
+    assert len(journal.scopes) == 1
+    assert all(journal.scope_before_statement)
+    assert (journal.commits_sent, journal.released, journal.discarded) == (1, 1, 0)
+
+
+@given(make=CONNECTION_ERRORS)
+def test_read_many_repeats_the_whole_work_once_after_a_connection_failure(make: Any) -> None:
+    journal = Journal()
+    calls: list[int] = []
+    database = _api_database(journal, [Fault(Phase.EXECUTE, Kind.CONNECTION, make)])
+
+    outcome = _run(database.read_many(make_context(), _three_reads(calls)))
+
+    assert outcome == [[(1,)]] * 3
+    assert (journal.attempts, calls) == (2, [1, 2])
+    assert journal.sleeps == [READ_RETRY_DELAY_SECONDS]
+    assert (journal.commits_sent, journal.released, journal.discarded) == (1, 1, 1)
+
+
+def test_an_error_of_the_work_is_not_retried_and_never_commits() -> None:
+    journal = Journal()
+    database = _api_database(journal, [])
+
+    async def work(rows: Any) -> None:
+        await rows(USER_STATEMENT, None)
+        raise InjectedOther("fallo del lector")
+
+    with pytest.raises(InjectedOther):
+        _run(database.read_many(make_context(), work))
+    assert (journal.attempts, journal.user_statements, journal.commits_sent) == (1, 1, 0)
+    assert (journal.released, journal.discarded) == (1, 0)
 
 
 # --- Casos de borde -----------------------------------------------------------------------------
