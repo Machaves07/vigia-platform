@@ -41,6 +41,7 @@ def _module(name: str) -> ModuleType:
 federation = _module("aws_federation")
 app_token = _module("github_app_token")
 staging = _module("staging")
+loop_diff = _module("loop_diff")
 
 CREDENTIALS = {
     "AccessKeyId": "ASIAEXAMPLE",
@@ -337,3 +338,34 @@ def test_the_command_rejects_other_environments_and_tasks(arguments: list[str]) 
     with pytest.raises(SystemExit) as raised:
         staging.main(arguments, aws=FakeAws())
     assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("stack", ["vigia-loop", "vigia-loop-staging-7"])
+def test_the_exclusive_loop_diff_accepts_only_its_own_stack(stack: str) -> None:
+    assert loop_diff.validate(f"Stack {stack}\n[+] AWS::SQS::Queue Queue\n", stack) == []
+    assert loop_diff.validate(f"Stack {stack} ({stack})\nThere were no differences\n", stack) == []
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        "",
+        "CDK failed: permission denied",
+        "Stack vigia-data\n[~] AWS::S3::Bucket Evidence\n",
+        "Stack vigia-loop\nStack vigia-compute\n",
+        "Stack vigia-loop (vigia-data)\n",
+        "Stack vigia-loop-staging-70\n",
+        "Stack vigia-loop\nStack vigia-data (cabecera desconocida) extra\n",
+    ],
+)
+def test_another_stack_or_an_unrecognizable_diff_fails_closed(report: str) -> None:
+    assert loop_diff.validate(report, "vigia-loop")
+
+
+def test_the_loop_diff_command_fails_with_missing_or_foreign_report(tmp_path: Path) -> None:
+    path = tmp_path / "diff.txt"
+    assert loop_diff.main([str(path), "--stack", "vigia-loop"]) == 1
+    path.write_text("Stack vigia-data\n", encoding="utf-8")
+    assert loop_diff.main([str(path), "--stack", "vigia-loop"]) == 1
+    path.write_text("Stack vigia-loop\n", encoding="utf-8")
+    assert loop_diff.main([str(path), "--stack", "vigia-loop"]) == 0

@@ -489,6 +489,46 @@ def test_alarms_of_other_deployments_are_ignored() -> None:
     assert _run(_target(environment="pilot"), aws=pilot_own)[7].status == "failed"
 
 
+@pytest.mark.parametrize(
+    "alarm",
+    [
+        "loop-dead-letter",
+        "assistant-unavailable",
+        "export-stuck",
+        "export-failed",
+        "loop-projection-divergence",
+        "periodic-task-stale-review-reminders",
+        "assistant-token-budget",
+        "assistant-rate-margin",
+        "email-bounce-rate",
+        "email-events-dlq",
+        "email-events-queue-age",
+        "email-send-quota-high",
+        "email-bounce-rate-warning",
+        "email-complaint-rate-warning",
+        "email-complaint-rate",
+    ],
+)
+def test_u04_alarm_at_the_last_minute_of_pilot_fails(alarm: str) -> None:
+    pauses: list[float] = []
+    aws = FakeAws(alarms=[[] for _ in range(15)] + [[f"vigia-{alarm}"]])
+    result = deploy_checks.check_alarms(
+        _target(environment="pilot", watch_minutes=15), aws, pauses.append
+    )
+    assert result.status == "failed"
+    assert pauses == [60] * 15
+    assert "minuto 15" in result.detail
+    assert all(call[-2:] == ("--alarm-name-prefix", "vigia-") for call in aws.calls)
+
+
+def test_a_composite_u04_alarm_also_blocks_pilot() -> None:
+    def aws(*arguments: str) -> Any:
+        return {"CompositeAlarms": [{"AlarmName": "vigia-loop-degraded"}]}
+
+    result = deploy_checks.check_alarms(_target(environment="pilot"), aws, lambda _: None)
+    assert result.status == "failed"
+
+
 # --- 10: certificado revocado en dos capas ----------------------------------------------------
 
 
