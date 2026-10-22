@@ -1,6 +1,6 @@
 # vigia-platform
 
-Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. U-02 (plataforma núcleo) está construida: expediente, identidad, auditoría, bandeja de salida, worker, orden administrativa, seis pilas de CDK y canalización. U-03 a U-05 añaden flota, lazo de cierre y la aplicación de página única. Lo que entra en cada versión está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
+Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. U-02 (plataforma núcleo) está construida: expediente, identidad, auditoría, bandeja de salida, worker, orden administrativa, seis pilas de CDK y canalización. U-03 (gobernanza y flota) y U-04 (lazo de cierre, acreditación y notificaciones) también lo están; U-05 añade la aplicación de página única. Lo que entra en cada versión está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
 
 **Sin AWS por ahora (adenda A-47)**: U-02 se cierra sin cuenta de AWS. El primer despliegue (TASK-154, VIG-98) está diferido, y los trabajos de la canalización que tocan AWS solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true`.
 
@@ -15,6 +15,9 @@ vigia-platform/
       catalog/             catálogo, compuertas, walk-test, admisiones (U-03)
       fleet/               flota, alta y credenciales del nodo, lista de revocación (U-03)
       node_api/            rutas del contrato del nodo bajo /api/nodes (U-03)
+      loop/                lazo de cierre: bandeja, ciclo del hallazgo, proyección y asistente (U-04)
+      accreditation/       exportación, paquete mensual, métricas, adopción y exposición (U-04)
+      notifications/       avisos, preferencias, agrupación y correo (U-04)
       shared/              api, outbox, signing, crypto, observability, clock, runtime
     migrations/            Alembic, una sola cadena, solo hacia adelante (TASK-106 a 108)
     openapi/               especificación generada de la aplicación (U-05 genera su cliente)
@@ -22,7 +25,7 @@ vigia-platform/
     tests/                 unit, properties, examples, abuse, isolation, integration, resilience, benchmarks
   infra/                   pilas de AWS CDK en Python (TASK-144 a 150)
   docs/                    formatos del paquete y del archivo de auditoría
-  docs/runbooks/           procedimientos de operación 6.1 a 6.6 (U-02), los u03-* (U-03) y contingencias
+  docs/runbooks/           procedimientos de operación 6.1 a 6.6 (U-02), los u03-* (U-03), los u04-* (U-04) y contingencias
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
   .github/scripts/         pasos de AWS de los flujos (tareas puntuales, salidas, barrido)
   local/                   configuración de los servicios locales (colector de OpenTelemetry)
@@ -237,6 +240,82 @@ El instalador del nodo (U-06) verifica los servidores con el almacén de confian
 
 **Pendiente nº 30 (aditivo)**: la consola de comisionamiento debe mostrar esa huella **junto al código de alta**. Mientras no exista, la huella vigente se publica en el `README` del repositorio de configuración de sitio del cliente, no aquí. **Sin AWS por ahora (A-47)** no hay raíz publicada todavía: la huella se fija en el primer despliegue ([VIG-174](https://linear.app/manuch/issue/VIG-174), TASK-238).
 
+## Lazo, acreditación y notificaciones (U-04)
+
+U-04 añade tres módulos con la misma raíz de composición (A-52): cada uno trae su `registration.py` y ninguno edita `shared/runtime/units.py`. No añade servicios: todo corre en `vigia-api` y `vigia-worker`. Sus recursos de AWS están en una pila propia, `vigia-loop`, que se despliega **la última**. Lo que entra está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en los [runbooks u04-7.1 a 7.6](docs/runbooks/README.md).
+
+### Módulos
+
+| Módulo | Qué aporta | Dónde |
+|---|---|---|
+| `loop` | Bandeja por zona servida desde la proyección, ciclo del hallazgo (clasificación, acción, cierre firmado, reapertura), cola de revisión, plazos, causa raíz con asistente opcional, adjuntos de cierre y validadores de texto | `backend/src/vigia_platform/loop/` |
+| `accreditation` | Exportación del paquete de acreditación con verificador, paquete mensual con auditoría muestral, métricas de definición cerrada, adopción y exposición | `backend/src/vigia_platform/accreditation/` |
+| `notifications` | Catálogo de avisos con urgencia y audiencia, preferencias, agrupación y resumen semanal, envío por correo y avisos de entrega | `backend/src/vigia_platform/notifications/` |
+
+La comprobación de arranque exige los **17 tipos de registro**, los **28 eventos**, las **diez tareas periódicas**, los **seis consumidores** con su mamparo y los **dos validadores** de texto de U-04; si falta uno, el proceso no arranca y nombra la pieza (`RegistrationIncomplete`). El detalle está en el [registro de U-04](docs/runbooks/u04-registration.md); los nombres de las métricas, en [métricas de U-04](docs/runbooks/u04-metrics.md).
+
+Los seis consumidores, con su mamparo (concurrencia por proceso, que cambia `VIGIA_LOOP_BULKHEADS`): `loop_projection` (4), `review_queue` (2), `notification_engine` (4), `assistant_worker` (2), `export_worker` (1) y `email_delivery_events` (2).
+
+Las diez tareas periódicas, todas por organización salvo la última:
+
+| Tarea | Cadencia (UTC) |
+|---|---|
+| `evaluate_deadlines`, `review_reminders`, `email_grouping` | cada hora |
+| `verify_loop_projection`, `digest_weekly` (el día semanal configurado) | diaria 02:00 |
+| `metrics_materialize` | diaria 03:00 |
+| `monthly_package` | diaria 04:00 |
+| `adoption_check` | diaria 05:00 |
+| `unclosable_review_due` | diaria 06:00 |
+| `email_delivery_events_poll` (**global**) | cada 15 s |
+
+Cada una tiene su alarma `periodic-task-stale-<tarea>` (26 h; 35 días `monthly_package` y `metrics_materialize`; 9 días `digest_weekly`). `rebuild_loop_projection` no es periódica: es la orden `vigia-admin rebuild-loop-projection`.
+
+### Correo
+
+- **Envío** por el servicio de correo de AWS con la identidad `mail.<dominio>` (DKIM gestionado, SPF, remitente de rebotes `bounce.mail.<dominio>` y DMARC `p=none` durante el piloto) y el conjunto de configuración `vigia-email-<entorno>`. El remitente es `no-responder@mail.<dominio>`. En `staging-<n>` la identidad es `mail-<entorno>.<dominio>`, sin verificar.
+- **Degradación**: sin adaptador de correo o con su cortacircuito abierto, el aviso queda en la aplicación con `degraded_app_only`; la alerta de integridad comprometida se encola siempre. Tope propio de 200 correos de resumen por hora y organización.
+- **Salir del arenero** es un paso bloqueante del primer despliegue: [runbook 7.5, parte A](docs/runbooks/u04-7.5-email-sandbox-and-reputation.md).
+
+### Cola de avisos de entrega
+
+Los avisos de entrega, rebote, queja y rechazo llegan por el tema y la cola `vigia-email-events-<entorno>` (14 días de retención), con la cola muerta `vigia-email-events-dlq-<entorno>` tras 5 recepciones, cifrados con la clave `vigia-queue`. `vigia-worker` los consume por el punto privado `vigia-vpce-sqs-<entorno>`; el consumidor `email_delivery_events` es idempotente por el identificador de mensaje del proveedor y **nunca crea avisos**. Nunca hay una ruta pública para ellos.
+
+### Secreto del asistente, por nombre
+
+La clave del proveedor del asistente es una sola para la plataforma y vive en el secreto **`vigia/<entorno>/assistant/api-key`**. La pila lo crea **vacío**; el dueño escribe el valor con el [runbook 7.4](docs/runbooks/u04-7.4-assistant-key-rotation.md). Solo `vigia-worker` la recibe, en `ANTHROPIC_API_KEY`; `vigia-api` nunca la ve. **Ningún valor de la clave entra al repositorio, a la canalización ni a la configuración de pruebas**: sin clave, el asistente responde `unavailable` con `no_api_key` y el resto del lazo sigue igual. No existe en `staging-<n>`.
+
+### Variables nuevas
+
+Todas no secretas; las lee `shared/runtime/config.py`:
+
+| Variable | Contenido |
+|---|---|
+| `VIGIA_ASSISTANT_API_HOST`, `VIGIA_EMAIL_API_HOST` | Los dos únicos destinos de salida del worker (`api.anthropic.com` y `email.<región>.amazonaws.com`) |
+| `VIGIA_LOOP_BULKHEADS` | `consumidor=concurrencia,…` para los seis consumidores |
+| `VIGIA_ASSISTANT_MODEL` | Modelo del asistente (`claude-opus-5` por omisión o `claude-sonnet-5`) |
+| `VIGIA_EMAIL_EVENTS_QUEUE_URL` | URL de `vigia-email-events-<entorno>`; sin ella, el consumidor no sondea |
+| `VIGIA_EMAIL_SENDER_DOMAIN` | Dominio del remitente; sin él, en `pilot` no se registra el adaptador de correo |
+
+`infra/stacks/compute.py` fija en `vigia-worker` `VIGIA_ASSISTANT_API_HOST`, `VIGIA_EMAIL_API_HOST` y `VIGIA_LOOP_BULKHEADS`; `VIGIA_ASSISTANT_MODEL` toma su valor por omisión. `VIGIA_EMAIL_EVENTS_QUEUE_URL`, `VIGIA_EMAIL_SENDER_DOMAIN` y la clave del asistente todavía no están en la definición de tareas: son precondiciones del primer despliegue de U-04 ([VIG-252](https://linear.app/manuch/issue/VIG-252), TASK-337).
+
+### Convención de nombres
+
+`<entorno>` es el valor de `VIGIA_ENVIRONMENT` (`pilot` o `staging-<n>`), el mismo con el que la pila y el código componen los nombres: ningún nombre de U-04 se inyecta aparte.
+
+| Recurso | Nombre |
+|---|---|
+| Conjunto de configuración del correo | `vigia-email-<entorno>` |
+| Tema y cola de avisos de entrega | `vigia-email-events-<entorno>` |
+| Cola muerta del correo | `vigia-email-events-dlq-<entorno>` |
+| Punto privado y su grupo | `vigia-vpce-sqs-<entorno>` y `sg-queue-endpoint` |
+| Clave de las colas | `alias/vigia-queue` |
+| Secreto del asistente | `vigia/<entorno>/assistant/api-key` |
+| Política gestionada del worker | `vigia-loop-worker` |
+| Alarmas | `vigia-<clave>`: la clave es la de `infra/stacks/loop.py` (`loop-dead-letter`, `export-stuck`, `email-bounce-rate`…), y los runbooks la citan así |
+| Claves del depósito `vigia-evidence` | `org/<organización>/plant/<planta>/zone/<zona>/closure/…` (adjuntos), `org/<organización>/plant/<planta>/export/<exportación>/…` (exportaciones) y `org/<organización>/plant/<planta>/zone/<zona>/monthly/<periodo>/package.zip` (paquete mensual) |
+
+Fuera de `pilot`, los nombres de alcance de cuenta (alarmas, alias, política) llevan además el sufijo del despliegue.
+
 ## Variables de configuración
 
 Cada proceso lee su configuración del entorno **una vez**, al arrancar, con un modelo estricto de Pydantic (`extra="forbid"`). Si falta una variable obligatoria o no es válida, el proceso no arranca. Ningún secreto, clave ni `.env` entra al repositorio. En AWS, las tareas solo reciben **nombres o ARN** de secretos y claves (`infra/stacks/compute.py`), nunca sus valores. Las del entorno local están en «Variables del entorno local».
@@ -272,7 +351,9 @@ La definición de tareas de `infra/stacks/compute.py` fija además variables que
 | `create-organization --operator …` | Organización cliente, su primera planta y su primer administrador | Primer despliegue |
 | `rotate-key <propósito> --operator …` | Rotación de la clave de firma de `catalog`, `gate`, `live_view_token`, `key_set` o `checkpoint` | [6.4](docs/runbooks/6.4-key-rotation.md) |
 | `rotate-node-ca --new-key-id … --operator …` | Paquete de dos raíces de `vigia-node-ca`, solo con `ca_rotation=true` | [6.4](docs/runbooks/6.4-key-rotation.md) |
-| `replay-dead-letter <evento> <consumidor> --operator …` | Reentrega de una entrega de la cola muerta | [6.3](docs/runbooks/6.3-dead-letter-replay.md) |
+| `replay-dead-letter <evento> <consumidor> --operator …` | Reentrega de una entrega de la cola muerta | [6.3](docs/runbooks/6.3-dead-letter-replay.md); consumidores de U-04, [7.2](docs/runbooks/u04-7.2-dead-letter-replay.md) |
+| `rebuild-loop-projection --organization … --plant … --operator …` | Reconstrucción de la proyección del lazo de una planta desde el expediente (U-04) | [7.1](docs/runbooks/u04-7.1-loop-projection-rebuild.md) |
+| `declare-unrecoverable-attachment --organization … --plant … --attachment … --sha256 … --detected-at … --operator …` | Declara no recuperable un adjunto de cierre perdido sin versión anterior (U-04) | [7.3](docs/runbooks/u04-7.3-lost-closure-object.md) |
 | `create-partitions --until AAAA-MM --operator …` | Particiones mensuales por adelantado | [Contingencia de subparticionado](docs/runbooks/subpartitioning-contingency.md) |
 | `restore-audit-partition <objeto> --sha256 … --output …` | Descarga, verifica y extrae un archivo de auditoría (solo lectura) | [6.5](docs/runbooks/6.5-audit-archive-and-restore.md) |
 | `record-restore-drill --result ok\|failed --operator …` | Registra el ensayo de restauración y reinicia su alarma | [6.1](docs/runbooks/6.1-quarterly-restore-drill.md) |
@@ -317,6 +398,8 @@ Los procedimientos de conmutación y recuperación (RESILIENCY-13, NFR-NUC-12) e
 - [6.4 rotación de claves](docs/runbooks/6.4-key-rotation.md);
 - [6.5 archivado y restauración de auditoría](docs/runbooks/6.5-audit-archive-and-restore.md);
 - [6.6 contraseña de la base](docs/runbooks/6.6-database-password-rotation.md);
+- los de U-03, [u03-6.1 a 6.4](docs/runbooks/README.md#índice);
+- los de U-04: [7.1 reconstrucción de la proyección](docs/runbooks/u04-7.1-loop-projection-rebuild.md), [7.2 colas muertas del lazo](docs/runbooks/u04-7.2-dead-letter-replay.md), [7.3 objeto perdido de `closure/`](docs/runbooks/u04-7.3-lost-closure-object.md), [7.4 clave del asistente](docs/runbooks/u04-7.4-assistant-key-rotation.md), [7.5 arenero y reputación del correo](docs/runbooks/u04-7.5-email-sandbox-and-reputation.md) y [7.6 exportación atascada](docs/runbooks/u04-7.6-export-stuck-or-failed.md), con los ensayos DR-LAZ-01 a 04 dentro de 6.1;
 - y las contingencias.
 
 Los enlaces relativos de este archivo y de `docs/` se comprueban con:
