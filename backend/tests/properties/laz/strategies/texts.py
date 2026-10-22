@@ -4,7 +4,10 @@
   forma de la tabla ``resources/vocabulary/inflections.es.json``, con sus tildes) o con
   **una** instancia de un patrón (``PATTERN_INSTANCES``: la columna «Qué cae» de BLM §14 y sus
   variantes), entre palabras del vocabulario permitido, con mayúsculas al azar. Devuelve el texto
-  y el ``term_id`` que el rechazo debe nombrar.
+  y el ``term_id`` que el rechazo debe nombrar. Nunca produce una forma que la lista excluye por
+  diseño (``excluded_by_design``: «cobertura observable» y «falsos negativos en N pases» de §14.2,
+  las negaciones de D-9).
+- ``design_exclusion_texts``: esas formas excluidas por diseño, que la política acepta.
 - ``allowed_texts``: frases del vocabulario permitido (``ALLOWED_WORDS``), que ningún término
   bloquea, con mayúsculas y signos al azar.
 - ``unicode_texts``: un texto bloqueado y una variante que esquiva la comparación ASCII con
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import unicodedata
 import uuid
 from collections.abc import Mapping
@@ -57,6 +61,8 @@ __all__ = [
     "allowed_texts",
     "attribution_unicode_texts",
     "blocked_vocabulary_texts",
+    "design_exclusion_texts",
+    "excluded_by_design",
     "inflections",
     "person_attribution_texts",
     "unicode_texts",
@@ -193,9 +199,34 @@ def _term(term: InitialTerm) -> st.SearchStrategy[tuple[frozenset[uuid.UUID], st
     )
 
 
+_EXCLUDED_BY_DESIGN: Final = (
+    re.compile(r"cobertura[\W_]*observable"),
+    re.compile(r"falsos[\W_]*negativos[\W_]*en[\W_]*[0-9]+[\W_]*pases"),
+    re.compile(r"no[\W_]*(?:significa|equivale[\W_]*a)[\W_]*zona[\W_]*(?:despejad|segur)"),
+)
+"""Las formas que la lista inicial deja pasar a propósito, escritas aquí sin importar la política:
+
+- «N % de cobertura observable» y «cero falsos negativos en N pases», los hechos medidos que §14.2
+  dice que **no** caen (anticipación negativa en el patrón);
+- las cuatro negaciones de D-9 («no significa / no equivale a zona despejada / segura»).
+
+Son más anchas que las de producción (cualquier separador, sin límites de palabra): descartar de
+más solo quita variedad al generador, nunca le hace esperar un rechazo que la política no da.
+"""
+
+
+def excluded_by_design(text: str) -> bool:
+    """``text`` contiene una forma que la lista inicial excluye por diseño.
+
+    Las formas son las de ``_EXCLUDED_BY_DESIGN``; compara sin tildes ni mayúsculas.
+    """
+    decomposed = unicodedata.normalize("NFD", text.casefold())
+    folded = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return any(pattern.search(folded) for pattern in _EXCLUDED_BY_DESIGN)
+
+
 @st.composite
-def blocked_vocabulary_texts(draw: st.DrawFn) -> BlockedText:
-    """Una flexión de un lema bloqueado o una instancia de patrón, en un texto permitido."""
+def _blocked_candidates(draw: st.DrawFn) -> BlockedText:
     term = draw(st.sampled_from(INITIAL_TERMS))
     term_ids, instance = draw(_term(term))
     if draw(st.booleans()):
@@ -203,6 +234,39 @@ def blocked_vocabulary_texts(draw: st.DrawFn) -> BlockedText:
     before, after = draw(_phrase()), draw(_phrase())
     text = " ".join(part for part in (before, instance, after) if part)
     return BlockedText(text=text, term_ids=term_ids)
+
+
+def blocked_vocabulary_texts() -> st.SearchStrategy[BlockedText]:
+    """Una flexión de un lema bloqueado o una instancia de patrón, en un texto permitido.
+
+    Descarta los textos en que las palabras vecinas forman una exclusión por diseño
+    (``excluded_by_design``): «100 % de cobertura» seguido de «observable» se acepta con razón.
+    """
+    return _blocked_candidates().filter(lambda blocked: not excluded_by_design(blocked.text))
+
+
+@st.composite
+def design_exclusion_texts(draw: st.DrawFn) -> str:
+    """Un texto con una forma que la lista inicial excluye por diseño, entre palabras permitidas."""
+    number = str(draw(st.integers(min_value=0, max_value=100)))
+    instance = draw(
+        st.sampled_from(
+            (
+                f"{number} % de cobertura observable",
+                f"{number}% de cobertura observable medida",
+                f"{number},5 % de cobertura, observable",
+                f"cero falsos negativos en {number} pases del acta",
+                "no significa zona despejada",
+                "no significa zona segura",
+                "no equivale a zona despejada",
+                "no equivale a zona segura",
+            )
+        )
+    )
+    if draw(st.booleans()):
+        instance = instance.upper() if draw(st.booleans()) else instance.capitalize()
+    before, after = draw(_phrase()), draw(_phrase())
+    return " ".join(part for part in (before, instance, after) if part)
 
 
 @st.composite
