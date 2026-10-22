@@ -154,10 +154,10 @@ def test_u02_record_types_come_from_the_registry() -> None:
     u02 = {c.record_type for c in latest if c.definition.writer_unit is ActorUnit.U02}
     assert len(u02) == 14
     # U-03: sus 26 tipos, también los que todavía no escribe ninguna ruta (VIG-163, TASK-227);
-    # U-04: sus 17 (VIG-201, TASK-302).
+    # U-04: sus 17 (VIG-201, TASK-302) y closure_attachment_unrecoverable (VIG-274).
     assert names - u02 == U03_RECORD_TYPES | U04_RECORD_TYPES
     assert len(U03_RECORD_TYPES) == 26
-    assert len(U04_RECORD_TYPES) == 17
+    assert len(U04_RECORD_TYPES) == 18
 
 
 def test_the_registry_rejects_duplicates_and_bad_names(monkeypatch: pytest.MonkeyPatch) -> None:

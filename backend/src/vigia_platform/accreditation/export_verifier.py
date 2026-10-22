@@ -41,7 +41,12 @@ control, y le añade la lectura del paquete exportado con estas defensas, en est
    ``content_hash`` de cada registro con contenido; el ``entry_hash`` de cada entrada de
    auditoría, recalculado entero con el sobre de U-02; los enlaces entre registros y entradas
    consecutivos y con lo que cubre cada punto de control; y los conteos por estado, los clips,
-   los adjuntos y las entradas ausentes del manifiesto frente a lo que el paquete lleva.
+   los adjuntos y las entradas ausentes del manifiesto frente a lo que el paquete lleva. Un
+   adjunto que cita una entrada de evidencia viaja con sus bytes o consta **no recuperable**
+   (manifiesto 2, DR-LAZ-04) con la declaración ``closure_attachment_unrecoverable`` del hallazgo
+   (mismo hash y fecha); uno ausente sin declarar es ``manifest_mismatch``. También en una zona
+   unipersonal: la declaración viaja siempre con su contenido y la entrada de evidencia, sin él,
+   con su lista ``attachment_refs`` (identificador y hash de cada adjunto).
 7. Solo si todo lo anterior está íntegro **y anclado** y se pide ``--extract``, se escriben los
    archivos en un directorio vacío, volviendo a comprobar cada hash mientras se escriben.
 
@@ -90,10 +95,18 @@ from vigia_platform.ledger.chain.package_verifier import (
 from vigia_platform.ledger.chain.pure_ed25519 import ed25519_verify
 from vigia_platform.ledger.chain.pure_rfc8785 import CanonicalizationError, canonicalize
 
-EXPORT_VERIFIER_VERSION: Final = "export-verifier.1"
-"""Versión de este verificador: la que el manifiesto declara en ``verifier_version``."""
+EXPORT_VERIFIER_VERSION: Final = "export-verifier.2"
+"""Versión de este verificador: la que el manifiesto declara en ``verifier_version``. La 2
+(VIG-274) lee el manifiesto 2, con los adjuntos declarados no recuperables (DR-LAZ-04)."""
 
-EXPORT_MANIFEST_VERSION: Final = 1
+EXPORT_MANIFEST_VERSION: Final = 2
+EXPORT_MANIFEST_VERSIONS: Final = (1, 2)
+"""Las versiones del manifiesto que este verificador lee: un paquete es permanente, así que la 2
+sigue verificando los de la 1."""
+UNRECOVERABLE_RECORD_TYPE: Final = "closure_attachment_unrecoverable"
+_UNRECOVERABLE_KEYS: Final = frozenset(
+    {"declaration_id", "detected_at", "reason_es", "record_id", "sha256"}
+)
 EXPORT_MANIFEST_NAME: Final = "manifest.json"
 EXPORT_VERIFIER_NAME: Final = "vigia_verify.py"
 EXPORT_VERIFIER_ABSENT: Final = "absent"
@@ -641,7 +654,7 @@ def _read_manifest(package: _Package, expected_sha256: str | None) -> tuple[_Man
     if not isinstance(document, dict):
         raise _manifest_error("no es un objeto JSON", "")
     version = document.get("manifest_version")
-    if not _is_count(version) or version != EXPORT_MANIFEST_VERSION:
+    if not _is_count(version) or version not in EXPORT_MANIFEST_VERSIONS:
         raise _manifest_error(
             f"manifest_version {version!r}: use el verificador incluido en el paquete",
             "/manifest_version",
@@ -920,6 +933,12 @@ class _Content:
         self.by_kind: dict[str, list[_Artifact]] = {}
         for artifact in manifest.artifacts:
             self.by_kind.setdefault(artifact.kind, []).append(artifact)
+        self.record_ids: dict[str, Mapping[str, Any]] = {}
+        """Cada registro de los hallazgos por su ``record_id`` (con o sin contenido)."""
+        self.evidence_attachments: dict[str, str] = {}
+        """Los adjuntos que citan las entradas de evidencia con contenido: identificador → hash."""
+        self.lost: dict[str, Mapping[str, Any]] = {}
+        """Las declaraciones ``closure_attachment_unrecoverable`` con contenido, por adjunto."""
 
     def _where(self, artifact: _Artifact, pointer: str) -> dict[str, Any]:
         entry = self.package.entries[artifact.path]
@@ -1188,6 +1207,45 @@ class _Content:
             raise _fail("record_conflict", **self._where(artifact, pointer))
         links[sequence] = (record["record_hash"], record["previous_hash"], artifact, pointer)
         self.report.records_checked += 1
+        self._attachment_facts(artifact, pointer, record)
+
+    def _attachment_facts(self, artifact: _Artifact, pointer: str, record: dict[str, Any]) -> None:
+        """Lo que el expediente dice de los adjuntos (DR-LAZ-04): qué citan las entradas de
+        evidencia y qué declaró no recuperable. Solo de los registros con contenido."""
+        self.record_ids[record["record_id"]] = record
+        kind = record.get("record_type")
+        content = record.get("content")
+        if kind == "action_evidence_added" and "content" not in record:
+            # Zona unipersonal: la entrada viaja sin contenido, con su lista de adjuntos.
+            content = {"attachments": record.get("attachment_refs")}
+            if not isinstance(content["attachments"], list):
+                raise self._invalid(artifact, pointer + "/attachment_refs", "adjuntos")
+        if not isinstance(content, dict):
+            if kind == UNRECOVERABLE_RECORD_TYPE:
+                raise self._invalid(artifact, pointer, "adjunto no recuperable sin contenido")
+            return
+        if kind == "action_evidence_added":
+            items = content.get("attachments", [])
+            if not isinstance(items, list):
+                raise self._invalid(artifact, pointer + "/content/attachments", "adjuntos")
+            for index, item in enumerate(items):
+                if not (
+                    isinstance(item, dict)
+                    and _matches(_UUID_FORM, item.get("attachment_id"))
+                    and _matches(_SHA256_FORM, item.get("sha256"))
+                ):
+                    raise self._invalid(
+                        artifact, f"{pointer}/content/attachments/{index}", "adjunto"
+                    )
+                self.evidence_attachments[item["attachment_id"]] = item["sha256"]
+        elif kind == UNRECOVERABLE_RECORD_TYPE:
+            if not (
+                _matches(_UUID_FORM, content.get("attachment_id"))
+                and _matches(_SHA256_FORM, content.get("sha256"))
+                and _matches(_STAMP_FORM, content.get("detected_at"))
+            ):
+                raise self._invalid(artifact, pointer + "/content", "adjunto no recuperable")
+            self.lost[content["attachment_id"]] = {**content, "record_id": record["record_id"]}
 
     def _counts(self, states: Mapping[str, int], flagged: int) -> None:
         document = self.manifest.document
@@ -1233,15 +1291,7 @@ class _Content:
                 included.add(clip["path"])
         if {a.path for a in self.by_kind.get("clip", [])} != included:
             raise self._mismatch("un clip del paquete no está declarado", "/clips")
-        attached: set[str] = set()
-        for index, attachment in enumerate(document["attachments"]):
-            pointer = f"/attachments/{index}"
-            if not isinstance(attachment, dict):
-                raise self._mismatch("adjunto mal declarado", pointer)
-            self._declared(artifacts, attachment, "attachment", pointer)
-            attached.add(attachment["path"])
-        if {a.path for a in self.by_kind.get("attachment", [])} != attached:
-            raise self._mismatch("un adjunto del paquete no está declarado", "/attachments")
+        self.attachments(artifacts)
         absent: set[object] = set()
         for index, item in enumerate(document["absent_entries"]):
             if not isinstance(item, dict) or not isinstance(item.get("kind"), str):
@@ -1258,6 +1308,85 @@ class _Content:
         ):
             raise self._mismatch(
                 "verifier_version no cuadra con el verificador", "/verifier_version"
+            )
+
+    def attachments(self, artifacts: Mapping[str, _Artifact]) -> None:
+        """Cada adjunto del manifiesto viaja con sus bytes o consta **no recuperable** con la
+        declaración del expediente (DR-LAZ-04, manifiesto 2); y cada adjunto que cita una entrada
+        de evidencia está en el manifiesto con su hash: uno ausente sin declarar es un paquete
+        roto, nunca silencio."""
+        document = self.manifest.document
+        version = document["manifest_version"]
+        attached: set[str] = set()
+        listed: dict[object, Mapping[str, Any]] = {}
+        for index, attachment in enumerate(document["attachments"]):
+            pointer = f"/attachments/{index}"
+            if not isinstance(attachment, dict) or attachment.get("attachment_id") in listed:
+                raise self._mismatch("adjunto mal declarado", pointer)
+            listed[attachment.get("attachment_id")] = attachment
+            # La versión 1 no declaraba disponibilidad: todos sus adjuntos viajaban.
+            available = attachment.get("available", True if version == 1 else None)
+            if not isinstance(available, bool):
+                raise self._mismatch("adjunto sin available", pointer + "/available")
+            if available:
+                if version != 1 and attachment.get("unrecoverable") is not None:
+                    raise self._mismatch("adjunto disponible y no recuperable", pointer)
+                self._declared(artifacts, attachment, "attachment", pointer)
+                attached.add(attachment["path"])
+            else:
+                self._unrecoverable(attachment, pointer)
+        if {a.path for a in self.by_kind.get("attachment", [])} != attached:
+            raise self._mismatch("un adjunto del paquete no está declarado", "/attachments")
+        for attachment_id, sha256 in sorted(self.evidence_attachments.items()):
+            entry = listed.get(attachment_id)
+            if entry is None or entry.get("sha256") != sha256:
+                raise self._mismatch(
+                    f"el adjunto {attachment_id} no viaja ni consta como no recuperable",
+                    "/attachments",
+                )
+        for attachment_id, declaration in sorted(self.lost.items()):
+            entry = listed.get(attachment_id)
+            if (
+                entry is not None
+                and entry.get("sha256") == declaration["sha256"]
+                and entry.get("available") is not False
+            ):
+                raise self._mismatch(
+                    f"el adjunto {attachment_id} es no recuperable en el expediente",
+                    "/attachments",
+                )
+
+    def _unrecoverable(self, attachment: Mapping[str, Any], pointer: str) -> None:
+        """Un adjunto sin bytes: su declaración es la del registro del expediente (mismo
+        identificador, hash y fecha) y el paquete no lleva nada en su lugar."""
+        declaration = attachment.get("unrecoverable")
+        if (
+            attachment.get("path") is not None
+            or not isinstance(declaration, dict)
+            or declaration.keys() != _UNRECOVERABLE_KEYS
+            or declaration["sha256"] != attachment.get("sha256")
+            or not _matches(_SHA256_FORM, declaration["sha256"])
+            or not _matches(_UUID_FORM, declaration["record_id"])
+            or not _matches(_UUID_FORM, declaration["declaration_id"])
+            or not _matches(_STAMP_FORM, declaration["detected_at"])
+            or not isinstance(declaration["reason_es"], str)
+        ):
+            raise self._mismatch("adjunto no recuperable mal declarado", pointer)
+        record = self.record_ids.get(declaration["record_id"])
+        if record is None or record.get("record_type") != UNRECOVERABLE_RECORD_TYPE:
+            raise self._mismatch(
+                "adjunto no recuperable sin su registro en el hallazgo", pointer + "/unrecoverable"
+            )
+        content = self.lost.get(str(attachment.get("attachment_id")))
+        if (
+            content is None
+            or content["record_id"] != declaration["record_id"]
+            or content.get("declaration_id") != declaration["declaration_id"]
+            or content["sha256"] != declaration["sha256"]
+            or content["detected_at"] != declaration["detected_at"]
+        ):
+            raise self._mismatch(
+                "la declaración no es la del registro del hallazgo", pointer + "/unrecoverable"
             )
 
     def _declared(

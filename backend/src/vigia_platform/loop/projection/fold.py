@@ -130,10 +130,12 @@ U04_RECORD_TYPES: Final = frozenset(
         "commitments_recorded",
         "loop_configuration_changed",
         "late_segment_attached",
+        "closure_attachment_unrecoverable",
     }
 )
-"""Los diecisiete tipos de U-04 (§5.1). Los que no cambian ``Episode`` ni ``FindingState``
-(acreditación, vocabulario, configuración y entradas de evidencia) solo avanzan el control."""
+"""Los diecisiete tipos de U-04 (§5.1) y ``closure_attachment_unrecoverable`` (VIG-274). Los que
+no cambian ``Episode`` ni ``FindingState`` (acreditación, vocabulario, configuración, entradas de
+evidencia y adjuntos declarados no recuperables) solo avanzan el control."""
 
 PROJECTED_RECORD_TYPES: Final = U03_RECORD_TYPES | U04_RECORD_TYPES
 
@@ -146,6 +148,8 @@ _NO_SUBJECT_EFFECT: Final = frozenset(
         "vocabulary_list_changed",
         "commitments_recorded",
         "loop_configuration_changed",
+        # El hallazgo y su cierre no se alteran (P4, P5; runbook 7.3, paso 4).
+        "closure_attachment_unrecoverable",
     }
 )
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)

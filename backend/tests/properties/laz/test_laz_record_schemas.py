@@ -149,8 +149,11 @@ DESIGN_TABLE: Final[dict[str, tuple[str, str, frozenset[str], frozenset[str]]]] 
         frozenset(),
         frozenset({"late_segment_attached"}),
     ),
+    # Fuera de §5.1: el adjunto de cierre no recuperable del runbook 7.3, paso 4 (VIG-274).
+    "closure_attachment_unrecoverable": ("plant", "/declaration_id", frozenset(), frozenset()),
 }
-"""La tabla consolidada de §5.1, copiada a mano del diseño (no derivada del código)."""
+"""La tabla consolidada de §5.1, copiada a mano del diseño (no derivada del código), más la fila
+de ``closure_attachment_unrecoverable`` (VIG-274, DR-LAZ-04)."""
 
 DESIGN_EVENTS: Final = frozenset(
     {
@@ -205,7 +208,8 @@ def _compiled(name: str) -> CompiledType:
 
 
 def test_the_seventeen_types_are_exactly_those_of_the_design() -> None:
-    assert len(DESIGN_TABLE) == 17
+    # Los 17 de §5.1 y ``closure_attachment_unrecoverable`` (VIG-274).
+    assert len(DESIGN_TABLE) == 18
     assert set(REGISTRY.record_types()) == set(DESIGN_TABLE) == U04_RECORD_TYPES
 
 
@@ -364,7 +368,7 @@ def test_the_snapshot_paths_are_only_user_snapshots_titles_files_and_terms() -> 
 
 
 def test_the_privacy_metaproperty_of_u02_holds_on_the_seventeen() -> None:
-    assert len(REGISTRY.latest()) == 17
+    assert len(REGISTRY.latest()) == 18
     assert privacy_violations(REGISTRY.latest()) == []
 
 

@@ -14,7 +14,10 @@ Lo que un tercero lee primero y la razón por la que **nada falta en silencio**:
 - el resumen de cobertura **con sus huecos** y el aviso fijo «no se observó» (BR-LAZ-93);
 - los estándares citados con su texto y su hash (BR-LAZ-95), los acuerdos por zona con firmantes
   y sustituciones (BR-LAZ-96), los tramos de acta no vigente (BR-LAZ-97), los clips frente a los
-  adjuntos declarados (BR-LAZ-98) y las zonas unipersonales con marcas agregadas (BR-LAZ-99).
+  adjuntos declarados (BR-LAZ-98) y las zonas unipersonales con marcas agregadas (BR-LAZ-99);
+- cada adjunto que el expediente declara **no recuperable** (DR-LAZ-04, runbook 7.3, paso 4;
+  VIG-274): ``available = false``, sin ruta ni bytes, con su hash, la fecha de la comprobación y
+  el registro que lo declara (versión 2 del manifiesto).
 
 **Textos fijos**: toda frase del manifiesto que no es dato de otra unidad sale de
 ``FIXED_TEXTS_ES``, una lista **cerrada**. Ninguna afirma que no ocurrió nada: dicen qué se
@@ -37,6 +40,7 @@ __all__ = [
     "AGGREGATION_NOTICE_ES",
     "ANONYMIZATION_STATEMENT_ES",
     "ASSIGNMENT_HISTORY_UNAVAILABLE_ES",
+    "ATTACHMENT_UNRECOVERABLE_ES",
     "COVERAGE_NOTICE_ES",
     "DOCUMENT_ABSENT_ES",
     "EVIDENCE_FLAGGED_NOTICE_ES",
@@ -69,10 +73,13 @@ __all__ = [
     "RevokedGate",
     "StandardCited",
     "StateCounts",
+    "UnrecoverableDeclaration",
     "ZoneEntry",
 ]
 
-MANIFEST_VERSION: Final = 1
+MANIFEST_VERSION: Final = 2
+"""2 desde VIG-274: cada adjunto declara ``available`` y, si no lo está, su declaración
+``unrecoverable`` con ``path`` nulo (DR-LAZ-04). El verificador lee también la 1."""
 
 VERIFIER_VERSION_ABSENT: Final = "absent"
 """``verifier_version`` mientras el paquete no lleva el verificador (TASK-346 lo rellena)."""
@@ -151,6 +158,13 @@ ASSIGNMENT_HISTORY_UNAVAILABLE_ES: Final = (
     "La historia de asignación de nodos de la zona no estaba disponible al componer el paquete: "
     "se declara ausente."
 )
+ATTACHMENT_UNRECOVERABLE_ES: Final = (
+    "Este adjunto de cierre se perdió del depósito sin una versión anterior que restaurar: consta "
+    "como no recuperable con su hash y la fecha en que se comprobó, y el paquete no lleva sus "
+    "bytes. El hallazgo y su cierre no se alteran: el cierre sigue siendo válido con su "
+    "descripción estructurada."
+)
+"""Runbook 7.3, paso 4 (DR-LAZ-04, VIG-274): en cada adjunto declarado no recuperable."""
 
 FIXED_TEXTS_ES: Final = (
     COVERAGE_NOTICE_ES,
@@ -164,6 +178,7 @@ FIXED_TEXTS_ES: Final = (
     DOCUMENT_ABSENT_ES,
     VERIFIER_ABSENT_ES,
     ASSIGNMENT_HISTORY_UNAVAILABLE_ES,
+    ATTACHMENT_UNRECOVERABLE_ES,
 )
 """Lista **cerrada** de las frases que el manifiesto escribe por su cuenta."""
 
@@ -340,8 +355,21 @@ class DeclaredClip:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class UnrecoverableDeclaration:
+    """El registro ``closure_attachment_unrecoverable`` de un adjunto (DR-LAZ-04, VIG-274)."""
+
+    record_id: uuid.UUID
+    declaration_id: uuid.UUID
+    detected_at: datetime
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DeclaredAttachment:
-    """Un adjunto de cierre subido por una persona bajo declaración firmada (BR-LAZ-98)."""
+    """Un adjunto de cierre subido por una persona bajo declaración firmada (BR-LAZ-98).
+
+    Si el expediente lo declara no recuperable (runbook 7.3, paso 4), ``unrecoverable`` lleva esa
+    declaración y ``path`` es ``None``: el paquete no lleva sus bytes y lo dice, con su hash y su
+    fecha, en vez de fallar o de omitirlo."""
 
     attachment_id: uuid.UUID
     subject_id: uuid.UUID
@@ -349,7 +377,8 @@ class DeclaredAttachment:
     sha256: str
     size_bytes: int
     content_type: str
-    path: str
+    path: str | None
+    unrecoverable: UnrecoverableDeclaration | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
