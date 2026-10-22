@@ -34,7 +34,7 @@ from sqlalchemy.engine import Row
 from sqlalchemy.sql import Executable
 
 from vigia_platform.shared.context import ContextAbsent, ScopeContext, repository
-from vigia_platform.shared.db import Database, DatabaseHealth, ProcessKind, Transaction
+from vigia_platform.shared.db import Database, DatabaseHealth, ProcessKind, ReadRows, Transaction
 from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.secrets import (
     AwsSettings,
@@ -277,6 +277,13 @@ class LazyDatabase:
         if not isinstance(context, ScopeContext):
             raise ContextAbsent()
         return await (await self._get()).read(context, statement, parameters)
+
+    async def read_many[T](
+        self, context: ScopeContext, work: Callable[[ReadRows], Awaitable[T]]
+    ) -> T:
+        if not isinstance(context, ScopeContext):
+            raise ContextAbsent()
+        return await (await self._get()).read_many(context, work)
 
     async def health(self, *, timeout_seconds: float) -> DatabaseHealth:
         return await (await self._get()).health(timeout_seconds=timeout_seconds)
