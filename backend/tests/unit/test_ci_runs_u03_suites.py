@@ -1,8 +1,9 @@
-"""``ci.yml`` ejecuta las suites de U-03 en cada PR (NFR-GOB-60 a 62; TASK-234).
+"""``ci.yml`` ejecuta las suites de U-03 y U-04 en cada PR (TASK-234 y TASK-333).
 
 Criterio de aceptación: la prueba falla si un ``--ignore``, un ``--deselect`` o un marcador deja
 fuera de los trabajos «backend» de ``ci.yml`` alguna de las suites nuevas de U-03:
-``tests/isolation``, ``tests/abuse``, ``tests/examples``, ``tests/properties/gob`` o el perfil
+``tests/isolation``, ``tests/abuse``, ``tests/examples``, ``tests/properties/gob`` y ``laz``,
+o el perfil
 ``ci`` de ``tests/load`` (marcado ``integration``).
 
 La prueba lee el flujo real y simula la cobertura de cada suite por el conjunto de los trabajos
@@ -29,16 +30,17 @@ SUITES = (
     "tests/abuse",
     "tests/examples",
     "tests/properties/gob",
+    "tests/properties/laz",
 )
 """Directorios que los trabajos «backend» deben ejecutar entre todos."""
 
 LOAD_SUITE = "tests/load"
 """El perfil de carga ``ci`` de ``tests/load`` corre en su trabajo, marcado ``integration``."""
 
-_SEPARATE_VALUE_OPTIONS = ("-p", "-m", "-k", "-o")
+_SEPARATE_VALUE_OPTIONS = ("-p", "-m", "-k", "-o", "--ignore", "--deselect", "--ignore-glob")
 """Opciones de pytest cuyo valor viaja en el argumento siguiente (no con ``=``)."""
 
-_SUITE_TOKENS = ("isolation", "abuse", "examples", "properties", "gob", "load", "nightly")
+_SUITE_TOKENS = ("isolation", "abuse", "examples", "properties", "gob", "laz", "load", "nightly")
 
 
 @dataclass
@@ -67,8 +69,12 @@ class Command:
     def excludes(self, directory: str) -> bool:
         """Un ``--ignore`` o ``--deselect`` deja fuera ``directory`` (o una parte)."""
         for excluded in (*self.ignores, *self.deselects):
-            target = excluded.rstrip("/")
-            if target == directory or directory.startswith(target + "/"):
+            target = excluded.split("::", 1)[0].rstrip("/")
+            if (
+                target == directory
+                or directory.startswith(target + "/")
+                or target.startswith(directory + "/")
+            ):
                 return True
         return False
 
@@ -110,6 +116,8 @@ def _parse(tokens: list[str], raw: str) -> Command:
             deselects.append(argument.split("=", 1)[1])
         elif argument.startswith("--hypothesis-profile="):
             profile = argument.split("=", 1)[1]
+        elif argument.startswith("--ignore-glob="):
+            options["--ignore-glob"] = argument.split("=", 1)[1]
         elif argument in _SEPARATE_VALUE_OPTIONS and position + 1 < len(tokens):
             value = tokens[position + 1]
             position += 1
@@ -117,6 +125,12 @@ def _parse(tokens: list[str], raw: str) -> Command:
                 marker = value
             elif argument == "-k":
                 options["-k"] = value
+            elif argument == "--ignore":
+                ignores.append(value)
+            elif argument == "--deselect":
+                deselects.append(value)
+            elif argument == "--ignore-glob":
+                options["--ignore-glob"] = value
         elif not argument.startswith("-"):
             paths.append(argument.rstrip("/"))
         position += 1
@@ -185,6 +199,8 @@ def coverage_problems(text: str) -> list[str]:
     for command in commands:
         if command.options.get("-k"):
             problems.append(f"un trabajo «backend» filtra con -k: {command.raw}")
+        if command.options.get("--ignore-glob"):
+            problems.append(f"un trabajo «backend» filtra con --ignore-glob: {command.raw}")
         for token in _SUITE_TOKENS:
             if token in command.marker:
                 problems.append(f"un marcador nombra la suite {token!r}: {command.raw}")

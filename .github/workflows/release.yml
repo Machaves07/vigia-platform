@@ -25,6 +25,9 @@
 # variable el release ensaya 1 a 3 y lo dice en el resumen. Ningún trabajo usa claves de AWS de larga
 # duración: los de AWS piden un token OIDC (id-token: write) en el entorno staging o pilot y lo cambian
 # por credenciales de una hora del rol vigia-deploy (.github/scripts/aws_federation.py).
+# U-04: vigia-loop al final de cada despliegue y también incluida al destruir staging. Su diff
+# exclusivo falla cerrado si incluye otra pila o CDK no termina con éxito. Las alarmas vigia-*
+# de U-04 entran en los mismos 16 sondeos de pilot (15 minutos, comprobación nº 7).
 #
 # Variables del repositorio: VIGIA_AWS_ENABLED, VIGIA_AWS_ACCOUNT_ID, VIGIA_DOMAIN (P1, P5).
 # Secretos: VIGIA_CONTRACTS_DEPLOY_KEY, VIGIA_RELEASE_APP_ID, VIGIA_RELEASE_PRIVATE_KEY (A-40).
@@ -242,12 +245,16 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           uv sync --frozen
-          $CDK diff -c environment=pilot -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-pilot.txt" 2>&1 || true
+          $CDK diff -c environment=pilot -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-pilot.txt" 2>&1
           tail -n 200 "$RUNNER_TEMP/cdk-diff-pilot.txt"
+          $CDK diff --exclusively vigia-loop --no-change-set --no-color -c environment=pilot -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-loop-pilot.txt" 2>&1
+          python3 ../.github/scripts/loop_diff.py --stack vigia-loop "$RUNNER_TEMP/cdk-diff-loop-pilot.txt"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: cdk-diff-pilot
-          path: ${{ runner.temp }}/cdk-diff-pilot.txt
+          path: |
+            ${{ runner.temp }}/cdk-diff-pilot.txt
+            ${{ runner.temp }}/cdk-diff-loop-pilot.txt
           retention-days: 90
 
   staging:
@@ -296,7 +303,11 @@ jobs:
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: pilas con first_deploy=true (servicios con 0 tareas, sin almacén de confianza)
         working-directory: infra
-        run: $CDK deploy --all --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=true -c image_digest="$DIGEST"
+        run: |
+          $CDK diff --exclusively "vigia-loop-$STAGING" --no-change-set --no-color -c environment="$STAGING" -c first_deploy=true -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-loop-staging-primero.txt" 2>&1
+          python3 ../.github/scripts/loop_diff.py --stack "vigia-loop-$STAGING" "$RUNNER_TEMP/cdk-diff-loop-staging-primero.txt"
+          $CDK deploy --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=true -c image_digest="$DIGEST" \
+            "vigia-foundation-$STAGING" "vigia-data-$STAGING" "vigia-edge-$STAGING" "vigia-observability-$STAGING" "vigia-compute-$STAGING" "vigia-loop-$STAGING"
       - name: federación renovada
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: vigia-migrate
@@ -311,7 +322,10 @@ jobs:
       - name: pilas con first_deploy=false (almacén de confianza con la raíz y servicios escalados)
         working-directory: infra
         run: |
-          $CDK deploy --all --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=false -c image_digest="$DIGEST"
+          $CDK diff --exclusively "vigia-loop-$STAGING" --no-change-set --no-color -c environment="$STAGING" -c first_deploy=false -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-loop-staging.txt" 2>&1
+          python3 ../.github/scripts/loop_diff.py --stack "vigia-loop-$STAGING" "$RUNNER_TEMP/cdk-diff-loop-staging.txt"
+          $CDK deploy --require-approval never --concurrency 1 -c environment="$STAGING" -c first_deploy=false -c image_digest="$DIGEST" \
+            "vigia-foundation-$STAGING" "vigia-data-$STAGING" "vigia-edge-$STAGING" "vigia-observability-$STAGING" "vigia-compute-$STAGING" "vigia-loop-$STAGING"
           aws ecs wait services-stable --cluster "vigia-$STAGING" --services vigia-api vigia-worker
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
         with:
@@ -387,6 +401,14 @@ jobs:
           path: ${{ runner.temp }}/comprobaciones-staging.json
           if-no-files-found: warn
           retention-days: 90
+      - name: informes del diff exclusivo de vigia-loop
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: cdk-diff-loop-staging
+          path: ${{ runner.temp }}/cdk-diff-loop-staging*.txt
+          if-no-files-found: warn
+          retention-days: 90
 
   destruir-staging:
     name: destruir staging-<n> (siempre) y comprobar residuos
@@ -414,7 +436,9 @@ jobs:
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: cdk destroy de staging-<n>
         working-directory: infra
-        run: $CDK destroy --all --force -c environment="$STAGING"
+        run: |
+          $CDK destroy --force -c environment="$STAGING" \
+            "vigia-loop-$STAGING" "vigia-compute-$STAGING" "vigia-observability-$STAGING" "vigia-edge-$STAGING" "vigia-data-$STAGING" "vigia-foundation-$STAGING"
       - name: federación renovada
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: sin residuos (ningún recurso vivo; claves con borrado programado)
@@ -446,11 +470,13 @@ jobs:
         run: uv sync --frozen
       - name: federación con vigia-deploy (sin claves)
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
-      - name: cdk deploy de pilot (foundation, data, edge, observability, compute)
+      - name: cdk deploy de pilot (foundation, data, edge, observability, compute y loop al final)
         working-directory: infra
         run: |
+          $CDK diff --exclusively vigia-loop --no-change-set --no-color -c environment=pilot -c image_digest="$DIGEST" > "$RUNNER_TEMP/cdk-diff-loop-pilot.txt" 2>&1
+          python3 ../.github/scripts/loop_diff.py --stack vigia-loop "$RUNNER_TEMP/cdk-diff-loop-pilot.txt"
           $CDK deploy --require-approval never --concurrency 1 -c environment=pilot -c image_digest="$DIGEST" \
-            vigia-foundation vigia-data vigia-edge vigia-observability vigia-compute
+            vigia-foundation vigia-data vigia-edge vigia-observability vigia-compute vigia-loop
       - name: federación renovada
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: vigia-migrate y servicios en el digest nuevo
@@ -464,7 +490,7 @@ jobs:
           VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
         run: |
           uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment pilot --domain "$DOMAIN" \
-            --verifier-sha256 "$VERIFIER" --report "$RUNNER_TEMP/comprobaciones-pilot.json" --summary "$GITHUB_STEP_SUMMARY"
+            --verifier-sha256 "$VERIFIER" --watch-minutes 15 --report "$RUNNER_TEMP/comprobaciones-pilot.json" --summary "$GITHUB_STEP_SUMMARY"
       - name: informe de las comprobaciones
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -528,7 +554,7 @@ jobs:
             echo "### Release v$VERSION sobre \`$GITHUB_SHA\` (dry-run=$DRY_RUN, soak=$SOAK)"
             echo
             if [ "$AWS_ENABLED" != "true" ]; then
-              echo "**Sin AWS (A-47):** \`VIGIA_AWS_ENABLED\` no vale \`true\`. Se ensayó lo que no necesita AWS: nightly verde sobre el commit, imagen arm64 construida, auditada y escaneada **sin publicar**, SBOM, verificador y \`cdk synth\` de \`$STAGING\` y \`pilot\`. Se omitieron la publicación en ECR, el diff de CDK de pilot, \`$STAGING\` y su destrucción, \`pilot\` y la etiqueta."
+              echo "**Sin AWS (A-47):** \`VIGIA_AWS_ENABLED\` no vale \`true\`. Se ejecutaron los trabajos que no necesitan AWS (véanse sus resultados): precondición de nightly verde, imagen arm64 sin publicar, auditoría, escaneo, SBOM, verificador y \`cdk synth\` de \`$STAGING\` y \`pilot\`, incluida \`vigia-loop\`. Se omitieron ECR, los diff (también el exclusivo de \`vigia-loop\`), despliegue y destrucción de \`$STAGING\`, \`pilot\`, sus comprobaciones y la etiqueta."
               echo
             fi
             echo "| Trabajo | Resultado |"

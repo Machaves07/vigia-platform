@@ -36,7 +36,10 @@ Cada regla se prueba también en negativo con un flujo sintético que la incumpl
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -45,6 +48,7 @@ import pytest
 import yaml
 
 from tests.integration.conftest import POSTGRES_IMAGE
+from tests.unit.test_ci_runs_u03_suites import _pytest_commands, coverage_problems
 from tools import run_boot_check
 from tools.check_test_split import SPECS, read_job, static_problems
 
@@ -475,7 +479,7 @@ def test_staging_is_destroyed_always_and_checked_for_residue() -> None:
     assert str(job["if"]).startswith("always() && ")
     assert "staging" in job["needs"]
     run = _run_text(job)
-    assert _position(run, '$CDK destroy --all --force -c environment="$STAGING"') < _position(
+    assert _position(run, '$CDK destroy --force -c environment="$STAGING"') < _position(
         run, 'staging.py residue --environment "$STAGING"'
     )
     assert release["env"]["STAGING"] == "staging-${{ github.run_number }}"
@@ -1094,3 +1098,211 @@ def test_a_requirement_without_exact_version_or_hash_fails(requirements: str) ->
 def test_hashed_requirements_pass() -> None:
     text = "# comentario\na==1 \\\n    --hash=sha256:" + "a" * 64 + "\n    # via b\n"
     assert requirement_problems(text) == []
+
+
+# U-04 (TASK-333): las listas de abajo son guardas de pertenencia, no un segundo reparto.
+# Los comandos siguen seleccionando directorios completos y pytest-split conserva sus tiempos.
+_LAZ_NIGHTLY = (
+    *[
+        ("resiliencia", f"tests/resilience/test_fs_laz_{number:02d}.py", "")
+        for number in range(1, 13)
+    ],
+    ("resiliencia", "tests/resilience/test_dr_laz_01_02.py", ""),
+    ("resiliencia", "tests/resilience/test_dr_laz_03_04.py", ""),
+    ("bancos", "tests/benchmarks/test_nfr_laz_01_operations.py", ""),
+    ("bancos", "tests/benchmarks/test_laz_validators_bench.py", ""),
+    ("bancos", "tests/benchmarks/test_laz_evaluate_deadlines_bench.py", ""),
+    ("carga", "tests/load/test_export_load.py", "integration and nightly"),
+    ("volumetria", "tests/volumetry/test_laz_volumetry.py", "integration and nightly"),
+)
+
+
+def _suite_is_selected(job: dict[Any, Any], path: str, marker: str, profile: str) -> bool:
+    return any(
+        call.selects(path)
+        and not call.excludes(path)
+        and not call.options.get("-k")
+        and not call.options.get("--ignore-glob")
+        and call.marker == marker
+        and call.profile == profile
+        for step in job["steps"]
+        if not step.get("if")
+        for call in _pytest_commands(str(step.get("run") or ""))
+    )
+
+
+def test_ci_includes_laz_suites_and_loop_stack_in_existing_checks() -> None:
+    assert coverage_problems((WORKFLOWS / "ci.yml").read_text("utf-8")) == []
+    job = _ci()["jobs"]["infra"]
+    assert job["defaults"]["run"]["working-directory"] == "infra"
+    assert _suite_is_selected(job, "tests/test_loop_stack.py", "", "")
+
+
+@pytest.mark.parametrize("suite", ["properties/laz", "isolation", "abuse", "examples"])
+@pytest.mark.parametrize("job_id", ["backend-pruebas", "backend-integracion-grupos"])
+def test_excluding_a_u04_suite_from_either_ci_marker_class_is_detected(
+    suite: str, job_id: str
+) -> None:
+    ci = _ci()
+    for step in ci["jobs"][job_id]["steps"]:
+        if "coverage run -m pytest" in str(step.get("run")):
+            step["run"] += f" --ignore=tests/{suite}"
+    assert coverage_problems(yaml.safe_dump(ci))
+
+
+def test_excluding_the_loop_stack_template_tests_is_detected() -> None:
+    job = _ci()["jobs"]["infra"]
+    for step in job["steps"]:
+        if "pytest" in str(step.get("run")):
+            step["run"] += " --ignore=tests/test_loop_stack.py"
+    assert not _suite_is_selected(job, "tests/test_loop_stack.py", "", "")
+
+
+@pytest.mark.parametrize("option", ["--ignore-glob=tests/*stack*", "--ignore-glob tests/*stack*"])
+def test_excluding_the_loop_template_with_a_glob_is_also_detected(option: str) -> None:
+    job = _ci()["jobs"]["infra"]
+    for step in job["steps"]:
+        if "pytest" in str(step.get("run")):
+            step["run"] += f" {option}"
+    assert not _suite_is_selected(job, "tests/test_loop_stack.py", "", "")
+
+
+@pytest.mark.parametrize(("job_id", "path", "marker"), _LAZ_NIGHTLY)
+def test_u04_nightly_suites_run_in_their_own_job_and_exclusion_is_detected(
+    job_id: str, path: str, marker: str
+) -> None:
+    job = _workflow("nightly")["jobs"][job_id]
+    assert (REPOSITORY / "backend" / path).is_file()
+    assert _suite_is_selected(job, path, marker, "nightly")
+    for step in job["steps"]:
+        if "pytest" in str(step.get("run")):
+            step["run"] = "\n".join(
+                f"{line} --deselect={path}" if "pytest" in line else line
+                for line in step["run"].splitlines()
+            )
+    assert not _suite_is_selected(job, path, marker, "nightly")
+
+
+def test_long_nightly_suites_are_not_duplicated_in_the_general_jobs() -> None:
+    jobs = _workflow("nightly")["jobs"]
+    for job_id in ("propiedades", "integracion"):
+        calls = _pytest_commands(_run_text(jobs[job_id]))
+        assert calls
+        for directory in ("benchmarks", "resilience", "volumetry", "load", "properties"):
+            assert all(call.excludes(f"tests/{directory}") for call in calls)
+    volume = _run_text(jobs["volumetria"])
+    assert "--part all" not in volume and "--part laz" not in volume
+    assert "--part nuc" in volume and "--part gob" in volume
+    # Los auxiliares sin base tampoco desaparecen al moverlos de «propiedades» a sus trabajos.
+    assert _suite_is_selected(jobs["carga"], "tests/load", "not integration", "nightly")
+    assert _suite_is_selected(jobs["volumetria"], "tests/volumetry", "not integration", "nightly")
+
+
+def test_dependency_job_covers_the_new_u04_packages_without_a_narrow_inventory() -> None:
+    run = _run_text(_ci()["jobs"]["dependencias"])
+    assert "uv sync --frozen" in run
+    assert "uv run --frozen python tools/check_licenses.py" in run
+    lock = (REPOSITORY / "backend" / "uv.lock").read_text("utf-8")
+    # simplemma era una hipótesis del diseño: no está instalada en este árbol. No se añade
+    # una dependencia solo para satisfacer el inventario previsto de la planificación.
+    for package in ("holidays", "tzdata", "anthropic"):
+        assert f'name = "{package}"' in lock
+
+
+@pytest.mark.parametrize("job_id", ["staging", "pilot"])
+def test_release_deploys_loop_last_after_a_successful_isolated_diff(job_id: str) -> None:
+    job = _workflow("release")["jobs"][job_id]
+    assert AWS_GATE in job["if"]
+    deploys = [step["run"] for step in job["steps"] if "$CDK deploy " in str(step.get("run"))]
+    assert len(deploys) == (2 if job_id == "staging" else 1)
+    for run in deploys:
+        assert (
+            run.index("$CDK diff --exclusively")
+            < run.index("loop_diff.py")
+            < run.index("$CDK deploy")
+        )
+        assert "--no-change-set --no-color" in run
+        assert "|| true" not in run
+        command = run[run.index("$CDK deploy") :].split("aws ecs", 1)[0].strip()
+        assert command.endswith('"vigia-loop-$STAGING"' if job_id == "staging" else "vigia-loop")
+        assert "vigia-datasets" not in command
+
+
+def test_release_destroy_includes_loop_and_pilot_checks_keep_the_whole_alarm_window() -> None:
+    jobs = _workflow("release")["jobs"]
+    run = _run_text(jobs["destruir-staging"])
+    assert '"vigia-loop-$STAGING"' in run
+    assert "--watch-minutes 15" in _run_text(jobs["pilot"])
+    run = _run_text(jobs["publicar"])
+    assert "diff --exclusively vigia-loop" in run and "loop_diff.py --stack vigia-loop" in run
+    assert "|| true" not in run
+
+
+def test_u04_benchmarks_keep_the_fifty_percent_policy_without_changing_other_units() -> None:
+    from tests.benchmarks.conftest import unit_regression_factor
+
+    assert unit_regression_factor("laz_operation") == 1.5
+    assert unit_regression_factor("gob_operation") == 1.2
+    assert unit_regression_factor("nuc_operation") == 1.5
+    baseline = json.loads(
+        (REPOSITORY / "backend/tests/benchmarks/baseline.json").read_text("utf-8")
+    )
+    laz = {name: entry for name, entry in baseline["benchmarks"].items() if name.startswith("laz_")}
+    assert len(laz) >= 17
+    assert all(entry["regression_factor"] == 1.5 for entry in laz.values())
+
+
+@pytest.mark.parametrize("synthesis", ["success", "failure"])
+def test_the_real_release_summary_runs_without_aws_and_reports_failures_honestly(
+    tmp_path: Path, synthesis: str
+) -> None:
+    # Solo el intérprete de las dos consultas jq es un doble: se ejecuta el run real del YAML.
+    # No impone instalar jq (herramienta del runner de GitHub) para correr las pruebas Python.
+    jq = tmp_path / "jq"
+    jq.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        "data = json.load(sys.stdin)\n"
+        "if sys.argv[1:] == ['-r', r'to_entries[] | \"| \\(.key) | \\(.value.result) |\"']:\n"
+        "    for key, value in data.items():\n"
+        "        print(f'| {key} | {value[\"result\"]} |')\n"
+        "elif sys.argv[1:] == ['-e', "
+        '\'all(.[]; .result == "success" or .result == "skipped")\']:\n'
+        "    ok = all(v['result'] in ('success', 'skipped') for v in data.values())\n"
+        "    sys.exit(0 if ok else 1)\n"
+        "else:\n"
+        "    sys.exit(2)\n",
+        encoding="utf-8",
+    )
+    jq.chmod(0o700)
+    job = _workflow("release")["jobs"]["resumen"]
+    report = tmp_path / "summary.md"
+    results = {
+        name: {"result": "skipped"}
+        for name in ("publicar", "staging", "destruir-staging", "pilot", "etiqueta")
+    }
+    results.update({name: {"result": "success"} for name in ("preparar", "imagen")})
+    results["sintesis"] = {"result": synthesis}
+    answer = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", _run_text(job)],
+        env={
+            "PATH": f"{tmp_path}{os.pathsep}{os.defpath}",
+            "GITHUB_STEP_SUMMARY": str(report),
+            "GITHUB_SHA": "a" * 40,
+            "VERSION": "0.4.0",
+            "STAGING": "staging-7",
+            "AWS_ENABLED": "false",
+            "DRY_RUN": "true",
+            "SOAK": "false",
+            "RESULTADOS": json.dumps(results),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert answer.returncode == (0 if synthesis == "success" else 1), answer.stderr
+    text = report.read_text("utf-8")
+    assert "Sin AWS (A-47)" in text and "vigia-loop" in text
+    assert f"| sintesis | {synthesis} |" in text
+    assert "Se omitieron ECR" in text
