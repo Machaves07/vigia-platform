@@ -16,6 +16,11 @@
 #   contra las rutas del contrato, con dos procesos tras el balanceador local y la comparación de
 #   métricas (NFR-GOB-54);
 # - informe archivado 90 días.
+# U-04 (LC-LAZ-43): tests/properties/laz entra en las dos matrices de propiedades sin listas
+# ni cambios de ejemplos o semillas; FS-LAZ-01 a 12 y DR-LAZ-01 a 04 en resiliencia; exportación
+# en carga; los 17 objetivos NFR-LAZ-01 en bancos (50 %, sin cambiar el 20 % de U-03); un año
+# y un millón de notificaciones en volumetria. Ninguna de esas suites largas se duplica en
+# integracion ni en propiedades (el trabajo sin tests/properties).
 #
 # Seguridad: igual que ci.yml (permisos de solo lectura, acciones fijadas por hash y la clave de
 # despliegue de vigia-contracts solo para instalar, borrada después). Ningún trabajo toca AWS.
@@ -72,7 +77,7 @@ jobs:
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
       - name: pruebas perfil nightly sin integration (sin las propiedades)
-        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks --ignore=tests/properties --durations=15
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --ignore=tests/benchmarks --ignore=tests/properties --ignore=tests/resilience --ignore=tests/volumetry --ignore=tests/load --durations=15
 
   # Las propiedades de U-02 y U-03 con el perfil nightly (PR-GOB-01 a 32 y las de U-02): el
   # conjunto más lento de la suite. Desde VIG-199 (2026-10-13), en 5 grupos por tiempos medidos
@@ -218,7 +223,7 @@ jobs:
           retention-days: 90
 
   bancos:
-    name: bancos (regresión del 20 % en U-03 y del 50 % en U-02)
+    name: bancos (regresión del 20 % en U-03 y del 50 % en U-02 y U-04)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     defaults:
@@ -245,7 +250,7 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: bancos de NFR-NUC-01 y 02 (50 %) y de NFR-GOB-01, 03, 04, 05, 09 y 10 (20 %)
+      - name: bancos U-02 y U-04 (50 %) y U-03 (20 %), política por unidad de conftest.py
         env:
           VIGIA_BENCHMARK_REPORT: ${{ runner.temp }}/informes/vigia-benchmarks.json
           VIGIA_BENCHMARK_UPDATE_BASELINE: ${{ inputs.update_baseline && '1' || '' }}
@@ -292,10 +297,15 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: generación y medición (NFR-NUC-05 y NFR-GOB-11 y 16 sobre un año; presupuesto de NFR-GOB-07)
+      - name: generación y medición de U-02 y U-03 (un año; presupuesto de NFR-GOB-07)
         run: |
           mkdir -p "$RUNNER_TEMP/informes"
-          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --part all --out "$RUNNER_TEMP/informes/volumetry-target.json"
+          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --part nuc --out "$RUNNER_TEMP/informes/volumetry-nuc.json"
+          uv run --frozen python tests/volumetry/generate_scale_data.py --scale target --part gob --out "$RUNNER_TEMP/informes/volumetry-gob.json"
+      - name: volumetría U-04 (un año y un millón de avisos; NFR-LAZ-06 y 09)
+        env:
+          VIGIA_LOAD_REPORT_DIR: ${{ runner.temp }}/informes
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "integration and nightly" tests/volumetry/test_laz_volumetry.py
       - name: informe de volumetría
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -333,7 +343,7 @@ jobs:
       - name: borrar la clave (ya no hace falta)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
-      - name: FS-NUC-01 a 10 (perfil nightly)
+      - name: FS-NUC, FS-GOB, FS-LAZ-01 a 12 y DR-LAZ-01 a 04 (perfil nightly)
         env:
           VIGIA_RESILIENCE_REPORT_DIR: ${{ runner.temp }}/informes
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly tests/resilience
@@ -437,6 +447,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/informes"
           uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "integration and nightly" tests/load
+      - name: pruebas sin integración de los clientes y perfiles de carga
+        run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" tests/load
       - name: informe de la carga
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

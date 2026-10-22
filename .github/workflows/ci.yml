@@ -17,6 +17,8 @@
 #   (pytest-split con backend/.test_durations; VIG-198): pytest sin integration (propiedades,
 #   tests/isolation, tests/abuse, tests/examples que no necesitan contenedores) con cobertura, un
 #   artefacto por grupo.
+#   U-04 (LC-LAZ-43): incluye tests/properties/laz, aislamiento de SUP-U05, L-1 a L-12,
+#   corpus R5 y los nueve ejemplos. No se añaden listas de rutas: las recoge la colección completa.
 # - backend (lint, tipos y pruebas sin integración): el check obligatorio de siempre; agrega los
 #   dos anteriores y falla si alguno no terminó en verde.
 # - backend (pruebas de integración, grupo N de 4): pytest con integration (PostgreSQL y LocalStack
@@ -35,8 +37,12 @@
 # - cobertura: combina los trabajos con cobertura (los 4 grupos sin integración y los 4 de
 #   integración) y exige ≥ 90 % en identity y ledger (dominio y aplicación) y ≥ 80 % global
 #   (tools/check_coverage.py).
+#   NFR-LAZ-45: también ≥ 90 % en loop, accreditation y notifications, cada módulo sin adaptadores.
+#   Se conserva el nombre histórico del check de cobertura.
 # - dependencias (licencias y pip-audit): lista permitida con LICENSE-EXCEPTIONS.md y avisos de
 #   vulnerabilidad de todo el bloqueo.
+#   Incluye holidays, tzdata y anthropic de U-04, sin excepciones nuevas; simplemma, prevista
+#   como hipótesis en el diseño, no está instalada. Cualquier adición entra en el mismo inventario.
 # - imagen arm64 (construcción, auditoría, arranque y escaneo): buildx --platform linux/arm64
 #   --ssh default en un runner arm64; usuario no root, ninguna clave en capas ni historial;
 #   vigia-api arranca con la raíz de solo lectura contra PostgreSQL migrado; Grype. Sin publicar
@@ -45,6 +51,7 @@
 #   migraciones del cambio (NFR-NUC-14, RESILIENCY-04).
 # - flujos (actionlint): lint de .github/workflows con shellcheck (TASK-151).
 # - infra (pruebas y cdk synth): pruebas de plantilla de CDK y síntesis sin credenciales.
+#   Incluye tests/test_loop_stack.py (U-04), bloqueante en el mismo check.
 # Los checks obligatorios conservan su nombre: escaneo de secretos, los «backend» de siempre (los
 # dos de la integración, ahora agregadores) e infra.
 name: ci

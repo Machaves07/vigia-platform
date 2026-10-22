@@ -17,6 +17,7 @@ Lista de §3.2 leída como fija la revisión de coherencia (nota T-07, U02-H-07)
 6. ``/.well-known/vigia-checkpoint-keys`` y ``/.well-known/vigia-verifier`` responden y el hash del
    verificador es el del artefacto del release.
 7. Ninguna alarma del despliegue en ``ALARM`` durante 15 minutos (la última, por su duración).
+   Incluye las de U-04: se consultan todas las alarmas ``vigia-``, no una lista de U-02.
 8. ``staging``: recorrido de Playwright (U-05). 9. ``pilot``: ``GET /`` y ``version.json`` (U-05).
 10 a 13. U-03: certificado revocado en dos capas, catálogo firmado, alta por ``app.`` y rechazo
    por ``nodes.``, origen cruzado y ``PUT`` sin suma.
