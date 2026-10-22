@@ -437,14 +437,16 @@ def test_no_runbook_contains_or_writes_a_secret_value(name: str) -> None:
     assert ".env" not in text
 
 
+# Las sondas se componen al correr para que ningún literal con forma de credencial quede en el árbol:
+# el escaneo de secretos del CI (gitleaks) las marcaría como fuga.
 @pytest.mark.parametrize(
     "probe",
     [
-        "AKIAABCDEFGHIJKLMNOP",
-        "sk-ant-api03-abcdefghijkl",
-        "-----BEGIN PRIVATE KEY-----",
-        "api_key = abcdefghijklmnop",
-        "ANTHROPIC_API_KEY=x",
+        pytest.param("AKIA" + "ABCDEFGHIJKLMNOP", id="aws-access-key"),
+        pytest.param("sk-" + "ant-api03-" + "abcdefghijkl", id="anthropic-key"),
+        pytest.param("-----BEGIN " + "PRIVATE KEY-----", id="private-key"),
+        pytest.param("api_key" + " = abcdefghijklmnop", id="api-key-assignment"),
+        pytest.param("ANTHROPIC_API_KEY" + "=x", id="anthropic-env-assignment"),
     ],
 )
 def test_the_secret_patterns_detect_their_probe(probe: str) -> None:
