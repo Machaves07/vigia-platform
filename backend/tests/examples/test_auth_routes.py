@@ -474,6 +474,8 @@ def test_me_exposes_the_additive_fields_and_nothing_sensitive(api: Api) -> None:
         "absolute_expires_at",
         "privacy_notice_version",
         "api_version",
+        "professional_license",
+        "second_factor_enrolled",
     }
     assert body["user"] == {
         "user_id": str(person.user_id),
@@ -503,6 +505,9 @@ def test_me_exposes_the_additive_fields_and_nothing_sensitive(api: Api) -> None:
     assert body["api_version"] == APP_VERSION
     assert response.headers[API_VERSION_HEADER] == APP_VERSION
     assert response.headers["cache-control"] == "no-store"
+    # Aditivo de U-05 (TASK-402): sin licencia registrada ni segundo factor inscrito.
+    assert body["professional_license"] is None
+    assert body["second_factor_enrolled"] is False
     # Nada sensible: ni el identificador de sesión, ni su hash, ni el de la contraseña.
     text = response.text
     for secret in (cookie.token, cookie.value, cookie.session_id_hash, "fake$", person.password):
@@ -510,6 +515,51 @@ def test_me_exposes_the_additive_fields_and_nothing_sensitive(api: Api) -> None:
     assert not {
         key for key in _keys(body) if "session" in key or "password" in key or "token" in key
     }
+
+
+def test_me_carries_the_own_license_and_second_factor_state(api: Api) -> None:
+    """Aditivo de U-05 (TASK-402; BR-APP-47 y RV-01): la licencia del perfil de la persona de la
+    sesión y si tiene inscrito el segundo factor, leídos de su cuenta en cada petición; nunca los
+    de otra persona de la misma organización."""
+    authz = api.env.authz
+    person = _person(api)
+    colleague = authz.sessions.add_user(person.organization_id, enrolled=True)
+    authz.execute(
+        "UPDATE identity.user_account SET professional_license = $2 WHERE user_id = $1",
+        colleague.user_id,
+        "LIC-COLEGA-0002",
+    )
+    _, cookie = api.login(person.email, person.password)
+    assert cookie is not None
+    before = api.request("GET", "/me", cookie=cookie)
+    assert before.status_code == 200, before.text
+    assert before.json()["professional_license"] is None
+    assert before.json()["second_factor_enrolled"] is False
+    assert "LIC-COLEGA-0002" not in before.text
+    authz.execute(
+        "UPDATE identity.user_account SET professional_license = $2,"
+        " second_factor_enrolled_at = $3 WHERE user_id = $1",
+        person.user_id,
+        "LIC-SST-0001",
+        api.clock.now(),
+    )
+    after = api.request("GET", "/me", cookie=cookie)
+    assert after.status_code == 200, after.text
+    body = after.json()
+    assert body["professional_license"] == "LIC-SST-0001"
+    assert body["second_factor_enrolled"] is True
+    assert "LIC-COLEGA-0002" not in after.text
+    # Licencia de 64 caracteres, el máximo de BR-NUC-34: llega entera.
+    longest = "L" * 64
+    authz.execute(
+        "UPDATE identity.user_account SET professional_license = $2,"
+        " second_factor_enrolled_at = NULL WHERE user_id = $1",
+        person.user_id,
+        longest,
+    )
+    edge = api.request("GET", "/me", cookie=cookie).json()
+    assert edge["professional_license"] == longest
+    assert edge["second_factor_enrolled"] is False
 
 
 def test_me_requires_a_usable_session(api: Api) -> None:
