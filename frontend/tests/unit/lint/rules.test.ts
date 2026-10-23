@@ -151,8 +151,19 @@ describe('excepciones acotadas a su archivo', () => {
     );
   });
 
-  it('otro archivo llamado clock.ts no hereda la excepción', async () => {
-    const code = 'export const now = (): number => Date.now();\n';
-    expect(rules(await lint('src/components/clock.ts', code))).toEqual(['no-restricted-syntax']);
-  });
+  it.each(['src/components/clock.ts', 'src/state/reducers/session.ts', 'src/state/clock.test.ts'])(
+    '%s no hereda la excepción de src/state/clock.ts',
+    async (file) => {
+      const code = 'export const now = (): number => Date.now();\n';
+      expect(rules(await lint(file, code))).toEqual(['no-restricted-syntax']);
+    },
+  );
+
+  it.each(['src/pages/scr01/Screen.tsx', 'src/state/connection/breaker.ts'])(
+    '%s no hereda la excepción de src/ports/**',
+    async (file) => {
+      const code = "import { api } from '@/client';\nexport const probe = api;\n";
+      expect(rules(await lint(file, code))).toEqual(['no-restricted-imports']);
+    },
+  );
 });

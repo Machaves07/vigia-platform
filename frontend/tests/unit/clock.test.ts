@@ -60,6 +60,20 @@ describe('FakeClock', () => {
       }),
     );
     expect(runs).toBe(NUM_RUNS[profile]);
+    expect(runs).toBe(profile === 'nightly' ? 2000 : 200);
+  });
+
+  it('un temporizador vence justo en el borde de la ventana, y no antes', () => {
+    const clock = new FakeClock(0);
+    const fired: number[] = [];
+    clock.setTimeout(() => fired.push(clock.now()), 100);
+    clock.advance(99);
+    expect(fired).toEqual([]);
+    clock.advance(1);
+    expect(fired).toEqual([100]);
+    clock.setTimeout(() => fired.push(clock.now()), 0);
+    clock.advance(0);
+    expect(fired).toEqual([100, 100]);
   });
 
   it('un temporizador programado durante advance vence en la misma llamada', () => {
