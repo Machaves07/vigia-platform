@@ -2902,6 +2902,56 @@ def test_me_under_concession_shows_the_concession_and_only_the_installer_column(
 
 
 @pytest.mark.integration
+def test_me_under_concession_signs_with_the_provider_license_only(isolation: Isolation) -> None:
+    """Aditivo de U-05 (TASK-402): bajo concesión, ``GET /me`` del proveedor da **su** licencia y
+    su segundo factor (es su firma), nunca los de una persona del cliente."""
+    authz, b = isolation.authz, isolation.b
+    installer, cookie = isolation.installer()
+    authz.execute(
+        "UPDATE identity.user_account SET professional_license = $2 WHERE user_id = $1",
+        installer,
+        "LIC-PROVEEDOR-0001",
+    )
+    (client,) = isolation.fetch(
+        "SELECT professional_license, second_factor_enrolled_at FROM identity.user_account"
+        " WHERE user_id = $1",
+        b.ids.user,
+    )
+    authz.execute(
+        "UPDATE identity.user_account SET professional_license = $2,"
+        " second_factor_enrolled_at = $3 WHERE user_id = $1",
+        b.ids.user,
+        "LIC-CLIENTE-0002",
+        authz.now(),
+    )
+    try:
+        concession = authz.add_concession(
+            b.ids.organization,
+            installer,
+            level=ScopeLevel.PLANT,
+            scope_id=b.ids.plant,
+            granted_at=authz.now() - HOUR,
+        )
+        response = isolation.send(Call("GET", "/me"), cookie, concession)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["concession_id"] == str(concession)
+        assert body["user"]["user_id"] == str(installer)
+        assert body["professional_license"] == "LIC-PROVEEDOR-0001"
+        assert body["second_factor_enrolled"] is False
+        assert "LIC-CLIENTE-0002" not in response.text
+        assert str(b.ids.user) not in response.text
+    finally:
+        authz.execute(
+            "UPDATE identity.user_account SET professional_license = $2,"
+            " second_factor_enrolled_at = $3 WHERE user_id = $1",
+            b.ids.user,
+            client["professional_license"],
+            client["second_factor_enrolled_at"],
+        )
+
+
+@pytest.mark.integration
 def test_password_change_under_concession_is_rejected_before_touching_the_client(
     isolation: Isolation,
 ) -> None:

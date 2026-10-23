@@ -9,6 +9,11 @@
   * nº 7: ``api_version``, la versión de la release desplegada (la ``app_version`` de
     ``/version.json``), también en la cabecera ``X-Vigia-Api-Version`` (NFR-APP-13).
 
+  Y el aditivo de U-05 que el dueño decidió el 2026-10-23 (TASK-402): ``professional_license``, la
+  del perfil de la persona de la sesión (la que registra ``PATCH /users/{user_id}``; bajo concesión,
+  la del usuario de la proveedora), para advertir antes de firmar (BR-APP-47), y
+  ``second_factor_enrolled``, si tiene inscrito el segundo factor (RV-01).
+
   Nunca el identificador de sesión, su hash ni el de la contraseña.
 
 - ``POST /privacy-notice/accept`` (sesión): la persona acepta la versión vigente. Es la única ruta
@@ -81,6 +86,8 @@ class MeResponse(_Strict):
     absolute_expires_at: str
     privacy_notice_version: str
     api_version: str
+    professional_license: str | None = Field(max_length=64)
+    second_factor_enrolled: bool
 
 
 class NoticeAcceptRequest(_Strict):
@@ -130,6 +137,8 @@ def me_router() -> APIRouter:
             absolute_expires_at=format_timestamp(view.absolute_expires_at),
             privacy_notice_version=privacy_notice_version(request),
             api_version=version,
+            professional_license=view.professional_license,
+            second_factor_enrolled=view.second_factor_enrolled,
         )
 
     @router.post(
