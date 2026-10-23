@@ -197,6 +197,19 @@ PROFILES: Final[Mapping[str, LoadProfile]] = {
         steady_minutes=30.0,
         lost_reply_fraction=0.5,
     ),
+    # Hito «U-04 terminada» (TASK-335): la plataforma que llena el extremo a extremo de U-04
+    # (``tests/integration/test_u04_end_to_end.py``) en el check de integración: una planta con
+    # cuatro zonas, ``speed_factor`` 60 durante 3 minutos (unos 40 registros). El hito lo corre a
+    # ritmo real con ``VIGIA_U04_E2E_PROFILE=ci-real-time``.
+    "u04-e2e": LoadProfile(
+        "u04-e2e",
+        nodes=4,
+        zones_per_node=1,
+        nodes_per_plant=4,
+        speed_factor=60.0,
+        steady_minutes=3.0,
+        lost_reply_fraction=0.1,
+    ),
     "nightly": LoadProfile(
         "nightly",
         nodes=100,
