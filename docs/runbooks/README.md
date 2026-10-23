@@ -1,9 +1,9 @@
 # Runbooks de operación de `vigia-platform`
 
-**Unidades**: U-02 y U-03 · **Tareas**: TASK-152 (VIG-97) y TASK-236 (VIG-172) · **Requisitos**: RESILIENCY-13, NFR-NUC-12, NFR-NUC-50, NFR-GOB-65, NFR-GOB-21 y NFR-GOB-48.
-**Diseño**: `plataforma-nucleo/infrastructure-design/deployment-architecture.md` §6 y `plataforma-gobernanza-flota/infrastructure-design/deployment-architecture.md` §6, y sus notas fechadas del 2026-09-23, en `aidlc-docs/` del espacio de trabajo de Vigía, fuera de este repositorio. La adenda `docs/decisions/adenda-al-diseno.md` del plan manda donde difieran.
+**Unidades**: U-02, U-03 y U-04 · **Tareas**: TASK-152 (VIG-97), TASK-236 (VIG-172) y TASK-334 (VIG-250) · **Requisitos**: RESILIENCY-11 y 13, NFR-NUC-12, NFR-NUC-50, NFR-GOB-65, NFR-GOB-21, NFR-GOB-48 y NFR-LAZ-39 y 42.
+**Diseño**: `plataforma-nucleo/infrastructure-design/deployment-architecture.md` §6, `plataforma-gobernanza-flota/infrastructure-design/deployment-architecture.md` §6 y `plataforma-lazo-acreditacion/infrastructure-design/deployment-architecture.md` §6, y sus notas fechadas del 2026-09-23, en `aidlc-docs/` del espacio de trabajo de Vigía, fuera de este repositorio. La adenda `docs/decisions/adenda-al-diseno.md` del plan manda donde difieran.
 
-Estos procedimientos se escriben antes del incidente para que el dueño los ejecute sin reconstruirlos. Cada runbook de U-02 tiene tres secciones fijas: **Pasos**, **Validación posterior** y **Comunicación**. Los de U-03 (prefijo `u03-`) añaden **Disparador**, **Vuelta atrás** y **Estado en el código**, y cada uno se cita desde la alarma que lo dispara. Los nombres de recursos, alarmas, métricas y órdenes son los del código de este repositorio (`infra/`, `backend/`, `.github/`), no los del diseño cuando difieren. Cada diferencia está anotada en la sección «Estado en el código» del runbook.
+Estos procedimientos se escriben antes del incidente para que el dueño los ejecute sin reconstruirlos. Cada runbook de U-02 tiene tres secciones fijas: **Pasos**, **Validación posterior** y **Comunicación**. Los de U-03 (prefijo `u03-`) y U-04 (prefijo `u04-`, numerados 7.1 a 7.6 a continuación de los de U-02 y U-03) añaden **Disparador**, **Vuelta atrás** y **Estado en el código**, y cada uno se cita desde la alarma que lo dispara: en U-04, la descripción de cada alarma de `infra/stacks/loop.py` nombra su runbook. Los nombres de recursos, alarmas, métricas y órdenes son los del código de este repositorio (`infra/`, `backend/`, `.github/`), no los del diseño cuando difieren. Cada diferencia está anotada en la sección «Estado en el código» del runbook.
 
 Los cinco runbooks de código de NFR-GOB-65 se reparten así: **revocar un nodo** y **reemplazar un nodo averiado** con 6.1 de U-03; **regenerar y publicar la lista de revocación** con 6.2 de U-03; **reabrir una sesión de walk-test incompleta** con 6.4 de U-03; **reprocesar una alarma atascada** con [6.3 de U-02](6.3-dead-letter-replay.md), que U-03 no duplica. El conteo de clips huérfanos (6.3 de U-03) no tiene runbook de código propio: es verificación y conteo.
 
@@ -21,10 +21,20 @@ Los cinco runbooks de código de NFR-GOB-65 se reparten así: **revocar un nodo*
 | [U-03 6.2 Regeneración y publicación de la lista de revocación](u03-6.2-revocation-list-publication.md) | Alarmas `revocation-list-publish-failed` y `revocation-list-expiring`; tras una restauración (NFR-GOB-21) | Ante la alarma o la restauración |
 | [U-03 6.3 Verificación y conteo de clips huérfanos](u03-6.3-orphan-clips.md) | Alarma de flota `orphan_clips_growing` o revisión de R5 (NFR-GOB-65) | Ante la alarma o el crecimiento sostenido |
 | [U-03 6.4 Reapertura de una sesión de walk-test incompleta](u03-6.4-walk-test-session-reopen.md) | Sesión `incomplete` por `expire_walk_test_sessions` a los 7 días (NFR-GOB-65) | Bajo petición del coordinador |
+| [U-04 7.1 Reconstrucción de la proyección del lazo por planta](u04-7.1-loop-projection-rebuild.md) | Alarmas `loop-projection-divergence` y `periodic-task-stale-verify-loop-projection`; restauración de la base (DR-LAZ-01 y 02) | Ante la alarma o la restauración |
+| [U-04 7.2 Reproceso de las colas muertas del lazo](u04-7.2-dead-letter-replay.md) | Camino A: alarma `loop-dead-letter`. Camino B: alarmas `email-events-dlq`, `email-events-queue-age` y `periodic-task-stale-email-delivery-events-poll` (DR-LAZ-03) | Ante la alarma |
+| [U-04 7.3 Objeto perdido de `closure/` o volumen de paquete](u04-7.3-lost-closure-object.md) | Adjunto de cierre ilegible o volumen ausente (DR-LAZ-04) | Ante el evento |
+| [U-04 7.4 Rotación de la clave del proveedor del asistente](u04-7.4-assistant-key-rotation.md) | Rotación planificada o compromiso; alarmas `assistant-unavailable`, `assistant-token-budget` y `assistant-rate-margin` | Manual, ante el evento o la alarma |
+| [U-04 7.5 Arenero, cuotas y reputación del correo](u04-7.5-email-sandbox-and-reputation.md) | Parte A: antes del primer despliegue. Parte B: alarmas `email-bounce-rate`, `email-complaint-rate`, sus informativas y `email-send-quota-high` | Una vez (A); ante la alarma (B) |
+| [U-04 7.6 Exportación atascada o fallida](u04-7.6-export-stuck-or-failed.md) | Alarmas `export-stuck`, `export-failed` y `periodic-task-stale-monthly-package` | Ante la alarma |
+| [Salud de lectura de la proyección del lazo](loop-projection-read-health.md) | Bandeja que declara una planta restaurada sin reconstruir (VIG-273) | Referencia de 7.1 |
+| [Métricas de U-04](u04-metrics.md) y [registro de U-04](u04-registration.md) | Nombres de métricas, tareas, consumidores y órdenes de U-04 | Referencia |
 | [Contingencia de subparticionado](subpartitioning-contingency.md) | La volumetría nocturna supera los 300 ms en la lista mayor (PAT-NUC-ESC-01) | Solo si la medición lo exige |
 | [Recuperación de una cadena rota](broken-chain-recovery.md) | Alarma `vigia-integrity-compromised` (BR-NUC-58) | Ante la alarma |
 | [Pruebas con la base en otra fecha](clock-shifted-database-tests.md) | Código sensible al reloj (retro 15 de `AGENTS.md`) | En la tarea que lo toque |
 | [Traslado de la pila `vigia-datasets`](traslado-vigia-datasets.md) | Primer despliegue (TASK-150, VIG-28) | Una vez |
+
+Las alarmas de U-04 sin runbook propio son las `periodic-task-stale-*` de `evaluate_deadlines`, `review_reminders`, `unclosable_review_due`, `metrics_materialize`, `adoption_check`, `email_grouping` y `digest_weekly`: su descripción remite a los registros de `vigia-worker`. Todas sus tareas son idempotentes y se ponen al día solas tras una caída (PR-LAZ-48, [registro de U-04](u04-registration.md#verificación)).
 
 ## Reglas comunes
 
