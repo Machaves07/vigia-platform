@@ -9,7 +9,7 @@
 # falla si alguna entrada de la raíz falta aquí.
 extend = "../pyproject.toml"
 
-# `print()` tampoco (T20, seguimiento de VIG-22): solo las dos órdenes de consola, cuya salida es la
+# `print()` tampoco (T20, seguimiento de VIG-22): solo las órdenes de consola, cuya salida es la
 # respuesta a quien las ejecuta.
 [lint]
 extend-select = ["T20"]
@@ -17,6 +17,7 @@ extend-select = ["T20"]
 [lint.extend-per-file-ignores]
 "vigia_platform/ledger/chain/package_verifier.py" = ["T201"]
 "vigia_platform/shared/api/export_openapi.py" = ["T201"]
+"vigia_platform/shared/api/export_u05_fixtures.py" = ["T201"]
 
 [lint.flake8-tidy-imports.banned-api]
 "pickle".msg = "Prohibido por NFR-NUC-27: usa JSON validado por los modelos."
