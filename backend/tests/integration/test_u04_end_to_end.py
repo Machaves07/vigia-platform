@@ -233,6 +233,24 @@ def _coordinator(target: LoadTarget, organization: uuid.UUID) -> tuple[uuid.UUID
     return user, cookie.value
 
 
+def _installer_session(target: LoadTarget, concession: uuid.UUID) -> tuple[uuid.UUID, str]:
+    """Una sesión **nueva** del instalador de la concesión de la flota.
+
+    La que abre el aprovisionamiento lleva sin uso lo que dure la carga: a ritmo real (30 min)
+    supera ``IDLE_TIMEOUT`` y responde 401, como debe; la consola real abre otra."""
+    provisioner = Provisioner(
+        target.stack, target.api, target.app.url, target.tls.ca_file, target.directory
+    )
+    (row,) = target.stack.fetch(
+        "SELECT provider_user_id FROM identity.provider_concession WHERE concession_id = $1",
+        concession,
+    )
+    user = uuid.UUID(str(row["provider_user_id"]))
+    cookie, session = provisioner._session(target.stack.provider_organization_id, user)
+    target.stack.admin([session])
+    return user, cookie.value
+
+
 # --- Lo que el expediente y la proyección dicen ------------------------------------------------
 
 
@@ -581,8 +599,11 @@ def test_u04_inbox_loop_assistant_and_export_over_the_simulated_node(
         organization = fleet.organization_id
         user, cookie = _coordinator(load_target, organization)
         console = _console(load_target, user, cookie)
+        installer_user, installer_cookie = _installer_session(
+            load_target, fleet.console.concession_id
+        )
         installer = _console(
-            load_target, user, fleet.console.cookie_value, fleet.console.concession_id
+            load_target, installer_user, installer_cookie, fleet.console.concession_id
         )
 
         # 2. La bandeja: un elemento por episodio y por detección a revisión, ninguno más.
