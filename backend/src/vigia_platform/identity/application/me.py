@@ -7,6 +7,10 @@ efectivos los calcula ``identity.authz.route_role`` con las mismas reglas que la
 ruta (claves ``platform.*`` solo en la proveedora y sin concesión; bajo concesión, solo la columna
 de ``provider_installer``).
 
+La licencia profesional y el estado del segundo factor (aditivo de U-05, TASK-402) salen de la
+misma fila de la cuenta: la de la persona **de la sesión** (``s.user_id``), también bajo concesión,
+donde son los del usuario de la proveedora (es su firma) y nunca datos del cliente.
+
 Nunca devuelve el identificador de sesión ni su hash, ni el de la contraseña.
 """
 
@@ -30,6 +34,7 @@ __all__ = ["MeService", "MeView", "OrganizationSummary", "effective_keys"]
 
 _PROFILE: Final = text(
     "SELECT s.idle_expires_at, s.absolute_expires_at, u.email, u.display_name,"
+    " u.professional_license, u.second_factor_enrolled_at IS NOT NULL AS second_factor_enrolled,"
     " o.organization_id, o.code, o.name, o.kind"
     " FROM identity.session AS s"
     " JOIN identity.user_account AS u ON u.user_id = s.user_id"
@@ -52,6 +57,8 @@ class MeView:
     user_id: uuid.UUID
     display_name: str = field(repr=False)
     email: str = field(repr=False)
+    professional_license: str | None = field(repr=False)
+    second_factor_enrolled: bool
     organization: OrganizationSummary
     assignments: tuple[AllowedScope, ...]
     effective_permissions: tuple[str, ...]
@@ -117,6 +124,8 @@ class MeService:
             user_id=scope.user_id,
             display_name=row.display_name,
             email=row.email,
+            professional_license=row.professional_license,
+            second_factor_enrolled=bool(row.second_factor_enrolled),
             organization=OrganizationSummary(
                 organization_id=as_uuid(row.organization_id),
                 code=row.code,
