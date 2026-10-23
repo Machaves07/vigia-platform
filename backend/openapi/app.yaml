@@ -11619,6 +11619,15 @@
         "api_version":
           "type": "string"
           "title": "Api Version"
+        "professional_license":
+          "anyOf":
+            - "type": "string"
+              "maxLength": 64
+            - "type": "null"
+          "title": "Professional License"
+        "second_factor_enrolled":
+          "type": "boolean"
+          "title": "Second Factor Enrolled"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -11631,6 +11640,8 @@
         - "absolute_expires_at"
         - "privacy_notice_version"
         - "api_version"
+        - "professional_license"
+        - "second_factor_enrolled"
       "title": "MeResponse"
     "MetricKey":
       "type": "string"
