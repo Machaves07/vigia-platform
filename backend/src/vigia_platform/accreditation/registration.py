@@ -141,6 +141,28 @@ type ConsumerRegistrar = Callable[[ConsumerRegistry, UnitServices], None]
 type StateBuilder = Callable[[UnitServices], Mapping[str, object]]
 
 
+def _u04_checkpoints(services: UnitServices) -> CheckpointService:
+    """El ``CheckpointService`` de ``export_worker`` y ``monthly_package`` (U04-H-08).
+
+    ``services.checkpoints`` no sirve aquí: su ``writer_context`` por defecto espera ya recibir un
+    contexto de U-02 (``_require_u02``), y el de la entrega o de la tarea periódica es de U-04 (con
+    él, toda exportación fallaba con ``CheckpointContextRejected``, VIG-276). Mismo almacén y
+    firmante, pero con ``writer_context=services.contexts.checkpoint_writer``: lo traduce al
+    contexto de sistema de U-02 de la misma organización (checkpoints.py documenta a U-04 como
+    invocador legítimo «antes de cada exportación o paquete mensual»)."""
+    return CheckpointService(
+        store=SqlCheckpointStore(
+            database=services.database,
+            writer=services.writer,
+            audit=services.audit,
+            outbox=services.outbox,
+        ),
+        signer=services.signing,
+        clock=services.clock,
+        writer_context=services.contexts.checkpoint_writer,
+    )
+
+
 def _export_composer(services: UnitServices, stream: ExportStream) -> ExportComposer:
     """El compositor real (TASK-318) con los puertos de U-02 y U-03 en proceso."""
     evidence = services.require_evidence()
@@ -197,7 +219,7 @@ def _register_export_worker(registry: ConsumerRegistry, services: UnitServices) 
         registry,
         ExportWorker(
             leases=SqlExportLeaseStore(database=services.database, writer=services.writer),
-            checkpoints=services.checkpoints,
+            checkpoints=_u04_checkpoints(services),
             uploads=uploads,
             composer=composer,
             alarm=LoggingExportAlarm(),
@@ -214,23 +236,6 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
     ``_register_export_worker`` con ``MissingUploadPort``/``MissingPackageComposer``)."""
     monthly_repository = MonthlyPackageRepository(database=services.database)
     evidence: EvidencePort = MissingEvidence() if services.evidence is None else services.evidence
-    # ``services.checkpoints`` no sirve aquí: su ``writer_context`` por defecto espera ya recibir
-    # un contexto de U-02 (``_require_u02``), y el de la tarea periódica es de U-04. El paquete
-    # mensual necesita su propio ``CheckpointService``, con el mismo almacén y firmante, pero con
-    # ``writer_context=services.contexts.checkpoint_writer``: lo traduce al contexto de sistema de
-    # U-02 de la misma organización (checkpoints.py documenta a U-04 como invocador legítimo
-    # «antes de cada exportación o paquete mensual»).
-    checkpoints = CheckpointService(
-        store=SqlCheckpointStore(
-            database=services.database,
-            writer=services.writer,
-            audit=services.audit,
-            outbox=services.outbox,
-        ),
-        signer=services.signing,
-        clock=services.clock,
-        writer_context=services.contexts.checkpoint_writer,
-    )
     composer = MonthlyPackageComposer(
         database=services.database,
         reader=LectorExpediente(
@@ -241,7 +246,7 @@ def _register_monthly_package(registry: PeriodicTaskRegistry, services: UnitServ
         ),
         repository=monthly_repository,
         evidence=evidence,
-        checkpoints=checkpoints,
+        checkpoints=_u04_checkpoints(services),
         writer=services.writer,
         clock=services.clock,
         signer=services.signing,
