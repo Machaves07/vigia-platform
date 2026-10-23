@@ -1,0 +1,5 @@
+{
+  "$comment": "Temporal de VIG-277: lo borra VIG-330 al configurar Lighthouse CI.",
+  "task": "VIG-330 (TASK-455)",
+  "ignoreDependencies": ["@lhci/cli"]
+}

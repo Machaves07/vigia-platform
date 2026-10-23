@@ -1,0 +1,5 @@
+{
+  "$comment": "Temporal de VIG-277: lo borra VIG-291 al usar la aritmética de periodos y zonas horarias.",
+  "task": "VIG-291 (TASK-419)",
+  "ignoreDependencies": ["date-fns", "date-fns-tz"]
+}

@@ -1,0 +1,5 @@
+{
+  "$comment": "Temporal de VIG-277: lo borra VIG-336 al pasar axe en todas las pantallas.",
+  "task": "VIG-336 (TASK-454)",
+  "ignoreDependencies": ["@axe-core/playwright", "axe-core"]
+}

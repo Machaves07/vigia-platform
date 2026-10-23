@@ -1,0 +1,861 @@
+[
+  {
+    "finding_id": "018cc251-f400-7000-8000-000000000001",
+    "contract_version": "1.1.0",
+    "organization_id": "e3e70682-c209-4cac-a29f-6fbed82c07cd",
+    "plant_id": "f728b4fa-4248-4e3a-8a5d-2f346baa9455",
+    "zone_id": "12e0c8b2-bad6-40fb-9948-8dec4f65d4d9",
+    "node_id": "f689a4a5-ffda-4336-8c6e-90373020da5c",
+    "episode": {
+      "episode_id": "018cc251-f400-7000-8000-000000000000",
+      "segment_index": 0,
+      "continues": false,
+      "max_segment_ms": 60000
+    },
+    "family": "coexistence",
+    "standard": {
+      "standard_id": "5487ce1e-af19-422a-99b8-a714e61a441c",
+      "version": 1
+    },
+    "node_time": {
+      "started_at": "2024-01-01T00:00:00.000Z",
+      "ended_at": "2024-01-01T00:00:00.000Z",
+      "clock": {
+        "synchronized": false,
+        "offset_ms": 0,
+        "source": "ntp.local"
+      }
+    },
+    "signals": [
+      {
+        "signal_id": "c470f0e7-f76f-4fb8-b412-fc12ac322c12",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "28805c5d-ad1b-4f60-89e4-dab20edc6d2b",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "878b9f6b-57a1-4b71-a975-d279d86dbf11",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "ebe21368-98c7-4205-9e01-a934402d0baf",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "0361524c-2cc0-4859-aa65-24ab713b7e05",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "e66cd36e-68ef-4f5f-ae68-690a78bc7175",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "eae2025e-8233-4e23-9ff3-334b91b15f5d",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "637e0edc-5b6e-4ae7-a620-81434fbaecc0",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "27460f22-403d-4f83-a859-890cd670f668",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "753c7c99-032f-46ca-b0d9-c2aa8f837ef7",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "bd30291a-55fe-408e-943e-2e04bdd7d19b",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "2284b7a4-47e7-4593-8b58-85ca0bb2c3f0",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "7b59051b-f400-48d7-831d-5a973d792fa1",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "ac642b4c-49b2-4ded-9c31-d9b25a2b745b",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "e456697c-f268-4baa-971c-702d5bf49c04",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "21e15094-9efe-4464-9a90-f534a23d4c9d",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "bf9cc545-6355-48f7-8f6f-a985b732d46f",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "14aa451c-a69c-4b85-9432-f8db6a174c1c",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "b2d650af-313b-42b7-9836-31890063e42f",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "391cf046-3d4a-4d51-a8fa-fd04559b5975",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "b5d97ef7-60ef-4471-b2b8-ff39a32c9b6f",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "dfe1b307-9172-4f0a-ac7c-8803e01bbf50",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "df26f517-66fa-4989-8813-5d586a1689ad",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "c5adf681-6b10-453a-9145-de05b3ab1b2c",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "2a69acc7-0bf9-40ef-b581-6b74a985ab61",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "b3969057-425c-4200-905a-da6b720299e3",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "e28bc9ff-870f-484c-b244-f536285e25b4",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "9a9e4310-8fb8-4bab-a875-4cd37cbd7025",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "09f6048f-e245-4460-8004-884cc167733f",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "d675ebf7-4fe3-4c9a-9371-0f577e9cf84f",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "d29dc5df-cf1d-4110-8cc3-6d8c77863fe5",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      },
+      {
+        "signal_id": "6a46721a-cffa-4cdd-b963-a7efe00111e5",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2024-01-01T00:00:00.000Z"
+      }
+    ],
+    "observability_state": "observable",
+    "cameras": [
+      {
+        "camera_id": "eb1167b3-67a9-4378-bc65-c1e582e2e662",
+        "originating": true,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000000",
+            "camera_id": "eb1167b3-67a9-4378-bc65-c1e582e2e662",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/eb1167b3-67a9-4378-bc65-c1e582e2e662/018cc251-e078-7000-8000-000000000000.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000001",
+            "camera_id": "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/f7c1bd87-4da5-4709-9471-3d60c8a70639/018cc251-e078-7000-8000-000000000001.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "e443df78-9558-467f-9ba9-1faf7a024204",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000002",
+            "camera_id": "e443df78-9558-467f-9ba9-1faf7a024204",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/e443df78-9558-467f-9ba9-1faf7a024204/018cc251-e078-7000-8000-000000000002.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000003",
+            "camera_id": "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/23a7711a-8133-4876-b7eb-dcd9e87a1613/018cc251-e078-7000-8000-000000000003.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "1846d424-c17c-4279-a3c6-612f48268673",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000004",
+            "camera_id": "1846d424-c17c-4279-a3c6-612f48268673",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/1846d424-c17c-4279-a3c6-612f48268673/018cc251-e078-7000-8000-000000000004.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000005",
+            "camera_id": "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c/018cc251-e078-7000-8000-000000000005.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "b4862b21-fb97-4435-8856-1712e8e5216a",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000006",
+            "camera_id": "b4862b21-fb97-4435-8856-1712e8e5216a",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/b4862b21-fb97-4435-8856-1712e8e5216a/018cc251-e078-7000-8000-000000000006.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "259f4329-e6f4-490b-9a16-4106cf6a659e",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "018cc251-e078-7000-8000-000000000007",
+            "camera_id": "259f4329-e6f4-490b-9a16-4106cf6a659e",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "size_bytes": 1,
+            "duration_ms": 10000,
+            "starts_at": "2023-12-31T23:59:55.000Z",
+            "ends_at": "2024-01-01T00:00:05.000Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/259f4329-e6f4-490b-9a16-4106cf6a659e/018cc251-e078-7000-8000-000000000007.mp4"
+          }
+        ]
+      }
+    ],
+    "tier": "tier_1",
+    "max_confidence": 0.4,
+    "episode_duration_ms": 0,
+    "condition_duration_ms": 0,
+    "automatic_classification": {
+      "trigger": "corroboration",
+      "corroborating_camera_ids": [
+        "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+        "e443df78-9558-467f-9ba9-1faf7a024204",
+        "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+        "1846d424-c17c-4279-a3c6-612f48268673",
+        "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+        "b4862b21-fb97-4435-8856-1712e8e5216a",
+        "259f4329-e6f4-490b-9a16-4106cf6a659e"
+      ]
+    },
+    "model_version": "yolov8n-2026.09",
+    "software_version": "0.0.0",
+    "receipt": {
+      "platform_record_id": "d663049d-155e-48b1-ba83-ada4a2121ac5",
+      "received_at": "2024-01-01T00:00:00.000Z",
+      "status": "accepted"
+    }
+  },
+  {
+    "finding_id": "01a3082c-34bf-7000-8000-00000000007a",
+    "contract_version": "1.1.0",
+    "organization_id": "a63ded44-1edc-4de7-872b-2285aedad631",
+    "plant_id": "cd5f332b-a9cb-46f3-8d84-c2508548b8f9",
+    "zone_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+    "node_id": "4710a21f-4db2-46c5-9553-b3c51e83b436",
+    "episode": {
+      "episode_id": "01a3082b-ee50-7000-8000-0000000012a1",
+      "segment_index": 3340,
+      "continues": false,
+      "max_segment_ms": 3600000,
+      "previous_segment_record_id": "01a3082b-ee50-7000-8000-00000032beb8"
+    },
+    "family": "dwell",
+    "secondary_families": [],
+    "standard": {
+      "standard_id": "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+      "version": 1
+    },
+    "node_time": {
+      "started_at": "2027-01-12T04:33:31.839Z",
+      "ended_at": "2027-01-12T04:35:42.912Z",
+      "clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "10.0.0.1",
+        "last_sync_at": "2027-01-12T04:33:31.622Z"
+      }
+    },
+    "signals": [
+      {
+        "signal_id": "c092bce7-b5eb-4659-82b0-5928ea73922e",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2027-01-12T04:32:40.537Z"
+      },
+      {
+        "signal_id": "09e6fbc9-8139-45fa-b5cd-02bb858bdefe",
+        "role": "guard",
+        "value": "deasserted",
+        "valid": true,
+        "read_at": "2027-01-12T04:33:31.705Z"
+      },
+      {
+        "signal_id": "92c93d68-4605-474f-ae69-ae518b21fe5f",
+        "role": "start_command",
+        "value": "unknown",
+        "valid": false,
+        "read_at": "2027-01-12T04:33:26.973Z"
+      },
+      {
+        "signal_id": "79b3ff32-4360-4f4a-8ebc-855762b74235",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2027-01-12T04:33:31.500Z"
+      },
+      {
+        "signal_id": "75bf1927-d265-4372-8761-1630b6342120",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2027-01-12T04:32:34.093Z"
+      }
+    ],
+    "observability_state": "degraded",
+    "cameras": [
+      {
+        "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+        "originating": true,
+        "clips": [
+          {
+            "clip_id": "01a3082d-cc25-7000-8000-0000001232aa",
+            "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "f98db819a596f2461f1ac763dbf674560fe7bc6785c1bee8e26b2285e11259d5",
+            "size_bytes": 267424,
+            "duration_ms": 56779,
+            "starts_at": "2027-01-12T04:35:16.133Z",
+            "ends_at": "2027-01-12T04:36:12.912Z",
+            "segment": "end",
+            "anonymized": true,
+            "storage_key": "org/zone/a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2/01a3082d-cc25-7000-8000-0000001232aa.mp4"
+          },
+          {
+            "clip_id": "01a3082c-1197-7fff-bfff-ffffffffffff",
+            "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "303bd1a3629f3eb82107ede02521f40ad27985dfe1304fbf70425e80d5f3326d",
+            "size_bytes": 1,
+            "duration_ms": 34352,
+            "starts_at": "2027-01-12T04:33:22.839Z",
+            "ends_at": "2027-01-12T04:33:57.191Z",
+            "segment": "start",
+            "anonymized": true,
+            "storage_key": "org/zone/a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2/01a3082c-1197-7fff-bfff-ffffffffffff.mp4"
+          }
+        ]
+      }
+    ],
+    "tier": "tier_1",
+    "max_confidence": 0.99999,
+    "episode_duration_ms": 131073,
+    "condition_duration_ms": 19658,
+    "automatic_classification": {
+      "trigger": "publication_threshold",
+      "corroborating_camera_ids": []
+    },
+    "model_version": "rtdetr-l.v2",
+    "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "receipt": {
+      "platform_record_id": "916a54ed-52dc-41d1-9633-3ca133e20421",
+      "received_at": "2027-01-12T04:35:44.053Z",
+      "status": "accepted"
+    }
+  },
+  {
+    "finding_id": "01de3ff2-9894-7000-8000-00000000c366",
+    "contract_version": "1.1.0",
+    "organization_id": "5986b2ca-1545-45ea-b26b-66e9e4a03cad",
+    "plant_id": "223d0795-77b0-4fd2-b99f-11b26116a843",
+    "zone_id": "e3e5f60c-01b6-4b32-93fa-7ed0510c48f4",
+    "node_id": "c2eae3f0-a943-433f-9e9f-1150b2d46d36",
+    "episode": {
+      "episode_id": "01de3ff2-9862-7000-8000-00000000001f",
+      "segment_index": 0,
+      "continues": true,
+      "max_segment_ms": 79918
+    },
+    "family": "coexistence",
+    "secondary_families": [],
+    "standard": {
+      "standard_id": "856c42a8-ede5-4339-afec-0ce7a9b02dd8",
+      "version": 25959
+    },
+    "node_time": {
+      "started_at": "2035-02-02T22:13:50.868Z",
+      "ended_at": "2035-02-02T22:14:11.010Z",
+      "clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "ntp.local"
+      }
+    },
+    "signals": [
+      {
+        "signal_id": "c72acd35-d79d-4cc5-8714-69e3d229f979",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2035-02-02T22:13:50.440Z"
+      },
+      {
+        "signal_id": "1388b8cf-960a-4809-a674-28ef3f8e27bd",
+        "role": "start_command",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2035-02-02T22:13:50.115Z"
+      }
+    ],
+    "observability_state": "degraded",
+    "cameras": [
+      {
+        "camera_id": "633ff8cf-bb02-4305-b405-457ff5940f81",
+        "originating": true,
+        "clips": [
+          {
+            "clip_id": "01de3ff2-4a74-7000-8000-000000008220",
+            "camera_id": "633ff8cf-bb02-4305-b405-457ff5940f81",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "551290bbb81a861c99d5c46e676a0cd3a29bf88b9d90351056e3e4e1976bd135",
+            "size_bytes": 52428800,
+            "duration_ms": 45142,
+            "starts_at": "2035-02-02T22:13:30.868Z",
+            "ends_at": "2035-02-02T22:14:16.010Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "org/zone/633ff8cf-bb02-4305-b405-457ff5940f81/01de3ff2-4a74-7000-8000-000000008220.mp4"
+          }
+        ]
+      },
+      {
+        "camera_id": "6ed45703-1995-4522-b373-1eca64ad5cf4",
+        "originating": false,
+        "clips": [
+          {
+            "clip_id": "01de3ff2-4a74-7000-8000-000000000000",
+            "camera_id": "6ed45703-1995-4522-b373-1eca64ad5cf4",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "59e1a87fb9aab08cd8d625add40cc1b8f7b72174145a919d2e5747dbc04c0c0e",
+            "size_bytes": 368,
+            "duration_ms": 45142,
+            "starts_at": "2035-02-02T22:13:30.868Z",
+            "ends_at": "2035-02-02T22:14:16.010Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "org/zone/6ed45703-1995-4522-b373-1eca64ad5cf4/01de3ff2-4a74-7000-8000-000000000000.mp4"
+          }
+        ]
+      }
+    ],
+    "tier": "tier_1",
+    "max_confidence": 0.08758049986106005,
+    "episode_duration_ms": 20142,
+    "condition_duration_ms": 5109,
+    "automatic_classification": {
+      "trigger": "corroboration",
+      "corroborating_camera_ids": [
+        "6ed45703-1995-4522-b373-1eca64ad5cf4"
+      ]
+    },
+    "model_version": "a",
+    "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "receipt": {
+      "platform_record_id": "73fadf27-89fe-426f-9eef-90b0cf8de667",
+      "received_at": "2035-02-02T22:14:16.837Z",
+      "status": "accepted_duplicate"
+    }
+  },
+  {
+    "finding_id": "01cd0cbb-4d03-7000-8000-000000002dd0",
+    "contract_version": "1.1.0",
+    "organization_id": "40d27b80-0507-49f8-8c75-6e7c3d8eebc3",
+    "plant_id": "3ebf190d-e4f2-44c9-a888-fecdc5071e81",
+    "zone_id": "58f5e250-aefc-4555-894a-60d0ca5a736f",
+    "node_id": "c126bbce-6d97-402a-9ea2-f6d60e9a4ec7",
+    "episode": {
+      "episode_id": "01cd0cbb-0936-7000-8000-000001bcef9d",
+      "segment_index": 0,
+      "continues": true,
+      "max_segment_ms": 236994
+    },
+    "family": "dwell",
+    "secondary_families": [],
+    "standard": {
+      "standard_id": "09c55d7b-4e42-4a04-a15a-e718d0e2d9f8",
+      "version": 111991
+    },
+    "node_time": {
+      "started_at": "2032-09-30T21:45:24.995Z",
+      "ended_at": "2032-09-30T21:46:12.608Z",
+      "clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "pool.ntp.org"
+      }
+    },
+    "signals": [
+      {
+        "signal_id": "a5db68e1-d2eb-4bc9-901e-48c300705f74",
+        "role": "energy",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2032-09-30T21:45:12.765Z"
+      },
+      {
+        "signal_id": "ef80f92d-b2d1-47d5-b693-36714097eced",
+        "role": "start_command",
+        "value": "deasserted",
+        "valid": true,
+        "read_at": "2032-09-30T21:44:24.995Z"
+      }
+    ],
+    "observability_state": "degraded",
+    "cameras": [
+      {
+        "camera_id": "40b516b7-47b6-4a8f-bcff-c3f300f6bfc0",
+        "originating": true,
+        "clips": [
+          {
+            "clip_id": "01cd0cbb-397b-7000-8000-000000014596",
+            "camera_id": "40b516b7-47b6-4a8f-bcff-c3f300f6bfc0",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "2d317df13f1aa31db671df2b20ce4a3a1d4f371730ce64900bab9db225a3cba3",
+            "size_bytes": 49204,
+            "duration_ms": 57613,
+            "starts_at": "2032-09-30T21:45:19.995Z",
+            "ends_at": "2032-09-30T21:46:17.608Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/40b516b7-47b6-4a8f-bcff-c3f300f6bfc0/01cd0cbb-397b-7000-8000-000000014596.mp4"
+          }
+        ]
+      }
+    ],
+    "tier": "tier_1",
+    "max_confidence": 1.0064585817689566e-215,
+    "episode_duration_ms": 47613,
+    "condition_duration_ms": 43200,
+    "automatic_classification": {
+      "trigger": "publication_threshold",
+      "corroborating_camera_ids": []
+    },
+    "model_version": "yolov8n-2026.09",
+    "software_version": "0.0.0",
+    "receipt": {
+      "platform_record_id": "9f9e4499-6442-4687-b848-20d1a91c893e",
+      "received_at": "2032-09-30T22:26:40.998Z",
+      "status": "accepted_duplicate"
+    }
+  },
+  {
+    "finding_id": "01abfd30-feb5-7000-8000-000000000000",
+    "contract_version": "1.1.0",
+    "organization_id": "afec6343-f34f-4b13-874b-cfeccd49057c",
+    "plant_id": "e1a42f3a-c19d-45e9-8433-45bd665036e9",
+    "zone_id": "29012c29-5d60-4f42-adc0-4d862dcca9f3",
+    "node_id": "3b5391f8-f130-44df-96b4-43cf76ce382a",
+    "episode": {
+      "episode_id": "01abfd30-f5ef-7000-8000-0000000015ea",
+      "segment_index": 0,
+      "continues": true,
+      "max_segment_ms": 900000
+    },
+    "family": "guard_bypass",
+    "standard": {
+      "standard_id": "b7801c3e-9e77-45ca-bd3b-d3bbe2850171",
+      "version": 375203
+    },
+    "node_time": {
+      "started_at": "2028-04-01T10:48:01.973Z",
+      "ended_at": "2028-04-01T10:48:02.465Z",
+      "clock": {
+        "synchronized": false,
+        "offset_ms": 17582740,
+        "source": "ntp.local",
+        "last_sync_at": "2028-04-01T10:47:59.974Z"
+      }
+    },
+    "signals": [
+      {
+        "signal_id": "712f21a8-46b3-4c2b-a1e9-d8406063969c",
+        "role": "energy",
+        "value": "unknown",
+        "valid": false,
+        "read_at": "2028-04-01T10:47:51.486Z"
+      },
+      {
+        "signal_id": "c3acded1-cd1e-4ae3-813a-6915ab4131c8",
+        "role": "guard",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2028-04-01T10:48:00.872Z"
+      },
+      {
+        "signal_id": "c690ee40-5717-4a82-a64d-ee0a493837ec",
+        "role": "start_command",
+        "value": "unknown",
+        "valid": false,
+        "read_at": "2028-04-01T10:47:55.102Z"
+      },
+      {
+        "signal_id": "bd6bd069-809c-4ac9-86eb-fd93071b163d",
+        "role": "start_command",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2028-04-01T10:47:56.970Z"
+      },
+      {
+        "signal_id": "59d63eb3-e406-4275-866f-34c41cc83288",
+        "role": "start_command",
+        "value": "unknown",
+        "valid": false,
+        "read_at": "2028-04-01T10:47:52.777Z"
+      },
+      {
+        "signal_id": "c52bfd67-d4bd-42be-ab2d-a551b4c3c339",
+        "role": "auxiliary",
+        "value": "asserted",
+        "valid": true,
+        "read_at": "2028-04-01T10:47:57.842Z"
+      }
+    ],
+    "observability_state": "observable",
+    "cameras": [
+      {
+        "camera_id": "863c7102-4be5-4cd4-b4f7-8c8cd6af7629",
+        "originating": true,
+        "clips": [
+          {
+            "clip_id": "01abfd30-8985-7000-8000-000000000032",
+            "camera_id": "863c7102-4be5-4cd4-b4f7-8c8cd6af7629",
+            "media_kind": "video",
+            "content_type": "video/mp4",
+            "sha256": "90aec7299d1c4862fb2a4883885ddc2b61b7d12279b1645df8525eb09888a350",
+            "size_bytes": 52428800,
+            "duration_ms": 54492,
+            "starts_at": "2028-04-01T10:47:31.973Z",
+            "ends_at": "2028-04-01T10:48:26.465Z",
+            "segment": "full",
+            "anonymized": true,
+            "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/863c7102-4be5-4cd4-b4f7-8c8cd6af7629/01abfd30-8985-7000-8000-000000000032.mp4"
+          }
+        ]
+      }
+    ],
+    "tier": "tier_1",
+    "max_confidence": 1.0,
+    "episode_duration_ms": 492,
+    "condition_duration_ms": 142,
+    "automatic_classification": {
+      "trigger": "publication_threshold",
+      "corroborating_camera_ids": []
+    },
+    "model_version": "rtdetr-l.v2",
+    "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "receipt": {
+      "platform_record_id": "3dbc68fe-12ea-4026-ba10-ff552c52b174",
+      "received_at": "2028-04-01T10:49:35.224Z",
+      "status": "accepted_duplicate"
+    }
+  }
+]

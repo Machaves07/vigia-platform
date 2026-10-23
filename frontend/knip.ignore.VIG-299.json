@@ -1,0 +1,5 @@
+{
+  "$comment": "Temporal de VIG-277: lo borra VIG-299 al crear el arnés de Playwright.",
+  "task": "VIG-299 (TASK-449)",
+  "ignoreDependencies": ["@playwright/test"]
+}

@@ -252,7 +252,9 @@ def _run(
 # --- Conjunto ---------------------------------------------------------------------------
 
 
-def test_a_healthy_staging_has_no_failures() -> None:
+def test_a_healthy_staging_has_no_failures_but_the_pending_u05_check() -> None:
+    # VIG-277 creó frontend/package.json: la nº 8 (U-05) deja de omitirse y queda fallida
+    # hasta que VIG-319 (TASK-457) la escriba en tools/deploy_checks.py.
     results = _run()
     assert {n for n, r in results.items() if r.status == "ok"} == {
         1,
@@ -267,8 +269,9 @@ def test_a_healthy_staging_has_no_failures() -> None:
         12,
         13,
     }
-    assert results[8].status == "skipped" and results[9].detail == "solo en pilot"
-    assert {n for n, r in results.items() if r.status == "failed"} == set()
+    assert results[9].status == "skipped" and results[9].detail == "solo en pilot"
+    assert {n for n, r in results.items() if r.status == "failed"} == {8}
+    assert "no está escrita" in results[8].detail
 
 
 def test_a_repository_without_u03_routes_skips_the_u03_checks_with_a_reason(tmp_path: Path) -> None:
@@ -654,12 +657,13 @@ def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
     assert pilot[9].status == "failed"
 
 
-def test_the_current_repository_has_contract_routes_and_enrollment_but_no_frontend() -> None:
+def test_the_current_repository_has_contract_routes_enrollment_and_frontend() -> None:
     # VIG-152 y TASK-223 publican rutas del contrato y VIG-151 el alta: las comprobaciones de
-    # U-03 ya están escritas (TASK-234) y corren contra el material del entorno.
+    # U-03 ya están escritas (TASK-234) y corren contra el material del entorno. VIG-277 crea
+    # frontend/package.json (U-05): sus comprobaciones nº 8 y 9 las escribe VIG-319.
     target = _target()
     assert target.has_contract_routes() and target.has_enrollment()
-    assert not target.has_frontend()
+    assert target.has_frontend()
     assert "/health/live" in target.openapi_paths()
 
 
