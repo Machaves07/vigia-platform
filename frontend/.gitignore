@@ -1,6 +1,5 @@
 node_modules/
 dist/
-# El informe de cobertura de vitest; `src/state/coverage/` es código.
 /coverage/
 test-results/
 playwright-report/

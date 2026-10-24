@@ -36,3 +36,66 @@ b5a03d19f2d870482d70b435b2b7c7cc8eccc594:backend/tests/load/test_load_units.py:p
 # detectan; no es una credencial. El commit siguiente arma las sondas por partes en tiempo de
 # ejecución.
 58b6ac91adba00c2529613945807cf0e287b4a05:backend/tests/unit/test_u04_runbooks.py:aws-access-token:443
+#
+# VIG-290: claves del catálogo de textos («navigation.scrNN») en la prop titleKey de los relevos
+# y en el campo title_key de los descriptores de pantalla; no son secretos. El commit siguiente
+# pasa los relevos a screen="scrNN" y el campo a title_text.
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/account/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/hierarchy/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/invitation/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/login/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/organization/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr01/users/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr02/client/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr02/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr02/provider/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr03/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr03/integrity/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr04/admissions/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr04/catalog/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr04/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr04/parameters/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr04/vocabulary/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr05/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr05/gates/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr05/policy/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/close/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/matrix/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/occlusion/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/record/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr06/session/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/alarms/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/enrollment/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/inventory/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/lifecycle/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr07/target_version/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr08/descriptor.ts:generic-api-key:11
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr08/detail/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr08/home/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr08/inbox/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr08/labels/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/classify/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/loop/closure/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/loop/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/loop/reopening/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr09/loop/unclosable/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr10/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr10/queue/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr12/descriptor.ts:generic-api-key:11
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr12/entry/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr12/package/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr13/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr13/metrics/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr13/weekly/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr14/descriptor.ts:generic-api-key:6
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr14/exports/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr15/descriptor.ts:generic-api-key:9
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr15/list/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr15/preferences/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/descriptor.ts:generic-api-key:10
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/entry/index.tsx:generic-api-key:5
+a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/zone/index.tsx:generic-api-key:5
