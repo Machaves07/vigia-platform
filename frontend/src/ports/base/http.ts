@@ -20,7 +20,8 @@
  * - `X-Vigia-Api-Version` de cada respuesta se entrega al observador inyectado (`app.version`,
  *   VIG-302).
  * - Toda respuesta no 2xx se traduce con `behaviourFor` (`ports.errors`); `unauthenticated` y
- *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300).
+ *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300);
+ *   cualquier otra respuesta HTTP se avisa como respuesta autenticada (renueva la inactividad).
  * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración.
  */
 import { OPERATIONS } from '@/client';
@@ -112,6 +113,11 @@ export interface TransportOptions {
   readonly onApiVersion?: (version: string) => void;
   /** Eventos de sesión (VIG-300). */
   readonly onSessionEvent?: (event: SessionEvent) => void;
+  /**
+   * Respuesta HTTP que no es `unauthenticated` ni `privacy_notice_required`: el servidor renovó la
+   * inactividad de la sesión (BR-NUC-25), y `state.session` reinicia su ventana (VIG-300).
+   */
+  readonly onAuthenticatedResponse?: () => void;
   /** Origen de la API; por omisión, el de la página (la API comparte origen). */
   readonly origin?: string;
   readonly fetch?: typeof fetch;
@@ -323,8 +329,10 @@ export function createTransport(options: TransportOptions): Transport {
   /** Registra el intento en su circuito y emite los eventos de sesión. */
   const settle = (request: ApiRequest, result: Attempt): void => {
     const dependency = request.dependency ?? 'platform';
-    if (result.type === 'ok') connection.register(dependency, { ok: true });
-    else if (result.type === 'fault')
+    if (result.type === 'ok') {
+      connection.register(dependency, { ok: true });
+      options.onAuthenticatedResponse?.();
+    } else if (result.type === 'fault')
       connection.register(dependency, { ok: false, error: result.fault });
     else if (result.type === 'http') {
       connection.register(dependency, { ok: false, error: result.error });
@@ -333,6 +341,8 @@ export function createTransport(options: TransportOptions): Transport {
         result.error.code === 'privacy_notice_required'
       ) {
         options.onSessionEvent?.(result.error.code);
+      } else {
+        options.onAuthenticatedResponse?.();
       }
     }
   };
