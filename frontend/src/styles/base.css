@@ -1,0 +1,55 @@
+/* Hoja base de la aplicación (LC-APP-23): tipografía del sistema, foco visible y objetivos táctiles. */
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-family);
+  font-size: 100%;
+  line-height: var(--line-height);
+  color: var(--color-text);
+  background: var(--color-surface);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+/* El foco siempre se ve con teclado; nunca se quita sin reemplazo. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button,
+[role='button'],
+a,
+input[type='checkbox'],
+input[type='radio'],
+select {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

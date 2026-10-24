@@ -1,0 +1,54 @@
+/*
+ * Variables del sistema de diseño (LC-APP-23, NFR-APP-19 y 50).
+ *
+ * Semáforo de observabilidad azul, ámbar y gris (P10: Observable, Degradada, No observable). Sin
+ * verde ni rojo semánticos: ningún color dice «seguro» ni «peligro» (P2). Cada pareja texto y
+ * fondo cumple contraste 4,5:1 o más (WCAG 2.1 AA); la cifra va en el comentario de cada una.
+ * Los componentes usan módulos CSS con estas variables; no hay estilos en línea.
+ */
+:root {
+  /* Superficie y texto: #1f2328 sobre #ffffff, 15,8:1. */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f4f5f7;
+  --color-text: #1f2328;
+  /* #4a5260 sobre #ffffff, 7,9:1; sobre #f4f5f7, 7,2:1. */
+  --color-text-muted: #4a5260;
+  --color-border: #8a919c;
+
+  /* Observable: #ffffff sobre #1d4f91, 8,5:1. */
+  --color-observable: #1d4f91;
+  --color-on-observable: #ffffff;
+  /* Degradada: #1f2328 sobre #f2b33d, 9,3:1. */
+  --color-degraded: #f2b33d;
+  --color-on-degraded: #1f2328;
+  /* No observable: #ffffff sobre #5b6270, 6,2:1. */
+  --color-unobservable: #5b6270;
+  --color-on-unobservable: #ffffff;
+
+  /* Foco visible: anillo de 3 px, #1d4f91 sobre #ffffff, 8,5:1 (WCAG 2.4.7). */
+  --focus-ring-color: #1d4f91;
+  --focus-ring-width: 3px;
+  --focus-ring-offset: 2px;
+
+  /* Tipografía del sistema: sin fuentes web externas. */
+  --font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --font-size-small: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-large: 1.25rem;
+  --font-size-title: 1.5rem;
+  --line-height: 1.5;
+
+  /* Espaciado en múltiplos de 4 px. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Objetivo táctil mínimo para tableta (WCAG 2.5.5). */
+  --touch-target-min: 44px;
+
+  --radius: 4px;
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+.lighthouseci/
+# El `build/` del .gitignore raíz es para salidas de Python; estas son pruebas.
+!tests/unit/build/

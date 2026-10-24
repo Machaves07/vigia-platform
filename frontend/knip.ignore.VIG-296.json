@@ -1,0 +1,5 @@
+{
+  "$comment": "Temporal de VIG-277: lo borra VIG-296 al usar los gráficos y las interacciones de usuario.",
+  "task": "VIG-296 (TASK-421)",
+  "ignoreDependencies": ["recharts", "@testing-library/user-event"]
+}
