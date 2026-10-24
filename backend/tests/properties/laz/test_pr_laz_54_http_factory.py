@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import keyword
 import logging
 import shutil
 from collections.abc import Iterator
@@ -170,8 +171,11 @@ def test_the_real_u04_tree_builds_no_client_outside_the_factory() -> None:
     assert scan_tree() == []
 
 
+# Un alias tiene que ser un identificador válido: sin palabras reservadas (``pass``, ``for``…), que
+# rompían el análisis del módulo generado con SyntaxError en vez de probar el escáner (main, 24-10).
+_RESERVED_ALIASES: Final = frozenset({"httpx", "boto3", "anthropic", "client"})
 _ALIAS = st.from_regex(r"[a-z][a-z]{2,8}", fullmatch=True).filter(
-    lambda name: name not in {"httpx", "boto3", "anthropic", "client"}
+    lambda name: name not in _RESERVED_ALIASES and not keyword.iskeyword(name)
 )
 
 
