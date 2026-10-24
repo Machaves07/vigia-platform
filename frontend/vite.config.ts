@@ -5,6 +5,9 @@
  * - Salida estática con nombres con hash de contenido bajo `assets/`, sin mapas de fuente dentro
  *   de `dist/` y sin `eval` (sin CSS en JavaScript ni plantillas evaluadas; NFR-APP-14, 19).
  * - Una porción de código por pantalla `src/pages/scrNN` (NFR-APP-01, 02).
+ * - Arranque (VIG-289): `index.html` carga `src/bootstrap/check.ts` (comprobación de capacidades)
+ *   y el complemento `vigia-bootstrap` escribe la versión mínima de `browserslist` y añade el
+ *   `modulepreload` del paquete inicial.
  * - Release (`config/release.ts`): `app_version` incrustada (`VITE_APP_VERSION`, etiqueta de
  *   release o sha; `dev` sin valor), `version.json` `{app_version, contract_tag, built_at}`, `.br`
  *   y `.gz` junto a cada recurso, mapas de fuente (ocultos: sin `sourceMappingURL`) en
@@ -30,6 +33,7 @@ import {
   resolveAppVersion,
   screenChunkName,
 } from './config/build.ts';
+import { vigiaBootstrap } from './config/bootstrap.ts';
 import { vigiaRelease } from './config/release.ts';
 import { systemClock } from './src/state/clock.ts';
 
@@ -65,8 +69,9 @@ export default defineConfig(({ mode }) => {
   const sourcemapDir =
     process.env.VIGIA_SOURCEMAPS_DIR ??
     fileURLToPath(new URL('../frontend-sourcemaps', import.meta.url));
+  const root = fileURLToPath(new URL('.', import.meta.url));
   return {
-    plugins: [react(), vigiaRelease({ release, sourcemapDir })],
+    plugins: [react(), vigiaBootstrap({ root }), vigiaRelease({ release, sourcemapDir })],
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     },
