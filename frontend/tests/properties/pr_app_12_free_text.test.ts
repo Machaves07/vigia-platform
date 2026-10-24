@@ -73,6 +73,18 @@ function insertAt(text: string, at: number, piece: string): string {
   return [...chars.slice(0, index), piece, ...chars.slice(index)].join('');
 }
 
+/**
+ * Como `insertAt`, pero nunca delante de una marca combinante: la posición avanza hasta el final
+ * del grupo. Delante de una marca, NFC compone la última letra del fragmento con ella (`&apos` +
+ * U+0301 → `&apoś`) y el texto deja de contener marcado, también en el servidor.
+ */
+function insertOutsideCluster(text: string, at: number, piece: string): string {
+  const chars = Array.from(text);
+  let index = at % (chars.length + 1);
+  while (index < chars.length && /^\p{M}/u.test(chars[index] ?? '')) index += 1;
+  return [...chars.slice(0, index), piece, ...chars.slice(index)].join('');
+}
+
 /** Veredicto esperado al añadir algo a un texto aceptado: el primer tope es la expansión. */
 function expectedAfterInsert(text: string, route: string, reason: FreeTextRejection): string {
   return codePointLength(text) > 4 * limitsOf(route).maxLength ? 'too_long' : reason;
@@ -216,11 +228,24 @@ describe('PR-APP-12: propiedades contra el oráculo', () => {
   it('un fragmento de marcado, insertado en un texto aceptado, da markup', () => {
     fc.assert(
       fc.property(base, fc.constantFrom(...MARKUP), fc.nat(), (vector, fragment, at) => {
-        const text = insertAt(vector.text, at, fragment);
+        const text = insertOutsideCluster(vector.text, at, fragment);
         expect(verdictOf(text, vector.route).verdict).toBe(
           expectedAfterInsert(text, vector.route, 'markup'),
         );
       }),
+    );
+  });
+
+  it('regresión: un fragmento delante de una marca combinante se compone con ella (como el servidor)', () => {
+    // Contraejemplo reducido de la revisión: nfc-length:combining-at-max + '&apos' en la posición
+    // 81, que es un U+0301. NFC da '&apoś', no hay marcado y la longitud supera el máximo;
+    // apply_base_policy de Python 3.12 da también too_long.
+    const vector = accepted.find((found) => found.case === 'nfc-length:combining-at-max');
+    if (vector === undefined) throw new Error('falta el vector nfc-length:combining-at-max');
+    expect(Array.from(vector.text)[81]).toBe('́');
+    expect(verdictOf(insertAt(vector.text, 81, '&apos'), vector.route).verdict).toBe('too_long');
+    expect(verdictOf(insertOutsideCluster(vector.text, 81, '&apos'), vector.route).verdict).toBe(
+      'markup',
     );
   });
 

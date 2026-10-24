@@ -436,8 +436,6 @@ ${operationEntries}
   // Esquemas espejo, uno por operación con cuerpo o con parámetros de consulta.
   const ajv = new Ajv2020({
     strict: true,
-    strictTypes: false,
-    strictRequired: false,
     allErrors: true,
     coerceTypes: false,
     useDefaults: false,
