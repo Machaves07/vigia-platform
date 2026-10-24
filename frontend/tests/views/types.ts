@@ -40,6 +40,12 @@ export interface ViewRegistration {
   /**
    * Datos de la vista tal como llegan del servidor, normalmente `readView('<Esquema>')` de
    * `tests/generators`. Las propiedades les inyectan campos extra y organizaciones mezcladas.
+   *
+   * Las fugas se detectan buscando valores en el árbol renderizado, y solo se buscan los que
+   * tienen 8 o más letras y dígitos (más cortos darían falsos positivos por azar). Un valor más
+   * corto que se filtre (un estado, un código breve) no se detecta: el generador debe producir
+   * en cada registro al menos un campo con valor largo (UUID, código o texto de 8 o más
+   * caracteres) para que una fuga de ese registro se vea.
    */
   readonly data: fc.Arbitrary<Record<string, unknown>>;
   /** Pinta la pantalla (o el componente) con los datos recibidos. */

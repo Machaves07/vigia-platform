@@ -50,6 +50,20 @@ describe('PR-APP-10: ninguna pantalla pinta datos de otra organización', () => 
   );
 
   it(
+    'cae en rojo si la vista ignora la concesión activa y registra sus registros como error de contrato',
+    () => {
+      expect(() =>
+        assertOrganizationIsolation({
+          ...selftestView,
+          render: (data, context) =>
+            renderSelftest(data, { ...context, concessionOrganizationId: null }),
+        }),
+      ).toThrow(/RV-00 \(SCR-00\): error de contrato sin registros de otra organización/);
+    },
+    PROPERTY_TIMEOUT_MS,
+  );
+
+  it(
     'cae en rojo aunque registre el error de contrato si aun así pinta el registro ajeno',
     () => {
       expect(() =>

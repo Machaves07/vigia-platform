@@ -10,7 +10,10 @@
  * No se comparan subcadenas de textos fijos: se recogen los nodos de texto, los atributos y los
  * valores de formulario renderizados y se buscan en ellos los **valores** de los campos
  * prohibidos, ambos plegados (NFKD sin marcas, minúsculas, homoglifos latinos de cirílico y
- * griego, y solo letras y dígitos, lo que elimina espacios invisibles y separadores).
+ * griego, y solo letras y dígitos, lo que elimina espacios invisibles y separadores). El
+ * contador «personas» con número se busca en cada nodo de texto y cada atributo por separado,
+ * con los mismos homoglifos e invisibles plegados pero con los espacios y la puntuación visibles
+ * como separadores de palabra.
  */
 import { render } from '@testing-library/react';
 import fc from 'fast-check';
@@ -73,7 +76,13 @@ function fold(text: string): string {
   return result;
 }
 
-/** Longitud plegada mínima de un valor para buscarlo sin falsos positivos por azar. */
+/**
+ * Longitud plegada mínima de un valor para buscarlo sin falsos positivos por azar. Por lo mismo,
+ * las dos propiedades no reducen el contraejemplo (`noShrink`): la reducción lleva los valores a
+ * `aaaa…` y `0000…`, que coinciden por azar con el texto unido de otros nodos y harían que el
+ * mensaje nombrara un campo que no se filtró. El contraejemplo es el primero que falla, con sus
+ * valores aleatorios, y se repite con su semilla.
+ */
 const MIN_FOLDED_LENGTH = 8;
 
 interface Haystack {
@@ -137,8 +146,52 @@ function leaves(value: unknown, path: JsonPath = []): Leaf[] {
   ];
 }
 
-/** «personas» (o «persona») junto a un número, en cualquier orden, sobre texto plegado. */
-const PERSON_COUNTER = /personas?\d|\dpersonas?/;
+/**
+ * Plegado por palabras para el contador de personas: como `fold`, pero quita solo los
+ * caracteres de formato invisibles (U+200B, U+2060…) y conserva espacios y puntuación visibles
+ * como separadores, para no unir palabras de nodos distintos ni de un rótulo y una fecha.
+ */
+function foldWords(text: string): string {
+  let result = '';
+  for (const char of text.normalize('NFKD').toLowerCase()) {
+    if (/[\p{M}\p{Cf}]/u.test(char)) continue;
+    result += /\s/u.test(char) ? ' ' : (CONFUSABLES[char] ?? char);
+  }
+  return result.replace(/ +/g, ' ');
+}
+
+/**
+ * «personas» o «persona», como palabra entera, seguida de un número (con espacios, `:` o `#`
+ * entre medias) o precedida de uno («12 personas»), sobre texto plegado con `foldWords`.
+ */
+const PERSON_COUNTER = /(?<![\p{L}\p{N}])personas?[ :#]*\p{N}|\p{N} ?personas?(?![\p{L}\p{N}])/u;
+
+/**
+ * Textos donde se busca el contador: cada nodo de texto, cada atributo y cada valor de
+ * formulario por separado, nunca el texto concatenado de la vista.
+ */
+function counterSources(root: HTMLElement): { readonly source: string; readonly text: string }[] {
+  const found: { source: string; text: string }[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const parent = node.parentElement?.tagName.toLowerCase() ?? 'raíz';
+    found.push({ source: `el texto de <${parent}>`, text: node.textContent ?? '' });
+  }
+  for (const element of root.querySelectorAll('*')) {
+    const tag = element.tagName.toLowerCase();
+    for (const attribute of element.attributes) {
+      found.push({ source: `el atributo ${attribute.name} de <${tag}>`, text: attribute.value });
+    }
+    if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      found.push({ source: `el valor de <${tag}>`, text: element.value });
+    }
+  }
+  return found;
+}
 
 /** Nombres de campo de persona observada que ninguna vista puede declarar (BR-APP-21). */
 const PERSON_FIELD_NAME =
@@ -179,9 +232,9 @@ export function forbiddenRendered(
       );
     }
   }
-  for (const haystack of rendered) {
-    if (PERSON_COUNTER.test(haystack.text)) {
-      violations.push(`${label}: «personas» seguido de número en ${haystack.source}.`);
+  for (const { source, text } of counterSources(root)) {
+    if (PERSON_COUNTER.test(foldWords(text))) {
+      violations.push(`${label}: «personas» seguido de número en ${source}.`);
     }
   }
   return violations;
@@ -306,7 +359,8 @@ export function assertNoPersonData(registration: ViewRegistration): void {
         );
       }
       return { data: value as Record<string, unknown>, context };
-    });
+    })
+    .noShrink();
   fc.assert(
     fc.property(sample, ({ data, context }) => {
       const view = renderView(registration, data, context);
@@ -366,7 +420,8 @@ export function assertOrganizationIsolation(registration: ViewRegistration): num
             foreignPaths: paths.filter((_, index) => chosen[index]?.startsWith('foreign') === true),
           };
         });
-    });
+    })
+    .noShrink();
   let exercised = 0;
   fc.assert(
     fc.property(sample, ({ data, context, foreignPaths }) => {
