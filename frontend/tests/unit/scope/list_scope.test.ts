@@ -1,7 +1,7 @@
 /**
  * BR-APP-07 y NFR-APP-10: toda lista paginada de los puertos declarados envía el alcance elegido
  * como filtro explícito (`plant_id` y, si la operación lo admite, `zone_id`) y nunca la
- * organización. Se recorren los puertos de `src/ports/scrNN*`; cada lectura cuya operación de
+ * organización. Se recorren los puertos de `src/ports/scrNN*` y `src/ports/shared/`; cada lectura cuya operación de
  * `app.yaml` admite `plant_id` se llama con `scopeParams` de su pantalla y MSW anota la consulta
  * que llega. Con cero puertos de lista declarados, esa prueba se salta con su motivo; la del
  * mecanismo, sobre un puerto declarado aquí, corre siempre.
@@ -65,6 +65,7 @@ function isPort(value: unknown): value is DeclaredPort {
 const MODULES = {
   ...import.meta.glob('../../../src/ports/scr*.ts', { eager: true }),
   ...import.meta.glob('../../../src/ports/scr*/**/*.ts', { eager: true }),
+  ...import.meta.glob('../../../src/ports/shared/**/*.ts', { eager: true }),
 };
 const PORTS = Object.values(MODULES).flatMap((module) =>
   Object.values(module as Record<string, unknown>).filter(isPort),

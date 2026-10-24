@@ -24,6 +24,8 @@ import { PROPERTY_TIMEOUT_MS } from '../support/timeouts';
 
 const START = Date.parse('2026-10-24T12:00:00.000Z');
 const HOUR = 3_600_000;
+/** Errores que no son `not_found`: bajo la concesión no la terminan. */
+const ERRORS = { 400: 'invalid_request', 409: 'idempotency_conflict', 422: 'schema_invalid' };
 
 type Event =
   | {
@@ -34,6 +36,7 @@ type Event =
     }
   | { readonly kind: 'request' }
   | { readonly kind: 'not_found'; readonly stale: boolean }
+  | { readonly kind: 'error'; readonly status: keyof typeof ERRORS }
   | { readonly kind: 'advance'; readonly ms: number }
   | { readonly kind: 'change' }
   | { readonly kind: 'fill' };
@@ -53,6 +56,10 @@ const event: fc.Arbitrary<Event> = fc.oneof(
   }),
   fc.constant({ kind: 'request' as const }),
   fc.record({ kind: fc.constant('not_found' as const), stale: fc.boolean() }),
+  fc.record({
+    kind: fc.constant('error' as const),
+    status: fc.constantFrom(400 as const, 409 as const, 422 as const),
+  }),
   fc.record({
     kind: fc.constant('advance' as const),
     ms: fc.oneof(fc.integer({ min: 0, max: 2 * HOUR }), fc.constant(30 * 24 * HOUR)),
@@ -115,6 +122,10 @@ const EXAMPLES: ['provider' | 'client', boolean, Event[]][] = [
   ],
   // Cambiar con caché y borrador llenos.
   ['provider', false, [activate(A), { kind: 'fill' }, { kind: 'change' }, { kind: 'request' }]],
+  // Activar con la caché llena de lo pedido sin concesión.
+  ['provider', false, [{ kind: 'fill' }, activate(A), { kind: 'request' }]],
+  // Un error que no es `not_found` bajo la concesión: sigue activa.
+  ['provider', false, [activate(A), { kind: 'error', status: 409 }, { kind: 'request' }]],
 ];
 
 describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa', () => {
@@ -142,6 +153,7 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
             });
             const sent: (string | null)[] = [];
             let respondNotFound = false;
+            let respondError: keyof typeof ERRORS | null = null;
             const transport = createTransport({
               clock,
               connection: createPortConnection(clock),
@@ -153,7 +165,12 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
                 return Promise.resolve(
                   respondNotFound
                     ? Response.json({ code: 'not_found', message_es: 'No.' }, { status: 404 })
-                    : Response.json({ ok: true }),
+                    : respondError !== null
+                      ? Response.json(
+                          { code: ERRORS[respondError], message_es: 'No.' },
+                          { status: respondError },
+                        )
+                      : Response.json({ ok: true }),
                 );
               },
             });
@@ -216,7 +233,19 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
                   expect(accepted).toBe(allowed);
                   if (allowed) {
                     model = { id: step.id, expiresAt };
+                    // Lo que se pidió sin concesión no se sirve bajo ella.
+                    expect(cache.client.getQueryCache().getAll()).toHaveLength(0);
                   }
+                  break;
+                }
+                case 'error': {
+                  const expected = modelActive();
+                  respondError = step.status;
+                  await transport
+                    .request({ operationId: 'hierarchy_hierarchy_get', kind: 'read' })
+                    .catch(() => undefined);
+                  respondError = null;
+                  expect(sent.at(-1)).toBe(expected);
                   break;
                 }
                 case 'request':

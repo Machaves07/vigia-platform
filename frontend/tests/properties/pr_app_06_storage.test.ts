@@ -46,6 +46,8 @@ const VOCABULARY = new Set<string>([
   'all',
   'search',
   'from',
+  'category',
+  'note',
   'selected_plant_id',
   'list_filters',
   'columns',
@@ -57,6 +59,10 @@ const screen = fc.constantFrom(...SCREENS);
 const freeText = fc
   .oneof(fc.stringMatching(/^[a-z][a-z0-9_]{2,20}$/), fc.string({ minLength: 1, maxLength: 60 }))
   .filter((value) => !VOCABULARY.has(value) && value.trim() !== '');
+/** Texto libre con forma de valor cerrado: el esquema lo aceptaría, solo el filtro lo para. */
+const freeToken = fc
+  .stringMatching(/^[a-z][a-z0-9_]{2,20}$/)
+  .filter((value) => !VOCABULARY.has(value));
 
 type Action =
   | {
@@ -66,6 +72,10 @@ type Action =
       readonly zone: string | null;
       readonly search: string;
       readonly from: string;
+      /** Valor de una selección que no está entre sus opciones. */
+      readonly undeclared: string;
+      /** Valor de un campo de texto que declara opciones (y entre ellas, ese valor). */
+      readonly note: string;
     }
   | { readonly kind: 'select_plant'; readonly plant: number | 'all' | 'outside' }
   | { readonly kind: 'columns'; readonly screen: Screen; readonly columns: readonly string[] }
@@ -85,6 +95,8 @@ const action: fc.Arbitrary<Action> = fc.oneof(
     zone: fc.option(fc.uuid(), { nil: null }),
     search: freeText,
     from: fc.constantFrom('2026-10-01', '2026-01-31'),
+    undeclared: freeToken,
+    note: freeToken,
   }),
   fc.record({
     kind: fc.constant('select_plant' as const),
@@ -196,16 +208,28 @@ describe('PR-APP-06: el almacenamiento solo recibe UiPreferences', () => {
                     ...(step.zone === null
                       ? []
                       : [{ name: 'zone', kind: 'select', options: [{ value: step.zone }] }]),
+                    // Selección con un valor que no es ninguna de sus opciones.
+                    {
+                      name: 'category',
+                      kind: 'select',
+                      options: CHOICES.map((value) => ({ value })),
+                    },
                     { name: 'search', kind: 'text' },
+                    // Texto libre aunque declare opciones: solo se recuerda `kind: 'select'`.
+                    { name: 'note', kind: 'text', options: [{ value: step.note }] },
                     { name: 'from', kind: 'date' },
                   ];
                   forbidden.add(step.search);
                   forbidden.add(step.from);
+                  forbidden.add(step.undeclared);
+                  forbidden.add(step.note);
                   if (step.zone !== null) forbidden.add(step.zone);
                   preferences.rememberListFilters(step.screen, fields, {
                     ...(step.status === '' ? {} : { status: step.status }),
                     ...(step.zone === null ? {} : { zone: step.zone }),
+                    category: step.undeclared,
                     search: step.search,
+                    note: step.note,
                     from: step.from,
                   });
                   break;
