@@ -1,0 +1,28 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "grant_provider_concessions_post",
+  "method": "post",
+  "path": "/provider/concessions",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/GrantBody",
+    "$defs": {
+      "GrantBody": {
+        "properties": {
+          "client_organization_id": { "type": "string", "format": "uuid" },
+          "scope_level": { "type": "string", "enum": ["organization", "plant"] },
+          "scope_id": { "type": "string", "format": "uuid" },
+          "reason": { "type": "string", "maxLength": 500, "minLength": 10 },
+          "duration_hours": {
+            "anyOf": [{ "type": "integer", "maximum": 2160, "minimum": 1 }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["client_organization_id", "scope_level", "scope_id", "reason"]
+      }
+    }
+  },
+  "query": null
+}

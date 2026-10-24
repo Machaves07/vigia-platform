@@ -1,0 +1,28 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "list_labels_labels_get",
+  "method": "get",
+  "path": "/labels",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "from": { "type": "string" },
+      "to": { "type": "string" },
+      "zone_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "family": {
+        "anyOf": [{ "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }, { "type": "null" }]
+      },
+      "reason_category": {
+        "anyOf": [{ "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }, { "type": "null" }]
+      },
+      "page_size": { "type": "integer", "maximum": 200, "minimum": 1 },
+      "after_labeled_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "after_label_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] }
+    },
+    "required": ["from", "to"],
+    "additionalProperties": false
+  }
+}

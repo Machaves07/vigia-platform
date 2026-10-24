@@ -1,0 +1,34 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "sign_policy_plants__plant_id__policy_post",
+  "method": "post",
+  "path": "/plants/{plant_id}/policy",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/PlantPolicyBody",
+    "$defs": {
+      "PlantPolicyBody": {
+        "properties": {
+          "version": { "type": "integer" },
+          "signed_at": { "type": "string", "format": "date-time" },
+          "signed_by_display_name": { "type": "string" },
+          "legal_opinion_reference": { "type": "string" },
+          "criteria_summary_es": { "type": "string" },
+          "document_ref": { "additionalProperties": true, "type": "object" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "signed_at",
+          "signed_by_display_name",
+          "legal_opinion_reference",
+          "criteria_summary_es",
+          "document_ref"
+        ]
+      }
+    }
+  },
+  "query": null
+}

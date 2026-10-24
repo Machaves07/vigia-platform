@@ -26,8 +26,8 @@ npm ci
 | `npm test`               | vitest con el perfil `ci` de fast-check (200 ejemplos)                                |
 | `npm run test:nightly`   | vitest con el perfil `nightly` (2 000 ejemplos)                                       |
 | `npm run check`          | Cada comprobación de `scripts/checks/*.mjs`, en orden                                 |
-| `npm run generate`       | Cliente y esquemas desde `backend/openapi/app.yaml` (lo completa VIG-280)             |
-| `npm run generate:check` | Diferencia vacía de lo generado (lo completa VIG-280)                                 |
+| `npm run generate`       | Cliente, validadores y esquemas espejo desde `backend/openapi/app.yaml`               |
+| `npm run generate:check` | Falla con la diferencia si algo generado no coincide con `app.yaml`                   |
 | `npm run e2e`            | Playwright contra la plataforma local (lo completa VIG-299)                           |
 | `npm run size`           | Presupuesto de tamaño por porción (lo completa VIG-294)                               |
 

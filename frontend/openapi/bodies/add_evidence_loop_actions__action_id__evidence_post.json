@@ -1,0 +1,45 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "add_evidence_loop_actions__action_id__evidence_post",
+  "method": "post",
+  "path": "/loop/actions/{action_id}/evidence",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/EvidenceEntryBody",
+    "$defs": {
+      "EvidenceAttachmentBody": {
+        "properties": {
+          "attachment_id": { "type": "string", "format": "uuid" },
+          "content_type": { "type": "string", "maxLength": 255, "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "filename": { "type": "string", "maxLength": 128, "minLength": 1 },
+          "no_identifiable_person_declared": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["attachment_id", "content_type", "size_bytes", "sha256", "filename"]
+      },
+      "EvidenceEntryBody": {
+        "properties": {
+          "description": { "type": "string", "maxLength": 2000, "minLength": 20 },
+          "performed_at": { "type": "string", "maxLength": 24, "minLength": 24 },
+          "performed_by_role": { "type": "string", "maxLength": 64, "minLength": 1 },
+          "verification_note": {
+            "anyOf": [{ "type": "string", "maxLength": 1000, "minLength": 1 }, { "type": "null" }]
+          },
+          "attachments": {
+            "items": { "$ref": "#/$defs/EvidenceAttachmentBody" },
+            "type": "array",
+            "maxItems": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["description", "performed_at", "performed_by_role"]
+      }
+    }
+  },
+  "query": null
+}

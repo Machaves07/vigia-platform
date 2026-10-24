@@ -1,0 +1,54 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "change_vocabulary_loop_vocabulary_changes_post",
+  "method": "post",
+  "path": "/loop/vocabulary/changes",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/VocabularyChangeBody",
+    "$defs": {
+      "DeclaredNameBody": {
+        "properties": { "kind": { "type": "string" }, "value": { "type": "string" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "value"]
+      },
+      "TermBody": {
+        "properties": {
+          "category": { "type": "string" },
+          "form": { "type": "string" },
+          "value": { "type": "string" },
+          "suggestion_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["category", "form", "value", "suggestion_es"]
+      },
+      "VocabularyChangeBody": {
+        "properties": {
+          "added": { "items": { "$ref": "#/$defs/TermBody" }, "type": "array", "maxItems": 200 },
+          "removed": {
+            "items": { "type": "string", "format": "uuid" },
+            "type": "array",
+            "maxItems": 200
+          },
+          "declared_names_added": {
+            "items": { "$ref": "#/$defs/DeclaredNameBody" },
+            "type": "array",
+            "maxItems": 200
+          },
+          "declared_names_removed": {
+            "items": { "type": "string", "format": "uuid" },
+            "type": "array",
+            "maxItems": 200
+          },
+          "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

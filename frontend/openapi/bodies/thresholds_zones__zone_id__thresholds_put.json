@@ -1,0 +1,24 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "thresholds_zones__zone_id__thresholds_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/thresholds",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ThresholdsBody",
+    "$defs": {
+      "ThresholdsBody": {
+        "properties": {
+          "review": { "type": "number", "exclusiveMaximum": 1, "exclusiveMinimum": 0 },
+          "publication": { "type": "number", "maximum": 1, "exclusiveMinimum": 0 },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["review", "publication", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}

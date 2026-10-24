@@ -1,0 +1,54 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "scope_record_zones__zone_id__gates_mounting_scope_record_post",
+  "method": "post",
+  "path": "/zones/{zone_id}/gates/mounting/scope-record",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ScopeRecordBody",
+    "$defs": {
+      "BlurVerificationBody": {
+        "properties": {
+          "declared": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+          "capture_document_ref": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "CameraFramingBody": {
+        "properties": {
+          "camera_id": { "type": "string", "format": "uuid" },
+          "framing_description_es": { "type": "string" },
+          "reference_marker": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["camera_id", "framing_description_es", "reference_marker"]
+      },
+      "ScopeRecordBody": {
+        "properties": {
+          "scope_text_es": { "type": "string" },
+          "cameras": {
+            "items": { "$ref": "#/$defs/CameraFramingBody" },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 1
+          },
+          "blur_verification": {
+            "anyOf": [{ "$ref": "#/$defs/BlurVerificationBody" }, { "type": "null" }]
+          },
+          "document_ref": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["scope_text_es", "cameras"]
+      }
+    }
+  },
+  "query": null
+}

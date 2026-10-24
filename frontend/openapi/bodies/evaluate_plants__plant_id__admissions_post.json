@@ -1,0 +1,38 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "evaluate_plants__plant_id__admissions_post",
+  "method": "post",
+  "path": "/plants/{plant_id}/admissions",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/AdmissionBody",
+    "$defs": {
+      "AdmissionBody": {
+        "properties": {
+          "family": { "$ref": "#/$defs/PredicateFamily" },
+          "answers": { "$ref": "#/$defs/AnswersBody" },
+          "justification_es": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["family", "answers"]
+      },
+      "AnswersBody": {
+        "properties": {
+          "standard": { "type": "boolean" },
+          "remedy": { "type": "boolean" },
+          "subject": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["standard", "remedy", "subject"]
+      },
+      "PredicateFamily": {
+        "type": "string",
+        "enum": ["coexistence", "guard_bypass", "dwell", "startup_transition"]
+      }
+    }
+  },
+  "query": null
+}

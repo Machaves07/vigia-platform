@@ -1,0 +1,25 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "record_occlusion_test_walk_tests__session_id__occlusion_tests_post",
+  "method": "post",
+  "path": "/walk-tests/{session_id}/occlusion-tests",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/OcclusionTestBody",
+    "$defs": {
+      "OcclusionTestBody": {
+        "properties": {
+          "camera_id": { "type": "string", "format": "uuid" },
+          "started_at": { "type": "string", "format": "date-time" },
+          "ended_at": { "type": "string", "format": "date-time" },
+          "declared_reason_es": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["camera_id", "started_at", "ended_at"]
+      }
+    }
+  },
+  "query": null
+}

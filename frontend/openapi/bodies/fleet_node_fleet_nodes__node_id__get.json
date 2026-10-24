@@ -1,0 +1,17 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "fleet_node_fleet_nodes__node_id__get",
+  "method": "get",
+  "path": "/fleet/nodes/{node_id}",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "history_after": { "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }] },
+      "history_limit": { "type": "integer", "maximum": 100, "minimum": 1 }
+    },
+    "additionalProperties": false
+  }
+}

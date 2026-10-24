@@ -1,0 +1,28 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "minimum_coverage_zones__zone_id__minimum_coverage_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/minimum-coverage",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/MinimumCoverageBody",
+    "$defs": {
+      "MinimumCoverageBody": {
+        "properties": {
+          "required_count": { "type": "integer" },
+          "required_camera_ids": {
+            "items": { "type": "string", "format": "uuid" },
+            "type": "array",
+            "maxItems": 8
+          },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["required_count", "required_camera_ids", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}

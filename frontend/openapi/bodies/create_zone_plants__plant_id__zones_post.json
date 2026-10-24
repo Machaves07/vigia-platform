@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "create_zone_plants__plant_id__zones_post",
+  "method": "post",
+  "path": "/plants/{plant_id}/zones",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ZoneBody",
+    "$defs": {
+      "ZoneBody": {
+        "properties": {
+          "code": { "type": "string", "maxLength": 32, "minLength": 2 },
+          "name": { "type": "string", "maxLength": 120, "minLength": 1 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["code", "name"]
+      }
+    }
+  },
+  "query": null
+}
