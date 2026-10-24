@@ -54,6 +54,16 @@ const ttls = fc.array(fc.oneof(fc.integer({ min: 1, max: 900 }), fc.constantFrom
   maxLength: 8,
 });
 
+/**
+ * Cuánto va el reloj del cliente por delante del servidor, en ms: con más de 5 minutos, la URL
+ * llega ya vencida según el reloj local.
+ */
+const skews = fc.oneof(
+  fc.constant(0),
+  fc.integer({ min: 0, max: 1_200_000 }),
+  fc.constantFrom(299_000, 300_000, 600_000),
+);
+
 function storageDump(storage: Storage): string {
   const entries: string[] = [];
   for (let index = 0; index < storage.length; index += 1) {
@@ -83,7 +93,13 @@ async function settle(): Promise<void> {
 }
 
 beforeEach(() => {
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  // Como el navegador: `play()` despacha el evento `play`, que la propiedad ejercita en `onPlay`.
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement,
+  ) {
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockReturnValue(undefined);
   localStorage.clear();
   sessionStorage.clear();
@@ -98,18 +114,21 @@ describe(
         fc.asyncProperty(
           fc.array(command, { minLength: 1, maxLength: 16 }),
           ttls,
-          async (commands, serverTtls) => {
+          skews,
+          async (commands, serverTtls, skewMs) => {
             const clock = new FakeClock(START);
             const client = new QueryClient();
             /** Peticiones reales: clip pedido y URL entregada. */
             const requests: { clip: string; url: string }[] = [];
             const requestUrl = (clip: string): Promise<ReadUrl> => {
+              // Un bucle de peticiones falla la propiedad en lugar de colgar el worker.
+              if (requests.length >= 64) return Promise.reject(new Error('bucle de peticiones'));
               const ttl = serverTtls[requests.length % serverTtls.length] ?? 300;
               const url = `https://store.example/clip/${clip}?sig=${String(requests.length).padStart(4, '0')}`;
               requests.push({ clip, url });
               return Promise.resolve({
                 url,
-                expires_at: new Date(clock.now() + ttl * 1000).toISOString(),
+                expires_at: new Date(clock.now() + ttl * 1000 - skewMs).toISOString(),
               });
             };
 
@@ -140,7 +159,11 @@ describe(
               if (expiresAt === null || clock.now() >= expiresAt) {
                 const ttl = serverTtls[expected % serverTtls.length] ?? 300;
                 expected += 1;
-                expiresAt = clock.now() + Math.min(ttl, EVIDENCE_URL_MAX_SECONDS) * 1000;
+                const now = clock.now();
+                const local = now + EVIDENCE_URL_MAX_SECONDS * 1000;
+                const server = now + ttl * 1000 - skewMs;
+                // Ya vencida según el reloj local: plazo local de 5 minutos, nunca otra petición.
+                expiresAt = server > now ? Math.min(server, local) : local;
                 return true;
               }
               return false;

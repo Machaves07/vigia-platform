@@ -38,12 +38,19 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-/** URL prefirmada distinta en cada petición, vigente `ttlSeconds` según el reloj de la prueba. */
+/** Tope de peticiones de una prueba: un bucle de peticiones acaba en fallo, no cuelga el worker. */
+const REQUEST_CAP = 20;
+
+/**
+ * URL prefirmada distinta en cada petición, vigente `ttlSeconds` según el reloj de la prueba
+ * (negativo: ya vencida, como con el reloj del cliente adelantado respecto al servidor).
+ */
 function serveReadUrl(ttlSeconds = 300) {
   server.use(
     variant(READ_URL_OPERATION, ({ params }) => {
       const id = String(params.evidence_id);
       requested.push(id);
+      if (requested.length > REQUEST_CAP) return apiError('storage_unavailable', 503);
       const url = `https://vigia-evidence-000000000000-us-east-1.s3.us-east-1.amazonaws.com/clip/${id}.mp4?X-Amz-Signature=${String(issued.length + 1).padStart(8, '0')}`;
       issued.push(url);
       return HttpResponse.json({
@@ -61,7 +68,13 @@ beforeEach(() => {
   issued = [];
   connection = createPortConnection(clock);
   installTransport(createTransport({ clock, connection, devLog: () => undefined }));
-  playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+  // Como el navegador: `play()` despacha el evento `play` en el elemento.
+  playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+    this: HTMLMediaElement,
+  ) {
+    this.dispatchEvent(new Event('play'));
+    return Promise.resolve();
+  });
   pauseSpy = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockReturnValue(undefined);
 });
 
@@ -189,6 +202,67 @@ describe('URL de evidencia (BR-APP-58, PR-APP-17)', () => {
     await waitFor(() => {
       expect(requested).toHaveLength(2);
     }, WAIT);
+  });
+
+  it('una URL que llega ya vencida (reloj local adelantado 10 min) hace una sola petición por pulsación', async () => {
+    serveReadUrl(-600);
+    const { video } = renderPlayer();
+    fireEvent.click(screen.getByRole('button', { name: t('media.clip.play') }));
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe(issued[0]);
+    }, WAIT);
+    await act(async () => {
+      for (let round = 0; round < 8; round += 1) await Promise.resolve();
+    });
+    expect(requested).toHaveLength(1);
+    expect(playSpy).toHaveBeenCalledTimes(1);
+
+    // Se cuenta un plazo local de 5 minutos: reanudar dentro no pide; tras vencer, una sola.
+    clock.advance(299_999);
+    fireEvent.play(video);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(requested).toHaveLength(1);
+    clock.advance(1);
+    fireEvent.play(video);
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe(issued[1]);
+    }, WAIT);
+    await act(async () => {
+      for (let round = 0; round < 8; round += 1) await Promise.resolve();
+    });
+    expect(requested).toHaveLength(2);
+  });
+
+  it('el play que lanza el reproductor no pide otra URL aunque la URL venza antes del evento', async () => {
+    serveReadUrl(1);
+    // El evento `play` llega 2 s después de recibir una URL de 1 s.
+    playSpy.mockImplementation(function (this: HTMLMediaElement) {
+      clock.advance(2_000);
+      this.dispatchEvent(new Event('play'));
+      return Promise.resolve();
+    });
+    const { video } = renderPlayer();
+    fireEvent.click(screen.getByRole('button', { name: t('media.clip.play') }));
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe(issued[0]);
+    }, WAIT);
+    await act(async () => {
+      for (let round = 0; round < 8; round += 1) await Promise.resolve();
+    });
+    expect(requested).toHaveLength(1);
+    expect(pauseSpy).not.toHaveBeenCalled();
+
+    // Un gesto posterior con la URL vencida sí pide una (y solo una).
+    fireEvent.play(video);
+    await waitFor(() => {
+      expect(video.getAttribute('src')).toBe(issued[1]);
+    }, WAIT);
+    await act(async () => {
+      for (let round = 0; round < 8; round += 1) await Promise.resolve();
+    });
+    expect(requested).toHaveLength(2);
   });
 
   it('dos pulsaciones seguidas mientras se pide la URL hacen una sola petición', async () => {
