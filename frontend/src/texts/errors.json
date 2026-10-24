@@ -1,0 +1,17 @@
+{
+  "errors.reauth": "Inicie sesión de nuevo para continuar; se conserva lo escrito.",
+  "errors.second_factor": "Complete el segundo factor de autenticación para continuar.",
+  "errors.privacy_notice": "Acepte el aviso de tratamiento vigente para continuar.",
+  "errors.not_available_in_scope": "No disponible en su alcance.",
+  "errors.forbidden_reload": "Acción no permitida en su alcance; si acaba de iniciar sesión o cambió de planta, recargue la aplicación.",
+  "errors.anchored": "Revise los datos del formulario; se conserva lo escrito.",
+  "errors.payload_too_large": "La petición supera el límite de 1 MB o el límite indicado para el adjunto; se conserva lo escrito.",
+  "errors.countdown": "Espere el tiempo indicado antes de repetir la acción.",
+  "errors.transient": "La plataforma no está disponible temporalmente. Espere el tiempo indicado y pulse repetir.",
+  "errors.degraded_section": "Esta sección no está disponible ahora; el resto de la aplicación sigue disponible.",
+  "errors.storage_unavailable": "El almacén no está disponible ahora; las evidencias, adjuntos o descargas afectados no se pueden obtener.",
+  "errors.period_too_long": "El periodo máximo por consulta es 31 días; ajuste el tramo.",
+  "errors.zone_without_node": "La zona no tiene un nodo asignado; la vista en vivo no está disponible.",
+  "errors.export_state": "La descarga no está disponible; consulte el estado de la exportación.",
+  "errors.internal_error": "Algo falló. Indique el código de correlación al reportarlo."
+}
