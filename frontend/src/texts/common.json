@@ -1,4 +1,15 @@
 {
   "common.app_name": "Vigía",
-  "common.loading": "Cargando la aplicación…"
+  "common.loading": "Cargando la aplicación…",
+  "common.loading_data": "Cargando datos…",
+  "common.loading_long": "La carga está tardando más de lo habitual.",
+  "common.ready": "Datos disponibles",
+  "common.empty": "Sin datos para esta consulta",
+  "common.error": "No se pudo completar la consulta",
+  "common.unavailable": "No disponible en este momento",
+  "common.not_available_in_scope": "No disponible en su alcance",
+  "common.updated_ago": "Actualizado hace {elapsed}",
+  "common.goal": "Objetivo propio",
+  "common.observability_legend": "Observable no significa zona despejada",
+  "common.unknown": "desconocido"
 }
