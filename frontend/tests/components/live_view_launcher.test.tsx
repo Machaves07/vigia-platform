@@ -58,6 +58,8 @@ const REJECTION_CODES: Readonly<Record<string, string>> = {
   'live_view.rejection.zone_without_node': 'zone_without_node',
   'live_view.rejection.rate_limited': 'rate_limited',
 };
+/** Tope de espera holgado: no es lo que se prueba, solo la carga de la máquina. */
+const WAIT = { timeout: 10_000 };
 /** Espera que impone el rechazo `rate_limited` de la plataforma. */
 const RETRY_AFTER_SECONDS = 30;
 
@@ -189,7 +191,7 @@ describe('sin dirección anunciada (pendiente nº 31, BR-APP-65)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(container.querySelector('[data-part="no_link"]')).not.toBeNull();
-    });
+    }, WAIT);
     const blocked = part(container, 'no_link');
     expect(blocked.getAttribute('data-text-key')).toBe('live_view.pending_local_url');
     expect(blocked.getAttribute('data-problem')).toBe('no_local_url');
@@ -205,7 +207,7 @@ describe('sin dirección anunciada (pendiente nº 31, BR-APP-65)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(container.querySelector('[data-part="no_link"]')).not.toBeNull();
-    });
+    }, WAIT);
     const blocked = part(container, 'no_link');
     expect(blocked.getAttribute('data-text-key')).toBe('live_view.unusable_url');
     expect(blocked.getAttribute('data-problem')).toBe('unusable');
@@ -320,7 +322,7 @@ describe('rechazos de la plataforma (BR-APP-66, BR-APP-71)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(launcher().querySelector('[data-text-key="errors.countdown"]')).not.toBeNull();
-    });
+    }, WAIT);
 
     expect(requestButton().textContent).toBe(text('live_view.open_again'));
     expect(requestButton().disabled).toBe(true);
@@ -347,7 +349,7 @@ describe('rechazos de la plataforma (BR-APP-66, BR-APP-71)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(container.querySelector('[data-text-key="errors.zone_without_node"]')).not.toBeNull();
-    });
+    }, WAIT);
     expect(container.querySelector('[data-part="message"]')?.textContent).toBe(
       text('errors.zone_without_node'),
     );
@@ -362,7 +364,7 @@ describe('rechazos de la plataforma (BR-APP-66, BR-APP-71)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(launcher().querySelector('[data-text-key="errors.transient"]')).not.toBeNull();
-    });
+    }, WAIT);
     expect(requestButton().textContent).toBe(text('live_view.open_again'));
     expect(requestButton().disabled).toBe(false);
     expect(launcher().querySelector('[data-part="wait"]')).toBeNull();
@@ -376,7 +378,7 @@ describe('rechazos de la plataforma (BR-APP-66, BR-APP-71)', () => {
     fireEvent.click(requestButton());
     await waitFor(() => {
       expect(launcher().querySelector('[data-text-key="errors.internal_error"]')).not.toBeNull();
-    });
+    }, WAIT);
     expect(window.location.href).toBe(before);
     expect(tokenFoundIn(TOKEN)).toEqual([]);
   });
