@@ -1,0 +1,31 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "assign_loop_findings__finding_state_id__actions_post",
+  "method": "post",
+  "path": "/loop/findings/{finding_state_id}/actions",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/CorrectiveActionBody",
+    "$defs": {
+      "CorrectiveActionBody": {
+        "properties": {
+          "action_type": { "type": "string", "maxLength": 64 },
+          "action_description": { "type": "string", "maxLength": 2000, "minLength": 20 },
+          "expected_outcome": {
+            "anyOf": [{ "type": "string", "maxLength": 1000, "minLength": 1 }, { "type": "null" }]
+          },
+          "assignee_user_id": { "type": "string", "format": "uuid" },
+          "deadline_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "supersedes_action_id": {
+            "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["action_type", "action_description", "assignee_user_id"]
+      }
+    }
+  },
+  "query": null
+}

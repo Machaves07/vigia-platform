@@ -1,0 +1,37 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "list_fleet_alarms_fleet_alarms_get",
+  "method": "get",
+  "path": "/fleet/alarms",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "after": { "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }] },
+      "limit": { "type": "integer", "maximum": 100, "minimum": 1 },
+      "plant_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "node_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "alarm_kind": { "anyOf": [{ "$ref": "#/$defs/FleetAlarmKind" }, { "type": "null" }] },
+      "status": { "anyOf": [{ "$ref": "#/$defs/AlarmStatus" }, { "type": "null" }] }
+    },
+    "additionalProperties": false,
+    "$defs": {
+      "AlarmStatus": { "type": "string", "enum": ["active", "cleared"] },
+      "FleetAlarmKind": {
+        "type": "string",
+        "enum": [
+          "node_mute",
+          "queue_over_threshold",
+          "clock_drift",
+          "version_retiring",
+          "simulated_adapter_in_productive",
+          "certificate_expiring",
+          "camera_below_min_fps",
+          "orphan_clips_growing"
+        ]
+      }
+    }
+  }
+}

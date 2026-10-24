@@ -1,0 +1,4196 @@
+{
+  "findings": [
+    {
+      "finding_id": "018cc251-f400-7000-8000-000000000001",
+      "contract_version": "1.1.0",
+      "organization_id": "e3e70682-c209-4cac-a29f-6fbed82c07cd",
+      "plant_id": "f728b4fa-4248-4e3a-8a5d-2f346baa9455",
+      "zone_id": "12e0c8b2-bad6-40fb-9948-8dec4f65d4d9",
+      "node_id": "f689a4a5-ffda-4336-8c6e-90373020da5c",
+      "episode": {
+        "episode_id": "018cc251-f400-7000-8000-000000000000",
+        "segment_index": 0,
+        "continues": false,
+        "max_segment_ms": 60000
+      },
+      "family": "coexistence",
+      "standard": {
+        "standard_id": "5487ce1e-af19-422a-99b8-a714e61a441c",
+        "version": 1
+      },
+      "node_time": {
+        "started_at": "2024-01-01T00:00:00.000Z",
+        "ended_at": "2024-01-01T00:00:00.000Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": 0,
+          "source": "ntp.local"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "c470f0e7-f76f-4fb8-b412-fc12ac322c12",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "28805c5d-ad1b-4f60-89e4-dab20edc6d2b",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "878b9f6b-57a1-4b71-a975-d279d86dbf11",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "ebe21368-98c7-4205-9e01-a934402d0baf",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "0361524c-2cc0-4859-aa65-24ab713b7e05",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "e66cd36e-68ef-4f5f-ae68-690a78bc7175",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "eae2025e-8233-4e23-9ff3-334b91b15f5d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "637e0edc-5b6e-4ae7-a620-81434fbaecc0",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "27460f22-403d-4f83-a859-890cd670f668",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "753c7c99-032f-46ca-b0d9-c2aa8f837ef7",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "bd30291a-55fe-408e-943e-2e04bdd7d19b",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "2284b7a4-47e7-4593-8b58-85ca0bb2c3f0",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "7b59051b-f400-48d7-831d-5a973d792fa1",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "ac642b4c-49b2-4ded-9c31-d9b25a2b745b",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "e456697c-f268-4baa-971c-702d5bf49c04",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "21e15094-9efe-4464-9a90-f534a23d4c9d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "bf9cc545-6355-48f7-8f6f-a985b732d46f",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "14aa451c-a69c-4b85-9432-f8db6a174c1c",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "b2d650af-313b-42b7-9836-31890063e42f",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "391cf046-3d4a-4d51-a8fa-fd04559b5975",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "b5d97ef7-60ef-4471-b2b8-ff39a32c9b6f",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "dfe1b307-9172-4f0a-ac7c-8803e01bbf50",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "df26f517-66fa-4989-8813-5d586a1689ad",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "c5adf681-6b10-453a-9145-de05b3ab1b2c",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "2a69acc7-0bf9-40ef-b581-6b74a985ab61",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "b3969057-425c-4200-905a-da6b720299e3",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "e28bc9ff-870f-484c-b244-f536285e25b4",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "9a9e4310-8fb8-4bab-a875-4cd37cbd7025",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "09f6048f-e245-4460-8004-884cc167733f",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d675ebf7-4fe3-4c9a-9371-0f577e9cf84f",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d29dc5df-cf1d-4110-8cc3-6d8c77863fe5",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "6a46721a-cffa-4cdd-b963-a7efe00111e5",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "eb1167b3-67a9-4378-bc65-c1e582e2e662",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000000",
+              "camera_id": "eb1167b3-67a9-4378-bc65-c1e582e2e662",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/eb1167b3-67a9-4378-bc65-c1e582e2e662/018cc251-e078-7000-8000-000000000000.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000001",
+              "camera_id": "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/f7c1bd87-4da5-4709-9471-3d60c8a70639/018cc251-e078-7000-8000-000000000001.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "e443df78-9558-467f-9ba9-1faf7a024204",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000002",
+              "camera_id": "e443df78-9558-467f-9ba9-1faf7a024204",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/e443df78-9558-467f-9ba9-1faf7a024204/018cc251-e078-7000-8000-000000000002.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000003",
+              "camera_id": "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/23a7711a-8133-4876-b7eb-dcd9e87a1613/018cc251-e078-7000-8000-000000000003.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "1846d424-c17c-4279-a3c6-612f48268673",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000004",
+              "camera_id": "1846d424-c17c-4279-a3c6-612f48268673",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/1846d424-c17c-4279-a3c6-612f48268673/018cc251-e078-7000-8000-000000000004.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000005",
+              "camera_id": "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c/018cc251-e078-7000-8000-000000000005.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "b4862b21-fb97-4435-8856-1712e8e5216a",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000006",
+              "camera_id": "b4862b21-fb97-4435-8856-1712e8e5216a",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/b4862b21-fb97-4435-8856-1712e8e5216a/018cc251-e078-7000-8000-000000000006.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "259f4329-e6f4-490b-9a16-4106cf6a659e",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000007",
+              "camera_id": "259f4329-e6f4-490b-9a16-4106cf6a659e",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/259f4329-e6f4-490b-9a16-4106cf6a659e/018cc251-e078-7000-8000-000000000007.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.4,
+      "episode_duration_ms": 0,
+      "condition_duration_ms": 0,
+      "automatic_classification": {
+        "trigger": "corroboration",
+        "corroborating_camera_ids": [
+          "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+          "e443df78-9558-467f-9ba9-1faf7a024204",
+          "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+          "1846d424-c17c-4279-a3c6-612f48268673",
+          "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+          "b4862b21-fb97-4435-8856-1712e8e5216a",
+          "259f4329-e6f4-490b-9a16-4106cf6a659e"
+        ]
+      },
+      "model_version": "yolov8n-2026.09",
+      "software_version": "0.0.0",
+      "receipt": {
+        "platform_record_id": "d663049d-155e-48b1-ba83-ada4a2121ac5",
+        "received_at": "2024-01-01T00:00:00.000Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "018cc251-f400-7000-8000-000000000001",
+      "contract_version": "1.1.0",
+      "organization_id": "a63ded44-1edc-4de7-872b-2285aedad631",
+      "plant_id": "cd5f332b-a9cb-46f3-8d84-c2508548b8f9",
+      "zone_id": "09e6fbc9-8139-45fa-b5cd-02bb858bdefe",
+      "node_id": "be43f162-625a-4bd3-a205-cc5307f9f088",
+      "episode": {
+        "episode_id": "018cc251-f400-7000-8000-000000000000",
+        "segment_index": 0,
+        "continues": false,
+        "max_segment_ms": 60000
+      },
+      "family": "coexistence",
+      "standard": {
+        "standard_id": "92c93d68-4605-474f-ae69-ae518b21fe5f",
+        "version": 1
+      },
+      "node_time": {
+        "started_at": "2024-01-01T00:00:00.000Z",
+        "ended_at": "2024-01-01T00:00:00.000Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": 0,
+          "source": "ntp.local"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "3c831fce-d1f0-4295-8379-f105f75ac921",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "e3f7b41a-caea-4914-9343-42a78cf89d26",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "f78d0ae1-bbdf-40de-a41d-f517e678487e",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "98920112-13aa-4b0f-9c5d-0b66a97214f3",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "a3b55899-2f86-4cf7-962d-4fbfee6f6c1d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "af4c5a99-1a73-4ff5-9401-74e002dcf405",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "f900ff06-3ca8-4ca7-94f5-3ca42c25e377",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "bc6ad954-ee09-4c19-81dc-ac3eefc9c281",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "4c27fb36-f892-4a67-a29b-57a78fc966f8",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "385aee7f-b357-4679-9d6f-97b8401e9dca",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "ce267dbf-33c1-444c-bb5c-3a1d64bed668",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "e5b9ff61-d3c8-4cf3-b5b4-4875f9b859c8",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d6930156-89e8-4539-97ec-6a373671abab",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "3e300b66-1410-44fb-894c-1dbd40639d97",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "16d9d20b-aec5-4437-bfc2-781b41910119",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "970b38cc-51db-40e9-87f5-c2736946ca8a",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "41defba8-5bc2-4a93-8b85-9c2c7af96f33",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "5898abbe-30dc-4ab1-b839-95d964955039",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "0d4c1c61-2f11-4d5f-a6a6-ba240ac2db77",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d4571666-28a5-4b04-8a87-a622f2c78465",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d25c6066-1f0f-4a78-9c3f-5d5cd3f15750",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "4333ad26-0a8a-42a2-8533-63d0cba43ed4",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "852525f2-3844-40df-8ed4-711e558306e9",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "64207d97-5a3e-4b83-b875-9c83678e4ca7",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "fcdf39f3-8def-4f21-a249-c4b4f014d8b5",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "53addfda-3298-4bab-abe6-9f791c1df539",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "cd9aad3f-6e72-4e02-8d20-6e2663995153",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "d55ec7c4-afba-43e3-8257-e488b759dbf5",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "f47764d3-d764-406d-996d-d71cc6f9bfca",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "5bc1152b-9e8f-4cda-938f-b545269c518a",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "17be6a58-c26e-43bc-8f34-9fbc1e0ae17d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        },
+        {
+          "signal_id": "c6e19719-a864-4d45-97bc-e65b23478c10",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-01T00:00:00.000Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "d38aa6cd-9c41-43d2-bcad-3b247f18a291",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000000",
+              "camera_id": "d38aa6cd-9c41-43d2-bcad-3b247f18a291",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/d38aa6cd-9c41-43d2-bcad-3b247f18a291/018cc251-e078-7000-8000-000000000000.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000001",
+              "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2/018cc251-e078-7000-8000-000000000001.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "c04f56a4-85c9-4c87-9f70-ac60fc17b1b3",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000002",
+              "camera_id": "c04f56a4-85c9-4c87-9f70-ac60fc17b1b3",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/c04f56a4-85c9-4c87-9f70-ac60fc17b1b3/018cc251-e078-7000-8000-000000000002.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "00054eb9-53f5-4736-93e2-efb239f22774",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000003",
+              "camera_id": "00054eb9-53f5-4736-93e2-efb239f22774",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/00054eb9-53f5-4736-93e2-efb239f22774/018cc251-e078-7000-8000-000000000003.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000004",
+              "camera_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/8b41469f-4323-44a5-9255-cf10f4fe2739/018cc251-e078-7000-8000-000000000004.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000005",
+              "camera_id": "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/cfd49d08-fdce-42da-8147-092f9c85e3ab/018cc251-e078-7000-8000-000000000005.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "a0e9b549-c42f-496b-9c6a-66484050fde5",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000006",
+              "camera_id": "a0e9b549-c42f-496b-9c6a-66484050fde5",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/a0e9b549-c42f-496b-9c6a-66484050fde5/018cc251-e078-7000-8000-000000000006.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "c092bce7-b5eb-4659-82b0-5928ea73922e",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "018cc251-e078-7000-8000-000000000007",
+              "camera_id": "c092bce7-b5eb-4659-82b0-5928ea73922e",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+              "size_bytes": 1,
+              "duration_ms": 10000,
+              "starts_at": "2023-12-31T23:59:55.000Z",
+              "ends_at": "2024-01-01T00:00:05.000Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/c092bce7-b5eb-4659-82b0-5928ea73922e/018cc251-e078-7000-8000-000000000007.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.4,
+      "episode_duration_ms": 0,
+      "condition_duration_ms": 0,
+      "automatic_classification": {
+        "trigger": "corroboration",
+        "corroborating_camera_ids": [
+          "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+          "c04f56a4-85c9-4c87-9f70-ac60fc17b1b3",
+          "00054eb9-53f5-4736-93e2-efb239f22774",
+          "8b41469f-4323-44a5-9255-cf10f4fe2739",
+          "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+          "a0e9b549-c42f-496b-9c6a-66484050fde5",
+          "c092bce7-b5eb-4659-82b0-5928ea73922e"
+        ]
+      },
+      "model_version": "yolov8n-2026.09",
+      "software_version": "0.0.0",
+      "receipt": {
+        "platform_record_id": "c8954c41-ecae-4a52-bba8-e3df159b5d3b",
+        "received_at": "2024-01-01T00:00:00.000Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01a3082c-34bf-7000-8000-00000000007a",
+      "contract_version": "1.1.0",
+      "organization_id": "a63ded44-1edc-4de7-872b-2285aedad631",
+      "plant_id": "cd5f332b-a9cb-46f3-8d84-c2508548b8f9",
+      "zone_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+      "node_id": "4710a21f-4db2-46c5-9553-b3c51e83b436",
+      "episode": {
+        "episode_id": "01a3082b-ee50-7000-8000-0000000012a1",
+        "segment_index": 3340,
+        "continues": false,
+        "max_segment_ms": 3600000,
+        "previous_segment_record_id": "01a3082b-ee50-7000-8000-00000032beb8"
+      },
+      "family": "dwell",
+      "secondary_families": [],
+      "standard": {
+        "standard_id": "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+        "version": 1
+      },
+      "node_time": {
+        "started_at": "2027-01-12T04:33:31.839Z",
+        "ended_at": "2027-01-12T04:35:42.912Z",
+        "clock": {
+          "synchronized": true,
+          "offset_ms": 0,
+          "source": "10.0.0.1",
+          "last_sync_at": "2027-01-12T04:33:31.622Z"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "c092bce7-b5eb-4659-82b0-5928ea73922e",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2027-01-12T04:32:40.537Z"
+        },
+        {
+          "signal_id": "09e6fbc9-8139-45fa-b5cd-02bb858bdefe",
+          "role": "guard",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2027-01-12T04:33:31.705Z"
+        },
+        {
+          "signal_id": "92c93d68-4605-474f-ae69-ae518b21fe5f",
+          "role": "start_command",
+          "value": "unknown",
+          "valid": false,
+          "read_at": "2027-01-12T04:33:26.973Z"
+        },
+        {
+          "signal_id": "79b3ff32-4360-4f4a-8ebc-855762b74235",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2027-01-12T04:33:31.500Z"
+        },
+        {
+          "signal_id": "75bf1927-d265-4372-8761-1630b6342120",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2027-01-12T04:32:34.093Z"
+        }
+      ],
+      "observability_state": "degraded",
+      "cameras": [
+        {
+          "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01a3082d-cc25-7000-8000-0000001232aa",
+              "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "f98db819a596f2461f1ac763dbf674560fe7bc6785c1bee8e26b2285e11259d5",
+              "size_bytes": 267424,
+              "duration_ms": 56779,
+              "starts_at": "2027-01-12T04:35:16.133Z",
+              "ends_at": "2027-01-12T04:36:12.912Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "org/zone/a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2/01a3082d-cc25-7000-8000-0000001232aa.mp4"
+            },
+            {
+              "clip_id": "01a3082c-1197-7fff-bfff-ffffffffffff",
+              "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "303bd1a3629f3eb82107ede02521f40ad27985dfe1304fbf70425e80d5f3326d",
+              "size_bytes": 1,
+              "duration_ms": 34352,
+              "starts_at": "2027-01-12T04:33:22.839Z",
+              "ends_at": "2027-01-12T04:33:57.191Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2/01a3082c-1197-7fff-bfff-ffffffffffff.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.99999,
+      "episode_duration_ms": 131073,
+      "condition_duration_ms": 19658,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "rtdetr-l.v2",
+      "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receipt": {
+        "platform_record_id": "916a54ed-52dc-41d1-9633-3ca133e20421",
+        "received_at": "2027-01-12T04:35:44.053Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01d77457-74b0-7000-8000-00000022b332",
+      "contract_version": "1.1.0",
+      "organization_id": "1535de61-96ab-4b42-9c00-ad7e5fe78520",
+      "plant_id": "c625eb14-5250-4070-b9ef-24fa8b0e68b1",
+      "zone_id": "292797e0-f9d6-4c4c-bbf9-9d0fd49644aa",
+      "node_id": "05d3a350-4782-4db7-9269-634e99f08392",
+      "episode": {
+        "episode_id": "01d77457-45d1-7000-8000-0004e1828ab7",
+        "segment_index": 77,
+        "continues": true,
+        "max_segment_ms": 3600000,
+        "previous_segment_record_id": "01d77457-45d1-7000-8000-00000000bad8"
+      },
+      "family": "startup_transition",
+      "standard": {
+        "standard_id": "3b0d4640-8e28-4bc1-9e5e-e880800da8eb",
+        "version": 57075
+      },
+      "node_time": {
+        "started_at": "2034-03-02T03:04:44.976Z",
+        "ended_at": "2034-03-02T04:04:44.976Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": -148097,
+          "source": "gps0",
+          "last_sync_at": "2034-03-02T03:04:34.384Z"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "47fddf34-5a83-4f5d-a182-d2c97575cec0",
+          "role": "energy",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2034-03-02T03:04:44.870Z"
+        },
+        {
+          "signal_id": "df3b7a6e-aa3b-4c58-af23-ad87ffb971f2",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2034-03-02T03:04:44.766Z"
+        },
+        {
+          "signal_id": "e5e3084d-b0ed-4bc4-9f82-73e6b9b859e5",
+          "role": "guard",
+          "value": "unknown",
+          "valid": false,
+          "read_at": "2034-03-02T03:04:39.602Z"
+        },
+        {
+          "signal_id": "d0e35bdc-6df7-4963-a121-2563c9f033c3",
+          "role": "energy",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2034-03-02T03:04:44.950Z"
+        }
+      ],
+      "observability_state": "degraded",
+      "cameras": [
+        {
+          "camera_id": "0008790b-3556-4367-9707-ce78797dbafa",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01d7748e-1cd1-7000-8000-00000020a9f9",
+              "camera_id": "0008790b-3556-4367-9707-ce78797dbafa",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "f311b739bc433479f6c01cb8d59263decf4069cce103ee343ea194588b055d30",
+              "size_bytes": 63638,
+              "duration_ms": 47015,
+              "starts_at": "2034-03-02T04:04:26.961Z",
+              "ends_at": "2034-03-02T04:05:13.976Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "org/zone/0008790b-3556-4367-9707-ce78797dbafa/01d7748e-1cd1-7000-8000-00000020a9f9.mp4"
+            },
+            {
+              "clip_id": "01d77456-ff80-7000-8000-00000000053a",
+              "camera_id": "0008790b-3556-4367-9707-ce78797dbafa",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "7f53327b4428f3cb9785bd22ad55fa1e1b401e6be84bb04f41e84e59f5ffceb2",
+              "size_bytes": 392606,
+              "duration_ms": 59503,
+              "starts_at": "2034-03-02T03:04:14.976Z",
+              "ends_at": "2034-03-02T03:05:14.479Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/0008790b-3556-4367-9707-ce78797dbafa/01d77456-ff80-7000-8000-00000000053a.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 3600000,
+      "condition_duration_ms": 88131,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "rict_w1",
+      "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receipt": {
+        "platform_record_id": "ca8cbba7-30c7-4845-8c05-7c49d78522f3",
+        "received_at": "2034-03-02T04:04:48.920Z",
+        "status": "accepted_duplicate"
+      }
+    },
+    {
+      "finding_id": "01a0077c-2275-7000-8000-0000000001b5",
+      "contract_version": "1.1.0",
+      "organization_id": "76356c6b-4c2d-4e51-9920-3c11b785e786",
+      "plant_id": "651306aa-9ca5-4aa6-862e-07a0e619bc3e",
+      "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+      "node_id": "778e018c-f0e6-4bac-bc6a-3d2bf87c2c03",
+      "episode": {
+        "episode_id": "01a0077c-1abc-7000-8000-0000000000aa",
+        "segment_index": 252463051,
+        "continues": true,
+        "max_segment_ms": 3600000,
+        "previous_segment_record_id": "01a0077c-1abc-7000-8000-0000001ddf3a"
+      },
+      "family": "dwell",
+      "secondary_families": [
+        "startup_transition",
+        "guard_bypass"
+      ],
+      "standard": {
+        "standard_id": "cce51990-5a35-48e1-bdfd-7dab4bdd8d9f",
+        "version": 1297156
+      },
+      "node_time": {
+        "started_at": "2026-08-15T22:12:50.933Z",
+        "ended_at": "2026-08-15T22:13:13.612Z",
+        "clock": {
+          "synchronized": true,
+          "offset_ms": 0,
+          "source": "pool.ntp.org"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "6d174a42-6772-453c-a216-4cfee6ee2a22",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:12.482Z"
+        },
+        {
+          "signal_id": "f6d2d74e-e59b-4129-96e0-026e96946aff",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:50.875Z"
+        },
+        {
+          "signal_id": "0237577e-1f69-4c60-9d6c-08f246a4deef",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:50.079Z"
+        },
+        {
+          "signal_id": "b918fc3b-a397-41f0-b108-08d243fe0e35",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:49.967Z"
+        },
+        {
+          "signal_id": "8d7ac266-36f9-4adc-ab62-b0473823b8ee",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:45.178Z"
+        },
+        {
+          "signal_id": "38c48a67-1d6a-4774-b708-0cf4ceb2f103",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2026-08-15T22:12:49.888Z"
+        }
+      ],
+      "observability_state": "degraded",
+      "cameras": [
+        {
+          "camera_id": "0a480146-5323-4e49-9a45-1b48040c21fe",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01a0077b-ff4d-7000-8000-0000000000ba",
+              "camera_id": "0a480146-5323-4e49-9a45-1b48040c21fe",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "9944f300347d943215268035005feb375937117d95167e34f33c1510b9de9c26",
+              "size_bytes": 52428800,
+              "duration_ms": 41679,
+              "starts_at": "2026-08-15T22:12:41.933Z",
+              "ends_at": "2026-08-15T22:13:23.612Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "org/zone/0a480146-5323-4e49-9a45-1b48040c21fe/01a0077b-ff4d-7000-8000-0000000000ba.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.6527881361127762,
+      "episode_duration_ms": 22679,
+      "condition_duration_ms": 11818,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "yolov8n-2026.09",
+      "software_version": "0.0.0",
+      "receipt": {
+        "platform_record_id": "be0c39d8-f88c-4c48-9dfe-ddfd50b9b07a",
+        "received_at": "2026-08-15T22:14:53.874Z",
+        "status": "accepted_duplicate"
+      }
+    },
+    {
+      "finding_id": "01baaff9-f0bb-7000-8000-000000000a15",
+      "contract_version": "1.1.0",
+      "organization_id": "171defd6-960e-4e24-9eb5-6a4499958d0e",
+      "plant_id": "92c3e04d-76ea-46db-88a9-8e7409647068",
+      "zone_id": "04392cd0-a8cf-408f-a288-7f5da0216ec9",
+      "node_id": "cb668c3d-9034-4738-9b85-67416d098f00",
+      "episode": {
+        "episode_id": "01baaff9-d1f1-7000-8000-000000100001",
+        "segment_index": 0,
+        "continues": false,
+        "max_segment_ms": 1916555
+      },
+      "family": "startup_transition",
+      "secondary_families": [],
+      "standard": {
+        "standard_id": "7ab66aa9-986e-40ef-98b1-079ac5da5256",
+        "version": 1
+      },
+      "node_time": {
+        "started_at": "2030-04-02T02:38:57.723Z",
+        "ended_at": "2030-04-02T02:46:10.119Z",
+        "clock": {
+          "synchronized": true,
+          "offset_ms": 0,
+          "source": "ntp.local"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "566cb10d-f42c-4e32-9b53-83abad50ca08",
+          "role": "guard",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2030-04-02T02:38:54.013Z"
+        },
+        {
+          "signal_id": "e3e00dc1-8245-4a72-ade5-aa7212b1aa8f",
+          "role": "auxiliary",
+          "value": "unknown",
+          "valid": false,
+          "read_at": "2030-04-02T02:38:51.007Z"
+        },
+        {
+          "signal_id": "02737486-6276-40a6-b1a3-1ce463b78d5e",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2030-04-02T02:38:16.029Z"
+        },
+        {
+          "signal_id": "4030c325-df0d-42cc-b7c6-8497ee5232bd",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2030-04-02T02:38:26.632Z"
+        },
+        {
+          "signal_id": "4cca0cff-e3d1-4cb6-87cb-a42eb9d84672",
+          "role": "energy",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2030-04-02T02:38:16.128Z"
+        }
+      ],
+      "observability_state": "degraded",
+      "cameras": [
+        {
+          "camera_id": "d8a4d245-3338-4e84-86ca-e90b757de58f",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01bab000-7205-7000-8000-000000010392",
+              "camera_id": "d8a4d245-3338-4e84-86ca-e90b757de58f",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "51e9eca02895b132af91978436e9b13ccbf014d4a761753f54ed6451ca2c8d1f",
+              "size_bytes": 1,
+              "duration_ms": 11082,
+              "starts_at": "2030-04-02T02:46:04.037Z",
+              "ends_at": "2030-04-02T02:46:15.119Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/d8a4d245-3338-4e84-86ca-e90b757de58f/01bab000-7205-7000-8000-000000010392.mp4"
+            },
+            {
+              "clip_id": "01baaff9-a29b-7000-8000-000000000048",
+              "camera_id": "d8a4d245-3338-4e84-86ca-e90b757de58f",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "281652f07a251915fab7047cc1a90a7c4180d7b5a3a20d2bc69b0a8ef0fac6eb",
+              "size_bytes": 247530,
+              "duration_ms": 58204,
+              "starts_at": "2030-04-02T02:38:37.723Z",
+              "ends_at": "2030-04-02T02:39:35.927Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/d8a4d245-3338-4e84-86ca-e90b757de58f/01baaff9-a29b-7000-8000-000000000048.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 432396,
+      "condition_duration_ms": 26778,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "qc33l4b4u0gz2",
+      "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "receipt": {
+        "platform_record_id": "b38f1984-75cb-406e-b092-4f3212c9e659",
+        "received_at": "2030-04-02T03:16:51.765Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01b9682a-190c-7000-8069-e046b15e5dd8",
+      "contract_version": "1.1.0",
+      "organization_id": "a68b5da5-7981-4702-a8d0-f6e3446f19ea",
+      "plant_id": "c2b6db30-7664-4ccc-acc9-3e9730fe2680",
+      "zone_id": "3fc180ea-ff1f-4ebf-8307-825aac9b4bd3",
+      "node_id": "f01bf7ce-103f-4388-a869-a0cfcebc1a80",
+      "episode": {
+        "episode_id": "01b96828-df99-7000-8000-0000000bd9e8",
+        "segment_index": 1681286,
+        "continues": false,
+        "max_segment_ms": 1048577,
+        "previous_segment_record_id": "01b96828-df99-7000-8000-000000042ec1"
+      },
+      "family": "dwell",
+      "secondary_families": [
+        "coexistence",
+        "guard_bypass"
+      ],
+      "standard": {
+        "standard_id": "3850330c-bc40-4361-b7b1-08dcbe8d4ba5",
+        "version": 195
+      },
+      "node_time": {
+        "started_at": "2030-01-28T10:56:06.924Z",
+        "ended_at": "2030-01-28T10:56:36.577Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": 6219,
+          "source": "10.0.0.1"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "35e9a2b4-dc20-4ebe-88b1-fb78434c8972",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2030-01-28T10:56:06.924Z"
+        },
+        {
+          "signal_id": "b7347328-1686-4702-a053-1c59242b6ae6",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2030-01-28T10:56:06.767Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "a652076f-5bd6-4db6-973c-3778e8f4e1e2",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01b96829-eff5-7000-a2ca-ea103d94f800",
+              "camera_id": "a652076f-5bd6-4db6-973c-3778e8f4e1e2",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "069a77233e66c6e771853233e1c4525b15f3881bb652186143e43e16471c4b97",
+              "size_bytes": 52428800,
+              "duration_ms": 45172,
+              "starts_at": "2030-01-28T10:55:56.405Z",
+              "ends_at": "2030-01-28T10:56:41.577Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk/org/zone/a652076f-5bd6-4db6-973c-3778e8f4e1e2/01b96829-eff5-7000-a2ca-ea103d94f800.mp4"
+            },
+            {
+              "clip_id": "01b96829-a3dc-7000-8000-00045124a517",
+              "camera_id": "a652076f-5bd6-4db6-973c-3778e8f4e1e2",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "beae30200eb23106b64d62b2b40be09fe28eb2f4f3d7b5d9e5f2cb2d18e6fe6e",
+              "size_bytes": 1,
+              "duration_ms": 30725,
+              "starts_at": "2030-01-28T10:55:36.924Z",
+              "ends_at": "2030-01-28T10:56:07.649Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/a652076f-5bd6-4db6-973c-3778e8f4e1e2/01b96829-a3dc-7000-8000-00045124a517.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "c7fc20dd-4cec-4b71-a1bb-5143abc76a0d",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "01b96829-f6d1-7000-8000-000000001509",
+              "camera_id": "c7fc20dd-4cec-4b71-a1bb-5143abc76a0d",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "5ebfe28056f7c9d195880410abddedf588e2640b45f2bf749f71b11c9705c24c",
+              "size_bytes": 939181,
+              "duration_ms": 43416,
+              "starts_at": "2030-01-28T10:55:58.161Z",
+              "ends_at": "2030-01-28T10:56:41.577Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "org/zone/c7fc20dd-4cec-4b71-a1bb-5143abc76a0d/01b96829-f6d1-7000-8000-000000001509.mp4"
+            },
+            {
+              "clip_id": "01b96829-a3dc-7000-8000-000000000314",
+              "camera_id": "c7fc20dd-4cec-4b71-a1bb-5143abc76a0d",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "edac90459b62c6e253606a79ea3928a7a3ebc3bc9e5d93b4e477574d9b5cbfca",
+              "size_bytes": 49729394,
+              "duration_ms": 42905,
+              "starts_at": "2030-01-28T10:55:36.924Z",
+              "ends_at": "2030-01-28T10:56:19.829Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/c7fc20dd-4cec-4b71-a1bb-5143abc76a0d/01b96829-a3dc-7000-8000-000000000314.mp4"
+            }
+          ]
+        },
+        {
+          "camera_id": "27183efa-f329-445d-a6a8-8da8d0968bee",
+          "originating": false,
+          "clips": [
+            {
+              "clip_id": "01b96829-a3dc-7000-8000-000000000928",
+              "camera_id": "27183efa-f329-445d-a6a8-8da8d0968bee",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "675c83a5a16ca7f56b9827aad2ecb54ef413f3df04a3056231a9254737215477",
+              "size_bytes": 2611,
+              "duration_ms": 37130,
+              "starts_at": "2030-01-28T10:55:36.924Z",
+              "ends_at": "2030-01-28T10:56:14.054Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/27183efa-f329-445d-a6a8-8da8d0968bee/01b96829-a3dc-7000-8000-000000000928.mp4"
+            },
+            {
+              "clip_id": "01b9682a-0ca1-7000-8000-000000002a5b",
+              "camera_id": "27183efa-f329-445d-a6a8-8da8d0968bee",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "98a336010888cd136dad055ea698ddd19e017fce01ea56636d861055a86925fa",
+              "size_bytes": 1,
+              "duration_ms": 37832,
+              "starts_at": "2030-01-28T10:56:03.745Z",
+              "ends_at": "2030-01-28T10:56:41.577Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "org/zone/27183efa-f329-445d-a6a8-8da8d0968bee/01b9682a-0ca1-7000-8000-000000002a5b.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 29653,
+      "condition_duration_ms": 21689,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": [
+          "c7fc20dd-4cec-4b71-a1bb-5143abc76a0d"
+        ]
+      },
+      "model_version": "a",
+      "software_version": "0.0.0",
+      "receipt": {
+        "platform_record_id": "a3342499-0b3b-49c8-8062-83b754623770",
+        "received_at": "2030-01-28T11:57:26.651Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01e03c70-ae2b-7000-8000-0000000002a6",
+      "contract_version": "1.1.0",
+      "organization_id": "e648a267-46b3-4657-be09-8df83faa2949",
+      "plant_id": "5f0a3d79-ef50-44ec-aab2-fa20b2332eaf",
+      "zone_id": "10c383dc-9065-4442-a354-9fbca88b4bc2",
+      "node_id": "f99a05da-c692-40d5-897c-54adf10c35cf",
+      "episode": {
+        "episode_id": "01e03c70-ab4e-7000-8000-000000003573",
+        "segment_index": 328093,
+        "continues": true,
+        "max_segment_ms": 900000,
+        "previous_segment_record_id": "01e03c70-ab4e-7007-8603-a12487a9e000"
+      },
+      "family": "coexistence",
+      "standard": {
+        "standard_id": "57cdb107-d609-4499-847e-cbf44dcc95e4",
+        "version": 1
+      },
+      "node_time": {
+        "started_at": "2035-05-12T15:58:39.659Z",
+        "ended_at": "2035-05-12T16:00:19.211Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": -331,
+          "source": "10.0.0.1",
+          "last_sync_at": "2035-05-12T15:58:36.947Z"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "91bda57c-c550-4ad4-a277-1834d9ec9c21",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2035-05-12T15:58:13.625Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "e09a73b2-4869-40ff-bbf2-a913cea92ca7",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01e03c72-0b72-7000-8000-00000000007c",
+              "camera_id": "e09a73b2-4869-40ff-bbf2-a913cea92ca7",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "c35ad27869c5f41eeff781a996c5184c49c428a9a43afbec5af8227b9bd734f4",
+              "size_bytes": 1,
+              "duration_ms": 40137,
+              "starts_at": "2035-05-12T16:00:09.074Z",
+              "ends_at": "2035-05-12T16:00:49.211Z",
+              "segment": "end",
+              "anonymized": true,
+              "storage_key": "org/zone/e09a73b2-4869-40ff-bbf2-a913cea92ca7/01e03c72-0b72-7000-8000-00000000007c.mp4"
+            },
+            {
+              "clip_id": "01e03c70-871b-7000-8000-000000000000",
+              "camera_id": "e09a73b2-4869-40ff-bbf2-a913cea92ca7",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "c496032e208cf61e1b9bc54a6e9dfa35d535cd7d50f99459539fbfa9da2dae7f",
+              "size_bytes": 18203276,
+              "duration_ms": 57751,
+              "starts_at": "2035-05-12T15:58:29.659Z",
+              "ends_at": "2035-05-12T15:59:27.410Z",
+              "segment": "start",
+              "anonymized": true,
+              "storage_key": "org/zone/e09a73b2-4869-40ff-bbf2-a913cea92ca7/01e03c70-871b-7000-8000-000000000000.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 99552,
+      "condition_duration_ms": 99552,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "rtdetr-l.v2",
+      "software_version": "586.718.234+build.7",
+      "receipt": {
+        "platform_record_id": "2ab776ee-1930-42cf-a0b9-b65fa46a404b",
+        "received_at": "2035-05-12T16:00:19.320Z",
+        "status": "accepted_duplicate"
+      }
+    },
+    {
+      "finding_id": "018d55e2-db4a-7000-8000-000000000195",
+      "contract_version": "1.1.0",
+      "organization_id": "8d30b8e5-cd69-40c4-b00f-f495786c80bd",
+      "plant_id": "c29c9262-45bf-4ad7-8eb3-d99094ba3175",
+      "zone_id": "23ee277a-378e-4990-83e1-6ed030d7d09e",
+      "node_id": "9b5f5e33-9e0c-475e-8e1d-0874458d5089",
+      "episode": {
+        "episode_id": "018d55df-3772-7000-8000-0000000001d5",
+        "segment_index": 0,
+        "continues": false,
+        "max_segment_ms": 2097153
+      },
+      "family": "guard_bypass",
+      "standard": {
+        "standard_id": "b0d6b6ae-1de7-4610-9666-3d05952b5aae",
+        "version": 2671070
+      },
+      "node_time": {
+        "started_at": "2024-01-29T15:42:27.146Z",
+        "ended_at": "2024-01-29T15:42:31.138Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": 591086173,
+          "source": "gps0"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "ec9de0d8-9fdc-430d-ba3c-19475df36c26",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2024-01-29T15:42:25.624Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "4c90d94a-f5a0-4fb6-af4a-e13ec8f70312",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "018d55e2-661a-7000-8000-38e71b531b1c",
+              "camera_id": "4c90d94a-f5a0-4fb6-af4a-e13ec8f70312",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "fd2cf4764fac58c4fc96a1375afa6f2308817e68157998d0c51c51b1b26944e3",
+              "size_bytes": 52428800,
+              "duration_ms": 38992,
+              "starts_at": "2024-01-29T15:41:57.146Z",
+              "ends_at": "2024-01-29T15:42:36.138Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "org/zone/4c90d94a-f5a0-4fb6-af4a-e13ec8f70312/018d55e2-661a-7000-8000-38e71b531b1c.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.963278004142659,
+      "episode_duration_ms": 3992,
+      "condition_duration_ms": 0,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "a",
+      "software_version": "64.46.453-alpha",
+      "receipt": {
+        "platform_record_id": "c2fc93f0-3552-4e19-80d6-81fa3fd89550",
+        "received_at": "2024-01-29T15:42:31.467Z",
+        "status": "accepted_duplicate"
+      }
+    },
+    {
+      "finding_id": "01c112b9-aeba-7000-8000-000000002bf9",
+      "contract_version": "1.1.0",
+      "organization_id": "8d1d064b-1182-4389-bbd4-d08ebc39b29a",
+      "plant_id": "6f53a30f-f15c-41ee-a1da-fd83922d9443",
+      "zone_id": "689576a6-cd76-4033-9ad0-9716abeca612",
+      "node_id": "4c4236a8-3e5c-4549-aa9c-37464a47e2c0",
+      "episode": {
+        "episode_id": "01c112b9-307e-7000-8000-000000009b61",
+        "segment_index": 0,
+        "continues": false,
+        "max_segment_ms": 790666
+      },
+      "family": "startup_transition",
+      "secondary_families": [
+        "guard_bypass"
+      ],
+      "standard": {
+        "standard_id": "2d094511-22d6-41ac-8483-6e68e77544bd",
+        "version": 4194303
+      },
+      "node_time": {
+        "started_at": "2031-02-13T13:07:54.682Z",
+        "ended_at": "2031-02-13T13:07:55.200Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": -228093191,
+          "source": "fe80::1",
+          "last_sync_at": "2031-02-13T13:07:41.973Z"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "ab0b42db-fc6c-4674-8ec0-774248c82f7b",
+          "role": "energy",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:49.091Z"
+        },
+        {
+          "signal_id": "a668ea0d-61c7-4252-8da5-5eced84e8e87",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:45.608Z"
+        },
+        {
+          "signal_id": "08c3fd76-6c30-4b74-90d3-423ee3d3e245",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:38.038Z"
+        },
+        {
+          "signal_id": "afdd070e-bfd5-42ed-8c56-42bf776c9865",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:54.424Z"
+        },
+        {
+          "signal_id": "c1a87f0c-11da-43b9-9872-9d5bef591d2c",
+          "role": "auxiliary",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:51.292Z"
+        },
+        {
+          "signal_id": "2880fb74-f347-4714-aa82-a78fd942f44e",
+          "role": "start_command",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:53.032Z"
+        },
+        {
+          "signal_id": "e2d76a77-104b-4f76-bd7b-815041c1be81",
+          "role": "energy",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2031-02-13T13:07:10.504Z"
+        }
+      ],
+      "observability_state": "degraded",
+      "cameras": [
+        {
+          "camera_id": "3869d057-d1e2-438c-8c55-d581a1a9fcbc",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01c112b9-87aa-7000-8000-000000000001",
+              "camera_id": "3869d057-d1e2-438c-8c55-d581a1a9fcbc",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "aeff7ba8e7dff4a696b12e817f7b7e820902d406bc9f25e52d90a8c82b7aef1d",
+              "size_bytes": 999999,
+              "duration_ms": 20518,
+              "starts_at": "2031-02-13T13:07:44.682Z",
+              "ends_at": "2031-02-13T13:08:05.200Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "org/zone/3869d057-d1e2-438c-8c55-d581a1a9fcbc/01c112b9-87aa-7000-8000-000000000001.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 0.6158335826829686,
+      "episode_duration_ms": 518,
+      "condition_duration_ms": 518,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "z9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-xxx",
+      "software_version": "0.0.0",
+      "receipt": {
+        "platform_record_id": "a1df227f-2cfd-47a3-836c-5d078ca343ac",
+        "received_at": "2031-02-13T13:08:13.819Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01d455cb-b66c-7000-8000-00000e568d10",
+      "contract_version": "1.1.0",
+      "organization_id": "593ca5c8-96c0-4038-96a6-6f95b38aaf87",
+      "plant_id": "96c6a21a-c1d3-45f1-a828-3271e8d067e1",
+      "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+      "node_id": "f4f15f0f-24e2-42e6-8992-a0d076f4d0a4",
+      "episode": {
+        "episode_id": "01d455cb-833f-7000-8000-00000368ff77",
+        "segment_index": 162,
+        "continues": true,
+        "max_segment_ms": 507964,
+        "previous_segment_record_id": "01d455cb-833f-7000-8000-000000010860"
+      },
+      "family": "coexistence",
+      "secondary_families": [
+        "guard_bypass"
+      ],
+      "standard": {
+        "standard_id": "d50566e1-23d6-4f20-b4d3-12158b7e16f9",
+        "version": 83663558
+      },
+      "node_time": {
+        "started_at": "2033-09-28T01:35:08.396Z",
+        "ended_at": "2033-09-28T01:35:21.764Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": -15780,
+          "source": "10.0.0.1"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "9f21ea07-a501-46fe-8e7b-13f11a6a664d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:35:01.450Z"
+        },
+        {
+          "signal_id": "37fec3d1-13ab-4101-bf3f-2a6192dc81cf",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:35:03.127Z"
+        },
+        {
+          "signal_id": "f8d48ff8-9bab-4ca5-a21e-61652058286d",
+          "role": "start_command",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:34:46.335Z"
+        },
+        {
+          "signal_id": "27888fc3-9524-481c-8b47-da6002dde0b7",
+          "role": "auxiliary",
+          "value": "unknown",
+          "valid": false,
+          "read_at": "2033-09-28T01:35:02.667Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01d455cb-a2e4-7000-8000-00000000001f",
+              "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "22fbb05e892dd88548ab06ee00b6207e2810b0281ebe9daa6846a5289a068288",
+              "size_bytes": 12106525,
+              "duration_ms": 36368,
+              "starts_at": "2033-09-28T01:35:03.396Z",
+              "ends_at": "2033-09-28T01:35:39.764Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "org/zone/aba92a67-05bf-4b03-8aff-a8c8a4ad3d92/01d455cb-a2e4-7000-8000-00000000001f.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 13368,
+      "condition_duration_ms": 1555,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "rtdetr-l.v2",
+      "software_version": "610.265.303+build.7",
+      "receipt": {
+        "platform_record_id": "62325bd5-337f-4a5f-8a17-3204ec109393",
+        "received_at": "2033-09-28T01:35:32.904Z",
+        "status": "accepted"
+      }
+    },
+    {
+      "finding_id": "01d455cb-b66c-7000-8000-00000e568d10",
+      "contract_version": "1.1.0",
+      "organization_id": "593ca5c8-96c0-4038-96a6-6f95b38aaf87",
+      "plant_id": "96c6a21a-c1d3-45f1-a828-3271e8d067e1",
+      "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+      "node_id": "f4f15f0f-24e2-42e6-8992-a0d076f4d0a4",
+      "episode": {
+        "episode_id": "01d455cb-833f-7000-8000-00000368ff77",
+        "segment_index": 162,
+        "continues": true,
+        "max_segment_ms": 507964,
+        "previous_segment_record_id": "01d455cb-833f-7000-8000-000000010860"
+      },
+      "family": "coexistence",
+      "secondary_families": [
+        "guard_bypass"
+      ],
+      "standard": {
+        "standard_id": "d50566e1-23d6-4f20-b4d3-12158b7e16f9",
+        "version": 83663558
+      },
+      "node_time": {
+        "started_at": "2033-09-28T01:35:08.396Z",
+        "ended_at": "2033-09-28T01:35:21.764Z",
+        "clock": {
+          "synchronized": false,
+          "offset_ms": -15780,
+          "source": "10.0.0.1"
+        }
+      },
+      "signals": [
+        {
+          "signal_id": "9f21ea07-a501-46fe-8e7b-13f11a6a664d",
+          "role": "energy",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:35:01.450Z"
+        },
+        {
+          "signal_id": "37fec3d1-13ab-4101-bf3f-2a6192dc81cf",
+          "role": "guard",
+          "value": "asserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:35:03.127Z"
+        },
+        {
+          "signal_id": "f8d48ff8-9bab-4ca5-a21e-61652058286d",
+          "role": "start_command",
+          "value": "deasserted",
+          "valid": true,
+          "read_at": "2033-09-28T01:34:46.335Z"
+        },
+        {
+          "signal_id": "27888fc3-9524-481c-8b47-da6002dde0b7",
+          "role": "auxiliary",
+          "value": "unknown",
+          "valid": false,
+          "read_at": "2033-09-28T01:35:02.667Z"
+        }
+      ],
+      "observability_state": "observable",
+      "cameras": [
+        {
+          "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+          "originating": true,
+          "clips": [
+            {
+              "clip_id": "01d455cb-a2e4-7000-8000-00000000001f",
+              "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+              "media_kind": "video",
+              "content_type": "video/mp4",
+              "sha256": "22fbb05e892dd88548ab06ee00b6207e2810b0281ebe9daa6846a5289a068288",
+              "size_bytes": 12106525,
+              "duration_ms": 36368,
+              "starts_at": "2033-09-28T01:35:03.396Z",
+              "ends_at": "2033-09-28T01:35:39.764Z",
+              "segment": "full",
+              "anonymized": true,
+              "storage_key": "org/zone/aba92a67-05bf-4b03-8aff-a8c8a4ad3d92/01d455cb-a2e4-7000-8000-00000000001f.mp4"
+            }
+          ]
+        }
+      ],
+      "tier": "tier_1",
+      "max_confidence": 1.0,
+      "episode_duration_ms": 13368,
+      "condition_duration_ms": 1555,
+      "automatic_classification": {
+        "trigger": "publication_threshold",
+        "corroborating_camera_ids": []
+      },
+      "model_version": "rtdetr-l.v2",
+      "software_version": "610.265.303+build.7",
+      "receipt": {
+        "platform_record_id": "62325bd5-337f-4a5f-8a17-3204ec109393",
+        "received_at": "2033-09-28T01:35:32.904Z",
+        "status": "accepted"
+      }
+    }
+  ],
+  "heartbeats": [
+    {
+      "heartbeat_id": "018d61f7-1800-7000-8000-000000000000",
+      "contract_version": "1.1.0",
+      "organization_id": "e3e70682-c209-4cac-a29f-6fbed82c07cd",
+      "plant_id": "f728b4fa-4248-4e3a-8a5d-2f346baa9455",
+      "node_id": "34ab18fd-0a68-488e-8ad4-041504c14982",
+      "sent_at": "2024-02-01T00:00:00.000Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": 0,
+        "source": "ntp.local"
+      },
+      "software_version": "0.0.0",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "eb1167b3-67a9-4378-bc65-c1e582e2e662",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "f7c1bd87-4da5-4709-9471-3d60c8a70639",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "e443df78-9558-467f-9ba9-1faf7a024204",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "23a7711a-8133-4876-b7eb-dcd9e87a1613",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "1846d424-c17c-4279-a3c6-612f48268673",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "fcbd04c3-4021-4ef7-8ca5-a5a19e4d6e3c",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "b4862b21-fb97-4435-8856-1712e8e5216a",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "259f4329-e6f4-490b-9a16-4106cf6a659e",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "12e0c8b2-bad6-40fb-9948-8dec4f65d4d9",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "03c54c71-fca0-4536-a169-df82b9bdee2d",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "6ae04d52-adb3-48cb-b315-8c0c66dd7794",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "03a89879-36a9-4d74-80de-59f550f0fc2b",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "faf1501b-009a-415b-8137-8be5b7a28e0a",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "9cb017c1-8741-4e91-acfe-bb4bd29e8693",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "9bbd750d-1e70-4c52-b0c1-fb6a19086515",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "4d6b234f-dfa7-46ed-b2d1-f81ba636425c",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "2ea60b99-fa7f-48bf-b044-284a47acf2f6",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "ec3aa314-da9b-4017-b9c1-47c719a5711b",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "0597aab6-14d3-4dbc-a0ac-f4c9658de17e",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "ccc14d51-73f6-40d8-a9f4-1cc04653a560",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "41a93f90-dc82-4527-9da3-b7e2cad6e514",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "d138d150-8557-416a-a750-2a812227d96d",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "1d77ce40-58d8-4776-a51a-d4f3a699bae0",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "d9ead926-4745-4d9e-a789-6389df3277fd",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [],
+        "retained_sent": 0
+      }
+    },
+    {
+      "heartbeat_id": "018d61f7-1800-7000-8000-000000000000",
+      "contract_version": "1.1.0",
+      "organization_id": "a63ded44-1edc-4de7-872b-2285aedad631",
+      "plant_id": "cd5f332b-a9cb-46f3-8d84-c2508548b8f9",
+      "node_id": "4ebad5c5-25d9-4122-834a-ca5b3fc13957",
+      "sent_at": "2024-02-01T00:00:00.000Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": 0,
+        "source": "ntp.local"
+      },
+      "software_version": "0.0.0",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "d38aa6cd-9c41-43d2-bcad-3b247f18a291",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "c04f56a4-85c9-4c87-9f70-ac60fc17b1b3",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "00054eb9-53f5-4736-93e2-efb239f22774",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "cfd49d08-fdce-42da-8147-092f9c85e3ab",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "a0e9b549-c42f-496b-9c6a-66484050fde5",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "c092bce7-b5eb-4659-82b0-5928ea73922e",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "09e6fbc9-8139-45fa-b5cd-02bb858bdefe",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "16a0b01b-024f-481c-91e2-5d6a35c3a887",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "8fc81e8c-bd28-428a-bf4c-53ea0680c862",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "4cc60365-8554-4e87-8f3c-3f5b6a93ad24",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "c781b288-7192-4ddb-b0af-ffa1867510dc",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "c0787418-2ffe-4211-a463-d5034d3e4e61",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "5220363f-9314-439c-a703-6c582e896de4",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "b438f9fb-24fb-4c6d-85a6-bd2ac56f4df0",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "db6008d4-4bdb-4925-a1b3-7bc0afeaf5b5",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "2334d20e-f8d0-4ffc-b05a-77e87b8ea4ef",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "b373bb92-1d4d-43a3-8d1d-e9eb8bbb4d76",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "9e94285c-f74d-4ead-a5b3-869a33030446",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "51fa2141-b3aa-4645-9932-4cecf43ab733",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "e54bafc8-0c93-46ff-9ea3-06ea00b706b8",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "7623459e-e788-479b-b54d-0345c1940bd5",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "1e354f31-c888-4ca1-9a5e-fab30bd471e5",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2024-02-01T00:00:00.000Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [],
+        "retained_sent": 0
+      }
+    },
+    {
+      "heartbeat_id": "01e3df91-6cfd-7000-8000-000e32e01a6e",
+      "contract_version": "1.1.0",
+      "organization_id": "a63ded44-1edc-4de7-872b-2285aedad631",
+      "plant_id": "cd5f332b-a9cb-46f3-8d84-c2508548b8f9",
+      "node_id": "0742587b-e5b7-4907-a12a-a10e0d4041cb",
+      "sent_at": "2035-11-09T11:20:53.757Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": -143,
+        "source": "gps0"
+      },
+      "software_version": "933.880.112",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "a55e8b4f-0b04-4fcd-ae86-8f6ef85da5f2",
+          "connected": true,
+          "measured_fps": 240,
+          "observability_state": "observable",
+          "declared_min_fps": 18.352267673287763
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "8b41469f-4323-44a5-9255-cf10f4fe2739",
+          "mode": "commissioning",
+          "observability_state": "not_observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2035-11-09T11:18:52.083Z",
+          "open_episodes": 17243348
+        },
+        {
+          "zone_id": "979b61be-558f-4664-957b-2f55edcd4358",
+          "mode": "no_capture",
+          "observability_state": "degraded",
+          "catalog_version": 1584,
+          "gate_state_valid_until": "2035-11-09T22:26:10.556Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "8746c8a2-435a-4c5d-acd7-5734bc5123cb",
+          "mode": "commissioning",
+          "observability_state": "degraded",
+          "catalog_version": 14115861,
+          "gate_state_valid_until": "2035-11-09T11:20:54.155Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "324f093a-7a86-4e1b-8ba6-b2a60504e4bb",
+          "mode": "commissioning",
+          "observability_state": "not_observable",
+          "catalog_version": 2147483646,
+          "gate_state_valid_until": "2035-11-09T14:07:33.757Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "de513357-00e4-4ceb-ad50-f63dba8811de",
+          "mode": "commissioning",
+          "observability_state": "degraded",
+          "catalog_version": 29392,
+          "gate_state_valid_until": "2035-11-09T11:20:54.337Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": true,
+        "adapter": "modbus_rtu",
+        "last_valid_read_at": "2035-11-09T09:46:37.638Z"
+      },
+      "local_queue": {
+        "pending": 437,
+        "dead_letter": [
+          {
+            "code": "schema_invalid",
+            "count": 39097
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 0
+          },
+          {
+            "code": "node_not_enrolled",
+            "count": 0
+          },
+          {
+            "code": "zone_gate_not_approved",
+            "count": 948420350
+          },
+          {
+            "code": "clip_hash_mismatch",
+            "count": 215
+          },
+          {
+            "code": "clip_not_anonymized",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_invalid",
+            "count": 3881
+          },
+          {
+            "code": "enrollment_code_expired",
+            "count": 7216482
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 4204
+          },
+          {
+            "code": "signature_invalid",
+            "count": 199
+          },
+          {
+            "code": "timestamp_out_of_window",
+            "count": 0
+          },
+          {
+            "code": "temporarily_unavailable",
+            "count": 3086
+          },
+          {
+            "code": "storage_unavailable",
+            "count": 0
+          }
+        ],
+        "retained_sent": 0,
+        "circuit_state": "closed"
+      },
+      "live_view_local_url": "https://wmgp:8443/"
+    },
+    {
+      "heartbeat_id": "01cbe76d-4b46-7000-8000-0000001d9adf",
+      "contract_version": "1.1.0",
+      "organization_id": "1535de61-96ab-4b42-9c00-ad7e5fe78520",
+      "plant_id": "c625eb14-5250-4070-b9ef-24fa8b0e68b1",
+      "node_id": "6b8c230d-0ca0-4998-b548-c5f5af05c83c",
+      "sent_at": "2032-08-04T22:51:28.454Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": 85809,
+        "source": "fe80::1"
+      },
+      "software_version": "234.401.346",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 6305,
+      "cameras": [
+        {
+          "camera_id": "0008790b-3556-4367-9707-ce78797dbafa",
+          "connected": true,
+          "measured_fps": 163,
+          "observability_state": "observable",
+          "declared_min_fps": 60
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "292797e0-f9d6-4c4c-bbf9-9d0fd49644aa",
+          "mode": "commissioning",
+          "observability_state": "not_observable",
+          "catalog_version": 2147483647,
+          "gate_state_valid_until": "2032-08-04T22:51:27.114Z",
+          "open_episodes": 3097
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "simulated"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "clip_not_anonymized",
+            "count": 23820
+          },
+          {
+            "code": "enrollment_code_invalid",
+            "count": 257928221
+          },
+          {
+            "code": "enrollment_code_expired",
+            "count": 0
+          },
+          {
+            "code": "signature_invalid",
+            "count": 0
+          }
+        ],
+        "retained_sent": 99999,
+        "lost_episodes": 165
+      },
+      "field_notice": [
+        {
+          "zone_id": "292797e0-f9d6-4c4c-bbf9-9d0fd49644aa",
+          "beacon_available": true,
+          "voice_available": true
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01b427d1-2656-7000-8000-0000000000df",
+      "contract_version": "1.1.0",
+      "organization_id": "76356c6b-4c2d-4e51-9920-3c11b785e786",
+      "plant_id": "651306aa-9ca5-4aa6-862e-07a0e619bc3e",
+      "node_id": "42f43f75-3a29-4c04-9291-6b4092eed89e",
+      "sent_at": "2029-05-12T09:49:19.318Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": 9007199254740991,
+        "source": "fe80::1"
+      },
+      "software_version": "33.294.655-alpha",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "bf4b5822-d989-4e48-b361-b70346f4af5f",
+          "connected": false,
+          "measured_fps": 240,
+          "observability_state": "degraded",
+          "declared_min_fps": 35.14851005965601
+        },
+        {
+          "camera_id": "2a4f32d6-9b80-409d-85a3-5ca99aad9af6",
+          "connected": false,
+          "measured_fps": 57,
+          "observability_state": "degraded",
+          "declared_min_fps": 25.822284282413055
+        },
+        {
+          "camera_id": "0a480146-5323-4e49-9a45-1b48040c21fe",
+          "connected": true,
+          "measured_fps": 240,
+          "observability_state": "degraded",
+          "declared_min_fps": 35.77528372425359
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "mode": "productive",
+          "observability_state": "degraded",
+          "catalog_version": 422,
+          "gate_state_valid_until": "2029-05-12T07:22:59.981Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "modbus_rtu",
+        "last_valid_read_at": "2029-05-12T09:49:18.873Z"
+      },
+      "local_queue": {
+        "pending": 396,
+        "dead_letter": [
+          {
+            "code": "schema_invalid",
+            "count": 0
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 0
+          },
+          {
+            "code": "contract_version_retired",
+            "count": 0
+          },
+          {
+            "code": "node_not_enrolled",
+            "count": 1552792275
+          },
+          {
+            "code": "node_revoked",
+            "count": 0
+          },
+          {
+            "code": "node_zone_mismatch",
+            "count": 53
+          },
+          {
+            "code": "clip_missing",
+            "count": 0
+          },
+          {
+            "code": "clip_hash_mismatch",
+            "count": 3788
+          },
+          {
+            "code": "clip_too_large",
+            "count": 78671273
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 676361676
+          },
+          {
+            "code": "signature_invalid",
+            "count": 6247686
+          },
+          {
+            "code": "idempotency_conflict",
+            "count": 0
+          },
+          {
+            "code": "rate_limited",
+            "count": 78113
+          }
+        ],
+        "retained_sent": 114,
+        "lost_episodes": 884
+      },
+      "live_view_accesses": [
+        {
+          "access_id": "01b427d1-2652-7000-8000-000010a94321",
+          "jti": "01b427d1-2652-7000-8000-00000000019c",
+          "sub": "e925c775-7af4-4c45-b58c-de96c2805147",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.314Z",
+          "outcome": "rejected_mode"
+        },
+        {
+          "access_id": "01b427cf-85eb-7000-8000-0000dd28a2ca",
+          "jti": "01b427cf-85eb-7000-8000-000000001989",
+          "sub": "cd34f05d-8144-43e9-b6c0-0896a9a56667",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:47:32.715Z",
+          "outcome": "rejected_reused",
+          "closed_at": "2029-05-12T09:48:06.301Z"
+        },
+        {
+          "access_id": "01b427a6-8c01-7000-8000-000000001c99",
+          "jti": "01b427a6-8c01-7000-8000-000000000197",
+          "sub": "c79665d7-6ecf-4688-b67e-87d729a77ea7",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:02:47.297Z",
+          "outcome": "rejected_signature"
+        },
+        {
+          "access_id": "01b427ce-b7f6-7000-8000-00000005926a",
+          "jti": "01b427ce-b7f6-7000-8000-00000000027e",
+          "sub": "72855d39-843c-4b4f-86ff-5d977711c97f",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:46:39.990Z",
+          "outcome": "rejected_scope",
+          "closed_at": "2029-05-12T09:48:25.588Z"
+        },
+        {
+          "access_id": "01b427d0-fb89-7000-8000-00000000050b",
+          "jti": "01b427d0-fb89-7000-8000-0000000006d5",
+          "sub": "b3f605f2-75d0-492c-9eee-4cfe5b19408d",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:08.361Z",
+          "outcome": "rejected_limit",
+          "closed_at": "2029-05-12T09:49:12.036Z"
+        },
+        {
+          "access_id": "01b427cf-7661-7000-83e1-e2deeb879c00",
+          "jti": "01b427cf-7661-7000-8000-5443a5489c12",
+          "sub": "472b6cda-b3b6-4af2-ad93-fcecefd53742",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:47:28.737Z",
+          "outcome": "opened"
+        },
+        {
+          "access_id": "01b427d1-2508-7000-8000-0000000002ea",
+          "jti": "01b427d1-2508-7000-8000-000000000e4b",
+          "sub": "f2e2e547-5837-4ced-b138-bd90e2b888f3",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.984Z",
+          "outcome": "rejected_scope",
+          "closed_at": "2029-05-12T09:49:19.267Z"
+        },
+        {
+          "access_id": "01b427d1-253c-7000-8000-0000342409a0",
+          "jti": "01b427d1-253c-7000-8000-0000000399ff",
+          "sub": "ff2ff3a0-83f9-407d-b00a-7016097ab88c",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.036Z",
+          "outcome": "rejected_signature"
+        },
+        {
+          "access_id": "01b427d1-2270-7000-8000-00000000057e",
+          "jti": "01b427d1-2270-7000-8000-002d91de3c7d",
+          "sub": "c1df2160-37ed-4d83-8335-ccfb3161a18d",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.320Z",
+          "outcome": "closed_by_mode"
+        },
+        {
+          "access_id": "01b427d1-2650-7000-8000-0000000041f4",
+          "jti": "01b427d1-2650-7000-8001-437eeecd8001",
+          "sub": "fd3e3221-1959-45ee-b318-648df598c550",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.312Z",
+          "outcome": "rejected_limit",
+          "closed_at": "2029-05-12T09:49:19.313Z"
+        },
+        {
+          "access_id": "01b427d1-25e4-7000-8000-0000000026f7",
+          "jti": "01b427d1-25e4-7000-8000-000000000057",
+          "sub": "5dccca29-9073-4d26-ae2f-d937135e0b9d",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.204Z",
+          "outcome": "rejected_expired",
+          "closed_at": "2029-05-12T09:49:19.309Z"
+        },
+        {
+          "access_id": "01b427d1-231f-7000-8000-00003ce1a75d",
+          "jti": "01b427d1-231f-7000-8000-000000000399",
+          "sub": "b8b93a1f-d3c4-4428-b707-ccf421ced4b7",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.495Z",
+          "outcome": "opened"
+        },
+        {
+          "access_id": "01b42777-7df7-7000-8000-0009dec52fc1",
+          "jti": "01b42777-7df7-7004-8000-000000000001",
+          "sub": "fd80bab5-574c-426b-8178-1ad4fa9afa0f",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T08:11:23.511Z",
+          "outcome": "rejected_scope"
+        },
+        {
+          "access_id": "01b427cf-7a66-7000-8000-0000000101fc",
+          "jti": "01b427cf-7a66-7000-8000-00000000012a",
+          "sub": "f44a0c9f-4df3-4c72-9a7a-8fac8709ae87",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:47:29.766Z",
+          "outcome": "rejected_expired",
+          "closed_at": "2029-05-12T09:48:20.306Z"
+        },
+        {
+          "access_id": "01b427d1-2621-7000-8000-0000000000e5",
+          "jti": "01b427d1-2621-71ad-b01b-c20875c00000",
+          "sub": "4f1077d1-a958-46de-a9ff-763df44406ee",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.265Z",
+          "outcome": "rejected_expired"
+        },
+        {
+          "access_id": "01b427d1-259e-7000-8000-0000010a225c",
+          "jti": "01b427d1-259e-7000-8000-cc7174a1b2bd",
+          "sub": "f6f5ec92-0489-465e-9698-280d27863469",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.134Z",
+          "outcome": "rejected_expired"
+        },
+        {
+          "access_id": "01b427d1-22b6-7000-8000-000198064ac9",
+          "jti": "01b427d1-22b6-7000-8000-000000000ca3",
+          "sub": "0e665491-102b-46a0-9a18-2c5b77fb31f1",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.390Z",
+          "outcome": "closed_by_revocation"
+        },
+        {
+          "access_id": "01b426d1-2656-7000-8000-000005be3bef",
+          "jti": "01b426d1-2656-7000-8000-00000001ed71",
+          "sub": "0d7cbdf8-e07a-4d4c-8309-b8d6c9368458",
+          "role": "provider_installer",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T05:09:42.102Z",
+          "outcome": "closed_by_mode",
+          "closed_at": "2029-05-12T06:47:12.738Z"
+        },
+        {
+          "access_id": "01b427cf-dc70-7000-8000-000000000000",
+          "jti": "01b427cf-dc70-7000-8000-000000000ac8",
+          "sub": "5e294be8-fc45-4a8c-b820-759f03c989b7",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:47:54.864Z",
+          "outcome": "rejected_expired",
+          "closed_at": "2029-05-12T09:49:12.721Z"
+        },
+        {
+          "access_id": "01b427d1-216b-77c3-b679-e9318b900000",
+          "jti": "01b427d1-216b-7000-8000-000008000000",
+          "sub": "427388e1-5d3c-4ee9-9324-ff6e56bb7e4d",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.059Z",
+          "outcome": "rejected_limit"
+        },
+        {
+          "access_id": "01b427c1-2656-7000-8000-00000000d1c0",
+          "jti": "01b427c1-2656-7000-8000-0000012e0abb",
+          "sub": "6214cd27-588d-4327-a72e-38eb11a26def",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:31:50.742Z",
+          "outcome": "rejected_signature"
+        },
+        {
+          "access_id": "01b427d0-cf89-7000-8000-000000000a87",
+          "jti": "01b427d0-cf89-7000-8000-000000000613",
+          "sub": "9da56fa7-ebee-47cc-9469-a47bab563f88",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:48:57.097Z",
+          "outcome": "opened",
+          "closed_at": "2029-05-12T09:49:16.319Z"
+        },
+        {
+          "access_id": "01b427d0-ece6-7000-8000-000001000000",
+          "jti": "01b427d0-ece6-7000-8000-00001c8cfc01",
+          "sub": "df1faf32-dffc-4fac-b632-4e1a6aa19ea4",
+          "role": "provider_installer",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:04.614Z",
+          "outcome": "opened",
+          "closed_at": "2029-05-12T09:49:07.593Z"
+        },
+        {
+          "access_id": "01b427c2-b518-7000-8000-00002e3f705a",
+          "jti": "01b427c2-b518-7fff-bfff-ffffffffffff",
+          "sub": "bbb87018-2c55-4581-9482-3ff494882ccd",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:33:32.824Z",
+          "outcome": "rejected_mode",
+          "closed_at": "2029-05-12T09:35:26.350Z"
+        },
+        {
+          "access_id": "01b427d1-258d-7000-8000-00000030b3e4",
+          "jti": "01b427d1-258d-7000-8314-020d01fe3560",
+          "sub": "6be1a78d-9e8c-4555-be82-e50b66a75c98",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.117Z",
+          "outcome": "rejected_limit",
+          "closed_at": "2029-05-12T09:49:19.198Z"
+        },
+        {
+          "access_id": "01b427b1-2655-7000-8000-000001faa0c4",
+          "jti": "01b427b1-2655-7000-8000-0000020bd1f1",
+          "sub": "0d15117b-d1d6-450d-bff5-2b80aa7c40e8",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:14:22.165Z",
+          "outcome": "closed_by_revocation",
+          "closed_at": "2029-05-12T09:29:33.993Z"
+        },
+        {
+          "access_id": "01b427d1-2598-7000-8000-000000000030",
+          "jti": "01b427d1-2598-7000-8000-0000020ee969",
+          "sub": "81dc38ac-6209-4263-91e7-0edc6f1959cd",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.128Z",
+          "outcome": "rejected_mode"
+        },
+        {
+          "access_id": "01b42738-8fd7-7000-803f-ffffffffffff",
+          "jti": "01b42738-8fd7-7000-8000-6406b4a3ccab",
+          "sub": "db51237c-48a5-4743-879d-00aea5c95278",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T07:02:39.319Z",
+          "outcome": "closed_expired",
+          "closed_at": "2029-05-12T07:42:27.761Z"
+        },
+        {
+          "access_id": "01b427d0-2655-7000-8000-000000012d02",
+          "jti": "01b427d0-2655-7000-8000-000000000032",
+          "sub": "1d8e27f6-3796-424d-b63b-5d26e191a195",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:48:13.781Z",
+          "outcome": "rejected_reused"
+        },
+        {
+          "access_id": "01b427d1-049d-7000-8000-00000012c6ed",
+          "jti": "01b427d1-049d-7000-8000-000000005029",
+          "sub": "b984234d-1344-430a-b2ab-8969d73f27bd",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:10.685Z",
+          "outcome": "rejected_mode"
+        },
+        {
+          "access_id": "01b4253b-e847-7000-8000-00000041b958",
+          "jti": "01b4253b-e847-7000-8000-000000000060",
+          "sub": "5624b07e-088d-4ec4-927a-71a36798b343",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-11T21:47:04.135Z",
+          "outcome": "opened",
+          "closed_at": "2029-05-12T05:08:45.784Z"
+        },
+        {
+          "access_id": "01b427ca-33a2-7000-8000-000006974642",
+          "jti": "01b427ca-33a2-7224-bcea-474163a80000",
+          "sub": "efc54ae6-9287-4a35-a6d1-ce4681cc8a13",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:41:43.970Z",
+          "outcome": "opened"
+        },
+        {
+          "access_id": "01b427d1-1e44-7000-8000-5d6c2d2725aa",
+          "jti": "01b427d1-1e44-7000-803f-8f34c480c464",
+          "sub": "cbbfb654-3e15-42dc-9181-4c578f7b345f",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:17.252Z",
+          "outcome": "closed_by_revocation"
+        },
+        {
+          "access_id": "01b427cc-72ba-7000-8000-0000089d16a0",
+          "jti": "01b427cc-72ba-7000-8000-00000001dbf1",
+          "sub": "2d6a2e88-a272-4185-99bc-7a439b0c1335",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:44:11.194Z",
+          "outcome": "closed_by_revocation"
+        },
+        {
+          "access_id": "01b427d0-fe5b-7000-8000-000125d55f68",
+          "jti": "01b427d0-fe5b-7000-8000-0000000007c3",
+          "sub": "bbd569cf-af38-4672-bc07-4e91fb4b9cfb",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:09.083Z",
+          "outcome": "rejected_mode"
+        },
+        {
+          "access_id": "01b427d0-745d-7000-8000-00000a5a56b0",
+          "jti": "01b427d0-745d-7000-8000-100000000001",
+          "sub": "34f4ba6d-adfe-47d3-ab72-fa0645284462",
+          "role": "plant_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:48:33.757Z",
+          "outcome": "closed_by_client"
+        },
+        {
+          "access_id": "01b427d0-4c1f-7000-8000-0000000000ba",
+          "jti": "01b427d0-4c1f-7000-8001-cf8bb79bf56f",
+          "sub": "07f38564-b232-4081-a957-6918193951a9",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:48:23.455Z",
+          "outcome": "closed_by_revocation"
+        },
+        {
+          "access_id": "01b427aa-493a-7000-8000-000000000586",
+          "jti": "01b427aa-493a-7fff-bfff-fffffffffffe",
+          "sub": "a945a900-416c-41e3-a22d-43f0386651ff",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:06:52.346Z",
+          "outcome": "rejected_reused",
+          "closed_at": "2029-05-12T09:31:09.113Z"
+        },
+        {
+          "access_id": "01b426c3-e140-7000-8000-000000000157",
+          "jti": "01b426c3-e140-7000-8000-000000000f45",
+          "sub": "a0816d20-2cd8-495f-b0df-00aab4cb6b0d",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T04:55:12.448Z",
+          "outcome": "rejected_signature",
+          "closed_at": "2029-05-12T07:35:17.444Z"
+        },
+        {
+          "access_id": "01b427ca-0a4a-7000-8000-000000009d92",
+          "jti": "01b427ca-0a4a-7000-8000-000000000000",
+          "sub": "a1d39426-ebd7-4a1a-b6b6-700091edfeb6",
+          "role": "administrator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:41:33.386Z",
+          "outcome": "rejected_limit",
+          "closed_at": "2029-05-12T09:44:06.027Z"
+        },
+        {
+          "access_id": "01b427d1-25ef-7000-8000-000000002e4b",
+          "jti": "01b427d1-25ef-7000-8000-000000cd9299",
+          "sub": "2aed6c00-d1e4-42e1-ae97-6c9b29fe1a36",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.215Z",
+          "outcome": "rejected_reused"
+        },
+        {
+          "access_id": "01b42707-dbc8-7000-8000-00000000094d",
+          "jti": "01b42707-dbc8-7000-8000-00000008b3e8",
+          "sub": "f3a9215e-9f94-46c2-a49c-609da973a3d9",
+          "role": "provider_installer",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T06:09:27.496Z",
+          "outcome": "rejected_expired"
+        },
+        {
+          "access_id": "01b427d1-25b9-7000-8000-000000001241",
+          "jti": "01b427d1-25b9-7000-8000-00007b4ec623",
+          "sub": "00560165-60d1-4625-bce4-1bc944faea05",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.161Z",
+          "outcome": "rejected_expired",
+          "closed_at": "2029-05-12T09:49:19.318Z"
+        },
+        {
+          "access_id": "01b427d0-e347-7000-8000-000000000190",
+          "jti": "01b427d0-e347-7000-8000-00000000009e",
+          "sub": "b0d70dbe-f84a-4abf-9d53-b96decc20002",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:02.151Z",
+          "outcome": "rejected_signature",
+          "closed_at": "2029-05-12T09:49:19.318Z"
+        },
+        {
+          "access_id": "01b427d1-2072-7000-8000-000000000031",
+          "jti": "01b427d1-2072-7000-8000-00002ea9f726",
+          "sub": "1307d051-cb39-436b-988e-2f0045947bc9",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:17.810Z",
+          "outcome": "rejected_scope",
+          "closed_at": "2029-05-12T09:49:17.849Z"
+        },
+        {
+          "access_id": "01b427d1-1c6b-7000-8000-0000001ec46c",
+          "jti": "01b427d1-1c6b-7000-8000-01cc67f039c3",
+          "sub": "b7bd8459-fed6-4be6-8449-935a466ff4c5",
+          "role": "copasst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:16.779Z",
+          "outcome": "closed_by_client",
+          "closed_at": "2029-05-12T09:49:17.208Z"
+        },
+        {
+          "access_id": "01b427d1-1c60-7000-8000-00000001e2a4",
+          "jti": "01b427d1-1c60-7000-8000-000000027caa",
+          "sub": "be71a511-90e2-4364-be22-9620e723e05c",
+          "role": "provider_installer",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:16.768Z",
+          "outcome": "rejected_reused",
+          "closed_at": "2029-05-12T09:49:17.245Z"
+        },
+        {
+          "access_id": "01b427d1-24a7-7000-8000-000000003dc4",
+          "jti": "01b427d1-24a7-7000-8000-0000000001c1",
+          "sub": "ba6f50f9-e3e6-4861-8f64-e745bf22605b",
+          "role": "line_manager",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:18.887Z",
+          "outcome": "opened"
+        },
+        {
+          "access_id": "01b427d1-2560-7000-8000-00000000016b",
+          "jti": "01b427d1-2560-7000-8000-000000e92bf7",
+          "sub": "03046dcc-54a1-4ca4-bd68-5e0308e08b2c",
+          "role": "coordinator_sst",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-12T09:49:19.072Z",
+          "outcome": "closed_by_revocation"
+        },
+        {
+          "access_id": "01b422aa-ca56-7000-8000-0001ffffffff",
+          "jti": "01b422aa-ca56-7fff-bfff-ffffffffffff",
+          "sub": "cd8ecf38-9da1-48f2-af49-40364ba8c033",
+          "role": "platform_operator",
+          "zone_id": "6ec28660-f596-4148-af77-30bbc66064a9",
+          "opened_at": "2029-05-11T09:49:19.318Z",
+          "outcome": "closed_by_client"
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01a49330-7dfc-7000-8000-0000000022ee",
+      "contract_version": "1.1.0",
+      "organization_id": "171defd6-960e-4e24-9eb5-6a4499958d0e",
+      "plant_id": "92c3e04d-76ea-46db-88a9-8e7409647068",
+      "node_id": "910ac630-f6dc-4674-9377-e6d883a29d9f",
+      "sent_at": "2027-03-29T21:28:13.052Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "ntp.local"
+      },
+      "software_version": "0.0.0",
+      "model_version": "jzhi",
+      "uptime_seconds": 4294967297,
+      "cameras": [
+        {
+          "camera_id": "d8a4d245-3338-4e84-86ca-e90b757de58f",
+          "connected": true,
+          "measured_fps": 180.84253793655841,
+          "observability_state": "not_observable",
+          "declared_min_fps": 60
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "04392cd0-a8cf-408f-a288-7f5da0216ec9",
+          "mode": "commissioning",
+          "observability_state": "degraded",
+          "catalog_version": 151344,
+          "gate_state_valid_until": "2027-03-29T21:28:14.521Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "171f1f02-0073-4636-a627-4f004e0a4f12",
+          "mode": "no_capture",
+          "observability_state": "degraded",
+          "catalog_version": 1237893,
+          "gate_state_valid_until": "2027-03-29T21:28:13.631Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "f474a8d3-5ea1-4d54-b7e3-9466bfab34a3",
+          "mode": "productive",
+          "observability_state": "not_observable",
+          "catalog_version": 486,
+          "gate_state_valid_until": "2027-03-29T21:28:14.392Z",
+          "open_episodes": 430
+        },
+        {
+          "zone_id": "392f052f-72df-47b4-bfcb-bfcf827cea6d",
+          "mode": "no_capture",
+          "observability_state": "not_observable",
+          "catalog_version": 47298,
+          "gate_state_valid_until": "2027-03-29T21:28:37.419Z",
+          "open_episodes": 414125
+        },
+        {
+          "zone_id": "dd6777b4-ce52-4b92-ad12-a546f205bcc3",
+          "mode": "commissioning",
+          "observability_state": "not_observable",
+          "catalog_version": 672,
+          "gate_state_valid_until": "2027-03-29T21:28:12.904Z",
+          "open_episodes": 43092
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "schema_invalid",
+            "count": 320128025
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 5259
+          },
+          {
+            "code": "contract_version_retired",
+            "count": 134217727
+          },
+          {
+            "code": "node_revoked",
+            "count": 0
+          },
+          {
+            "code": "node_zone_mismatch",
+            "count": 0
+          },
+          {
+            "code": "zone_gate_not_approved",
+            "count": 62
+          },
+          {
+            "code": "clip_missing",
+            "count": 0
+          },
+          {
+            "code": "clip_hash_mismatch",
+            "count": 1093
+          },
+          {
+            "code": "clip_not_anonymized",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_expired",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 4673
+          },
+          {
+            "code": "signature_invalid",
+            "count": 7201
+          },
+          {
+            "code": "timestamp_out_of_window",
+            "count": 1359159
+          },
+          {
+            "code": "storage_unavailable",
+            "count": 577
+          }
+        ],
+        "retained_sent": 0
+      },
+      "last_update_result_id": "01a48e0a-21fc-7000-8000-0000000005bf",
+      "live_view_accesses": [
+        {
+          "access_id": "01a49330-5953-7000-8000-00055465fd1c",
+          "jti": "01a49330-5953-7000-8000-00028bfcc61e",
+          "sub": "856039cf-9bb4-4c8d-953b-146aedab0eb7",
+          "role": "plant_manager",
+          "zone_id": "04392cd0-a8cf-408f-a288-7f5da0216ec9",
+          "opened_at": "2027-03-29T21:28:03.667Z",
+          "outcome": "closed_expired"
+        },
+        {
+          "access_id": "01a4930c-fbaf-7000-8000-0000000023f1",
+          "jti": "01a4930c-fbaf-7000-8000-000001672656",
+          "sub": "890bb279-4a3f-4783-816d-9387bfbfa4a5",
+          "role": "plant_manager",
+          "zone_id": "f474a8d3-5ea1-4d54-b7e3-9466bfab34a3",
+          "opened_at": "2027-03-29T20:49:25.935Z",
+          "outcome": "closed_by_mode",
+          "closed_at": "2027-03-29T21:25:15.446Z"
+        },
+        {
+          "access_id": "01a4932d-c705-7fff-bfff-ffffffffffff",
+          "jti": "01a4932d-c705-7007-8425-3ce765002000",
+          "sub": "034c1fd3-4c76-4ef4-b6be-9d09e1d25171",
+          "role": "platform_operator",
+          "zone_id": "04392cd0-a8cf-408f-a288-7f5da0216ec9",
+          "opened_at": "2027-03-29T21:25:15.141Z",
+          "outcome": "opened"
+        },
+        {
+          "access_id": "01a4932f-7dfc-7000-8000-00000000fc8e",
+          "jti": "01a4932f-7dfc-7000-8000-3fffffffffff",
+          "sub": "7f8492e7-5cc0-4aca-8adb-fa00ec584147",
+          "role": "administrator",
+          "zone_id": "392f052f-72df-47b4-bfcb-bfcf827cea6d",
+          "opened_at": "2027-03-29T21:27:07.516Z",
+          "outcome": "rejected_scope"
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01b12a07-b558-7000-8000-00105e1e176c",
+      "contract_version": "1.1.0",
+      "organization_id": "a68b5da5-7981-4702-a8d0-f6e3446f19ea",
+      "plant_id": "c2b6db30-7664-4ccc-acc9-3e9730fe2680",
+      "node_id": "5d8bd9da-c164-42cd-b298-55e10468889f",
+      "sent_at": "2028-12-14T16:59:47.416Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": -8,
+        "source": "fe80::1"
+      },
+      "software_version": "999.999.999-rc.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "model_version": "g__proto__",
+      "uptime_seconds": 744583946,
+      "cameras": [
+        {
+          "camera_id": "a652076f-5bd6-4db6-973c-3778e8f4e1e2",
+          "connected": false,
+          "measured_fps": 161.814438487873,
+          "observability_state": "observable",
+          "declared_min_fps": 57.01801576391226
+        },
+        {
+          "camera_id": "cc6ae58c-93bc-42bd-99a2-a1dfdb2e5d8b",
+          "connected": false,
+          "measured_fps": 137,
+          "observability_state": "observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "00485486-645d-456b-8f53-17b826326fff",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "degraded",
+          "declared_min_fps": 48
+        },
+        {
+          "camera_id": "c7fc20dd-4cec-4b71-a1bb-5143abc76a0d",
+          "connected": true,
+          "measured_fps": 233.17019303868568,
+          "observability_state": "not_observable",
+          "declared_min_fps": 38
+        },
+        {
+          "camera_id": "cbbe41bd-d32e-4a64-a42e-ce9e081069a6",
+          "connected": true,
+          "measured_fps": 75.59689880341278,
+          "observability_state": "not_observable",
+          "declared_min_fps": 13.018753551044583
+        },
+        {
+          "camera_id": "1ea0cd91-e361-4f38-a536-6e3f49ee0232",
+          "connected": false,
+          "measured_fps": 240,
+          "observability_state": "degraded",
+          "declared_min_fps": 60
+        },
+        {
+          "camera_id": "ffbb5ca7-b246-4cf8-9cde-004ce032bea2",
+          "connected": true,
+          "measured_fps": 208,
+          "observability_state": "observable",
+          "declared_min_fps": 11
+        },
+        {
+          "camera_id": "27183efa-f329-445d-a6a8-8da8d0968bee",
+          "connected": true,
+          "measured_fps": 1.1754943508222875e-38,
+          "observability_state": "observable",
+          "declared_min_fps": 31.829534487429658
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "3fc180ea-ff1f-4ebf-8307-825aac9b4bd3",
+          "mode": "commissioning",
+          "observability_state": "degraded",
+          "catalog_version": 295302,
+          "gate_state_valid_until": "2028-12-21T16:59:47.416Z",
+          "open_episodes": 59303
+        },
+        {
+          "zone_id": "4c3f009d-50b2-4b2d-9378-d96f86296b3e",
+          "mode": "productive",
+          "observability_state": "degraded",
+          "catalog_version": 268435457,
+          "gate_state_valid_until": "2028-12-14T16:59:47.093Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "ce225831-516d-48d3-b480-fe25cf03a757",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2028-12-14T16:59:47.133Z",
+          "open_episodes": 14
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "simulated"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "payload_too_large",
+            "count": 625465624
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 525
+          },
+          {
+            "code": "contract_version_retired",
+            "count": 14420
+          },
+          {
+            "code": "node_revoked",
+            "count": 1096022
+          },
+          {
+            "code": "zone_gate_not_approved",
+            "count": 587
+          },
+          {
+            "code": "clip_missing",
+            "count": 558
+          },
+          {
+            "code": "clip_too_large",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 0
+          },
+          {
+            "code": "temporarily_unavailable",
+            "count": 688
+          },
+          {
+            "code": "rate_limited",
+            "count": 0
+          }
+        ],
+        "retained_sent": 0
+      },
+      "live_view_accesses": [],
+      "live_view_local_url": "https://nodo-01.planta.local:8443/"
+    },
+    {
+      "heartbeat_id": "01d49c00-ca42-7000-8000-000000000654",
+      "contract_version": "1.1.0",
+      "organization_id": "e648a267-46b3-4657-be09-8df83faa2949",
+      "plant_id": "5f0a3d79-ef50-44ec-aab2-fa20b2332eaf",
+      "node_id": "049ba713-5868-45aa-ab51-2a5cdcd743a0",
+      "sent_at": "2033-10-11T16:46:32.002Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": -219,
+        "source": "10.0.0.1",
+        "last_sync_at": "2033-10-11T16:21:56.312Z"
+      },
+      "software_version": "74.292.22",
+      "model_version": "z9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-9_.-xxx",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "8e39341a-a284-4dea-9682-235021c0f1d2",
+          "connected": false,
+          "measured_fps": 47,
+          "observability_state": "degraded",
+          "declared_min_fps": 24.276194809428716
+        },
+        {
+          "camera_id": "e09a73b2-4869-40ff-bbf2-a913cea92ca7",
+          "connected": false,
+          "measured_fps": 0,
+          "observability_state": "degraded",
+          "declared_min_fps": 1
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "10c383dc-9065-4442-a354-9fbca88b4bc2",
+          "mode": "commissioning",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2033-10-11T16:46:32.600Z",
+          "open_episodes": 177072879
+        },
+        {
+          "zone_id": "25229114-2981-4335-831a-e1dccd581e16",
+          "mode": "no_capture",
+          "observability_state": "degraded",
+          "catalog_version": 2147483647,
+          "gate_state_valid_until": "2033-10-11T16:45:30.233Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "7a16d9f8-e944-4ef6-819e-75dab5724be9",
+          "mode": "productive",
+          "observability_state": "not_observable",
+          "catalog_version": 463452,
+          "gate_state_valid_until": "2033-10-11T16:46:31.902Z",
+          "open_episodes": 157005763
+        },
+        {
+          "zone_id": "2e0be465-8367-4a63-8e06-53c72de192ba",
+          "mode": "productive",
+          "observability_state": "degraded",
+          "catalog_version": 659231,
+          "gate_state_valid_until": "2033-10-11T16:46:19.635Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "simulated"
+      },
+      "local_queue": {
+        "pending": 479001601,
+        "dead_letter": [
+          {
+            "code": "contract_version_retired",
+            "count": 0
+          },
+          {
+            "code": "node_not_enrolled",
+            "count": 0
+          },
+          {
+            "code": "node_revoked",
+            "count": 164757
+          },
+          {
+            "code": "clip_missing",
+            "count": 121
+          },
+          {
+            "code": "clip_not_anonymized",
+            "count": 0
+          },
+          {
+            "code": "signature_invalid",
+            "count": 2328
+          },
+          {
+            "code": "timestamp_out_of_window",
+            "count": 0
+          },
+          {
+            "code": "rate_limited",
+            "count": 5475
+          }
+        ],
+        "retained_sent": 9013,
+        "oldest_pending_at": "2033-10-11T16:46:28.941Z",
+        "lost_episodes": 116
+      },
+      "last_update_result_id": "01d496da-6e42-7000-8000-00000004f795",
+      "field_notice": [
+        {
+          "zone_id": "7a16d9f8-e944-4ef6-819e-75dab5724be9",
+          "beacon_available": false,
+          "voice_available": false
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01a74270-aad9-7007-bfff-ffffffffffff",
+      "contract_version": "1.1.0",
+      "organization_id": "8d30b8e5-cd69-40c4-b00f-f495786c80bd",
+      "plant_id": "c29c9262-45bf-4ad7-8eb3-d99094ba3175",
+      "node_id": "e5d97c80-ce84-4aff-a857-b1d5419abc50",
+      "sent_at": "2027-08-10T08:17:26.233Z",
+      "node_clock": {
+        "synchronized": false,
+        "offset_ms": -9007199254740991,
+        "source": "fe80::1"
+      },
+      "software_version": "0.0.0",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "4c90d94a-f5a0-4fb6-af4a-e13ec8f70312",
+          "connected": true,
+          "measured_fps": 240,
+          "observability_state": "degraded",
+          "declared_min_fps": 2.324139540928617
+        },
+        {
+          "camera_id": "67ca4a9a-bb5a-4cbf-af54-61bc5e7ae814",
+          "connected": true,
+          "measured_fps": 22.325407589943453,
+          "observability_state": "observable",
+          "declared_min_fps": 18
+        },
+        {
+          "camera_id": "ca8fb2fb-9cf7-4135-9be4-2d97441fc436",
+          "connected": true,
+          "measured_fps": 233,
+          "observability_state": "degraded",
+          "declared_min_fps": 60
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "23ee277a-378e-4990-83e1-6ed030d7d09e",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 1,
+          "gate_state_valid_until": "2027-08-10T08:17:26.030Z",
+          "open_episodes": 11771
+        },
+        {
+          "zone_id": "12d83a20-93c5-4630-94f5-17ca0c1b356b",
+          "mode": "no_capture",
+          "observability_state": "degraded",
+          "catalog_version": 360280283,
+          "gate_state_valid_until": "2027-08-10T08:18:34.219Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "e0fedd31-d05c-42b8-861a-42b0378e9c0e",
+          "mode": "no_capture",
+          "observability_state": "degraded",
+          "catalog_version": 13312,
+          "gate_state_valid_until": "2027-08-10T08:41:02.755Z",
+          "open_episodes": 137
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 121,
+        "dead_letter": [
+          {
+            "code": "payload_too_large",
+            "count": 1776307
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 5447
+          },
+          {
+            "code": "node_zone_mismatch",
+            "count": 0
+          },
+          {
+            "code": "zone_gate_not_approved",
+            "count": 13069
+          },
+          {
+            "code": "clip_missing",
+            "count": 0
+          },
+          {
+            "code": "clip_not_anonymized",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_invalid",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_expired",
+            "count": 318
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 0
+          },
+          {
+            "code": "signature_invalid",
+            "count": 1728
+          },
+          {
+            "code": "rate_limited",
+            "count": 0
+          }
+        ],
+        "retained_sent": 6724098,
+        "oldest_pending_at": "2027-08-10T08:17:26.233Z",
+        "circuit_state": "open",
+        "lost_episodes": 0
+      },
+      "last_update_result_id": "01a73d4a-4ed9-7000-8000-000000270e47",
+      "live_view_accesses": [
+        {
+          "access_id": "01a7426f-ad50-7000-8000-3ac51c89fb50",
+          "jti": "01a7426f-ad50-7000-8000-000000002056",
+          "sub": "5e9adba8-0f82-4112-8969-ed36144a622a",
+          "role": "line_manager",
+          "zone_id": "23ee277a-378e-4990-83e1-6ed030d7d09e",
+          "opened_at": "2027-08-10T08:16:21.328Z",
+          "outcome": "rejected_limit"
+        },
+        {
+          "access_id": "01a74270-aa81-7000-8000-0000000627a0",
+          "jti": "01a74270-aa81-7000-8000-000000000176",
+          "sub": "8c43da51-3ce0-4b12-9494-3c0305543e63",
+          "role": "line_manager",
+          "zone_id": "e0fedd31-d05c-42b8-861a-42b0378e9c0e",
+          "opened_at": "2027-08-10T08:17:26.145Z",
+          "outcome": "rejected_limit",
+          "closed_at": "2027-08-10T08:17:26.151Z"
+        },
+        {
+          "access_id": "01a7404f-c62f-7000-8000-0000000000b6",
+          "jti": "01a7404f-c62f-7000-8000-00000000299b",
+          "sub": "2dc91410-474e-422d-8c36-50e3a53e442c",
+          "role": "plant_manager",
+          "zone_id": "23ee277a-378e-4990-83e1-6ed030d7d09e",
+          "opened_at": "2027-08-09T22:22:16.111Z",
+          "outcome": "opened",
+          "closed_at": "2027-08-10T02:10:40.542Z"
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01cfa292-e729-7000-8000-00000002bc3c",
+      "contract_version": "1.1.0",
+      "organization_id": "8d1d064b-1182-4389-bbd4-d08ebc39b29a",
+      "plant_id": "6f53a30f-f15c-41ee-a1da-fd83922d9443",
+      "node_id": "14106c93-1058-4ec6-a6cc-a0cfae672f23",
+      "sent_at": "2033-02-06T10:09:54.473Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "fe80::1",
+        "last_sync_at": "2033-02-06T10:09:06.415Z"
+      },
+      "software_version": "705.297.316-rc.1",
+      "model_version": "v-7",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "3869d057-d1e2-438c-8c55-d581a1a9fcbc",
+          "connected": true,
+          "measured_fps": 101,
+          "observability_state": "not_observable",
+          "declared_min_fps": 60
+        },
+        {
+          "camera_id": "6fb52ed2-7d4f-4863-915b-ec68478eb3bd",
+          "connected": true,
+          "measured_fps": 178,
+          "observability_state": "not_observable",
+          "declared_min_fps": 34.25287633267008
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "689576a6-cd76-4033-9ad0-9716abeca612",
+          "mode": "commissioning",
+          "observability_state": "degraded",
+          "catalog_version": 577,
+          "gate_state_valid_until": "2033-02-06T10:30:55.701Z",
+          "open_episodes": 53699
+        },
+        {
+          "zone_id": "86ed31bc-b309-4a0e-8687-fa2551584bf9",
+          "mode": "no_capture",
+          "observability_state": "not_observable",
+          "catalog_version": 2571,
+          "gate_state_valid_until": "2033-02-06T10:09:54.270Z",
+          "open_episodes": 334223
+        }
+      ],
+      "signal_reader": {
+        "available": false,
+        "adapter": "file",
+        "last_valid_read_at": "2033-02-06T10:09:54.396Z"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "schema_invalid",
+            "count": 510509
+          },
+          {
+            "code": "contract_version_unsupported",
+            "count": 0
+          },
+          {
+            "code": "node_zone_mismatch",
+            "count": 0
+          },
+          {
+            "code": "clip_missing",
+            "count": 0
+          },
+          {
+            "code": "clip_too_large",
+            "count": 1710
+          },
+          {
+            "code": "clip_not_anonymized",
+            "count": 0
+          },
+          {
+            "code": "enrollment_code_invalid",
+            "count": 684792582
+          },
+          {
+            "code": "signature_invalid",
+            "count": 17581
+          },
+          {
+            "code": "temporarily_unavailable",
+            "count": 51024
+          },
+          {
+            "code": "rate_limited",
+            "count": 3441
+          }
+        ],
+        "retained_sent": 0,
+        "lost_episodes": 536870911
+      },
+      "last_update_result_id": "01cf9d6c-8b29-7000-8000-0000002a1426",
+      "live_view_accesses": [
+        {
+          "access_id": "01cfa280-cd0b-7000-8000-000000001859",
+          "jti": "01cfa280-cd0b-7000-8000-0000000000c2",
+          "sub": "96a6215d-1e73-480c-a4ee-47ca853f755e",
+          "role": "platform_operator",
+          "zone_id": "86ed31bc-b309-4a0e-8687-fa2551584bf9",
+          "opened_at": "2033-02-06T09:50:08.139Z",
+          "outcome": "closed_by_revocation"
+        }
+      ]
+    },
+    {
+      "heartbeat_id": "01c788cf-d047-7000-8000-000000ca3c21",
+      "contract_version": "1.1.0",
+      "organization_id": "593ca5c8-96c0-4038-96a6-6f95b38aaf87",
+      "plant_id": "96c6a21a-c1d3-45f1-a828-3271e8d067e1",
+      "node_id": "3afd0a21-b631-44ee-abff-8b1bbc48bac0",
+      "sent_at": "2031-12-31T17:44:00.327Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "gps0"
+      },
+      "software_version": "0.0.0",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 4503599627370496,
+      "cameras": [
+        {
+          "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+          "connected": true,
+          "measured_fps": 240,
+          "observability_state": "not_observable",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "439b2e66-3a46-4cce-9844-41b30b1cde90",
+          "connected": false,
+          "measured_fps": 85,
+          "observability_state": "not_observable",
+          "declared_min_fps": 60
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "mode": "commissioning",
+          "observability_state": "observable",
+          "catalog_version": 10630,
+          "gate_state_valid_until": "2031-12-31T17:43:59.422Z",
+          "open_episodes": 91653305
+        },
+        {
+          "zone_id": "93597a14-5ef3-4a6b-9df3-e705f27a4170",
+          "mode": "commissioning",
+          "observability_state": "observable",
+          "catalog_version": 1938503,
+          "gate_state_valid_until": "2031-12-31T17:28:09.688Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "a92f5159-5cd3-4ebb-a544-a4321cef1c64",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 9625644,
+          "gate_state_valid_until": "2031-12-31T17:44:05.499Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": true,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "schema_invalid",
+            "count": 66163
+          },
+          {
+            "code": "contract_version_retired",
+            "count": 262
+          },
+          {
+            "code": "clip_missing",
+            "count": 2308
+          },
+          {
+            "code": "clip_too_large",
+            "count": 430
+          },
+          {
+            "code": "enrollment_code_used",
+            "count": 4471
+          },
+          {
+            "code": "signature_invalid",
+            "count": 0
+          },
+          {
+            "code": "temporarily_unavailable",
+            "count": 74515
+          },
+          {
+            "code": "rate_limited",
+            "count": 506922
+          }
+        ],
+        "retained_sent": 0
+      },
+      "live_view_accesses": [
+        {
+          "access_id": "01c788cf-cf84-7000-8000-0000000244c1",
+          "jti": "01c788cf-cf84-7000-8000-0000000011df",
+          "sub": "cacc224a-0ebd-49ce-967a-b0b4343586d7",
+          "role": "provider_installer",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:44:00.132Z",
+          "outcome": "closed_by_mode",
+          "closed_at": "2031-12-31T17:44:00.290Z"
+        },
+        {
+          "access_id": "01c788cf-cf98-7000-8000-0000009dde74",
+          "jti": "01c788cf-cf98-7000-8000-0000000001fa",
+          "sub": "d29dc804-3fd3-43b9-8973-366d9b5520e6",
+          "role": "plant_manager",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:44:00.152Z",
+          "outcome": "rejected_scope"
+        },
+        {
+          "access_id": "01c788cf-ca6d-7000-8000-0000000000de",
+          "jti": "01c788cf-ca6d-7000-8000-000000002554",
+          "sub": "e6a8e879-8002-4066-adcb-9292890343b1",
+          "role": "plant_manager",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:43:58.829Z",
+          "outcome": "opened"
+        }
+      ],
+      "live_view_local_url": "https://0e.gd40lg9gb.humqnuopi3:8443/"
+    },
+    {
+      "heartbeat_id": "01c788cf-d047-7000-8000-000000ca3c21",
+      "contract_version": "1.1.0",
+      "organization_id": "593ca5c8-96c0-4038-96a6-6f95b38aaf87",
+      "plant_id": "96c6a21a-c1d3-45f1-a828-3271e8d067e1",
+      "node_id": "3afd0a21-b631-44ee-abff-8b1bbc48bac0",
+      "sent_at": "2031-12-31T17:44:00.327Z",
+      "node_clock": {
+        "synchronized": true,
+        "offset_ms": 0,
+        "source": "gps0"
+      },
+      "software_version": "0.0.1",
+      "model_version": "yolov8n-2026.09",
+      "uptime_seconds": 0,
+      "cameras": [
+        {
+          "camera_id": "aba92a67-05bf-4b03-8aff-a8c8a4ad3d92",
+          "connected": false,
+          "measured_fps": 0.0,
+          "observability_state": "degraded",
+          "declared_min_fps": 1
+        },
+        {
+          "camera_id": "439b2e66-3a46-4cce-9844-41b30b1cde90",
+          "connected": false,
+          "measured_fps": 0.0,
+          "observability_state": "observable",
+          "declared_min_fps": 60
+        }
+      ],
+      "zones": [
+        {
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "mode": "commissioning",
+          "observability_state": "observable",
+          "catalog_version": 10630,
+          "gate_state_valid_until": "2031-12-31T17:43:59.422Z",
+          "open_episodes": 91653305
+        },
+        {
+          "zone_id": "93597a14-5ef3-4a6b-9df3-e705f27a4170",
+          "mode": "commissioning",
+          "observability_state": "observable",
+          "catalog_version": 1938503,
+          "gate_state_valid_until": "2031-12-31T17:28:09.688Z",
+          "open_episodes": 0
+        },
+        {
+          "zone_id": "a92f5159-5cd3-4ebb-a544-a4321cef1c64",
+          "mode": "no_capture",
+          "observability_state": "observable",
+          "catalog_version": 9625644,
+          "gate_state_valid_until": "2031-12-31T17:44:05.499Z",
+          "open_episodes": 0
+        }
+      ],
+      "signal_reader": {
+        "available": true,
+        "adapter": "modbus_rtu"
+      },
+      "local_queue": {
+        "pending": 0,
+        "dead_letter": [
+          {
+            "code": "payload_too_large",
+            "count": 262
+          },
+          {
+            "code": "node_zone_mismatch",
+            "count": 2308
+          },
+          {
+            "code": "clip_missing",
+            "count": 430
+          },
+          {
+            "code": "enrollment_code_invalid",
+            "count": 4471
+          },
+          {
+            "code": "enrollment_code_expired",
+            "count": 0
+          },
+          {
+            "code": "idempotency_conflict",
+            "count": 74515
+          },
+          {
+            "code": "timestamp_out_of_window",
+            "count": 506922
+          }
+        ],
+        "retained_sent": 0
+      },
+      "live_view_accesses": [
+        {
+          "access_id": "01c788cf-cf84-7000-8000-0000000244c1",
+          "jti": "01c788cf-cf84-7000-8000-0000000011df",
+          "sub": "cacc224a-0ebd-49ce-967a-b0b4343586d7",
+          "role": "provider_installer",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:44:00.132Z",
+          "outcome": "closed_by_mode",
+          "closed_at": "2031-12-31T17:44:00.290Z"
+        },
+        {
+          "access_id": "01c788cf-cf98-7000-8000-0000009dde74",
+          "jti": "01c788cf-cf98-7000-8000-0000000001fa",
+          "sub": "d29dc804-3fd3-43b9-8973-366d9b5520e6",
+          "role": "plant_manager",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:44:00.152Z",
+          "outcome": "rejected_scope"
+        },
+        {
+          "access_id": "01c788cf-ca6d-7000-8000-0000000000de",
+          "jti": "01c788cf-ca6d-7000-8000-000000002554",
+          "sub": "e6a8e879-8002-4066-adcb-9292890343b1",
+          "role": "plant_manager",
+          "zone_id": "e8b2a8ec-e21f-4f26-aeef-7d7653834c11",
+          "opened_at": "2031-12-31T17:43:58.829Z",
+          "outcome": "opened"
+        }
+      ],
+      "live_view_local_url": "https://0e.gd40lg9gb.humqnuopi3:8443/"
+    }
+  ]
+}

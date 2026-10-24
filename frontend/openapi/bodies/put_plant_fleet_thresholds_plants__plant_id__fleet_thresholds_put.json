@@ -1,0 +1,28 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "put_plant_fleet_thresholds_plants__plant_id__fleet_thresholds_put",
+  "method": "put",
+  "path": "/plants/{plant_id}/fleet-thresholds",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/FleetThresholdsBody",
+    "$defs": {
+      "FleetThresholdsBody": {
+        "properties": {
+          "queue_pending_threshold": { "type": "integer" },
+          "queue_age_threshold_minutes": { "type": "integer" },
+          "clock_drift_threshold_ms": { "type": "integer" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "queue_pending_threshold",
+          "queue_age_threshold_minutes",
+          "clock_drift_threshold_ms"
+        ]
+      }
+    }
+  },
+  "query": null
+}

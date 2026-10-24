@@ -1,0 +1,24 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "upload_grant_loop_actions__action_id__attachments_upload_grant_post",
+  "method": "post",
+  "path": "/loop/actions/{action_id}/attachments/upload-grant",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/UploadGrantRequest",
+    "$defs": {
+      "UploadGrantRequest": {
+        "properties": {
+          "content_type": { "type": "string", "maxLength": 255, "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["content_type", "size_bytes", "sha256"]
+      }
+    }
+  },
+  "query": null
+}

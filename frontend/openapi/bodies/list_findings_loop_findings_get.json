@@ -1,0 +1,39 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "list_findings_loop_findings_get",
+  "method": "get",
+  "path": "/loop/findings",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "zone_id": {
+        "anyOf": [
+          { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          { "type": "null" }
+        ]
+      },
+      "family": { "anyOf": [{ "$ref": "#/$defs/PredicateFamily" }, { "type": "null" }] },
+      "tier": { "anyOf": [{ "$ref": "#/$defs/EvidenceTier" }, { "type": "null" }] },
+      "lifecycle_state": {
+        "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }]
+      },
+      "from": { "anyOf": [{ "type": "string", "maxLength": 40 }, { "type": "null" }] },
+      "to": { "anyOf": [{ "type": "string", "maxLength": 40 }, { "type": "null" }] },
+      "order": { "$ref": "#/$defs/InboxOrder" },
+      "cursor": { "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }] },
+      "limit": { "type": "integer", "maximum": 200, "minimum": 1 }
+    },
+    "additionalProperties": false,
+    "$defs": {
+      "EvidenceTier": { "type": "string", "enum": ["tier_1", "tier_2"] },
+      "InboxOrder": { "type": "string", "enum": ["newest_first", "oldest_first"] },
+      "PredicateFamily": {
+        "type": "string",
+        "enum": ["coexistence", "guard_bypass", "dwell", "startup_transition"]
+      }
+    }
+  }
+}

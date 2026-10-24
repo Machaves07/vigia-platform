@@ -1,0 +1,18 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "get_monthly_package_accreditation_monthly_packages_get",
+  "method": "get",
+  "path": "/accreditation/monthly-packages",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "zone_id": { "type": "string", "format": "uuid" },
+      "period": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" }
+    },
+    "required": ["zone_id", "period"],
+    "additionalProperties": false
+  }
+}

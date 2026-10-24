@@ -1,0 +1,28 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "list_overdue_loop_overdue_get",
+  "method": "get",
+  "path": "/loop/overdue",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "plant_id": { "type": "string", "format": "uuid" },
+      "zone_id": {
+        "anyOf": [
+          { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          { "type": "null" }
+        ]
+      },
+      "from": { "anyOf": [{ "type": "string", "maxLength": 40 }, { "type": "null" }] },
+      "to": { "anyOf": [{ "type": "string", "maxLength": 40 }, { "type": "null" }] },
+      "min_overdue_days": { "type": "integer", "maximum": 3660, "minimum": 0 },
+      "cursor": { "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }] },
+      "limit": { "type": "integer", "maximum": 200, "minimum": 1 }
+    },
+    "required": ["plant_id"],
+    "additionalProperties": false
+  }
+}

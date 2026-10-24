@@ -1,0 +1,25 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "record_pass_walk_tests__session_id__passes_post",
+  "method": "post",
+  "path": "/walk-tests/{session_id}/passes",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/PassBody",
+    "$defs": {
+      "PassBody": {
+        "properties": {
+          "row_id": { "type": "string", "format": "uuid" },
+          "result": { "$ref": "#/$defs/PassResult" },
+          "evidence_ref": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["row_id", "result"]
+      },
+      "PassResult": { "type": "string", "enum": ["detected", "missed", "false_alarm"] }
+    }
+  },
+  "query": null
+}
