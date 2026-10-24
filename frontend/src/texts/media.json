@@ -18,7 +18,7 @@
   "media.upload.progress": "Progreso de la subida",
   "media.upload.done": "Archivo subido",
   "media.upload.kept": "Su archivo sigue seleccionado: puede reintentar sin elegirlo de nuevo.",
-  "media.upload.empty": "El archivo está vacío.",
+  "media.upload.empty": "El archivo no contiene datos.",
   "media.upload.store_failed": "El almacén no recibió el archivo.",
   "media.upload.attachment_type_not_allowed": "El archivo debe ser una imagen JPEG o PNG o un documento PDF.",
   "media.upload.attachment_too_large": "El archivo supera el tamaño máximo admitido.",
