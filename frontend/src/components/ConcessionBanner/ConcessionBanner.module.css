@@ -1,0 +1,56 @@
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 2px solid var(--color-degraded);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.statement {
+  margin: 0;
+  font-weight: 600;
+}
+
+.details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  font-size: var(--font-size-small);
+}
+
+.details div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.details dt {
+  color: var(--color-text-muted);
+}
+
+.details dt::after {
+  content: ':';
+}
+
+.details dd {
+  margin: 0;
+}
+
+.change {
+  min-height: var(--touch-target-min);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.change:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}

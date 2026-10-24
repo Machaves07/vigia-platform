@@ -1,0 +1,16 @@
+{
+  "components_concession.banner.label": "Concesión activa",
+  "components_concession.banner.operating_in": "Operando en",
+  "components_concession.banner.under_until": "bajo concesión hasta",
+  "components_concession.banner.audited": "cada consulta queda registrada",
+  "components_concession.banner.client_pending": "la organización cliente",
+  "components_concession.banner.scope": "Alcance",
+  "components_concession.banner.reason": "Motivo",
+  "components_concession.banner.change": "Cambiar de concesión",
+  "components_concession.scope.organization": "Toda la organización",
+  "components_concession.scope.plant": "Planta",
+  "components_concession.scope.zone": "Zona",
+  "components_concession.ended.changed": "Dejó de operar bajo la concesión. Elija otra en su panel de concesiones.",
+  "components_concession.ended.expired": "La concesión venció. Volvió a su panel de concesiones.",
+  "components_concession.ended.not_found": "La concesión ya no da acceso a ese recurso o fue revocada. Volvió a su panel de concesiones."
+}

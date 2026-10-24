@@ -9,10 +9,14 @@
  * - `src/client/validators.js` (y su `.d.ts`): esos esquemas compilados por el Ajv del contrato en
  *   código autónomo. La política de contenido no admite `unsafe-eval`, así que el navegador no
  *   puede compilar con Ajv: ejecuta lo que se compiló aquí, como `@vigia/contracts`.
+ * - `src/state/scope/uiPreferences.validator.js` (y su `.d.ts`): el esquema cerrado de
+ *   `UiPreferences` (`uiPreferences.schema.json`, a mano), compilado igual (BR-APP-19).
  *
  * Todo es función del texto de la especificación y de las versiones fijadas en
  * `package-lock.json`: dos corridas dan los mismos bytes.
  */
+import { readFileSync } from 'node:fs';
+
 import Ajv2020 from 'ajv/dist/2020.js';
 import standaloneCode from 'ajv/dist/standalone/index.js';
 import addFormats from 'ajv-formats';
@@ -32,6 +36,13 @@ const NOTICE =
   'Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: ' +
   'no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).';
 const CODE_HEADER = `// ${NOTICE}\n`;
+
+/** Esquema cerrado de `UiPreferences` (a mano) y su validador compilado (sin extensión). */
+const PREFERENCES_SCHEMA = 'src/state/scope/uiPreferences.schema.json';
+const PREFERENCES_VALIDATOR = 'src/state/scope/uiPreferences.validator';
+const PREFERENCES_HEADER =
+  `// Generado por \`npm run generate\` (scripts/generate.mjs) desde ${PREFERENCES_SCHEMA}: ` +
+  'no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).\n';
 
 const METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
 const COMPONENT_REF = /^#\/components\/schemas\/([A-Za-z0-9_.-]+)$/;
@@ -543,5 +554,42 @@ export declare const bodies: Readonly<Record<BodyOperationId, CompiledValidator>
 export declare const queries: Readonly<Record<QueryOperationId, CompiledValidator>>;
 `;
   files.set('src/client/validators.d.ts', await pretty(declarations, 'src/client/validators.d.ts'));
+
+  // `UiPreferences` (LC-APP-07, BR-APP-19): no sale de `app.yaml`, pero por la misma razón se
+  // compila aquí; `state.scope` valida con él antes de escribir en el almacenamiento.
+  const preferencesAjv = new Ajv2020({
+    strict: true,
+    allErrors: false,
+    coerceTypes: false,
+    useDefaults: false,
+    removeAdditional: false,
+    messages: false,
+    code: { source: true, esm: true, lines: true, optimize: true },
+  });
+  preferencesAjv.addSchema(
+    JSON.parse(readFileSync(new URL(`../../${PREFERENCES_SCHEMA}`, import.meta.url), 'utf8')),
+    'ui_preferences.json',
+  );
+  const preferences = [
+    '/* eslint-disable -- código autónomo de Ajv: no se edita ni se revisa a mano. */',
+    '// @ts-nocheck -- código autónomo de Ajv; sus tipos están en uiPreferences.validator.d.ts.',
+    PREFERENCES_HEADER.trimEnd(),
+    standalone(preferencesAjv, { validateUiPreferences: 'ui_preferences.json' }),
+    '',
+  ].join('\n');
+  files.set(
+    `${PREFERENCES_VALIDATOR}.js`,
+    await pretty(preferences, `${PREFERENCES_VALIDATOR}.js`),
+  );
+  const preferencesTypes = `${PREFERENCES_HEADER}
+/** Esquema cerrado de \`UiPreferences\` compilado por Ajv 8 (2020-12, estricto, sin coerción). */
+import type { CompiledValidator } from '@vigia/contracts';
+
+export declare const validateUiPreferences: CompiledValidator;
+`;
+  files.set(
+    `${PREFERENCES_VALIDATOR}.d.ts`,
+    await pretty(preferencesTypes, `${PREFERENCES_VALIDATOR}.d.ts`),
+  );
   return files;
 }
