@@ -41,6 +41,8 @@ const START = 1_800_000_000_000;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const FORM_ROUTE = '/users?tab=invite';
+/** Tope de las esperas de MSW y React: no es lo que se prueba (retro 15). */
+const WAIT = { timeout: 10_000 };
 
 afterEach(() => {
   cleanup();
@@ -316,7 +318,7 @@ describe('aviso de inactividad a los 28 min (BR-APP-14)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Seguir trabajando' }));
     await vi.waitFor(() => {
       expect(screen.getByLabelText('estado').textContent).toBe('active');
-    });
+    }, WAIT);
   });
 
   it('el vencimiento lo marca idle_expires_at del servidor, no una marca propia', async () => {
@@ -431,6 +433,30 @@ describe('ports.base avisa a la sesión (VIG-292 + VIG-300)', () => {
     });
   });
 
+  it.each([
+    ['429 rate_limited', () => apiError('rate_limited', 429)],
+    ['503 temporarily_unavailable del bulkhead', () => apiError('temporarily_unavailable', 503)],
+    ['413 payload_too_large', () => apiError('payload_too_large', 413)],
+    ['500 internal_error', () => apiError('internal_error', 500)],
+    ['502 de la pasarela sin cuerpo', () => new HttpResponse(null, { status: 502 })],
+  ])('%s llega antes de SessionStep: no renueva la ventana', async (_, reply) => {
+    const { clock, notices, store, me } = setup();
+    server.use(me());
+    await store.load();
+    clock.advance(20 * MINUTE_MS);
+    server.use(variant('list_users_users_get', reply));
+    await currentTransport()
+      .request({ operationId: 'list_users_users_get', kind: 'write' })
+      .catch(() => undefined);
+    expect(store.getSnapshot()).toMatchObject({
+      last_request_at: START,
+      idle_deadline_at: START + IDLE_TIMEOUT_MS,
+    });
+    // El aviso sale a los 28 min de la última respuesta autenticada, antes del vencimiento real.
+    clock.advance(8 * MINUTE_MS);
+    expect(notices).toEqual(['idle_warning']);
+  });
+
   it('privacy_notice_required pasa a privacy_notice_pending', async () => {
     const { store } = setup();
     server.use(variant('me_me_get', () => apiError('privacy_notice_required', 403)));
@@ -470,7 +496,11 @@ function InviteForm() {
 }
 
 describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, NFR-APP-38)', () => {
-  async function lockMidForm(options: { reauthAs: string }) {
+  async function lockMidForm(options: {
+    reauthAs: string;
+    mountWhileLocked?: boolean;
+    detour?: boolean;
+  }) {
     const context = setup();
     const { clock, store, me } = context;
     server.use(me());
@@ -487,22 +517,49 @@ describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, N
     fireEvent.click(screen.getByRole('button', { name: 'Invitar' }));
     await vi.waitFor(() => {
       expect(store.getSnapshot().status).toBe('locked_for_reauth');
-    });
+    }, WAIT);
     // El armazón lleva a /login: la pantalla se desmonta con la sesión bloqueada.
     view.unmount();
     context.route.current = LOGIN_ROUTE;
+    if (options.mountWhileLocked === true) {
+      // Antes de saber quién reautentica, el formulario no recupera nada; al desmontarse en
+      // blanco no pisa el borrador guardado.
+      context.route.current = FORM_ROUTE;
+      const locked = render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+      expect(screen.getByLabelText('Correo')).toHaveProperty('value', '');
+      locked.unmount();
+      context.route.current = LOGIN_ROUTE;
+    }
     clock.advance(10 * MINUTE_MS);
     server.use(me({ userId: options.reauthAs }));
     await act(async () => {
       await store.load();
     });
     const back = store.takeReturnRoute();
+    if (options.detour === true) {
+      // La persona pasa antes por otra pantalla con el mismo formulario: el borrador no es suyo.
+      context.route.current = '/users';
+      const other = render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+      expect(screen.getByLabelText('Correo')).toHaveProperty('value', '');
+      other.unmount();
+    }
     // Sin ruta guardada, la persona vuelve a abrir el mismo formulario por su cuenta.
     context.route.current = back ?? FORM_ROUTE;
     render(createElement(SessionProvider, { store }, createElement(InviteForm)));
-    // Tiempo y tareas para que una escritura reenviada sola llegara a MSW.
+    // Tiempo para los temporizadores y una petición testigo por el mismo transporte y MSW: una
+    // escritura reenviada saldría antes que ella.
     clock.advance(10 * MINUTE_MS);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    let probes = 0;
+    server.use(
+      variant('list_users_users_get', () => {
+        probes += 1;
+        return HttpResponse.json({ items: [] });
+      }),
+    );
+    await act(async () => {
+      await currentTransport().request({ operationId: 'list_users_users_get', kind: 'read' });
+    });
+    expect(probes).toBe(1);
     return { back, posts: () => posts };
   }
 
@@ -511,6 +568,19 @@ describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, N
     expect(back).toBe(FORM_ROUTE);
     expect(screen.getByLabelText('Correo')).toHaveProperty('value', 'nueva@ejemplo.test');
     expect(screen.getByLabelText('sucio').textContent).toBe('true');
+    expect(posts()).toBe(1);
+  });
+
+  it('con la sesión bloqueada el formulario no recupera el borrador ni lo pisa', async () => {
+    const { back, posts } = await lockMidForm({ reauthAs: USER_A, mountWhileLocked: true });
+    expect(back).toBe(FORM_ROUTE);
+    expect(screen.getByLabelText('Correo')).toHaveProperty('value', 'nueva@ejemplo.test');
+    expect(posts()).toBe(1);
+  });
+
+  it('el borrador espera en su ruta aunque la persona pase antes por otra', async () => {
+    const { posts } = await lockMidForm({ reauthAs: USER_A, detour: true });
+    expect(screen.getByLabelText('Correo')).toHaveProperty('value', 'nueva@ejemplo.test');
     expect(posts()).toBe(1);
   });
 

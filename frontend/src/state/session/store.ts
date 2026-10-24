@@ -11,7 +11,8 @@
  *   se reenvía: la persona la repite al volver (BR-APP-16, PAT-APP-RES-05).
  * - Borradores (`FormDraft`, NFR-APP-38): solo en memoria. Una pantalla que se desmonta con la
  *   sesión perdida deja aquí su borrador; al volver a la misma ruta tras reautenticar la misma
- *   persona, lo recupera. Otra persona, otra ruta o el cierre de sesión lo descartan.
+ *   persona, lo recupera; en otra ruta sigue guardado. Otra persona o el cierre de sesión lo
+ *   descartan.
  * - `logout()`: `POST /auth/logout` y, aunque falle, `clearAll()` de la caché, borrado de
  *   `UiPreferences` (`state.scope`, inyectado), del almacenamiento del navegador y de todo el
  *   estado en memoria; vuelta a `/login` (BR-APP-17, BR-APP-19).
@@ -61,7 +62,10 @@ export interface SessionStore {
   /** Funciones sueltas (sin `this`): `useSyncExternalStore` las recibe tal cual. */
   readonly getSnapshot: () => UiSession;
   readonly subscribe: (listener: () => void) => () => void;
-  /** Para `createTransport` (`onAuthenticatedResponse`, `onSessionEvent`). */
+  /**
+   * Para `createTransport` (`onAuthenticatedResponse`, `onSessionEvent`). Los rechazos previos a
+   * la sesión (429, 503, 413, 5xx) no llegan aquí: no renuevan la ventana.
+   */
   readonly transportHooks: {
     readonly onAuthenticatedResponse: () => void;
     readonly onSessionEvent: (event: 'unauthenticated' | 'privacy_notice_required') => void;
@@ -181,7 +185,10 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
     keepDraft(draft) {
       // Con la sesión en uso el borrador es de la pantalla; sin sesión no hay nada que conservar.
       if (isAuthenticated(session.status) || session.status === 'anonymous') return;
-      drafts.set(draftKey(draft.screenId, draft.formId), {
+      const key = draftKey(draft.screenId, draft.formId);
+      // El formulario montado en blanco con la sesión bloqueada no pisa el borrador guardado.
+      if (!draft.dirty && drafts.has(key)) return;
+      drafts.set(key, {
         route: session.return_route ?? options.currentRoute(),
         draft: formDraftReducer(draft, { type: 'lock' }),
       });
@@ -190,8 +197,9 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
       const key = draftKey(screenId, formId);
       const kept = drafts.get(key);
       if (kept === undefined || !isAuthenticated(session.status)) return null;
-      drafts.delete(key);
+      // En otra ruta sigue guardado: vuelve si la persona abre luego el formulario original.
       if (kept.route !== options.currentRoute()) return null;
+      drafts.delete(key);
       return formDraftReducer(kept.draft, { type: 'restore' });
     },
     async logout() {

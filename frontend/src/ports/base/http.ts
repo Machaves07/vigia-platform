@@ -114,8 +114,9 @@ export interface TransportOptions {
   /** Eventos de sesión (VIG-300). */
   readonly onSessionEvent?: (event: SessionEvent) => void;
   /**
-   * Respuesta HTTP que no es `unauthenticated` ni `privacy_notice_required`: el servidor renovó la
-   * inactividad de la sesión (BR-NUC-25), y `state.session` reinicia su ventana (VIG-300).
+   * Respuesta que pasó por `SessionStep` (2xx o error de negocio): el servidor renovó la
+   * inactividad de la sesión (BR-NUC-25), y `state.session` reinicia su ventana (VIG-300). Los
+   * rechazos previos a la sesión (`PRE_SESSION_CODES`, 5xx) no avisan.
    */
   readonly onAuthenticatedResponse?: () => void;
   /** Origen de la API; por omisión, el de la página (la API comparte origen). */
@@ -145,6 +146,21 @@ export interface Transport {
 const TRANSIENT: HttpError = { code: 'temporarily_unavailable', status: 0 };
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
 const MAX_API_VERSION_LENGTH = 128;
+/**
+ * Rechazos que la cadena de U-02 emite antes de `SessionStep` (límite de cuerpo, bulkhead, límite
+ * por origen) o sin garantía de haber llegado a él (`internal_error`, pasarela): no renuevan la
+ * inactividad. Ante la duda no se renueva: un aviso adelantado se corrige con «seguir trabajando».
+ */
+const PRE_SESSION_CODES: ReadonlySet<string> = new Set([
+  'payload_too_large',
+  'temporarily_unavailable',
+  'rate_limited',
+  'internal_error',
+]);
+
+function renewsSession(error: HttpError): boolean {
+  return error.status < 500 && !PRE_SESSION_CODES.has(error.code);
+}
 
 type Attempt =
   | { readonly type: 'ok'; readonly status: number; readonly value: unknown }
@@ -341,7 +357,7 @@ export function createTransport(options: TransportOptions): Transport {
         result.error.code === 'privacy_notice_required'
       ) {
         options.onSessionEvent?.(result.error.code);
-      } else {
+      } else if (renewsSession(result.error)) {
         options.onAuthenticatedResponse?.();
       }
     }
