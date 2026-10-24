@@ -233,6 +233,9 @@ describe('PR-APP-07: inspección de valores renderizados, no de textos fijos', (
           ),
           createElement('p', null, 'Sesiones activas de la persona'),
           createElement('p', null, '4'),
+          createElement('p', null, 'Firma de la persona 2026-10-24'),
+          createElement('p', null, 'Zona 3 · Persona responsable'),
+          createElement('button', null, 'Persona ', createElement('span', null, '2')),
         ),
       ),
     ).toEqual([]);
@@ -251,5 +254,49 @@ describe('PR-APP-07: inspección de valores renderizados, no de textos fijos', (
     expect(violations(createElement('p', { 'aria-label': '12 personas' }, 'Zona'))).toEqual([
       'RV-00 (SCR-00): «personas» seguido de número en el atributo aria-label de <p>.',
     ]);
+  });
+
+  it('detecta «personas» con número aunque los separe puntuación', () => {
+    for (const text of [
+      'Personas (3)',
+      '\u0420\u0435rsonas (3)',
+      'Personas - 3',
+      'Personas — 3',
+      'Personas = 3',
+      'Personas · 3',
+      'Personas, 3',
+      'Personas [3]',
+      'Personas: «3»',
+      '(3) personas',
+      '3-personas',
+      '1 persona',
+    ]) {
+      expect(violations(createElement('p', null, text)), text).toEqual([
+        'RV-00 (SCR-00): «personas» seguido de número en el texto de <p>.',
+      ]);
+    }
+    expect(violations(createElement('p', { title: 'Personas (3)' }, 'Zona'))).toEqual([
+      'RV-00 (SCR-00): «personas» seguido de número en el atributo title de <p>.',
+    ]);
+  });
+
+  it('detecta «personas» con número partido entre nodos de un mismo elemento', () => {
+    expect(
+      violations(createElement('button', null, 'Personas ', createElement('span', null, '3'))),
+    ).toEqual(['RV-00 (SCR-00): «personas» seguido de número en el texto unido de <button>.']);
+    expect(
+      violations(
+        createElement(
+          'section',
+          null,
+          createElement(
+            'dl',
+            null,
+            createElement('dt', null, 'P\u0435rs\u200Bonas'),
+            createElement('dd', null, '3'),
+          ),
+        ),
+      ),
+    ).toEqual(['RV-00 (SCR-00): «personas» seguido de número en el texto unido de <dl>.']);
   });
 });

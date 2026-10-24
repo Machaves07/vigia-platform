@@ -11,9 +11,10 @@
  * valores de formulario renderizados y se buscan en ellos los **valores** de los campos
  * prohibidos, ambos plegados (NFKD sin marcas, minúsculas, homoglifos latinos de cirílico y
  * griego, y solo letras y dígitos, lo que elimina espacios invisibles y separadores). El
- * contador «personas» con número se busca en cada nodo de texto y cada atributo por separado,
- * con los mismos homoglifos e invisibles plegados pero con los espacios y la puntuación visibles
- * como separadores de palabra.
+ * contador «personas» con número se busca en cada nodo de texto y cada atributo por separado, y
+ * después en los nodos de texto de cada elemento unidos por espacios (solo el plural seguido de
+ * número), con los mismos homoglifos e invisibles plegados pero con los espacios y la puntuación
+ * visibles como separadores de palabra.
  */
 import { render } from '@testing-library/react';
 import fc from 'fast-check';
@@ -161,21 +162,37 @@ function foldWords(text: string): string {
 }
 
 /**
- * «personas» o «persona», como palabra entera, seguida de un número (con espacios, `:` o `#`
- * entre medias) o precedida de uno («12 personas»), sobre texto plegado con `foldWords`.
+ * Contador de personas dentro de un mismo texto plegado con `foldWords`: «personas» como palabra
+ * entera seguida de un número, o un número seguido de «personas» («12 personas», «(3) personas»),
+ * con cualquier tramo sin letras ni dígitos entre medias («Personas (3)», «Personas — 3»,
+ * «Personas: «3»»), y «1 persona». Con el número detrás se exige el plural: «Firma de la
+ * persona 2026-10-24» es un rótulo y una fecha, no un contador.
  */
-const PERSON_COUNTER = /(?<![\p{L}\p{N}])personas?[ :#]*\p{N}|\p{N} ?personas?(?![\p{L}\p{N}])/u;
+const PERSON_COUNTER =
+  /(?<![\p{L}\p{N}])personas[^\p{L}\p{N}]*\p{N}|\p{N}[^\p{L}\p{N}]*personas(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])1 persona(?![\p{L}\p{N}])/u;
+
+/**
+ * Contador partido entre los nodos de texto de un elemento, unidos por espacios («Personas
+ * <span>3</span>», `<dt>Personas</dt><dd>3</dd>`): solo «personas» en plural seguida de número,
+ * para no marcar un rótulo en singular junto a un número de otro nodo («Zona 3» + «Persona
+ * responsable»).
+ */
+const SPLIT_PERSON_COUNTER = /(?<![\p{L}\p{N}])personas[^\p{L}\p{N}]*\p{N}/u;
+
+interface CounterSource {
+  readonly source: string;
+  readonly text: string;
+}
 
 /**
  * Textos donde se busca el contador: cada nodo de texto, cada atributo y cada valor de
  * formulario por separado, nunca el texto concatenado de la vista.
  */
-function counterSources(root: HTMLElement): { readonly source: string; readonly text: string }[] {
-  const found: { source: string; text: string }[] = [];
-  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+function counterSources(root: HTMLElement): CounterSource[] {
+  const found: CounterSource[] = [];
+  for (const node of textNodes(root)) {
     const parent = node.parentElement?.tagName.toLowerCase() ?? 'raíz';
-    found.push({ source: `el texto de <${parent}>`, text: node.textContent ?? '' });
+    found.push({ source: `el texto de <${parent}>`, text: node.data });
   }
   for (const element of root.querySelectorAll('*')) {
     const tag = element.tagName.toLowerCase();
@@ -188,6 +205,43 @@ function counterSources(root: HTMLElement): { readonly source: string; readonly 
       element instanceof HTMLSelectElement
     ) {
       found.push({ source: `el valor de <${tag}>`, text: element.value });
+    }
+  }
+  return found;
+}
+
+function textNodes(root: Element): Text[] {
+  const nodes: Text[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    nodes.push(node as Text);
+  }
+  return nodes;
+}
+
+/**
+ * Infracciones del contador en `root`: primero cada texto por separado (`PERSON_COUNTER`) y
+ * después, por elemento, sus nodos de texto unidos (`SPLIT_PERSON_COUNTER`). Un elemento solo se
+ * nombra si el contador no estaba ya dentro de un solo nodo o de un elemento más interno.
+ */
+function personCounters(root: HTMLElement): string[] {
+  const found: string[] = [];
+  const flagged: Node[] = [];
+  for (const { source, text } of counterSources(root)) {
+    if (PERSON_COUNTER.test(foldWords(text))) found.push(source);
+  }
+  for (const node of textNodes(root)) {
+    if (PERSON_COUNTER.test(foldWords(node.data))) flagged.push(node);
+  }
+  // Orden inverso de documento: los descendientes antes que sus antepasados.
+  for (const element of [...root.querySelectorAll('*')].reverse()) {
+    if (flagged.some((node) => element.contains(node))) continue;
+    const nodes = textNodes(element);
+    if (nodes.length < 2) continue;
+    const joined = nodes.map((node) => node.data).join(' ');
+    if (SPLIT_PERSON_COUNTER.test(foldWords(joined))) {
+      found.push(`el texto unido de <${element.tagName.toLowerCase()}>`);
+      flagged.push(element);
     }
   }
   return found;
@@ -232,10 +286,8 @@ export function forbiddenRendered(
       );
     }
   }
-  for (const { source, text } of counterSources(root)) {
-    if (PERSON_COUNTER.test(foldWords(text))) {
-      violations.push(`${label}: «personas» seguido de número en ${source}.`);
-    }
+  for (const source of personCounters(root)) {
+    violations.push(`${label}: «personas» seguido de número en ${source}.`);
   }
   return violations;
 }
