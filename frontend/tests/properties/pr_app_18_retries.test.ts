@@ -39,6 +39,11 @@ const step = fc.constantFrom<Step>(
 const READ = 'list_users_users_get';
 const WRITE = 'invite_users_post';
 
+// Oráculo independiente del módulo bajo prueba (BR-APP-73, PAT-APP-RES-02): no se lee de
+// `READ_RETRY_DELAYS_MS`, para que cambiar los retrocesos o su número haga fallar la propiedad.
+const EXPECTED_DELAYS_MS = [2_000, 4_000, 8_000] as const;
+const MAX_READ_ATTEMPTS = 4;
+
 function setup(steps: readonly Step[], seededFailures: number) {
   const clock = new FakeClock();
   const { connection, after } = recordingConnection(clock);
@@ -77,6 +82,10 @@ function expectFailure(error: unknown, last: Step, kind: RequestKind): void {
 }
 
 describe('PR-APP-18', () => {
+  it('los retrocesos publicados son los del diseño: 2, 4 y 8 s', () => {
+    expect(READ_RETRY_DELAYS_MS).toEqual(EXPECTED_DELAYS_MS);
+  });
+
   it(
     'lecturas: como mucho 3 reintentos a 2, 4 y 8 s, solo reintentables y con el circuito cerrado; después offline',
     async () => {
@@ -86,10 +95,11 @@ describe('PR-APP-18', () => {
           fc.integer({ min: 0, max: 4 }),
           async (steps, seeded) => {
             const { clock, connection, after, calls, transport } = setup(steps, seeded);
-            const outcome = await drive(
-              clock,
-              transport.request({ operationId: READ, kind: 'read' }),
-            );
+            const request = transport.request({ operationId: READ, kind: 'read' });
+            const settled = { at: NaN };
+            const mark = () => (settled.at = clock.now());
+            request.then(mark, mark);
+            const outcome = await drive(clock, request);
 
             if (seeded >= 4) {
               // Circuito abierto: falla rápido, sin red.
@@ -101,7 +111,7 @@ describe('PR-APP-18', () => {
             }
 
             expect(calls.length).toBeGreaterThanOrEqual(1);
-            expect(calls.length).toBeLessThanOrEqual(1 + READ_RETRY_DELAYS_MS.length);
+            expect(calls.length).toBeLessThanOrEqual(MAX_READ_ATTEMPTS);
             expect(after).toHaveLength(calls.length);
 
             for (let i = 0; i < calls.length; i += 1) {
@@ -114,12 +124,16 @@ describe('PR-APP-18', () => {
 
               const retriedNext = i + 1 < calls.length;
               const mayRetry =
-                RETRYABLE.has(current) && i < READ_RETRY_DELAYS_MS.length && circuit === 'closed';
+                RETRYABLE.has(current) && i < EXPECTED_DELAYS_MS.length && circuit === 'closed';
               expect(retriedNext).toBe(mayRetry);
               if (retriedNext) {
-                expect((calls[i + 1]?.at ?? NaN) - call.endedAt).toBe(READ_RETRY_DELAYS_MS[i]);
+                expect((calls[i + 1]?.at ?? NaN) - call.endedAt).toBe(EXPECTED_DELAYS_MS[i]);
               }
             }
+
+            // Sin reintento, el resultado llega en el instante del último fallo: nunca se espera un
+            // retroceso para acabar en offline (circuito abierto por ese fallo o reintentos agotados).
+            expect(settled.at).toBe(calls.at(-1)?.endedAt);
 
             const last = steps[calls.length - 1] ?? 'ok';
             if (last === 'ok') {

@@ -152,7 +152,12 @@ function fillPath(template: string, params: ApiRequest['path'] = {}): string {
     if (value === undefined || value === '') {
       throw new TypeError(`ports.base: falta el parámetro de ruta «${name}» de ${template}.`);
     }
-    return encodeURIComponent(String(value));
+    const segment = encodeURIComponent(String(value));
+    // `encodeURIComponent` deja `.` y `..`, que `URL` normaliza hacia otra operación.
+    if (segment === '.' || segment === '..') {
+      throw new TypeError(`ports.base: el parámetro de ruta «${name}» no puede ser «.» ni «..».`);
+    }
+    return segment;
   });
 }
 

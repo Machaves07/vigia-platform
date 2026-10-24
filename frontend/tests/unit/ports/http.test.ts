@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 
 import { OPERATIONS } from '@/client';
 import type { components } from '@/client/schema';
+import { bodies } from '@/client/validators.js';
 import {
   API_VERSION_HEADER,
   CONCESSION_HEADER,
@@ -68,9 +69,11 @@ describe('tiempos de espera (BR-APP-61, NFR-APP-04)', () => {
     const clock = new FakeClock();
     const entries: DevLogEntry[] = [];
     const { fetch } = silentFetch(clock);
-    installTransport(
-      transportWith(clock, { fetch, devLog: (entry) => entries.push(entry) }).transport,
-    );
+    const { transport } = transportWith(clock, {
+      fetch,
+      devLog: (entry) => entries.push(entry),
+    });
+    installTransport(transport);
     const declarations = Object.fromEntries(
       ALL_IDS.map((id) => [
         id,
@@ -84,6 +87,13 @@ describe('tiempos de espera (BR-APP-61, NFR-APP-04)', () => {
     const pending = ALL_IDS.map((id) => {
       const operation = port[id];
       const input = { path: pathParams(id) };
+      // Una escritura con cuerpo se valida antes de salir: sin cuerpos válidos de las 66
+      // operaciones, va al mismo transporte que usa el puerto, con un cuerpo cualquiera.
+      if (Object.hasOwn(bodies, id)) {
+        return transport
+          .request({ operationId: id, kind: 'write', body: {}, ...input })
+          .catch(() => undefined);
+      }
       const call = operation?.read ? operation.read(input) : operation?.write?.(input);
       return call?.catch(() => undefined);
     });
@@ -244,6 +254,17 @@ describe('cabeceras y credenciales (BR-APP-67, 69, 70)', () => {
         kind: 'write',
       }),
     ).rejects.toThrow(/user_id/);
+    // `.` y `..` sobrevivirían a encodeURIComponent y URL los resolvería hacia otra operación.
+    for (const step_id of ['.', '..']) {
+      await expect(
+        transport.request({
+          operationId: 'close_step_walk_tests__session_id__steps__step_id__close_post',
+          kind: 'write',
+          path: { session_id: 's1', step_id },
+        }),
+      ).rejects.toThrow(/step_id/);
+    }
+    expect(calls).toHaveLength(2);
   });
 
   it('X-Vigia-Api-Version de cada respuesta llega al observador; unauthenticated y privacy_notice_required, a la sesión', async () => {
@@ -415,6 +436,40 @@ describe('circuitos y reintentos (BR-APP-72 a 74)', () => {
     expect(failureOf(await drive(clock, inFlight))).toEqual({ kind: 'aborted' });
     // Solo cuenta el primer fallo de red: la cancelación no se registró.
     expect(connection.getSnapshot().circuits.platform.failures).toHaveLength(1);
+  });
+
+  it('una escritura ignora la cancelación del llamador: llega al servidor y da su resultado', async () => {
+    const clock = new FakeClock();
+    const { calls, fetch } = scriptedFetch(clock, ['ok']);
+    const { transport } = transportWith(clock, { fetch });
+    const controller = new AbortController();
+    controller.abort();
+    const write = await drive(
+      clock,
+      transport.request({
+        operationId: 'invite_users_post',
+        kind: 'write',
+        body: { any: 1 },
+        signal: controller.signal,
+      }),
+    );
+    expect(write).toEqual({ ok: true, value: { answer: 1 } });
+    expect(calls).toHaveLength(1);
+
+    // Cancelar con la escritura en vuelo no la corta: termina por su propio tope de 30 s.
+    const slow = scriptedFetch(clock, ['timeout']);
+    const inFlight = new AbortController();
+    const pending = transportWith(clock, { fetch: slow.fetch }).transport.request({
+      operationId: 'invite_users_post',
+      kind: 'write',
+      body: { any: 1 },
+      signal: inFlight.signal,
+    });
+    const start = clock.now();
+    await flush();
+    inFlight.abort();
+    expect(failureOf(await drive(clock, pending))?.kind).toBe('timeout');
+    expect(slow.calls[0]?.endedAt).toBe(start + TIMEOUT_MS.write);
   });
 
   it('una lectura correcta registra éxito y vuelve a online', async () => {
@@ -611,6 +666,9 @@ describe('defineScreenPort (LC-APP-14, BR-APP-63, 64)', () => {
     const outcome = await drive(clock, port.invite.write(invalid));
     const failure = failureOf(outcome);
     expect(failure?.kind).toBe('invalid_input');
+    // El cuerpo es obligatorio en toda operación con cuerpo: omitirlo también es invalid_input.
+    const missing = {} as unknown as Parameters<typeof port.invite.write>[0];
+    expect(failureOf(await drive(clock, port.invite.write(missing)))?.kind).toBe('invalid_input');
     expect(calls).toHaveLength(0);
   });
 

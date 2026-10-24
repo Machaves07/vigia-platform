@@ -16,7 +16,11 @@ const SPECIFIERS = [
   /\bimport\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/g,
   /\bexport\s+(?:type\s+)?[^'";]*?\s+from\s+['"]([^'"]+)['"]/g,
   /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  /\bimport\s*\(\s*`([^`]+)`\s*\)/g,
 ];
+
+/** Un especificador calculado (plantilla con `${…}`) no se puede comprobar: se rechaza. */
+const COMPUTED = '${';
 
 function specifiers(source: string): string[] {
   return SPECIFIERS.flatMap((pattern) =>
@@ -42,6 +46,7 @@ function violations(file: string, source: string): string[] {
   if (screen === undefined) return [];
   const own = new RegExp(`^src/ports/${screen}(?![0-9])`);
   return specifiers(source).filter((specifier) => {
+    if (specifier.includes(COMPUTED)) return true;
     const path = target(file, specifier);
     if (path === null) return false;
     if (path === 'src/client' || path.startsWith('src/client/')) return true;
@@ -85,6 +90,9 @@ describe('BR-APP-62: cada página solo usa su puerto', () => {
       "const lazy = () => import('@/ports/errors/map');",
       "import { OPERATIONS } from '@/client';",
       "import '@/ports/validation';",
+      'const own = () => import(`@/ports/scr08Inbox`);',
+      'const tpl = () => import(`@/ports/scr02Thing`);',
+      'const computed = (name: string) => import(`@/ports/${name}`);',
     ].join('\n');
     expect(violations(page, source)).toEqual([
       '@/ports/scr01Account',
@@ -93,6 +101,8 @@ describe('BR-APP-62: cada página solo usa su puerto', () => {
       '@/ports/validation',
       '@/ports/base',
       '@/ports/errors/map',
+      '@/ports/scr02Thing',
+      '@/ports/${name}',
     ]);
     expect(violations('src/components/Thing.tsx', source)).toEqual([]);
   });
