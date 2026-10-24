@@ -8,6 +8,10 @@
 #   make worker    worker (vigia-worker) contra el entorno local     — llega con TASK-130
 #   make migrate   alembic upgrade head contra PostgreSQL local
 #   make admin     orden administrativa: make admin ARGS="--help"    — llega con TASK-132
+#   make frontend-dev    servidor de desarrollo de Vite en 5173 (compose, perfil frontend)
+#   make frontend-test   pruebas de frontend/ (vitest, perfil ci de fast-check)
+#   make frontend-check  comprobaciones de frontend/ (npm run check)
+#   make frontend-e2e    recorridos de Playwright (npm run e2e)          — llega con VIG-299
 #
 # En Windows sin `make`, el README tiene los mismos comandos con `uv run`.
 # Las pruebas de integración usan testcontainers; con `VIGIA_TEST_USE_COMPOSE=1` usan el entorno
@@ -17,6 +21,7 @@ SHELL := /bin/sh
 .DEFAULT_GOAL := help
 
 BACKEND := backend
+FRONTEND := frontend
 PROFILE ?= ci
 ARGS ?=
 
@@ -50,7 +55,7 @@ define require
 		exit 2; }
 endef
 
-.PHONY: help up down ps test run worker migrate admin
+.PHONY: help up down ps test run worker migrate admin frontend-dev frontend-test frontend-check frontend-e2e
 
 help:
 	@sed -n 's/^#   make /make /p' Makefile
@@ -83,3 +88,17 @@ migrate:
 admin:
 	$(call require,src/vigia_platform/identity/application/admin_cli.py,TASK-132)
 	cd $(BACKEND) && $(call LOCAL_ENV,vigia-admin) uv run vigia-admin $(ARGS)
+
+# Aplicación de página única (VIG-288; infrastructure-design.md de U-05 §2). `frontend-dev` corre
+# en compose; las demás, con el Node del anfitrión tras `npm ci` en frontend/.
+frontend-dev:
+	docker compose --profile frontend up frontend
+
+frontend-test:
+	cd $(FRONTEND) && npm test
+
+frontend-check:
+	cd $(FRONTEND) && npm run check
+
+frontend-e2e:
+	cd $(FRONTEND) && npm run e2e

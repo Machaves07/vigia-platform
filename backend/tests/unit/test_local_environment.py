@@ -3,13 +3,14 @@
 Sin Docker: leen ``docker-compose.yml``, los ``Dockerfile`` de ``local/`` y el ``Makefile`` de la
 raíz del repositorio y fijan lo que no debe cambiar sin revisión:
 
-- los tres servicios (PostgreSQL 16, LocalStack y el colector de OpenTelemetry), sin MinIO (AGPL);
+- los tres servicios (PostgreSQL 16, LocalStack y el colector de OpenTelemetry), sin MinIO (AGPL),
+  más el servidor de desarrollo de la aplicación (``frontend``, VIG-288) solo con su perfil;
 - toda imagen de origen fijada por digest, ninguna por ``latest`` (criterio 3);
 - las imágenes de testcontainers son las mismas que las de compose (el mismo entorno en el PC y en
   la canalización);
 - los puertos publicados solo en ``127.0.0.1``;
 - los objetivos ``test``, ``run``, ``worker``, ``migrate`` y ``admin`` del ``Makefile`` y sus
-  equivalentes con ``uv run`` en el README.
+  equivalentes con ``uv run`` en el README, y los ``frontend-*`` de U-05.
 
 ``docker-compose.yml`` se lee línea a línea (el repositorio no declara un analizador de YAML):
 la prueba ``test_compose_parser_sees_every_service`` protege ese lector.
@@ -31,8 +32,20 @@ MAKEFILE = REPOSITORY / "Makefile"
 README = REPOSITORY / "README.md"
 LOCAL_DIRECTORY = REPOSITORY / "local"
 
-EXPECTED_SERVICES = {"postgres", "localstack", "otel-collector"}
-MAKE_TARGETS = ("test", "run", "worker", "migrate", "admin")
+EXPECTED_SERVICES = {"postgres", "localstack", "otel-collector", "frontend"}
+PROFILED_SERVICES = {"frontend": "frontend"}
+"""Servicios que solo arrancan con su perfil: ``make up`` y las pruebas no los levantan."""
+MAKE_TARGETS = (
+    "test",
+    "run",
+    "worker",
+    "migrate",
+    "admin",
+    "frontend-dev",
+    "frontend-test",
+    "frontend-check",
+    "frontend-e2e",
+)
 
 PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$")
 """``nombre:etiqueta@sha256:<64 hex>``: etiqueta legible y digest que manda."""
@@ -44,6 +57,7 @@ class ComposeService:
     image: str | None = None
     build: bool = False
     ports: list[str] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=list)
 
 
 def _compose_services(text: str) -> dict[str, ComposeService]:
@@ -72,6 +86,8 @@ def _compose_services(text: str) -> dict[str, ComposeService]:
             current.image = match[1]
         elif re.fullmatch(r"    build:.*", line):
             current.build = True
+        elif match := re.fullmatch(r"    profiles:\s*\[(.*)\]", line):
+            current.profiles = [item.strip().strip('"') for item in match[1].split(",")]
         if re.fullmatch(r"    ports:", line):
             in_ports = True
             continue
@@ -108,6 +124,7 @@ def test_compose_parser_sees_every_service() -> None:
         "      test:\n"
         "        - CMD\n"
         "  b:\n"
+        '    profiles: ["dev"]\n'
         "    build:\n"
         "      context: ./b\n"
         "    image: b:local\n"
@@ -121,10 +138,29 @@ def test_compose_parser_sees_every_service() -> None:
     assert not parsed["a"].build
     assert parsed["b"].build
     assert parsed["b"].ports == []
+    assert parsed["a"].profiles == []
+    assert parsed["b"].profiles == ["dev"]
 
 
 def test_compose_has_the_three_services(services: dict[str, ComposeService]) -> None:
     assert set(services) == EXPECTED_SERVICES
+
+
+def test_only_the_frontend_service_needs_a_profile(services: dict[str, ComposeService]) -> None:
+    """``make up`` (``docker compose up -d --wait``) solo levanta los tres de siempre."""
+    for name, service in services.items():
+        expected = [PROFILED_SERVICES[name]] if name in PROFILED_SERVICES else []
+        assert service.profiles == expected, name
+
+
+def test_the_frontend_image_uses_the_same_node_as_the_application_stage() -> None:
+    """El servidor de desarrollo y la etapa ``frontend-build`` de la imagen usan el mismo Node."""
+    local = _dockerfile_images(LOCAL_DIRECTORY / "frontend" / "Dockerfile")
+    image = REPOSITORY / "backend" / "Dockerfile"
+    stage = re.search(r"^ARG NODE_IMAGE=(\S+)$", image.read_text(encoding="utf-8"), re.MULTILINE)
+    assert stage is not None
+    assert local == [stage[1]]
+    assert stage[1].startswith("node:22-")
 
 
 def test_no_minio_anywhere() -> None:
@@ -149,7 +185,7 @@ def test_every_source_image_is_pinned_by_digest(services: dict[str, ComposeServi
     for service in services.values():
         assert service.image is not None, f"{service.name} sin image:"
         if service.build:
-            # La imagen construida se nombra con la versión del colector, nunca con `latest`.
+            # La imagen construida se nombra con la versión de su origen, nunca con `latest`.
             assert re.fullmatch(r"vigia-local/[a-z0-9-]+:\d+\.\d+\.\d+", service.image)
         else:
             source_images.append(service.image)
