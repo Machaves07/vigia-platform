@@ -1,0 +1,34 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "new_standard_version_zones__zone_id__standards__standard_id__versions_post",
+  "method": "post",
+  "path": "/zones/{zone_id}/standards/{standard_id}/versions",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/StandardVersionBody",
+    "$defs": {
+      "StandardChanges": {
+        "properties": {
+          "title_es": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "declared_text": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "predicate": {
+            "anyOf": [{ "additionalProperties": true, "type": "object" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "StandardVersionBody": {
+        "properties": {
+          "changes": { "$ref": "#/$defs/StandardChanges" },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["changes", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}

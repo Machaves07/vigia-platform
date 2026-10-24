@@ -1,0 +1,29 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "declare_loop_findings__finding_state_id__unclosable_post",
+  "method": "post",
+  "path": "/loop/findings/{finding_state_id}/unclosable",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/UnclosableDeclarationBody",
+    "$defs": {
+      "UnclosableDeclarationBody": {
+        "properties": {
+          "evaluated_alternative": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "rejection_reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "responsible_user_id": {
+            "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }]
+          },
+          "decision_date": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "compensatory_measure": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "review_due_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "professional_license": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

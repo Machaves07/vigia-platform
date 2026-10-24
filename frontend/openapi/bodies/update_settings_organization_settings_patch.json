@@ -1,0 +1,29 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "update_settings_organization_settings_patch",
+  "method": "patch",
+  "path": "/organization/settings",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/SettingsBody",
+    "$defs": {
+      "SettingsBody": {
+        "properties": {
+          "name": {
+            "anyOf": [{ "type": "string", "maxLength": 120, "minLength": 1 }, { "type": "null" }]
+          },
+          "concession_max_days": {
+            "anyOf": [{ "type": "integer", "maximum": 90, "minimum": 1 }, { "type": "null" }]
+          },
+          "concession_default_days": {
+            "anyOf": [{ "type": "integer", "maximum": 90, "minimum": 1 }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

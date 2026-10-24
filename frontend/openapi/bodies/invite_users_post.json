@@ -1,0 +1,56 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "invite_users_post",
+  "method": "post",
+  "path": "/users",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/InviteBody",
+    "$defs": {
+      "AssignmentBody": {
+        "properties": {
+          "role": { "$ref": "#/$defs/Role" },
+          "scope_level": { "$ref": "#/$defs/ScopeLevel" },
+          "scope_id": { "type": "string", "format": "uuid" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["role", "scope_level", "scope_id"]
+      },
+      "InviteBody": {
+        "properties": {
+          "email": { "type": "string", "maxLength": 254, "minLength": 3 },
+          "display_name": { "type": "string", "maxLength": 120, "minLength": 1 },
+          "professional_license": {
+            "anyOf": [{ "type": "string", "maxLength": 64, "minLength": 1 }, { "type": "null" }]
+          },
+          "assignments": {
+            "items": { "$ref": "#/$defs/AssignmentBody" },
+            "type": "array",
+            "maxItems": 32,
+            "minItems": 1
+          },
+          "disclose_link": { "type": "boolean" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["email", "display_name", "assignments"]
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "coordinator_sst",
+          "line_manager",
+          "plant_manager",
+          "administrator",
+          "provider_installer",
+          "copasst",
+          "platform_operator"
+        ]
+      },
+      "ScopeLevel": { "type": "string", "enum": ["organization", "plant", "zone"] }
+    }
+  },
+  "query": null
+}

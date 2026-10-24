@@ -1,0 +1,65 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "signature_loop_root_cause_analyses__analysis_id__signature_post",
+  "method": "post",
+  "path": "/loop/root-cause-analyses/{analysis_id}/signature",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/AnalysisSignatureBody",
+    "$defs": {
+      "AnalysisSignatureBody": {
+        "properties": {
+          "professional_license": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "root_cause_category": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "root_cause_statement": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "conclusion": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "cause_effect_branches": {
+            "items": { "$ref": "#/$defs/BranchBody" },
+            "type": "array",
+            "maxItems": 6
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "BranchBody": {
+        "properties": {
+          "branch_category": { "type": "string" },
+          "factors": {
+            "items": { "$ref": "#/$defs/FactorBody" },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["branch_category", "factors"]
+      },
+      "EvidenceRefBody": {
+        "properties": {
+          "kind": { "type": "string" },
+          "id": { "type": "string", "format": "uuid" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "id"]
+      },
+      "FactorBody": {
+        "properties": {
+          "text": { "type": "string" },
+          "evidence_refs": {
+            "items": { "$ref": "#/$defs/EvidenceRefBody" },
+            "type": "array",
+            "maxItems": 32
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["text"]
+      }
+    }
+  },
+  "query": null
+}

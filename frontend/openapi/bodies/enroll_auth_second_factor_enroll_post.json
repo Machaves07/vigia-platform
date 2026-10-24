@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "enroll_auth_second_factor_enroll_post",
+  "method": "post",
+  "path": "/auth/second-factor/enroll",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/EnrollRequest",
+    "$defs": {
+      "EnrollRequest": {
+        "properties": {
+          "code": {
+            "anyOf": [{ "type": "string", "maxLength": 64, "minLength": 1 }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

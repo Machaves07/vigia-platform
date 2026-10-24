@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "verify_integrity_verify_post",
+  "method": "post",
+  "path": "/integrity/verify",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/VerifyRequest",
+    "$defs": {
+      "VerifyRequest": {
+        "properties": {
+          "kind": { "type": "string", "enum": ["ledger", "audit"] },
+          "plant_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind"]
+      }
+    }
+  },
+  "query": null
+}

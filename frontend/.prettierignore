@@ -4,5 +4,7 @@ coverage/
 package-lock.json
 # Generado por generate_findings.py; se regenera, no se formatea.
 tests/fixtures/synthetic/contracts/findings.json
+# Generado por generate_contract_samples.py; se regenera, no se formatea.
+tests/fixtures/synthetic/contracts/contract_samples.json
 # Generado por scripts/msw_spec.mjs desde backend/openapi/app.yaml; --check exige igualdad exacta.
 tests/msw/openapi.responses.json

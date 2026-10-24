@@ -1,0 +1,36 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "start_step_walk_tests__session_id__steps_post",
+  "method": "post",
+  "path": "/walk-tests/{session_id}/steps",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/StepBody",
+    "$defs": {
+      "StepBody": {
+        "properties": {
+          "step_kind": { "$ref": "#/$defs/StepKind" },
+          "responsible_user_id": { "type": "string", "format": "uuid" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["step_kind", "responsible_user_id"]
+      },
+      "StepKind": {
+        "type": "string",
+        "enum": [
+          "physical_setup",
+          "signal_mapping",
+          "framing",
+          "walk_test_passes",
+          "occlusion_test",
+          "latency_measurement",
+          "review_and_signatures",
+          "other"
+        ]
+      }
+    }
+  },
+  "query": null
+}

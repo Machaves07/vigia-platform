@@ -1,0 +1,23 @@
+{
+  "validation.required": "Este campo es obligatorio.",
+  "validation.unknown_field": "Este campo no forma parte del formulario.",
+  "validation.too_short": "El texto es más corto que el mínimo del campo.",
+  "validation.too_long": "El texto supera la longitud máxima del campo.",
+  "validation.too_few_items": "Faltan elementos: no se alcanza el mínimo del campo.",
+  "validation.too_many_items": "Hay más elementos que el máximo del campo.",
+  "validation.duplicate_items": "Hay elementos repetidos.",
+  "validation.out_of_range": "El valor está fuera del rango permitido.",
+  "validation.pattern": "El valor no tiene la forma esperada.",
+  "validation.not_allowed": "El valor no es una de las opciones permitidas.",
+  "validation.type": "El valor no es del tipo esperado.",
+  "validation.format_date_time": "La fecha y hora no son válidas.",
+  "validation.format_uuid": "El identificador no es válido.",
+  "validation.format_email": "El correo no tiene un formato válido.",
+  "validation.invalid": "El valor no es válido.",
+  "validation.free_text.too_short": "El texto es más corto que el mínimo del campo.",
+  "validation.free_text.too_long": "El texto supera la longitud máxima del campo.",
+  "validation.free_text.control_character": "El texto contiene caracteres de control.",
+  "validation.free_text.invisible_character": "El texto contiene caracteres invisibles de formato.",
+  "validation.free_text.disallowed_character": "El texto contiene caracteres no admitidos.",
+  "validation.free_text.markup": "El texto contiene marcado o secuencias de escape de marcado."
+}

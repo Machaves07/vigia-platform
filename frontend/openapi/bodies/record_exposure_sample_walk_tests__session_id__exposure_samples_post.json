@@ -1,0 +1,24 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "record_exposure_sample_walk_tests__session_id__exposure_samples_post",
+  "method": "post",
+  "path": "/walk-tests/{session_id}/exposure-samples",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ExposureSampleBody",
+    "$defs": {
+      "ExposureSampleBody": {
+        "properties": {
+          "pass_id": { "type": "string", "format": "uuid" },
+          "fetched_at": { "type": "string", "format": "date-time" },
+          "displayed_at": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["pass_id", "fetched_at", "displayed_at"]
+      }
+    }
+  },
+  "query": null
+}

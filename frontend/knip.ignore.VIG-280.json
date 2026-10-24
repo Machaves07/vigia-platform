@@ -1,5 +1,0 @@
-{
-  "$comment": "Temporal de VIG-277: lo borra VIG-280 al usar el cliente generado y la validación espejo.",
-  "task": "VIG-280 (TASK-403)",
-  "ignoreDependencies": ["openapi-fetch", "openapi-typescript", "ajv", "ajv-formats"]
-}

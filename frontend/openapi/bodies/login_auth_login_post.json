@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "login_auth_login_post",
+  "method": "post",
+  "path": "/auth/login",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/LoginRequest",
+    "$defs": {
+      "LoginRequest": {
+        "properties": {
+          "email": { "type": "string", "maxLength": 254, "minLength": 1 },
+          "password": { "type": "string", "maxLength": 128, "minLength": 1 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["email", "password"]
+      }
+    }
+  },
+  "query": null
+}
