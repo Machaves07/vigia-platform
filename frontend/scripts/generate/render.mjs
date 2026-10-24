@@ -27,12 +27,6 @@ import { parseOpenApiYaml } from './openapiYaml.mjs';
 
 export const SPEC_PATH = '../backend/openapi/app.yaml';
 export const BODIES_DIR = 'openapi/bodies';
-export const CLIENT_FILES = [
-  'src/client/index.ts',
-  'src/client/schema.d.ts',
-  'src/client/validators.d.ts',
-  'src/client/validators.js',
-];
 
 const NOTICE =
   'Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: ' +
@@ -43,7 +37,12 @@ const METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'tr
 const COMPONENT_REF = /^#\/components\/schemas\/([A-Za-z0-9_.-]+)$/;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DIALECT = 'https://json-schema.org/draft/2020-12/schema';
-const COMPONENTS_ID = 'https://vigia.local/frontend/openapi/components.json';
+/**
+ * Identificador relativo de las definiciones compartidas que se compilan: el código autónomo las
+ * incrusta y `src/` no lleva URL absolutas (NFR-APP-08). Lo compilado no declara `$schema`: el
+ * Ajv de 2020-12 ya usa ese dialecto.
+ */
+const COMPONENTS_ID = 'components.json';
 
 /** Palabras clave que conservan los esquemas espejo: solo las que deciden un veredicto. */
 const KEEP = new Set([
@@ -459,7 +458,6 @@ ${operationEntries}
     ),
   ].sort();
   ajv.addSchema({
-    $schema: DIALECT,
     $id: COMPONENTS_ID,
     $defs: Object.fromEntries(
       shared.map((name) => [
@@ -500,26 +498,18 @@ ${operationEntries}
     // para que el código de cada definición se emita una sola vez.
     if (body !== null) {
       ajv.addSchema(
-        {
-          $schema: DIALECT,
-          .../** @type {JsonObject} */ (
-            mirror(body.schema, `${COMPONENTS_ID}#/$defs/`, operationId)
-          ),
-        },
-        `body:${operationId}`,
+        /** @type {JsonObject} */ (mirror(body.schema, `${COMPONENTS_ID}#/$defs/`, operationId)),
+        `body__${operationId}.json`,
       );
-      exports[`body__${operationId}`] = `body:${operationId}`;
+      exports[`body__${operationId}`] = `body__${operationId}.json`;
       bodyIds.push(operationId);
     }
     if (query !== null) {
       ajv.addSchema(
-        {
-          $schema: DIALECT,
-          .../** @type {JsonObject} */ (mirror(query, `${COMPONENTS_ID}#/$defs/`, operationId)),
-        },
-        `query:${operationId}`,
+        /** @type {JsonObject} */ (mirror(query, `${COMPONENTS_ID}#/$defs/`, operationId)),
+        `query__${operationId}.json`,
       );
-      exports[`query__${operationId}`] = `query:${operationId}`;
+      exports[`query__${operationId}`] = `query__${operationId}.json`;
       queryIds.push(operationId);
     }
   }

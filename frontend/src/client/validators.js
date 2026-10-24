@@ -8,10 +8,9 @@ const runtime0 = cjs(runtime0Module);
 const runtime1 = cjs(runtime1Module);
 export const body__accept_invitations__token__accept_post = validate52;
 const schema19 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   oneOf: [
-    { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/BeginActivation' },
-    { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CompleteActivation' },
+    { $ref: 'components.json#/$defs/BeginActivation' },
+    { $ref: 'components.json#/$defs/CompleteActivation' },
   ],
 };
 const schema21 = {
@@ -519,10 +518,7 @@ function validate52(
 validate52.evaluated = { dynamicProps: true, dynamicItems: false };
 
 export const body__accept_notice_privacy_notice_accept_post = validate58;
-const schema23 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NoticeAcceptRequest',
-};
+const schema23 = { $ref: 'components.json#/$defs/NoticeAcceptRequest' };
 const schema24 = {
   properties: { notice_version: { type: 'string', maxLength: 32, minLength: 1 } },
   additionalProperties: false,
@@ -664,10 +660,7 @@ function validate58(
 validate58.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__add_evidence_loop_actions__action_id__evidence_post = validate61;
-const schema25 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EvidenceEntryBody',
-};
+const schema25 = { $ref: 'components.json#/$defs/EvidenceEntryBody' };
 const schema26 = {
   properties: {
     description: { type: 'string', maxLength: 2000, minLength: 20 },
@@ -677,9 +670,7 @@ const schema26 = {
       anyOf: [{ type: 'string', maxLength: 1000, minLength: 1 }, { type: 'null' }],
     },
     attachments: {
-      items: {
-        $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EvidenceAttachmentBody',
-      },
+      items: { $ref: 'components.json#/$defs/EvidenceAttachmentBody' },
       type: 'array',
       maxItems: 20,
     },
@@ -1433,10 +1424,7 @@ function validate61(
 validate61.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__assign_loop_findings__finding_state_id__actions_post = validate66;
-const schema28 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CorrectiveActionBody',
-};
+const schema28 = { $ref: 'components.json#/$defs/CorrectiveActionBody' };
 const schema29 = {
   properties: {
     action_type: { type: 'string', maxLength: 64 },
@@ -1916,14 +1904,11 @@ function validate66(
 validate66.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__assign_role_users__user_id__roles_post = validate69;
-const schema30 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AssignmentBody',
-};
+const schema30 = { $ref: 'components.json#/$defs/AssignmentBody' };
 const schema31 = {
   properties: {
-    role: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/Role' },
-    scope_level: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ScopeLevel' },
+    role: { $ref: 'components.json#/$defs/Role' },
+    scope_level: { $ref: 'components.json#/$defs/ScopeLevel' },
     scope_id: { type: 'string', format: 'uuid' },
   },
   additionalProperties: false,
@@ -2221,10 +2206,7 @@ function validate69(
 validate69.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__assign_zone_nodes__node_id__zones_post = validate76;
-const schema34 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeZoneBody',
-};
+const schema34 = { $ref: 'components.json#/$defs/NodeZoneBody' };
 const schema35 = {
   properties: { zone_id: { type: 'string', format: 'uuid' } },
   additionalProperties: false,
@@ -2352,14 +2334,11 @@ function validate76(
 validate76.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__cameras_zones__zone_id__cameras_put = validate79;
-const schema36 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CamerasBody',
-};
+const schema36 = { $ref: 'components.json#/$defs/CamerasBody' };
 const schema37 = {
   properties: {
     cameras: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CameraBody' },
+      items: { $ref: 'components.json#/$defs/CameraBody' },
       type: 'array',
       maxItems: 8,
       minItems: 1,
@@ -2374,9 +2353,7 @@ const schema38 = {
   properties: {
     camera_id: { type: 'string', format: 'uuid' },
     code: { type: 'string' },
-    role_in_zone: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CameraRoleInZone',
-    },
+    role_in_zone: { $ref: 'components.json#/$defs/CameraRoleInZone' },
     declared_min_fps: { type: 'number' },
     stream_reference: { type: 'string' },
   },
@@ -2832,7 +2809,6 @@ validate79.evaluated = { props: true, dynamicProps: false, dynamicItems: false }
 
 export const query__catalog_history_zones__zone_id__catalog_versions_get = validate86;
 const schema40 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 10 }, { type: 'null' }] },
@@ -3015,10 +2991,7 @@ function validate86(
 validate86.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__change_configuration_loop_plants__plant_id__configuration_put = validate87;
-const schema41 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ConfigurationChangeBody',
-};
+const schema41 = { $ref: 'components.json#/$defs/ConfigurationChangeBody' };
 const schema42 = {
   properties: {
     classification_deadline_business_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
@@ -3041,12 +3014,7 @@ const schema42 = {
     single_occupancy_default_window_minutes: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     reminder_interval_hours: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     business_calendar: {
-      anyOf: [
-        {
-          $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/BusinessCalendarBody',
-        },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/BusinessCalendarBody' }, { type: 'null' }],
     },
     reason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
   },
@@ -4628,10 +4596,7 @@ function validate87(
 validate87.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__change_password_auth_password_post = validate92;
-const schema44 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PasswordChangeRequest',
-};
+const schema44 = { $ref: 'components.json#/$defs/PasswordChangeRequest' };
 const schema45 = {
   properties: {
     current_password: { type: 'string', maxLength: 128, minLength: 1 },
@@ -4836,22 +4801,13 @@ function validate92(
 validate92.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__change_vocabulary_loop_vocabulary_changes_post = validate95;
-const schema46 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/VocabularyChangeBody',
-};
+const schema46 = { $ref: 'components.json#/$defs/VocabularyChangeBody' };
 const schema47 = {
   properties: {
-    added: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/TermBody' },
-      type: 'array',
-      maxItems: 200,
-    },
+    added: { items: { $ref: 'components.json#/$defs/TermBody' }, type: 'array', maxItems: 200 },
     removed: { items: { type: 'string', format: 'uuid' }, type: 'array', maxItems: 200 },
     declared_names_added: {
-      items: {
-        $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/DeclaredNameBody',
-      },
+      items: { $ref: 'components.json#/$defs/DeclaredNameBody' },
       type: 'array',
       maxItems: 200,
     },
@@ -5533,10 +5489,7 @@ function validate95(
 validate95.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__classify_loop_findings__finding_state_id__classifications_post = validate102;
-const schema50 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ClassificationBody',
-};
+const schema50 = { $ref: 'components.json#/$defs/ClassificationBody' };
 const schema51 = {
   properties: {
     outcome: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -5829,10 +5782,7 @@ function validate102(
 validate102.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__close_loop_findings__finding_state_id__closure_post = validate105;
-const schema52 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ClosureBody',
-};
+const schema52 = { $ref: 'components.json#/$defs/ClosureBody' };
 const schema53 = {
   properties: {
     closure_description: { type: 'string', maxLength: 2000, minLength: 20 },
@@ -6152,18 +6102,10 @@ function validate105(
 validate105.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__close_step_walk_tests__session_id__steps__step_id__close_post = validate108;
-const schema54 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CloseStepBody',
-};
+const schema54 = { $ref: 'components.json#/$defs/CloseStepBody' };
 const schema55 = {
   properties: {
-    correction: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CorrectionBody' },
-        { type: 'null' },
-      ],
-    },
+    correction: { anyOf: [{ $ref: 'components.json#/$defs/CorrectionBody' }, { type: 'null' }] },
   },
   additionalProperties: false,
   type: 'object',
@@ -6547,29 +6489,19 @@ function validate108(
 validate108.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__close_walk_test_walk_tests__session_id__close_post = validate113;
-const schema57 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CloseBody',
-};
+const schema57 = { $ref: 'components.json#/$defs/CloseBody' };
 const schema58 = {
   properties: {
     signatures: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SignatureBody' },
+      items: { $ref: 'components.json#/$defs/SignatureBody' },
       type: 'array',
       maxItems: 32,
       minItems: 1,
     },
     false_alarm_acceptance: {
-      anyOf: [
-        {
-          $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FalseAlarmAcceptanceBody',
-        },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/FalseAlarmAcceptanceBody' }, { type: 'null' }],
     },
-    installer_measurements: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/InstallerMeasurementsBody',
-    },
+    installer_measurements: { $ref: 'components.json#/$defs/InstallerMeasurementsBody' },
   },
   additionalProperties: false,
   type: 'object',
@@ -6767,7 +6699,7 @@ const schema61 = {
   properties: {
     beacon_latency_ms_p95: { type: 'integer' },
     baselines: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/BaselineBody' },
+      items: { $ref: 'components.json#/$defs/BaselineBody' },
       type: 'array',
       maxItems: 8,
     },
@@ -7343,7 +7275,6 @@ validate113.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__commissioning_clips_zones__zone_id__commissioning_clips_get = validate124;
 const schema63 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 36 }, { type: 'null' }] },
@@ -7526,14 +7457,11 @@ function validate124(
 validate124.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__create_agreement_zones__zone_id__use_agreements_post = validate125;
-const schema64 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/UseAgreementBody',
-};
+const schema64 = { $ref: 'components.json#/$defs/UseAgreementBody' };
 const schema65 = {
   properties: {
     signatories: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SignatoryBody' },
+      items: { $ref: 'components.json#/$defs/SignatoryBody' },
       type: 'array',
       maxItems: 32,
     },
@@ -7546,7 +7474,7 @@ const schema65 = {
 };
 const schema66 = {
   properties: {
-    role: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/Role' },
+    role: { $ref: 'components.json#/$defs/Role' },
     user_id: { type: 'string', format: 'uuid' },
   },
   additionalProperties: false,
@@ -7956,10 +7884,7 @@ function validate125(
 validate125.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__create_plant_plants_post = validate131;
-const schema67 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PlantBody',
-};
+const schema67 = { $ref: 'components.json#/$defs/PlantBody' };
 const schema68 = {
   properties: {
     code: { type: 'string', maxLength: 32, minLength: 2 },
@@ -8353,10 +8278,7 @@ function validate131(
 validate131.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__create_zone_plants__plant_id__zones_post = validate134;
-const schema69 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ZoneBody',
-};
+const schema69 = { $ref: 'components.json#/$defs/ZoneBody' };
 const schema70 = {
   properties: {
     code: { type: 'string', maxLength: 32, minLength: 2 },
@@ -8561,10 +8483,7 @@ function validate134(
 validate134.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__declare_loop_findings__finding_state_id__unclosable_post = validate137;
-const schema71 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/UnclosableDeclarationBody',
-};
+const schema71 = { $ref: 'components.json#/$defs/UnclosableDeclarationBody' };
 const schema72 = {
   properties: {
     evaluated_alternative: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -9110,10 +9029,7 @@ function validate137(
 validate137.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__declare_node_plants__plant_id__nodes_post = validate140;
-const schema73 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeDeclarationBody',
-};
+const schema73 = { $ref: 'components.json#/$defs/NodeDeclarationBody' };
 const schema74 = {
   properties: {
     code: { type: 'string' },
@@ -9385,10 +9301,7 @@ function validate140(
 validate140.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__decommission_node_nodes__node_id__decommission_post = validate143;
-const schema75 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeReasonBody',
-};
+const schema75 = { $ref: 'components.json#/$defs/NodeReasonBody' };
 const schema76 = {
   properties: { reason_es: { type: 'string' } },
   additionalProperties: false,
@@ -9500,10 +9413,7 @@ function validate143(
 validate143.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__enroll_auth_second_factor_enroll_post = validate146;
-const schema77 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EnrollRequest',
-};
+const schema77 = { $ref: 'components.json#/$defs/EnrollRequest' };
 const schema78 = {
   properties: {
     code: { anyOf: [{ type: 'string', maxLength: 64, minLength: 1 }, { type: 'null' }] },
@@ -9677,14 +9587,11 @@ function validate146(
 validate146.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__evaluate_plants__plant_id__admissions_post = validate149;
-const schema79 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AdmissionBody',
-};
+const schema79 = { $ref: 'components.json#/$defs/AdmissionBody' };
 const schema80 = {
   properties: {
-    family: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PredicateFamily' },
-    answers: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AnswersBody' },
+    family: { $ref: 'components.json#/$defs/PredicateFamily' },
+    answers: { $ref: 'components.json#/$defs/AnswersBody' },
     justification_es: { anyOf: [{ type: 'string' }, { type: 'null' }] },
   },
   additionalProperties: false,
@@ -10090,7 +9997,6 @@ validate149.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__fleet_node_fleet_nodes__node_id__get = validate156;
 const schema83 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     history_after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
@@ -10273,10 +10179,7 @@ function validate156(
 validate156.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__framing_recapture_zones__zone_id__framing_recaptures_post = validate157;
-const schema84 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FramingRecaptureBody',
-};
+const schema84 = { $ref: 'components.json#/$defs/FramingRecaptureBody' };
 const schema85 = {
   properties: {
     camera_id: { type: 'string', format: 'uuid' },
@@ -10485,7 +10388,6 @@ validate157.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__get_adoption_accreditation_adoption_get = validate160;
 const schema86 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     from: { type: 'string', maxLength: 10 },
@@ -10794,7 +10696,6 @@ validate160.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__get_exposure_accreditation_exposure_get = validate161;
 const schema87 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     zone_id: { type: 'string', format: 'uuid' },
@@ -10948,7 +10849,6 @@ validate161.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__get_monthly_package_accreditation_monthly_packages_get = validate162;
 const schema88 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     zone_id: { type: 'string', format: 'uuid' },
@@ -11100,17 +11000,12 @@ function validate162(
 validate162.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__grant_document_documents_post = validate163;
-const schema89 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/DocumentGrantBody',
-};
+const schema89 = { $ref: 'components.json#/$defs/DocumentGrantBody' };
 const schema90 = {
   properties: {
     plant_id: { type: 'string', format: 'uuid' },
-    kind: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/DocumentKind' },
-    content_type: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/DocumentContentType',
-    },
+    kind: { $ref: 'components.json#/$defs/DocumentKind' },
+    content_type: { $ref: 'components.json#/$defs/DocumentContentType' },
     size_bytes: { type: 'integer', maximum: 20971520, minimum: 1 },
     sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
   },
@@ -11511,10 +11406,7 @@ function validate163(
 validate163.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__grant_provider_concessions_post = validate170;
-const schema93 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/GrantBody',
-};
+const schema93 = { $ref: 'components.json#/$defs/GrantBody' };
 const schema94 = {
   properties: {
     client_organization_id: { type: 'string', format: 'uuid' },
@@ -11897,10 +11789,7 @@ function validate170(
 validate170.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__invite_users_post = validate173;
-const schema95 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/InviteBody',
-};
+const schema95 = { $ref: 'components.json#/$defs/InviteBody' };
 const schema96 = {
   properties: {
     email: { type: 'string', maxLength: 254, minLength: 3 },
@@ -11909,7 +11798,7 @@ const schema96 = {
       anyOf: [{ type: 'string', maxLength: 64, minLength: 1 }, { type: 'null' }],
     },
     assignments: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AssignmentBody' },
+      items: { $ref: 'components.json#/$defs/AssignmentBody' },
       type: 'array',
       maxItems: 32,
       minItems: 1,
@@ -12455,7 +12344,6 @@ validate173.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_admissions_plants__plant_id__admissions_get = validate180;
 const schema98 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
@@ -12639,7 +12527,6 @@ validate180.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_audit_entries_audit_entries_get = validate181;
 const schema99 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     operation: {
@@ -13367,7 +13254,6 @@ validate181.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_commitments_accreditation_commitments_get = validate182;
 const schema100 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     zone_id: { type: 'string', format: 'uuid' },
@@ -13520,7 +13406,6 @@ validate182.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_concessions_concessions_get = validate183;
 const schema101 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: { plant_id: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] } },
   additionalProperties: false,
@@ -13654,7 +13539,6 @@ validate183.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_enrollment_attempts_nodes__node_id__enrollment_attempts_get = validate184;
 const schema102 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
@@ -13838,28 +13722,17 @@ validate184.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_findings_loop_findings_get = validate185;
 const schema103 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     zone_id: {
       anyOf: [{ type: 'array', items: { type: 'string', format: 'uuid' } }, { type: 'null' }],
     },
-    family: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PredicateFamily' },
-        { type: 'null' },
-      ],
-    },
-    tier: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EvidenceTier' },
-        { type: 'null' },
-      ],
-    },
+    family: { anyOf: [{ $ref: 'components.json#/$defs/PredicateFamily' }, { type: 'null' }] },
+    tier: { anyOf: [{ $ref: 'components.json#/$defs/EvidenceTier' }, { type: 'null' }] },
     lifecycle_state: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
     from: { anyOf: [{ type: 'string', maxLength: 40 }, { type: 'null' }] },
     to: { anyOf: [{ type: 'string', maxLength: 40 }, { type: 'null' }] },
-    order: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/InboxOrder' },
+    order: { $ref: 'components.json#/$defs/InboxOrder' },
     cursor: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
     limit: { type: 'integer', maximum: 200, minimum: 1 },
   },
@@ -14652,25 +14525,14 @@ validate185.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_fleet_alarms_fleet_alarms_get = validate192;
 const schema107 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
     limit: { type: 'integer', maximum: 100, minimum: 1 },
     plant_id: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     node_id: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
-    alarm_kind: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FleetAlarmKind' },
-        { type: 'null' },
-      ],
-    },
-    status: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AlarmStatus' },
-        { type: 'null' },
-      ],
-    },
+    alarm_kind: { anyOf: [{ $ref: 'components.json#/$defs/FleetAlarmKind' }, { type: 'null' }] },
+    status: { anyOf: [{ $ref: 'components.json#/$defs/AlarmStatus' }, { type: 'null' }] },
   },
   additionalProperties: false,
 };
@@ -15247,24 +15109,15 @@ validate192.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_fleet_nodes_fleet_nodes_get = validate197;
 const schema110 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
     limit: { type: 'integer', maximum: 100, minimum: 1 },
     plant_id: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
     communication_state: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CommunicationState' },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/CommunicationState' }, { type: 'null' }],
     },
-    warning: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FleetAlarmKind' },
-        { type: 'null' },
-      ],
-    },
+    warning: { anyOf: [{ $ref: 'components.json#/$defs/FleetAlarmKind' }, { type: 'null' }] },
   },
   additionalProperties: false,
 };
@@ -15749,7 +15602,6 @@ validate197.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_labels_labels_get = validate202;
 const schema113 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     from: { type: 'string' },
@@ -16304,18 +16156,12 @@ validate202.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_notifications_notifications_get = validate203;
 const schema114 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
     limit: { type: 'integer', maximum: 200, minimum: 1 },
     status: {
-      anyOf: [
-        {
-          $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NotificationStatusFilter',
-        },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/NotificationStatusFilter' }, { type: 'null' }],
     },
     since: { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] },
     until: { anyOf: [{ type: 'string', format: 'date-time' }, { type: 'null' }] },
@@ -16783,7 +16629,6 @@ validate203.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_overdue_loop_overdue_get = validate206;
 const schema116 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     plant_id: { type: 'string', format: 'uuid' },
@@ -17326,7 +17171,6 @@ validate206.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_queries_concessions__concession_id__queries_get = validate207;
 const schema117 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
@@ -17510,7 +17354,6 @@ validate207.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_records_ledger_records_get = validate208;
 const schema118 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     record_type: {
@@ -18237,7 +18080,6 @@ validate208.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_review_queue_loop_review_queue_get = validate209;
 const schema119 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     cursor: { anyOf: [{ type: 'string', maxLength: 128 }, { type: 'null' }] },
@@ -18421,7 +18263,6 @@ validate209.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__list_users_users_get = validate210;
 const schema120 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     after: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
@@ -18604,10 +18445,7 @@ function validate210(
 validate210.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__login_auth_login_post = validate211;
-const schema121 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/LoginRequest',
-};
+const schema121 = { $ref: 'components.json#/$defs/LoginRequest' };
 const schema122 = {
   properties: {
     email: { type: 'string', maxLength: 254, minLength: 1 },
@@ -18813,7 +18651,6 @@ validate211.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__metrics_accreditation_metrics_get = validate214;
 const schema123 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: {
     period: { type: 'string', pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' },
@@ -19074,10 +18911,7 @@ function validate214(
 validate214.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__minimum_coverage_zones__zone_id__minimum_coverage_put = validate215;
-const schema124 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/MinimumCoverageBody',
-};
+const schema124 = { $ref: 'components.json#/$defs/MinimumCoverageBody' };
 const schema125 = {
   properties: {
     required_count: { type: 'integer' },
@@ -19304,15 +19138,10 @@ validate215.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__new_standard_version_zones__zone_id__standards__standard_id__versions_post =
   validate218;
-const schema126 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/StandardVersionBody',
-};
+const schema126 = { $ref: 'components.json#/$defs/StandardVersionBody' };
 const schema127 = {
   properties: {
-    changes: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/StandardChanges',
-    },
+    changes: { $ref: 'components.json#/$defs/StandardChanges' },
     reason_es: { type: 'string' },
   },
   additionalProperties: false,
@@ -19697,22 +19526,16 @@ function validate218(
 validate218.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__new_standard_zones__zone_id__standards_post = validate223;
-const schema129 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/StandardBody',
-};
+const schema129 = { $ref: 'components.json#/$defs/StandardBody' };
 const schema130 = {
   properties: {
-    family: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PredicateFamily' },
+    family: { $ref: 'components.json#/$defs/PredicateFamily' },
     title_es: { type: 'string' },
     declared_text: { type: 'string' },
     predicate: { additionalProperties: true, type: 'object' },
     reason_es: { type: 'string' },
     zone_parameters: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ZoneParametersBody' },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/ZoneParametersBody' }, { type: 'null' }],
     },
   },
   additionalProperties: false,
@@ -19722,22 +19545,16 @@ const schema130 = {
 const schema131 = {
   properties: {
     cameras: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CameraBody' },
+      items: { $ref: 'components.json#/$defs/CameraBody' },
       type: 'array',
       maxItems: 8,
       minItems: 1,
     },
-    minimum_coverage: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CoverageValues',
-    },
+    minimum_coverage: { $ref: 'components.json#/$defs/CoverageValues' },
     signals: { items: { additionalProperties: true, type: 'object' }, type: 'array', maxItems: 32 },
-    thresholds: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ThresholdValues',
-    },
-    clip_window: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ClipWindowBody',
-    },
-    episode: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EpisodeBody' },
+    thresholds: { $ref: 'components.json#/$defs/ThresholdValues' },
+    clip_window: { $ref: 'components.json#/$defs/ClipWindowBody' },
+    episode: { $ref: 'components.json#/$defs/EpisodeBody' },
     single_occupancy: { type: 'boolean' },
     aggregation_window_minutes: { type: 'integer', maximum: 480, minimum: 15 },
   },
@@ -20936,10 +20753,7 @@ validate223.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__open_regression_rerun_zones__zone_id__walk_tests_regression_rerun_post =
   validate238;
-const schema136 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/RerunBody',
-};
+const schema136 = { $ref: 'components.json#/$defs/RerunBody' };
 const schema137 = {
   properties: { passes_per_cell: { type: 'integer' } },
   additionalProperties: false,
@@ -21052,10 +20866,7 @@ function validate238(
 validate238.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__open_walk_test_zones__zone_id__walk_tests_post = validate241;
-const schema138 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/OpenWalkTestBody',
-};
+const schema138 = { $ref: 'components.json#/$defs/OpenWalkTestBody' };
 const schema139 = {
   properties: { passes_per_cell: { type: 'integer' } },
   additionalProperties: false,
@@ -21168,10 +20979,7 @@ function validate241(
 validate241.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__publish_target_version_fleet_target_versions_post = validate244;
-const schema140 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/TargetVersionBody',
-};
+const schema140 = { $ref: 'components.json#/$defs/TargetVersionBody' };
 const schema141 = {
   properties: {
     plant_id: { type: 'string', format: 'uuid' },
@@ -21181,16 +20989,9 @@ const schema141 = {
         { type: 'null' },
       ],
     },
-    group: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeGroup' },
-        { type: 'null' },
-      ],
-    },
+    group: { anyOf: [{ $ref: 'components.json#/$defs/NodeGroup' }, { type: 'null' }] },
     target_version: { type: 'string', maxLength: 64 },
-    maintenance_window: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/MaintenanceWindowBody',
-    },
+    maintenance_window: { $ref: 'components.json#/$defs/MaintenanceWindowBody' },
   },
   additionalProperties: false,
   type: 'object',
@@ -21779,10 +21580,7 @@ function validate244(
 validate244.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__put_plant_fleet_thresholds_plants__plant_id__fleet_thresholds_put = validate251;
-const schema144 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FleetThresholdsBody',
-};
+const schema144 = { $ref: 'components.json#/$defs/FleetThresholdsBody' };
 const schema145 = {
   properties: {
     queue_pending_threshold: { type: 'integer' },
@@ -21965,17 +21763,10 @@ function validate251(
 validate251.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__put_signatory_policy_plants__plant_id__signatory_policy_put = validate254;
-const schema146 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SignatoryPolicyBody',
-};
+const schema146 = { $ref: 'components.json#/$defs/SignatoryPolicyBody' };
 const schema147 = {
   properties: {
-    required_roles: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/Role' },
-      type: 'array',
-      maxItems: 7,
-    },
+    required_roles: { items: { $ref: 'components.json#/$defs/Role' }, type: 'array', maxItems: 7 },
     minimum: { type: 'integer' },
   },
   additionalProperties: false,
@@ -22150,17 +21941,12 @@ validate254.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__put_step_loop_root_cause_analyses__analysis_id__steps__step_index__put =
   validate258;
-const schema148 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AnalysisStepBody',
-};
+const schema148 = { $ref: 'components.json#/$defs/AnalysisStepBody' };
 const schema149 = {
   properties: {
     statement: { type: 'string' },
     evidence_refs: {
-      items: {
-        $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EvidenceRefBody',
-      },
+      items: { $ref: 'components.json#/$defs/EvidenceRefBody' },
       type: 'array',
       maxItems: 32,
     },
@@ -22515,14 +22301,11 @@ function validate258(
 validate258.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__reactivate_users__user_id__reactivate_post = validate263;
-const schema151 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ReactivateBody',
-};
+const schema151 = { $ref: 'components.json#/$defs/ReactivateBody' };
 const schema152 = {
   properties: {
     assignments: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AssignmentBody' },
+      items: { $ref: 'components.json#/$defs/AssignmentBody' },
       type: 'array',
       maxItems: 32,
       minItems: 1,
@@ -22700,14 +22483,11 @@ validate263.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__record_commitments_accreditation_monthly_packages__package_id__commitments_post =
   validate267;
-const schema153 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CommitmentsBody',
-};
+const schema153 = { $ref: 'components.json#/$defs/CommitmentsBody' };
 const schema154 = {
   properties: {
     commitments: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CommitmentIn' },
+      items: { $ref: 'components.json#/$defs/CommitmentIn' },
       type: 'array',
       maxItems: 20,
       minItems: 1,
@@ -23033,10 +22813,7 @@ validate267.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__record_exposure_sample_walk_tests__session_id__exposure_samples_post =
   validate272;
-const schema156 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ExposureSampleBody',
-};
+const schema156 = { $ref: 'components.json#/$defs/ExposureSampleBody' };
 const schema157 = {
   properties: {
     pass_id: { type: 'string', format: 'uuid' },
@@ -23260,10 +23037,7 @@ function validate272(
 validate272.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__record_occlusion_test_walk_tests__session_id__occlusion_tests_post = validate275;
-const schema158 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/OcclusionTestBody',
-};
+const schema158 = { $ref: 'components.json#/$defs/OcclusionTestBody' };
 const schema159 = {
   properties: {
     camera_id: { type: 'string', format: 'uuid' },
@@ -23555,14 +23329,11 @@ function validate275(
 validate275.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__record_pass_walk_tests__session_id__passes_post = validate278;
-const schema160 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PassBody',
-};
+const schema160 = { $ref: 'components.json#/$defs/PassBody' };
 const schema161 = {
   properties: {
     row_id: { type: 'string', format: 'uuid' },
-    result: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PassResult' },
+    result: { $ref: 'components.json#/$defs/PassResult' },
     evidence_ref: { anyOf: [{ type: 'string', format: 'uuid' }, { type: 'null' }] },
   },
   additionalProperties: false,
@@ -23843,10 +23614,7 @@ validate278.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__record_sample_result_accreditation_sample_items__sample_item_id__result_post =
   validate283;
-const schema163 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SampleResultBody',
-};
+const schema163 = { $ref: 'components.json#/$defs/SampleResultBody' };
 const schema164 = {
   properties: {
     outcome: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -24054,10 +23822,7 @@ function validate283(
 validate283.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__reopen_loop_findings__finding_state_id__reopening_post = validate286;
-const schema165 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ReopeningBody',
-};
+const schema165 = { $ref: 'components.json#/$defs/ReopeningBody' };
 const schema166 = {
   properties: {
     reason_text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -24522,10 +24287,7 @@ function validate286(
 validate286.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__reopen_walk_test_walk_tests__session_id__reopen_post = validate289;
-const schema167 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ReopenBody',
-};
+const schema167 = { $ref: 'components.json#/$defs/ReopenBody' };
 const schema168 = {
   properties: { reason_es: { type: 'string' } },
   additionalProperties: false,
@@ -24637,10 +24399,7 @@ function validate289(
 validate289.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__request_export_accreditation_exports_post = validate292;
-const schema169 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ExportRequestBody',
-};
+const schema169 = { $ref: 'components.json#/$defs/ExportRequestBody' };
 const schema170 = {
   properties: {
     plant_id: { type: 'string', format: 'uuid' },
@@ -24650,10 +24409,8 @@ const schema170 = {
       maxItems: 80,
       minItems: 1,
     },
-    period: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PeriodBody' },
-    package_form: {
-      $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PackageForm',
-    },
+    period: { $ref: 'components.json#/$defs/PeriodBody' },
+    package_form: { $ref: 'components.json#/$defs/PackageForm' },
   },
   additionalProperties: false,
   type: 'object',
@@ -25132,10 +24889,7 @@ function validate292(
 validate292.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__resolve_loop_review_queue__detection_id__resolution_post = validate299;
-const schema173 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ReviewResolutionBody',
-};
+const schema173 = { $ref: 'components.json#/$defs/ReviewResolutionBody' };
 const schema174 = {
   properties: {
     outcome: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -25406,10 +25160,7 @@ function validate299(
 validate299.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__retirement_zones__zone_id__standards__standard_id__retirement_post = validate302;
-const schema175 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/RetirementBody',
-};
+const schema175 = { $ref: 'components.json#/$defs/RetirementBody' };
 const schema176 = {
   properties: {
     reason_es: { type: 'string' },
@@ -25570,21 +25321,13 @@ function validate302(
 validate302.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__review_loop_unclosable__declaration_id__reviews_post = validate305;
-const schema177 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/UnclosableReviewBody',
-};
+const schema177 = { $ref: 'components.json#/$defs/UnclosableReviewBody' };
 const schema178 = {
   properties: {
     outcome: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     review_note: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     new_review_due_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    action: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ReviewActionBody' },
-        { type: 'null' },
-      ],
-    },
+    action: { anyOf: [{ $ref: 'components.json#/$defs/ReviewActionBody' }, { type: 'null' }] },
     professional_license: { anyOf: [{ type: 'string' }, { type: 'null' }] },
   },
   additionalProperties: false,
@@ -26400,10 +26143,7 @@ function validate305(
 validate305.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__revocation_zones__zone_id__gates__gate__revocation_post = validate310;
-const schema180 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/RevocationBody',
-};
+const schema180 = { $ref: 'components.json#/$defs/RevocationBody' };
 const schema181 = {
   properties: { reason_es: { type: 'string' } },
   additionalProperties: false,
@@ -26515,10 +26255,7 @@ function validate310(
 validate310.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__revoke_node_nodes__node_id__revocation_post = validate313;
-const schema182 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeReasonBody',
-};
+const schema182 = { $ref: 'components.json#/$defs/NodeReasonBody' };
 
 function validate314(
   data,
@@ -26624,28 +26361,18 @@ function validate313(
 validate313.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__scope_record_zones__zone_id__gates_mounting_scope_record_post = validate316;
-const schema184 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ScopeRecordBody',
-};
+const schema184 = { $ref: 'components.json#/$defs/ScopeRecordBody' };
 const schema185 = {
   properties: {
     scope_text_es: { type: 'string' },
     cameras: {
-      items: {
-        $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CameraFramingBody',
-      },
+      items: { $ref: 'components.json#/$defs/CameraFramingBody' },
       type: 'array',
       maxItems: 8,
       minItems: 1,
     },
     blur_verification: {
-      anyOf: [
-        {
-          $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/BlurVerificationBody',
-        },
-        { type: 'null' },
-      ],
+      anyOf: [{ $ref: 'components.json#/$defs/BlurVerificationBody' }, { type: 'null' }],
     },
     document_ref: { anyOf: [{ additionalProperties: true, type: 'object' }, { type: 'null' }] },
   },
@@ -27315,10 +27042,7 @@ function validate316(
 validate316.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__second_factor_auth_second_factor_post = validate323;
-const schema188 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SecondFactorRequest',
-};
+const schema188 = { $ref: 'components.json#/$defs/SecondFactorRequest' };
 const schema189 = {
   properties: { code: { type: 'string', maxLength: 64, minLength: 1 } },
   additionalProperties: false,
@@ -27460,10 +27184,7 @@ function validate323(
 validate323.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__sign_policy_plants__plant_id__policy_post = validate326;
-const schema190 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/PlantPolicyBody',
-};
+const schema190 = { $ref: 'components.json#/$defs/PlantPolicyBody' };
 const schema191 = {
   properties: {
     version: { type: 'integer' },
@@ -27765,10 +27486,7 @@ function validate326(
 validate326.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__signals_zones__zone_id__signals_put = validate329;
-const schema192 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SignalsBody',
-};
+const schema192 = { $ref: 'components.json#/$defs/SignalsBody' };
 const schema193 = {
   properties: {
     signals: { items: { additionalProperties: true, type: 'object' }, type: 'array', maxItems: 32 },
@@ -27948,10 +27666,7 @@ function validate329(
 validate329.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__signature_loop_root_cause_analyses__analysis_id__signature_post = validate332;
-const schema194 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/AnalysisSignatureBody',
-};
+const schema194 = { $ref: 'components.json#/$defs/AnalysisSignatureBody' };
 const schema195 = {
   properties: {
     professional_license: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -27959,7 +27674,7 @@ const schema195 = {
     root_cause_statement: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     conclusion: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     cause_effect_branches: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/BranchBody' },
+      items: { $ref: 'components.json#/$defs/BranchBody' },
       type: 'array',
       maxItems: 6,
     },
@@ -27971,7 +27686,7 @@ const schema196 = {
   properties: {
     branch_category: { type: 'string' },
     factors: {
-      items: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/FactorBody' },
+      items: { $ref: 'components.json#/$defs/FactorBody' },
       type: 'array',
       maxItems: 16,
       minItems: 1,
@@ -27985,9 +27700,7 @@ const schema197 = {
   properties: {
     text: { type: 'string' },
     evidence_refs: {
-      items: {
-        $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EvidenceRefBody',
-      },
+      items: { $ref: 'components.json#/$defs/EvidenceRefBody' },
       type: 'array',
       maxItems: 32,
     },
@@ -28652,10 +28365,7 @@ function validate332(
 validate332.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__single_occupancy_zones__zone_id__catalog_single_occupancy_put = validate340;
-const schema198 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SingleOccupancyBody',
-};
+const schema198 = { $ref: 'components.json#/$defs/SingleOccupancyBody' };
 const schema199 = {
   properties: {
     single_occupancy: { type: 'boolean' },
@@ -28852,13 +28562,10 @@ function validate340(
 validate340.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__start_step_walk_tests__session_id__steps_post = validate343;
-const schema200 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/StepBody',
-};
+const schema200 = { $ref: 'components.json#/$defs/StepBody' };
 const schema201 = {
   properties: {
-    step_kind: { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/StepKind' },
+    step_kind: { $ref: 'components.json#/$defs/StepKind' },
     responsible_user_id: { type: 'string', format: 'uuid' },
   },
   additionalProperties: false,
@@ -29083,7 +28790,6 @@ validate343.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__status_at_zones__zone_id__coverage_at_get = validate348;
 const schema203 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: { instant: { type: 'string' } },
   required: ['instant'],
@@ -29170,10 +28876,7 @@ function validate348(
 validate348.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__thresholds_zones__zone_id__thresholds_put = validate349;
-const schema204 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ThresholdsBody',
-};
+const schema204 = { $ref: 'components.json#/$defs/ThresholdsBody' };
 const schema205 = {
   properties: {
     review: { type: 'number', exclusiveMaximum: 1, exclusiveMinimum: 0 },
@@ -29410,7 +29113,6 @@ validate349.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const query__timeline_zones__zone_id__coverage_get = validate352;
 const schema206 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
   properties: { from: { type: 'string' }, to: { type: 'string' } },
   required: ['from', 'to'],
@@ -29527,10 +29229,7 @@ function validate352(
 validate352.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__unassign_zone_nodes__node_id__zones__zone_id__unassignment_post = validate353;
-const schema207 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NodeReasonBody',
-};
+const schema207 = { $ref: 'components.json#/$defs/NodeReasonBody' };
 
 function validate354(
   data,
@@ -29636,10 +29335,7 @@ function validate353(
 validate353.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__update_commitment_accreditation_commitments__commitment_id__patch = validate356;
-const schema209 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/CommitmentUpdateBody',
-};
+const schema209 = { $ref: 'components.json#/$defs/CommitmentUpdateBody' };
 const schema210 = {
   properties: {
     state: { type: 'string' },
@@ -29816,10 +29512,7 @@ function validate356(
 validate356.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__update_preferences_notifications_preferences_put = validate359;
-const schema211 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/NotificationPreferenceUpdateIn',
-};
+const schema211 = { $ref: 'components.json#/$defs/NotificationPreferenceUpdateIn' };
 const schema212 = {
   properties: {
     email_enabled_normal: { type: 'boolean' },
@@ -30030,10 +29723,7 @@ function validate359(
 validate359.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__update_profile_users__user_id__patch = validate362;
-const schema213 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ProfileBody',
-};
+const schema213 = { $ref: 'components.json#/$defs/ProfileBody' };
 const schema214 = {
   properties: {
     display_name: { anyOf: [{ type: 'string', maxLength: 120, minLength: 1 }, { type: 'null' }] },
@@ -30322,10 +30012,7 @@ function validate362(
 validate362.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__update_settings_organization_settings_patch = validate365;
-const schema215 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/SettingsBody',
-};
+const schema215 = { $ref: 'components.json#/$defs/SettingsBody' };
 const schema216 = {
   properties: {
     name: { anyOf: [{ type: 'string', maxLength: 120, minLength: 1 }, { type: 'null' }] },
@@ -30694,10 +30381,7 @@ validate365.evaluated = { props: true, dynamicProps: false, dynamicItems: false 
 
 export const body__upload_grant_loop_actions__action_id__attachments_upload_grant_post =
   validate368;
-const schema217 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/UploadGrantRequest',
-};
+const schema217 = { $ref: 'components.json#/$defs/UploadGrantRequest' };
 const schema218 = {
   properties: {
     content_type: { type: 'string', maxLength: 255, minLength: 1 },
@@ -30936,10 +30620,7 @@ function validate368(
 validate368.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__verify_integrity_verify_post = validate371;
-const schema219 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/VerifyRequest',
-};
+const schema219 = { $ref: 'components.json#/$defs/VerifyRequest' };
 const schema220 = {
   properties: {
     kind: { type: 'string', enum: ['ledger', 'audit'] },
@@ -31146,24 +30827,11 @@ function validate371(
 validate371.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 
 export const body__windows_zones__zone_id__windows_put = validate374;
-const schema221 = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/WindowsBody',
-};
+const schema221 = { $ref: 'components.json#/$defs/WindowsBody' };
 const schema222 = {
   properties: {
-    clip_window: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/ClipWindowBody' },
-        { type: 'null' },
-      ],
-    },
-    episode: {
-      anyOf: [
-        { $ref: 'https://vigia.local/frontend/openapi/components.json#/$defs/EpisodeBody' },
-        { type: 'null' },
-      ],
-    },
+    clip_window: { anyOf: [{ $ref: 'components.json#/$defs/ClipWindowBody' }, { type: 'null' }] },
+    episode: { anyOf: [{ $ref: 'components.json#/$defs/EpisodeBody' }, { type: 'null' }] },
     reason_es: { type: 'string' },
   },
   additionalProperties: false,
