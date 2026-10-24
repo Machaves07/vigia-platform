@@ -75,6 +75,42 @@ env:
   COVERAGE_CORE: sysmon
 
 jobs:
+  # Retro 29, propuesta 1 (dueño, 2026-10-24): un PR que solo toca frontend/ o docs/ no ejecuta los trabajos de
+  # backend (16 de las 19 primeras fusiones de U-05 eran así y corrían ~20 trabajos que no pueden fallar por su
+  # cambio). «backend=true» si algún archivo cambiado queda fuera de frontend/, docs/, README.md y CHANGELOG.md, y
+  # siempre en un push a main. Los checks que exige la sesión de control siguen apareciendo, en verde con
+  # «saltado por rutas». En main y en el nightly corre todo.
+  rutas:
+    name: rutas del cambio (frontend o backend)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.rutas.outputs.backend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: archivos cambiados frente a la base del PR
+        id: rutas
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_PR: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENTO" != pull_request ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"; echo "push: corre todo"; exit 0
+          fi
+          cambiados=$(git diff --name-only "$BASE...$HEAD_PR")
+          printf '%s\n' "$cambiados"
+          if printf '%s\n' "$cambiados" | grep -qvE '^(frontend/|docs/|README\.md$|CHANGELOG\.md$)'; then
+            backend=true
+          else
+            backend=false
+          fi
+          echo "backend=$backend" | tee -a "$GITHUB_OUTPUT"
+
   secretos:
     name: escaneo de secretos
     if: github.event_name == 'push' || github.event.pull_request.draft == false
@@ -108,7 +144,8 @@ jobs:
   # (los 4 grupos) terminaron en verde.
   backend-lint:
     name: backend (lint y tipos)
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas]
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false) && needs.rutas.outputs.backend != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -159,7 +196,8 @@ jobs:
   # identificadores, así que los grupos y los tiempos son los mismos en los dos.
   backend-pruebas:
     name: backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas]
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false) && needs.rutas.outputs.backend != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -208,7 +246,7 @@ jobs:
   # (always()): un check obligatorio «omitido» cuenta como superado en GitHub, así que tiene que fallar.
   backend:
     name: backend (lint, tipos y pruebas sin integración)
-    needs: [backend-lint, backend-pruebas]
+    needs: [rutas, backend-lint, backend-pruebas]
     if: always() && (github.event_name == 'push' || github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -217,7 +255,9 @@ jobs:
         env:
           LINT: ${{ needs.backend-lint.result }}
           PRUEBAS: ${{ needs.backend-pruebas.result }}
+          BACKEND: ${{ needs.rutas.outputs.backend }}
         run: |
+          if [ "$BACKEND" = false ]; then echo "saltado por rutas: el PR solo toca frontend/ o docs/"; exit 0; fi
           echo "backend (lint y tipos): $LINT; pruebas sin integración (4 grupos): $PRUEBAS"
           test "$LINT" = success && test "$PRUEBAS" = success
 
@@ -237,7 +277,8 @@ jobs:
   #   jq -S --indent 4 -s add /tmp/tiempos/*/.test_durations_integracion > backend/.test_durations_integracion
   backend-integracion-grupos:
     name: backend (pruebas de integración, grupo ${{ matrix.grupo }} de 4)
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas]
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false) && needs.rutas.outputs.backend != 'false'
     runs-on: ubuntu-24.04
     # 45 min: los tiempos se midieron con el perfil pr (19-23 min); en main corre ci (200 ejemplos), aún sin medir.
     timeout-minutes: 45
@@ -287,7 +328,7 @@ jobs:
   # falle la matriz (always()): un check «omitido» cuenta como superado, así que tienen que fallar.
   backend-integracion:
     name: backend (pruebas de integración)
-    needs: [backend-integracion-grupos]
+    needs: [rutas, backend-integracion-grupos]
     if: always() && (github.event_name == 'push' || github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -295,13 +336,15 @@ jobs:
       - name: los 4 grupos de integración en verde
         env:
           GRUPOS: ${{ needs.backend-integracion-grupos.result }}
+          BACKEND: ${{ needs.rutas.outputs.backend }}
         run: |
+          if [ "$BACKEND" = false ]; then echo "saltado por rutas: el PR solo toca frontend/ o docs/"; exit 0; fi
           echo "pruebas de integración (4 grupos): $GRUPOS"
           test "$GRUPOS" = success
 
   backend-integracion-2:
     name: backend (pruebas de integración, segunda mitad)
-    needs: [backend-integracion-grupos]
+    needs: [rutas, backend-integracion-grupos]
     if: always() && (github.event_name == 'push' || github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -309,12 +352,15 @@ jobs:
       - name: los 4 grupos de integración en verde
         env:
           GRUPOS: ${{ needs.backend-integracion-grupos.result }}
+          BACKEND: ${{ needs.rutas.outputs.backend }}
         run: |
+          if [ "$BACKEND" = false ]; then echo "saltado por rutas: el PR solo toca frontend/ o docs/"; exit 0; fi
           echo "pruebas de integración (4 grupos): $GRUPOS"
           test "$GRUPOS" = success
 
   backend-carga:
     name: backend (carga ci)
+    needs: [rutas]
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -322,13 +368,20 @@ jobs:
       run:
         working-directory: backend
     steps:
+      - name: saltado por rutas (el PR solo toca frontend/ o docs/)
+        if: needs.rutas.outputs.backend == 'false'
+        working-directory: .
+        run: echo 'saltado por rutas, el PR solo toca frontend/ o docs/'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: needs.rutas.outputs.backend != 'false'
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        if: needs.rutas.outputs.backend != 'false'
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
+        if: needs.rutas.outputs.backend != 'false'
         env:
           CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
         run: |
@@ -338,11 +391,13 @@ jobs:
           echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
       - name: instalación congelada
+        if: needs.rutas.outputs.backend != 'false'
         run: uv sync --frozen
       - name: borrar la clave (ya no hace falta)
-        if: always()
+        if: always() && needs.rutas.outputs.backend != 'false'
         run: rm -f ~/.ssh/vigia_contracts
       - name: perfil ci de tests/load (10 nodos, speed_factor 60, 5 min; Docker del runner)
+        if: needs.rutas.outputs.backend != 'false'
         run: |
           if [ -d tests/load ]; then
             uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=ci -m integration tests/load/
@@ -355,35 +410,45 @@ jobs:
   # cobertura-*). Solo necesita coverage.py y el código fuente.
   cobertura:
     name: cobertura (≥ 90 % identity y ledger, ≥ 80 % global)
-    needs: [backend-pruebas, backend-integracion-grupos]
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas, backend-pruebas, backend-integracion-grupos]
+    if: always() && (github.event_name == 'push' || github.event.pull_request.draft == false) && (needs.rutas.outputs.backend == 'false' || (needs.backend-pruebas.result == 'success' && needs.backend-integracion-grupos.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
     steps:
+      - name: saltado por rutas (el PR solo toca frontend/ o docs/)
+        if: needs.rutas.outputs.backend == 'false'
+        working-directory: .
+        run: echo 'saltado por rutas, el PR solo toca frontend/ o docs/'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        if: needs.rutas.outputs.backend != 'false'
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        if: needs.rutas.outputs.backend != 'false'
         with:
           enable-cache: false
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        if: needs.rutas.outputs.backend != 'false'
         with:
           pattern: cobertura-*
           path: backend/datos-cobertura
           merge-multiple: true
       - name: coverage fijado por suma (tools/requirements/coverage.txt)
+        if: needs.rutas.outputs.backend != 'false'
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/herramientas"
           uv pip install --python "$RUNNER_TEMP/herramientas" --require-hashes -r tools/requirements/coverage.txt
       - name: combinar e informar
+        if: needs.rutas.outputs.backend != 'false'
         run: |
           "$RUNNER_TEMP/herramientas/bin/coverage" combine --keep datos-cobertura
           "$RUNNER_TEMP/herramientas/bin/coverage" report --skip-covered --sort=cover | tail -40
           "$RUNNER_TEMP/herramientas/bin/coverage" json -o coverage.json
       - name: umbrales (tools/check_coverage.py)
+        if: needs.rutas.outputs.backend != 'false'
         run: uv run --no-project --python 3.12 python tools/check_coverage.py coverage.json
 
   # NFR-NUC-24 y NFR-CTR-26: licencias permitidas (con LICENSE-EXCEPTIONS.md) y pip-audit de todo
@@ -482,7 +547,8 @@ jobs:
   # el trabajo falla en vez de dar verde sin probar nada (seguimiento de VIG-94).
   arranque-n-1:
     name: arranque N-1 contra el esquema N
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas]
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false) && needs.rutas.outputs.backend != 'false'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     steps:
@@ -534,7 +600,8 @@ jobs:
 
   infra:
     name: infra (pruebas y cdk synth)
-    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    needs: [rutas]
+    if: (github.event_name == 'push' || github.event.pull_request.draft == false) && needs.rutas.outputs.backend != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
