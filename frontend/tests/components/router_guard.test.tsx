@@ -38,7 +38,8 @@ const concrete = (path: string): string =>
 async function renderAt(principal: NavigationPrincipal | null, path: string) {
   const router = createMemoryRouter(createAppRoutes(principal), { initialEntries: [path] });
   const view = render(<RouterProvider router={router} />);
-  await screen.findByRole('main');
+  // Tope amplio: la porción `lazy` llega por importación dinámica y no es lo que se prueba.
+  await screen.findByRole('main', {}, { timeout: 10_000 });
   return { html: view.container.innerHTML, router, unmount: view.unmount };
 }
 
@@ -84,7 +85,9 @@ describe('guarda: sin permiso, el mismo árbol que not_found', () => {
     account.unmount();
     const login = await renderAt(null, '/login');
     expect(login.html).not.toBe(missing.html);
-    expect(await screen.findByText(text('screen_state.unavailable'))).toBeDefined();
+    expect(
+      await screen.findByText(text('screen_state.unavailable'), {}, { timeout: 10_000 }),
+    ).toBeDefined();
   });
 });
 
@@ -198,7 +201,11 @@ describe('estados comunes y campana de relevo', () => {
   it('la campana de relevo enlaza las notificaciones sin pedir nada', async () => {
     const router = createMemoryRouter([{ path: '/', element: <Bell /> }]);
     render(<RouterProvider router={router} />);
-    const link = await screen.findByRole('link', { name: text('navigation.bell') });
+    const link = await screen.findByRole(
+      'link',
+      { name: text('navigation.bell') },
+      { timeout: 10_000 },
+    );
     expect(link.getAttribute('href')).toBe('/notifications');
     expect(requests).toEqual([]);
   });
