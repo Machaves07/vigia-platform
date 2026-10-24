@@ -228,6 +228,22 @@ const DAMAGES = {
     withFirst(response, (interval) => {
       interval.layer = 'composite';
     }),
+  /** Un intervalo de plataforma con dos causas, con el resumen ajustado a la primera. */
+  two_causes: (response: CoverageChunkResponse) => {
+    const first = response.intervals[0];
+    if (first === undefined) throw new Error('Un tramo servido tiene al menos un intervalo.');
+    const key = bucket(first as Pick<Piece, 'layer' | 'state' | 'causes'>);
+    const summary = { ...response.summary, [key]: response.summary[key] - first.duration_ms };
+    summary.no_communication_ms += first.duration_ms;
+    return {
+      ...withFirst(response, (interval) => {
+        interval.layer = 'platform_communication';
+        interval.state = 'not_observable';
+        interval.causes = ['no_communication', 'never_reported'];
+      }),
+      summary,
+    };
+  },
   /** Un intervalo de duración cero al principio: no rompe la contigüidad ni el resumen. */
   empty_interval: (response: CoverageChunkResponse) => {
     const first = response.intervals[0];
@@ -412,6 +428,19 @@ describe('PR-APP-05 ejemplos de carga', () => {
     expect(composite.status).toBe('incomplete');
     if (composite.status !== 'incomplete') return;
     expect(composite.problems).toEqual([{ kind: 'inconsistent_chunk', period: chosen }]);
+  });
+
+  it('un tramo coherente que se sale del periodo lo deja incompleto', () => {
+    const longer = [{ ...pieces[0], endMs: chosen.toMs + DAY_MS }] as Piece[];
+    const first = { fromMs: chosen.fromMs, toMs: chosen.fromMs + CHUNK_MAX_MS };
+    const overrun = { fromMs: first.toMs, toMs: chosen.toMs + DAY_MS };
+    const composite = composeCoverage(chosen, [
+      { period: first, response: serve(longer, first) },
+      { period: overrun, response: serve(longer, overrun) },
+    ]);
+    expect(composite.status).toBe('incomplete');
+    if (composite.status !== 'incomplete') return;
+    expect(composite.problems).toEqual([{ kind: 'not_contiguous', period: overrun }]);
   });
 
   it('un fallo distinto de period_too_long deja el tramo como missing_chunk con su error', async () => {

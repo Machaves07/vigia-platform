@@ -275,7 +275,16 @@ export function CoverageTimeline({
     onPeriodChange(periodEndingAt(composite.period.toMs, preset[1] * DAY_MS));
   };
 
-  const missing = composite.status === 'incomplete' ? composite.problems : [];
+  // Huecos de los problemas, recortados al periodo: un tramo puede salirse de él.
+  const missing = (composite.status === 'incomplete' ? composite.problems : []).flatMap(
+    ({ period: { fromMs, toMs } }) => {
+      const from = Math.max(fromMs, composite.period.fromMs);
+      const to = Math.min(toMs, composite.period.toMs);
+      if (to <= from) return [];
+      const width = Math.max((to - from) * scale, 1);
+      return [{ x: Math.min((from - composite.period.fromMs) * scale, widthPx - width), width }];
+    },
+  );
 
   return (
     <section className={styles.timeline} aria-labelledby={titleId} data-status={composite.status}>
@@ -326,14 +335,14 @@ export function CoverageTimeline({
                   height={LANE_HEIGHT}
                   aria-hidden="true"
                 />
-                {missing.map((problem, index) => (
+                {missing.map(({ x, width }, index) => (
                   <rect
                     key={index}
                     className={styles.missing}
                     data-part="missing"
-                    x={(problem.period.fromMs - composite.period.fromMs) * scale}
+                    x={x}
                     y={OVERHANG}
-                    width={Math.max((problem.period.toMs - problem.period.fromMs) * scale, 1)}
+                    width={width}
                     height={LANE_HEIGHT}
                     aria-hidden="true"
                   />

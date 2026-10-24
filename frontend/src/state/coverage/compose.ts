@@ -185,22 +185,23 @@ function instantMs(value: unknown): number | null {
   return Number.isSafeInteger(ms) ? ms : null;
 }
 
-function isLayer(value: string): value is CoverageLayer {
-  return (LAYERS as readonly string[]).includes(value);
-}
-
-/** Contador del resumen en que cuenta un intervalo (el mismo reparto que U-02). */
-function summaryKeyOf(interval: CoverageIntervalOut): SummaryKey | null {
+/**
+ * Capa del intervalo y contador del resumen en que cuenta (el mismo reparto que U-02); `null` si
+ * algún valor no pertenece a su lista cerrada.
+ */
+function classify(
+  interval: CoverageIntervalOut,
+): { readonly layer: CoverageLayer; readonly key: SummaryKey } | null {
   if (interval.layer === 'platform_communication') {
     const cause = interval.causes[0];
     if (interval.state !== 'not_observable' || interval.causes.length !== 1) return null;
     return (PLATFORM_CAUSES as readonly (string | undefined)[]).includes(cause)
-      ? (`${cause ?? ''}_ms` as SummaryKey)
+      ? { layer: interval.layer, key: `${cause ?? ''}_ms` as SummaryKey }
       : null;
   }
   if (interval.layer !== 'node_report') return null;
   return (STATES as readonly string[]).includes(interval.state)
-    ? (`${interval.state}_ms` as SummaryKey)
+    ? { layer: interval.layer, key: `${interval.state}_ms` as SummaryKey }
     : null;
 }
 
@@ -223,19 +224,18 @@ function chunkIntervals(
   for (const interval of response.intervals) {
     const startMs = instantMs(interval.starts_at);
     const endMs = instantMs(interval.ends_at);
-    const key = summaryKeyOf(interval);
+    const classified = classify(interval);
     if (
       startMs !== cursor ||
       endMs === null ||
       endMs <= startMs ||
       interval.duration_ms !== endMs - startMs ||
-      key === null ||
-      !isLayer(interval.layer)
+      classified === null
     ) {
       return null;
     }
-    counted[key] += interval.duration_ms;
-    timed.push({ startMs, endMs, layer: interval.layer, interval });
+    counted[classified.key] += interval.duration_ms;
+    timed.push({ startMs, endMs, layer: classified.layer, interval });
     cursor = endMs;
   }
   if (cursor !== chunk.toMs) return null;
@@ -277,7 +277,8 @@ export function composeCoverage(
     intervals.push(...timed);
     for (const key of SUMMARY_KEYS) summary[key] += response.summary[key];
   }
-  if (cursor !== period.toMs) {
+  // Un tramo que se sale del periodo ya quedó como `not_contiguous`; aquí solo falta el final.
+  if (cursor < period.toMs) {
     problems.push({ kind: 'not_contiguous', period: { fromMs: cursor, toMs: period.toMs } });
   }
 

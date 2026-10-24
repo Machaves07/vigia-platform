@@ -187,6 +187,32 @@ describe('UI-11 CoverageTimeline', () => {
     expect(screen.getAllByRole('listitem', { name: /^Lo que el nodo informa:/ })).toHaveLength(1);
   });
 
+  it('el hueco de un tramo que se sale del periodo se recorta al ancho de la línea', () => {
+    const period = { fromMs: FROM, toMs: FROM + 40 * DAY_MS };
+    const first = { fromMs: FROM, toMs: FROM + 31 * DAY_MS };
+    const overrun = { fromMs: first.toMs, toMs: period.toMs + DAY_MS };
+    const composite = composeCoverage(period, [
+      {
+        period: first,
+        response: response(first, [[31 * DAY_MS, 'node_report', 'observable', []]]),
+      },
+      {
+        period: overrun,
+        response: response(overrun, [[10 * DAY_MS, 'node_report', 'observable', []]]),
+      },
+    ]);
+    const { container } = render(timeline(composite));
+    const holes = [...container.querySelectorAll('[data-part="missing"]')].map((hole) => [
+      Number(hole.getAttribute('x')),
+      Number(hole.getAttribute('width')),
+    ]);
+    expect(holes).toHaveLength(2);
+    for (const [x = 0, width = 0] of holes) {
+      expect(x).toBeCloseTo((31 / 40) * WIDTH);
+      expect(x + width).toBeCloseTo(WIDTH);
+    }
+  });
+
   it('el detalle de una marca lista cada intervalo con su duración, por teclado', async () => {
     const user = userEvent.setup();
     render(timeline(week()));
