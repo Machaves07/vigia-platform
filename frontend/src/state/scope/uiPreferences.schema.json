@@ -1,0 +1,68 @@
+{
+  "$id": "ui_preferences.json",
+  "$comment": "UiPreferences (domain-entities §2.12, BR-APP-19, LC-APP-07): único contenido admitido en el almacenamiento del navegador. Esquema cerrado: sin campos fuera de la lista, sin texto libre, sin identificadores de registro ni tokens (solo la planta seleccionada como UUID). Sin `$schema`: el Ajv de 2020-12 ya usa ese dialecto. `npm run generate` lo compila en código autónomo (`uiPreferences.validator.js`).",
+  "title": "UiPreferences",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "selected_plant_id": {
+      "type": "string",
+      "pattern": "^(?:all|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+    },
+    "list_filters": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/screen" },
+      "additionalProperties": {
+        "type": "object",
+        "maxProperties": 20,
+        "propertyNames": { "$ref": "#/$defs/token" },
+        "additionalProperties": { "$ref": "#/$defs/token" }
+      }
+    },
+    "columns": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/screen" },
+      "additionalProperties": {
+        "type": "array",
+        "maxItems": 50,
+        "uniqueItems": true,
+        "items": { "$ref": "#/$defs/token" }
+      }
+    },
+    "active_tabs": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/screen" },
+      "additionalProperties": { "$ref": "#/$defs/token" }
+    }
+  },
+  "$defs": {
+    "screen": {
+      "type": "string",
+      "enum": [
+        "shell",
+        "home",
+        "scr01",
+        "scr02",
+        "scr03",
+        "scr04",
+        "scr05",
+        "scr06",
+        "scr07",
+        "scr08",
+        "scr09",
+        "scr10",
+        "scr11",
+        "scr12",
+        "scr13",
+        "scr14",
+        "scr15",
+        "scr16"
+      ]
+    },
+    "token": {
+      "$comment": "Valor de lista cerrada, nombre de filtro, columna o pestaña: `snake_case` de 1 a 64 caracteres. Excluye UUID, espacios, mayúsculas y puntos (texto libre, identificadores de registro y tokens).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    }
+  }
+}
