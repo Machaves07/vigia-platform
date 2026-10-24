@@ -172,10 +172,9 @@ describe('versiones y bloqueo de escrituras', () => {
       const save = port.save as { write(): Promise<unknown> };
       await expect(save.write()).rejects.toMatchObject({ failure: NOTICE });
       const path = Object.fromEntries(
-        [...OPERATIONS[operationId].path.matchAll(/\{([^}]+)\}/g)].map((match) => [
-          match[1],
-          'synthetic',
-        ]),
+        [...OPERATIONS[operationId].path.matchAll(/\{([^}]+)\}/g)].map(
+          (match): [string, string] => [match[1] ?? '', 'synthetic'],
+        ),
       );
       await expect(transport.request({ kind: 'write', operationId, path })).rejects.toMatchObject({
         failure: NOTICE,
