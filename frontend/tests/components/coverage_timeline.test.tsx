@@ -125,6 +125,14 @@ function durationsIn(element: HTMLElement): string[] {
     .map((item) => item.querySelector('[data-part="duration"]')?.textContent ?? '');
 }
 
+/** `[x, width]` de cada hueco dibujado, en las dos capas. */
+function holesIn(container: HTMLElement): number[][] {
+  return [...container.querySelectorAll('[data-part="missing"]')].map((hole) => [
+    Number(hole.getAttribute('x')),
+    Number(hole.getAttribute('width')),
+  ]);
+}
+
 async function expectNoSeriousViolations(ui: ReactElement) {
   const { container } = render(<main>{ui}</main>);
   const results = await axe(container);
@@ -202,14 +210,28 @@ describe('UI-11 CoverageTimeline', () => {
       },
     ]);
     const { container } = render(timeline(composite));
-    const holes = [...container.querySelectorAll('[data-part="missing"]')].map((hole) => [
-      Number(hole.getAttribute('x')),
-      Number(hole.getAttribute('width')),
-    ]);
+    const holes = holesIn(container);
     expect(holes).toHaveLength(2);
     for (const [x = 0, width = 0] of holes) {
       expect(x).toBeCloseTo((31 / 40) * WIDTH);
       expect(x + width).toBeCloseTo(WIDTH);
+    }
+  });
+
+  it('el hueco de menos de un píxel al final se dibuja de 1 px dentro de la línea', () => {
+    const served = { fromMs: WEEK.fromMs, toMs: WEEK.toMs - 1 };
+    const composite = composeCoverage(WEEK, [
+      {
+        period: served,
+        response: response(served, [[7 * DAY_MS - 1, 'node_report', 'observable', []]]),
+      },
+    ]);
+    const { container } = render(timeline(composite));
+    const holes = holesIn(container);
+    expect(holes).toHaveLength(2);
+    for (const [x = 0, width = 0] of holes) {
+      expect(width).toBe(1);
+      expect(x + width).toBeLessThanOrEqual(WIDTH);
     }
   });
 
