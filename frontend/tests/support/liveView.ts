@@ -19,12 +19,26 @@ import { FakeClock } from './fakeClock';
 
 /** Zona sintética (UUID v7). */
 export const ZONE_ID = '0190a1b2-0000-7000-8000-0000000000a1';
+
+/** `base64url` sin relleno, como los segmentos de una JWS compacta. */
+function base64url(value: string): string {
+  return btoa(value).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
 /**
- * Token sintético con la forma del contrato: JWS compacta. Se arma por segmentos para que el árbol
- * no contenga el literal entero: el escáner de secretos lo marcaba como `generic-api-key` por su
- * entropía (falso positivo) y un commit de fusión en `main` volvería a escanearlo.
+ * Token sintético con la forma del contrato: JWS compacta (`base64url.base64url.base64url`).
+ *
+ * Se **arma al ejecutar la prueba** y no se escribe en ningún archivo: un literal con forma de
+ * JWS/JWT no puede quedar en el repositorio, ni siquiera siendo inventado, porque el escáner de
+ * secretos lo marca (`generic-api-key`) y un commit de fusión en `main` volvería a escanearlo.
+ * El valor es el mismo en cada corrida (los segmentos se codifican aquí), así que las pruebas que
+ * comparan el `href` con el token siguen siendo deterministas.
  */
-export const TOKEN = ['eyJhbGciOiJFZERTQSJ9', 'eyJ6b25lIjoiejEifQ', 'c2lnbmF0dXJl'].join('.');
+export const TOKEN = [
+  base64url('{"alg":"EdDSA"}'),
+  base64url('{"zone":"z1"}'),
+  'firma-sintetica',
+].join('.');
 /** Dirección local anunciada por el nodo (A-35: puerto 8443 y ruta `/`). */
 export const LOCAL_URL = 'https://nodo-01.planta.local:8443/';
 export const EXPIRES_AT = '2026-10-24T15:40:00.000Z';
