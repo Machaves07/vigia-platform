@@ -83,6 +83,40 @@ class ThrottledClock implements Clock {
 
 const gates = { isVisible: () => true, canReadPlatform: () => true, isActive: () => true };
 
+const A = '0b9e2c1a-1111-4f00-8000-00000000000a';
+const B = '0b9e2c1a-2222-4f00-8000-00000000000b';
+const activate = (id: string, ttlMs = HOUR): Event => ({
+  kind: 'activate',
+  id,
+  ttlMs,
+  status: 'active',
+});
+/** Casos que la propiedad recorre siempre, además de los generados. */
+const EXAMPLES: ['provider' | 'client', boolean, Event[]][] = [
+  // Pestaña en segundo plano: vence sin que llegue el temporizador; la petición no la lleva.
+  ['provider', true, [activate(A), { kind: 'advance', ms: 2 * HOUR }, { kind: 'request' }]],
+  // `not_found` tardío de A con B ya activa: B sigue.
+  [
+    'provider',
+    false,
+    [
+      activate(A),
+      { kind: 'change' },
+      activate(B),
+      { kind: 'not_found', stale: true },
+      { kind: 'request' },
+    ],
+  ],
+  // Vencimiento más allá del tope de `setTimeout`.
+  [
+    'provider',
+    false,
+    [activate(A, 60 * 24 * HOUR), { kind: 'advance', ms: 30 * 24 * HOUR }, { kind: 'request' }],
+  ],
+  // Cambiar con caché y borrador llenos.
+  ['provider', false, [activate(A), { kind: 'fill' }, { kind: 'change' }, { kind: 'request' }]],
+];
+
 describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa', () => {
   it(
     'para toda secuencia, la cabecera sale solo bajo la concesión vigente y cada final vacía caché y borrador',
@@ -124,23 +158,21 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
               },
             });
 
-            /** Modelo: concesión activa, su vencimiento y la última que estuvo activa. */
+            /** Modelo: concesión activa, su vencimiento y la última que terminó. */
             let model: { id: string; expiresAt: number } | null = null;
-            let previous: string | null = null;
+            const history: { lastEnded: string | null } = { lastEnded: null };
             let endings = 0;
             /** Un final del modelo cuyo efecto aún no se comprobó. */
             let pending: ConcessionEnd | null = null;
             const modelActive = (): string | null => {
-              if (model !== null && clock.now() >= model.expiresAt) {
-                model = null;
-                pending = 'expired';
-              }
+              if (model !== null && clock.now() >= model.expiresAt) endModel('expired');
               return model?.id ?? null;
             };
-            const endModel = (reason: ConcessionEnd) => {
+            function endModel(reason: ConcessionEnd) {
+              history.lastEnded = model?.id ?? history.lastEnded;
               model = null;
               pending = reason;
-            };
+            }
             /** Tras cada final: caché vacía, borrador descartado y aviso con su motivo. */
             const checkEnded = () => {
               if (pending === null) return;
@@ -184,7 +216,6 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
                   expect(accepted).toBe(allowed);
                   if (allowed) {
                     model = { id: step.id, expiresAt };
-                    previous = step.id;
                   }
                   break;
                 }
@@ -192,10 +223,11 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
                   await request('ok');
                   break;
                 case 'not_found': {
-                  if (step.stale && previous !== null && previous !== modelActive()) {
+                  const { lastEnded } = history;
+                  if (step.stale && lastEnded !== null && lastEnded !== modelActive()) {
                     // Respuesta tardía de una concesión ya terminada: no afecta a la vigente.
                     const before = store.getSnapshot().active?.concession_id ?? null;
-                    store.reportNotFound(previous);
+                    store.reportNotFound(lastEnded);
                     expect(store.getSnapshot().active?.concession_id ?? null).toBe(before);
                     break;
                   }
@@ -251,6 +283,7 @@ describe('PR-APP-21: cabecera de concesión si y solo si hay concesión activa',
             cache.dispose();
           },
         ),
+        { examples: EXAMPLES },
       );
     },
     PROPERTY_TIMEOUT_MS,

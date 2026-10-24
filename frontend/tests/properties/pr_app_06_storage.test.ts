@@ -167,10 +167,10 @@ describe('PR-APP-06: el almacenamiento solo recibe UiPreferences', () => {
     () => {
       fc.assert(
         fc.property(
-          fc.uniqueArray(fc.uuid(), { minLength: 4, maxLength: 4 }),
-          fc.uuid(),
+          // Cuatro plantas del alcance y una quinta fuera de él, distinta de todas.
+          fc.uniqueArray(fc.uuid(), { minLength: 5, maxLength: 5 }),
           fc.array(action, { minLength: 1, maxLength: 25 }),
-          (plantIds, outsidePlant, actions) => {
+          ([outsidePlant = '', ...plantIds], actions) => {
             localStorage.clear();
             sessionStorage.clear();
             writes = [];
@@ -297,6 +297,40 @@ describe('PR-APP-06: el almacenamiento solo recibe UiPreferences', () => {
     },
     PROPERTY_TIMEOUT_MS,
   );
+
+  it('una escritura directa que no cumple el esquema no se escribe ni sustituye lo vigente', () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(
+          fc.record({
+            kind: fc.constant('plant' as const),
+            value: fc.oneof(freeText, liveViewToken()),
+          }),
+          fc.record({ kind: fc.constant('tab' as const), value: fc.oneof(freeText, fc.uuid()) }),
+          fc.record({
+            kind: fc.constant('columns' as const),
+            value: fc.oneof(freeText, fc.uuid()),
+          }),
+        ),
+        (attempt) => {
+          fc.pre(!TOKEN.test(attempt.value) || attempt.kind === 'plant');
+          localStorage.clear();
+          writes = [];
+          const preferences = createPreferencesStore(localStorage);
+          preferences.setActiveTab('scr08', 'summary');
+          const before = preferences.read();
+          if (attempt.kind === 'plant') preferences.selectPlant(attempt.value);
+          if (attempt.kind === 'tab') preferences.setActiveTab('scr08', attempt.value);
+          if (attempt.kind === 'columns') preferences.setColumns('scr08', [attempt.value]);
+          expect(writes).toHaveLength(1);
+          expect(preferences.read()).toBe(before);
+          expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? 'null')).toEqual({
+            active_tabs: { scr08: 'summary' },
+          });
+        },
+      ),
+    );
+  });
 
   it('lo guardado a mano que no cumple el esquema se descarta y se borra al leerlo', () => {
     fc.assert(
