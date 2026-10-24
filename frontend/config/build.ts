@@ -15,9 +15,13 @@ export const DEV_API_TARGET = 'http://localhost:8000';
 
 export type ApiMode = 'mock' | 'real';
 
-const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/]/;
+const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/](?!descriptor\.ts$)/;
 
-/** Nombre de la porción de la pantalla a la que pertenece el módulo, o `null` si no es de una. */
+/**
+ * Nombre de la porción de la pantalla a la que pertenece el módulo, o `null` si no es de una.
+ * `src/pages/scrNN/descriptor.ts` no es de la porción: la tabla de pantallas lo importa en el
+ * paquete inicial y, dentro de la porción, arrastraría todas las pantallas al arranque (VIG-290).
+ */
 export function screenChunkName(moduleId: string): string | null {
   const match = SCREEN_MODULE.exec(moduleId);
   return match?.[1] ?? null;
