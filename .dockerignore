@@ -8,5 +8,15 @@
 !backend/resources/
 !backend/migrations/
 !backend/tools/vigia_verify.py
+# Etapa `frontend-build` (VIG-288): la aplicación y la especificación de `generate --check`, sin
+# dependencias instaladas ni salidas locales (la etapa hace su propio `npm ci` y su `vite build`).
+!backend/openapi/app.yaml
+!frontend/
+frontend/node_modules
+frontend/dist
+frontend/coverage
+frontend/test-results
+frontend/playwright-report
+frontend/.lighthouseci
 **/__pycache__
 **/*.py[cod]

@@ -58,6 +58,7 @@ cd backend && uv run pytest -q --hypothesis-profile=ci          # nocturno: --hy
 | `postgres` | `postgres:16` (PostgreSQL 16.15), base `vigia`, usuario `vigia` | 5432 |
 | `localstack` | `localstack/localstack:4.14.0`, edición comunitaria: S3 con sumas de verificación, KMS y Secrets Manager | 4566 |
 | `otel-collector` | binario de `otel/opentelemetry-collector-contrib:0.161.0` (`local/otel-collector/`) | 4317 (OTLP gRPC), 4318 (OTLP HTTP) |
+| `frontend` (solo con `--profile frontend`) | `node:22-bookworm-slim` con `git` y `ssh` (`local/frontend/`): `npm ci` y `vite --host`; reenvía a `VITE_API_PROXY` (por omisión `http://host.docker.internal:8000`) todo lo que no sea navegación | 5173 (`VIGIA_LOCAL_FRONTEND_PORT`) |
 
 Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son valores fijos del entorno local, no secretos. Si un puerto está ocupado, cámbialo con `VIGIA_LOCAL_POSTGRES_PORT`, `VIGIA_LOCAL_LOCALSTACK_PORT`, `VIGIA_LOCAL_OTLP_GRPC_PORT` o `VIGIA_LOCAL_OTLP_HTTP_PORT`. El colector escribe un resumen de lo que recibe en `docker compose logs otel-collector`.
 
@@ -71,6 +72,12 @@ Sin MinIO (AGPL). Solo datos generados (NFR-CTR-43). Usuarios y contraseñas son
 | `make worker` | `cd backend; uv run python -m vigia_platform.shared.worker.main` |
 | `make migrate` | `cd backend; uv run alembic upgrade head` |
 | `make admin ARGS="--help"` | `cd backend; uv run vigia-admin --help` |
+| `make frontend-dev` | `docker compose --profile frontend up frontend` |
+| `make frontend-test` | `cd frontend; npm test` |
+| `make frontend-check` | `cd frontend; npm run check` |
+| `make frontend-e2e` | `cd frontend; npm run e2e` (lo completa VIG-299) |
+
+El servicio `frontend` instala `@vigia/contracts` por `git+ssh` con el agente SSH del anfitrión (`SSH_AUTH_SOCK`, con la clave de despliegue de solo lectura cargada), que se monta en el contenedor; la clave nunca entra en la imagen. `make run` escucha en `127.0.0.1`: si el contenedor no alcanza la API por `host.docker.internal`, arráncala con `--host 0.0.0.0` o cambia `VITE_API_PROXY`. La imagen de `vigia-platform` construye la aplicación en su etapa `frontend-build` y `vigia-api` la sirve desde `/app/static`; `--build-arg APP_VERSION=<etiqueta o sha>` fija la versión de `version.json` (sin él, `dev`).
 
 `migrate` funciona contra el entorno local. Los módulos de `run`, `worker` y `admin` ya existen (TASK-133, TASK-130 y TASK-132) y los tres piden sus dependencias a un constructor, la **raíz de composición**, que nombran `VIGIA_API_RUNTIME`, `VIGIA_WORKER_RUNTIME` y `VIGIA_ADMIN_RUNTIME` (`vigia_platform.<módulo>:<función>`, asíncrono). U-03 la implementa (A-52): `vigia_platform.shared.runtime.{api,worker,admin}:build_{api,worker,admin}_runtime`, con un registro por unidad (`shared/runtime/units.py`) que suma rutas, tipos, eventos, consumidores y tareas sin tocar la raíz. En local basta exportar las tres variables con esos valores. Sin la variable, el proceso termina sin arrancar con un mensaje que lo dice. `make admin ARGS="--help"` sí funciona: la ayuda no necesita dependencias. El detalle de U-03 está en [Gobernanza y flota (U-03)](#gobernanza-y-flota-u-03).
 

@@ -7,10 +7,17 @@
  *   reenvía a `vigia-api`, porque varias rutas de la API sin prefijo (`/concessions`, `/zones/*`,
  *   `/fleet/*`, `/notifications/*`, `/loop/*`, `/accreditation/*`) coinciden con rutas de pantalla.
  * - `isViteOwnedPath`: lo que sirve el propio Vite en desarrollo (módulos, cliente HMR, recursos).
- * - `parseApiMode`: `VITE_API_MODE` es `mock` (MSW en el navegador) o `real` (proxy hacia la API).
+ * - `parseApiMode`: `VITE_API_MODE` es `mock` (MSW en el navegador) o `real` (proxy hacia la API);
+ *   `parseApiProxy`: `VITE_API_PROXY`, destino del proxy.
+ * - Release (VIG-288): `app_version`, `contract_tag` y `built_at` de `version.json` con los
+ *   patrones que valida `StaticSite`, el marcador `vigia-app` y qué archivos se precomprimen o son
+ *   mapas de fuente. El complemento que los aplica está en `config/release.ts`.
  */
 
-/** Destino del proxy de desarrollo: `vigia-api` del `docker-compose.yml` de U-02. */
+/**
+ * Destino por omisión del proxy de desarrollo: `vigia-api` de `make run`. `VITE_API_PROXY` lo
+ * cambia (el servicio `frontend` de `docker-compose.yml` usa `http://host.docker.internal:8000`).
+ */
 export const DEV_API_TARGET = 'http://localhost:8000';
 
 export type ApiMode = 'mock' | 'real';
@@ -81,4 +88,127 @@ export function parseApiMode(value: string | undefined): ApiMode {
   if (value === undefined || value === '') return 'real';
   if (value === 'mock' || value === 'real') return value;
   throw new Error(`VITE_API_MODE debe ser «mock» o «real», no «${value}».`);
+}
+
+/** Lee `VITE_API_PROXY`; sin valor, `DEV_API_TARGET`. Solo `http(s)://` sin ruta ni credenciales. */
+export function parseApiProxy(value: string | undefined): string {
+  if (value === undefined || value === '') return DEV_API_TARGET;
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
+  }
+  if (
+    url === null ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new Error(`VITE_API_PROXY debe ser un origen http(s):// sin ruta, no «${value}».`);
+  }
+  return url.origin;
+}
+
+// --- Release: versión, `version.json`, precompresión y marcador (VIG-288, LC-APP-29) ----------
+
+/**
+ * Cadena que la comprobación de Route 53 `vigia-app-index` busca en `/` (R-APP-7): la
+ * construcción falla si `index.html` no la contiene.
+ */
+export const APP_MARKER = 'vigia-app';
+
+/** `app_version` cuando la construcción no recibe `VITE_APP_VERSION` (desarrollo local). */
+const DEFAULT_APP_VERSION = 'dev';
+
+/**
+ * Mismos patrones que `_APP_VERSION`, `_CONTRACT_TAG` y `_BUILT_AT` de
+ * `backend/src/vigia_platform/shared/api/static.py`: un `version.json` que no los cumple hace que
+ * `vigia-api` no arranque (`StaticSiteInvalid`), así que la construcción falla antes.
+ */
+const APP_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+const CONTRACT_TAG_PATTERN = APP_VERSION_PATTERN;
+const BUILT_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+
+/** Lee `VITE_APP_VERSION` (etiqueta de release o sha); sin valor, `dev`. */
+export function resolveAppVersion(value: string | undefined): string {
+  if (value === undefined || value === '') return DEFAULT_APP_VERSION;
+  if (!APP_VERSION_PATTERN.test(value)) {
+    throw new Error(`VITE_APP_VERSION no tiene la forma de una etiqueta o un sha: «${value}».`);
+  }
+  return value;
+}
+
+/**
+ * Etiqueta de `@vigia/contracts` fijada en `package.json` (`git+ssh://…#v1.1.0` → `v1.1.0`,
+ * ADR-004). Sin etiqueta o con otra forma, la construcción falla.
+ */
+export function contractTagFrom(spec: string | undefined): string {
+  const parts = spec?.split('#') ?? [];
+  const tag = parts.length === 2 ? parts[1] : undefined;
+  if (tag === undefined || !CONTRACT_TAG_PATTERN.test(tag)) {
+    throw new Error(`@vigia/contracts debe fijarse por etiqueta (…#vX.Y.Z), no «${String(spec)}».`);
+  }
+  return tag;
+}
+
+/**
+ * Hora de la construcción en ISO 8601 UTC con milisegundos. Con `SOURCE_DATE_EPOCH` (segundos),
+ * la de esa marca, para construcciones reproducibles.
+ */
+export function builtAt(sourceDateEpoch: string | undefined, clock: { now(): number }): string {
+  if (sourceDateEpoch === undefined || sourceDateEpoch === '')
+    return new Date(clock.now()).toISOString();
+  if (!/^\d{1,11}$/.test(sourceDateEpoch)) {
+    throw new Error(`SOURCE_DATE_EPOCH debe ser un entero de segundos, no «${sourceDateEpoch}».`);
+  }
+  return new Date(Number(sourceDateEpoch) * 1000).toISOString();
+}
+
+export interface AppRelease {
+  readonly app_version: string;
+  readonly contract_tag: string;
+  readonly built_at: string;
+}
+
+/** Contenido de `version.json` (`{app_version, contract_tag, built_at}`), comprobado. */
+export function versionDocument(release: AppRelease): string {
+  const checks: [keyof AppRelease, RegExp][] = [
+    ['app_version', APP_VERSION_PATTERN],
+    ['contract_tag', CONTRACT_TAG_PATTERN],
+    ['built_at', BUILT_AT_PATTERN],
+  ];
+  for (const [key, pattern] of checks) {
+    if (!pattern.test(release[key])) throw new Error(`version.json: ${key} no es válido.`);
+  }
+  const { app_version, contract_tag, built_at } = release;
+  return `${JSON.stringify({ app_version, contract_tag, built_at })}\n`;
+}
+
+/** Falla si `index.html` no contiene el marcador `vigia-app` (R-APP-7). */
+export function assertAppMarker(html: string): void {
+  if (!html.includes(APP_MARKER)) {
+    throw new Error(
+      `index.html no contiene el marcador «${APP_MARKER}»: la comprobación vigia-app-index ` +
+        'lo busca en / (R-APP-7).',
+    );
+  }
+}
+
+/** `true` si el archivo es un mapa de fuente (nunca va a `dist/`; NFR-APP-24). */
+export function isSourceMap(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.map');
+}
+
+/** `true` si el archivo de salida es un recurso de `assets/` que lleva `.br` y `.gz` al lado. */
+export function isPrecompressed(fileName: string): boolean {
+  return (
+    fileName.startsWith('assets/') &&
+    !isSourceMap(fileName) &&
+    !fileName.endsWith('.br') &&
+    !fileName.endsWith('.gz')
+  );
 }

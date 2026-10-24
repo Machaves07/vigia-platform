@@ -7,6 +7,9 @@
 #                     está fuera de la lista permitida (tech-stack-decisions.md §2).
 #   - otel-collector  colector de OpenTelemetry con receptor OTLP (4317 gRPC, 4318 HTTP)
 #
+# Y uno de U-05 solo con el perfil `frontend` (VIG-288): `frontend`, el servidor de desarrollo de
+# Vite en 5173 (`make frontend-dev` o `docker compose --profile frontend up frontend`).
+#
 # Uso: `docker compose up -d` (o `make up`, que espera a que los tres estén sanos),
 # `docker compose ps`, `docker compose down -v` (borra también el volumen de la base).
 #
@@ -92,5 +95,35 @@ services:
       retries: 30
       start_period: 3s
 
+  frontend:
+    # Servidor de desarrollo de Vite (VIG-288). Solo con `--profile frontend` (`make frontend-dev`):
+    # `make up` y las pruebas de integración no lo arrancan. Hace `npm ci` y `vite --host` en
+    # http://localhost:5173 y reenvía a VITE_API_PROXY toda petición que no sea de navegación (D-3);
+    # por omisión, la API de `make run` en el anfitrión. `make run` escucha en 127.0.0.1: si el
+    # contenedor no la alcanza por host.docker.internal, arranca la API con `--host 0.0.0.0` o
+    # cambia VITE_API_PROXY. `npm ci` instala @vigia/contracts por git+ssh con el agente SSH del
+    # anfitrión (SSH_AUTH_SOCK), que se monta en el contenedor; la clave nunca entra en la imagen.
+    profiles: ["frontend"]
+    build:
+      context: ./local/frontend
+    image: vigia-local/frontend:22.23.4
+    pull_policy: build
+    environment:
+      VITE_API_MODE: ${VITE_API_MODE:-real}
+      VITE_API_PROXY: ${VITE_API_PROXY:-http://host.docker.internal:8000}
+      SSH_AUTH_SOCK: /run/ssh-agent.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${VIGIA_LOCAL_FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/src/frontend
+      - frontend-node-modules:/src/frontend/node_modules
+      # Lo que la aplicación lee de backend/ (etiquetas; especificación de `generate`).
+      - ./backend/resources:/src/backend/resources:ro
+      - ./backend/openapi:/src/backend/openapi:ro
+      - ${SSH_AUTH_SOCK:-/dev/null}:/run/ssh-agent.sock
+
 volumes:
   postgres-data:
+  frontend-node-modules:

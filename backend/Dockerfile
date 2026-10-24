@@ -2,19 +2,32 @@
 #
 # Una imagen, dos procesos: `vigia-api` (orden por defecto) y `vigia-worker` (la orden de su
 # servicio); las tareas puntuales `vigia-migrate` (`alembic upgrade head`) y `vigia-admin` usan la
-# misma imagen. Sin etapa de la aplicación de página única: llega con U-05.
+# misma imagen. La aplicación de página única de U-05 va en la misma imagen y la misma release
+# (despliegue atómico; VIG-288, LC-APP-29): la etapa `frontend-build` la construye y `vigia-api`
+# la sirve desde `/app/static` (`shared/api/static.py`).
 #
 # Construcción (desde la raíz del repositorio; la clave de despliegue de vigia-contracts, de solo
 # lectura, en el agente SSH del que construye):
 #
 #   docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile .
 #
-# - Base y `uv` fijados por digest del índice multiplataforma; ninguna etiqueta móvil. Para
-#   actualizar: `docker buildx imagetools inspect <imagen>:<etiqueta>` y copiar el `Digest`.
-# - `vigia-contracts` se instala por `git+ssh` (ADR-004) con `RUN --mount=type=ssh`: la clave
+# Con `--build-arg APP_VERSION=<etiqueta de release o sha>` la aplicación y su `version.json`
+# llevan esa versión (lo pasa el flujo de release, VIG-337); sin él, `dev`.
+#
+# - Bases (Python, `uv` y Node LTS 22) fijadas por digest del índice multiplataforma; ninguna
+#   etiqueta móvil. Para actualizar: `docker buildx imagetools inspect <imagen>:<etiqueta>` y
+#   copiar el `Digest`.
+# - `vigia-contracts` se instala por `git+ssh` (ADR-004), el paquete de Python con `uv` y el de
+#   TypeScript (`@vigia/contracts`) con `npm ci`, ambos con `RUN --mount=type=ssh`: la clave
 #   nunca entra en una capa ni en el historial; solo el socket del agente existe durante esa orden
-#   (nota de 2026-09-23 de tech-stack-decisions.md §6). `git` y `ssh` quedan en la etapa de
+#   (nota de 2026-09-23 de tech-stack-decisions.md §6). `git` y `ssh` quedan en las etapas de
 #   construcción.
+# - Aplicación: `npm ci --ignore-scripts` (ninguna dependencia de la construcción necesita
+#   scripts de instalación), `generate --check` (cliente y esquemas al día con
+#   `backend/openapi/app.yaml` del mismo commit) y `vite build`, que deja `version.json`, `.br` y
+#   `.gz` junto a cada recurso, falla sin el marcador `vigia-app` y escribe los mapas de fuente
+#   fuera de `dist/` (se quedan en la etapa: nunca llegan a la imagen; NFR-APP-24). Sin trabajador
+#   de servicio (PAT-APP-MAN-06) y sin secretos en las variables de construcción (NFR-APP-21).
 # - Ejecución: usuario `vigia` (10001) sin privilegios, sin binarios setuid ni setgid, código
 #   propiedad de root y de solo lectura, bytecode precompilado: la imagen arranca con la raíz de
 #   solo lectura y `/tmp` montado aparte (infrastructure-design.md §5.3 y su nota de 2026-09-23:
@@ -22,8 +35,50 @@
 
 ARG PYTHON_IMAGE=python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424
+# node:22-bookworm-slim → Node 22.23.4 y npm 10.9.9 al fijar el digest.
+ARG NODE_IMAGE=node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 
 FROM ${UV_IMAGE} AS uv
+
+# --- Aplicación de página única (U-05) ----------------------------------------------------------
+
+FROM ${NODE_IMAGE} AS frontend-build
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# La misma huella publicada de github.com que la etapa `build`.
+RUN install -d -m 0755 /etc/ssh \
+    && echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" \
+       > /etc/ssh/ssh_known_hosts
+
+ENV GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes" \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+WORKDIR /src/frontend
+
+# Dependencias primero (capa reutilizable mientras no cambie el bloqueo); el agente SSH solo
+# existe durante esta orden.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=ssh \
+    --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts
+
+# Lo que la aplicación lee de `backend/`: la especificación de `generate --check` y las etiquetas.
+COPY backend/openapi/app.yaml /src/backend/openapi/app.yaml
+COPY backend/resources/labels.platform.es.json backend/resources/labels.loop.es.json \
+     /src/backend/resources/
+COPY frontend/ ./
+
+ARG APP_VERSION=dev
+RUN npm run generate:check \
+    && VITE_APP_VERSION="$APP_VERSION" npm run build \
+    && test -f dist/index.html \
+    && test -f dist/version.json \
+    && test -z "$(find dist -name '*.map')"
 
 # --- Construcción ------------------------------------------------------------------------------
 
@@ -104,6 +159,9 @@ RUN groupadd --system --gid 10001 vigia \
 # Propiedad de root con los permisos de la construcción (umask 022): `vigia` lee y ejecuta, no
 # escribe.
 COPY --from=build --chown=root:root /app /app
+# La aplicación construida, igual: propiedad de root y de solo lectura para `vigia`
+# (`AppConfig.static_dir`, `DEFAULT_STATIC_DIR`). Los mapas de fuente se quedan en la etapa.
+COPY --from=frontend-build --chown=root:root /src/frontend/dist /app/static
 
 # La caché de fontconfig (y las fuentes temporales de WeasyPrint) van a `/tmp`: la raíz sigue
 # siendo de solo lectura.

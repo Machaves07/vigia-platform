@@ -96,7 +96,7 @@ _MAX_HEADER_ITEMS: Final = 64
 
 SCREEN_ROUTES: Final[tuple[str, ...]] = (
     "/",
-    "/login",
+    "/login/*",
     "/home",
     "/findings/*",
     "/zones/*",
@@ -112,11 +112,18 @@ SCREEN_ROUTES: Final[tuple[str, ...]] = (
     "/integrity",
     "/review-queue",
     "/invitations/*",
+    "/plants/*",
 )
 """Rutas de pantalla de U-05 (``plataforma-aplicacion/infrastructure-design.md`` §3).
 
 ``/x/*`` admite ``/x`` y ``/x/<segmentos>``: una pantalla desconocida dentro de la aplicación
-recibe ``index.html`` y la propia aplicación muestra «no disponible en su alcance»."""
+recibe ``index.html`` y la propia aplicación muestra «no disponible en su alcance».
+
+VIG-288 (Q1 del dueño, 2026-10-23): ``/login/*`` cubre los pasos de SCR-01
+(``/login/second-factor``, ``/login/enroll``), que antes respondían ``not_found`` al recargar, y
+``/plants/*`` las pantallas de planta de SCR-04, SCR-05 y SCR-07 (``/plants/{plant_id}/catalog``,
+``/admissions``, ``/gates``, ``/policy``, ``/fleet-thresholds``). Ambas solo ante navegación
+(D-3): ``GET /plants/{plant_id}/admissions`` con ``Accept: application/json`` sigue en la API."""
 
 _SEGMENT: Final = r"[A-Za-z0-9_~][A-Za-z0-9._~-]{0,127}"
 _ASSET_PATH: Final = re.compile(rf"^{_SEGMENT}(?:/{_SEGMENT}){{0,{MAX_ASSET_DEPTH - 1}}}$")
