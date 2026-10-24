@@ -58,6 +58,11 @@ describe('porciones y modo de API', () => {
   it.each([
     ['/repo/frontend/src/pages/scr01/Login.tsx', 'scr01'],
     ['C:\\repo\\frontend\\src\\pages\\scr16\\index.ts', 'scr16'],
+    ['/repo/frontend/src/pages/scr08/home/index.tsx', 'scr08'],
+    ['/repo/frontend/src/pages/scr08/descriptor.ts', null],
+    ['C:\\repo\\frontend\\src\\pages\\scr09\\descriptor.ts', null],
+    ['/repo/frontend/src/pages/scr09/loop/descriptor.ts.tsx', 'scr09'],
+    ['/repo/frontend/src/pages/shared/ScreenState.tsx', null],
     ['/repo/frontend/src/components/Badge.tsx', null],
     ['/repo/frontend/src/pages/scr1/x.tsx', null],
     ['/repo/node_modules/react/index.js', null],

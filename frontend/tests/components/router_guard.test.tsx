@@ -1,0 +1,212 @@
+/**
+ * Guarda del enrutador (BR-APP-03, 77; NFR-APP-23) y precarga de código (PAT-APP-REN-02).
+ *
+ * - Toda ruta sin permiso alcanzada por URL pinta exactamente el mismo árbol que una ruta que no
+ *   existe (se compara el DOM serializado, no los textos), y no carga la porción de la pantalla.
+ * - Con permiso, la ruta pinta su página (hoy, el relevo `unavailable`).
+ * - `/` lleva al panel de inicio del rol más operativo; sin sesión, al inicio de sesión.
+ * - Precargar el inicio y sus enlazadas, y navegar por ellas, no dispara ninguna petición (MSW
+ *   cuenta cero).
+ */
+import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMemoryRouter, RouterProvider } from 'react-router';
+
+import type { NavigationPrincipal } from '@/app/navigation';
+import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from '@/app/router';
+import { SCREENS } from '@/app/screens';
+import { Bell } from '@/pages/scr15/Bell';
+import { ScreenState } from '@/pages/shared/ScreenState';
+import { text } from '@/texts';
+
+import { effectivePermissions } from '../generators';
+import { server } from '../setup/msw';
+
+const ID = '0192d2c4-7a10-7c3e-8a51-3b1f0e9d2a44';
+const NOT_FOUND = '/esta-ruta-no-existe/ni-esta';
+
+const coordinator: NavigationPrincipal = {
+  effective_permissions: effectivePermissions('customer_organization', ['coordinator_sst']),
+  assignments: [{ role: 'coordinator_sst' }],
+};
+const nobody: NavigationPrincipal = { effective_permissions: [], assignments: [] };
+
+/** Ruta concreta: cada parámetro `:x` por un identificador o un periodo. */
+const concrete = (path: string): string =>
+  path.replace(/:period\b/, '2026-09').replace(/:[a-z_]+/g, ID);
+
+async function renderAt(principal: NavigationPrincipal | null, path: string) {
+  const router = createMemoryRouter(createAppRoutes(principal), { initialEntries: [path] });
+  const view = render(<RouterProvider router={router} />);
+  // Tope amplio: la porción `lazy` llega por importación dinámica y no es lo que se prueba.
+  await screen.findByRole('main', {}, { timeout: 10_000 });
+  return { html: view.container.innerHTML, router, unmount: view.unmount };
+}
+
+let requests: string[];
+const onRequest = ({ request }: { request: Request }) => {
+  requests.push(`${request.method} ${request.url}`);
+};
+
+beforeEach(() => {
+  requests = [];
+  server.events.on('request:start', onRequest);
+});
+
+afterEach(() => {
+  server.events.removeListener('request:start', onRequest);
+});
+
+describe('guarda: sin permiso, el mismo árbol que not_found', () => {
+  const guarded = SCREENS.flatMap((descriptor) =>
+    descriptor.route_groups
+      .filter((group) => group.access === 'permission')
+      .flatMap((group) =>
+        group.paths.map((path) => [`${descriptor.screen_id} ${group.id} ${path}`, group, path]),
+      ),
+  ) as [string, (typeof SCREENS)[number]['route_groups'][number], string][];
+
+  it.each(guarded)('%s', async (_name, group, path) => {
+    const loader = vi.spyOn(group, 'load');
+    const missing = await renderAt(nobody, NOT_FOUND);
+    missing.unmount();
+    const denied = await renderAt(nobody, concrete(path));
+    expect(denied.html).toBe(missing.html);
+    expect(denied.html).toContain(text('errors.not_available_in_scope'));
+    expect(loader).not.toHaveBeenCalled();
+    expect(requests).toEqual([]);
+  });
+
+  it('cuenta y administración sin sesión también son not_found; el inicio de sesión no', async () => {
+    const missing = await renderAt(null, NOT_FOUND);
+    missing.unmount();
+    const account = await renderAt(null, '/account');
+    expect(account.html).toBe(missing.html);
+    account.unmount();
+    const login = await renderAt(null, '/login');
+    expect(login.html).not.toBe(missing.html);
+    expect(
+      await screen.findByText(text('screen_state.unavailable'), {}, { timeout: 10_000 }),
+    ).toBeDefined();
+  });
+});
+
+describe('con permiso, cada grupo pinta su página', () => {
+  const open = SCREENS.flatMap((descriptor) =>
+    descriptor.route_groups.flatMap((group) =>
+      group.paths.map((path) => [`${descriptor.screen_id} ${group.id} ${path}`, descriptor, path]),
+    ),
+  ) as [string, (typeof SCREENS)[number], string][];
+
+  const everything: NavigationPrincipal = {
+    effective_permissions: [...new Set(SCREENS.flatMap((s) => s.required_permissions))],
+    assignments: [],
+  };
+
+  it.each(open)('%s', async (_name, descriptor, path) => {
+    const missing = await renderAt(everything, NOT_FOUND);
+    missing.unmount();
+    const page = await renderAt(everything, concrete(path));
+    expect(page.html).not.toBe(missing.html);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text(descriptor.title_text));
+    expect(requests).toEqual([]);
+  });
+});
+
+describe('inicio', () => {
+  it('/ lleva al panel de inicio del coordinador', async () => {
+    const { router } = await renderAt(coordinator, '/');
+    expect(router.state.location.pathname).toBe('/home');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text('navigation.scr08'));
+  });
+
+  it('/ sin sesión lleva al inicio de sesión', async () => {
+    const { router } = await renderAt(null, '/');
+    expect(router.state.location.pathname).toBe('/login');
+  });
+
+  it('/ sin panel de inicio es «no disponible en su alcance»', async () => {
+    const missing = await renderAt(nobody, NOT_FOUND);
+    missing.unmount();
+    const root = await renderAt(nobody, '/');
+    expect(root.html).toBe(missing.html);
+  });
+});
+
+describe('precarga solo de código (PAT-APP-REN-02)', () => {
+  it('el coordinador precarga su inicio y las pantallas enlazadas, sin ninguna petición', async () => {
+    const groups = preloadGroups(coordinator);
+    const ids = groups.map((group) => group.id);
+    expect(ids[0]).toBe('home');
+    expect(ids).toEqual(expect.arrayContaining(['classify', 'loop', 'queue', 'root_cause']));
+    const loads = groups.map((group) => vi.spyOn(group, 'load'));
+    await preloadHomeCode(coordinator);
+    for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
+    const { router } = await renderAt(coordinator, '/');
+    await router.navigate(`/findings/${ID}/classify`);
+    await router.navigate('/review-queue');
+    await router.navigate(`/findings/${ID}/root-cause`);
+    expect(requests).toEqual([]);
+  });
+
+  it('no precarga grupos sin permiso de las pantallas enlazadas', () => {
+    const lineManager: NavigationPrincipal = {
+      effective_permissions: effectivePermissions('customer_organization', ['line_manager']),
+      assignments: [{ role: 'line_manager' }],
+    };
+    expect(preloadGroups(lineManager).map((group) => group.id)).toEqual(['entry']);
+    expect(preloadGroups(nobody)).toEqual([]);
+  });
+
+  it('se programa tras la primera pintura, no en el acto, y se puede cancelar', async () => {
+    const task = vi.fn();
+    afterFirstPaint(task);
+    expect(task).not.toHaveBeenCalled();
+    await vi.waitFor(
+      () => {
+        expect(task).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 10_000 },
+    );
+    const cancelled = vi.fn();
+    const cancel = afterFirstPaint(cancelled);
+    cancel();
+    const witness = vi.fn();
+    afterFirstPaint(witness);
+    await vi.waitFor(
+      () => {
+        expect(witness).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 10_000 },
+    );
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+});
+
+describe('estados comunes y campana de relevo', () => {
+  it('loading es un esqueleto sin números; empty y error con su texto', () => {
+    const loading = render(<ScreenState state="loading" />);
+    expect(loading.container.textContent).not.toMatch(/\d/);
+    expect(screen.getByRole('status').getAttribute('aria-busy')).toBe('true');
+    loading.unmount();
+    render(<ScreenState state="empty" message="Aún no hay datos." />);
+    expect(screen.getByText('Aún no hay datos.')).toBeDefined();
+    const retry = vi.fn();
+    render(<ScreenState state="error" correlationId="c-1" onRetry={retry} />);
+    expect(screen.getByRole('alert').textContent).toContain('c-1');
+    screen.getByRole('button', { name: text('screen_state.retry') }).click();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('la campana de relevo enlaza las notificaciones sin pedir nada', async () => {
+    const router = createMemoryRouter([{ path: '/', element: <Bell /> }]);
+    render(<RouterProvider router={router} />);
+    const link = await screen.findByRole(
+      'link',
+      { name: text('navigation.bell') },
+      { timeout: 10_000 },
+    );
+    expect(link.getAttribute('href')).toBe('/notifications');
+    expect(requests).toEqual([]);
+  });
+});
