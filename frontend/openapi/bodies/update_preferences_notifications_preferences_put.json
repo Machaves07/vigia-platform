@@ -1,0 +1,24 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "update_preferences_notifications_preferences_put",
+  "method": "put",
+  "path": "/notifications/preferences",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/NotificationPreferenceUpdateIn",
+    "$defs": {
+      "NotificationPreferenceUpdateIn": {
+        "properties": {
+          "email_enabled_normal": { "type": "boolean" },
+          "email_enabled_digest": { "type": "boolean" },
+          "weekly_digest_weekday": { "type": "integer", "maximum": 7, "minimum": 1 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["email_enabled_normal", "email_enabled_digest", "weekly_digest_weekday"]
+      }
+    }
+  },
+  "query": null
+}

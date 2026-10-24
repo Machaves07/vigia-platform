@@ -1,0 +1,33 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "list_audit_entries_audit_entries_get",
+  "method": "get",
+  "path": "/audit/entries",
+  "bodyRequired": false,
+  "body": null,
+  "query": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "operation": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+            "maxItems": 32
+          },
+          { "type": "null" }
+        ]
+      },
+      "actor_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "plant_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "zone_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] },
+      "occurred_from": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "occurred_before": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "page_size": { "type": "integer", "maximum": 200, "minimum": 1 },
+      "after_occurred_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "after_entry_id": { "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }] }
+    },
+    "additionalProperties": false
+  }
+}

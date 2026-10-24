@@ -1,0 +1,115 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "new_standard_zones__zone_id__standards_post",
+  "method": "post",
+  "path": "/zones/{zone_id}/standards",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/StandardBody",
+    "$defs": {
+      "CameraBody": {
+        "properties": {
+          "camera_id": { "type": "string", "format": "uuid" },
+          "code": { "type": "string" },
+          "role_in_zone": { "$ref": "#/$defs/CameraRoleInZone" },
+          "declared_min_fps": { "type": "number" },
+          "stream_reference": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["camera_id", "code", "role_in_zone", "declared_min_fps", "stream_reference"]
+      },
+      "CameraRoleInZone": { "type": "string", "enum": ["primary", "redundant"] },
+      "ClipWindowBody": {
+        "properties": {
+          "pre_seconds": { "type": "integer" },
+          "post_seconds": { "type": "integer" }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "CoverageValues": {
+        "properties": {
+          "required_count": { "type": "integer" },
+          "required_camera_ids": {
+            "items": { "type": "string", "format": "uuid" },
+            "type": "array",
+            "maxItems": 8
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["required_count", "required_camera_ids"]
+      },
+      "EpisodeBody": {
+        "properties": {
+          "grouping_window_ms": { "type": "integer" },
+          "max_segment_ms": { "type": "integer" }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "PredicateFamily": {
+        "type": "string",
+        "enum": ["coexistence", "guard_bypass", "dwell", "startup_transition"]
+      },
+      "StandardBody": {
+        "properties": {
+          "family": { "$ref": "#/$defs/PredicateFamily" },
+          "title_es": { "type": "string" },
+          "declared_text": { "type": "string" },
+          "predicate": { "additionalProperties": true, "type": "object" },
+          "reason_es": { "type": "string" },
+          "zone_parameters": {
+            "anyOf": [{ "$ref": "#/$defs/ZoneParametersBody" }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["family", "title_es", "declared_text", "predicate", "reason_es"]
+      },
+      "ThresholdValues": {
+        "properties": {
+          "review": { "type": "number", "exclusiveMaximum": 1, "exclusiveMinimum": 0 },
+          "publication": { "type": "number", "maximum": 1, "exclusiveMinimum": 0 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["review", "publication"]
+      },
+      "ZoneParametersBody": {
+        "properties": {
+          "cameras": {
+            "items": { "$ref": "#/$defs/CameraBody" },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 1
+          },
+          "minimum_coverage": { "$ref": "#/$defs/CoverageValues" },
+          "signals": {
+            "items": { "additionalProperties": true, "type": "object" },
+            "type": "array",
+            "maxItems": 32
+          },
+          "thresholds": { "$ref": "#/$defs/ThresholdValues" },
+          "clip_window": { "$ref": "#/$defs/ClipWindowBody" },
+          "episode": { "$ref": "#/$defs/EpisodeBody" },
+          "single_occupancy": { "type": "boolean" },
+          "aggregation_window_minutes": { "type": "integer", "maximum": 480, "minimum": 15 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cameras",
+          "minimum_coverage",
+          "signals",
+          "thresholds",
+          "clip_window",
+          "episode"
+        ]
+      }
+    }
+  },
+  "query": null
+}

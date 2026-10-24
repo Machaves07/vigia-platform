@@ -1,0 +1,24 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "single_occupancy_zones__zone_id__catalog_single_occupancy_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/catalog/single-occupancy",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/SingleOccupancyBody",
+    "$defs": {
+      "SingleOccupancyBody": {
+        "properties": {
+          "single_occupancy": { "type": "boolean" },
+          "aggregation_window_minutes": { "type": "integer", "maximum": 480, "minimum": 15 },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["single_occupancy", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}

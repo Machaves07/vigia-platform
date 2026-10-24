@@ -1,0 +1,69 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "change_configuration_loop_plants__plant_id__configuration_put",
+  "method": "put",
+  "path": "/loop/plants/{plant_id}/configuration",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ConfigurationChangeBody",
+    "$defs": {
+      "BusinessCalendarBody": {
+        "properties": {
+          "working_weekdays": {
+            "items": { "type": "integer" },
+            "type": "array",
+            "maxItems": 7,
+            "minItems": 1
+          },
+          "non_working_dates": { "items": { "type": "string" }, "type": "array", "maxItems": 400 }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["working_weekdays", "non_working_dates"]
+      },
+      "ConfigurationChangeBody": {
+        "properties": {
+          "classification_deadline_business_days": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "review_deadline_business_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "action_deadline_default_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "action_deadline_min_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "action_deadline_max_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "manager_highlight_overdue_days": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "unclosable_review_default_months": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "unclosable_review_max_months": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "monthly_package_generation_day": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "sample_percent": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "sample_min": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "sample_max": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "adoption_silence_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "exposure_coverage_threshold_percent": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "email_grouping_hours": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "export_max_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "export_max_zones": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "single_occupancy_default_window_minutes": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }]
+          },
+          "reminder_interval_hours": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "business_calendar": {
+            "anyOf": [{ "$ref": "#/$defs/BusinessCalendarBody" }, { "type": "null" }]
+          },
+          "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

@@ -1,0 +1,34 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "grant_document_documents_post",
+  "method": "post",
+  "path": "/documents",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/DocumentGrantBody",
+    "$defs": {
+      "DocumentContentType": {
+        "type": "string",
+        "enum": ["application/pdf", "image/jpeg", "image/png"]
+      },
+      "DocumentGrantBody": {
+        "properties": {
+          "plant_id": { "type": "string", "format": "uuid" },
+          "kind": { "$ref": "#/$defs/DocumentKind" },
+          "content_type": { "$ref": "#/$defs/DocumentContentType" },
+          "size_bytes": { "type": "integer", "maximum": 20971520, "minimum": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["plant_id", "kind", "content_type", "size_bytes", "sha256"]
+      },
+      "DocumentKind": {
+        "type": "string",
+        "enum": ["scope_record", "use_agreement", "plant_policy", "blur_check_capture"]
+      }
+    }
+  },
+  "query": null
+}

@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "update_commitment_accreditation_commitments__commitment_id__patch",
+  "method": "patch",
+  "path": "/accreditation/commitments/{commitment_id}",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/CommitmentUpdateBody",
+    "$defs": {
+      "CommitmentUpdateBody": {
+        "properties": {
+          "state": { "type": "string" },
+          "note": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["state"]
+      }
+    }
+  },
+  "query": null
+}

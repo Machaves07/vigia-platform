@@ -1,0 +1,27 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "signals_zones__zone_id__signals_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/signals",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/SignalsBody",
+    "$defs": {
+      "SignalsBody": {
+        "properties": {
+          "signals": {
+            "items": { "additionalProperties": true, "type": "object" },
+            "type": "array",
+            "maxItems": 32
+          },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["signals", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}
