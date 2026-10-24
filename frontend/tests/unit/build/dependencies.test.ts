@@ -60,6 +60,9 @@ const AUXILIARY = {
   '@types/react': 'react',
   '@types/react-dom': 'react-dom',
   '@vitest/coverage-v8': 'vitest',
+  // La usa el arranque (VIG-289) para derivar la versión mínima de la política de navegadores
+  // (NFR-APP-31); ya está en el árbol de desarrollo por `eslint-plugin-react-hooks`.
+  browserslist: 'eslint-plugin-react-hooks',
 } as const;
 
 /** Lista permitida (AGENTS.md, NFR-CTR-26) más las excepciones permisivas de A-43. */

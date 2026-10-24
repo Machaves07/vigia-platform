@@ -5,9 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>Vigía</title>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- Paso 1 de PAT-APP-REN-01: guion propio externo de comprobación de capacidades (LC-APP-01).
+         Si el navegador no sirve, deja visible la sección de abajo y no carga React. -->
+    <script type="module" src="/src/bootstrap/check.ts"></script>
   </head>
   <body>
     <div id="vigia-app"></div>
+    <!-- Sección estática «navegador no compatible»: su texto va compilado aquí desde el catálogo
+         (`src/texts/bootstrap.json`) y se muestra quitando `hidden`, sin JavaScript de por medio.
+         Se comprueba en tests/unit/bootstrap/index_html.test.ts. -->
+    <main id="vigia-unsupported" hidden lang="es">
+      <h1>Navegador no compatible</h1>
+      <p>
+        Este navegador no reúne lo que Vigía necesita para funcionar. Abra la aplicación con la
+        última versión de Chrome, Edge, Firefox o Safari en un ordenador o una tableta. Si el aviso
+        continúa, comuníqueselo a quien administra la plataforma.
+      </p>
+    </main>
   </body>
 </html>
