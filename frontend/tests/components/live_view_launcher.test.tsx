@@ -22,6 +22,7 @@ import catalog from '@/texts/live_view.json';
 
 import { server } from '../setup/msw';
 import {
+  auxClick,
   EXPIRES_AT,
   handoff,
   liveViewHarness,
@@ -44,6 +45,19 @@ const CERTIFICATE_KEYS = [
   'live_view.certificate_notice',
   'live_view.certificate_instruction',
 ] as const;
+/**
+ * Código que identifica cada causa de rechazo (nota U05-H-07 de BR-APP-66): los del nodo son sus
+ * resultados de sesión y los de la plataforma, los del mapa cerrado de errores. Va como atributo
+ * de datos, nunca como texto visible.
+ */
+const REJECTION_CODES: Readonly<Record<string, string>> = {
+  'live_view.rejection.limit': 'rejected_limit',
+  'live_view.rejection.mode': 'rejected_mode',
+  'live_view.rejection.reused': 'rejected_reused',
+  'live_view.rejection.expired': 'rejected_expired',
+  'live_view.rejection.zone_without_node': 'zone_without_node',
+  'live_view.rejection.rate_limited': 'rate_limited',
+};
 /** Espera que impone el rechazo `rate_limited` de la plataforma. */
 const RETRY_AFTER_SECONDS = 30;
 
@@ -140,6 +154,23 @@ describe('pantalla previa (BR-APP-66 y nota U05-H-07)', () => {
     expect(
       container.querySelector('[data-text-key="live_view.rejection.rate_limited"]'),
     ).not.toBeNull();
+  });
+
+  it('identifica cada causa con su código como atributo de datos, nunca como texto visible', () => {
+    const { container } = renderLauncher(liveViewHarness());
+    const items = [...container.querySelectorAll('[data-part="rejections"] li')];
+    expect(items).toHaveLength(Object.keys(REJECTION_CODES).length);
+    for (const item of items) {
+      const key = item.getAttribute('data-text-key') ?? '';
+      const code = REJECTION_CODES[key];
+      expect(code).toBeDefined();
+      expect(item.getAttribute('data-rejection-code')).toBe(code);
+      // La etiqueta visible es la del catálogo y no repite el valor crudo.
+      expect(item.textContent).toBe(catalog[key as keyof typeof catalog]);
+      expect(item.textContent).not.toContain(code ?? '');
+    }
+    // El modo de la zona se presenta en español, no con el valor del contrato.
+    expect(catalog['live_view.rejection.mode']).not.toContain('no_capture');
   });
 
   it('empieza sin enlace y con el botón de abrir', () => {
@@ -239,6 +270,29 @@ describe('enlace con el token en el fragmento (BR-APP-65, PR-APP-20)', () => {
       opened_at_ms: harness.clock.now(),
     });
     expect(JSON.stringify(opened.mock.calls)).not.toContain(TOKEN);
+    expect(tokenFoundIn(TOKEN)).toEqual([]);
+    expect(requestButton().textContent).toBe(text('live_view.open_again'));
+  });
+
+  it('el botón central del ratón también elimina el enlace del DOM', async () => {
+    const harness = liveViewHarness();
+    server.use(harness.granted(handoff()));
+    const opened = vi.fn<(opened: LiveViewOpened) => void>();
+    renderLauncher(harness, opened);
+    const link = await requestToken();
+
+    // El botón derecho no abre nada: el enlace sigue donde estaba y nadie recibe el acuse.
+    auxClick(link, 2);
+    expect(launcher().querySelector('[data-part="link"]')).not.toBeNull();
+    expect(opened).not.toHaveBeenCalled();
+
+    // El botón central abre la pestaña sin disparar `click`; el enlace sale igualmente del DOM.
+    auxClick(link, 1);
+    expect(launcher().querySelector('[data-part="link"]')).toBeNull();
+    expect(opened).toHaveBeenCalledExactlyOnceWith({
+      zone_id: ZONE_ID,
+      opened_at_ms: harness.clock.now(),
+    });
     expect(tokenFoundIn(TOKEN)).toEqual([]);
     expect(requestButton().textContent).toBe(text('live_view.open_again'));
   });

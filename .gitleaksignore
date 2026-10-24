@@ -99,3 +99,8 @@ a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr15/preferences/in
 a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/descriptor.ts:generic-api-key:10
 a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/entry/index.tsx:generic-api-key:5
 a7869f20044a0fdcb4017ad64e17ed478a5a851b:frontend/src/pages/scr16/zone/index.tsx:generic-api-key:5
+#
+# VIG-304: token JWS sintético de las pruebas de la vista en vivo
+# (frontend/tests/support/liveView.ts), con forma del contrato pero inventado y sin firma real;
+# no es un secreto. El commit siguiente lo arma por segmentos en tiempo de ejecución.
+36faaa440aa0ffc536c5a316d41200c5a7d8ea90:frontend/tests/support/liveView.ts:generic-api-key:22

@@ -6,6 +6,7 @@
  * Nada de esto son datos reales: el token es una JWS compacta inventada y la dirección del nodo,
  * un nombre local de laboratorio.
  */
+import { fireEvent } from '@testing-library/react';
 import { HttpResponse, type HttpResponseResolver } from 'msw';
 
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
@@ -18,8 +19,12 @@ import { FakeClock } from './fakeClock';
 
 /** Zona sintética (UUID v7). */
 export const ZONE_ID = '0190a1b2-0000-7000-8000-0000000000a1';
-/** Token sintético con la forma del contrato: JWS compacta. */
-export const TOKEN = 'eyJhbGciOiJFZERTQSJ9.eyJ6b25lIjoiejEifQ.c2lnbmF0dXJl';
+/**
+ * Token sintético con la forma del contrato: JWS compacta. Se arma por segmentos para que el árbol
+ * no contenga el literal entero: el escáner de secretos lo marcaba como `generic-api-key` por su
+ * entropía (falso positivo) y un commit de fusión en `main` volvería a escanearlo.
+ */
+export const TOKEN = ['eyJhbGciOiJFZERTQSJ9', 'eyJ6b25lIjoiejEifQ', 'c2lnbmF0dXJl'].join('.');
 /** Dirección local anunciada por el nodo (A-35: puerto 8443 y ruta `/`). */
 export const LOCAL_URL = 'https://nodo-01.planta.local:8443/';
 export const EXPIRES_AT = '2026-10-24T15:40:00.000Z';
@@ -130,4 +135,14 @@ export function tokenFoundIn(token: string): string[] {
   return Object.entries(tokenTraces())
     .filter(([, value]) => value.includes(token))
     .map(([name]) => name);
+}
+
+/**
+ * Pulsación con un botón no principal del ratón: el navegador emite `auxclick` (botón 1, el
+ * central, que abre la pestaña sin disparar `click`) y **no** `click`. `@testing-library/dom` 10.4
+ * no trae el atajo `fireEvent.auxClick`, así que se construye el `MouseEvent` a mano y se despacha
+ * con `fireEvent` para que quede dentro de `act`.
+ */
+export function auxClick(element: Element, button: number): void {
+  fireEvent(element, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button }));
 }

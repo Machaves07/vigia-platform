@@ -18,7 +18,7 @@
  *   el `retry_after_seconds` indicado.
  * - El tiempo entra por un `Clock` inyectado (PAT-APP-RES-06).
  */
-import { useEffect, useLayoutEffect, useReducer } from 'react';
+import { useEffect, useLayoutEffect, useReducer, type MouseEvent } from 'react';
 
 import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import {
@@ -52,14 +52,21 @@ const PREVIEW_KEYS = [
   'live_view.certificate_instruction',
 ] as const;
 
-/** Causas de rechazo, con la etiqueta del nodo y de la plataforma. */
-const REJECTION_KEYS = [
-  'live_view.rejection.limit',
-  'live_view.rejection.mode',
-  'live_view.rejection.reused',
-  'live_view.rejection.expired',
-  'live_view.rejection.zone_without_node',
-  'live_view.rejection.rate_limited',
+/**
+ * Causas de rechazo: la etiqueta en español del catálogo y el código que las identifica (nota
+ * U05-H-07 de BR-APP-66). El código viaja como atributo de datos y **nunca** como texto visible,
+ * que es solo la etiqueta: a una persona no se le muestran valores crudos. Los del nodo son los
+ * resultados de sesión del contrato (`rejected_limit`, `rejected_mode`, `rejected_reused` y
+ * `rejected_expired`, este último el token vencido) y los de la plataforma, los del mapa cerrado
+ * de errores (`zone_without_node`, `rate_limited`).
+ */
+const REJECTIONS = [
+  { key: 'live_view.rejection.limit', code: 'rejected_limit' },
+  { key: 'live_view.rejection.mode', code: 'rejected_mode' },
+  { key: 'live_view.rejection.reused', code: 'rejected_reused' },
+  { key: 'live_view.rejection.expired', code: 'rejected_expired' },
+  { key: 'live_view.rejection.zone_without_node', code: 'zone_without_node' },
+  { key: 'live_view.rejection.rate_limited', code: 'rate_limited' },
 ] as const;
 
 /** Acuse de apertura: sin el token, que ya se descartó (PR-APP-29). */
@@ -140,6 +147,13 @@ export function LiveViewLauncher({
     dispatch({ type: 'opened' });
   };
 
+  // El botón central del ratón abre la pestaña sin disparar `click`: se atiende también `auxclick`
+  // (botón 1) para que el enlace salga del DOM igual que con un clic normal (BR-APP-65: «se elimina
+  // al pulsarlo»). El botón derecho (2) no abre nada y deja el enlace donde está.
+  const openWithMiddleButton = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button === 1) open();
+  };
+
   return (
     <section
       className={styles.launcher}
@@ -156,8 +170,8 @@ export function LiveViewLauncher({
       </ul>
       <h3 className={styles.subtitle}>{text('live_view.rejections.title')}</h3>
       <ul className={styles.list} data-part="rejections">
-        {REJECTION_KEYS.map((key) => (
-          <li key={key} data-text-key={key}>
+        {REJECTIONS.map(({ key, code }) => (
+          <li key={key} data-text-key={key} data-rejection-code={code}>
             {text(key)}
           </li>
         ))}
@@ -173,6 +187,7 @@ export function LiveViewLauncher({
               rel={LIVE_VIEW_LINK_REL}
               data-part="link"
               onClick={open}
+              onAuxClick={openWithMiddleButton}
             >
               {text('live_view.link')}
             </a>{' '}

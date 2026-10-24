@@ -1,7 +1,8 @@
 /**
- * PR-APP-29 (PAT-APP-SEG-03, BR-APP-65, R-APP-4): tras el clic o el vencimiento, el token no existe
- * en el DOM, la memoria del componente, el almacenamiento, el historial ni los registros; el enlace
- * no tiene `opener` y no envía referente; y `window.open` nunca se llama.
+ * PR-APP-29 (PAT-APP-SEG-03, BR-APP-65, R-APP-4): tras el clic (también el central), el vencimiento
+ * o cualquiera de los caminos de apertura, el token no existe en el DOM, la memoria del componente,
+ * el almacenamiento, el historial ni los registros; el enlace no tiene `opener` y no envía
+ * referente; y `window.open` nunca se llama.
  *
  * La memoria del componente es el estado del reductor de UI-18: la primera propiedad recorre
  * secuencias de eventos y comprueba que, fuera de `link`, no queda ni rastro del token. La segunda
@@ -28,11 +29,13 @@ import { text } from '@/texts';
 
 import { liveViewDelivery } from '../generators';
 import { server } from '../setup/msw';
-import { liveViewHarness, tokenFoundIn, ZONE_ID } from '../support/liveView';
+import { liveViewHarness, auxClick, tokenFoundIn, ZONE_ID } from '../support/liveView';
 import { PROPERTY_TIMEOUT_MS } from '../support/timeouts';
 
 const START_MS = 1_800_000_000_000;
 const REJECTED = { code: 'rate_limited', status: 429, retry_after_seconds: 30 } as const;
+/** Caminos de apertura: clic normal, botón central del ratón (sin `click`) y vencimiento. */
+const OPENING = fc.constantFrom('click', 'middle', 'expire');
 
 afterEach(() => {
   installTransport(null);
@@ -108,7 +111,7 @@ describe('PR-APP-29 · el token no sobrevive al clic ni al vencimiento', () => {
   );
 
   it(
-    'tras el clic o el vencimiento el token sale del DOM, el almacenamiento, el historial y los registros',
+    'tras el clic (o el clic central) o el vencimiento el token sale del DOM, el almacenamiento, el historial y los registros',
     async () => {
       const harness = liveViewHarness();
       const open = vi.spyOn(window, 'open').mockImplementation(() => null);
@@ -120,7 +123,7 @@ describe('PR-APP-29 · el token no sobrevive al clic ni al vencimiento', () => {
         vi.spyOn(console, 'debug'),
       ];
       await fc.assert(
-        fc.asyncProperty(liveViewDelivery(), fc.boolean(), async (delivery, byClick) => {
+        fc.asyncProperty(liveViewDelivery(), OPENING, async (delivery, opening) => {
           const token = delivery.token as string;
           const fromRequests = harness.requests.length;
           const fromLog = harness.devLog.length;
@@ -141,8 +144,11 @@ describe('PR-APP-29 · el token no sobrevive al clic ni al vencimiento', () => {
             expect(link.getAttribute('target')).toBe('_blank');
             expect(open).not.toHaveBeenCalled();
 
-            if (byClick) {
+            if (opening === 'click') {
               fireEvent.click(link);
+            } else if (opening === 'middle') {
+              // El botón central abre la pestaña sin `click`: `auxclick` (botón 1) cierra igual.
+              auxClick(link, 1);
             } else {
               act(() => {
                 harness.clock.advance(LIVE_VIEW_TOKEN_SECONDS * 1000);
