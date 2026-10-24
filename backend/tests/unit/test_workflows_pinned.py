@@ -61,6 +61,9 @@ CODEOWNERS = REPOSITORY / ".github" / "CODEOWNERS"
 DEPENDABOT = REPOSITORY / ".github" / "dependabot.yml"
 
 REQUIRED_CHECKS = (
+    # Retro 29 (dueño, 2026-10-24): decide si un PR solo de frontend/ o docs/ salta los
+    # trabajos de backend.
+    "rutas del cambio (frontend o backend)",
     "escaneo de secretos",
     "backend (lint y tipos)",
     "backend (pruebas sin integración, grupo ${{ matrix.grupo }} de 4)",
@@ -759,7 +762,7 @@ def test_the_coverage_job_needs_every_backend_job_with_coverage() -> None:
     ci = _ci()
     job = next(job for job in ci["jobs"].values() if job["name"].startswith("cobertura"))
     backend_jobs = ["backend-integracion-grupos", "backend-pruebas"]
-    assert sorted(job["needs"]) == backend_jobs
+    assert sorted(job["needs"]) == sorted([*backend_jobs, "rutas"])
     artifacts = []
     for job_id in backend_jobs:
         steps = ci["jobs"][job_id]["steps"]
@@ -794,15 +797,18 @@ def test_the_required_backend_check_aggregates_lint_and_the_four_groups() -> Non
     jobs = _ci()["jobs"]
     job = jobs["backend"]
     assert job["name"] == "backend (lint, tipos y pruebas sin integración)"
-    assert sorted(job["needs"]) == ["backend-lint", "backend-pruebas"]
+    assert sorted(job["needs"]) == ["backend-lint", "backend-pruebas", "rutas"]
     assert str(job["if"]).startswith("always() && ")
     assert "github.event.pull_request.draft == false" in job["if"]
     (step,) = job["steps"]
     assert step["env"] == {
         "LINT": "${{ needs.backend-lint.result }}",
         "PRUEBAS": "${{ needs.backend-pruebas.result }}",
+        "BACKEND": "${{ needs.rutas.outputs.backend }}",
     }
     assert 'test "$LINT" = success && test "$PRUEBAS" = success' in step["run"]
+    # Retro 29: solo salta con un «false» explícito de «rutas» (falla cerrado).
+    assert 'if [ "$BACKEND" = false ]; then' in step["run"]
     lint = _job_text(jobs["backend-lint"])
     for command in (
         "ruff check",
@@ -1368,3 +1374,35 @@ def test_the_real_release_summary_runs_without_aws_and_reports_failures_honestly
     assert "comprobaciones nº 14 y 15 pendientes de contrato del dueño: VIG-252" in text
     assert "No se ejecutaron las comprobaciones nº 14" in text
     assert "no son comprobaciones superadas" in text
+
+
+def test_the_route_filter_fails_closed_and_never_gates_the_security_jobs() -> None:
+    """Retro 29, propuesta 1 (dueño, 2026-10-24): un PR solo de frontend/ o docs/ salta los
+    trabajos de backend. Solo un ``backend=false`` explícito salta algo: si «rutas» falla (salida
+    vacía), todo corre o el check obligatorio queda en rojo. En un push a main corre todo.
+    Secretos, dependencias, imagen y flujos no dependen del filtro."""
+    jobs = _ci()["jobs"]
+    rutas = jobs["rutas"]
+    assert rutas["name"] == "rutas del cambio (frontend o backend)"
+    assert rutas["outputs"] == {"backend": "${{ steps.rutas.outputs.backend }}"}
+    run = _job_text(rutas)
+    assert 'if [ "$EVENTO" != pull_request ]; then' in run and "backend=true" in run
+    assert r"grep -qvE '^(frontend/|docs/|README\.md$|CHANGELOG\.md$)'" in run
+    assert rutas["steps"][0]["with"]["fetch-depth"] == 0
+    text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    condiciones = re.findall(r"needs\.rutas\.outputs\.backend\s*(==|!=)\s*'(\w+)'", text)
+    assert condiciones and all(valor == "false" for _, valor in condiciones)
+    for job_id in ("secretos", "dependencias", "imagen", "flujos"):
+        assert "needs" not in jobs[job_id], job_id
+        assert "rutas" not in str(jobs[job_id]), job_id
+    pesados = (
+        "backend-lint",
+        "backend-pruebas",
+        "backend-integracion-grupos",
+        "arranque-n-1",
+        "infra",
+    )
+    for job_id in pesados:
+        assert jobs[job_id]["needs"] == ["rutas"], job_id
+        condicion = str(jobs[job_id]["if"])
+        assert condicion.endswith("&& needs.rutas.outputs.backend != 'false'"), job_id
