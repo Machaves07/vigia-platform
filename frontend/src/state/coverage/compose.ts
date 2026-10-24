@@ -13,9 +13,9 @@
  * - Los intervalos se concatenan tal como llegan: **ninguno se omite ni se fusiona**, tampoco dos
  *   del mismo estado a ambos lados del corte entre tramos (BR-APP-37).
  * - El resumen es la suma de los seis contadores de los tramos y solo se da si suma exactamente
- *   `to − from`. Si falta un tramo, uno no es coherente o la suma no cuadra, el compuesto queda
- *   `incomplete` con la lista de problemas y **sin resumen**: la interfaz muestra «cobertura
- *   incompleta», nunca un resumen parcial (BR-APP-39).
+ *   `to − from`, es decir, si todos los tramos llegaron, son coherentes y cubren el periodo sin
+ *   hueco ni solape. Si no, el compuesto queda `incomplete` con la lista de problemas y **sin
+ *   resumen**: la interfaz muestra «cobertura incompleta», nunca un resumen parcial (BR-APP-39).
  *
  * `loadCoverage` pide los tramos con el puerto de la pantalla; si el servidor responde
  * `period_too_long`, parte ese tramo en dos y los pide de nuevo (la interfaz corrige el tramo).
@@ -54,7 +54,7 @@ export const SUMMARY_KEYS = [
   'zone_not_active_ms',
 ] as const;
 export type SummaryKey = (typeof SUMMARY_KEYS)[number];
-export type CoverageSummary = Readonly<Record<SummaryKey, number>>;
+type CoverageSummary = Readonly<Record<SummaryKey, number>>;
 
 /** `IntervalOut` de U-02 (domain-entities §3.8); la pantalla lo recibe ya validado por su puerto. */
 export interface CoverageIntervalOut {
@@ -97,17 +97,15 @@ export interface TimedInterval {
   readonly interval: CoverageIntervalOut;
 }
 
-export type CoverageProblemKind =
+type CoverageProblemKind =
   /** La petición del tramo falló. */
   | 'missing_chunk'
   /** La respuesta del tramo no es coherente consigo misma o con lo pedido. */
   | 'inconsistent_chunk'
   /** Los tramos no cubren el periodo sin hueco ni solape. */
-  | 'not_contiguous'
-  /** Los resúmenes no suman exactamente `to − from`. */
-  | 'summary_mismatch';
+  | 'not_contiguous';
 
-export interface CoverageProblem {
+interface CoverageProblem {
   readonly kind: CoverageProblemKind;
   readonly period: CoveragePeriod;
 }
@@ -161,7 +159,7 @@ export function partitionPeriod(period: CoveragePeriod): CoveragePeriod[] {
 }
 
 /** Las dos mitades de un tramo (corrección tras `period_too_long`). */
-export function splitChunk(chunk: CoveragePeriod): [CoveragePeriod, CoveragePeriod] {
+function splitChunk(chunk: CoveragePeriod): [CoveragePeriod, CoveragePeriod] {
   checkPeriod(chunk, Number.MAX_SAFE_INTEGER);
   if (chunk.toMs - chunk.fromMs < 2) {
     throw new CoveragePeriodError('Un tramo de 1 ms no se puede partir.');
@@ -192,7 +190,7 @@ function isLayer(value: string): value is CoverageLayer {
 }
 
 /** Contador del resumen en que cuenta un intervalo (el mismo reparto que U-02). */
-export function summaryKeyOf(interval: CoverageIntervalOut): SummaryKey | null {
+function summaryKeyOf(interval: CoverageIntervalOut): SummaryKey | null {
   if (interval.layer === 'platform_communication') {
     const cause = interval.causes[0];
     if (interval.state !== 'not_observable' || interval.causes.length !== 1) return null;
@@ -283,11 +281,8 @@ export function composeCoverage(
     problems.push({ kind: 'not_contiguous', period: { fromMs: cursor, toMs: period.toMs } });
   }
 
-  const total = SUMMARY_KEYS.reduce((sum, key) => sum + summary[key], 0);
-  if (problems.length === 0 && total !== period.toMs - period.fromMs) {
-    problems.push({ kind: 'summary_mismatch', period });
-  }
-
+  // Sin problemas, los tramos cubren el periodo sin hueco ni solape y el resumen de cada uno suma
+  // su duración: la suma es exactamente `to − from` (PR-APP-05 lo comprueba).
   const chunks = ordered.map((result) => result.period);
   if (problems.length > 0) {
     return { status: 'incomplete', period, chunks, intervals, problems };

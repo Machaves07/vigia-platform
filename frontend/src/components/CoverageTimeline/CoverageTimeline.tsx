@@ -275,10 +275,7 @@ export function CoverageTimeline({
     onPeriodChange(periodEndingAt(composite.period.toMs, preset[1] * DAY_MS));
   };
 
-  const missing =
-    composite.status === 'incomplete'
-      ? composite.problems.filter((problem) => problem.kind !== 'summary_mismatch')
-      : [];
+  const missing = composite.status === 'incomplete' ? composite.problems : [];
 
   return (
     <section className={styles.timeline} aria-labelledby={titleId} data-status={composite.status}>

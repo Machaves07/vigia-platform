@@ -19,9 +19,12 @@ import {
   CHUNK_MAX_MS,
   composeCoverage,
   CoveragePeriodError,
+  DEFAULT_PERIOD_MS,
   loadCoverage,
   MAX_PERIOD_MS,
   partitionPeriod,
+  periodEndingAt,
+  periodQuery,
   SUMMARY_KEYS,
   type CoverageChunkResponse,
   type CoverageChunkResult,
@@ -118,7 +121,8 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-function bucket(piece: Piece): SummaryKey {
+/** Contador de U-02: la causa en la capa de la plataforma, el estado en la del nodo. */
+function bucket(piece: Pick<Piece, 'layer' | 'state' | 'causes'>): SummaryKey {
   return (
     piece.layer === 'platform_communication' ? `${piece.causes[0] ?? ''}_ms` : `${piece.state}_ms`
   ) as SummaryKey;
@@ -165,6 +169,74 @@ function expectExactCover(
   }
   expect(cursor).toBe(chosen.toMs);
 }
+
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+/** Cambia el primer intervalo de la respuesta. */
+function withFirst(
+  response: CoverageChunkResponse,
+  change: (interval: Mutable<CoverageIntervalOut>) => void,
+): CoverageChunkResponse {
+  const [first, ...rest] = response.intervals;
+  if (first === undefined) throw new Error('Un tramo servido tiene al menos un intervalo.');
+  const copy = { ...first };
+  change(copy);
+  return { ...response, intervals: [copy, ...rest] };
+}
+
+/**
+ * Respuestas incoherentes con su tramo; cada una la detecta una comprobación distinta de
+ * `composeCoverage` (además, `missing` es un tramo sin respuesta y `absent`, uno que falta).
+ */
+const DAMAGES = {
+  missing: (response: CoverageChunkResponse) => response,
+  absent: (response: CoverageChunkResponse) => response,
+  wrong_period: (response: CoverageChunkResponse, chunk: CoveragePeriod) => ({
+    ...response,
+    period: { from: iso(chunk.fromMs + 1), to: iso(chunk.toMs) },
+  }),
+  summary_inflated: (response: CoverageChunkResponse) => ({
+    ...response,
+    summary: { ...response.summary, observable_ms: response.summary.observable_ms + 1 },
+  }),
+  first_dropped: (response: CoverageChunkResponse) => ({
+    ...response,
+    intervals: response.intervals.slice(1),
+  }),
+  last_dropped: (response: CoverageChunkResponse) => ({
+    ...response,
+    intervals: response.intervals.slice(0, -1),
+  }),
+  /** `duration_ms` no es `ends_at − starts_at`, con el resumen ajustado a esa duración. */
+  duration_mismatch: (response: CoverageChunkResponse) => {
+    const first = response.intervals[0];
+    if (first === undefined) throw new Error('Un tramo servido tiene al menos un intervalo.');
+    const key = bucket(first as Pick<Piece, 'layer' | 'state' | 'causes'>);
+    return {
+      ...withFirst(response, (interval) => {
+        interval.duration_ms += 1;
+      }),
+      summary: { ...response.summary, [key]: response.summary[key] + 1 },
+    };
+  },
+  unknown_state: (response: CoverageChunkResponse) =>
+    withFirst(response, (interval) => {
+      interval.layer = 'node_report';
+      interval.state = 'clear';
+    }),
+  unknown_layer: (response: CoverageChunkResponse) =>
+    withFirst(response, (interval) => {
+      interval.layer = 'composite';
+    }),
+  /** Un intervalo de duración cero al principio: no rompe la contigüidad ni el resumen. */
+  empty_interval: (response: CoverageChunkResponse) => {
+    const first = response.intervals[0];
+    if (first === undefined) throw new Error('Un tramo servido tiene al menos un intervalo.');
+    const empty = { ...first, ends_at: first.starts_at, duration_ms: 0 };
+    return { ...response, intervals: [empty, ...response.intervals] };
+  },
+} as const;
+type Damage = keyof typeof DAMAGES;
 
 function periodTooLong(): PortError {
   const error = { code: 'period_too_long', status: 422 };
@@ -248,50 +320,33 @@ describe('PR-APP-05 composición de cobertura por tramos', () => {
         fc.property(
           timeline,
           fc.nat(),
-          fc.constantFrom('missing', 'summary_inflated', 'interval_dropped', 'wrong_period'),
+          fc.constantFrom(...(Object.keys(DAMAGES) as Damage[])),
           ({ period: chosen, pieces }, pick, damage) => {
             const chunks = partitionPeriod(chosen);
             const broken = pick % chunks.length;
-            const results: CoverageChunkResult[] = chunks.map((chunk, index) => {
+            const results = chunks.flatMap((chunk, index): CoverageChunkResult[] => {
               const response = serve(pieces, chunk);
-              if (index !== broken) return { period: chunk, response };
-              switch (damage) {
-                case 'missing':
-                  return { period: chunk, response: null, error: new Error('sin respuesta') };
-                case 'summary_inflated':
-                  return {
-                    period: chunk,
-                    response: {
-                      ...response,
-                      summary: {
-                        ...response.summary,
-                        observable_ms: response.summary.observable_ms + 1,
-                      },
-                    },
-                  };
-                case 'interval_dropped':
-                  return {
-                    period: chunk,
-                    response: { ...response, intervals: response.intervals.slice(1) },
-                  };
-                default:
-                  return {
-                    period: chunk,
-                    response: {
-                      ...response,
-                      period: { from: iso(chunk.fromMs + 1), to: iso(chunk.toMs) },
-                    },
-                  };
+              if (index !== broken) return [{ period: chunk, response }];
+              if (damage === 'missing') {
+                return [{ period: chunk, response: null, error: new Error('sin respuesta') }];
               }
+              if (damage === 'absent') return [];
+              return [{ period: chunk, response: DAMAGES[damage](response, chunk) }];
             });
             const composite = composeCoverage(chosen, results);
             expect(composite.status).toBe('incomplete');
             expect('summary' in composite).toBe(false);
             if (composite.status !== 'incomplete') return;
-            expect(composite.problems).toContainEqual({
-              kind: damage === 'missing' ? 'missing_chunk' : 'inconsistent_chunk',
-              period: chunks[broken],
-            });
+            const expected =
+              damage === 'missing'
+                ? 'missing_chunk'
+                : damage === 'absent'
+                  ? 'not_contiguous'
+                  : 'inconsistent_chunk';
+            expect(composite.problems.map((problem) => problem.kind)).toContain(expected);
+            if (expected !== 'not_contiguous') {
+              expect(composite.problems).toContainEqual({ kind: expected, period: chunks[broken] });
+            }
           },
         ),
       );
@@ -339,6 +394,25 @@ describe('PR-APP-05 composición de cobertura por tramos', () => {
 describe('PR-APP-05 ejemplos de carga', () => {
   const chosen = { fromMs: EPOCH_MIN, toMs: EPOCH_MIN + 40 * DAY_MS };
   const pieces: Piece[] = [{ startMs: chosen.fromMs, endMs: chosen.toMs, ...KINDS[0] }];
+
+  it('el periodo por omisión es de 7 días, cabe en un tramo y se consulta en ISO con ms y Z', () => {
+    const fallback = periodEndingAt(chosen.toMs, DEFAULT_PERIOD_MS);
+    expect(fallback).toEqual({ fromMs: chosen.toMs - 7 * DAY_MS, toMs: chosen.toMs });
+    expect(partitionPeriod(fallback)).toEqual([fallback]);
+    expect(periodQuery(fallback)).toEqual({
+      from: '2026-02-03T00:00:00.000Z',
+      to: '2026-02-10T00:00:00.000Z',
+    });
+  });
+
+  it('un tramo de más de 31 días no se acepta aunque su respuesta sea coherente', () => {
+    const composite = composeCoverage(chosen, [
+      { period: chosen, response: serve(pieces, chosen) },
+    ]);
+    expect(composite.status).toBe('incomplete');
+    if (composite.status !== 'incomplete') return;
+    expect(composite.problems).toEqual([{ kind: 'inconsistent_chunk', period: chosen }]);
+  });
 
   it('un fallo distinto de period_too_long deja el tramo como missing_chunk con su error', async () => {
     const failure = new Error('red caída');

@@ -36,7 +36,6 @@
   "coverage.incomplete.missing_chunk": "Tramo sin respuesta",
   "coverage.incomplete.inconsistent_chunk": "Tramo con datos incoherentes",
   "coverage.incomplete.not_contiguous": "Tramo con hueco o solape",
-  "coverage.incomplete.summary_mismatch": "El resumen no suma el periodo",
   "coverage.mark.one": "intervalo de menos de un píxel",
   "coverage.mark.many": "intervalos de menos de un píxel",
   "coverage.detail.title": "Detalle",
