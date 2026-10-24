@@ -27,6 +27,8 @@ build/
 dist/
 *.egg-info/
 node_modules/
+# Mapas de fuente de `vite build` (VIG-288): fuera de `dist/`; los adjunta el release.
+frontend-sourcemaps/
 # Ensamblado de nube que genera `cdk synth` en infra/
 cdk.out/
 # Informes del arnés de resiliencia (tests/resilience): artefacto de la canalización, no del árbol.
