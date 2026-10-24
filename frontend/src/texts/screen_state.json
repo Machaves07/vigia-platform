@@ -1,0 +1,8 @@
+{
+  "screen_state.loading": "Cargando…",
+  "screen_state.error": "No se pudo cargar esta pantalla.",
+  "screen_state.correlation_id": "Código de correlación",
+  "screen_state.retry": "Repetir",
+  "screen_state.unavailable": "Esta pantalla aún no está disponible.",
+  "screen_state.back_home": "Volver al inicio"
+}
