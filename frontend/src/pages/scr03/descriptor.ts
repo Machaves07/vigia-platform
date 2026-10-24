@@ -6,7 +6,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-03',
-  title_key: 'navigation.scr03',
+  title_text: 'navigation.scr03',
   route: '/integrity',
   required_permissions: ['integrity.verify', 'coverage.read'],
   route_groups: [

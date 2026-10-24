@@ -6,7 +6,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-01',
-  title_key: 'navigation.scr01',
+  title_text: 'navigation.scr01',
   route: '/login',
   required_permissions: [
     'users.manage',

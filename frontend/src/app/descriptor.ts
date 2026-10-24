@@ -83,7 +83,7 @@ interface ScreenSection {
 export interface ScreenDescriptor {
   readonly screen_id: ScreenId;
   /** Clave del catálogo de textos con el nombre de la pantalla. */
-  readonly title_key: string;
+  readonly title_text: string;
   /** Ruta canónica de `frontend-components.md` §3. */
   readonly route: string;
   /** Visible en la navegación si alguna está en `effective_permissions` (BR-APP-01). */

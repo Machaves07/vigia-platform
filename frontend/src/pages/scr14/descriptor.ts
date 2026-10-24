@@ -3,7 +3,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-14',
-  title_key: 'navigation.scr14',
+  title_text: 'navigation.scr14',
   route: '/exports',
   required_permissions: ['export.create'],
   route_groups: [

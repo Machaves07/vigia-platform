@@ -8,7 +8,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-12',
-  title_key: 'navigation.scr12',
+  title_text: 'navigation.scr12',
   route: '/zones/:zone_id/monthly/:period',
   required_permissions: ['review_package.read', 'findings.classify', 'commitments.write'],
   route_groups: [

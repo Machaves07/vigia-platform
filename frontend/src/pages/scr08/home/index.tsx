@@ -2,5 +2,5 @@
 import { RelayPage } from '@/pages/shared/RelayPage';
 
 export default function Page() {
-  return <RelayPage titleKey="navigation.scr08" />;
+  return <RelayPage screen="scr08" />;
 }

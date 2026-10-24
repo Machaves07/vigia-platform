@@ -42,7 +42,7 @@ interface SectionEntry {
 
 interface NavigationEntry {
   readonly screen_id: ScreenId;
-  readonly title_key: string;
+  readonly title_text: string;
   readonly route: string;
   readonly visible: boolean;
   readonly groups: readonly GroupEntry[];
@@ -87,7 +87,7 @@ export function canEnterGroup(group: RouteGroup, permissions: ReadonlySet<string
 function entryFor(screen: ScreenDescriptor, permissions: ReadonlySet<string>): NavigationEntry {
   return {
     screen_id: screen.screen_id,
-    title_key: screen.title_key,
+    title_text: screen.title_text,
     route: screen.route,
     visible: anyGranted(screen.required_permissions, permissions),
     groups: screen.route_groups.map((group) => ({

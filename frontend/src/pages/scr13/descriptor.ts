@@ -7,7 +7,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-13',
-  title_key: 'navigation.scr13',
+  title_text: 'navigation.scr13',
   route: '/metrics',
   required_permissions: ['executive_summary.read', 'metrics.read', 'exposure.read'],
   route_groups: [

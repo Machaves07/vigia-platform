@@ -6,7 +6,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-11',
-  title_key: 'navigation.scr11',
+  title_text: 'navigation.scr11',
   route: '/findings/:finding_state_id/root-cause',
   required_permissions: ['root_cause.analyze'],
   route_groups: [

@@ -7,7 +7,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-16',
-  title_key: 'navigation.scr16',
+  title_text: 'navigation.scr16',
   route: '/transparency/:zone_id',
   required_permissions: ['transparency.read', 'live_view.open'],
   route_groups: [

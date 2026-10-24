@@ -62,7 +62,7 @@ describe('los dieciséis descriptores', () => {
     const paths = SCREENS.flatMap((screen) => screen.route_groups.flatMap((group) => group.paths));
     expect(new Set(paths).size).toBe(paths.length);
     for (const screen of SCREENS) {
-      expect(texts[screen.title_key], screen.title_key).toBeDefined();
+      expect(texts[screen.title_text], screen.title_text).toBeDefined();
       expect(paths).toContain(screen.route);
       for (const group of screen.route_groups) {
         expect(group.id).toMatch(/^[a-z_]+(\/[a-z_]+)?$/);

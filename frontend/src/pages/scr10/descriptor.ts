@@ -7,7 +7,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-10',
-  title_key: 'navigation.scr10',
+  title_text: 'navigation.scr10',
   route: '/review-queue',
   required_permissions: ['findings.read', 'review_queue.resolve'],
   route_groups: [

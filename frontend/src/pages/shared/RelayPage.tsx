@@ -10,10 +10,11 @@ import { text } from '@/texts';
 import { ScreenState } from './ScreenState';
 import styles from './ScreenState.module.css';
 
-export function RelayPage({ titleKey }: { readonly titleKey: string }): ReactNode {
+/** `screen`: `scrNN`; el título sale de `navigation.scrNN`. */
+export function RelayPage({ screen }: { readonly screen: `scr${number}` }): ReactNode {
   return (
     <main className={styles.panel}>
-      <h1 className={styles.title}>{text(titleKey)}</h1>
+      <h1 className={styles.title}>{text(`navigation.${screen}`)}</h1>
       <ScreenState state="unavailable" />
     </main>
   );

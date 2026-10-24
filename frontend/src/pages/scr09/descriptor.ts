@@ -7,7 +7,7 @@ import type { ScreenDescriptor } from '@/app/descriptor';
 
 export const descriptor: ScreenDescriptor = {
   screen_id: 'SCR-09',
-  title_key: 'navigation.scr09',
+  title_text: 'navigation.scr09',
   route: '/findings/:finding_state_id/loop',
   required_permissions: [
     'findings.read',

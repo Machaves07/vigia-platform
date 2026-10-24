@@ -108,7 +108,7 @@ describe('con permiso, cada grupo pinta su página', () => {
     missing.unmount();
     const page = await renderAt(everything, concrete(path));
     expect(page.html).not.toBe(missing.html);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text(descriptor.title_key));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text(descriptor.title_text));
     expect(requests).toEqual([]);
   });
 });
