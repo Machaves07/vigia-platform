@@ -16,7 +16,9 @@
  * - `credentials: 'same-origin'`; sin iframes ni token anti-falsificación (BR-APP-70); destino
  *   solo de la lista cerrada `OPERATIONS` del cliente generado, en el origen de la aplicación.
  * - `X-Vigia-Concession` en toda petición si y solo si el proveedor inyectado (lo conecta
- *   `state.concession`, VIG-301) devuelve una concesión (BR-APP-67, 69).
+ *   `state.concession`, VIG-301) devuelve una concesión (BR-APP-67, 69). Un `not_found` a una
+ *   petición enviada con la cabecera se entrega a `onConcessionNotFound` con esa concesión
+ *   (IF-06 paso 4).
  * - `X-Vigia-Api-Version` de cada respuesta se entrega al observador inyectado (`app.version`,
  *   VIG-302).
  * - Toda respuesta no 2xx se traduce con `behaviourFor` (`ports.errors`); `unauthenticated` y
@@ -109,6 +111,8 @@ export interface TransportOptions {
   readonly connection: TransportConnection;
   /** Concesión activa del proveedor (VIG-301); `null` o vacía: sin cabecera. */
   readonly concession?: () => string | null | undefined;
+  /** `not_found` a una petición enviada bajo `concessionId` (VIG-301). */
+  readonly onConcessionNotFound?: (concessionId: string) => void;
   /** Observador de `X-Vigia-Api-Version` (VIG-302). */
   readonly onApiVersion?: (version: string) => void;
   /** Eventos de sesión (VIG-300). */
@@ -165,7 +169,7 @@ function renewsSession(error: HttpError): boolean {
 type Attempt =
   | { readonly type: 'ok'; readonly status: number; readonly value: unknown }
   | { readonly type: 'fault'; readonly fault: TransportFault }
-  | { readonly type: 'http'; readonly error: HttpError }
+  | { readonly type: 'http'; readonly error: HttpError; readonly concession: string | null }
   | { readonly type: 'aborted' };
 
 function fillPath(template: string, params: ApiRequest['path'] = {}): string {
@@ -250,14 +254,17 @@ export function createTransport(options: TransportOptions): Transport {
     ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
   const devLog = options.devLog ?? createDevLog();
 
-  const headersFor = (request: ApiRequest): Headers => {
+  const headersFor = (request: ApiRequest, concession: string | null): Headers => {
     const headers = new Headers({ Accept: 'application/json' });
     if (request.body !== undefined) headers.set('Content-Type', 'application/json');
-    const concession = options.concession?.();
-    if (typeof concession === 'string' && concession.length > 0) {
-      headers.set(CONCESSION_HEADER, concession);
-    }
+    if (concession !== null) headers.set(CONCESSION_HEADER, concession);
     return headers;
+  };
+
+  /** La concesión de un intento: se lee una vez y viaja con su resultado. */
+  const concessionNow = (): string | null => {
+    const concession = options.concession?.();
+    return typeof concession === 'string' && concession.length > 0 ? concession : null;
   };
 
   const observe = (response: Response): void => {
@@ -289,12 +296,13 @@ export function createTransport(options: TransportOptions): Transport {
       };
       request.signal?.addEventListener('abort', onCallerAbort, { once: true });
     });
+    const concession = concessionNow();
     const exchange = (async (): Promise<Attempt> => {
       let response: Response;
       try {
         response = await fetchImpl(url, {
           method: operation.method.toUpperCase(),
-          headers: headersFor(request),
+          headers: headersFor(request, concession),
           credentials: 'same-origin',
           signal: controller.signal,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
@@ -311,7 +319,7 @@ export function createTransport(options: TransportOptions): Transport {
       }
       return response.ok
         ? { type: 'ok', status: response.status, value: body }
-        : { type: 'http', error: httpError(response, body) };
+        : { type: 'http', error: httpError(response, body), concession };
     })();
     // El intercambio puede rechazar tras perder la carrera; nunca queda un rechazo sin atender.
     exchange.catch(SILENT);
@@ -359,6 +367,9 @@ export function createTransport(options: TransportOptions): Transport {
         options.onSessionEvent?.(result.error.code);
       } else if (renewsSession(result.error)) {
         options.onAuthenticatedResponse?.();
+      }
+      if (result.error.code === 'not_found' && result.concession !== null) {
+        options.onConcessionNotFound?.(result.concession);
       }
     }
   };
