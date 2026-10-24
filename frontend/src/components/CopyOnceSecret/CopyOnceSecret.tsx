@@ -6,8 +6,8 @@
  * El valor se toma al montar y vive solo en el estado del componente, que React suelta al
  * desmontar: nunca en almacenamiento del navegador, título, URL ni historial. Al desmontar se
  * elimina además, si la pantalla lo indica con `discard`, la consulta o mutación de TanStack
- * Query que lo trajo, para que no quede en la caché tras salir. La pantalla debe soltar su propia copia al recibir
- * `onAcknowledged`.
+ * Query que lo trajo, para que no quede en la caché tras salir. La pantalla debe soltar su propia
+ * copia al recibir `onAcknowledged`.
  */
 import {
   QueryClientContext,
