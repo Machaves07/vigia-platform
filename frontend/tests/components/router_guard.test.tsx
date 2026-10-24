@@ -17,10 +17,12 @@ import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from
 import { SCREENS } from '@/app/screens';
 import { Bell } from '@/pages/scr15/Bell';
 import { ScreenState } from '@/pages/shared/ScreenState';
+import { ScreenQueryProvider, type ScreenQueryCache } from '@/state/query';
 import { text } from '@/texts';
 
 import { effectivePermissions } from '../generators';
 import { server } from '../setup/msw';
+import { queryFixture } from '../support/queryCache';
 
 const ID = '0192d2c4-7a10-7c3e-8a51-3b1f0e9d2a44';
 const NOT_FOUND = '/esta-ruta-no-existe/ni-esta';
@@ -31,13 +33,26 @@ const coordinator: NavigationPrincipal = {
 };
 const nobody: NavigationPrincipal = { effective_permissions: [], assignments: [] };
 
-/** Ruta concreta: cada parámetro `:x` por un identificador o un periodo. */
+/**
+ * Ruta concreta: cada parámetro `:x` por un identificador o un periodo.
+ */
 const concrete = (path: string): string =>
   path.replace(/:period\b/, '2026-09').replace(/:[a-z_]+/g, ID);
 
+const caches: ScreenQueryCache[] = [];
+
 async function renderAt(principal: NavigationPrincipal | null, path: string) {
+  // Las pantallas ya implementadas usan la caché de consultas del armazón (VIG-293): sin ella el
+  // gancho de pantalla no puede montarse. Aquí no se instala transporte: lo que se prueba es el
+  // enrutado, no lo que cada pantalla pide.
+  const { cache } = queryFixture();
+  caches.push(cache);
   const router = createMemoryRouter(createAppRoutes(principal), { initialEntries: [path] });
-  const view = render(<RouterProvider router={router} />);
+  const view = render(
+    <ScreenQueryProvider cache={cache}>
+      <RouterProvider router={router} />
+    </ScreenQueryProvider>,
+  );
   // Tope amplio: la porción `lazy` llega por importación dinámica y no es lo que se prueba.
   await screen.findByRole('main', {}, { timeout: 10_000 });
   return { html: view.container.innerHTML, router, unmount: view.unmount };
@@ -55,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   server.events.removeListener('request:start', onRequest);
+  for (const cache of caches.splice(0)) cache.dispose();
 });
 
 describe('guarda: sin permiso, el mismo árbol que not_found', () => {
@@ -106,10 +122,11 @@ describe('con permiso, cada grupo pinta su página', () => {
   it.each(open)('%s', async (_name, descriptor, path) => {
     const missing = await renderAt(everything, NOT_FOUND);
     missing.unmount();
+    // Una ruta que no existe no pide nada al servidor.
+    expect(requests).toEqual([]);
     const page = await renderAt(everything, concrete(path));
     expect(page.html).not.toBe(missing.html);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text(descriptor.title_text));
-    expect(requests).toEqual([]);
   });
 });
 
@@ -142,11 +159,13 @@ describe('precarga solo de código (PAT-APP-REN-02)', () => {
     const loads = groups.map((group) => vi.spyOn(group, 'load'));
     await preloadHomeCode(coordinator);
     for (const load of loads) expect(load).toHaveBeenCalledTimes(1);
+    // La precarga es solo de código: no pide ningún dato (PAT-APP-REN-02). Al abrir después cada
+    // pantalla, la pantalla pide su propia lectura y la prueba de esa pantalla lo comprueba.
+    expect(requests).toEqual([]);
     const { router } = await renderAt(coordinator, '/');
     await router.navigate(`/findings/${ID}/classify`);
     await router.navigate('/review-queue');
     await router.navigate(`/findings/${ID}/root-cause`);
-    expect(requests).toEqual([]);
   });
 
   it('no precarga grupos sin permiso de las pantallas enlazadas', () => {
