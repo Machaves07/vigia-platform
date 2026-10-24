@@ -50,10 +50,12 @@ type Part<O, K extends keyof O, As extends string> = [NonNullable<O[K]>] extends
     : Readonly<Record<As, NonNullable<O[K]>>>;
 
 type Parameters<Id extends OperationId> = operations[Id]['parameters'];
-type JsonBody<Id extends OperationId> =
-  NonNullable<operations[Id]['requestBody']> extends {
-    readonly content: { readonly 'application/json': infer Body };
-  }
+/** `requestBody?: never` (sin cuerpo, como `POST /auth/logout`): nada que pasar. */
+type JsonBody<Id extends OperationId> = [NonNullable<operations[Id]['requestBody']>] extends [never]
+  ? unknown
+  : NonNullable<operations[Id]['requestBody']> extends {
+        readonly content: { readonly 'application/json': infer Body };
+      }
     ? { readonly body: Body }
     : unknown;
 
