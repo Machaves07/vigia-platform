@@ -1,0 +1,40 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "request_export_accreditation_exports_post",
+  "method": "post",
+  "path": "/accreditation/exports",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ExportRequestBody",
+    "$defs": {
+      "ExportRequestBody": {
+        "properties": {
+          "plant_id": { "type": "string", "format": "uuid" },
+          "zone_ids": {
+            "items": { "type": "string", "format": "uuid" },
+            "type": "array",
+            "maxItems": 80,
+            "minItems": 1
+          },
+          "period": { "$ref": "#/$defs/PeriodBody" },
+          "package_form": { "$ref": "#/$defs/PackageForm" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["plant_id", "zone_ids", "period", "package_form"]
+      },
+      "PackageForm": { "type": "string", "enum": ["with_clips", "without_clips"] },
+      "PeriodBody": {
+        "properties": {
+          "from": { "type": "string", "format": "date-time" },
+          "to": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["from", "to"]
+      }
+    }
+  },
+  "query": null
+}

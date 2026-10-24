@@ -1,0 +1,29 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "reopen_loop_findings__finding_state_id__reopening_post",
+  "method": "post",
+  "path": "/loop/findings/{finding_state_id}/reopening",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/ReopeningBody",
+    "$defs": {
+      "ReopeningBody": {
+        "properties": {
+          "reason_text": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "action_type": { "type": "string", "maxLength": 64 },
+          "action_description": { "type": "string", "maxLength": 2000, "minLength": 20 },
+          "expected_outcome": {
+            "anyOf": [{ "type": "string", "maxLength": 1000, "minLength": 1 }, { "type": "null" }]
+          },
+          "assignee_user_id": { "type": "string", "format": "uuid" },
+          "deadline_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["action_type", "action_description", "assignee_user_id"]
+      }
+    }
+  },
+  "query": null
+}

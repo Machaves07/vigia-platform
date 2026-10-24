@@ -1,0 +1,23 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "retirement_zones__zone_id__standards__standard_id__retirement_post",
+  "method": "post",
+  "path": "/zones/{zone_id}/standards/{standard_id}/retirement",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/RetirementBody",
+    "$defs": {
+      "RetirementBody": {
+        "properties": {
+          "reason_es": { "type": "string" },
+          "effective_from": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["reason_es", "effective_from"]
+      }
+    }
+  },
+  "query": null
+}

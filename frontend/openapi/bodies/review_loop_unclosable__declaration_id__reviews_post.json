@@ -1,0 +1,42 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "review_loop_unclosable__declaration_id__reviews_post",
+  "method": "post",
+  "path": "/loop/unclosable/{declaration_id}/reviews",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/UnclosableReviewBody",
+    "$defs": {
+      "ReviewActionBody": {
+        "properties": {
+          "action_type": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "action_description": {
+            "anyOf": [{ "type": "string", "maxLength": 2000 }, { "type": "null" }]
+          },
+          "expected_outcome": {
+            "anyOf": [{ "type": "string", "maxLength": 1000 }, { "type": "null" }]
+          },
+          "assignee_user_id": {
+            "anyOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }]
+          },
+          "deadline_days": { "anyOf": [{ "type": "integer" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "UnclosableReviewBody": {
+        "properties": {
+          "outcome": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "review_note": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "new_review_due_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "action": { "anyOf": [{ "$ref": "#/$defs/ReviewActionBody" }, { "type": "null" }] },
+          "professional_license": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+        },
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "query": null
+}

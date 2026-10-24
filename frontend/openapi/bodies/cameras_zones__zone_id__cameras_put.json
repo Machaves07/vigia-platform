@@ -1,0 +1,41 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "cameras_zones__zone_id__cameras_put",
+  "method": "put",
+  "path": "/zones/{zone_id}/cameras",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/CamerasBody",
+    "$defs": {
+      "CameraBody": {
+        "properties": {
+          "camera_id": { "type": "string", "format": "uuid" },
+          "code": { "type": "string" },
+          "role_in_zone": { "$ref": "#/$defs/CameraRoleInZone" },
+          "declared_min_fps": { "type": "number" },
+          "stream_reference": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["camera_id", "code", "role_in_zone", "declared_min_fps", "stream_reference"]
+      },
+      "CameraRoleInZone": { "type": "string", "enum": ["primary", "redundant"] },
+      "CamerasBody": {
+        "properties": {
+          "cameras": {
+            "items": { "$ref": "#/$defs/CameraBody" },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 1
+          },
+          "reason_es": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["cameras", "reason_es"]
+      }
+    }
+  },
+  "query": null
+}

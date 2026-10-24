@@ -1,0 +1,20 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "open_walk_test_zones__zone_id__walk_tests_post",
+  "method": "post",
+  "path": "/zones/{zone_id}/walk-tests",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/OpenWalkTestBody",
+    "$defs": {
+      "OpenWalkTestBody": {
+        "properties": { "passes_per_cell": { "type": "integer" } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["passes_per_cell"]
+      }
+    }
+  },
+  "query": null
+}

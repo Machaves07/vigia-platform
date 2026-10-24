@@ -1,0 +1,33 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "accept_invitations__token__accept_post",
+  "method": "post",
+  "path": "/invitations/{token}/accept",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [{ "$ref": "#/$defs/BeginActivation" }, { "$ref": "#/$defs/CompleteActivation" }],
+    "$defs": {
+      "BeginActivation": {
+        "properties": { "step": { "type": "string", "enum": ["begin"] } },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["step"]
+      },
+      "CompleteActivation": {
+        "properties": {
+          "step": { "type": "string", "enum": ["complete"] },
+          "password": { "type": "string", "maxLength": 1024, "minLength": 1 },
+          "notice_version": { "type": "string", "maxLength": 32, "minLength": 1 },
+          "second_factor_code": {
+            "anyOf": [{ "type": "string", "maxLength": 16, "minLength": 1 }, { "type": "null" }]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["step", "password", "notice_version"]
+      }
+    }
+  },
+  "query": null
+}

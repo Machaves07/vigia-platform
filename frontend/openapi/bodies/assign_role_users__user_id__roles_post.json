@@ -1,0 +1,37 @@
+{
+  "$comment": "Generado por `npm run generate` (scripts/generate.mjs) desde backend/openapi/app.yaml: no se edita a mano; `npm run generate:check` exige diferencia vacía (NFR-APP-48).",
+  "operationId": "assign_role_users__user_id__roles_post",
+  "method": "post",
+  "path": "/users/{user_id}/roles",
+  "bodyRequired": true,
+  "body": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$ref": "#/$defs/AssignmentBody",
+    "$defs": {
+      "AssignmentBody": {
+        "properties": {
+          "role": { "$ref": "#/$defs/Role" },
+          "scope_level": { "$ref": "#/$defs/ScopeLevel" },
+          "scope_id": { "type": "string", "format": "uuid" }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["role", "scope_level", "scope_id"]
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "coordinator_sst",
+          "line_manager",
+          "plant_manager",
+          "administrator",
+          "provider_installer",
+          "copasst",
+          "platform_operator"
+        ]
+      },
+      "ScopeLevel": { "type": "string", "enum": ["organization", "plant", "zone"] }
+    }
+  },
+  "query": null
+}
