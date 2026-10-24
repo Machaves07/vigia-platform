@@ -22,7 +22,8 @@
  * - `X-Vigia-Api-Version` de cada respuesta se entrega al observador inyectado (`app.version`,
  *   VIG-302).
  * - Toda respuesta no 2xx se traduce con `behaviourFor` (`ports.errors`); `unauthenticated` y
- *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300).
+ *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300);
+ *   cualquier otra respuesta HTTP se avisa como respuesta autenticada (renueva la inactividad).
  * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración.
  */
 import { OPERATIONS } from '@/client';
@@ -116,6 +117,12 @@ export interface TransportOptions {
   readonly onApiVersion?: (version: string) => void;
   /** Eventos de sesión (VIG-300). */
   readonly onSessionEvent?: (event: SessionEvent) => void;
+  /**
+   * Respuesta que pasó por `SessionStep` (2xx o error de negocio): el servidor renovó la
+   * inactividad de la sesión (BR-NUC-25), y `state.session` reinicia su ventana (VIG-300). Los
+   * rechazos previos a la sesión (`PRE_SESSION_CODES`, 5xx) no avisan.
+   */
+  readonly onAuthenticatedResponse?: () => void;
   /** Origen de la API; por omisión, el de la página (la API comparte origen). */
   readonly origin?: string;
   readonly fetch?: typeof fetch;
@@ -143,6 +150,21 @@ export interface Transport {
 const TRANSIENT: HttpError = { code: 'temporarily_unavailable', status: 0 };
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
 const MAX_API_VERSION_LENGTH = 128;
+/**
+ * Rechazos que la cadena de U-02 emite antes de `SessionStep` (límite de cuerpo, bulkhead, límite
+ * por origen) o sin garantía de haber llegado a él (`internal_error`, pasarela): no renuevan la
+ * inactividad. Ante la duda no se renueva: un aviso adelantado se corrige con «seguir trabajando».
+ */
+const PRE_SESSION_CODES: ReadonlySet<string> = new Set([
+  'payload_too_large',
+  'temporarily_unavailable',
+  'rate_limited',
+  'internal_error',
+]);
+
+function renewsSession(error: HttpError): boolean {
+  return error.status < 500 && !PRE_SESSION_CODES.has(error.code);
+}
 
 type Attempt =
   | { readonly type: 'ok'; readonly status: number; readonly value: unknown }
@@ -331,8 +353,10 @@ export function createTransport(options: TransportOptions): Transport {
   /** Registra el intento en su circuito y emite los eventos de sesión. */
   const settle = (request: ApiRequest, result: Attempt): void => {
     const dependency = request.dependency ?? 'platform';
-    if (result.type === 'ok') connection.register(dependency, { ok: true });
-    else if (result.type === 'fault')
+    if (result.type === 'ok') {
+      connection.register(dependency, { ok: true });
+      options.onAuthenticatedResponse?.();
+    } else if (result.type === 'fault')
       connection.register(dependency, { ok: false, error: result.fault });
     else if (result.type === 'http') {
       connection.register(dependency, { ok: false, error: result.error });
@@ -341,6 +365,8 @@ export function createTransport(options: TransportOptions): Transport {
         result.error.code === 'privacy_notice_required'
       ) {
         options.onSessionEvent?.(result.error.code);
+      } else if (renewsSession(result.error)) {
+        options.onAuthenticatedResponse?.();
       }
       if (result.error.code === 'not_found' && result.concession !== null) {
         options.onConcessionNotFound?.(result.concession);
