@@ -1,0 +1,18 @@
+# Vigía: reglas por defecto de gitleaks 8.30 con UNA excepción acotada (dueño, 2026-10-24).
+# Las claves del catálogo de textos de frontend/ («navigation.scr01», «loop.closure.title») en
+# props o campos *Key / *_key no son secretos: la regla generic-api-key las confundía por su
+# entropía (VIG-290, 59 coincidencias). Solo vale dentro de frontend/ y solo para valores con
+# forma dominio.clave en minúsculas; cualquier otro hallazgo sigue fallando.
+title = "vigia-platform"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "Claves del catálogo de textos de frontend (dominio.clave)"
+condition = "AND"
+paths = ['''^frontend/''']
+regexTarget = "line"
+regexes = ['''(?i)\b[a-z_]*key\s*[=:]\s*\{?\s*["'`][a-z][a-z0-9_]*(\.[a-z0-9_-]+)+["'`]''']
