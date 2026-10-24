@@ -98,7 +98,8 @@ export async function preloadHomeCode(
   principal: NavigationPrincipal,
   screens: readonly ScreenDescriptor[] = SCREENS,
 ): Promise<void> {
-  await Promise.allSettled(preloadGroups(principal, screens).map((group) => group.load()));}
+  await Promise.allSettled(preloadGroups(principal, screens).map((group) => group.load()));
+}
 
 /** Ejecuta `task` tras la primera pintura (fotograma siguiente y cola de tareas); da su cancelación. */
 export function afterFirstPaint(task: () => void): () => void {
