@@ -9,6 +9,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { OPERATIONS } from '@/client';
+import { createAppVersion } from '@/app/version';
 import type { components } from '@/client/schema';
 import { bodies } from '@/client/validators.js';
 import {
@@ -55,7 +56,13 @@ function failureOf(outcome: { ok: boolean; error?: unknown }) {
 
 function transportWith(clock: FakeClock, extra: Partial<TransportOptions> = {}) {
   const connection = createPortConnection(clock);
-  const transport = createTransport({ clock, connection, devLog: () => undefined, ...extra });
+  const transport = createTransport({
+    clock,
+    connection,
+    version: createAppVersion({ appVersion: 'test', contractTag: 'v1.1.0', clock }),
+    devLog: () => undefined,
+    ...extra,
+  });
   return { connection, transport };
 }
 
@@ -207,6 +214,9 @@ describe('cabeceras y credenciales (BR-APP-67, 69, 70)', () => {
       let current: string | null = null;
       const clock = new FakeClock();
       const { transport } = transportWith(clock, { concession: () => current });
+      // El ejemplo generado de /me tiene una versión arbitraria: esta prueba trata cabeceras,
+      // no despliegues. Debe coincidir con la construcción sintética del transporte.
+      server.use(variant('me_me_get', () => HttpResponse.json({ api_version: 'test' })));
 
       const expected: (string | null)[] = [];
       for (const [round, values] of [

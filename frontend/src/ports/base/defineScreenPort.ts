@@ -198,7 +198,11 @@ export function defineScreenPort<
     });
 
     if (declaration.status === 'assumed') {
-      const unavailable = () => Promise.reject(new PortError({ kind: 'unavailable' }));
+      const unavailable = () =>
+        Promise.resolve().then(() => {
+          if (declaration.kind === 'write') currentTransport().assertVersionCurrent?.();
+          throw new PortError({ kind: 'unavailable' });
+        });
       port[name] = declaration.kind === 'read' ? { read: unavailable } : { write: unavailable };
       continue;
     }
@@ -206,12 +210,13 @@ export function defineScreenPort<
     const { operationId } = declaration;
     const dependency = declaration.dependency ?? 'platform';
     const send = async (kind: RequestKind, input: Input = {}, signal?: AbortSignal) => {
+      const transport = currentTransport();
+      if (kind === 'write') transport.assertVersionCurrent?.();
       // Todas las operaciones con cuerpo lo exigen (`requestBody` obligatorio): sin él, invalid_input.
       if (kind === 'write' && isBodyOperation(operationId)) {
         const verdict = validateBody(operationId, input.body);
         if (!verdict.ok) throw new PortError({ kind: 'invalid_input', issues: verdict.issues });
       }
-      const transport = currentTransport();
       const end = slow.begin(transport.clock);
       try {
         return await transport.request({
