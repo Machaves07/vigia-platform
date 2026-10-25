@@ -1,6 +1,10 @@
-/** SCR-07, grupo `enrollment`: relevo de VIG-290 que la tarea de la pantalla sustituye. */
-import { RelayPage } from '@/pages/shared/RelayPage';
+/** SCR-07, grupo `enrollment`: declarar nodo y código de alta con sus intentos (VIG-325). */
+import { useParams } from 'react-router';
+import { DeclareNode } from './DeclareNode';
+import { EnrollmentCode } from './EnrollmentCode';
 
 export default function Page() {
-  return <RelayPage screen="scr07" />;
+  const { node_id } = useParams();
+  if (node_id !== undefined) return <EnrollmentCode key={node_id} nodeId={node_id} />;
+  return <DeclareNode />;
 }

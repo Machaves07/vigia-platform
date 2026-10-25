@@ -15,7 +15,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import type { NavigationPrincipal } from '@/app/navigation';
 import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from '@/app/router';
 import { SCREENS } from '@/app/screens';
-import { Bell } from '@/pages/scr15/Bell';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import { ScreenQueryProvider, type ScreenQueryCache } from '@/state/query';
@@ -254,7 +253,7 @@ describe('precarga solo de código (PAT-APP-REN-02)', () => {
   });
 });
 
-describe('estados comunes y campana de relevo', () => {
+describe('estados comunes y precarga de campana', () => {
   it('loading es un esqueleto sin números; empty y error con su texto', () => {
     const loading = render(<ScreenState state="loading" />);
     expect(loading.container.textContent).not.toMatch(/\d/);
@@ -269,15 +268,9 @@ describe('estados comunes y campana de relevo', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('la campana de relevo enlaza las notificaciones sin pedir nada', async () => {
-    const router = createMemoryRouter([{ path: '/', element: <Bell /> }]);
-    render(<RouterProvider router={router} />);
-    const link = await screen.findByRole(
-      'link',
-      { name: text('navigation.bell') },
-      { timeout: 10_000 },
-    );
-    expect(link.getAttribute('href')).toBe('/notifications');
+  it('precargar el código de la campana no pide datos antes de montarla', async () => {
+    const module = await import('@/pages/scr15/Bell');
+    expect(typeof module.Bell).toBe('function');
     expect(requests).toEqual([]);
   });
 });

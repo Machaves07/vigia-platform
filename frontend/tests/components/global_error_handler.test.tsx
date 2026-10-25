@@ -7,6 +7,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import {
@@ -28,6 +29,12 @@ import {
   WAIT,
   type ShellFixture,
 } from '../support/appShell';
+
+// Se aísla el manejador de errores de la consulta viva de la campana, como en app_shell.test.tsx.
+// La campana real dentro de AppShell se prueba en components/scr15/bell.test.tsx.
+vi.mock('@/pages/scr15/Bell', () => ({
+  Bell: () => <Link to="/notifications">{text('navigation.bell')}</Link>,
+}));
 
 const CORRELATION = '0190a1b2-0000-7000-8000-0000000000c9';
 /** Texto que solo está en el error: nunca debe llegar a la pantalla. */
