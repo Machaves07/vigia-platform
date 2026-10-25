@@ -1,0 +1,20 @@
+{
+  "revision": "2359",
+  "browserVersion": "26.6",
+  "playwright": "1.63.0",
+  "mirrors": [
+    "https://cdn.playwright.dev/dbazure/download/playwright",
+    "https://playwright.download.prss.microsoft.com/dbazure/download/playwright",
+    "https://cdn.playwright.dev"
+  ],
+  "downloads": {
+    "ubuntu22.04-x64": {
+      "path": "builds/webkit/2359/webkit-ubuntu-22.04.zip",
+      "sha256": "d62debee56d669af322da430758544543c436ea8dbcc8a90e88dfbad1ee7042f"
+    },
+    "ubuntu24.04-x64": {
+      "path": "builds/webkit/2359/webkit-ubuntu-24.04.zip",
+      "sha256": "8c129d989a1c48d826ca11b45acbba919039de811623dc3819ccbd95b69eeb62"
+    }
+  }
+}

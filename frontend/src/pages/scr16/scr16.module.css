@@ -1,0 +1,101 @@
+/* SCR-16 en escritorio y tableta (≥ 768 px): una sola columna legible y objetivos táctiles ≥ 44 px. */
+.page {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--space-4);
+}
+
+.view {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.section,
+.confirm {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.confirm {
+  padding: var(--space-4);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.declared {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+.cameras,
+.standards,
+.zones {
+  display: grid;
+  gap: var(--space-3);
+  padding-left: 0;
+  list-style: none;
+}
+
+.cameras > li,
+.standards > li {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fact {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.scroll table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.scroll th,
+.scroll td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  overflow-wrap: anywhere;
+}
+
+.button,
+.zoneLink,
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .facts {
+    grid-template-columns: minmax(12rem, max-content) 1fr;
+  }
+
+  .fact {
+    display: contents;
+  }
+}
