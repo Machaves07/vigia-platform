@@ -1,7 +1,7 @@
 {
   "scr10.title": "Cola de revisión",
   "scr10.explanation": "Cada detección requiere una decisión humana. Los vencidos permanecen en la cola hasta su resolución.",
-  "scr10.empty": "No hay detecciones pendientes de revisión en su alcance. Esto no indica ausencia de riesgo.",
+  "scr10.empty": "No hay detecciones pendientes de revisión en su alcance. Esto no indica que no haya riesgo.",
   "scr10.zone": "Zona",
   "scr10.family": "Familia",
   "scr10.confidence": "Confianza máxima del modelo",
