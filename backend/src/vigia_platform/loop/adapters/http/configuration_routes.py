@@ -32,7 +32,11 @@ from vigia_platform.loop.config.parameters import (
     ConfigurationRejected,
     PlantLoopConfiguration,
 )
-from vigia_platform.loop.config.service import ConfigurationRequestInvalid
+from vigia_platform.loop.config.service import (
+    REASON_MAX_CHARS,
+    REASON_MIN_CHARS,
+    ConfigurationRequestInvalid,
+)
 from vigia_platform.loop.detail_codes import HTTP_STATUS_BY_DETAIL_CODE, LoopDetailCode
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import ApiError, ApiErrorCode
@@ -68,8 +72,24 @@ class BusinessCalendarBody(_Strict):
     """Fechas no laborables declaradas ``AAAA-MM-DD`` (a lo sumo 40 por año)."""
 
 
+def _configuration_schema(schema: dict[str, Any]) -> None:
+    """Publica límites del dominio para U-05, sin adelantar sus rechazos al validador HTTP.
+
+    No son restricciones ``Field(ge/le)``: el servicio sigue decidiendo los errores de rango y
+    motivo con sus ``detail_code`` de A-68. El espejo generado sí permite anclarlos antes del envío.
+    """
+    properties = schema["properties"]
+    for name, parameter in INTEGER_PARAMETERS.items():
+        integer = next(item for item in properties[name]["anyOf"] if item.get("type") == "integer")
+        integer.update(minimum=parameter.minimum, maximum=parameter.maximum)
+    reason = next(item for item in properties["reason"]["anyOf"] if item.get("type") == "string")
+    reason.update(minLength=REASON_MIN_CHARS, maxLength=REASON_MAX_CHARS)
+
+
 class ConfigurationChangeBody(_Strict):
     """Solo los parámetros que cambian, y el motivo."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", json_schema_extra=_configuration_schema)
 
     classification_deadline_business_days: StrictInt | None = None
     review_deadline_business_days: StrictInt | None = None

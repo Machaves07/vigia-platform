@@ -2994,29 +2994,57 @@ export const body__change_configuration_loop_plants__plant_id__configuration_put
 const schema41 = { $ref: 'components.json#/$defs/ConfigurationChangeBody' };
 const schema42 = {
   properties: {
-    classification_deadline_business_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    review_deadline_business_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    action_deadline_default_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    action_deadline_min_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    action_deadline_max_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    manager_highlight_overdue_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    unclosable_review_default_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    unclosable_review_max_months: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    monthly_package_generation_day: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    sample_percent: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    sample_min: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    sample_max: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    adoption_silence_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    exposure_coverage_threshold_percent: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    email_grouping_hours: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    export_max_days: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    export_max_zones: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    single_occupancy_default_window_minutes: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-    reminder_interval_hours: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+    classification_deadline_business_days: {
+      anyOf: [{ type: 'integer', maximum: 30, minimum: 1 }, { type: 'null' }],
+    },
+    review_deadline_business_days: {
+      anyOf: [{ type: 'integer', maximum: 30, minimum: 1 }, { type: 'null' }],
+    },
+    action_deadline_default_days: {
+      anyOf: [{ type: 'integer', maximum: 180, minimum: 1 }, { type: 'null' }],
+    },
+    action_deadline_min_days: {
+      anyOf: [{ type: 'integer', maximum: 180, minimum: 1 }, { type: 'null' }],
+    },
+    action_deadline_max_days: {
+      anyOf: [{ type: 'integer', maximum: 180, minimum: 1 }, { type: 'null' }],
+    },
+    manager_highlight_overdue_days: {
+      anyOf: [{ type: 'integer', maximum: 365, minimum: 1 }, { type: 'null' }],
+    },
+    unclosable_review_default_months: {
+      anyOf: [{ type: 'integer', maximum: 12, minimum: 1 }, { type: 'null' }],
+    },
+    unclosable_review_max_months: {
+      anyOf: [{ type: 'integer', maximum: 12, minimum: 1 }, { type: 'null' }],
+    },
+    monthly_package_generation_day: {
+      anyOf: [{ type: 'integer', maximum: 5, minimum: 1 }, { type: 'null' }],
+    },
+    sample_percent: { anyOf: [{ type: 'integer', maximum: 100, minimum: 1 }, { type: 'null' }] },
+    sample_min: { anyOf: [{ type: 'integer', maximum: 1000, minimum: 1 }, { type: 'null' }] },
+    sample_max: { anyOf: [{ type: 'integer', maximum: 1000, minimum: 1 }, { type: 'null' }] },
+    adoption_silence_days: {
+      anyOf: [{ type: 'integer', maximum: 90, minimum: 1 }, { type: 'null' }],
+    },
+    exposure_coverage_threshold_percent: {
+      anyOf: [{ type: 'integer', maximum: 100, minimum: 0 }, { type: 'null' }],
+    },
+    email_grouping_hours: {
+      anyOf: [{ type: 'integer', maximum: 24, minimum: 1 }, { type: 'null' }],
+    },
+    export_max_days: { anyOf: [{ type: 'integer', maximum: 3660, minimum: 1 }, { type: 'null' }] },
+    export_max_zones: { anyOf: [{ type: 'integer', maximum: 500, minimum: 1 }, { type: 'null' }] },
+    single_occupancy_default_window_minutes: {
+      anyOf: [{ type: 'integer', maximum: 480, minimum: 15 }, { type: 'null' }],
+    },
+    reminder_interval_hours: {
+      anyOf: [{ type: 'integer', maximum: 168, minimum: 1 }, { type: 'null' }],
+    },
     business_calendar: {
       anyOf: [{ $ref: 'components.json#/$defs/BusinessCalendarBody' }, { type: 'null' }],
     },
-    reason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    reason: { anyOf: [{ type: 'string', maxLength: 500, minLength: 10 }, { type: 'null' }] },
   },
   additionalProperties: false,
   type: 'object',
@@ -3271,36 +3299,66 @@ function validate88(
         }
         errors++;
       }
+      if (typeof data0 == 'number' && isFinite(data0)) {
+        if (data0 > 30 || isNaN(data0)) {
+          const err2 = {
+            instancePath: instancePath + '/classification_deadline_business_days',
+            schemaPath: '#/properties/classification_deadline_business_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 30 },
+          };
+          if (vErrors === null) {
+            vErrors = [err2];
+          } else {
+            vErrors.push(err2);
+          }
+          errors++;
+        }
+        if (data0 < 1 || isNaN(data0)) {
+          const err3 = {
+            instancePath: instancePath + '/classification_deadline_business_days',
+            schemaPath: '#/properties/classification_deadline_business_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err3];
+          } else {
+            vErrors.push(err3);
+          }
+          errors++;
+        }
+      }
       var _valid0 = _errs4 === errors;
       valid1 = valid1 || _valid0;
       const _errs6 = errors;
       if (data0 !== null) {
-        const err2 = {
+        const err4 = {
           instancePath: instancePath + '/classification_deadline_business_days',
           schemaPath: '#/properties/classification_deadline_business_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err2];
+          vErrors = [err4];
         } else {
-          vErrors.push(err2);
+          vErrors.push(err4);
         }
         errors++;
       }
       var _valid0 = _errs6 === errors;
       valid1 = valid1 || _valid0;
       if (!valid1) {
-        const err3 = {
+        const err5 = {
           instancePath: instancePath + '/classification_deadline_business_days',
           schemaPath: '#/properties/classification_deadline_business_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err3];
+          vErrors = [err5];
         } else {
-          vErrors.push(err3);
+          vErrors.push(err5);
         }
         errors++;
       } else {
@@ -3320,49 +3378,79 @@ function validate88(
       let valid2 = false;
       const _errs10 = errors;
       if (!(typeof data1 == 'number' && !(data1 % 1) && !isNaN(data1) && isFinite(data1))) {
-        const err4 = {
+        const err6 = {
           instancePath: instancePath + '/review_deadline_business_days',
           schemaPath: '#/properties/review_deadline_business_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err4];
+          vErrors = [err6];
         } else {
-          vErrors.push(err4);
+          vErrors.push(err6);
         }
         errors++;
+      }
+      if (typeof data1 == 'number' && isFinite(data1)) {
+        if (data1 > 30 || isNaN(data1)) {
+          const err7 = {
+            instancePath: instancePath + '/review_deadline_business_days',
+            schemaPath: '#/properties/review_deadline_business_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 30 },
+          };
+          if (vErrors === null) {
+            vErrors = [err7];
+          } else {
+            vErrors.push(err7);
+          }
+          errors++;
+        }
+        if (data1 < 1 || isNaN(data1)) {
+          const err8 = {
+            instancePath: instancePath + '/review_deadline_business_days',
+            schemaPath: '#/properties/review_deadline_business_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err8];
+          } else {
+            vErrors.push(err8);
+          }
+          errors++;
+        }
       }
       var _valid1 = _errs10 === errors;
       valid2 = valid2 || _valid1;
       const _errs12 = errors;
       if (data1 !== null) {
-        const err5 = {
+        const err9 = {
           instancePath: instancePath + '/review_deadline_business_days',
           schemaPath: '#/properties/review_deadline_business_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err5];
+          vErrors = [err9];
         } else {
-          vErrors.push(err5);
+          vErrors.push(err9);
         }
         errors++;
       }
       var _valid1 = _errs12 === errors;
       valid2 = valid2 || _valid1;
       if (!valid2) {
-        const err6 = {
+        const err10 = {
           instancePath: instancePath + '/review_deadline_business_days',
           schemaPath: '#/properties/review_deadline_business_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err6];
+          vErrors = [err10];
         } else {
-          vErrors.push(err6);
+          vErrors.push(err10);
         }
         errors++;
       } else {
@@ -3382,49 +3470,79 @@ function validate88(
       let valid3 = false;
       const _errs16 = errors;
       if (!(typeof data2 == 'number' && !(data2 % 1) && !isNaN(data2) && isFinite(data2))) {
-        const err7 = {
+        const err11 = {
           instancePath: instancePath + '/action_deadline_default_days',
           schemaPath: '#/properties/action_deadline_default_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err7];
+          vErrors = [err11];
         } else {
-          vErrors.push(err7);
+          vErrors.push(err11);
         }
         errors++;
+      }
+      if (typeof data2 == 'number' && isFinite(data2)) {
+        if (data2 > 180 || isNaN(data2)) {
+          const err12 = {
+            instancePath: instancePath + '/action_deadline_default_days',
+            schemaPath: '#/properties/action_deadline_default_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 180 },
+          };
+          if (vErrors === null) {
+            vErrors = [err12];
+          } else {
+            vErrors.push(err12);
+          }
+          errors++;
+        }
+        if (data2 < 1 || isNaN(data2)) {
+          const err13 = {
+            instancePath: instancePath + '/action_deadline_default_days',
+            schemaPath: '#/properties/action_deadline_default_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err13];
+          } else {
+            vErrors.push(err13);
+          }
+          errors++;
+        }
       }
       var _valid2 = _errs16 === errors;
       valid3 = valid3 || _valid2;
       const _errs18 = errors;
       if (data2 !== null) {
-        const err8 = {
+        const err14 = {
           instancePath: instancePath + '/action_deadline_default_days',
           schemaPath: '#/properties/action_deadline_default_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err8];
+          vErrors = [err14];
         } else {
-          vErrors.push(err8);
+          vErrors.push(err14);
         }
         errors++;
       }
       var _valid2 = _errs18 === errors;
       valid3 = valid3 || _valid2;
       if (!valid3) {
-        const err9 = {
+        const err15 = {
           instancePath: instancePath + '/action_deadline_default_days',
           schemaPath: '#/properties/action_deadline_default_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err9];
+          vErrors = [err15];
         } else {
-          vErrors.push(err9);
+          vErrors.push(err15);
         }
         errors++;
       } else {
@@ -3444,49 +3562,79 @@ function validate88(
       let valid4 = false;
       const _errs22 = errors;
       if (!(typeof data3 == 'number' && !(data3 % 1) && !isNaN(data3) && isFinite(data3))) {
-        const err10 = {
+        const err16 = {
           instancePath: instancePath + '/action_deadline_min_days',
           schemaPath: '#/properties/action_deadline_min_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err10];
+          vErrors = [err16];
         } else {
-          vErrors.push(err10);
+          vErrors.push(err16);
         }
         errors++;
+      }
+      if (typeof data3 == 'number' && isFinite(data3)) {
+        if (data3 > 180 || isNaN(data3)) {
+          const err17 = {
+            instancePath: instancePath + '/action_deadline_min_days',
+            schemaPath: '#/properties/action_deadline_min_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 180 },
+          };
+          if (vErrors === null) {
+            vErrors = [err17];
+          } else {
+            vErrors.push(err17);
+          }
+          errors++;
+        }
+        if (data3 < 1 || isNaN(data3)) {
+          const err18 = {
+            instancePath: instancePath + '/action_deadline_min_days',
+            schemaPath: '#/properties/action_deadline_min_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err18];
+          } else {
+            vErrors.push(err18);
+          }
+          errors++;
+        }
       }
       var _valid3 = _errs22 === errors;
       valid4 = valid4 || _valid3;
       const _errs24 = errors;
       if (data3 !== null) {
-        const err11 = {
+        const err19 = {
           instancePath: instancePath + '/action_deadline_min_days',
           schemaPath: '#/properties/action_deadline_min_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err11];
+          vErrors = [err19];
         } else {
-          vErrors.push(err11);
+          vErrors.push(err19);
         }
         errors++;
       }
       var _valid3 = _errs24 === errors;
       valid4 = valid4 || _valid3;
       if (!valid4) {
-        const err12 = {
+        const err20 = {
           instancePath: instancePath + '/action_deadline_min_days',
           schemaPath: '#/properties/action_deadline_min_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err12];
+          vErrors = [err20];
         } else {
-          vErrors.push(err12);
+          vErrors.push(err20);
         }
         errors++;
       } else {
@@ -3506,49 +3654,79 @@ function validate88(
       let valid5 = false;
       const _errs28 = errors;
       if (!(typeof data4 == 'number' && !(data4 % 1) && !isNaN(data4) && isFinite(data4))) {
-        const err13 = {
+        const err21 = {
           instancePath: instancePath + '/action_deadline_max_days',
           schemaPath: '#/properties/action_deadline_max_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err13];
+          vErrors = [err21];
         } else {
-          vErrors.push(err13);
+          vErrors.push(err21);
         }
         errors++;
+      }
+      if (typeof data4 == 'number' && isFinite(data4)) {
+        if (data4 > 180 || isNaN(data4)) {
+          const err22 = {
+            instancePath: instancePath + '/action_deadline_max_days',
+            schemaPath: '#/properties/action_deadline_max_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 180 },
+          };
+          if (vErrors === null) {
+            vErrors = [err22];
+          } else {
+            vErrors.push(err22);
+          }
+          errors++;
+        }
+        if (data4 < 1 || isNaN(data4)) {
+          const err23 = {
+            instancePath: instancePath + '/action_deadline_max_days',
+            schemaPath: '#/properties/action_deadline_max_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err23];
+          } else {
+            vErrors.push(err23);
+          }
+          errors++;
+        }
       }
       var _valid4 = _errs28 === errors;
       valid5 = valid5 || _valid4;
       const _errs30 = errors;
       if (data4 !== null) {
-        const err14 = {
+        const err24 = {
           instancePath: instancePath + '/action_deadline_max_days',
           schemaPath: '#/properties/action_deadline_max_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err14];
+          vErrors = [err24];
         } else {
-          vErrors.push(err14);
+          vErrors.push(err24);
         }
         errors++;
       }
       var _valid4 = _errs30 === errors;
       valid5 = valid5 || _valid4;
       if (!valid5) {
-        const err15 = {
+        const err25 = {
           instancePath: instancePath + '/action_deadline_max_days',
           schemaPath: '#/properties/action_deadline_max_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err15];
+          vErrors = [err25];
         } else {
-          vErrors.push(err15);
+          vErrors.push(err25);
         }
         errors++;
       } else {
@@ -3568,49 +3746,79 @@ function validate88(
       let valid6 = false;
       const _errs34 = errors;
       if (!(typeof data5 == 'number' && !(data5 % 1) && !isNaN(data5) && isFinite(data5))) {
-        const err16 = {
+        const err26 = {
           instancePath: instancePath + '/manager_highlight_overdue_days',
           schemaPath: '#/properties/manager_highlight_overdue_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err16];
+          vErrors = [err26];
         } else {
-          vErrors.push(err16);
+          vErrors.push(err26);
         }
         errors++;
+      }
+      if (typeof data5 == 'number' && isFinite(data5)) {
+        if (data5 > 365 || isNaN(data5)) {
+          const err27 = {
+            instancePath: instancePath + '/manager_highlight_overdue_days',
+            schemaPath: '#/properties/manager_highlight_overdue_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 365 },
+          };
+          if (vErrors === null) {
+            vErrors = [err27];
+          } else {
+            vErrors.push(err27);
+          }
+          errors++;
+        }
+        if (data5 < 1 || isNaN(data5)) {
+          const err28 = {
+            instancePath: instancePath + '/manager_highlight_overdue_days',
+            schemaPath: '#/properties/manager_highlight_overdue_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err28];
+          } else {
+            vErrors.push(err28);
+          }
+          errors++;
+        }
       }
       var _valid5 = _errs34 === errors;
       valid6 = valid6 || _valid5;
       const _errs36 = errors;
       if (data5 !== null) {
-        const err17 = {
+        const err29 = {
           instancePath: instancePath + '/manager_highlight_overdue_days',
           schemaPath: '#/properties/manager_highlight_overdue_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err17];
+          vErrors = [err29];
         } else {
-          vErrors.push(err17);
+          vErrors.push(err29);
         }
         errors++;
       }
       var _valid5 = _errs36 === errors;
       valid6 = valid6 || _valid5;
       if (!valid6) {
-        const err18 = {
+        const err30 = {
           instancePath: instancePath + '/manager_highlight_overdue_days',
           schemaPath: '#/properties/manager_highlight_overdue_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err18];
+          vErrors = [err30];
         } else {
-          vErrors.push(err18);
+          vErrors.push(err30);
         }
         errors++;
       } else {
@@ -3630,49 +3838,79 @@ function validate88(
       let valid7 = false;
       const _errs40 = errors;
       if (!(typeof data6 == 'number' && !(data6 % 1) && !isNaN(data6) && isFinite(data6))) {
-        const err19 = {
+        const err31 = {
           instancePath: instancePath + '/unclosable_review_default_months',
           schemaPath: '#/properties/unclosable_review_default_months/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err19];
+          vErrors = [err31];
         } else {
-          vErrors.push(err19);
+          vErrors.push(err31);
         }
         errors++;
+      }
+      if (typeof data6 == 'number' && isFinite(data6)) {
+        if (data6 > 12 || isNaN(data6)) {
+          const err32 = {
+            instancePath: instancePath + '/unclosable_review_default_months',
+            schemaPath: '#/properties/unclosable_review_default_months/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 12 },
+          };
+          if (vErrors === null) {
+            vErrors = [err32];
+          } else {
+            vErrors.push(err32);
+          }
+          errors++;
+        }
+        if (data6 < 1 || isNaN(data6)) {
+          const err33 = {
+            instancePath: instancePath + '/unclosable_review_default_months',
+            schemaPath: '#/properties/unclosable_review_default_months/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err33];
+          } else {
+            vErrors.push(err33);
+          }
+          errors++;
+        }
       }
       var _valid6 = _errs40 === errors;
       valid7 = valid7 || _valid6;
       const _errs42 = errors;
       if (data6 !== null) {
-        const err20 = {
+        const err34 = {
           instancePath: instancePath + '/unclosable_review_default_months',
           schemaPath: '#/properties/unclosable_review_default_months/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err20];
+          vErrors = [err34];
         } else {
-          vErrors.push(err20);
+          vErrors.push(err34);
         }
         errors++;
       }
       var _valid6 = _errs42 === errors;
       valid7 = valid7 || _valid6;
       if (!valid7) {
-        const err21 = {
+        const err35 = {
           instancePath: instancePath + '/unclosable_review_default_months',
           schemaPath: '#/properties/unclosable_review_default_months/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err21];
+          vErrors = [err35];
         } else {
-          vErrors.push(err21);
+          vErrors.push(err35);
         }
         errors++;
       } else {
@@ -3692,49 +3930,79 @@ function validate88(
       let valid8 = false;
       const _errs46 = errors;
       if (!(typeof data7 == 'number' && !(data7 % 1) && !isNaN(data7) && isFinite(data7))) {
-        const err22 = {
+        const err36 = {
           instancePath: instancePath + '/unclosable_review_max_months',
           schemaPath: '#/properties/unclosable_review_max_months/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err22];
+          vErrors = [err36];
         } else {
-          vErrors.push(err22);
+          vErrors.push(err36);
         }
         errors++;
+      }
+      if (typeof data7 == 'number' && isFinite(data7)) {
+        if (data7 > 12 || isNaN(data7)) {
+          const err37 = {
+            instancePath: instancePath + '/unclosable_review_max_months',
+            schemaPath: '#/properties/unclosable_review_max_months/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 12 },
+          };
+          if (vErrors === null) {
+            vErrors = [err37];
+          } else {
+            vErrors.push(err37);
+          }
+          errors++;
+        }
+        if (data7 < 1 || isNaN(data7)) {
+          const err38 = {
+            instancePath: instancePath + '/unclosable_review_max_months',
+            schemaPath: '#/properties/unclosable_review_max_months/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err38];
+          } else {
+            vErrors.push(err38);
+          }
+          errors++;
+        }
       }
       var _valid7 = _errs46 === errors;
       valid8 = valid8 || _valid7;
       const _errs48 = errors;
       if (data7 !== null) {
-        const err23 = {
+        const err39 = {
           instancePath: instancePath + '/unclosable_review_max_months',
           schemaPath: '#/properties/unclosable_review_max_months/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err23];
+          vErrors = [err39];
         } else {
-          vErrors.push(err23);
+          vErrors.push(err39);
         }
         errors++;
       }
       var _valid7 = _errs48 === errors;
       valid8 = valid8 || _valid7;
       if (!valid8) {
-        const err24 = {
+        const err40 = {
           instancePath: instancePath + '/unclosable_review_max_months',
           schemaPath: '#/properties/unclosable_review_max_months/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err24];
+          vErrors = [err40];
         } else {
-          vErrors.push(err24);
+          vErrors.push(err40);
         }
         errors++;
       } else {
@@ -3754,49 +4022,79 @@ function validate88(
       let valid9 = false;
       const _errs52 = errors;
       if (!(typeof data8 == 'number' && !(data8 % 1) && !isNaN(data8) && isFinite(data8))) {
-        const err25 = {
+        const err41 = {
           instancePath: instancePath + '/monthly_package_generation_day',
           schemaPath: '#/properties/monthly_package_generation_day/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err25];
+          vErrors = [err41];
         } else {
-          vErrors.push(err25);
+          vErrors.push(err41);
         }
         errors++;
+      }
+      if (typeof data8 == 'number' && isFinite(data8)) {
+        if (data8 > 5 || isNaN(data8)) {
+          const err42 = {
+            instancePath: instancePath + '/monthly_package_generation_day',
+            schemaPath: '#/properties/monthly_package_generation_day/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 5 },
+          };
+          if (vErrors === null) {
+            vErrors = [err42];
+          } else {
+            vErrors.push(err42);
+          }
+          errors++;
+        }
+        if (data8 < 1 || isNaN(data8)) {
+          const err43 = {
+            instancePath: instancePath + '/monthly_package_generation_day',
+            schemaPath: '#/properties/monthly_package_generation_day/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err43];
+          } else {
+            vErrors.push(err43);
+          }
+          errors++;
+        }
       }
       var _valid8 = _errs52 === errors;
       valid9 = valid9 || _valid8;
       const _errs54 = errors;
       if (data8 !== null) {
-        const err26 = {
+        const err44 = {
           instancePath: instancePath + '/monthly_package_generation_day',
           schemaPath: '#/properties/monthly_package_generation_day/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err26];
+          vErrors = [err44];
         } else {
-          vErrors.push(err26);
+          vErrors.push(err44);
         }
         errors++;
       }
       var _valid8 = _errs54 === errors;
       valid9 = valid9 || _valid8;
       if (!valid9) {
-        const err27 = {
+        const err45 = {
           instancePath: instancePath + '/monthly_package_generation_day',
           schemaPath: '#/properties/monthly_package_generation_day/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err27];
+          vErrors = [err45];
         } else {
-          vErrors.push(err27);
+          vErrors.push(err45);
         }
         errors++;
       } else {
@@ -3816,49 +4114,79 @@ function validate88(
       let valid10 = false;
       const _errs58 = errors;
       if (!(typeof data9 == 'number' && !(data9 % 1) && !isNaN(data9) && isFinite(data9))) {
-        const err28 = {
+        const err46 = {
           instancePath: instancePath + '/sample_percent',
           schemaPath: '#/properties/sample_percent/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err28];
+          vErrors = [err46];
         } else {
-          vErrors.push(err28);
+          vErrors.push(err46);
         }
         errors++;
+      }
+      if (typeof data9 == 'number' && isFinite(data9)) {
+        if (data9 > 100 || isNaN(data9)) {
+          const err47 = {
+            instancePath: instancePath + '/sample_percent',
+            schemaPath: '#/properties/sample_percent/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 100 },
+          };
+          if (vErrors === null) {
+            vErrors = [err47];
+          } else {
+            vErrors.push(err47);
+          }
+          errors++;
+        }
+        if (data9 < 1 || isNaN(data9)) {
+          const err48 = {
+            instancePath: instancePath + '/sample_percent',
+            schemaPath: '#/properties/sample_percent/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err48];
+          } else {
+            vErrors.push(err48);
+          }
+          errors++;
+        }
       }
       var _valid9 = _errs58 === errors;
       valid10 = valid10 || _valid9;
       const _errs60 = errors;
       if (data9 !== null) {
-        const err29 = {
+        const err49 = {
           instancePath: instancePath + '/sample_percent',
           schemaPath: '#/properties/sample_percent/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err29];
+          vErrors = [err49];
         } else {
-          vErrors.push(err29);
+          vErrors.push(err49);
         }
         errors++;
       }
       var _valid9 = _errs60 === errors;
       valid10 = valid10 || _valid9;
       if (!valid10) {
-        const err30 = {
+        const err50 = {
           instancePath: instancePath + '/sample_percent',
           schemaPath: '#/properties/sample_percent/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err30];
+          vErrors = [err50];
         } else {
-          vErrors.push(err30);
+          vErrors.push(err50);
         }
         errors++;
       } else {
@@ -3878,49 +4206,79 @@ function validate88(
       let valid11 = false;
       const _errs64 = errors;
       if (!(typeof data10 == 'number' && !(data10 % 1) && !isNaN(data10) && isFinite(data10))) {
-        const err31 = {
+        const err51 = {
           instancePath: instancePath + '/sample_min',
           schemaPath: '#/properties/sample_min/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err31];
+          vErrors = [err51];
         } else {
-          vErrors.push(err31);
+          vErrors.push(err51);
         }
         errors++;
+      }
+      if (typeof data10 == 'number' && isFinite(data10)) {
+        if (data10 > 1000 || isNaN(data10)) {
+          const err52 = {
+            instancePath: instancePath + '/sample_min',
+            schemaPath: '#/properties/sample_min/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 1000 },
+          };
+          if (vErrors === null) {
+            vErrors = [err52];
+          } else {
+            vErrors.push(err52);
+          }
+          errors++;
+        }
+        if (data10 < 1 || isNaN(data10)) {
+          const err53 = {
+            instancePath: instancePath + '/sample_min',
+            schemaPath: '#/properties/sample_min/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err53];
+          } else {
+            vErrors.push(err53);
+          }
+          errors++;
+        }
       }
       var _valid10 = _errs64 === errors;
       valid11 = valid11 || _valid10;
       const _errs66 = errors;
       if (data10 !== null) {
-        const err32 = {
+        const err54 = {
           instancePath: instancePath + '/sample_min',
           schemaPath: '#/properties/sample_min/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err32];
+          vErrors = [err54];
         } else {
-          vErrors.push(err32);
+          vErrors.push(err54);
         }
         errors++;
       }
       var _valid10 = _errs66 === errors;
       valid11 = valid11 || _valid10;
       if (!valid11) {
-        const err33 = {
+        const err55 = {
           instancePath: instancePath + '/sample_min',
           schemaPath: '#/properties/sample_min/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err33];
+          vErrors = [err55];
         } else {
-          vErrors.push(err33);
+          vErrors.push(err55);
         }
         errors++;
       } else {
@@ -3940,49 +4298,79 @@ function validate88(
       let valid12 = false;
       const _errs70 = errors;
       if (!(typeof data11 == 'number' && !(data11 % 1) && !isNaN(data11) && isFinite(data11))) {
-        const err34 = {
+        const err56 = {
           instancePath: instancePath + '/sample_max',
           schemaPath: '#/properties/sample_max/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err34];
+          vErrors = [err56];
         } else {
-          vErrors.push(err34);
+          vErrors.push(err56);
         }
         errors++;
+      }
+      if (typeof data11 == 'number' && isFinite(data11)) {
+        if (data11 > 1000 || isNaN(data11)) {
+          const err57 = {
+            instancePath: instancePath + '/sample_max',
+            schemaPath: '#/properties/sample_max/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 1000 },
+          };
+          if (vErrors === null) {
+            vErrors = [err57];
+          } else {
+            vErrors.push(err57);
+          }
+          errors++;
+        }
+        if (data11 < 1 || isNaN(data11)) {
+          const err58 = {
+            instancePath: instancePath + '/sample_max',
+            schemaPath: '#/properties/sample_max/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err58];
+          } else {
+            vErrors.push(err58);
+          }
+          errors++;
+        }
       }
       var _valid11 = _errs70 === errors;
       valid12 = valid12 || _valid11;
       const _errs72 = errors;
       if (data11 !== null) {
-        const err35 = {
+        const err59 = {
           instancePath: instancePath + '/sample_max',
           schemaPath: '#/properties/sample_max/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err35];
+          vErrors = [err59];
         } else {
-          vErrors.push(err35);
+          vErrors.push(err59);
         }
         errors++;
       }
       var _valid11 = _errs72 === errors;
       valid12 = valid12 || _valid11;
       if (!valid12) {
-        const err36 = {
+        const err60 = {
           instancePath: instancePath + '/sample_max',
           schemaPath: '#/properties/sample_max/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err36];
+          vErrors = [err60];
         } else {
-          vErrors.push(err36);
+          vErrors.push(err60);
         }
         errors++;
       } else {
@@ -4002,49 +4390,79 @@ function validate88(
       let valid13 = false;
       const _errs76 = errors;
       if (!(typeof data12 == 'number' && !(data12 % 1) && !isNaN(data12) && isFinite(data12))) {
-        const err37 = {
+        const err61 = {
           instancePath: instancePath + '/adoption_silence_days',
           schemaPath: '#/properties/adoption_silence_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err37];
+          vErrors = [err61];
         } else {
-          vErrors.push(err37);
+          vErrors.push(err61);
         }
         errors++;
+      }
+      if (typeof data12 == 'number' && isFinite(data12)) {
+        if (data12 > 90 || isNaN(data12)) {
+          const err62 = {
+            instancePath: instancePath + '/adoption_silence_days',
+            schemaPath: '#/properties/adoption_silence_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 90 },
+          };
+          if (vErrors === null) {
+            vErrors = [err62];
+          } else {
+            vErrors.push(err62);
+          }
+          errors++;
+        }
+        if (data12 < 1 || isNaN(data12)) {
+          const err63 = {
+            instancePath: instancePath + '/adoption_silence_days',
+            schemaPath: '#/properties/adoption_silence_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err63];
+          } else {
+            vErrors.push(err63);
+          }
+          errors++;
+        }
       }
       var _valid12 = _errs76 === errors;
       valid13 = valid13 || _valid12;
       const _errs78 = errors;
       if (data12 !== null) {
-        const err38 = {
+        const err64 = {
           instancePath: instancePath + '/adoption_silence_days',
           schemaPath: '#/properties/adoption_silence_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err38];
+          vErrors = [err64];
         } else {
-          vErrors.push(err38);
+          vErrors.push(err64);
         }
         errors++;
       }
       var _valid12 = _errs78 === errors;
       valid13 = valid13 || _valid12;
       if (!valid13) {
-        const err39 = {
+        const err65 = {
           instancePath: instancePath + '/adoption_silence_days',
           schemaPath: '#/properties/adoption_silence_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err39];
+          vErrors = [err65];
         } else {
-          vErrors.push(err39);
+          vErrors.push(err65);
         }
         errors++;
       } else {
@@ -4064,49 +4482,79 @@ function validate88(
       let valid14 = false;
       const _errs82 = errors;
       if (!(typeof data13 == 'number' && !(data13 % 1) && !isNaN(data13) && isFinite(data13))) {
-        const err40 = {
+        const err66 = {
           instancePath: instancePath + '/exposure_coverage_threshold_percent',
           schemaPath: '#/properties/exposure_coverage_threshold_percent/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err40];
+          vErrors = [err66];
         } else {
-          vErrors.push(err40);
+          vErrors.push(err66);
         }
         errors++;
+      }
+      if (typeof data13 == 'number' && isFinite(data13)) {
+        if (data13 > 100 || isNaN(data13)) {
+          const err67 = {
+            instancePath: instancePath + '/exposure_coverage_threshold_percent',
+            schemaPath: '#/properties/exposure_coverage_threshold_percent/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 100 },
+          };
+          if (vErrors === null) {
+            vErrors = [err67];
+          } else {
+            vErrors.push(err67);
+          }
+          errors++;
+        }
+        if (data13 < 0 || isNaN(data13)) {
+          const err68 = {
+            instancePath: instancePath + '/exposure_coverage_threshold_percent',
+            schemaPath: '#/properties/exposure_coverage_threshold_percent/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 0 },
+          };
+          if (vErrors === null) {
+            vErrors = [err68];
+          } else {
+            vErrors.push(err68);
+          }
+          errors++;
+        }
       }
       var _valid13 = _errs82 === errors;
       valid14 = valid14 || _valid13;
       const _errs84 = errors;
       if (data13 !== null) {
-        const err41 = {
+        const err69 = {
           instancePath: instancePath + '/exposure_coverage_threshold_percent',
           schemaPath: '#/properties/exposure_coverage_threshold_percent/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err41];
+          vErrors = [err69];
         } else {
-          vErrors.push(err41);
+          vErrors.push(err69);
         }
         errors++;
       }
       var _valid13 = _errs84 === errors;
       valid14 = valid14 || _valid13;
       if (!valid14) {
-        const err42 = {
+        const err70 = {
           instancePath: instancePath + '/exposure_coverage_threshold_percent',
           schemaPath: '#/properties/exposure_coverage_threshold_percent/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err42];
+          vErrors = [err70];
         } else {
-          vErrors.push(err42);
+          vErrors.push(err70);
         }
         errors++;
       } else {
@@ -4126,49 +4574,79 @@ function validate88(
       let valid15 = false;
       const _errs88 = errors;
       if (!(typeof data14 == 'number' && !(data14 % 1) && !isNaN(data14) && isFinite(data14))) {
-        const err43 = {
+        const err71 = {
           instancePath: instancePath + '/email_grouping_hours',
           schemaPath: '#/properties/email_grouping_hours/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err43];
+          vErrors = [err71];
         } else {
-          vErrors.push(err43);
+          vErrors.push(err71);
         }
         errors++;
+      }
+      if (typeof data14 == 'number' && isFinite(data14)) {
+        if (data14 > 24 || isNaN(data14)) {
+          const err72 = {
+            instancePath: instancePath + '/email_grouping_hours',
+            schemaPath: '#/properties/email_grouping_hours/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 24 },
+          };
+          if (vErrors === null) {
+            vErrors = [err72];
+          } else {
+            vErrors.push(err72);
+          }
+          errors++;
+        }
+        if (data14 < 1 || isNaN(data14)) {
+          const err73 = {
+            instancePath: instancePath + '/email_grouping_hours',
+            schemaPath: '#/properties/email_grouping_hours/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err73];
+          } else {
+            vErrors.push(err73);
+          }
+          errors++;
+        }
       }
       var _valid14 = _errs88 === errors;
       valid15 = valid15 || _valid14;
       const _errs90 = errors;
       if (data14 !== null) {
-        const err44 = {
+        const err74 = {
           instancePath: instancePath + '/email_grouping_hours',
           schemaPath: '#/properties/email_grouping_hours/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err44];
+          vErrors = [err74];
         } else {
-          vErrors.push(err44);
+          vErrors.push(err74);
         }
         errors++;
       }
       var _valid14 = _errs90 === errors;
       valid15 = valid15 || _valid14;
       if (!valid15) {
-        const err45 = {
+        const err75 = {
           instancePath: instancePath + '/email_grouping_hours',
           schemaPath: '#/properties/email_grouping_hours/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err45];
+          vErrors = [err75];
         } else {
-          vErrors.push(err45);
+          vErrors.push(err75);
         }
         errors++;
       } else {
@@ -4188,49 +4666,79 @@ function validate88(
       let valid16 = false;
       const _errs94 = errors;
       if (!(typeof data15 == 'number' && !(data15 % 1) && !isNaN(data15) && isFinite(data15))) {
-        const err46 = {
+        const err76 = {
           instancePath: instancePath + '/export_max_days',
           schemaPath: '#/properties/export_max_days/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err46];
+          vErrors = [err76];
         } else {
-          vErrors.push(err46);
+          vErrors.push(err76);
         }
         errors++;
+      }
+      if (typeof data15 == 'number' && isFinite(data15)) {
+        if (data15 > 3660 || isNaN(data15)) {
+          const err77 = {
+            instancePath: instancePath + '/export_max_days',
+            schemaPath: '#/properties/export_max_days/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 3660 },
+          };
+          if (vErrors === null) {
+            vErrors = [err77];
+          } else {
+            vErrors.push(err77);
+          }
+          errors++;
+        }
+        if (data15 < 1 || isNaN(data15)) {
+          const err78 = {
+            instancePath: instancePath + '/export_max_days',
+            schemaPath: '#/properties/export_max_days/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err78];
+          } else {
+            vErrors.push(err78);
+          }
+          errors++;
+        }
       }
       var _valid15 = _errs94 === errors;
       valid16 = valid16 || _valid15;
       const _errs96 = errors;
       if (data15 !== null) {
-        const err47 = {
+        const err79 = {
           instancePath: instancePath + '/export_max_days',
           schemaPath: '#/properties/export_max_days/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err47];
+          vErrors = [err79];
         } else {
-          vErrors.push(err47);
+          vErrors.push(err79);
         }
         errors++;
       }
       var _valid15 = _errs96 === errors;
       valid16 = valid16 || _valid15;
       if (!valid16) {
-        const err48 = {
+        const err80 = {
           instancePath: instancePath + '/export_max_days',
           schemaPath: '#/properties/export_max_days/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err48];
+          vErrors = [err80];
         } else {
-          vErrors.push(err48);
+          vErrors.push(err80);
         }
         errors++;
       } else {
@@ -4250,49 +4758,79 @@ function validate88(
       let valid17 = false;
       const _errs100 = errors;
       if (!(typeof data16 == 'number' && !(data16 % 1) && !isNaN(data16) && isFinite(data16))) {
-        const err49 = {
+        const err81 = {
           instancePath: instancePath + '/export_max_zones',
           schemaPath: '#/properties/export_max_zones/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err49];
+          vErrors = [err81];
         } else {
-          vErrors.push(err49);
+          vErrors.push(err81);
         }
         errors++;
+      }
+      if (typeof data16 == 'number' && isFinite(data16)) {
+        if (data16 > 500 || isNaN(data16)) {
+          const err82 = {
+            instancePath: instancePath + '/export_max_zones',
+            schemaPath: '#/properties/export_max_zones/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 500 },
+          };
+          if (vErrors === null) {
+            vErrors = [err82];
+          } else {
+            vErrors.push(err82);
+          }
+          errors++;
+        }
+        if (data16 < 1 || isNaN(data16)) {
+          const err83 = {
+            instancePath: instancePath + '/export_max_zones',
+            schemaPath: '#/properties/export_max_zones/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err83];
+          } else {
+            vErrors.push(err83);
+          }
+          errors++;
+        }
       }
       var _valid16 = _errs100 === errors;
       valid17 = valid17 || _valid16;
       const _errs102 = errors;
       if (data16 !== null) {
-        const err50 = {
+        const err84 = {
           instancePath: instancePath + '/export_max_zones',
           schemaPath: '#/properties/export_max_zones/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err50];
+          vErrors = [err84];
         } else {
-          vErrors.push(err50);
+          vErrors.push(err84);
         }
         errors++;
       }
       var _valid16 = _errs102 === errors;
       valid17 = valid17 || _valid16;
       if (!valid17) {
-        const err51 = {
+        const err85 = {
           instancePath: instancePath + '/export_max_zones',
           schemaPath: '#/properties/export_max_zones/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err51];
+          vErrors = [err85];
         } else {
-          vErrors.push(err51);
+          vErrors.push(err85);
         }
         errors++;
       } else {
@@ -4312,49 +4850,79 @@ function validate88(
       let valid18 = false;
       const _errs106 = errors;
       if (!(typeof data17 == 'number' && !(data17 % 1) && !isNaN(data17) && isFinite(data17))) {
-        const err52 = {
+        const err86 = {
           instancePath: instancePath + '/single_occupancy_default_window_minutes',
           schemaPath: '#/properties/single_occupancy_default_window_minutes/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err52];
+          vErrors = [err86];
         } else {
-          vErrors.push(err52);
+          vErrors.push(err86);
         }
         errors++;
+      }
+      if (typeof data17 == 'number' && isFinite(data17)) {
+        if (data17 > 480 || isNaN(data17)) {
+          const err87 = {
+            instancePath: instancePath + '/single_occupancy_default_window_minutes',
+            schemaPath: '#/properties/single_occupancy_default_window_minutes/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 480 },
+          };
+          if (vErrors === null) {
+            vErrors = [err87];
+          } else {
+            vErrors.push(err87);
+          }
+          errors++;
+        }
+        if (data17 < 15 || isNaN(data17)) {
+          const err88 = {
+            instancePath: instancePath + '/single_occupancy_default_window_minutes',
+            schemaPath: '#/properties/single_occupancy_default_window_minutes/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 15 },
+          };
+          if (vErrors === null) {
+            vErrors = [err88];
+          } else {
+            vErrors.push(err88);
+          }
+          errors++;
+        }
       }
       var _valid17 = _errs106 === errors;
       valid18 = valid18 || _valid17;
       const _errs108 = errors;
       if (data17 !== null) {
-        const err53 = {
+        const err89 = {
           instancePath: instancePath + '/single_occupancy_default_window_minutes',
           schemaPath: '#/properties/single_occupancy_default_window_minutes/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err53];
+          vErrors = [err89];
         } else {
-          vErrors.push(err53);
+          vErrors.push(err89);
         }
         errors++;
       }
       var _valid17 = _errs108 === errors;
       valid18 = valid18 || _valid17;
       if (!valid18) {
-        const err54 = {
+        const err90 = {
           instancePath: instancePath + '/single_occupancy_default_window_minutes',
           schemaPath: '#/properties/single_occupancy_default_window_minutes/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err54];
+          vErrors = [err90];
         } else {
-          vErrors.push(err54);
+          vErrors.push(err90);
         }
         errors++;
       } else {
@@ -4374,49 +4942,79 @@ function validate88(
       let valid19 = false;
       const _errs112 = errors;
       if (!(typeof data18 == 'number' && !(data18 % 1) && !isNaN(data18) && isFinite(data18))) {
-        const err55 = {
+        const err91 = {
           instancePath: instancePath + '/reminder_interval_hours',
           schemaPath: '#/properties/reminder_interval_hours/anyOf/0/type',
           keyword: 'type',
           params: { type: 'integer' },
         };
         if (vErrors === null) {
-          vErrors = [err55];
+          vErrors = [err91];
         } else {
-          vErrors.push(err55);
+          vErrors.push(err91);
         }
         errors++;
+      }
+      if (typeof data18 == 'number' && isFinite(data18)) {
+        if (data18 > 168 || isNaN(data18)) {
+          const err92 = {
+            instancePath: instancePath + '/reminder_interval_hours',
+            schemaPath: '#/properties/reminder_interval_hours/anyOf/0/maximum',
+            keyword: 'maximum',
+            params: { comparison: '<=', limit: 168 },
+          };
+          if (vErrors === null) {
+            vErrors = [err92];
+          } else {
+            vErrors.push(err92);
+          }
+          errors++;
+        }
+        if (data18 < 1 || isNaN(data18)) {
+          const err93 = {
+            instancePath: instancePath + '/reminder_interval_hours',
+            schemaPath: '#/properties/reminder_interval_hours/anyOf/0/minimum',
+            keyword: 'minimum',
+            params: { comparison: '>=', limit: 1 },
+          };
+          if (vErrors === null) {
+            vErrors = [err93];
+          } else {
+            vErrors.push(err93);
+          }
+          errors++;
+        }
       }
       var _valid18 = _errs112 === errors;
       valid19 = valid19 || _valid18;
       const _errs114 = errors;
       if (data18 !== null) {
-        const err56 = {
+        const err94 = {
           instancePath: instancePath + '/reminder_interval_hours',
           schemaPath: '#/properties/reminder_interval_hours/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err56];
+          vErrors = [err94];
         } else {
-          vErrors.push(err56);
+          vErrors.push(err94);
         }
         errors++;
       }
       var _valid18 = _errs114 === errors;
       valid19 = valid19 || _valid18;
       if (!valid19) {
-        const err57 = {
+        const err95 = {
           instancePath: instancePath + '/reminder_interval_hours',
           schemaPath: '#/properties/reminder_interval_hours/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err57];
+          vErrors = [err95];
         } else {
-          vErrors.push(err57);
+          vErrors.push(err95);
         }
         errors++;
       } else {
@@ -4451,32 +5049,32 @@ function validate88(
       valid20 = valid20 || _valid19;
       const _errs119 = errors;
       if (data19 !== null) {
-        const err58 = {
+        const err96 = {
           instancePath: instancePath + '/business_calendar',
           schemaPath: '#/properties/business_calendar/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err58];
+          vErrors = [err96];
         } else {
-          vErrors.push(err58);
+          vErrors.push(err96);
         }
         errors++;
       }
       var _valid19 = _errs119 === errors;
       valid20 = valid20 || _valid19;
       if (!valid20) {
-        const err59 = {
+        const err97 = {
           instancePath: instancePath + '/business_calendar',
           schemaPath: '#/properties/business_calendar/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err59];
+          vErrors = [err97];
         } else {
-          vErrors.push(err59);
+          vErrors.push(err97);
         }
         errors++;
       } else {
@@ -4495,17 +5093,46 @@ function validate88(
       const _errs122 = errors;
       let valid21 = false;
       const _errs123 = errors;
-      if (typeof data20 !== 'string') {
-        const err60 = {
+      if (typeof data20 === 'string') {
+        if (func1(data20) > 500) {
+          const err98 = {
+            instancePath: instancePath + '/reason',
+            schemaPath: '#/properties/reason/anyOf/0/maxLength',
+            keyword: 'maxLength',
+            params: { limit: 500 },
+          };
+          if (vErrors === null) {
+            vErrors = [err98];
+          } else {
+            vErrors.push(err98);
+          }
+          errors++;
+        }
+        if (func1(data20) < 10) {
+          const err99 = {
+            instancePath: instancePath + '/reason',
+            schemaPath: '#/properties/reason/anyOf/0/minLength',
+            keyword: 'minLength',
+            params: { limit: 10 },
+          };
+          if (vErrors === null) {
+            vErrors = [err99];
+          } else {
+            vErrors.push(err99);
+          }
+          errors++;
+        }
+      } else {
+        const err100 = {
           instancePath: instancePath + '/reason',
           schemaPath: '#/properties/reason/anyOf/0/type',
           keyword: 'type',
           params: { type: 'string' },
         };
         if (vErrors === null) {
-          vErrors = [err60];
+          vErrors = [err100];
         } else {
-          vErrors.push(err60);
+          vErrors.push(err100);
         }
         errors++;
       }
@@ -4513,32 +5140,32 @@ function validate88(
       valid21 = valid21 || _valid20;
       const _errs125 = errors;
       if (data20 !== null) {
-        const err61 = {
+        const err101 = {
           instancePath: instancePath + '/reason',
           schemaPath: '#/properties/reason/anyOf/1/type',
           keyword: 'type',
           params: { type: 'null' },
         };
         if (vErrors === null) {
-          vErrors = [err61];
+          vErrors = [err101];
         } else {
-          vErrors.push(err61);
+          vErrors.push(err101);
         }
         errors++;
       }
       var _valid20 = _errs125 === errors;
       valid21 = valid21 || _valid20;
       if (!valid21) {
-        const err62 = {
+        const err102 = {
           instancePath: instancePath + '/reason',
           schemaPath: '#/properties/reason/anyOf',
           keyword: 'anyOf',
           params: {},
         };
         if (vErrors === null) {
-          vErrors = [err62];
+          vErrors = [err102];
         } else {
-          vErrors.push(err62);
+          vErrors.push(err102);
         }
         errors++;
       } else {
@@ -4553,16 +5180,16 @@ function validate88(
       }
     }
   } else {
-    const err63 = {
+    const err103 = {
       instancePath,
       schemaPath: '#/type',
       keyword: 'type',
       params: { type: 'object' },
     };
     if (vErrors === null) {
-      vErrors = [err63];
+      vErrors = [err103];
     } else {
-      vErrors.push(err63);
+      vErrors.push(err103);
     }
     errors++;
   }

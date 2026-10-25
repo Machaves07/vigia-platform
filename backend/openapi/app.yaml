@@ -7853,96 +7853,134 @@
         "classification_deadline_business_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 30.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Classification Deadline Business Days"
         "review_deadline_business_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 30.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Review Deadline Business Days"
         "action_deadline_default_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 180.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Action Deadline Default Days"
         "action_deadline_min_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 180.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Action Deadline Min Days"
         "action_deadline_max_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 180.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Action Deadline Max Days"
         "manager_highlight_overdue_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 365.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Manager Highlight Overdue Days"
         "unclosable_review_default_months":
           "anyOf":
             - "type": "integer"
+              "maximum": 12.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Unclosable Review Default Months"
         "unclosable_review_max_months":
           "anyOf":
             - "type": "integer"
+              "maximum": 12.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Unclosable Review Max Months"
         "monthly_package_generation_day":
           "anyOf":
             - "type": "integer"
+              "maximum": 5.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Monthly Package Generation Day"
         "sample_percent":
           "anyOf":
             - "type": "integer"
+              "maximum": 100.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Sample Percent"
         "sample_min":
           "anyOf":
             - "type": "integer"
+              "maximum": 1000.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Sample Min"
         "sample_max":
           "anyOf":
             - "type": "integer"
+              "maximum": 1000.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Sample Max"
         "adoption_silence_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 90.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Adoption Silence Days"
         "exposure_coverage_threshold_percent":
           "anyOf":
             - "type": "integer"
+              "maximum": 100.0
+              "minimum": 0.0
             - "type": "null"
           "title": "Exposure Coverage Threshold Percent"
         "email_grouping_hours":
           "anyOf":
             - "type": "integer"
+              "maximum": 24.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Email Grouping Hours"
         "export_max_days":
           "anyOf":
             - "type": "integer"
+              "maximum": 3660.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Export Max Days"
         "export_max_zones":
           "anyOf":
             - "type": "integer"
+              "maximum": 500.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Export Max Zones"
         "single_occupancy_default_window_minutes":
           "anyOf":
             - "type": "integer"
+              "maximum": 480.0
+              "minimum": 15.0
             - "type": "null"
           "title": "Single Occupancy Default Window Minutes"
         "reminder_interval_hours":
           "anyOf":
             - "type": "integer"
+              "maximum": 168.0
+              "minimum": 1.0
             - "type": "null"
           "title": "Reminder Interval Hours"
         "business_calendar":
@@ -7952,6 +7990,8 @@
         "reason":
           "anyOf":
             - "type": "string"
+              "maxLength": 500
+              "minLength": 10
             - "type": "null"
           "title": "Reason"
       "additionalProperties": false
