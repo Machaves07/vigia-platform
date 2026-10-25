@@ -1,0 +1,58 @@
+.viewport {
+  height: 672px;
+  overflow: auto;
+}
+.tableWrap {
+  overflow-x: auto;
+}
+.table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  min-width: 1000px;
+}
+.table thead {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface, white);
+  z-index: 1;
+}
+.table th,
+.table td {
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #888;
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+.row {
+  height: 208px;
+}
+.row:focus {
+  outline: 3px solid #175cd3;
+  outline-offset: -3px;
+}
+.cell {
+  max-height: 191px;
+  overflow: auto;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  margin-block: 1rem;
+}
+.filters label {
+  display: grid;
+  gap: 0.25rem;
+}
+.fields {
+  display: grid;
+  gap: 1rem;
+  max-width: 36rem;
+}
+.fields label {
+  display: grid;
+  gap: 0.25rem;
+}

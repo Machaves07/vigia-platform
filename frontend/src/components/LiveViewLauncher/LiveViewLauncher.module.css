@@ -1,0 +1,76 @@
+.launcher {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.title,
+.subtitle {
+  margin: 0;
+}
+
+.title {
+  font-size: var(--font-size-large);
+}
+
+.subtitle {
+  font-size: var(--font-size-base);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--font-size-small);
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.link,
+.blocked,
+.pending {
+  margin: 0;
+}
+
+.blocked {
+  font-size: var(--font-size-small);
+}
+
+.anchor {
+  color: inherit;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.button {
+  min-height: var(--touch-target-min);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:focus-visible,
+.anchor:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
