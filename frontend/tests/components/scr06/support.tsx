@@ -11,8 +11,10 @@ import { createTransport, installTransport, createPortConnection } from '@/ports
 import type {
   CommissioningClip,
   CommissioningClips,
+  CommissioningRecord,
   CurrentWalkTest,
   MatrixRow,
+  OcclusionTest,
   PassOut,
   WalkTestSession,
   WalkTestStep,
@@ -105,6 +107,99 @@ export function session(overrides: Partial<WalkTestSession> = {}): WalkTestSessi
       { step_kind: 'framing', duration_ms: 1_800_000 },
     ],
     occlusion_tests: [],
+    ...overrides,
+  };
+}
+
+export const CAMERA_A = '0190a1b2-0000-7000-8000-00000000000d';
+const CAMERA_B = '0190a1b2-0000-7000-8000-00000000000e';
+export const OCCLUSION_TEST_ID = '0190a1b2-0000-7000-8000-00000000000f';
+export const RECORD_ID = '0190a1b2-0000-7000-8000-000000000010';
+export const SIGNER_ID = '0190a1b2-0000-7000-8000-000000000011';
+export const COSIGNER_ID = '0190a1b2-0000-7000-8000-000000000012';
+export const EVENT_ID = '0190a1b2-0000-7000-8000-000000000013';
+
+/** Prueba de oclusión sintética: ventana de 2 min y plazo = fin + 5 min (hora del servidor). */
+export function occlusionTest(overrides: Partial<OcclusionTest> = {}): OcclusionTest {
+  return {
+    test_id: OCCLUSION_TEST_ID,
+    camera_id: CAMERA_A,
+    started_at: '2026-10-24T10:03:00.000Z',
+    ended_at: '2026-10-24T10:05:00.000Z',
+    deadline: '2026-10-24T10:10:00.000Z',
+    verification: 'pending',
+    correlated_event_ids: [],
+    declared_reason_es: null,
+    failure_reason: null,
+    recorded_by: RESPONSIBLE,
+    ...overrides,
+  };
+}
+
+/** Acta cerrada sintética: dos filas, dos cámaras, tramos medidos y sin medir. */
+export function commissioningRecord(
+  overrides: Partial<CommissioningRecord> = {},
+): CommissioningRecord {
+  return {
+    commissioning_record_id: RECORD_ID,
+    session_id: SESSION_ID,
+    zone_id: ZONE_ID,
+    catalog_version: 12,
+    kind: 'initial',
+    passes_per_cell: 3,
+    matrix_results: [
+      { row_id: ROW_STANDING, detected: 3, missed: 0, false_alarms: 1 },
+      { row_id: ROW_CROUCHED, detected: 4, missed: 0, false_alarms: 0 },
+    ],
+    false_negatives_total: 0,
+    false_alarm_rate_observed: 0.125,
+    false_alarm_threshold: 0.2,
+    false_alarm_acceptance: null,
+    latency: {
+      node_tranche: { p95_ms: 180, measured_by: 'installer' },
+      platform_tranche: {
+        median_ms: 90,
+        p95_ms: 140,
+        max_ms: 210,
+        repetitions: 120,
+        measured_by: 'platform',
+      },
+      exposure_tranche: null,
+      served_tranche: null,
+      not_measured: ['exposure_tranche', 'served_tranche'],
+      indicative_sum_median_ms: null,
+      indicative_sum_p95_ms: 320,
+      indicative: true,
+      repetitions_counted: 120,
+    },
+    cameras_measured: [
+      { camera_id: CAMERA_A, measured_fps: 14.5, declared_min_fps: 10 },
+      { camera_id: CAMERA_B, measured_fps: null, declared_min_fps: null },
+    ],
+    occlusion_summary: [
+      { camera_id: CAMERA_A, verification: 'verified', test_id: OCCLUSION_TEST_ID },
+      { camera_id: CAMERA_B, verification: 'declared', test_id: null },
+    ],
+    total_duration_ms: 5_400_000,
+    steps_summary: [
+      { step_kind: 'walk_test_passes', duration_ms: 3_600_000 },
+      { step_kind: 'framing', duration_ms: 1_800_000 },
+    ],
+    installer_measurements: {
+      beacon_latency_ms_p95: 180,
+      measured_by: 'installer',
+      baselines: [
+        { camera_id: CAMERA_A, zone_id: ZONE_ID, captured_at: '2026-10-24T09:30:00.000Z' },
+      ],
+    },
+    signatures: [
+      {
+        user_id: SIGNER_ID,
+        role_in_use: 'provider_installer',
+        signed_at: '2026-10-24T11:00:00.000Z',
+      },
+    ],
+    closed_at: '2026-10-24T11:00:00.000Z',
     ...overrides,
   };
 }
