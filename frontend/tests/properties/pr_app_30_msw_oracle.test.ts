@@ -101,7 +101,8 @@ describe(
       const declared = new Set(OPERATIONS.map((op) => op.operationId));
       const extra = [...handlersByOperation.keys()].filter((id) => !declared.has(id));
       expect(extra, `manejadores sin operación: ${extra.join(', ')}`).toEqual([]);
-      expect(handlers).toHaveLength(OPERATIONS.length);
+      // version.json es público y no forma parte de app.yaml.
+      expect(handlers).toHaveLength(OPERATIONS.length + 1);
     });
 
     it.each(OPERATIONS.map((operation) => [operation.operationId, operation] as const))(

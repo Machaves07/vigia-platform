@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_API_MODE?: 'mock' | 'real';
   /** `app_version` de la construcción (etiqueta de release o sha; `dev`); ver `vite.config.ts`. */
   readonly VITE_APP_VERSION: string;
+  /** Etiqueta real de @vigia/contracts, derivada del paquete en la construcción. */
+  readonly VITE_CONTRACT_TAG: string;
 }
 
 interface ImportMeta {

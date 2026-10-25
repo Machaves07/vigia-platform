@@ -7,13 +7,18 @@
  * imprime al empezar y `FC_SEED=<semilla>` la repite.
  */
 import { fileURLToPath, URL } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 import { defineConfig } from 'vitest/config';
 
 import { resolveProfile } from './config/fastCheckProfile.ts';
+import { contractTagFrom, resolveAppVersion } from './config/build.ts';
 
 export default defineConfig(({ mode }) => {
   const profile = resolveProfile(process.env, mode === 'nightly' ? 'nightly' : 'ci');
+  const packageJson = JSON.parse(
+    readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+  ) as { dependencies: Record<string, string> };
   return {
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
@@ -25,6 +30,9 @@ export default defineConfig(({ mode }) => {
       globalSetup: ['tests/setup/global.ts'],
       setupFiles: ['tests/setup/index.ts'],
       env: {
+        // Misma construcción sintética para el controlador y MSW, sin depender del entorno local.
+        VITE_APP_VERSION: resolveAppVersion(undefined),
+        VITE_CONTRACT_TAG: contractTagFrom(packageJson.dependencies['@vigia/contracts']),
         FC_PROFILE: profile.name,
         FC_SEED: String(profile.seed),
       },

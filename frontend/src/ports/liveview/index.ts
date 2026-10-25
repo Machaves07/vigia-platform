@@ -54,6 +54,8 @@ export function liveViewFailure(error: unknown): LiveViewError | null {
       return null;
     case 'http':
       return failure.error;
+    case 'version_outdated':
+      return { code: 'version_outdated', status: 0 };
     case 'invalid_input':
       return { code: 'invalid_request', status: 422 };
     case 'unavailable':

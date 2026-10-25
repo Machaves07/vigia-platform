@@ -32,9 +32,29 @@ describe('startMockApi', { timeout: PROPERTY_TIMEOUT_MS }, () => {
     const response = await page.fetch('/me');
     expect(response.status).toBe(Number(successStatus(apiOperation(operationId))));
     expect(response.headers.get(MOCK_OPERATION_HEADER)).toBe(operationId);
-    expect(await response.json()).toHaveProperty('effective_permissions');
+    expect(response.headers.get('X-Vigia-Api-Version')).toBe(import.meta.env.VITE_APP_VERSION);
+    expect(await response.json()).toMatchObject({ api_version: import.meta.env.VITE_APP_VERSION });
     expect(network).not.toHaveBeenCalled();
     api.stop();
+  });
+
+  it('version.json anuncia la construcción y el contrato incrustados, sin caché ni red', async () => {
+    const { network, target: page } = target();
+    const api = startMockApi(page);
+    try {
+      const response = await page.fetch('/version.json');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(response.headers.get('X-Vigia-Api-Version')).toBe(import.meta.env.VITE_APP_VERSION);
+      expect(await response.json()).toEqual({
+        app_version: import.meta.env.VITE_APP_VERSION,
+        contract_tag: import.meta.env.VITE_CONTRACT_TAG,
+        built_at: '2026-10-24T00:00:00.000Z',
+      });
+      expect(network).not.toHaveBeenCalled();
+    } finally {
+      api.stop();
+    }
   });
 
   it('acepta Request y URL, y deja pasar a la red lo que no es de la API', async () => {
