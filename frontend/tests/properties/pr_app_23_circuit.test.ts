@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import { DEPENDENCIES, type Dependency } from '@/state/connection/reducer';
+import { DEPENDENCIES, FAILURE_WINDOW_MS, type Dependency } from '@/state/connection/reducer';
 
 import { fixture } from '../support/connection';
 
@@ -49,7 +49,7 @@ describe('PR-APP-23', () => {
             now += event.elapsed;
             clock.advance(event.elapsed);
             for (const value of Object.values(model)) {
-              value.failures = value.failures.filter((at) => at > now - 30_000);
+              value.failures = value.failures.filter((at) => at > now - FAILURE_WINDOW_MS);
               if (value.blockedUntil !== null && value.blockedUntil <= now) {
                 value.blockedUntil = null;
                 value.recovering = true;

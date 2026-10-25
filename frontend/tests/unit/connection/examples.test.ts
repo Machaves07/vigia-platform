@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { createConnection, type ConnectionState } from '@/state/connection';
-import { DEPENDENCIES, initialConnection, reduceConnection } from '@/state/connection/reducer';
+import {
+  DEPENDENCIES,
+  FAILURE_WINDOW_MS,
+  initialConnection,
+  reduceConnection,
+} from '@/state/connection/reducer';
 
 import { fixture } from '../../support/connection';
 import { FakeClock } from '../../support/fakeClock';
@@ -46,10 +51,12 @@ describe('conexión con reloj inyectado', () => {
     expect(connection.writeBlockReason()).toBeNull();
   });
 
-  it('vence la ventana móvil justo a los 30 s sin abrir por fallos dispersos', () => {
+  it('vence la ventana móvil justo a FAILURE_WINDOW_MS sin abrir por fallos dispersos', () => {
     const { clock, connection, fail } = fixture();
     fail();
-    clock.advance(30_000);
+    clock.advance(FAILURE_WINDOW_MS - 1);
+    expect(connection.getSnapshot().circuits.platform.failures).toHaveLength(1);
+    clock.advance(1);
     expect(connection.getSnapshot().connection.state).toBe('online');
     for (let i = 0; i < 3; i++) fail();
     expect(connection.getSnapshot().circuits.platform.state).toBe('closed');
