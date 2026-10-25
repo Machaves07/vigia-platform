@@ -234,6 +234,23 @@ describe('oclusión pending: plazo y nueva consulta de la sesión', { timeout: T
   });
 });
 
+describe('regresiones de PR-APP-07', { timeout: TEST_TIMEOUT }, () => {
+  it('una causa de fallo con nombre del prototipo («toString») no rompe la lista (FC_SEED=1618033)', async () => {
+    server.use(
+      currentWalkTestHandler(
+        withTests([occlusionTest({ verification: 'failed', failure_reason: 'toString' })]),
+      ),
+    );
+    openScreen();
+    await waitFor(() => {
+      expect(verificationOf(OCCLUSION_TEST_ID)).toBe('failed');
+    }, WAIT);
+    const reason = document.querySelector('[data-part="failure_reason"]');
+    expect(reason?.getAttribute('data-failure-reason')).toBe('toString');
+    expect(reason?.querySelector('[data-text-key]')).toBeNull();
+  });
+});
+
 describe('registrar la prueba', { timeout: TEST_TIMEOUT }, () => {
   async function fillWindow(): Promise<void> {
     fireEvent.change(await screen.findByRole('textbox', { name: CAMERA_LABEL }, WAIT), {

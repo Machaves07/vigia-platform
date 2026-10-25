@@ -14,7 +14,10 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 
+import { closeAnchor } from '@/pages/scr06/close/CloseRequirements';
 import { CloseScreen, type CloseSigner } from '@/pages/scr06/close/CloseScreen';
+import { behaviourFor } from '@/ports/errors/map';
+import { PortError } from '@/ports/shared';
 import { text } from '@/texts';
 
 import { apiError, mswPath } from '../../msw/handlers';
@@ -259,6 +262,32 @@ describe('rechazos del cierre anclados', { timeout: TEST_TIMEOUT }, () => {
     }, WAIT);
     const alert = document.querySelector(`[data-requirement="${requirement}"] [role="alert"]`);
     expect(alert?.getAttribute('data-code')).toBe('conflict');
+  });
+
+  it.each([
+    ['catalog_false_negative_present', 'matrix'],
+    ['toString', null],
+    ['constructor', null],
+    ['catalog_desconocido', null],
+  ])('closeAnchor(%s) → %s', (detailCode, anchor) => {
+    const error = { code: 'conflict', status: 409, detail_code: detailCode };
+    const failure = new PortError({ kind: 'http', error, behaviour: behaviourFor(error) });
+    expect(closeAnchor(failure)).toBe(anchor);
+  });
+
+  it('un detail_code con nombre del prototipo («toString») va a la pila, sin ancla', async () => {
+    server.use(
+      http.post(mswPath('/walk-tests/:session_id/close'), () =>
+        apiError('conflict', 409, { detailCode: 'toString' }),
+      ),
+    );
+    openScreen();
+    await typeBeacon('180');
+    fireEvent.click(screen.getByRole('button', { name: SIGN_LABEL }));
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-code="conflict"]')).toHaveLength(1);
+    }, WAIT);
+    expect(document.querySelectorAll('[data-requirement] [role="alert"]')).toHaveLength(0);
   });
 
   it('catalog_false_alarm_rate_above_threshold se ancla al motivo de la aceptación', async () => {

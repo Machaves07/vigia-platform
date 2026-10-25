@@ -45,24 +45,25 @@ export const FALSE_ALARM_REASON = 'false_alarm_acceptance.reason_es';
 export const SIGNATURES = 'signatures';
 
 /** `detail_code` de un rechazo del cierre → dónde se ancla su aviso. */
-const DETAIL_ANCHORS: Readonly<Record<string, string>> = {
-  catalog_steps_still_open: 'steps',
-  catalog_walk_test_incomplete: 'steps',
-  catalog_matrix_incomplete: 'matrix',
-  catalog_false_negative_present: 'matrix',
-  catalog_passes_below_minimum: 'matrix',
-  catalog_redundancy_not_verified: 'occlusion',
-  catalog_blur_not_verified: 'blur',
-  catalog_latency_not_measured: 'latency',
-  catalog_false_alarm_rate_above_threshold: FALSE_ALARM_REASON,
-  catalog_free_text_rejected: FALSE_ALARM_REASON,
-};
+const DETAIL_ANCHORS: ReadonlyMap<string, string> = new Map([
+  ['catalog_steps_still_open', 'steps'],
+  ['catalog_walk_test_incomplete', 'steps'],
+  ['catalog_matrix_incomplete', 'matrix'],
+  ['catalog_false_negative_present', 'matrix'],
+  ['catalog_passes_below_minimum', 'matrix'],
+  ['catalog_redundancy_not_verified', 'occlusion'],
+  ['catalog_blur_not_verified', 'blur'],
+  ['catalog_latency_not_measured', 'latency'],
+  ['catalog_false_alarm_rate_above_threshold', FALSE_ALARM_REASON],
+  ['catalog_free_text_rejected', FALSE_ALARM_REASON],
+]);
 
 /** El ancla del aviso de un rechazo del cierre, o `null` si va a la pila global. */
 export function closeAnchor(error: unknown): string | null {
   if (!isPortError(error) || error.failure.kind !== 'http') return null;
   const detail = error.failure.error.detail_code;
-  return typeof detail === 'string' ? (DETAIL_ANCHORS[detail] ?? null) : null;
+  // `Map` y no un objeto: un `detail_code` como `toString` no debe dar con el prototipo.
+  return typeof detail === 'string' ? (DETAIL_ANCHORS.get(detail) ?? null) : null;
 }
 
 export function CloseRequirements({

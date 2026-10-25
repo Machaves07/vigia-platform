@@ -92,6 +92,10 @@ function Tranche({
   );
 }
 
+/*
+ * Las cabeceras de fila llevan su rótulo delante del identificador («Fila …», «Cámara …»): así los
+ * dígitos de una fila no se unen a los del identificador de la siguiente en el texto del árbol.
+ */
 export function RecordView({ record }: { readonly record: CommissioningRecord }) {
   const headingId = useId();
   const documentHref = recordDocumentHref(record.commissioning_record_id);
@@ -141,7 +145,7 @@ export function RecordView({ record }: { readonly record: CommissioningRecord })
           <tbody>
             {record.matrix_results.map((row) => (
               <tr key={row.row_id} data-part="matrix_result">
-                <th scope="row">{row.row_id}</th>
+                <th scope="row">{`${text('scr06.matrix.row')} ${row.row_id}`}</th>
                 <td>{row.detected}</td>
                 <td>{row.missed}</td>
                 <td>{row.false_alarms}</td>
@@ -185,7 +189,7 @@ export function RecordView({ record }: { readonly record: CommissioningRecord })
             <tbody>
               {record.cameras_measured.map((camera) => (
                 <tr key={camera.camera_id} data-part="camera_rate">
-                  <th scope="row">{camera.camera_id}</th>
+                  <th scope="row">{`${text('scr06.record.camera')} ${camera.camera_id}`}</th>
                   <td>
                     {camera.measured_fps === null
                       ? text('scr06.record.not_measured')

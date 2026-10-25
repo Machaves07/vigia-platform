@@ -12,13 +12,17 @@ import { text } from '@/texts';
 import styles from './occlusion.module.css';
 
 /** Causas de fallo que la pantalla explica (las de `OcclusionTestOut.failure_reason`). */
-const FAILURE_EXPLANATIONS: Readonly<Record<string, string>> = {
-  no_observability_events_in_window: 'scr06.occlusion.failure.no_observability_events_in_window',
-  redundancy_not_verified: 'scr06.occlusion.failure.redundancy_not_verified',
-};
+const FAILURE_EXPLANATIONS: ReadonlyMap<string, string> = new Map([
+  [
+    'no_observability_events_in_window',
+    'scr06.occlusion.failure.no_observability_events_in_window',
+  ],
+  ['redundancy_not_verified', 'scr06.occlusion.failure.redundancy_not_verified'],
+]);
 
 function FailureReason({ reason }: { readonly reason: string }) {
-  const explanation = FAILURE_EXPLANATIONS[reason];
+  // `Map` y no un objeto: un valor del servidor como `toString` no debe dar con el prototipo.
+  const explanation = FAILURE_EXPLANATIONS.get(reason);
   return (
     <>
       <dt>{text('scr06.occlusion.list.failure')}</dt>
