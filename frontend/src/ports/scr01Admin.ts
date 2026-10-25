@@ -12,6 +12,7 @@
  * `conflict` anclado (`writeNotice`); la pantalla no replica ninguna regla (BR-APP-43). Las
  * políticas de consulta de `GET /users` y `GET /auth/sessions` están en `state.query`.
  */
+import assignBody from '../../openapi/bodies/assign_role_users__user_id__roles_post.json';
 import grant from '../../openapi/bodies/grant_provider_concessions_post.json';
 import type { components } from '@/client/schema';
 import { reasonLimits } from '@/components/ReasonField/limits';
@@ -119,17 +120,18 @@ export function adminClock() {
  */
 export const RESET_REASON_LIMITS = reasonLimits(grant, 'reason');
 
-/** Roles que una persona administradora puede asignar desde la interfaz (sin `platform_operator`). */
-export const ASSIGNABLE_ROLES: readonly Role[] = [
-  'coordinator_sst',
-  'line_manager',
-  'plant_manager',
-  'administrator',
-  'provider_installer',
-  'copasst',
-];
+/**
+ * Todos los valores de `Role` y `ScopeLevel`, leídos del esquema generado de `POST
+ * /users/{user_id}/roles` y nunca copiados. La pantalla ofrece todos los roles: cuáles admite cada
+ * organización (p. ej. `platform_operator` solo en la proveedora) lo decide el servidor (BR-APP-43).
+ */
+export const ASSIGNABLE_ROLES: readonly Role[] = assignBody.body.$defs.Role.enum.filter(
+  (value): value is Role => typeof value === 'string',
+);
 
-export const SCOPE_LEVELS: readonly ScopeLevel[] = ['organization', 'plant', 'zone'];
+export const SCOPE_LEVELS: readonly ScopeLevel[] = assignBody.body.$defs.ScopeLevel.enum.filter(
+  (value): value is ScopeLevel => typeof value === 'string',
+);
 
 /** Una página de usuarios con el cursor opaco del servidor (`after`). */
 export async function readUsers(

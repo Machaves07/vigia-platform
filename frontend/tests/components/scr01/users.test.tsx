@@ -248,6 +248,35 @@ describe('/admin/users', { timeout: 60_000 }, () => {
     expect(posted).toBe(0);
   });
 
+  it('el rol ofrece todos los valores, platform_operator incluido (BR-APP-43)', async () => {
+    const user = userEvent.setup();
+    await mountAt('/admin/users');
+    await user.click(
+      await screen.findByRole('button', { name: text('scr01_admin.invite.open') }, WAIT),
+    );
+    const form = screen.getByRole('form', { name: text('scr01_admin.invite.title') });
+    const role = within(form).getByLabelText<HTMLSelectElement>(
+      text('scr01_admin.assignment.role'),
+    );
+    // Oráculo literal del enum `Role` de U-02: la pantalla no recorta la lista.
+    expect(
+      Array.from(role.options)
+        .map((option) => option.value)
+        .filter((value) => value !== ''),
+    ).toEqual([
+      'coordinator_sst',
+      'line_manager',
+      'plant_manager',
+      'administrator',
+      'provider_installer',
+      'copasst',
+      'platform_operator',
+    ]);
+    expect(
+      within(role).getByRole('option', { name: label('role', 'platform_operator') }),
+    ).toBeDefined();
+  });
+
   it('el conflict del último administrador al retirar el rol se ancla con el mensaje del servidor y conserva lo escrito', async () => {
     let removals = 0;
     server.use(

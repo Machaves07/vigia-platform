@@ -99,7 +99,5 @@
   "scr01_admin.reset.submit": "Restablecer el segundo factor",
   "scr01_admin.reset.done": "Segundo factor restablecido. Sesiones de la persona cerradas:",
   "scr01_admin.reset.enroll_next": "Deberá inscribir el segundo factor la próxima vez que entre.",
-  "scr01_admin.invalid": "Algún campo no tiene la forma esperada. Revise lo escrito.",
-  "scr01_admin.yes": "Sí",
-  "scr01_admin.no": "No"
+  "scr01_admin.invalid": "Algún campo no tiene la forma esperada. Revise lo escrito."
 }
