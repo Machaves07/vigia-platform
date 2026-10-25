@@ -306,6 +306,26 @@ def test_a_process_that_lost_the_lease_leaves_no_export_produced(stack: ExportSt
     assert stack.export_row(export_id)["record_id"] == produced["record_id"]
 
 
+def test_a_process_that_lost_the_lease_after_the_other_closed_gets_lease_lost(
+    stack: ExportStack,
+) -> None:
+    """Si el que retomó ya cerró la solicitud (paquete escrito), el cierre tardío del que perdió
+    el arrendamiento es ``LeaseLost``: la valla va antes que el paquete, sin choque de clave."""
+    leases = SqlExportLeaseStore(database=stack.database, writer=stack.writer)
+    organization, export_id, context, lease = _acquired(stack, leases, "worker-d")
+    stack.clock.set(lease.until + timedelta(milliseconds=1))
+    taken = stack.run(leases.acquire(context, export_id, "worker-e", stack.now())).lease
+    assert taken is not None
+    now = stack.now()
+    stack.run(leases.finish_ready(context, taken, _real_package(), now, now + timedelta(days=30)))
+    with pytest.raises(LeaseLost):
+        stack.run(
+            leases.finish_ready(context, lease, _real_package(), now, now + timedelta(days=30))
+        )
+    (produced,) = _produced(stack, organization)
+    assert stack.export_row(export_id)["record_id"] == produced["record_id"]
+
+
 def test_two_concurrent_closings_write_a_single_export_produced(stack: ExportStack) -> None:
     """Dos cierres a la vez del mismo arrendamiento (dos conexiones): uno gana; nunca dos
     registros ``export_produced`` ni dos ``export_available``."""
