@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DateTimeFormatWithoutZones } from '../../support/capabilities';
+import { DateTimeFormatWithoutZones, mediaEnvironment } from '../../support/capabilities';
 import {
   browserProbe,
   CAPABILITIES,
@@ -58,7 +58,7 @@ const COMPLETE: CapabilityProbe = browserProbe({
   fetch: () => undefined,
   Intl: { DateTimeFormat: Intl.DateTimeFormat },
   crypto: { subtle: { digest: () => undefined } },
-  HTMLMediaElement: { prototype: { canPlayType: () => 'probably' } },
+  ...mediaEnvironment('probably'),
   navigator: { userAgent: userAgent('chrome', 156, 0) },
 });
 

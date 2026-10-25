@@ -62,7 +62,11 @@ export interface CapabilityProbe {
   readonly dateTimeFormat: DateTimeFormatConstructor | undefined;
   /** `crypto.subtle`; solo existe en contexto seguro. */
   readonly subtle: { readonly digest?: unknown } | undefined;
-  /** `HTMLMediaElement.prototype.canPlayType`, o `undefined`. */
+  /**
+   * `HTMLMediaElement.prototype.canPlayType` invocado sobre un elemento `video` nuevo, o
+   * `undefined`. El método nativo exige un `HTMLMediaElement` como receptor: sin él lanza
+   * `TypeError` (`Illegal invocation`) y el vídeo quedaría ausente en cualquier navegador (VIG-342).
+   */
   readonly canPlayType: ((type: string) => string) | undefined;
   /** `navigator.userAgent`; vacío si el navegador no lo expone. */
   readonly userAgent: string;
@@ -75,6 +79,8 @@ export interface BrowserEnvironment {
   readonly crypto?: { readonly subtle?: { readonly digest?: unknown } | undefined } | undefined;
   readonly HTMLMediaElement?:
     { readonly prototype: { readonly canPlayType?: unknown } } | undefined;
+  /** El documento que crea el elemento `video` receptor de `canPlayType`. */
+  readonly document?: { readonly createElement?: (tagName: 'video') => unknown } | undefined;
   readonly navigator?: { readonly userAgent?: string } | undefined;
 }
 
@@ -85,7 +91,26 @@ export function currentEnvironment(): BrowserEnvironment {
     Intl: globalThis.Intl,
     crypto: globalThis.crypto,
     HTMLMediaElement: globalThis.HTMLMediaElement,
+    document: globalThis.document,
     navigator: globalThis.navigator,
+  };
+}
+
+/**
+ * `canPlayType` del prototipo, invocado sobre un `video` que crea el documento en cada llamada.
+ * Los dos métodos nativos se llaman con su receptor explícito (el documento y el elemento): sin él
+ * lanzan. Lo que falle al crear el elemento o al preguntar lo recoge `supportsH264` como capacidad
+ * ausente, y un receptor que no sea un `HTMLMediaElement` hace lanzar al método (fallo cerrado).
+ */
+function h264Probe(environment: BrowserEnvironment): ((type: string) => string) | undefined {
+  const canPlayType = environment.HTMLMediaElement?.prototype.canPlayType;
+  const page = environment.document;
+  const createElement = page?.createElement;
+  if (typeof canPlayType !== 'function' || typeof createElement !== 'function') return undefined;
+  return (type) => {
+    const video: unknown = Reflect.apply(createElement, page, ['video']);
+    const verdict: unknown = Reflect.apply(canPlayType, video, [type]);
+    return typeof verdict === 'string' ? verdict : '';
   };
 }
 
@@ -94,7 +119,6 @@ export function browserProbe(
   environment: BrowserEnvironment = currentEnvironment(),
 ): CapabilityProbe {
   const dateTimeFormat = environment.Intl?.DateTimeFormat;
-  const canPlayType = environment.HTMLMediaElement?.prototype.canPlayType;
   return {
     fetch: environment.fetch,
     dateTimeFormat:
@@ -102,8 +126,7 @@ export function browserProbe(
         ? (dateTimeFormat as DateTimeFormatConstructor)
         : undefined,
     subtle: environment.crypto?.subtle,
-    canPlayType:
-      typeof canPlayType === 'function' ? (canPlayType as (type: string) => string) : undefined,
+    canPlayType: h264Probe(environment),
     userAgent: environment.navigator?.userAgent ?? '',
   };
 }
