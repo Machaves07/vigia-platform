@@ -201,7 +201,7 @@ export function Declaration({
           try {
             await mutation.run({
               ...draft,
-              review_due_at: reviewInstant(draft.review_due_at, timeZone),
+              review_due_at: reviewInstant(draft.review_due_at, closureClock(), timeZone),
               professional_license: signed.professional_license,
             });
             setDirty(false);

@@ -62,7 +62,6 @@
   "scr09.overdue.highlighted": "Requiere atención del gerente",
   "scr09.overdue.days": "Días de vencimiento",
   "scr09.overdue.more": "Cargar más vencidos",
-  "scr09.overdue.empty": "No hay acciones vencidas en esta consulta.",
   "scr09.overdue.local": "Vencidos de este lazo. El servidor acota el resumen de planta al alcance autorizado.",
   "scr09.overdue.zone_unknown": "Zona sin nombre disponible",
   "scr09.overdue.zone": "Zona",

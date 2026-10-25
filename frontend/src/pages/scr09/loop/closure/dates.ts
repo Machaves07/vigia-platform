@@ -20,9 +20,14 @@ export function validReviewDate(day: string, clock: Clock, timeZone: string): bo
     day <= upper
   );
 }
-/** Mediodía civil evita que un cambio de hora elimine la medianoche elegida. */
-export function reviewInstant(day: string, timeZone: string): string {
-  return fromZonedTime(`${day}T12:00:00`, timeZone).toISOString();
+/** Inicio civil, acotado al aniversario UTC que valida U-04 (incluido el recorte bisiesto). */
+export function reviewInstant(day: string, clock: Clock, timeZone: string): string {
+  const upper = new Date(clock.now());
+  const year = upper.getUTCFullYear() + 1;
+  const last = new Date(Date.UTC(year, upper.getUTCMonth() + 1, 0)).getUTCDate();
+  upper.setUTCFullYear(year, upper.getUTCMonth(), Math.min(upper.getUTCDate(), last));
+  const start = fromZonedTime(`${day}T00:00:00`, timeZone);
+  return new Date(Math.min(start.getTime(), upper.getTime())).toISOString();
 }
 export function executionInstant(value: string, timeZone: string): string | null {
   const date = fromZonedTime(value, timeZone);

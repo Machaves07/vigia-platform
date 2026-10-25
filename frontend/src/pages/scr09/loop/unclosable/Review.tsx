@@ -141,7 +141,8 @@ export function Review({
               .run({
                 outcome,
                 review_note: note,
-                new_review_due_at: outcome === 'renewed' ? reviewInstant(day, timeZone) : null,
+                new_review_due_at:
+                  outcome === 'renewed' ? reviewInstant(day, closureClock(), timeZone) : null,
                 action: outcome === 'converted_to_action' ? action : null,
                 professional_license: snapshot.professional_license,
               })
