@@ -12,7 +12,9 @@ no lleva.
 **Idempotencia** (``insert_pending``, PR-LAZ-09): ``detection_id`` es la clave primaria y
 ``(organization_id, source_event_id)`` tiene su propia restricción única (``laz_0029``); dos
 entregas del mismo evento, o dos trabajadores que entregan la misma detección a la vez,
-``INSERT ... ON CONFLICT (detection_id) DO NOTHING``: la segunda no escribe nada y no lanza.
+``INSERT ... ON CONFLICT DO NOTHING`` **sin árbitro**: la segunda no escribe nada y no lanza. Con
+``ON CONFLICT (detection_id)``, el choque con la otra restricción única (la de ``source_event_id``)
+seguía lanzando en la carrera de dos trabajadores (main en rojo, ci@b84dac4, L-10).
 
 El elemento **nunca sale de la cola por la tarea de recordatorios** (``due_candidates`` y
 ``send_reminders``): solo ``mark_resolved`` cambia ``state`` a ``resolved``, y solo tras una
@@ -63,7 +65,7 @@ _INSERT_PENDING: Final = text(
     " :publication_threshold, :review_reason, :observability_state_at_event, :occurred_at_exact,"
     " :occurred_at_bucket, CAST(:clip_references AS jsonb), CAST(:signals_summary AS jsonb),"
     " :received_at, :review_due_at, 'pending', 0, :source_event_id)"
-    " ON CONFLICT (detection_id) DO NOTHING"
+    " ON CONFLICT DO NOTHING"
 )
 
 _PENDING_PAGE: Final = text(
