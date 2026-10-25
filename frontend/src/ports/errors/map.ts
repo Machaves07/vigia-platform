@@ -1,5 +1,6 @@
 /** Mapa total BR-APP-71, LC-APP-15. Solo describe acciones: no reintenta ni altera el circuito. */
 import texts from '../../texts/errors.json';
+import versionTexts from '../../texts/version.json';
 
 import { detailLabel, exportStateLabel } from './labels';
 
@@ -13,7 +14,7 @@ export interface HttpError {
 }
 
 interface Message {
-  readonly text_key: keyof typeof texts;
+  readonly text_key: keyof typeof texts | keyof typeof versionTexts;
   readonly message_es: string;
 }
 type Section =
@@ -104,6 +105,13 @@ function retryAfter(error: HttpError): number | null {
 /** code manda sobre detail_code: un detalle nunca elude autenticación ni revela otro alcance. */
 export function behaviourFor(error: HttpError): Behaviour {
   switch (error.code) {
+    // Fallo local de ports.base, no un código HTTP del backend. Sin reintento automático.
+    case 'version_outdated':
+      return {
+        kind: 'forbidden_reload',
+        text_key: 'version.outdated',
+        message_es: versionTexts['version.outdated'],
+      };
     case 'unauthenticated':
       return {
         kind: 'reauth',
