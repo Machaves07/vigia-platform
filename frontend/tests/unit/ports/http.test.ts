@@ -59,7 +59,7 @@ function transportWith(clock: FakeClock, extra: Partial<TransportOptions> = {}) 
   const transport = createTransport({
     clock,
     connection,
-    version: createAppVersion({ appVersion: 'test', contractTag: 'v1.1.0', clock }),
+    version: createAppVersion({ clock }),
     devLog: () => undefined,
     ...extra,
   });
@@ -214,10 +214,6 @@ describe('cabeceras y credenciales (BR-APP-67, 69, 70)', () => {
       let current: string | null = null;
       const clock = new FakeClock();
       const { transport } = transportWith(clock, { concession: () => current });
-      // El ejemplo generado de /me tiene una versión arbitraria: esta prueba trata cabeceras,
-      // no despliegues. Debe coincidir con la construcción sintética del transporte.
-      server.use(variant('me_me_get', () => HttpResponse.json({ api_version: 'test' })));
-
       const expected: (string | null)[] = [];
       for (const [round, values] of [
         ['c-0f9e', null],

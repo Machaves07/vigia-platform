@@ -58,6 +58,16 @@ afterEach(() => {
 });
 
 describe('versiones y bloqueo de escrituras', () => {
+  it.each(['VITE_APP_VERSION', 'VITE_CONTRACT_TAG'] as const)(
+    'si falta %s falla explícitamente al crear el controlador, no durante la comprobación remota',
+    (name) => {
+      for (const value of [undefined, '', ' ']) {
+        vi.stubEnv(name, value);
+        expect(() => createAppVersion()).toThrow(`app.version: falta ${name} en la construcción.`);
+      }
+    },
+  );
+
   it('lee ambas versiones incrustadas y consulta version.json con no-store en el arranque y después de cada /me', async () => {
     vi.stubEnv('VITE_APP_VERSION', LOCAL);
     vi.stubEnv('VITE_CONTRACT_TAG', 'v1.1.0');
@@ -116,6 +126,17 @@ describe('versiones y bloqueo de escrituras', () => {
       unsubscribe();
     },
   );
+
+  it('API real local sin estáticos: dev frente a unknown bloquea; un 404 de version.json no lo levanta', async () => {
+    const { version } = setup({
+      appVersion: 'dev',
+      fetch: () => Promise.resolve(new Response(null, { status: 404 })),
+    });
+    version.observeMe({ api_version: 'unknown' });
+    expect(await version.start()).toBe('unavailable');
+    expect(version.canWrite()).toBe(false);
+    await expect(sessionPort.logout.write()).rejects.toMatchObject({ failure: NOTICE });
+  });
 
   it.each(['v2.0.0', 'v1.4.0', 'invalid', '', null])(
     'contrato incompatible o malformado %s: mismo bloqueo',

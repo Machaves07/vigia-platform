@@ -27,9 +27,18 @@ interface VersionOptions {
   readonly reload?: (context: ReloadContext) => void;
 }
 
+function embeddedVersion(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`app.version: falta ${name} en la construcción.`);
+  }
+  return value;
+}
+
 export function createAppVersion(options: VersionOptions = {}) {
-  const localVersion = options.appVersion ?? import.meta.env.VITE_APP_VERSION;
-  const localContract = options.contractTag ?? import.meta.env.VITE_CONTRACT_TAG;
+  const localVersion =
+    options.appVersion ?? embeddedVersion(import.meta.env.VITE_APP_VERSION, 'VITE_APP_VERSION');
+  const localContract =
+    options.contractTag ?? embeddedVersion(import.meta.env.VITE_CONTRACT_TAG, 'VITE_CONTRACT_TAG');
   const clock = options.clock ?? systemClock;
   const listeners = new Set<() => void>();
   let snapshot: VersionSnapshot = { outdated: false, message: null };

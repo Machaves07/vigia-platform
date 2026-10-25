@@ -69,6 +69,13 @@ export function exampleFor(operationId: string, status?: string): unknown {
         ? MINIMAL_PDF
         : fc.sample(apiSchemaArbitrary(schema), { seed: seedOf(key), numRuns: 1 })[0];
   }
+  // /me describe la construcción simulada, no una versión aleatoria del generador de esquemas.
+  if (operationId === 'me_me_get' && /^2\d\d$/.test(code)) {
+    example = {
+      ...(example as Record<string, unknown>),
+      api_version: import.meta.env.VITE_APP_VERSION,
+    };
+  }
   examples.set(key, example);
   return structuredClone(example);
 }
@@ -83,7 +90,12 @@ export function operationResponse(operationId: string, declared?: string): Respo
   const code = declared ?? successStatus(operation);
   const status = Number(code);
   if (!Number.isInteger(status)) throw new Error(`${operationId}: usa apiError para «${code}».`);
-  const headers = { [MOCK_OPERATION_HEADER]: operation.operationId };
+  const headers = {
+    [MOCK_OPERATION_HEADER]: operation.operationId,
+    ...(operation.operationId === 'me_me_get'
+      ? { 'X-Vigia-Api-Version': import.meta.env.VITE_APP_VERSION }
+      : {}),
+  };
   const [type] = Object.keys(operation.responses[code] ?? {});
   const body = exampleFor(operation.operationId, code);
   if (type === undefined) return new HttpResponse(null, { status, headers });
@@ -179,5 +191,23 @@ export const handlersByOperation: ReadonlyMap<string, HttpHandler> = new Map(
     ]),
 );
 
-/** Los manejadores de todas las operaciones, de la ruta más específica a la menos. */
-export const handlers: readonly HttpHandler[] = [...handlersByOperation.values()];
+/** Operaciones de app.yaml y metadatos públicos de la misma construcción simulada. */
+export const handlers: readonly HttpHandler[] = [
+  ...handlersByOperation.values(),
+  http.get('/version.json', () =>
+    HttpResponse.json(
+      {
+        app_version: import.meta.env.VITE_APP_VERSION,
+        contract_tag: import.meta.env.VITE_CONTRACT_TAG,
+        // Marca sintética fija: no se lee la hora del sistema en los manejadores.
+        built_at: '2026-10-24T00:00:00.000Z',
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-Vigia-Api-Version': import.meta.env.VITE_APP_VERSION,
+        },
+      },
+    ),
+  ),
+];
