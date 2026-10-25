@@ -11,7 +11,7 @@
 #   make frontend-dev    servidor de desarrollo de Vite en 5173 (compose, perfil frontend)
 #   make frontend-test   pruebas de frontend/ (vitest, perfil ci de fast-check)
 #   make frontend-check  comprobaciones de frontend/ (npm run check)
-#   make frontend-e2e    recorridos de Playwright (npm run e2e)          — llega con VIG-299
+#   make frontend-e2e    construcción y recorridos de Playwright contra la plataforma local
 #
 # En Windows sin `make`, el README tiene los mismos comandos con `uv run`.
 # Las pruebas de integración usan testcontainers; con `VIGIA_TEST_USE_COMPOSE=1` usan el entorno
@@ -101,4 +101,4 @@ frontend-check:
 	cd $(FRONTEND) && npm run check
 
 frontend-e2e:
-	cd $(FRONTEND) && npm run e2e
+	cd $(FRONTEND) && npm run build && node scripts/install_webkit.mjs && npm run e2e

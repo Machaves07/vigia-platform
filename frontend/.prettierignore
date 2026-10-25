@@ -8,3 +8,7 @@ tests/fixtures/synthetic/contracts/findings.json
 tests/fixtures/synthetic/contracts/contract_samples.json
 # Generado por scripts/msw_spec.mjs desde backend/openapi/app.yaml; --check exige igualdad exacta.
 tests/msw/openapi.responses.json
+# Artefactos de ejecución y manifiesto efímero del mundo e2e.
+tests/e2e/.world.json
+test-results/
+playwright-report/
