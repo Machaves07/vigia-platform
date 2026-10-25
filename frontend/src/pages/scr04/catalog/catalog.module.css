@@ -1,0 +1,50 @@
+.catalog {
+  max-width: 75rem;
+  margin-inline: auto;
+  padding: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.catalog form,
+.catalog article,
+.catalog section > dl {
+  padding: 1rem;
+  margin-block: 1rem;
+  border: 1px solid currentcolor;
+  border-radius: 0.25rem;
+}
+
+.catalog label {
+  display: block;
+  margin-block-start: 0.75rem;
+}
+
+.catalog textarea,
+.catalog input:not([type='checkbox']),
+.catalog select {
+  max-width: 100%;
+  min-width: min(25rem, 100%);
+  font: inherit;
+}
+
+.catalog textarea {
+  min-height: 6rem;
+}
+
+.catalog button {
+  margin: 0.5rem;
+}
+
+.catalog dt {
+  font-weight: bold;
+}
+
+.catalog dd {
+  margin-block-end: 0.5rem;
+}
+
+.catalog th,
+.catalog td {
+  padding: 0.5rem;
+  text-align: start;
+}
