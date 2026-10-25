@@ -140,6 +140,22 @@ describe('PR-APP-07: ninguna pantalla pinta campos fuera de su vista ni datos de
       personFieldsDeclared({ ...selftestView, allowedFields: ['title', 'track_id', 'Correo'] }),
     ).toEqual(['track_id', 'Correo']);
   });
+
+  it('solo RV-01 y RV-02 de SCR-01 declaran el correo de la cuenta, y nada más de persona', () => {
+    const fields = ['display_name', 'email', 'correo', 'person_id'];
+    expect(
+      personFieldsDeclared({ screen: 'SCR-01', view: 'RV-01', allowedFields: fields }),
+    ).toEqual(['correo', 'person_id']);
+    expect(
+      personFieldsDeclared({ screen: 'SCR-01', view: 'RV-02', allowedFields: fields }),
+    ).toEqual(['correo', 'person_id']);
+    expect(
+      personFieldsDeclared({ screen: 'SCR-01', view: 'RV-03', allowedFields: fields }),
+    ).toEqual(['email', 'correo', 'person_id']);
+    expect(
+      personFieldsDeclared({ screen: 'SCR-08', view: 'RV-01', allowedFields: fields }),
+    ).toEqual(['email', 'correo', 'person_id']);
+  });
 });
 
 describe('PR-APP-07: inspección de valores renderizados, no de textos fijos', () => {

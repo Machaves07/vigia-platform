@@ -251,9 +251,25 @@ function personCounters(root: HTMLElement): string[] {
 const PERSON_FIELD_NAME =
   /person|persona|track|face|rostro|worker|trabajador|employee|empleado|document|cedula|email|correo|phone|telefono/;
 
+/**
+ * Excepción cerrada: el correo de la **cuenta de la plataforma** (no de una persona observada) es
+ * campo de RV-01 (cuenta) y RV-02 (usuarios) de SCR-01 en `domain-entities.md` §3. Solo esas dos
+ * vistas pueden declarar `email`, con ese nombre exacto; cualquier otro nombre de persona sigue
+ * prohibido también en ellas.
+ */
+const ACCOUNT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  'SCR-01:RV-01': ['email'],
+  'SCR-01:RV-02': ['email'],
+};
+
 /** Campos de `allowedFields` con nombre de persona observada. */
-export function personFieldsDeclared(registration: ViewRegistration): string[] {
-  return registration.allowedFields.filter((field) => PERSON_FIELD_NAME.test(fold(field)));
+export function personFieldsDeclared(
+  registration: Pick<ViewRegistration, 'screen' | 'view' | 'allowedFields'>,
+): string[] {
+  const account = ACCOUNT_FIELDS[`${registration.screen}:${registration.view}`] ?? [];
+  return registration.allowedFields.filter(
+    (field) => !account.includes(field) && PERSON_FIELD_NAME.test(fold(field)),
+  );
 }
 
 /**
