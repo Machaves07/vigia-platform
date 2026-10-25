@@ -25,12 +25,12 @@ import { FakeClock } from '../../support/fakeClock';
 import { meResponse, USER_A } from '../../support/session';
 
 export const ORIGIN = 'http://localhost';
-export const INSTANT = '2026-01-01T12:00:00.000Z';
+const INSTANT = '2026-01-01T12:00:00.000Z';
 /** Tope holgado de las esperas: no es lo que se prueba. */
 export const WAIT = { timeout: 10_000 };
 
 export const ORGANIZATION = '0190a1b2-0000-7000-8000-0000000000f1';
-export const PROVIDER_ORGANIZATION = '0190a1b2-0000-7000-8000-0000000000f9';
+const PROVIDER_ORGANIZATION = '0190a1b2-0000-7000-8000-0000000000f9';
 export const PLANT = '0190a1b2-0000-7000-8000-0000000000a1';
 export const CONCESSION = '0190a1b2-0000-7000-8000-0000000000c1';
 export const OTHER_CONCESSION = '0190a1b2-0000-7000-8000-0000000000c2';
@@ -130,7 +130,7 @@ export function apiError(code: string, status: number, messageEs: string) {
 }
 
 /** `GET /me` del gerente del cliente (`concessions.read`, `concessions.revoke`). */
-export function clientMe(clock: FakeClock): MeResponse {
+function clientMe(clock: FakeClock): MeResponse {
   return meResponse({
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
