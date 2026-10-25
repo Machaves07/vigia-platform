@@ -50,3 +50,19 @@ de navegador incompatible. El arnés no sustituye el acceso por cookies sembrada
 o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestructura
 de autenticación de cada cuenta; los recorridos funcionales por rol pertenecen a
 VIG-332 y VIG-333.
+
+## Recorridos del coordinador y del mando
+
+```sh
+npm run build
+npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts
+```
+
+Estos recorridos usan los tres proyectos de escritorio; los de tableta se omiten
+porque no pertenecen a este guion. Conservan la guarda de CSP del arnés. El mundo
+usa el perfil de nodos `u04-e2e` y la semilla `449`, reserva dos hallazgos distintos
+por motor y prepara una licencia sintética, una política por las rutas reales del
+instalador bajo concesión y un paquete de mes vencido mediante el compositor real.
+La cuenta del mando nace con alcance de una sola zona. Las clasificaciones, la
+evidencia PNG, las firmas, las resoluciones y los compromisos del recorrido se
+registran desde el navegador, sin interceptar ni simular la API.
