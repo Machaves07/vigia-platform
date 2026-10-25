@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.e2e_u05 import __main__ as cli
 from tests.e2e_u05.world import assert_no_leaks, private_json, published_manifest
 
 
@@ -74,3 +75,21 @@ def test_manifest_collision_never_deletes_another_run(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError), published_manifest(path, {}):
         pytest.fail("No debe entrar en el mundo de otra ejecución")
     assert path.read_text() == "otra ejecución"
+
+
+def test_world_startup_diagnostic_never_includes_exception_payload(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    value = secrets.token_hex(20)
+
+    def unavailable() -> None:
+        raise ValueError(value)
+
+    monkeypatch.setattr(cli, "world", unavailable)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_: None)
+    assert cli.main() == 1
+    output = capsys.readouterr()
+    assert output.out.startswith("VIGIA_WORLD_FAILURE ValueError (")
+    assert "unavailable:" in output.out
+    assert value not in output.out
+    assert output.err == ""

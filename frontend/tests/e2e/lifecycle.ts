@@ -40,6 +40,11 @@ export async function startWorld(): Promise<void> {
       let output = '';
       processChild.stdout.on('data', (chunk: Buffer) => {
         output = (output + chunk.toString()).slice(-4096);
+        const failure = /VIGIA_WORLD_FAILURE ([^\r\n]+)/.exec(output)?.[1];
+        if (failure !== undefined) {
+          clearTimeout(timer);
+          reject(new Error(`Fallo del mundo: ${failure}`));
+        }
         if (output.includes('VIGIA_WORLD_READY')) {
           clearTimeout(timer);
           resolve();
@@ -59,7 +64,8 @@ export async function startWorld(): Promise<void> {
       );
     });
   } catch (error) {
-    await stopWorld();
+    // La limpieza no debe ocultar el diagnóstico seguro del arranque.
+    await stopWorld().catch(() => undefined);
     throw error;
   }
 }

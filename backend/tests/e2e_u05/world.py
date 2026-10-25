@@ -22,6 +22,7 @@ import pytest
 
 from tests.conformance.mtls_proxy import server_tls
 from tests.conformance.platform_target import BACKEND, WALL, Provisioner, platform_stack
+from tests.e2e_u05.commissioning import commissioning_clips
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
 from tests.integration.test_u04_end_to_end import (
     _expected_subjects,
@@ -254,6 +255,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             work=work,
         )
         assert_functional(analysis, ledger_check(target, fleet, set(result["journal"]["emitted"])))
+        commissioning_clips(target, fleet)
         expected = _expected_subjects(target, fleet.organization_id)
         assert expected["finding"] and expected["detection"], "La carga no llenó bandeja y cola"
         wait_until(
