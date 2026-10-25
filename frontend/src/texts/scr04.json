@@ -7,7 +7,7 @@
   "scr04.catalog.declared_text": "Texto declarado",
   "scr04.catalog.predicate": "Predicado",
   "scr04.catalog.use_template": "Usar plantilla de esta familia",
-  "scr04.catalog.predicate_help": "Componga all_of con presencia afirmada y las señales de la familia; min_duration_ms expresa el umbral temporal en milisegundos. No se admiten conteos ni ausencia de personas.",
+  "scr04.catalog.predicate_help": "Componga all_of con presencia afirmada y las señales de la familia; min_duration_ms expresa el umbral temporal en milisegundos. No se admiten conteos de personas ni la negación de su presencia.",
   "scr04.catalog.predicate_invalid": "El predicado no cumple la gramática de esta familia en el contrato.",
   "scr04.catalog.reason": "Motivo del cambio",
   "scr04.catalog.declare": "Declarar estándar",
