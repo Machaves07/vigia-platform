@@ -80,6 +80,14 @@ export default defineConfig(({ mode }) => {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
     server: {
+      fs: {
+        // SCR-03 distribuye el mismo archivo cuyo hash publica el backend, sin duplicarlo.
+        allow: [
+          root,
+          fileURLToPath(new URL('../backend/tools/vigia_verify.py', import.meta.url)),
+          `${fileURLToPath(new URL('../backend/tools/vigia_verify.py', import.meta.url))}?url`,
+        ],
+      },
       port: 5173,
       strictPort: true,
       proxy: apiMode === 'real' ? { '/': apiProxy(parseApiProxy(env.VITE_API_PROXY)) } : {},

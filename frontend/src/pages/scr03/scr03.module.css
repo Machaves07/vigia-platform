@@ -1,0 +1,25 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  max-width: 80rem;
+}
+
+.page form,
+.page label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.page table {
+  width: 100%;
+  text-align: start;
+}
+
+.page pre,
+.page code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
