@@ -38,7 +38,9 @@ function ZoneTransparency({ zoneId }: { readonly zoneId: string }) {
   return (
     <main className={styles.page}>
       <nav aria-label={text('scr16.entry.zones')}>
-        <Link to="/transparency">{text('scr16.entry.back')}</Link>
+        <Link className={styles.backLink} to="/transparency">
+          {text('scr16.entry.back')}
+        </Link>
       </nav>
       <h1>{text('navigation.scr16')}</h1>
       {zone === undefined ? null : (

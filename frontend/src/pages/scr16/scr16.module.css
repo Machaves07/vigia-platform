@@ -81,7 +81,8 @@
 }
 
 .button,
-.zoneLink {
+.zoneLink,
+.backLink {
   display: inline-flex;
   align-items: center;
   min-height: var(--touch-target-min);

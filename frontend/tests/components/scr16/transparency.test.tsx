@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { render, screen, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import Entry from '@/pages/scr16/entry';
 import Zone from '@/pages/scr16/zone';
@@ -19,13 +19,20 @@ import { apiError } from '../../msw/handlers';
 import { server } from '../../msw/server';
 import { AGREEMENT, INSTANT, transparency, transparencyFixture, WAIT, ZONE } from './support';
 
+// vitest no procesa los módulos CSS (`styles` llega vacío): cada clase se llama como en el fuente,
+// para poder inyectar `scr16.module.css` tal cual en la prueba de tableta.
+vi.mock('@/pages/scr16/scr16.module.css', () => ({
+  default: new Proxy({}, { get: (_target, key) => key }),
+}));
+
 /** Hojas de estilo reales de la aplicación: jsdom no procesa el CSS importado. */
-function stylesheet(name: string): string {
-  const styles = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src', 'styles');
-  return readFileSync(join(styles, name), 'utf8');
+function stylesheet(...path: string[]): string {
+  const src = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'src');
+  return readFileSync(join(src, ...path), 'utf8');
 }
-const baseCss = stylesheet('base.css');
-const tokensCss = stylesheet('tokens.css');
+const baseCss = stylesheet('styles', 'base.css');
+const tokensCss = stylesheet('styles', 'tokens.css');
+const screenCss = stylesheet('pages', 'scr16', 'scr16.module.css');
 
 const URL_TRANSPARENCY = `http://localhost/zones/${ZONE}/transparency`;
 
@@ -207,7 +214,26 @@ describe('SCR-16 vista de transparencia', { timeout: 30_000 }, () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
-  it('en tableta (768 × 1024) cada control mide al menos 44 px', async () => {
+  it.each([
+    [
+      'la vista de zona',
+      async () =>
+        (
+          await renderZone(
+            transparency({ pending_confirmation_for_me: '0190a1b2-1616-7000-8000-0000000000a2' }),
+          )
+        ).container,
+    ],
+    [
+      'el inicio',
+      async () => {
+        const fixture = await transparencyFixture('/transparency');
+        const { container } = render(<Entry />, { wrapper: fixture.Wrapper });
+        await screen.findByRole('link', { name: 'Zona sintética' }, WAIT);
+        return container;
+      },
+    ],
+  ])('en tableta (768 × 1024) cada control de %s mide al menos 44 px', async (_name, mount) => {
     const width = window.innerWidth;
     const height = window.innerHeight;
     window.innerWidth = 768;
@@ -215,18 +241,25 @@ describe('SCR-16 vista de transparencia', { timeout: 30_000 }, () => {
     const touch = /--touch-target-min:\s*([^;]+);/.exec(tokensCss)?.[1]?.trim();
     expect(touch).toBe('44px');
     const style = document.createElement('style');
-    style.textContent = baseCss.replaceAll('var(--touch-target-min)', touch ?? '0');
+    style.textContent = `${baseCss}\n${screenCss}`.replaceAll(
+      'var(--touch-target-min)',
+      touch ?? '0',
+    );
     document.head.append(style);
     try {
-      const { container } = await renderZone(
-        transparency({ pending_confirmation_for_me: '0190a1b2-1616-7000-8000-0000000000a2' }),
-      );
+      const container = await mount();
       const controls = [...container.querySelectorAll('a, button, select, input, [role="button"]')];
-      expect(controls.length).toBeGreaterThanOrEqual(4);
+      expect(controls.length).toBeGreaterThanOrEqual(2);
+      // `min-height` no se aplica a una caja en línea: en el navegador un enlace sin clase mide
+      // la altura de su línea (19 px), aunque jsdom informe los 44 px de `base.css`.
       const small = controls
         .filter((control) => {
           const computed = getComputedStyle(control);
-          return parseFloat(computed.minHeight) < 44 || parseFloat(computed.minWidth) < 44;
+          return (
+            computed.display === 'inline' ||
+            parseFloat(computed.minHeight) < 44 ||
+            parseFloat(computed.minWidth) < 44
+          );
         })
         .map((control) => control.outerHTML.slice(0, 80));
       expect(small).toEqual([]);
