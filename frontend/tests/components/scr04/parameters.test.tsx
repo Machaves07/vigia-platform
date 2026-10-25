@@ -1,8 +1,9 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { axe } from 'vitest-axe';
 import Page from '@/pages/scr04/parameters';
+import { ParameterView } from '@/pages/scr04/parameters/ParameterView';
 import {
   bodyIssues,
   parametersPort,
@@ -15,7 +16,7 @@ import { text } from '@/texts';
 import { server } from '../../msw/server';
 import { assertNoPersonData } from '../../support/viewProperties';
 import views from '../../views/scr04_parameters';
-import { CAMERA, catalog, errorResponse, REASON, renderPage, WAIT, ZONE } from './support';
+import { CAMERA, catalog, errorResponse, INSTANT, REASON, renderPage, WAIT, ZONE } from './support';
 
 async function ready() {
   const view = await renderPage(<Page />);
@@ -40,6 +41,29 @@ function submit() {
 }
 
 describe('SCR-04 parámetros', { timeout: 60_000 }, () => {
+  it.each([
+    ['America/Bogota', '02/03/2026, 07:00:00', '(America/Bogota, UTC-05:00)'],
+    ['Europe/Madrid', '02/03/2026, 13:00:00', '(Europe/Madrid, UTC+01:00)'],
+  ])('presenta la emisión en %s con zona y desplazamiento visibles', (timeZone, local, zone) => {
+    const { container } = render(<ParameterView data={catalog()} timeZone={timeZone} />);
+    const instant = container.querySelector('time');
+    expect(instant?.getAttribute('datetime')).toBe(INSTANT);
+    expect(instant?.textContent).toBe(local);
+    expect(screen.getByText(zone)).toBeTruthy();
+  });
+
+  it.each([
+    ['blocked_term_category', '__proto__'],
+    ['blocked_term_origin', 'constructor'],
+    ['blocked_term_form', 'toString'],
+    ['__proto__', 'constructor'],
+    ['constructor', 'name'],
+    ['toString', 'name'],
+    ['grupo_desconocido', 'valor_desconocido'],
+  ])('etiqueta desconocida %s / %s usa el fallback común', (group, value) => {
+    expect(screenLabel(group, value)).toBe(text('common.unknown'));
+  });
+
   it.each(Object.entries(views))(
     'RV-07 %s no filtra campos inyectados',
     (_name, view) => {

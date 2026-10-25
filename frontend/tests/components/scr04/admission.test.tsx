@@ -1,14 +1,15 @@
-import { act, fireEvent, screen, within, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { axe } from 'vitest-axe';
 import Page from '@/pages/scr04/admissions';
+import { AdmissionView } from '@/pages/scr04/admissions/AdmissionView';
 import { CRITERIA, isRecordedRejection, screenLabel } from '@/ports/scr04Parameters';
 import { PortError } from '@/ports/base';
 import { behaviourFor } from '@/ports/errors/map';
 import { text } from '@/texts';
 import { server } from '../../msw/server';
-import { admission, errorResponse, PLANT, renderPage, WAIT } from './support';
+import { admission, errorResponse, INSTANT, PLANT, renderPage, WAIT } from './support';
 
 async function answer(negative: string | null) {
   for (const criterion of CRITERIA) {
@@ -26,6 +27,17 @@ async function answer(negative: string | null) {
 }
 
 describe('SCR-04 admisión', { timeout: 60_000 }, () => {
+  it.each([
+    ['America/Bogota', '02/03/2026, 07:00:00', '(America/Bogota, UTC-05:00)'],
+    ['Europe/Madrid', '02/03/2026, 13:00:00', '(Europe/Madrid, UTC+01:00)'],
+  ])('presenta la evaluación en %s con zona y desplazamiento visibles', (timeZone, local, zone) => {
+    const { container } = render(<AdmissionView data={admission()} timeZone={timeZone} />);
+    const instant = container.querySelector('time');
+    expect(instant?.getAttribute('datetime')).toBe(INSTANT);
+    expect(instant?.textContent).toBe(local);
+    expect(screen.getByText(zone)).toBeTruthy();
+  });
+
   it.each([
     [400, 'invalid_request', 'catalog_admission_rejected', true],
     [422, 'invalid_request', 'catalog_admission_rejected', false],

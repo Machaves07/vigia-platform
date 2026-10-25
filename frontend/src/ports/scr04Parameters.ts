@@ -1,8 +1,6 @@
 /** Puerto de parámetros, admisión y vocabulario; el servidor autoriza y registra cada cambio. */
 import type { components } from '@/client/schema';
-import { labels } from '@/contracts';
-import platform from '../../../backend/resources/labels.platform.es.json';
-import loop from '../../../backend/resources/labels.loop.es.json';
+import { label } from '@/texts/labels';
 import type { Notice } from '@/components/NoticeStack/notice';
 import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
@@ -120,12 +118,7 @@ export async function readAdmissions(
 }
 
 export function screenLabel(group: string, value: string): string {
-  const tables: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-    ...labels,
-    ...platform,
-    ...loop,
-  };
-  return tables[group]?.[value] ?? '—';
+  return label(group, value);
 }
 
 export function reasonValid(reason: string, vocabulary = false): boolean {

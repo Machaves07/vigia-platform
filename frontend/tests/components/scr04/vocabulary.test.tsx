@@ -1,8 +1,9 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { axe } from 'vitest-axe';
 import Page from '@/pages/scr04/vocabulary';
+import { VocabularyView } from '@/pages/scr04/vocabulary/VocabularyView';
 import { text } from '@/texts';
 import { server } from '../../msw/server';
 import { errorResponse, INSTANT, RECORD, REASON, renderPage, WAIT } from './support';
@@ -21,6 +22,43 @@ function submit() {
 }
 
 describe('SCR-04 vocabulario', { timeout: 60_000 }, () => {
+  // Regresión PR-APP-07: FC_SEED=3141592, RV-07 con category='__proto__'.
+  it.each(['__proto__', 'constructor', 'toString'])(
+    'RV-07 renderiza campos libres %s con el fallback común, sin heredar etiquetas',
+    (value) => {
+      render(
+        <VocabularyView
+          data={{
+            list_version: 1,
+            lemmatizer_version: 'sintetico',
+            effective_from: INSTANT,
+            record_id: RECORD,
+            declared_names: [],
+            terms: [
+              {
+                term_id: RECORD,
+                category: value,
+                form: value,
+                origin: value,
+                value: 'término sintético',
+                lemma: null,
+                suggestion_es: 'Descripción observable',
+                added_in_version: 1,
+              },
+            ],
+          }}
+        />,
+      );
+      expect(screen.getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
+        'término sintético',
+        text('common.unknown'),
+        text('common.unknown'),
+        text('common.unknown'),
+        'Descripción observable',
+      ]);
+    },
+  );
+
   it('un cambio sin motivo no se envía; con motivo crea un registro inmutable y axe limpio', async () => {
     const view = await renderPage(<Page />, '/admin/vocabulary');
     await screen.findByRole('table', { name: text('scr04.vocabulary.title') }, WAIT);
