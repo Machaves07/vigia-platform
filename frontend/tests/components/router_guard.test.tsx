@@ -3,7 +3,8 @@
  *
  * - Toda ruta sin permiso alcanzada por URL pinta exactamente el mismo árbol que una ruta que no
  *   existe (se compara el DOM serializado, no los textos), y no carga la porción de la pantalla.
- * - Con permiso, la ruta pinta su página (hoy, el relevo `unavailable`).
+ * - Con permiso, la ruta carga su grupo. Aquí las páginas se sustituyen por una vista sintética:
+ *   sus consultas y formularios reales se prueban en components/scrNN/ con sus proveedores.
  * - `/` lleva al panel de inicio del rol más operativo; sin sesión, al inicio de sesión.
  * - Precargar el inicio y sus enlazadas, y navegar por ellas, no dispara ninguna petición (MSW
  *   cuenta cero).
@@ -15,7 +16,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router';
 import type { NavigationPrincipal } from '@/app/navigation';
 import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from '@/app/router';
 import { SCREENS } from '@/app/screens';
-import { Bell } from '@/pages/scr15/Bell';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { createSessionStore, SessionProvider } from '@/state/session';
 import { text } from '@/texts';
@@ -76,6 +76,19 @@ const onRequest = ({ request }: { request: Request }) => {
 beforeEach(() => {
   requests = [];
   server.events.on('request:start', onRequest);
+  // El enrutador no monta los proveedores de las pantallas de datos. Aislar todos los grupos
+  // evita que el avance de un relevo a una página real cambie el contrato de estas pruebas.
+  for (const descriptor of SCREENS) {
+    for (const group of descriptor.route_groups.filter((entry) => entry.access !== 'public')) {
+      vi.spyOn(group, 'load').mockResolvedValue({
+        default: () => (
+          <main>
+            <h1>{text(descriptor.title_text)}</h1>
+          </main>
+        ),
+      });
+    }
+  }
 });
 
 afterEach(() => {
@@ -141,19 +154,6 @@ describe('con permiso, cada grupo pinta su página', () => {
   };
 
   it.each(open)('%s', async (_name, descriptor, path) => {
-    if (descriptor.screen_id === 'SCR-03') {
-      // SCR-03 ya no es un relevo. Aquí se prueba el enrutador sin proveedores de datos;
-      // sus páginas reales, consultas y acciones se recorren en components/scr03/.
-      const group = descriptor.route_groups.find((entry) => entry.paths.includes(path));
-      if (group === undefined) throw new Error('La ruta no tiene grupo.');
-      vi.spyOn(group, 'load').mockResolvedValue({
-        default: () => (
-          <main>
-            <h1>{text(descriptor.title_text)}</h1>
-          </main>
-        ),
-      });
-    }
     const missing = await renderAt(everything, NOT_FOUND);
     missing.unmount();
     const page = await renderAt(everything, concrete(path));
@@ -233,7 +233,7 @@ describe('precarga solo de código (PAT-APP-REN-02)', () => {
   });
 });
 
-describe('estados comunes y campana de relevo', () => {
+describe('estados comunes y precarga de campana', () => {
   it('loading es un esqueleto sin números; empty y error con su texto', () => {
     const loading = render(<ScreenState state="loading" />);
     expect(loading.container.textContent).not.toMatch(/\d/);
@@ -248,15 +248,9 @@ describe('estados comunes y campana de relevo', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('la campana de relevo enlaza las notificaciones sin pedir nada', async () => {
-    const router = createMemoryRouter([{ path: '/', element: <Bell /> }]);
-    render(<RouterProvider router={router} />);
-    const link = await screen.findByRole(
-      'link',
-      { name: text('navigation.bell') },
-      { timeout: 10_000 },
-    );
-    expect(link.getAttribute('href')).toBe('/notifications');
+  it('precargar el código de la campana no pide datos antes de montarla', async () => {
+    const module = await import('@/pages/scr15/Bell');
+    expect(typeof module.Bell).toBe('function');
     expect(requests).toEqual([]);
   });
 });

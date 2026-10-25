@@ -9,7 +9,8 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { Link } from 'react-router';
 import { axe } from 'vitest-axe';
 
 import { connectionMessageKey } from '@/app/ConnectionNotice';
@@ -35,6 +36,12 @@ import {
   syntheticScreen,
   WAIT,
 } from '../support/appShell';
+
+// Aquí se aíslan los avisos de la sesión y la conexión: la campana ya es una consulta viva.
+// SCR-15 recorre la campana real, también dentro de AppShell, en components/scr15/bell.test.tsx.
+vi.mock('@/pages/scr15/Bell', () => ({
+  Bell: () => <Link to="/notifications">{text('navigation.bell')}</Link>,
+}));
 
 const TEST = { timeout: 60_000 };
 const DRAFT = 'Observación sintética del formulario';
