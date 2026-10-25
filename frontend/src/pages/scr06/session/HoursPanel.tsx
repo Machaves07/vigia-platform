@@ -13,7 +13,10 @@ import { text } from '@/texts';
 
 import styles from './session.module.css';
 
-export function HoursPanel({ session }: { readonly session: WalkTestSession }) {
+/** Lo que el panel pinta: la sesión en curso o el acta cerrada traen los mismos dos campos. */
+type ZoneHours = Pick<WalkTestSession, 'steps_summary' | 'total_duration_ms'>;
+
+export function HoursPanel({ session }: { readonly session: ZoneHours }) {
   const headingId = useId();
   return (
     <section className={styles.hours} aria-labelledby={headingId}>

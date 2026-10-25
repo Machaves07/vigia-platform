@@ -1,6 +1,17 @@
-/** SCR-06, grupo `record`: relevo de VIG-290 que la tarea de la pantalla sustituye. */
-import { RelayPage } from '@/pages/shared/RelayPage';
+/**
+ * Grupo `record` de SCR-06 (IF-13 paso 7): el acta de comisionamiento cerrada y su documento a
+ * demanda. El `Clock` del armazón se inyecta cuando exista (VIG-320); hasta entonces se usa el
+ * reloj del sistema, el mismo que usan `ports.base` y `state.query`.
+ */
+import { useParams } from 'react-router';
+
+import { NotAvailableInScope } from '@/pages/shared/ScreenState';
+import { systemClock } from '@/state/clock';
+
+import { RecordScreen } from './RecordScreen';
 
 export default function Page() {
-  return <RelayPage screen="scr06" />;
+  const recordId = useParams().record_id;
+  if (recordId === undefined || recordId === '') return <NotAvailableInScope />;
+  return <RecordScreen key={recordId} recordId={recordId} clock={systemClock} />;
 }

@@ -7,7 +7,7 @@
  *   da el mapa cerrado de errores, no la pantalla.
  * - Los estados comunes son `ScreenState`: el error lleva el `correlation_id` del servidor.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -25,6 +25,7 @@ import {
   currentWalkTest,
   currentWalkTestHandler,
   resetTransport,
+  row,
   renderScreen,
   session,
   type CapturedRequest,
@@ -232,5 +233,84 @@ describe('estados comunes', () => {
     expect(
       await screen.findByText(label('catalog_detail_code', 'catalog_mounting_gate_pending')),
     ).toBeTruthy();
+  });
+});
+
+describe('reejecución por regresión y vista en vivo (VIG-324)', { timeout: 30_000 }, () => {
+  const WAIT = { timeout: 10_000 };
+  const RERUN_LABEL = text('scr06.rerun.submit');
+
+  it('abre la reejecución con el cuerpo exacto y retoma la sesión de las filas afectadas', async () => {
+    const calls: CapturedRequest[] = [];
+    let opened = false;
+    server.use(
+      http.get(mswPath('/zones/:zone_id/walk-tests/current'), () =>
+        HttpResponse.json(
+          currentWalkTest(opened ? session({ kind: 'regression_rerun', rows: [row()] }) : null),
+        ),
+      ),
+      captureHandler({
+        method: 'post',
+        path: '/zones/{zone_id}/walk-tests/regression-rerun',
+        calls,
+        response: () => {
+          opened = true;
+          return HttpResponse.json(session({ kind: 'regression_rerun', rows: [row()] }), {
+            status: 201,
+          });
+        },
+      }),
+    );
+    openScreen();
+    fireEvent.click(await screen.findByRole('button', { name: RERUN_LABEL }, WAIT));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    }, WAIT);
+    expect(calls[0]?.url).toBe(`/zones/${ZONE_ID}/walk-tests/regression-rerun`);
+    expect(calls[0]?.body).toEqual({ passes_per_cell: 3 });
+    expect(
+      await screen.findByText(
+        label('walk_test_kind', 'regression_rerun'),
+        { selector: '[data-part="session_kind"]' },
+        WAIT,
+      ),
+    ).toBeTruthy();
+  });
+
+  it('el rechazo del servidor se ancla al panel de la reejecución', async () => {
+    server.use(
+      currentWalkTestHandler(currentWalkTest(null)),
+      http.post(mswPath('/zones/:zone_id/walk-tests/regression-rerun'), () =>
+        apiError('conflict', 409, { detailCode: 'catalog_walk_test_in_progress' }),
+      ),
+    );
+    openScreen();
+    fireEvent.click(await screen.findByRole('button', { name: RERUN_LABEL }, WAIT));
+    const panel = screen.getByRole('region', { name: text('scr06.rerun.title') });
+    await waitFor(() => {
+      expect(panel.querySelector('[role="alert"]')?.getAttribute('data-code')).toBe('conflict');
+    }, WAIT);
+    expect(
+      within(panel).getByText(label('catalog_detail_code', 'catalog_walk_test_in_progress')),
+    ).toBeTruthy();
+  });
+
+  it('con la sesión en curso ofrece la vista en vivo sin pedir ningún token al montar', async () => {
+    const tokens: CapturedRequest[] = [];
+    server.use(
+      currentWalkTestHandler(currentWalkTest(session())),
+      captureHandler({
+        method: 'post',
+        path: '/zones/{zone_id}/live-view-token',
+        calls: tokens,
+        response: () => HttpResponse.json({}, { status: 500 }),
+      }),
+    );
+    openScreen();
+    expect(
+      await screen.findByRole('region', { name: text('live_view.region_label') }, WAIT),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: text('live_view.open') })).toBeTruthy();
+    expect(tokens).toHaveLength(0);
   });
 });
