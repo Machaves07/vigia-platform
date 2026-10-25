@@ -49,7 +49,6 @@ export function QrCode({ enrollment }: { readonly enrollment: EnrollmentView }):
           role="img"
           aria-label={text('scr01.enroll.qr')}
           viewBox={shape.viewBox}
-          xmlns="http://www.w3.org/2000/svg"
         >
           <path d={shape.d} />
         </svg>
