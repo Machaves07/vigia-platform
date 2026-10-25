@@ -18,6 +18,7 @@ import { text } from '@/texts';
 import { scenario } from '../msw/scenario';
 import { faults, restorePlatform } from '../msw/scenarios/fs_app';
 import { server } from '../setup/msw';
+import { WAIT } from '../support/appShell';
 import {
   exportDraft,
   exportForm,
@@ -70,7 +71,11 @@ describe('FS-APP-01 · la API no responde durante 2 minutos', { timeout: 120_000
     expect(connection.getSnapshot().connection.state).toBe('offline');
 
     // Aviso permanente con la hora del último dato recibido y las escrituras deshabilitadas.
-    const notice = await screen.findByRole('region', { name: text('app_shell.connection.label') });
+    const notice = await screen.findByRole(
+      'region',
+      { name: text('app_shell.connection.label') },
+      WAIT,
+    );
     expect(notice.dataset.state).toBe('offline');
     expect(within(notice).getByRole('status').dataset.textKey).toBe('app_shell.connection.offline');
     expect(notice.querySelector('[data-part="last_data"] time')?.getAttribute('datetime')).toBe(

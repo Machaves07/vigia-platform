@@ -14,7 +14,6 @@ import {
   TIMEOUT_MS,
   type RequestKind,
 } from '@/ports/base';
-import { FAILURE_WINDOW_MS } from '@/state/connection/reducer';
 
 import { FakeClock } from '../support/fakeClock';
 import {
@@ -147,7 +146,7 @@ describe('PR-APP-18', () => {
               // Con 4 fallos dentro de la ventana del circuito (U05-H-10), offline.
               const firstFailure = seeded > 0 ? 0 : (calls[0]?.endedAt ?? 0);
               const lastEnd = calls.at(-1)?.endedAt ?? Infinity;
-              if (seeded + calls.length >= 4 && lastEnd - firstFailure < FAILURE_WINDOW_MS) {
+              if (seeded + calls.length >= 4 && lastEnd - firstFailure < 60_000) {
                 expect(connection.getSnapshot().connection.state).toBe('offline');
               }
             } else {

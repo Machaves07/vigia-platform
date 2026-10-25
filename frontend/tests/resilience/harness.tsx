@@ -34,14 +34,14 @@ import { flush } from '../support/ports';
 import { SCENARIOS, type ScenarioId } from './scenarios';
 
 /** Semilla de la corrida (`FC_SEED`, resuelta por `vitest.config.ts`). */
-export function runSeed(): number {
+function runSeed(): number {
   const seed = parseSeed(process.env.FC_SEED);
   if (seed === null) throw new Error('Falta FC_SEED: vitest.config.ts debe resolver la semilla.');
   return seed;
 }
 
 /** Semilla del escenario: la de la corrida combinada con su identificador (FNV-1a de 32 bits). */
-export function scenarioSeed(id: ScenarioId, seed = runSeed()): number {
+function scenarioSeed(id: ScenarioId, seed = runSeed()): number {
   let hash = 0x811c9dc5;
   for (const char of id) {
     hash ^= char.codePointAt(0) ?? 0;
@@ -82,7 +82,7 @@ export function syntheticText(prefix: string): fc.Arbitrary<string> {
   return fc.stringMatching(/^[a-z]{4,12}$/).map((suffix) => `${prefix} ${suffix}`);
 }
 
-export interface TrafficEntry {
+interface TrafficEntry {
   readonly method: string;
   readonly path: string;
   /** Lo que `note` devolvió al salir la petición (p. ej. el estado del circuito). */

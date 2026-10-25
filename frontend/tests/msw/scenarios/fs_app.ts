@@ -56,8 +56,10 @@ interface Hung {
 export const faults = {
   /** FS-APP-01: la plataforma (API y estáticos del mismo origen) no responde. */
   platformDown: false,
-  /** FS-APP-02 y 03: cuántas escrituras más fallan y con qué `retry_after_seconds`. */
+  /** FS-APP-02: cuántas escrituras más fallan; FS-APP-02 y 03: `retry_after_seconds`. */
   writeFailures: 0,
+  /** FS-APP-03: el límite por origen rechaza toda petición con sesión. */
+  rateLimited: false,
   retryAfterSeconds: 0,
   /** FS-APP-04: el almacén de evidencias no está disponible. */
   storageDown: false,
@@ -81,6 +83,7 @@ export function resetFaults(): void {
   for (const request of faults.hung.splice(0)) request.release();
   faults.platformDown = false;
   faults.writeFailures = 0;
+  faults.rateLimited = false;
   faults.retryAfterSeconds = 0;
   faults.storageDown = false;
   faults.evidenceUrlSeconds = 300;
@@ -186,16 +189,30 @@ const platformTimeout: HttpHandler[] = [
   }),
 ];
 
-/** FS-APP-02 y 03: `POST /accreditation/exports` falla `writeFailures` veces con `code`. */
-function failingExportWrite(code: 'temporarily_unavailable' | 'rate_limited', status: number) {
-  return [
-    at('request_export_accreditation_exports_post', () => {
-      if (faults.writeFailures <= 0) return undefined;
-      faults.writeFailures -= 1;
-      return apiError(code, status, { retryAfterSeconds: faults.retryAfterSeconds });
-    }),
-  ];
-}
+/** FS-APP-02: `POST /accreditation/exports` responde `503 temporarily_unavailable` `writeFailures` veces. */
+const writeUnavailable: HttpHandler[] = [
+  at('request_export_accreditation_exports_post', () => {
+    if (faults.writeFailures <= 0) return undefined;
+    faults.writeFailures -= 1;
+    return apiError('temporarily_unavailable', 503, {
+      retryAfterSeconds: faults.retryAfterSeconds,
+    });
+  }),
+];
+
+/**
+ * FS-APP-03: con `rateLimited`, el límite por origen de U-02 rechaza con `429 rate_limited` toda
+ * petición con sesión, lecturas y escrituras; la sonda pública no pasa por él.
+ */
+const rateLimited: HttpHandler[] = [
+  http.all('*', ({ request }) => {
+    const url = new URL(request.url);
+    if (!faults.rateLimited || url.origin !== FS_ORIGIN || url.pathname === '/health/live') {
+      return undefined;
+    }
+    return apiError('rate_limited', 429, { retryAfterSeconds: faults.retryAfterSeconds });
+  }),
+];
 
 /** FS-APP-04: la URL de lectura y la concesión de subida responden `storage_unavailable`. */
 const storageUnavailable: HttpHandler[] = [
@@ -278,8 +295,8 @@ const newVersion: HttpHandler[] = [
 export default {
   fs_app_base: base,
   fs_app_01_platform_timeout: platformTimeout,
-  fs_app_02_write_unavailable: failingExportWrite('temporarily_unavailable', 503),
-  fs_app_03_rate_limited: failingExportWrite('rate_limited', 429),
+  fs_app_02_write_unavailable: writeUnavailable,
+  fs_app_03_rate_limited: rateLimited,
   fs_app_04_storage_unavailable: storageUnavailable,
   fs_app_05_expiring_evidence_url: expiringEvidenceUrl,
   fs_app_06_session_expired: sessionExpired,

@@ -22,6 +22,8 @@ import pytest
 
 from tests.conformance.mtls_proxy import server_tls
 from tests.conformance.platform_target import BACKEND, WALL, Provisioner, platform_stack
+from tests.e2e_u05.faults import fault_control
+from tests.fault_proxy import fault_proxy
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
 from tests.integration.test_u04_end_to_end import (
     _expected_subjects,
@@ -218,9 +220,11 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             platform_stack(postgres, localstack, directory, aws_url=aws.url, ca_bundle=tls.ca_file)
         )
         port = free_port()
-        app = stack.enter_context(
-            balancer_process("app", [f"http://127.0.0.1:{port}"], tls, directory)
-        )
+        # Entre el balanceador de la aplicación y la API, el intermediario de fallos de U-02: los
+        # escenarios FS-APP lo congelan o lo cortan desde Playwright (``fault_control_url``).
+        api_faults = stack.enter_context(fault_proxy("127.0.0.1", port))
+        fault_url = stack.enter_context(fault_control(api_faults))
+        app = stack.enter_context(balancer_process("app", [api_faults.url], tls, directory))
         platform.environ.update(
             VIGIA_STATIC_DIR=str(static),
             VIGIA_PUBLIC_ORIGIN=app.url,
@@ -279,6 +283,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             "zone_ids": [str(value) for value in fleet.zone_ids],
             "non_productive_zone_id": str(non_productive),
             "concession_id": str(fleet.console.concession_id),
+            "fault_control_url": fault_url,
         }
         try:
             with published_manifest(manifest, document):

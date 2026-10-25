@@ -14,7 +14,7 @@ const OPEN_MS = 30_000;
  * separados 2, 4 y 8 s ponen 44 s entre el primer fallo y el cuarto. Con 30 s, una API que no
  * responde nunca abría el circuito (FS-APP-01).
  */
-export const FAILURE_WINDOW_MS = 60_000;
+const FAILURE_WINDOW_MS = 60_000;
 const FAILURE_THRESHOLD = 4;
 
 interface Circuit {

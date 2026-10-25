@@ -15,6 +15,7 @@ import { text } from '@/texts';
 import { scenario } from '../msw/scenario';
 import { faults, FS_EXPORT } from '../msw/scenarios/fs_app';
 import { server } from '../setup/msw';
+import { WAIT } from '../support/appShell';
 import {
   countdownText,
   exportDraft,
@@ -53,9 +54,11 @@ describe(
       submitExportRequest();
 
       for (let attempt = 1; attempt <= 2; attempt += 1) {
-        const retry = await screen.findByRole('button', {
-          name: text('components_forms.notice.retry'),
-        });
+        const retry = await screen.findByRole(
+          'button',
+          { name: text('components_forms.notice.retry') },
+          WAIT,
+        );
         expect(log.count('POST', WRITE)).toBe(attempt);
         const notice = retry.closest('li');
         expect(notice?.dataset.code).toBe('temporarily_unavailable');
@@ -78,7 +81,7 @@ describe(
 
       // El tercer envío, por acción de la persona, se acepta: tres peticiones en total, ni una más.
       const jobs = screen.getByRole('region', { name: text('scr14.jobs') });
-      await within(jobs).findByRole('button', { name: FS_EXPORT });
+      await within(jobs).findByRole('button', { name: FS_EXPORT }, WAIT);
       expect(
         screen.queryByRole('button', { name: text('components_forms.notice.retry') }),
       ).toBeNull();

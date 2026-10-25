@@ -25,6 +25,8 @@ export interface World {
   readonly zone_ids: readonly string[];
   readonly non_productive_zone_id: string;
   readonly concession_id: string;
+  /** Canal local del intermediario de fallos entre la aplicación y la API (`faults.ts`). */
+  readonly fault_control_url: string;
 }
 
 /** Archivo escrito exclusivamente por el proceso local del mundo, no por la aplicación. */
