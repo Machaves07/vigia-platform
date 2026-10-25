@@ -5,12 +5,16 @@
  *   la abre con la matriz derivada del catálogo (`POST /zones/{zone_id}/walk-tests`).
  * - Una sesión incompleta se reabre con motivo; los pasos se abren y se cierran con las marcas del
  *   servidor y, si hace falta, con una corrección de horas y su motivo.
+ * - Sin sesión, también se puede abrir la reejecución por regresión (solo las filas afectadas);
+ *   con sesión, la vista en vivo (UI-18 `LiveViewLauncher`, `live_view.open`) acompaña el
+ *   walk-test.
  * - El estado común de la pantalla es `ScreenState`; la lectura lleva UI-20 («actualizado hace X»).
  * - La autorización la decide el servidor (BR-APP-43): la pantalla no oculta ninguna acción por
  *   una regla propia, solo muestra lo que el servidor rechazó.
  */
 import { useState } from 'react';
 
+import { LiveViewLauncher } from '@/components/LiveViewLauncher/LiveViewLauncher';
 import { NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import { correlationOf } from '@/components/NoticeStack/notice';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
@@ -32,12 +36,15 @@ import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state
 import { text } from '@/texts';
 
 import { HoursPanel } from './HoursPanel';
+import { RegressionRerunPanel } from './RegressionRerunPanel';
 import { ReopenPanel } from './ReopenPanel';
 import { SessionHeader } from './SessionHeader';
 import { StepsPanel, type StepCorrection } from './StepsPanel';
 import styles from './session.module.css';
 
 const CURRENT_WALK_TEST = 'GET /zones/{zone_id}/walk-tests/current';
+/** Ancla de los avisos de la reejecución por regresión. */
+const REGRESSION_RERUN = 'regression_rerun';
 
 export interface SessionScreenProps {
   readonly zoneId: string;
@@ -214,6 +221,12 @@ export function SessionScreen({
     invalidates: { screen: 'scr06', resources: ['walk_tests'] },
   });
   const [openIssue, setOpenIssue] = useState<string | null>(null);
+  const rerun = useScreenMutation<{ readonly passes_per_cell: number }, WalkTestSession>({
+    write: (input) =>
+      scr06CommissioningPort.openRegressionRerun.write({ path: { zone_id: zoneId }, body: input }),
+    invalidates: { screen: 'scr06', resources: ['walk_tests'] },
+  });
+  const [rerunIssue, setRerunIssue] = useState<string | null>(null);
 
   const queryNotice = query.error === null ? null : noticeFromError(query.error, 'scr06-query');
   const correlationId =
@@ -242,21 +255,40 @@ export function SessionScreen({
         query.status === 'pending' ? (
           <ScreenState state="loading" />
         ) : (
-          <OpenSessionPanel
-            busy={openSession.status === 'pending'}
-            issue={openIssue}
-            onSubmit={(passesPerCell) => {
-              openSession.run({ passes_per_cell: passesPerCell }).catch((error: unknown) => {
-                const problems = fieldIssues(error);
-                setOpenIssue(problems.get('passes_per_cell') ?? null);
-                if (problems.size === 0) notices.add(error, null);
-              });
-            }}
-          />
+          <>
+            <OpenSessionPanel
+              busy={openSession.status === 'pending'}
+              issue={openIssue}
+              onSubmit={(passesPerCell) => {
+                openSession.run({ passes_per_cell: passesPerCell }).catch((error: unknown) => {
+                  const problems = fieldIssues(error);
+                  setOpenIssue(problems.get('passes_per_cell') ?? null);
+                  if (problems.size === 0) notices.add(error, null);
+                });
+              }}
+            />
+            <RegressionRerunPanel
+              busy={rerun.status === 'pending'}
+              issue={rerunIssue}
+              notice={notices.field(REGRESSION_RERUN)}
+              onSubmit={(passesPerCell) => {
+                setRerunIssue(null);
+                rerun.run({ passes_per_cell: passesPerCell }).catch((error: unknown) => {
+                  const problems = fieldIssues(error);
+                  setRerunIssue(problems.get('passes_per_cell') ?? null);
+                  if (problems.size === 0) notices.add(error, REGRESSION_RERUN);
+                });
+              }}
+            />
+          </>
         )
       ) : (
         <>
           <SessionBody session={session} clock={clock} notices={notices} />
+          <section className={styles.panel} aria-label={text('scr06.live_view.title')}>
+            <p className={styles.empty}>{text('scr06.live_view.intro')}</p>
+            <LiveViewLauncher zone_id={zoneId} clock={clock} />
+          </section>
           <RefreshIndicator
             fetchedAt={query.fetchedAt}
             refreshPolicy="on_demand"
