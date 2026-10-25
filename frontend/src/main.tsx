@@ -42,3 +42,5 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+console.log('ensayo VIG-294: el trabajo frontend debe quedar en rojo');
