@@ -16,6 +16,7 @@ import { MatrixScreen } from '@/pages/scr06/matrix/MatrixScreen';
 import { createExposureSampler, nextAnimationFrame } from '@/pages/scr06/matrix/exposure';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
+import type { Clock } from '@/state/clock';
 
 import { server } from '../../msw/server';
 import { FakeClock } from '../../support/fakeClock';
@@ -256,19 +257,21 @@ describe('muestra de exposición (BR-APP-84)', () => {
 
 describe('createExposureSampler', () => {
   it('no puede producir displayed_at por debajo de fetched_at aunque el reloj retroceda', () => {
-    const clock = new FakeClock(BROWSER_NOW_MS);
+    const backend = new FakeClock(BROWSER_NOW_MS);
     const sent: unknown[] = [];
     let calls = 0;
-    const sampler = createExposureSampler({
-      // Un reloj que retrocede un segundo en cada lectura: la segunda (`displayed_at`) queda por
-      // debajo de la primera (`fetched_at`) si el muestreador no las ordena.
-      clock: {
-        now: () => BROWSER_NOW_MS - calls++ * 1_000,
-        setTimeout: (callback, delayMs) => clock.setTimeout(callback, delayMs),
-        clearTimeout: (handle) => {
-          clock.clearTimeout(handle);
-        },
+    // Un reloj que retrocede un segundo en cada lectura: la primera la usa quien llama como
+    // `fetched_at` y la segunda (`displayed_at`, dentro del fotograma) queda por debajo si el
+    // muestreador no las ordena.
+    const clock: Clock = {
+      now: () => BROWSER_NOW_MS - calls++ * 1_000,
+      setTimeout: (callback, delayMs) => backend.setTimeout(callback, delayMs),
+      clearTimeout: (handle) => {
+        backend.clearTimeout(handle);
       },
+    };
+    const sampler = createExposureSampler({
+      clock,
       nextFrame: (callback) => {
         callback();
       },

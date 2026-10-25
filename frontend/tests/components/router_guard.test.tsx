@@ -152,7 +152,7 @@ describe('con permiso, cada grupo pinta su página', () => {
     assignments: [],
   };
 
-  it.each(open)('%s', async (_name, descriptor, path) => {
+  it.each(open)('%s', async (_name, _descriptor, path) => {
     const missing = await renderAt(everything, NOT_FOUND);
     missing.unmount();
     // Una ruta que no existe no pide nada al servidor.
@@ -163,7 +163,7 @@ describe('con permiso, cada grupo pinta su página', () => {
     // distinto del de la ruta no disponible. No se exige el nombre de navegación del descriptor
     // (`title_text`): un descriptor puede tener varios grupos y cada uno titula su página (SCR-07
     // tiene cuatro títulos propios), mientras que el relevo y SCR-06 usan el de navegación.
-    const heading = screen.getByRole('heading', { level: 1 }).textContent ?? '';
+    const heading = screen.getByRole('heading', { level: 1 }).textContent;
     expect(heading).not.toBe(text('errors.not_available_in_scope'));
     expect(Object.values(texts)).toContain(heading);
   });
