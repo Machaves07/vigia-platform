@@ -145,7 +145,7 @@ describe('excepción al pintar una pantalla (BR-APP-76)', { timeout: 30_000 }, (
     // Solo la pantalla afectada: la consulta de otra pantalla sigue en la caché.
     expect(queriesOf(fixture, 'scr15')).toBe(1);
     // Ningún detalle interno: ni el mensaje de la excepción ni un código de correlación inventado.
-    expect(fixture.container.textContent).not.toContain(INTERNAL);
+    expect(fixture.container.innerHTML).not.toContain(INTERNAL);
     expect(alert.querySelector('[data-part="correlation_id"]')).toBeNull();
     // El armazón sigue: la navegación permite salir de la pantalla genérica.
     expect(screen.getByRole('navigation', { name: text('app_shell.nav.label') })).toBeDefined();
@@ -168,7 +168,7 @@ describe('excepción al pintar una pantalla (BR-APP-76)', { timeout: 30_000 }, (
     const alert = await expectGenericScreen();
     expect(alert.querySelector('[data-part="correlation_id"]')?.textContent).toBe(CORRELATION);
     expect(screen.getByRole('button', { name: text('app_shell.error.copy') })).toBeDefined();
-    expect(fixture.container.textContent).not.toContain(INTERNAL);
+    expect(fixture.container.innerHTML).not.toContain(INTERNAL);
     expect(consoleCalls()).toEqual(SILENT);
   });
 
@@ -201,7 +201,7 @@ describe('fallos de la ventana (window.onerror y unhandledrejection)', { timeout
       expect(queriesOf(fixture, 'scr08')).toBe(0);
     }, WAIT);
     expect(queriesOf(fixture, 'scr15')).toBe(1);
-    expect(fixture.container.textContent).not.toContain(INTERNAL);
+    expect(fixture.container.innerHTML).not.toContain(INTERNAL);
     expect(consoleCalls()).toEqual(SILENT);
   });
 
@@ -246,7 +246,7 @@ describe('piezas del manejador', { timeout: 30_000 }, () => {
     expect(
       screen.getByRole('link', { name: text('app_shell.error.home') }).getAttribute('href'),
     ).toBe('/');
-    expect(view.container.textContent).not.toContain(INTERNAL);
+    expect(view.container.innerHTML).not.toContain(INTERNAL);
     expect(consoleCalls()).toEqual(SILENT);
   });
 
