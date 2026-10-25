@@ -24,7 +24,8 @@
  * - Toda respuesta no 2xx se traduce con `behaviourFor` (`ports.errors`); `unauthenticated` y
  *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300);
  *   cualquier otra respuesta HTTP se avisa como respuesta autenticada (renueva la inactividad).
- * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración.
+ * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración; solo en
+ *   desarrollo, y la construcción de producción lo elimina.
  */
 import { OPERATIONS } from '@/client';
 import { appVersion, type AppVersion } from '@/app/version';
@@ -67,8 +68,11 @@ export interface TransportConnection {
   register(dependency: Dependency, outcome: Outcome<CircuitError>): void;
 }
 
+/** `state.connection` con los errores de `ports.base`: lo anterior más `subscribe` y `tick`. */
+export type PortConnection = ReturnType<typeof createConnection<CircuitError>>;
+
 /** Circuitos de la aplicación con la clasificación de `ports.errors` (`counts_for_circuit`). */
-export function createPortConnection(clock: Clock): TransportConnection {
+export function createPortConnection(clock: Clock): PortConnection {
   return createConnection<CircuitError>({
     clock,
     counts_for_circuit: (error, dependency) =>
@@ -264,7 +268,9 @@ export function createTransport(options: TransportOptions): Transport {
   const fetchImpl =
     options.fetch ??
     ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-  const devLog = options.devLog ?? createDevLog();
+  // Fuera de desarrollo, ningún registro: `DEV` es la constante `false` en la construcción de
+  // producción, así que `createDevLog` y su `console` desaparecen de `dist/` (NFR-APP-18).
+  const devLog = options.devLog ?? (import.meta.env.DEV ? createDevLog() : SILENT);
 
   const headersFor = (request: ApiRequest, concession: string | null): Headers => {
     const headers = new Headers({ Accept: 'application/json' });

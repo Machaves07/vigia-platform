@@ -26,6 +26,7 @@
     "knip": "node scripts/knip.mjs",
     "test": "vitest run",
     "test:nightly": "vitest run --mode nightly",
+    "test:bootstrap:browsers": "playwright test --config tests/browser/playwright.config.ts",
     "check": "node scripts/checks/run.mjs",
     "e2e": "playwright test",
     "size": "node scripts/pending.mjs size VIG-294 TASK-412"

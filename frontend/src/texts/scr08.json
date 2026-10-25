@@ -36,7 +36,7 @@
   "scr08.inbox.to": "Hasta el día (UTC)",
   "scr08.inbox.overdue": "Acciones vencidas en el alcance, sin filtros",
   "scr08.inbox.count_unavailable": "Recuento no disponible mientras se reconstruye la proyección",
-  "scr08.inbox.empty": "No hay episodios disponibles para esta consulta; no afirma ausencia en la zona.",
+  "scr08.inbox.empty": "No hay episodios disponibles para esta consulta; no permite concluir nada sobre la zona.",
   "scr08.inbox.projection": "Proyección no auditada. La duración y el número de clips no están disponibles en esta respuesta del servidor.",
   "scr08.inbox.data_unavailable": "Dato no disponible en la proyección",
   "scr08.inbox.no_due": "Sin plazo de acción",

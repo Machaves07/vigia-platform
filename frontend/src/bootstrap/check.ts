@@ -41,8 +41,12 @@ export type BrowserEngine = keyof typeof MIN_BROWSER_VERSIONS;
 /** Zona horaria de la comprobación: un motor sin datos de zonas no la resuelve. */
 const ZONE_PROBE = 'America/Bogota';
 
-/** Tipo exacto del diseño para el clip de H.264 (R-APP-2). */
-export const H264_TYPE = 'video/mp4; codecs="avc1"';
+/**
+ * Sonda MP4/H.264 (R-APP-2, NFR-APP-31): AVC Constrained Baseline, nivel 3.0.
+ * `avc1` sin perfil/nivel da un falso negativo nativo en Firefox (VIG-343).
+ * Es una sonda de capacidad, no una restricción del perfil de los clips de U-06.
+ */
+export const H264_TYPE = 'video/mp4; codecs="avc1.42E01E"';
 
 /** Lo que se usa de `Intl.DateTimeFormat`: construir con `timeZone` y leer la zona resuelta. */
 export interface DateTimeFormatLike {
@@ -142,7 +146,7 @@ export function supportsTimeZones(dateTimeFormat: DateTimeFormatConstructor | un
   }
 }
 
-/** El navegador declara poder reproducir el tipo exacto del diseño (R-APP-2). */
+/** El navegador declara poder reproducir MP4/H.264 mediante un descriptor AVC completo. */
 export function supportsH264(canPlayType: ((type: string) => string) | undefined): boolean {
   if (canPlayType === undefined) return false;
   try {
