@@ -21,9 +21,11 @@ No cambian las otras capacidades ni la política de versiones ni los flujos por 
 ## Regresión reproducible
 
 Desde `frontend/`, con Node ≥ 22, OpenSSL, Bash y los motores de Playwright 1.64.1
-(Chromium gráfico requiere pantalla o `xvfb-run -a`):
+(Chromium gráfico requiere pantalla o `xvfb-run -a`). El proyecto `webkit` usa la compilación
+fijada por VIG-345 (`VIG-345-webkit-select-csp.md`):
 
 ```sh
+node scripts/install_webkit.mjs
 npm run test:bootstrap:browsers
 ```
 
@@ -41,8 +43,11 @@ Si faltan bibliotecas del sistema, se puede usar la imagen oficial, sin parchear
 entorno de los motores (montar solo este workspace, no credenciales):
 
 ```sh
+VIGIA_WEBKIT_PLATFORM=ubuntu24.04-x64 VIGIA_WEBKIT_DIR=/tmp/webkit-2359-noble \
+  node scripts/install_webkit.mjs
 docker run --rm --init --ipc=host --user "$(id -u):$(id -g)" \
-  -e HOME=/tmp -v "$PWD:/work" -w /work \
+  -e HOME=/tmp -e VIGIA_WEBKIT_DIR=/wk -v /tmp/webkit-2359-noble:/wk:ro \
+  -v "$PWD:/work" -w /work \
   mcr.microsoft.com/playwright:v1.64.1-noble \
   xvfb-run -a npm run test:bootstrap:browsers
 ```
