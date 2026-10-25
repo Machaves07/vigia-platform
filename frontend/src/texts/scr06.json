@@ -54,6 +54,8 @@
   "scr06.matrix.posture": "Postura",
   "scr06.matrix.standard": "Estándar",
   "scr06.matrix.conditions": "Condiciones de señal",
+  "scr06.matrix.condition.presence": "presencia",
+  "scr06.matrix.condition.none": "Sin condiciones de señal",
   "scr06.matrix.required": "Pases requeridos",
   "scr06.matrix.progress": "Avance de la fila",
   "scr06.matrix.counts": "Detectado, falso negativo y falsa alarma",

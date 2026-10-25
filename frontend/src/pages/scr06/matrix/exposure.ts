@@ -2,7 +2,8 @@
  * Muestra de exposición del tramo 3a (BR-APP-84, interfaces de U-03 v1.2): la consola no mide por
  * su cuenta, solo registra el tramo «recepción de la respuesta del pase → pintado».
  *
- * - `fetched_at` se lee del `Clock` inyectado en el momento de recibir la respuesta del pase.
+ * - `fetched_at` lo lee quien llama, del `Clock` inyectado, **al recibir la respuesta del pase**
+ *   (antes de que la invalidación relea la sesión y los clips), y lo pasa a `sample`.
  * - `displayed_at` se lee del **mismo** reloj en el siguiente fotograma (`requestAnimationFrame`),
  *   así que `displayed_at ≥ fetched_at` siempre.
  * - El envío es en segundo plano y **sin reintento**: el fallo no bloquea el pase ni se repite; el
@@ -24,8 +25,11 @@ export interface ExposureSamplerOptions {
 }
 
 export interface ExposureSampler {
-  /** Programa la muestra del pase: una sola vez, sin esperar al envío. */
-  sample(passId: string): void;
+  /**
+   * Programa la muestra del pase: una sola vez, sin esperar al envío. `fetchedAt` es el instante
+   * en que llegó la respuesta del pase, medido con el mismo reloj (BR-APP-84).
+   */
+  sample(passId: string, fetchedAt: number): void;
   /** Las muestras programadas, para las pruebas y el resumen de la pantalla. */
   readonly samples: readonly ExposureSampleBody[];
 }
@@ -45,8 +49,7 @@ export function createExposureSampler(options: ExposureSamplerOptions): Exposure
   const samples: ExposureSampleBody[] = [];
   return {
     samples,
-    sample(passId: string): void {
-      const fetchedAt = options.clock.now();
+    sample(passId: string, fetchedAt: number): void {
       options.nextFrame(() => {
         const displayedAt = Math.max(fetchedAt, options.clock.now());
         const body: ExposureSampleBody = {

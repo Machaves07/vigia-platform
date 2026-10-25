@@ -14,6 +14,7 @@ import type { WalkTestSession } from '@/ports/scr06Commissioning';
 import { label } from '@/texts/labels';
 import { text } from '@/texts';
 
+import { conditionsText } from './conditions';
 import type { ExposureOutcome } from './exposure';
 import styles from './matrix.module.css';
 
@@ -67,7 +68,7 @@ export function PassMatrixTable({
                 <th scope="row">{number}</th>
                 <td data-part="posture">{posture}</td>
                 <td data-part="standard_version">{row.standard_version}</td>
-                <td data-part="conditions">{row.predicate_conditions.length}</td>
+                <td data-part="conditions">{conditionsText(row.predicate_conditions)}</td>
                 <td data-part="required_passes">{row.required_passes}</td>
                 <td data-part="row_progress">
                   {`${String(registered)} / ${String(row.required_passes)}`}

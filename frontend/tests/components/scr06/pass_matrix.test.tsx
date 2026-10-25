@@ -58,6 +58,14 @@ const REGISTER = text('scr06.matrix.form.submit');
 const SELECT_ROW = text('scr06.matrix.select');
 const RESULT_LABEL = text('scr06.matrix.form.result');
 const EVIDENCE_LABEL = text('scr06.matrix.form.evidence');
+/** Un identificador que no cumple `format: uuid` del contrato: el espejo del puerto lo rechaza. */
+const NOT_A_UUID = 'no-es-un-uuid';
+
+/** Las condiciones de la fila por omisión, con las etiquetas del catálogo del contrato. */
+const ROW_CONDITIONS = [
+  text('scr06.matrix.condition.presence'),
+  `${label('condition_signal_role', 'energy')} ${label('condition_signal_value', 'asserted')}`,
+].join(' · ');
 
 let mounted: TestSession | null = null;
 
@@ -120,6 +128,12 @@ describe('matriz de pases', () => {
       (cell) => cell.textContent,
     );
     expect(progress).toEqual(['1 / 3', '3 / 3']);
+    // El estado de señal de cada fila, con las etiquetas del catálogo, no su número de condiciones.
+    const conditions = Array.from(
+      document.querySelectorAll('[data-part="conditions"]'),
+      (cell) => cell.textContent,
+    );
+    expect(conditions).toEqual([ROW_CONDITIONS, ROW_CONDITIONS]);
     // Ninguna cifra del servidor se presenta como garantía (BR-APP-26): el texto de la pantalla
     // no lleva «%» ni la palabra prohibida.
     expect(document.body.textContent).not.toContain('%');
@@ -174,6 +188,106 @@ describe('matriz de pases', () => {
       result: 'detected',
       evidence_ref: null,
     });
+  });
+
+  it('la fila elegida se identifica con su número, su postura y su estado de señal', async () => {
+    openScreen();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `${SELECT_ROW}: ${label('posture', 'crouched')} 2`,
+      }),
+    );
+    // La postura sola no distingue dos filas con condiciones distintas: la etiqueta lleva las
+    // condiciones de señal de la fila, como la matriz.
+    expect(document.querySelector('[data-part="selected_row"]')?.textContent).toBe(
+      `${text('scr06.matrix.selected')}: 2 · ${label('posture', 'crouched')} · ${ROW_CONDITIONS}`,
+    );
+  });
+
+  it('tras registrar un pase el selector de evidencia vuelve a «sin evidencia»', async () => {
+    const { calls } = openScreen();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+      }),
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: EVIDENCE_LABEL }), {
+      target: { value: CLIP_B },
+    });
+    fireEvent.click(screen.getByRole('button', { name: REGISTER }));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    // El clip elegido no se reutiliza sin querer en el pase siguiente.
+    const selector = screen.getByRole<HTMLSelectElement>('combobox', { name: EVIDENCE_LABEL });
+    expect(selector.value).toBe('');
+  });
+
+  it('el problema de la evidencia se muestra junto al campo y se limpia al registrar', async () => {
+    const calls: CapturedRequest[] = [];
+    server.use(
+      currentWalkTestHandler(currentWalkTest(matrixSession())),
+      // El selector ofrece un clip que no cumple el contrato: el espejo del puerto lo rechaza.
+      clipsHandler(clipsPage([clip({ clip_id: NOT_A_UUID }), clip({ clip_id: CLIP_A })])),
+      captureHandler({
+        method: 'post',
+        path: '/walk-tests/{session_id}/passes',
+        calls,
+        response: () => HttpResponse.json(pass(), { status: 201 }),
+      }),
+    );
+    renderScreen((clock) => <MatrixScreen zoneId={ZONE_ID} clock={clock} />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+      }),
+    );
+    const evidence = screen.getByRole('combobox', { name: EVIDENCE_LABEL });
+    fireEvent.change(evidence, { target: { value: NOT_A_UUID } });
+    fireEvent.click(screen.getByRole('button', { name: REGISTER }));
+    await waitFor(() => {
+      expect(document.querySelector('[data-part="local_error"]')).not.toBeNull();
+    });
+    // Nada salió a la red: el problema es estructural.
+    expect(calls).toHaveLength(0);
+    fireEvent.change(evidence, { target: { value: CLIP_A } });
+    fireEvent.click(screen.getByRole('button', { name: REGISTER }));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    // El error anterior no se queda pegado al campo.
+    await waitFor(() => {
+      expect(document.querySelector('[data-part="local_error"]')).toBeNull();
+    });
+  });
+
+  it('un problema estructural sin hueco en el formulario va a la pila de avisos', async () => {
+    const calls: CapturedRequest[] = [];
+    server.use(
+      // La fila del servidor trae un `row_id` que no cumple el contrato: no tiene hueco propio.
+      currentWalkTestHandler(
+        currentWalkTest(session({ rows: [row({ row_id: NOT_A_UUID })], passes: [] })),
+      ),
+      clipsHandler(clipsPage([clip()])),
+      captureHandler({
+        method: 'post',
+        path: '/walk-tests/{session_id}/passes',
+        calls,
+        response: () => HttpResponse.json(pass(), { status: 201 }),
+      }),
+    );
+    renderScreen((clock) => <MatrixScreen zoneId={ZONE_ID} clock={clock} />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: REGISTER }));
+    await waitFor(() => {
+      expect(document.querySelector('li[data-code="invalid_request"]')).not.toBeNull();
+    });
+    expect(calls).toHaveLength(0);
+    expect(document.querySelector('[data-part="local_error"]')).toBeNull();
   });
 
   it('pide elegir una fila antes de registrar', async () => {
@@ -233,6 +347,12 @@ function pixels(value: string | null): number | null {
 }
 
 describe('objetivo táctil en tableta (768 × 1024)', () => {
+  /**
+   * Se lee el `min-height` declarado en la hoja, no el estilo computado que pide el criterio:
+   * jsdom no aplica los módulos CSS (la clase del DOM es `_clase_hash`) y el repositorio no tiene
+   * ninguna prueba de estilos computados. Cuando llegue la medición en navegador (Playwright, e2e)
+   * es allí donde toca `getComputedStyle`; queda anotado, no bloquea este criterio.
+   */
   it('los controles de la matriz declaran al menos 44 px con el token del sistema', () => {
     window.innerWidth = 768;
     window.innerHeight = 1024;
@@ -244,7 +364,7 @@ describe('objetivo táctil en tableta (768 × 1024)', () => {
           rows={matrixSession().rows}
           clips={[clip()]}
           busy={false}
-          onSubmit={() => undefined}
+          onSubmit={() => Promise.resolve(false)}
         />
       </main>,
     );
@@ -279,7 +399,7 @@ describe('objetivo táctil en tableta (768 × 1024)', () => {
           rows={matrixSession().rows}
           clips={[clip(), clip({ clip_id: CLIP_B })]}
           busy={false}
-          onSubmit={() => undefined}
+          onSubmit={() => Promise.resolve(false)}
         />
       </main>,
     );

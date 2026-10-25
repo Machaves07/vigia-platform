@@ -37,6 +37,12 @@ const COMMISSIONING_CLIPS = 'GET /zones/{zone_id}/commissioning-clips';
 /** Clips por página del selector (el máximo de la ruta es 200). */
 const CLIP_PAGE_SIZE = 50;
 
+/** Pase registrado y el `fetched_at` del tramo 3a, leído al recibir su respuesta (BR-APP-84). */
+interface RegisteredPass {
+  readonly pass: WalkTestPass;
+  readonly fetchedAt: number;
+}
+
 export interface MatrixScreenProps {
   readonly zoneId: string;
   readonly clock: Clock;
@@ -113,12 +119,17 @@ export function MatrixScreen({
     [clock, nextFrame, sessionId],
   );
 
-  const recordPass = useScreenMutation<PassInput, WalkTestPass>({
-    write: (input) =>
-      scr06CommissioningPort.recordPass.write({
+  const recordPass = useScreenMutation<PassInput, RegisteredPass>({
+    write: async (input) => {
+      const pass = await scr06CommissioningPort.recordPass.write({
         path: { session_id: sessionId ?? '' },
         body: input,
-      }),
+      });
+      // BR-APP-84: `fetched_at` es el instante en que llega la respuesta del pase. Se lee aquí,
+      // dentro de la escritura, porque la invalidación de `onSettled` relee la sesión y los clips
+      // antes de que `run()` resuelva: leerlo entonces mediría el tramo desde esa relectura.
+      return { pass, fetchedAt: clock.now() };
+    },
     invalidates: { screen: 'scr06', resources: ['walk_tests'] },
   });
 
@@ -127,19 +138,24 @@ export function MatrixScreen({
   const correlationId =
     queryNotice === null ? undefined : (correlationOf(queryNotice) ?? undefined);
 
-  const register = (input: PassInput) => {
-    void recordPass
-      .run(input)
-      .then((pass) => {
-        // La muestra se programa al recibir la respuesta del pase, no antes.
-        setExposure((current) => new Map(current).set(pass.pass_id, 'pending'));
-        sampler?.sample(pass.pass_id);
-      })
-      .catch((error: unknown) => {
-        const problems = fieldIssues(error);
-        setEvidenceIssue(problems.get('evidence_ref') ?? null);
-        if (problems.size === 0) notices.add(error);
-      });
+  /** Registra el pase y dice si quedó registrado (el formulario reinicia su selector con eso). */
+  const register = async (input: PassInput): Promise<boolean> => {
+    try {
+      const { pass, fetchedAt } = await recordPass.run(input);
+      setEvidenceIssue(null);
+      // La muestra se programa con el `fetched_at` que ya se leyó al recibir la respuesta.
+      setExposure((current) => new Map(current).set(pass.pass_id, 'pending'));
+      sampler?.sample(pass.pass_id, fetchedAt);
+      return true;
+    } catch (error: unknown) {
+      const problems = fieldIssues(error);
+      // El problema de la evidencia tiene su hueco junto al selector; cualquier otro campo (p. ej.
+      // `row_id`) no lo tiene y se presenta en la pila de avisos, nunca en silencio (BR-APP-43).
+      setEvidenceIssue(problems.get('evidence_ref') ?? null);
+      const elsewhere = [...problems.keys()].some((field) => field !== 'evidence_ref');
+      if (elsewhere || problems.size === 0) notices.add(error);
+      return false;
+    }
   };
 
   return (

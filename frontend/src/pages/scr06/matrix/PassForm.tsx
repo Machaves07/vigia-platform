@@ -10,6 +10,7 @@ import type { CommissioningClip, PassResult, MatrixRow } from '@/ports/scr06Comm
 import { label } from '@/texts/labels';
 import { text } from '@/texts';
 
+import { conditionsText } from './conditions';
 import styles from './matrix.module.css';
 
 /** Resultados admitidos de un pase, en el orden de la lista cerrada de U-03. */
@@ -26,7 +27,8 @@ export interface PassFormProps {
   readonly rowId: string | null;
   readonly rows: readonly MatrixRow[];
   readonly clips: readonly CommissioningClip[];
-  readonly onSubmit: (input: PassInput) => void;
+  /** Resuelve `true` si el pase quedó registrado (entonces el selector vuelve a «sin evidencia»). */
+  readonly onSubmit: (input: PassInput) => Promise<boolean>;
   readonly busy: boolean;
   /** Error estructural del espejo del esquema, por campo. */
   readonly errorKey?: string | null;
@@ -45,24 +47,33 @@ export function PassForm({ rowId, rows, clips, onSubmit, busy, errorKey = null }
       </p>
     );
   }
-  const row = rows.find((candidate) => candidate.row_id === rowId);
+  const index = rows.findIndex((candidate) => candidate.row_id === rowId);
+  const row = index === -1 ? undefined : rows[index];
   return (
     <form
       className={styles.form}
       aria-label={text('scr06.matrix.form.title')}
       onSubmit={(event) => {
         event.preventDefault();
-        onSubmit({
+        void onSubmit({
           row_id: rowId,
           result,
           evidence_ref: evidence === '' ? null : evidence,
+        }).then((registered) => {
+          // Un pase registrado deja el selector en «sin evidencia»: el clip no se reutiliza sin
+          // querer en el pase siguiente.
+          if (registered) setEvidence('');
         });
       }}
     >
       <h3 className={styles.subtitle}>{text('scr06.matrix.form.title')}</h3>
       <p className={styles.hint} data-part="selected_row">
         {`${text('scr06.matrix.selected')}: ${
-          row === undefined ? rowId : label('posture', row.posture)
+          row === undefined
+            ? rowId
+            : // La fila se identifica como en la matriz (número, postura) y con su estado de
+              // señal: la postura sola no distingue dos filas con condiciones distintas.
+              `${String(index + 1)} · ${label('posture', row.posture)} · ${conditionsText(row.predicate_conditions)}`
         }`}
       </p>
       <div className={styles.field}>

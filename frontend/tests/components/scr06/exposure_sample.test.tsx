@@ -74,11 +74,12 @@ interface ExposureFixture {
 
 /** Monta la matriz con el programador de fotogramas bajo control de la prueba. */
 async function openScreen(
-  options: { readonly exposureFails?: boolean } = {},
+  options: { readonly exposureFails?: boolean; readonly refetchAdvanceMs?: number } = {},
 ): Promise<ExposureFixture> {
   const sampleCalls: CapturedRequest[] = [];
   const passCalls: CapturedRequest[] = [];
   const scheduler = frameScheduler();
+  const clock = new FakeClock(BROWSER_NOW_MS);
   let recorded = false;
   server.use(
     // La lectura devuelve la sesión con el pase registrado después de escribirlo.
@@ -119,12 +120,22 @@ async function openScreen(
       method: 'get',
       path: '/zones/{zone_id}/walk-tests/current',
       calls: [],
-      response: () => HttpResponse.json(currentWalkTest(sessionWith(recorded ? [pass()] : []))),
+      response: () => {
+        // La relectura que dispara la invalidación puede tardar: con `refetchAdvanceMs` el reloj
+        // avanza durante ella, así que el tramo 3a no debe incluir esa espera (BR-APP-84).
+        if (recorded && options.refetchAdvanceMs !== undefined) {
+          clock.advance(options.refetchAdvanceMs);
+        }
+        return HttpResponse.json(currentWalkTest(sessionWith(recorded ? [pass()] : [])));
+      },
     }),
   );
-  const rendered = renderScreen((clock) => (
-    <MatrixScreen zoneId={ZONE_ID} clock={clock} nextFrame={scheduler.nextFrame} />
-  ));
+  const rendered = renderScreen(
+    (renderClock) => (
+      <MatrixScreen zoneId={ZONE_ID} clock={renderClock} nextFrame={scheduler.nextFrame} />
+    ),
+    { clock },
+  );
   mounted = rendered;
   await screen.findByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` });
   return { sampleCalls, passCalls, scheduler, mounted: rendered };
@@ -147,7 +158,7 @@ describe('muestra de exposición (BR-APP-84)', () => {
     await waitFor(() => {
       expect(scheduler.pendingCount()).toBe(1);
     });
-    // La muestra se programa al recibir la respuesta: aún no se ha enviado nada.
+    // La muestra se programa (con el `fetched_at` ya leído): aún no se ha enviado nada.
     expect(sampleCalls).toHaveLength(0);
 
     mountedTest.clock.advance(2_000);
@@ -166,6 +177,32 @@ describe('muestra de exposición (BR-APP-84)', () => {
     // Una sola muestra para el pase, aunque el fotograma se ejecute otra vez.
     scheduler.run();
     expect(sampleCalls).toHaveLength(1);
+  });
+
+  it('fetched_at es el instante de la respuesta del pase aunque la relectura tarde', async () => {
+    const {
+      sampleCalls,
+      scheduler,
+      mounted: mountedTest,
+    } = await openScreen({
+      refetchAdvanceMs: 7_000,
+    });
+    registerPass();
+    await waitFor(() => {
+      expect(scheduler.pendingCount()).toBe(1);
+    });
+    // La relectura que sigue al pase (invalidación) ya avanzó el reloj 7 s; el tramo 3a empieza en
+    // la respuesta del pase, no en esa relectura (BR-APP-84).
+    expect(mountedTest.clock.now()).toBe(BROWSER_NOW_MS + 7_000);
+    scheduler.run();
+    await waitFor(() => {
+      expect(sampleCalls).toHaveLength(1);
+    });
+    expect(sampleCalls[0]?.body).toEqual({
+      pass_id: PASS_ID,
+      fetched_at: new Date(BROWSER_NOW_MS).toISOString(),
+      displayed_at: new Date(BROWSER_NOW_MS + 7_000).toISOString(),
+    });
   });
 
   it('si la muestra falla no hay segundo intento y el pase queda registrado', async () => {
@@ -240,7 +277,7 @@ describe('createExposureSampler', () => {
         return Promise.resolve(null);
       },
     });
-    sampler.sample(PASS_ID);
+    sampler.sample(PASS_ID, clock.now());
     const sample = sent[0] as { fetched_at: string; displayed_at: string };
     expect(Date.parse(sample.displayed_at)).toBeGreaterThanOrEqual(Date.parse(sample.fetched_at));
     expect(sample.displayed_at).toBe(sample.fetched_at);
@@ -259,8 +296,8 @@ describe('createExposureSampler', () => {
         return Promise.reject(new Error('503'));
       },
     });
-    sampler.sample(PASS_ID);
-    sampler.sample('0190a1b2-0000-7000-8000-0000000000dd');
+    sampler.sample(PASS_ID, clock.now());
+    sampler.sample('0190a1b2-0000-7000-8000-0000000000dd', clock.now());
     await new Promise((resolve) => {
       setTimeout(resolve, 0);
     });

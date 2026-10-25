@@ -45,7 +45,8 @@ export function row(overrides: Partial<MatrixRow> = {}): MatrixRow {
     row_id: ROW_STANDING,
     standard_id: '0190a1b2-0000-7000-8000-00000000000c',
     standard_version: 7,
-    predicate_conditions: [{ all_of: [] }],
+    // Gramática del predicado del contrato: presencia + rol de señal afirmado.
+    predicate_conditions: [{ presence: true }, { signal_role: 'energy', value: 'asserted' }],
     posture: 'standing',
     required_passes: 3,
     passes: { detected: 1, missed: 0, false_alarm: 0 },
@@ -184,9 +185,9 @@ export interface TestSession {
  */
 export function renderScreen(
   screen: (clock: FakeClock) => ReactElement,
-  options: { readonly nowMs?: number } = {},
+  options: { readonly nowMs?: number; readonly clock?: FakeClock } = {},
 ): TestSession {
-  const clock = new FakeClock(options.nowMs ?? BROWSER_NOW_MS);
+  const clock = options.clock ?? new FakeClock(options.nowMs ?? BROWSER_NOW_MS);
   const connection = createPortConnection(clock);
   installTransport(createTransport({ clock, connection, devLog: () => undefined }));
   const gates = {

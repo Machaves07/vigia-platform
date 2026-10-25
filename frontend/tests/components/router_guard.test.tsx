@@ -3,7 +3,7 @@
  *
  * - Toda ruta sin permiso alcanzada por URL pinta exactamente el mismo árbol que una ruta que no
  *   existe (se compara el DOM serializado, no los textos), y no carga la porción de la pantalla.
- * - Con permiso, la ruta pinta su página (hoy, el relevo `unavailable`).
+ * - Con permiso, la ruta pinta su propia página (con su encabezado de nivel 1 del catálogo).
  * - `/` lleva al panel de inicio del rol más operativo; sin sesión, al inicio de sesión.
  * - Precargar el inicio y sus enlazadas, y navegar por ellas, no dispara ninguna petición (MSW
  *   cuenta cero).
@@ -17,8 +17,10 @@ import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from
 import { SCREENS } from '@/app/screens';
 import { Bell } from '@/pages/scr15/Bell';
 import { ScreenState } from '@/pages/shared/ScreenState';
+import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import { ScreenQueryProvider, type ScreenQueryCache } from '@/state/query';
-import { text } from '@/texts';
+import { createSessionStore, SessionProvider } from '@/state/session';
+import { text, texts } from '@/texts';
 
 import { effectivePermissions } from '../generators';
 import { server } from '../setup/msw';
@@ -40,18 +42,47 @@ const concrete = (path: string): string =>
   path.replace(/:period\b/, '2026-09').replace(/:[a-z_]+/g, ID);
 
 const caches: ScreenQueryCache[] = [];
+/** `SessionStore` no se reexporta en el barril de `state.session`: se toma del constructor. */
+type SessionStore = ReturnType<typeof createSessionStore>;
+const stores: SessionStore[] = [];
+
+/**
+ * Lo que el armazón da a las pantallas ya implementadas y esta prueba necesita montar: el
+ * transporte (SCR-07 lee su `Clock` del transporte, `ports.base`), la caché de consultas
+ * (VIG-293, `useScreenQuery`) y la sesión de UI (VIG-320, `useUiSession`). El almacén se monta
+ * **sin cargar** la sesión (`GET /me` no se pide: esta prueba es de enrutado) y MSW responde las
+ * lecturas de las pantallas con sus manejadores generados; la prueba no afirma nada de esos datos.
+ */
+function shellProviders(path: string) {
+  const { cache, clock } = queryFixture();
+  const connection = createPortConnection(clock);
+  installTransport(createTransport({ clock, connection, devLog: () => undefined }));
+  const store = createSessionStore({
+    clock,
+    port: {
+      me: { read: () => Promise.reject(new Error('la guarda no carga la sesión')) },
+      logout: { write: () => Promise.resolve() },
+    },
+    cache,
+    clearPreferences: () => undefined,
+    currentRoute: () => path,
+    navigate: () => undefined,
+    storages: [],
+  });
+  return { cache, store };
+}
 
 async function renderAt(principal: NavigationPrincipal | null, path: string) {
-  // Las pantallas ya implementadas usan la caché de consultas del armazón (VIG-293): sin ella el
-  // gancho de pantalla no puede montarse. Aquí no se instala transporte: lo que se prueba es el
-  // enrutado, no lo que cada pantalla pide.
-  const { cache } = queryFixture();
+  const { cache, store } = shellProviders(path);
   caches.push(cache);
+  stores.push(store);
   const router = createMemoryRouter(createAppRoutes(principal), { initialEntries: [path] });
   const view = render(
-    <ScreenQueryProvider cache={cache}>
-      <RouterProvider router={router} />
-    </ScreenQueryProvider>,
+    <SessionProvider store={store}>
+      <ScreenQueryProvider cache={cache}>
+        <RouterProvider router={router} />
+      </ScreenQueryProvider>
+    </SessionProvider>,
   );
   // Tope amplio: la porción `lazy` llega por importación dinámica y no es lo que se prueba.
   await screen.findByRole('main', {}, { timeout: 10_000 });
@@ -71,6 +102,8 @@ beforeEach(() => {
 afterEach(() => {
   server.events.removeListener('request:start', onRequest);
   for (const cache of caches.splice(0)) cache.dispose();
+  for (const store of stores.splice(0)) store.dispose();
+  installTransport(null);
 });
 
 describe('guarda: sin permiso, el mismo árbol que not_found', () => {
@@ -126,7 +159,13 @@ describe('con permiso, cada grupo pinta su página', () => {
     expect(requests).toEqual([]);
     const page = await renderAt(everything, concrete(path));
     expect(page.html).not.toBe(missing.html);
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text(descriptor.title_text));
+    // El grupo pinta **su** página: un único encabezado de nivel 1, con un texto del catálogo y
+    // distinto del de la ruta no disponible. No se exige el nombre de navegación del descriptor
+    // (`title_text`): un descriptor puede tener varios grupos y cada uno titula su página (SCR-07
+    // tiene cuatro títulos propios), mientras que el relevo y SCR-06 usan el de navegación.
+    const heading = screen.getByRole('heading', { level: 1 }).textContent ?? '';
+    expect(heading).not.toBe(text('errors.not_available_in_scope'));
+    expect(Object.values(texts)).toContain(heading);
   });
 });
 
