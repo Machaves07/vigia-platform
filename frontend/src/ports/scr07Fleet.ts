@@ -1,5 +1,10 @@
-/** Puerto de SCR-07: inventario y salud. Los estados los calcula el servidor. */
+/**
+ * Puerto de SCR-07: inventario y salud (VIG-311); alta y ciclo de vida del nodo, versión objetivo
+ * y recaptura del encuadre (VIG-325). Los estados y la autorización los decide el servidor.
+ */
 import type { components, operations } from '@/client/schema';
+import type { Notice } from '@/components/NoticeStack/notice';
+import type { FreeTextLimits } from './validation';
 import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
 
@@ -80,7 +85,124 @@ export const fleetPort = defineScreenPort('SCR-07', {
     operationId: 'hierarchy_hierarchy_get',
     permission: 'session',
   },
+  declare: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'declare_node_plants__plant_id__nodes_post',
+    permission: 'commissioning.run',
+  },
+  issueCode: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'issue_enrollment_code_nodes__node_id__enrollment_codes_post',
+    permission: 'commissioning.run',
+  },
+  attempts: {
+    kind: 'read',
+    status: 'fixed',
+    operationId: 'list_enrollment_attempts_nodes__node_id__enrollment_attempts_get',
+    permission: 'fleet.read',
+  },
+  assignZone: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'assign_zone_nodes__node_id__zones_post',
+    permission: 'commissioning.run',
+  },
+  unassignZone: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'unassign_zone_nodes__node_id__zones__zone_id__unassignment_post',
+    permission: 'commissioning.run',
+  },
+  revoke: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'revoke_node_nodes__node_id__revocation_post',
+    permission: 'fleet.manage',
+  },
+  decommission: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'decommission_node_nodes__node_id__decommission_post',
+    permission: 'fleet.manage',
+  },
+  publishTargetVersion: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'publish_target_version_fleet_target_versions_post',
+    permission: 'fleet.manage',
+  },
+  recaptureFraming: {
+    kind: 'write',
+    status: 'fixed',
+    operationId: 'framing_recapture_zones__zone_id__framing_recaptures_post',
+    permission: 'commissioning.run',
+  },
 });
+
+export type DeclaredNode = components['schemas']['DeclaredNodeView'];
+export type DeclarationBody = components['schemas']['NodeDeclarationBody'];
+export type EnrollmentCode = components['schemas']['EnrollmentCodeView'];
+export type EnrollmentAttempt = components['schemas']['EnrollmentAttemptView'];
+export type TargetVersionBody = components['schemas']['TargetVersionBody'];
+export type TargetVersionPublication = components['schemas']['TargetVersionPublicationView'];
+export type FramingRecaptureBody = components['schemas']['FramingRecaptureBody'];
+export type FramingRegression = components['schemas']['RegressionOut'];
+export type HierarchyPlant = components['schemas']['PlantView'];
+export type HierarchyNode = components['schemas']['NodeView'];
+
+/**
+ * Límites de `reason_es` de la flota y de la recaptura (`REASON_MIN_CHARS`/`REASON_MAX_CHARS` de
+ * `fleet.domain.node_fleet_record` y `MIN_REASON_CHARS`/`MAX_REASON_CHARS` de
+ * `catalog.domain.catalog_version`, 10 a 500). `NodeReasonBody` y `FramingRecaptureBody` no los
+ * publican en el esquema; el espejo local nunca es la barrera: el servidor decide.
+ */
+export const NODE_REASON_LIMITS: FreeTextLimits = { minLength: 10, maxLength: 500 };
+
+/** Estado de nodo del servidor que habilita la baja (`fleet_node_not_revoked` si no lo es). */
+export const REVOKED_STATUS = 'revoked';
+
+/**
+ * Aviso de una escritura de la flota: el `detail_code` del servidor se ancla al campo que nombra
+ * `fields`; lo demás va al formulario (`form`). Una escritura cancelada no avisa de nada.
+ */
+export function fleetNotice(
+  error: Error | null,
+  fields: Readonly<Record<string, string>> = {},
+): Notice | null {
+  if (error === null) return null;
+  if (!isPortError(error)) {
+    return { id: 'fleet:internal', error: { code: 'internal_error', status: 0 }, field: 'form' };
+  }
+  const failure = error.failure;
+  switch (failure.kind) {
+    case 'http': {
+      const detail = failure.error.detail_code ?? '';
+      return {
+        id: `fleet:${detail || failure.error.code}`,
+        error: failure.error,
+        field: Object.hasOwn(fields, detail) ? (fields[detail] ?? 'form') : 'form',
+      };
+    }
+    case 'invalid_input':
+      return {
+        id: 'fleet:invalid',
+        error: { code: 'invalid_request', status: 422 },
+        field: 'form',
+      };
+    case 'unavailable':
+      return { id: 'fleet:unavailable', error: { code: 'not_found', status: 404 }, field: 'form' };
+    case 'aborted':
+      return null;
+    default:
+      return {
+        id: 'fleet:offline',
+        error: { code: 'temporarily_unavailable', status: 0 },
+        field: 'form',
+      };
+  }
+}
 
 /** Pagina dentro del mismo alcance; cada refresco sustituye la instantánea completa. */
 export async function readFleet(filters: NodeFilters, signal: AbortSignal): Promise<FleetNode[]> {

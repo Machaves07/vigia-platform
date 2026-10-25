@@ -59,7 +59,49 @@ afterEach(() => {
   installTransport(null);
 });
 
-export async function fleetFixture(path = '/fleet') {
+export const ZONE_A = '0190a1b2-0000-7000-8000-00000000a001';
+export const ZONE_B = '0190a1b2-0000-7000-8000-00000000a002';
+export const CAMERA = '0190a1b2-0000-7000-8000-00000000c001';
+
+/** Jerarquía sintética completa (`HierarchyView`) con dos zonas y los nodos dados. */
+export function hierarchyPlants() {
+  return plants.map((plant) => ({
+    ...plant,
+    data_region: 'us-east-1',
+    status: 'active',
+    zones: [
+      {
+        zone_id: ZONE_A,
+        plant_id: PLANT,
+        code: 'ZONA-SINT-A',
+        name: 'Zona sintética A',
+        node_id: null,
+      },
+      {
+        zone_id: ZONE_B,
+        plant_id: PLANT,
+        code: 'ZONA-SINT-B',
+        name: 'Zona sintética B',
+        node_id: null,
+      },
+    ],
+  }));
+}
+export function hierarchyNode(index: number, status = 'enrolled') {
+  const value = node(index);
+  return {
+    node_id: value.node_id,
+    plant_id: PLANT,
+    code: value.code,
+    status,
+    live_view_local_url: null,
+  };
+}
+
+export async function fleetFixture(
+  path = '/fleet',
+  hierarchy: { readonly plants: unknown[]; readonly nodes: unknown[] } = { plants, nodes: [] },
+) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   let active = true;
@@ -74,7 +116,7 @@ export async function fleetFixture(path = '/fleet') {
   const me = meResponse({
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
-    permissions: ['fleet.read', 'fleet.manage'],
+    permissions: ['fleet.read', 'fleet.manage', 'commissioning.run'],
   });
   const session = createSessionStore({
     clock,
@@ -89,7 +131,7 @@ export async function fleetFixture(path = '/fleet') {
   installTransport(createTransport({ clock, connection, origin: 'http://localhost' }));
   server.use(
     http.get('http://localhost/hierarchy', () =>
-      HttpResponse.json({ organization: me.organization, plants, nodes: [] }),
+      HttpResponse.json({ organization: me.organization, ...hierarchy }),
     ),
   );
   disposers.push(() => {
