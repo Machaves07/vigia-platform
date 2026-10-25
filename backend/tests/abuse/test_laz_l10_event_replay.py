@@ -1,6 +1,6 @@
 """L-10: RES-05, dos trabajadores no duplican una detección reentregada.
 
-Mutación: quitar ``ON CONFLICT (detection_id) DO NOTHING`` de ReviewQueueRepository.
+Mutación: quitar ``ON CONFLICT DO NOTHING`` de ReviewQueueRepository.
 La prueba lanza dos transacciones y comprueba tanto el ganador como la fila única.
 """
 
