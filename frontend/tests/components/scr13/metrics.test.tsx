@@ -27,6 +27,26 @@ describe('SCR-13 métricas', { timeout: 30_000 }, () => {
     expect(view.container.querySelector('[data-visualization]')).toBeNull();
     expect(screen.queryByText('0', { exact: true })).toBeNull();
   });
+  it.each(['not_computable', 'partial'] as const)(
+    'muestra el motivo de métrica %s del servidor',
+    (status) => {
+      const data = snapshot('synthetic');
+      data.values = data.values.map((metric) => ({
+        ...metric,
+        status,
+        value: status === 'partial' ? 0.5 : null,
+        not_computable_reason_es: status === 'not_computable' ? 'Sin denominador declarado.' : null,
+        partial_reason_es: status === 'partial' ? 'Periodo incompleto.' : null,
+      }));
+      render(<MetricView data={data} zoneName="Zona sintética" organizationId="synthetic" />);
+      expect(
+        screen.getByText(
+          status === 'not_computable' ? 'Sin denominador declarado.' : 'Periodo incompleto.',
+          { exact: true },
+        ),
+      ).toBeDefined();
+    },
+  );
   it.each(['user', 'team', 'shift', 'S\u200bhift', 'usuario', 'equipo', 'turno'])(
     'rechaza serie con dimensión %s',
     (dimension) => {

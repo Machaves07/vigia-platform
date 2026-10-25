@@ -77,6 +77,8 @@ export default {
       'kind',
       'from',
       'to',
+      'usage_notice_es',
+      'partial_reason_es',
     ],
   },
   programMetrics: {
@@ -97,7 +99,16 @@ export default {
         zoneName: 'Zona sintética',
         ...context,
       }),
-    allowedFields: ['period', 'values', 'key', 'status', 'unit', 'value'],
+    allowedFields: [
+      'period',
+      'values',
+      'key',
+      'status',
+      'unit',
+      'value',
+      'not_computable_reason_es',
+      'partial_reason_es',
+    ],
     organizationOf: 'organization_id',
   },
   adoptionByZone: {
@@ -109,7 +120,7 @@ export default {
         data: data as unknown as Adoption,
         zoneName: 'Zona sintética',
       }),
-    allowedFields: ['zones', 'silent_days', 'days', 'day', 'activity_count'],
+    allowedFields: ['zones', 'silent_days', 'days', 'day', 'activity_count', 'usage_notice_es'],
   },
   weeklyOverdue: {
     screen: 'SCR-13',
@@ -117,6 +128,15 @@ export default {
     data: readView('OverduePageOut'),
     render: (data) =>
       createElement(OverdueView, { data: data as unknown as Overdue, zoneName: 'Zona sintética' }),
-    allowedFields: ['zones', 'overdue_count', 'items', 'overdue_days'],
+    allowedFields: [
+      'zones',
+      'overdue_count',
+      'highlighted_count',
+      'items',
+      'overdue_days',
+      'highlighted',
+      'highlight_threshold_days',
+      'partition_notice',
+    ],
   },
 } satisfies Record<string, ViewRegistration>;

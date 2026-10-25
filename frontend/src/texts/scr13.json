@@ -33,12 +33,17 @@
   "scr13.day": "Día",
   "scr13.activity_count": "Actividad del lazo",
   "scr13.overdue_days": "Días de vencimiento",
-  "scr13.over_30": "Más de 30 días",
+  "scr13.highlighted": "Destacado por el servidor",
+  "scr13.highlight_threshold": "Umbral de destacado del servidor: {days} días",
+  "scr13.highlighted_count": "Total de destacados en la zona",
+  "scr13.projection_rebuilding": "Proyección en reconstrucción: los vencidos y recuentos pueden estar desactualizados.",
+  "scr13.projection_diverged": "Proyección divergente: los vencidos y recuentos no están verificados contra el expediente.",
   "scr13.overdue_count": "Total de vencidos en la zona",
   "scr13.next": "Cargar más vencidos",
   "scr13.goal": "Metas del programa: objetivo propio, sin incentivos.",
   "scr13.annotations": "Anotaciones de la cobertura",
   "scr13.gate_revoked": "Compuerta de uso revocada",
   "scr13.acceptance_not_current": "Acta no vigente",
-  "scr13.annotation": "Anotación del periodo"
+  "scr13.annotation": "Anotación del periodo",
+  "scr13.annotation_time_unavailable": "Fecha no disponible"
 }

@@ -6,7 +6,7 @@ import { axe } from 'vitest-axe';
 import Page from '@/pages/scr13/weekly';
 import { text } from '@/texts';
 import { server } from '../../msw/server';
-import { API, OTHER, WAIT, fixture, consult, overdueData } from './support';
+import { API, OTHER, WAIT, fixture, consult, overdueData, adoptionData } from './support';
 
 describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
   it('mismas cifras, vencidos 30/31 días, adopción del servidor y objetivo propio', async () => {
@@ -16,8 +16,13 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     const table = await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.querySelector('strong')).toBeNull();
-    expect(rows[1]?.querySelector('strong')?.textContent).toBe(text('scr13.over_30'));
+    expect(rows[0]?.querySelector('strong')?.textContent).toBe(text('scr13.highlighted'));
+    expect(rows[1]?.querySelector('strong')?.textContent).toBe(text('scr13.highlighted'));
+    expect(
+      screen.getByText('Umbral de destacado del servidor: 30 días', { exact: true }),
+    ).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByText(adoptionData().usage_notice_es, { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.goal'), { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.monthly_notice'), { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.not_computable'), { exact: true })).toBeDefined();
@@ -28,13 +33,65 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     ).toBeDefined();
     expect(await axe(view.container)).toHaveNoViolations();
   });
+  it('respeta destacado y totales del servidor con umbral configurable, sin recalcular por días ni página', async () => {
+    const f = await fixture(['executive_summary.read']);
+    const data = overdueData();
+    data.highlight_threshold_days = 15;
+    data.zones = data.zones.map((zone) => ({ ...zone, overdue_count: 9, highlighted_count: 7 }));
+    data.items = data.items.map((item, index) => ({
+      ...item,
+      overdue_days: index === 0 ? 20 : 31,
+      highlighted: index === 0,
+    }));
+    server.use(http.get(`${API}/loop/overdue`, () => HttpResponse.json(data)));
+    render(<Page />, { wrapper: f.Wrapper });
+    await consult();
+    const table = await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows[0]?.querySelector('strong')?.textContent).toBe(text('scr13.highlighted'));
+    expect(rows[1]?.querySelector('strong')).toBeNull();
+    expect(
+      screen.getByText('Umbral de destacado del servidor: 15 días', { exact: true }),
+    ).toBeDefined();
+    const zone = screen.getByRole('region', { name: 'Vencidos: Zona sintética 1' });
+    expect(
+      within(zone).getByText(text('scr13.highlighted_count'), { exact: true }).nextElementSibling
+        ?.textContent,
+    ).toBe('7');
+    expect(
+      within(zone).getByText(text('scr13.overdue_count'), { exact: true }).nextElementSibling
+        ?.textContent,
+    ).toBe('9');
+  });
+  it.each(['projection_rebuilding', 'projection_diverged'] as const)(
+    'declara %s junto a los vencidos, incluso sin filas',
+    async (notice) => {
+      const f = await fixture(['executive_summary.read']);
+      server.use(
+        http.get(`${API}/loop/overdue`, () =>
+          HttpResponse.json({
+            ...overdueData(),
+            items: [],
+            partition_notice: notice,
+          }),
+        ),
+      );
+      render(<Page />, { wrapper: f.Wrapper });
+      await consult();
+      const overdue = await screen.findByRole('region', { name: text('scr13.overdue') }, WAIT);
+      expect(within(overdue).getByRole('alert').textContent).toBe(text(`scr13.${notice}`));
+      expect(
+        within(overdue).getByRole('table', { name: text('scr13.overdue_days') }),
+      ).toBeDefined();
+    },
+  );
   it('executive_summary.read no concede por sí mismo métricas ni exposición', async () => {
     const f = await fixture(['executive_summary.read']);
     const view = render(<Page />, { wrapper: f.Wrapper });
     await consult();
     await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
     expect(screen.queryByRole('heading', { name: text('scr13.activation') })).toBeNull();
-    expect(view.container.querySelector('dd')).toBeNull();
+    expect(view.container.querySelector('[data-section="exposure"]')).toBeNull();
   });
   it.each(['plant', 'zone', 'item_plant', 'item_zone'] as const)(
     'rechaza vencidos con otro %s',

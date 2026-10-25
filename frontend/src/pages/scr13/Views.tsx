@@ -1,4 +1,5 @@
 /** RV-17: proyecciones explícitas. Ningún objeto de la API se vuelca al árbol. */
+import { formatInTimeZone } from 'date-fns-tz';
 import { MetricsChart } from '@/components/MetricsChart/MetricsChart';
 import { parseMetricsSeries } from '@/components/MetricsChart/metrics';
 import { CoverageTimeline } from '@/components/CoverageTimeline/CoverageTimeline';
@@ -33,10 +34,16 @@ export function MetricView({
           <section key={index} aria-label={text(`scr13.${metric.key}`)}>
             <h3>{text(`scr13.${metric.key}`)}</h3>
             {metric.status === 'not_computable' || metric.value == null ? (
-              <p>{text('scr13.not_computable')}</p>
+              <>
+                <p>{text('scr13.not_computable')}</p>
+                {metric.not_computable_reason_es != null && (
+                  <p>{metric.not_computable_reason_es}</p>
+                )}
+              </>
             ) : (
               <>
                 {metric.status === 'partial' && <p>{text('scr13.partial')}</p>}
+                {metric.partial_reason_es != null && <p>{metric.partial_reason_es}</p>}
                 <SeriesView
                   title={text(`scr13.${metric.key}`)}
                   valueLabel={text(`scr13.${metric.unit}`)}
@@ -71,6 +78,13 @@ function minute(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 }
 
+function annotationTime(value: string, timeZone: string) {
+  const instant = Date.parse(value);
+  return Number.isFinite(instant)
+    ? formatInTimeZone(instant, timeZone, 'yyyy-MM-dd HH:mm:ss XXX')
+    : text('scr13.annotation_time_unavailable');
+}
+
 export function ExposureView({
   data,
   composite,
@@ -93,12 +107,20 @@ export function ExposureView({
     Date.parse(data.coverage_timeline.period.to) !== composite.period.toMs
   )
     return <ScreenState state="unavailable" />;
-  if (data.status === 'not_computable') return <p>{text('scr13.not_computable')}</p>;
+  if (data.status === 'not_computable')
+    return (
+      <section aria-label={text('scr13.exposure')}>
+        <p>{text('scr13.not_computable')}</p>
+        <p>{data.usage_notice_es}</p>
+        {data.partial_reason_es !== null && <p>{data.partial_reason_es}</p>}
+      </section>
+    );
   return (
     <section aria-label={text('scr13.exposure')}>
       <h2>
         {text('scr13.exposure')} · {data.period}
       </h2>
+      <p>{data.usage_notice_es}</p>
       <p>
         {text(
           data.status === 'partial' || data.observable_coverage_percent < 80
@@ -106,6 +128,7 @@ export function ExposureView({
             : 'scr13.computed',
         )}
       </p>
+      {data.partial_reason_es !== null && <p>{data.partial_reason_es}</p>}
       <dl>
         <dt>{text('scr13.confirmed')}</dt>
         <dd>{data.confirmed_minutes}</dd>
@@ -157,7 +180,7 @@ export function ExposureView({
                       ? 'scr13.acceptance_not_current'
                       : 'scr13.annotation',
                 )}
-                : {note.from}–{note.to}
+                : {annotationTime(note.from, timeZone)}–{annotationTime(note.to, timeZone)}
               </li>
             ))}
           </ul>
@@ -177,6 +200,7 @@ export function AdoptionView({
   return (
     <section aria-label={text('scr13.panel_usage')}>
       <h2>{text('scr13.panel_usage')}</h2>
+      <p>{data.usage_notice_es}</p>
       {data.zones.map((zone) => (
         <section key={zone.zone_id}>
           <h3>{zoneName}</h3>
@@ -216,10 +240,22 @@ export function OverdueView({
   return (
     <section aria-label={text('scr13.overdue')}>
       <h2>{text('scr13.overdue')}</h2>
+      {data.partition_notice !== null && (
+        <p role="alert">{text(`scr13.${data.partition_notice}`)}</p>
+      )}
+      <p>
+        {text('scr13.highlight_threshold').replace('{days}', String(data.highlight_threshold_days))}
+      </p>
       {data.zones.map((zone) => (
-        <p key={zone.zone_id}>
-          {zoneName}: {text('scr13.overdue_count')} {zone.overdue_count}
-        </p>
+        <section key={zone.zone_id} aria-label={`${text('scr13.overdue')}: ${zoneName}`}>
+          <h3>{zoneName}</h3>
+          <dl>
+            <dt>{text('scr13.overdue_count')}</dt>
+            <dd>{zone.overdue_count}</dd>
+            <dt>{text('scr13.highlighted_count')}</dt>
+            <dd>{zone.highlighted_count}</dd>
+          </dl>
+        </section>
       ))}
       <table>
         <caption>{text('scr13.overdue_days')}</caption>
@@ -227,7 +263,7 @@ export function OverdueView({
           <tr>
             <th scope="col">{text('scr13.zone')}</th>
             <th scope="col">{text('scr13.overdue_days')}</th>
-            <th scope="col">{text('scr13.over_30')}</th>
+            <th scope="col">{text('scr13.highlighted')}</th>
           </tr>
         </thead>
         <tbody>
@@ -235,7 +271,7 @@ export function OverdueView({
             <tr key={item.finding_state_id}>
               <th scope="row">{zoneName}</th>
               <td>{item.overdue_days}</td>
-              <td>{item.overdue_days > 30 && <strong>{text('scr13.over_30')}</strong>}</td>
+              <td>{item.highlighted && <strong>{text('scr13.highlighted')}</strong>}</td>
             </tr>
           ))}
         </tbody>

@@ -76,6 +76,61 @@ describe('SCR-13 exposición', { timeout: 30_000 }, () => {
       expect(view.container.querySelectorAll('tbody tr')).toHaveLength(7);
     },
   );
+  it.each(['partial', 'not_computable'] as const)(
+    'conserva aviso de uso y motivo de exposición %s',
+    (status) => {
+      const data = {
+        ...exposureData(),
+        status,
+        partial_reason_es: 'Cobertura insuficiente del periodo.',
+      };
+      const view = render(
+        <ExposureView
+          data={data}
+          composite={composite()}
+          clock={new FakeClock()}
+          timeZone="UTC"
+          onPeriodChange={() => undefined}
+        />,
+      );
+      expect(screen.getByText(data.usage_notice_es, { exact: true })).toBeDefined();
+      expect(
+        screen.getByText('Cobertura insuficiente del periodo.', { exact: true }),
+      ).toBeDefined();
+      expect(screen.getByText(text(`scr13.${status}`), { exact: true })).toBeDefined();
+      if (status === 'not_computable') expect(view.container.querySelector('dd')).toBeNull();
+    },
+  );
+  it('anotaciones en la zona horaria de la planta y fecha inválida explícita', () => {
+    const data = exposureData();
+    data.coverage_timeline.annotations = [
+      {
+        kind: 'gate_revoked',
+        from: '2026-01-01T02:00:00.000Z',
+        to: '2026-01-01T03:00:00.000Z',
+        cause: null,
+      },
+      { kind: 'acceptance_not_current', from: '', to: '', cause: null },
+    ];
+    render(
+      <ExposureView
+        data={data}
+        composite={composite()}
+        clock={new FakeClock()}
+        timeZone="America/Bogota"
+        onPeriodChange={() => undefined}
+      />,
+    );
+    const notes = screen.getByRole('region', { name: text('scr13.annotations') });
+    expect(
+      within(notes)
+        .getAllByRole('listitem')
+        .map((node) => node.textContent),
+    ).toEqual([
+      'Compuerta de uso revocada: 2025-12-31 21:00:00 -05:00–2025-12-31 22:00:00 -05:00',
+      'Acta no vigente: Fecha no disponible–Fecha no disponible',
+    ]);
+  });
   it.each(['incomplete', 'wrong_period', 'wrong_embedded_period'] as const)(
     'no muestra cifras con cobertura %s',
     (kind) => {

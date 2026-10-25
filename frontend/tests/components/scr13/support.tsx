@@ -131,7 +131,7 @@ export function overdueData(): Overdue {
   return {
     plant_id: PLANT,
     highlight_threshold_days: 30,
-    zones: [{ zone_id: ZONE, overdue_count: 2, highlighted_count: 1 }],
+    zones: [{ zone_id: ZONE, overdue_count: 2, highlighted_count: 2 }],
     items: [30, 31].map((days, index) => ({
       finding_state_id: index === 0 ? ZONE : OTHER,
       plant_id: PLANT,
@@ -148,7 +148,7 @@ export function overdueData(): Overdue {
       due_at: FROM,
       overdue_since: FROM,
       overdue_days: days,
-      highlighted: days > 30,
+      highlighted: true,
     })),
     next_cursor: null,
     partition_notice: null,
