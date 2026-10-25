@@ -2,8 +2,10 @@
 import { cleanup, render } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import type { ReactNode } from 'react';
-import { MemoryRouter } from 'react-router';
-import { afterEach } from 'vitest';
+import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router';
+import { createAppRoutes } from '@/app/router';
+import { descriptor } from '@/pages/scr01/descriptor';
+import { afterEach, vi } from 'vitest';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import {
   LOOP_FIELDS,
@@ -61,10 +63,16 @@ export function hierarchy(): Hierarchy {
 
 export function configuration(plantId = PLANT): LoopConfiguration {
   // Valores sintéticos de lectura: no constituyen los límites de validación de escritura.
-  const integers = Object.fromEntries(LOOP_FIELDS.map((field) => [field, 3])) as Pick<
-    LoopConfiguration,
-    (typeof LOOP_FIELDS)[number]
-  >;
+  const integers = {
+    ...Object.fromEntries(LOOP_FIELDS.map((field) => [field, 3])),
+    action_deadline_min_days: 2,
+    action_deadline_default_days: 30,
+    action_deadline_max_days: 179,
+    single_occupancy_default_window_minutes: 60,
+    sample_percent: 10,
+    sample_min: 5,
+    sample_max: 30,
+  } as Pick<LoopConfiguration, (typeof LOOP_FIELDS)[number]>;
   return {
     ...integers,
     plant_id: plantId,
@@ -104,7 +112,14 @@ afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
 });
 
-export async function renderAdmin(element: ReactNode) {
+export async function renderAdmin(
+  element: ReactNode,
+  options: { readonly dataRegion?: string | null; readonly routes?: boolean } = {},
+) {
+  vi.stubEnv(
+    'VITE_PLANT_DATA_REGION',
+    options.dataRegion === null ? undefined : (options.dataRegion ?? 'co'),
+  );
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
@@ -142,12 +157,26 @@ export async function renderAdmin(element: ReactNode) {
     session.dispose();
     cache.dispose();
   });
+  const router =
+    options.routes === true
+      ? createMemoryRouter(createAppRoutes(me, { screens: [descriptor] }), {
+          initialEntries: ['/admin/hierarchy'],
+        })
+      : null;
+  if (router !== null)
+    disposers.push(() => {
+      router.dispose();
+    });
   const view = render(
-    <MemoryRouter>
-      <SessionProvider store={session}>
-        <ScreenQueryProvider cache={cache}>{element}</ScreenQueryProvider>
-      </SessionProvider>
-    </MemoryRouter>,
+    <SessionProvider store={session}>
+      <ScreenQueryProvider cache={cache}>
+        {router === null ? (
+          <MemoryRouter>{element}</MemoryRouter>
+        ) : (
+          <RouterProvider router={router} />
+        )}
+      </ScreenQueryProvider>
+    </SessionProvider>,
   );
   return { ...view, clock, cache };
 }

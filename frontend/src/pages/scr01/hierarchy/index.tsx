@@ -7,6 +7,7 @@ import { HierarchyView } from './HierarchyView';
 import { HierarchyNav, HierarchyRefresh, HierarchyResult, useHierarchyScope } from './shared';
 import { ZoneForm } from './ZoneForm';
 import { LoopConfiguration } from './LoopConfiguration';
+import { PlantForm } from './PlantForm';
 import styles from '../scr01.module.css';
 
 export default function Page() {
@@ -48,6 +49,7 @@ export default function Page() {
           />
         )}
       </HierarchyResult>
+      <PlantForm />
     </main>
   );
 }

@@ -1,13 +1,17 @@
 /** Puerto de jerarquía y ajustes de SCR-01. La autorización y la auditoría pertenecen al servidor. */
 import type { components } from '@/client/schema';
 import settingsSchema from '../../openapi/bodies/update_settings_organization_settings_patch.json';
+import plantSchema from '../../openapi/bodies/create_plant_plants_post.json';
+import configurationSchema from '../../openapi/bodies/change_configuration_loop_plants__plant_id__configuration_put.json';
 import type { Notice } from '@/components/NoticeStack/notice';
+import { reasonLimits } from '@/components/ReasonField/limits';
 import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
-import { validateBody, type ValidationIssue } from './validation';
+import { checkFreeText, validateBody, type ValidationIssue } from './validation';
 
 export type Hierarchy = components['schemas']['HierarchyView'];
 export type Plant = components['schemas']['PlantView'];
+export type PlantBody = components['schemas']['PlantBody'];
 export type ZoneBody = components['schemas']['ZoneBody'];
 export type OrganizationSettings = components['schemas']['SettingsView'];
 export type SettingsBody = Pick<
@@ -15,6 +19,7 @@ export type SettingsBody = Pick<
   'concession_max_days' | 'concession_default_days'
 >;
 export type LoopConfiguration = components['schemas']['ConfigurationOut'];
+export type ConfigurationChange = components['schemas']['ConfigurationChangeBody'];
 
 export const hierarchyPort = defineScreenPort('SCR-01', {
   // La ruta de lectura de U-02 solo exige sesión; hierarchy.read protege la sección del armazón.
@@ -82,6 +87,42 @@ export function zoneIssues(body: ZoneBody): readonly ValidationIssue[] {
   return verdict.ok ? [] : verdict.issues;
 }
 
+export function plantIssues(body: PlantBody): readonly ValidationIssue[] {
+  const verdict = validateBody('create_plant_plants_post', body);
+  return verdict.ok ? [] : verdict.issues;
+}
+
+/** Dato público de despliegue, nunca elegido por el formulario ni inferido del país u otra planta. */
+export function deploymentDataRegion(): string | null {
+  const value = import.meta.env.VITE_PLANT_DATA_REGION;
+  const schema = plantSchema.body.$defs.PlantBody.properties.data_region;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const length = Array.from(value).length;
+  return length >= schema.minLength && length <= schema.maxLength ? value : null;
+}
+
+export function configurationIssues(body: ConfigurationChange): readonly ValidationIssue[] {
+  if (typeof body.reason !== 'string' || body.reason.trim() === '')
+    return [{ field: 'reason', key: 'validation.required' }];
+  const verdict = validateBody(
+    'change_configuration_loop_plants__plant_id__configuration_put',
+    body,
+  );
+  const issues = verdict.ok ? [] : [...verdict.issues];
+  const freeText = checkFreeText(body.reason, configurationReasonLimits);
+  if (!freeText.ok && !issues.some((issue) => issue.field === 'reason'))
+    issues.push({ field: 'reason', key: freeText.key });
+  return issues;
+}
+
+/** Si el dominio rechaza el motivo, el aviso del servidor prevalece dentro de ReasonField. */
+export function configurationNotice(error: Error | null): Notice | undefined {
+  const notice = hierarchyNotice(error);
+  return notice?.error.detail_code === 'loop_configuration_change_reason_required'
+    ? { ...notice, field: 'reason' }
+    : undefined;
+}
+
 export function hierarchyClock() {
   return currentTransport().clock;
 }
@@ -134,3 +175,27 @@ export const LOOP_FIELDS = [
   'single_occupancy_default_window_minutes',
   'reminder_interval_hours',
 ] as const satisfies readonly (keyof LoopConfiguration)[];
+
+export const loopLimits = Object.fromEntries(
+  LOOP_FIELDS.map((field) => {
+    const integer = configurationSchema.body.$defs.ConfigurationChangeBody.properties[
+      field
+    ].anyOf.find((branch) => branch.type === 'integer');
+    if (
+      integer === undefined ||
+      typeof integer.minimum !== 'number' ||
+      typeof integer.maximum !== 'number'
+    )
+      throw new Error('Falta el rango generado de configuración del lazo.');
+    return [field, { min: integer.minimum, max: integer.maximum }];
+  }),
+) as Record<(typeof LOOP_FIELDS)[number], { min: number; max: number }>;
+
+const reasonSchema =
+  configurationSchema.body.$defs.ConfigurationChangeBody.properties.reason.anyOf.find(
+    (branch) => branch.type === 'string',
+  );
+export const configurationReasonLimits = reasonLimits(
+  { operationId: configurationSchema.operationId, body: { properties: { reason: reasonSchema } } },
+  'reason',
+);

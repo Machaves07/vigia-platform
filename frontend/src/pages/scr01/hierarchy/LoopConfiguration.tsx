@@ -1,4 +1,4 @@
-/** SUP-U05-38: lectura por planta. La edición espera el contrato de límites de SUP-U05-39. */
+/** SUP-U05-38/39: configuración y cambios por planta, con zona horaria informativa heredada. */
 import { Fragment } from 'react';
 import {
   hierarchyPort,
@@ -8,6 +8,7 @@ import {
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
 import { HierarchyRefresh, HierarchyResult, useHierarchyScope } from './shared';
+import { LoopConfigurationForm } from './LoopConfigurationForm';
 
 const WEEKDAYS = [
   'monday',
@@ -71,6 +72,9 @@ export function LoopConfiguration({ plantId }: { readonly plantId: string }) {
       <HierarchyRefresh query={query} operation={operation} />
       <HierarchyResult query={query}>
         {query.data !== undefined && <LoopConfigurationView configuration={query.data} />}
+        {query.data !== undefined && (
+          <LoopConfigurationForm initial={query.data} plantId={plantId} />
+        )}
       </HierarchyResult>
     </section>
   );
