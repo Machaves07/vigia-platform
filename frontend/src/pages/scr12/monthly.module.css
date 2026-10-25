@@ -1,0 +1,55 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 72rem;
+}
+
+.page section,
+.page form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.page input,
+.page select,
+.page textarea,
+.page button {
+  font: inherit;
+  min-height: var(--touch-target-min);
+}
+
+.page textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
+.page button {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-3);
+}
+
+.page :focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.page dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-2);
+}
+
+.page dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.page li {
+  margin-block: var(--space-3);
+}
