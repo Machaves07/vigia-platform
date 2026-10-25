@@ -17,10 +17,12 @@ import { afterFirstPaint, createAppRoutes, preloadGroups, preloadHomeCode } from
 import { SCREENS } from '@/app/screens';
 import { Bell } from '@/pages/scr15/Bell';
 import { ScreenState } from '@/pages/shared/ScreenState';
+import { createSessionStore, SessionProvider } from '@/state/session';
 import { text } from '@/texts';
 
 import { effectivePermissions } from '../generators';
 import { server } from '../setup/msw';
+import { FakeClock } from '../support/fakeClock';
 
 const ID = '0192d2c4-7a10-7c3e-8a51-3b1f0e9d2a44';
 const NOT_FOUND = '/esta-ruta-no-existe/ni-esta';
@@ -35,9 +37,32 @@ const nobody: NavigationPrincipal = { effective_permissions: [], assignments: []
 const concrete = (path: string): string =>
   path.replace(/:period\b/, '2026-09').replace(/:[a-z_]+/g, ID);
 
+/**
+ * Almacén de sesión sin red: las páginas públicas de SCR-01 (VIG-321) leen la sesión, como en el
+ * armazón; ninguna de estas pruebas la carga.
+ */
+function offlineSession() {
+  return createSessionStore({
+    clock: new FakeClock(0),
+    port: {
+      me: { read: () => Promise.reject(new Error('sin red en esta prueba')) },
+      logout: { write: () => Promise.resolve() },
+    },
+    cache: { clearAll: () => undefined },
+    clearPreferences: () => undefined,
+    currentRoute: () => '/',
+    navigate: () => undefined,
+    storages: [],
+  });
+}
+
 async function renderAt(principal: NavigationPrincipal | null, path: string) {
   const router = createMemoryRouter(createAppRoutes(principal), { initialEntries: [path] });
-  const view = render(<RouterProvider router={router} />);
+  const view = render(
+    <SessionProvider store={offlineSession()}>
+      <RouterProvider router={router} />
+    </SessionProvider>,
+  );
   // Tope amplio: la porción `lazy` llega por importación dinámica y no es lo que se prueba.
   await screen.findByRole('main', {}, { timeout: 10_000 });
   return { html: view.container.innerHTML, router, unmount: view.unmount };
@@ -86,16 +111,28 @@ describe('guarda: sin permiso, el mismo árbol que not_found', () => {
     const login = await renderAt(null, '/login');
     expect(login.html).not.toBe(missing.html);
     expect(
-      await screen.findByText(text('screen_state.unavailable'), {}, { timeout: 10_000 }),
+      await screen.findByRole(
+        'heading',
+        { level: 1, name: text('scr01.login.title') },
+        { timeout: 10_000 },
+      ),
     ).toBeDefined();
   });
 });
 
 describe('con permiso, cada grupo pinta su página', () => {
+  // Las rutas públicas (inicio de sesión e invitación, VIG-321) ya no son relevos: piden al
+  // servidor al montarse y las prueban `tests/components/scr01/`.
   const open = SCREENS.flatMap((descriptor) =>
-    descriptor.route_groups.flatMap((group) =>
-      group.paths.map((path) => [`${descriptor.screen_id} ${group.id} ${path}`, descriptor, path]),
-    ),
+    descriptor.route_groups
+      .filter((group) => group.access !== 'public')
+      .flatMap((group) =>
+        group.paths.map((path) => [
+          `${descriptor.screen_id} ${group.id} ${path}`,
+          descriptor,
+          path,
+        ]),
+      ),
   ) as [string, (typeof SCREENS)[number], string][];
 
   const everything: NavigationPrincipal = {
