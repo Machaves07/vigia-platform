@@ -5,6 +5,7 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 
 import { nextTotp } from './authenticator';
 import { watchPolicy } from './policy';
+import { assertPrivateArtifacts } from './private-artifacts';
 import { readWorld, type Role, type World } from './world';
 
 interface Account {
@@ -14,21 +15,23 @@ interface Account {
 
 interface Fixtures {
   world: World;
+}
+interface AuthFixtures {
   role: Role;
   authenticatedPage: Page;
+  _privateArtifacts: undefined;
 }
 interface WorkerFixtures {
   roleSession: (role: Role) => Promise<BrowserContext>;
 }
 
-export const test = base.extend<Fixtures, WorkerFixtures>({
+export const test = base.extend<Fixtures>({
   world: async ({}, use) => {
     await use(readWorld());
   },
   baseURL: async ({ world }, use) => {
     await use(world.base_url);
   },
-  role: ['coordinator_sst', { option: true }],
   context: async ({ context }, use) => {
     const check = await watchPolicy(context);
     try {
@@ -37,6 +40,21 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       check();
     }
   },
+});
+
+/** Playwright instrumenta incluso browser.newContext(): el acceso requiere otra política de artefactos. */
+export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
+  trace: 'off',
+  video: 'off',
+  screenshot: 'off',
+  role: ['coordinator_sst', { option: true }],
+  _privateArtifacts: [
+    async ({ trace, video, screenshot }, use) => {
+      assertPrivateArtifacts({ trace, video, screenshot });
+      await use(undefined);
+    },
+    { auto: true },
+  ],
   roleSession: [
     async ({ browser }, use, workerInfo) => {
       const world = readWorld();
@@ -51,7 +69,7 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
           Account
         >;
         const account = accounts[role];
-        // Contexto privado SIN trace, vídeo ni captura: fill() incluiría contraseña y OTP en ellos.
+        // La guarda automática exige trace/vídeo/capturas off antes de que se lea el formulario.
         const context = await browser.newContext({
           baseURL: world.base_url,
           ignoreHTTPSErrors: true,
@@ -65,11 +83,12 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
         const page = await context.newPage();
         try {
           await page.goto('/login');
+          await expect(page.getByLabel(/correo/i)).toBeVisible();
           await page.getByLabel(/correo/i).fill(world.users[role].email);
           await page.getByLabel(/contraseña/i).fill(account.password);
           await page.getByRole('button', { name: /iniciar sesión|entrar/i }).click();
           await page
-            .getByLabel(/código.*(?:verificación|autenticación)|segundo factor/i)
+            .getByLabel(/código de 6 dígitos/i)
             .fill(await nextTotp(account.totp_hex, role, world.credentials_file));
           await page.getByRole('button', { name: /verificar|confirmar/i }).click();
           await expect(page).not.toHaveURL(/\/login(?:\/|$)/);

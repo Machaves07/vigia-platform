@@ -1,6 +1,13 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 const engines = ['chromium', 'firefox', 'webkit'] as const;
+// Perfiles oficiales del mismo paquete/versión: Chrome anuncia Chrome, no HeadlessChrome.
+// No cambian las capacidades nativas que comprueba el arranque de producción.
+const desktopProfiles = {
+  chromium: devices['Desktop Chrome'],
+  firefox: devices['Desktop Firefox'],
+  webkit: devices['Desktop Safari'],
+};
 const sizes = [
   { name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false },
   { name: 'tablet', viewport: { width: 768, height: 1024 }, hasTouch: true },
@@ -25,7 +32,7 @@ export default defineConfig({
   projects: engines.flatMap((browserName) =>
     sizes.map(({ name, viewport, hasTouch }) => ({
       name: `${browserName}-${name}`,
-      use: { browserName, viewport, hasTouch },
+      use: { ...desktopProfiles[browserName], browserName, viewport, hasTouch },
     })),
   ),
 });

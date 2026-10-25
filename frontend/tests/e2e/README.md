@@ -31,15 +31,17 @@ Importa `test` y `expect` de `./fixtures`, no directamente de Playwright. La gua
 de CSP/Trusted Types se instala antes de los guiones, y también observa marcos y
 ventanas nuevas. Una violación falla la prueba; no se desactiva la política.
 
+Para pruebas autenticadas importa `authenticatedTest as test` de `./fixtures`.
 La opción `role` selecciona uno de los seis roles; `authenticatedPage` inicia sesión
 por la interfaz y reutiliza el contexto por rol y proyecto. Estos contextos privados
-no producen trazas, vídeo ni capturas: un registro de `fill()` expondría contraseña
+no producen trazas, vídeo ni capturas: una guarda automática rechaza activarlas
+también mediante `test.use()`. Playwright instrumenta incluso contextos creados a
+mano; un registro de `fill()` expondría contraseña
 y OTP. Las páginas sin autenticación sí conservan traza y vídeo solo al fallar.
 La ejecución es serial para no competir por un mismo TOTP.
 
-**Bloqueos reproducidos:** VIG-342 corrige la llamada nativa sin receptor de la
-sonda H.264 que hoy impide cargar React, incluso en Chromium compatible. VIG-321
-debe sustituir el relevo de `/login` antes de validar el acceso por interfaz. El
-smoke exige los campos de acceso, no solo un encabezado de relevo. Este arnés no
-implementa esas correcciones ni sustituye el acceso por cookies sembradas o rutas
-HTTP simuladas. Los recorridos funcionales por rol pertenecen a VIG-332 y VIG-333.
+El smoke exige los campos reales de acceso, no un encabezado de relevo ni el aviso
+de navegador incompatible. El arnés no sustituye el acceso por cookies sembradas
+o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestructura
+de autenticación de cada cuenta; los recorridos funcionales por rol pertenecen a
+VIG-332 y VIG-333.
