@@ -11,6 +11,7 @@ from vigia_contracts.credentials import FileCredentialStore, NodeCredentials, No
 from vigia_contracts.versioning import CONTRACT_VERSION
 
 from tests.conformance.platform_target import WALL
+from tests.factories import uuid7
 from tests.load.conftest import LoadTarget
 from tests.load.provision import LIVE_VIEW_HOST, SOFTWARE_VERSION, Fleet
 
@@ -39,7 +40,7 @@ def commissioning_clips(target: LoadTarget, fleet: Fleet) -> None:
         ) as client:
             for zone in node.zone_ids:
                 content = b"Clip sintetico del selector de comisionamiento" * 16
-                clip_id = uuid.uuid4()
+                clip_id = uuid7()
                 response = client.post(
                     "/api/nodes/clip-uploads",
                     json={
