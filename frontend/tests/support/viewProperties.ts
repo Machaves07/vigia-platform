@@ -254,12 +254,19 @@ const PERSON_FIELD_NAME =
 /**
  * Excepción cerrada: el correo de la **cuenta de la plataforma** (no de una persona observada) es
  * campo de RV-01 (cuenta) y RV-02 (usuarios) de SCR-01 en `domain-entities.md` §3. Solo esas dos
- * vistas pueden declarar `email`, con ese nombre exacto; cualquier otro nombre de persona sigue
- * prohibido también en ellas.
+ * vistas pueden declarar `email`, con ese nombre exacto. RV-19 añade únicamente cuatro banderas
+ * de correo de la cuenta, no direcciones ni datos de persona. Cualquier otro nombre de persona
+ * sigue prohibido también en ellas.
  */
 const ACCOUNT_FIELDS: Readonly<Record<string, readonly string[]>> = {
   'SCR-01:RV-01': ['email'],
   'SCR-01:RV-02': ['email'],
+  'SCR-15:RV-19': [
+    'email_enabled_normal',
+    'email_enabled_digest',
+    'email_suppressed_hard_bounce',
+    'email_suppressed_complaint',
+  ],
 };
 
 /** Campos de `allowedFields` con nombre de persona observada. */
