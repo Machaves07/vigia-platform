@@ -56,7 +56,21 @@ def prepare_journeys(
 
     # Un mes ya vencido: ni adelantar el reloj de la plataforma ni sellar un mes incompleto.
     now = WALL.now().astimezone(ZoneInfo("America/Bogota"))
-    period = (now.date().replace(day=1) - dt.timedelta(days=1)).strftime("%Y-%m")
+    previous_month = (now.date().replace(day=1) - dt.timedelta(days=1)).replace(day=1)
+    period = previous_month.strftime("%Y-%m")
+    # Precondición histórica sintética, como en test_metrics_routes: la zona ya existía
+    # durante el mes. Solo metadatos de identidad; no se reescribe ningún registro del lazo.
+    target.stack.admin(
+        [
+            (
+                "UPDATE identity.zone SET created_at = $2 WHERE zone_id = $1",
+                (
+                    fleet.zone_ids[0],
+                    dt.datetime.combine(previous_month, dt.time(), tzinfo=now.tzinfo),
+                ),
+            )
+        ]
+    )
 
     async def seal_monthly() -> None:
         assert target.api.runtime is not None
