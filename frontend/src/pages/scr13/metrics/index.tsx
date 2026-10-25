@@ -1,6 +1,6 @@
-/** SCR-13, grupo `metrics`: relevo de VIG-290 que la tarea de la pantalla sustituye. */
-import { RelayPage } from '@/pages/shared/RelayPage';
+/** Métricas y exposición del programa por zona y periodo. */
+import { ProgramPage } from '../ProgramPage';
 
 export default function Page() {
-  return <RelayPage screen="scr13" />;
+  return <ProgramPage />;
 }
