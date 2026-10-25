@@ -13,6 +13,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { AppRouter } from './app/router';
+import { installChunkLoadGuard } from './app/chunkLoadGuard';
+import { appVersion } from './app/version';
 import './styles/base.css';
 import styles from './styles/AppSkeleton.module.css';
 import { text } from './texts';
@@ -34,6 +36,8 @@ async function start(): Promise<void> {
     startMockApi();
   }
   const container = document.getElementById('vigia-app');
+  installChunkLoadGuard();
+  void appVersion.start();
   if (container === null) throw new Error('Falta el contenedor #vigia-app en index.html.');
   createRoot(container).render(
     <StrictMode>

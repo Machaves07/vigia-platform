@@ -199,9 +199,12 @@ describe('vite.config.ts', () => {
     return config({ command: 'build', mode: 'production' });
   }
 
-  it('incrusta app_version como import.meta.env.VITE_APP_VERSION', async () => {
-    const config = await resolved({ VITE_APP_VERSION: SHA });
-    expect(config.define).toEqual({ 'import.meta.env.VITE_APP_VERSION': JSON.stringify(SHA) });
+  it('incrusta app_version y la etiqueta real del contrato, sin permitir suplantarla por entorno', async () => {
+    const config = await resolved({ VITE_APP_VERSION: SHA, VITE_CONTRACT_TAG: 'v99.0.0' });
+    expect(config.define).toEqual({
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(SHA),
+      'import.meta.env.VITE_CONTRACT_TAG': '"v1.1.0"',
+    });
     expect(config.build?.sourcemap).toBe('hidden');
     const names = (config.plugins ?? [])
       .flat()
@@ -213,7 +216,10 @@ describe('vite.config.ts', () => {
 
   it('sin VITE_APP_VERSION incrusta dev', async () => {
     const config = await resolved({ VITE_APP_VERSION: '' });
-    expect(config.define).toEqual({ 'import.meta.env.VITE_APP_VERSION': '"dev"' });
+    expect(config.define).toEqual({
+      'import.meta.env.VITE_APP_VERSION': '"dev"',
+      'import.meta.env.VITE_CONTRACT_TAG': '"v1.1.0"',
+    });
   });
 });
 

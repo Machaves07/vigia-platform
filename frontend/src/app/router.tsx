@@ -20,6 +20,8 @@ import { canEnterGroup, homeScreen, type NavigationPrincipal } from '@/app/navig
 import { SCREENS } from '@/app/screens';
 import { NotAvailableInScope, ScreenState } from '@/pages/shared/ScreenState';
 
+import { guardChunkLoad } from './chunkLoadGuard';
+
 /** Ruta pública a la que lleva `/` sin sesión. */
 const LOGIN_PATH = '/login';
 
@@ -36,7 +38,7 @@ function groupRoute(path: string, group: RouteGroup, open: boolean): RouteObject
   return {
     path,
     lazy: async () => {
-      const module = await group.load();
+      const module = await guardChunkLoad(group.load);
       return { Component: module.default };
     },
   };
@@ -93,12 +95,14 @@ export function preloadGroups(
   return [homeGroup, ...groups];
 }
 
-/** Carga el código de `preloadGroups`; un fallo no hace nada (la navegación lo volverá a pedir). */
+/** Carga el código de `preloadGroups`; un fallo activa la recarga controlada, sin recargar. */
 export async function preloadHomeCode(
   principal: NavigationPrincipal,
   screens: readonly ScreenDescriptor[] = SCREENS,
 ): Promise<void> {
-  await Promise.allSettled(preloadGroups(principal, screens).map((group) => group.load()));
+  await Promise.allSettled(
+    preloadGroups(principal, screens).map((group) => guardChunkLoad(group.load)),
+  );
 }
 
 /** Ejecuta `task` tras la primera pintura (fotograma siguiente y cola de tareas); da su cancelación. */

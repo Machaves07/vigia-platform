@@ -10,6 +10,7 @@ import { createElement, type ChangeEvent, type SyntheticEvent } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
+import { createAppVersion } from '@/app/version';
 import { currentTransport } from '@/ports/base/http';
 import { sessionPort } from '@/ports/shared';
 import { createScreenQueryCache, screenKey } from '@/state/query';
@@ -75,6 +76,8 @@ function setup(extra: Partial<SessionStoreOptions> = {}) {
   installTransport(
     createTransport({
       clock,
+      // La sesión sintética anuncia 1.0.0: controlador aislado por prueba, como su reloj.
+      version: createAppVersion({ appVersion: '1.0.0', contractTag: 'v1.1.0', clock }),
       connection: createPortConnection(clock),
       devLog: () => undefined,
       ...store.transportHooks,
