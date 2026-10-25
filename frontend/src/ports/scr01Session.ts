@@ -20,7 +20,6 @@ const PUBLIC_ROUTE = 'public';
 /** Ruta con sesión sin clave propia (`SessionRoute`). */
 const SESSION_ROUTE = 'session';
 
-export type LoginStatus = components['schemas']['LoginResponse']['status'];
 export type EnrollmentView = components['schemas']['EnrollmentView'];
 export type ActivationResponse = components['schemas']['ActivationResponse'];
 
