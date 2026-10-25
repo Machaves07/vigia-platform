@@ -25,7 +25,7 @@ describe('relevos de los grupos de rutas', () => {
         (group) => `src/pages/${pageDir(screen.screen_id)}/${group.id}/index.tsx`,
       ),
     );
-    expect(expected).toHaveLength(46);
+    expect(expected).toHaveLength(47);
     expect(expected.filter((file) => !files.has(file))).toEqual([]);
     const ignored = spawnSync('git', ['check-ignore', '--no-index', ...expected], {
       cwd: root,
