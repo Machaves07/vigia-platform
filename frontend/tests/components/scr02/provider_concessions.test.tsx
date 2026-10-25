@@ -10,7 +10,7 @@
  * - Sin concesión activa, el usuario del proveedor solo entra en este panel y en su cuenta.
  * - `axe` sin violaciones serias.
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -120,12 +120,34 @@ describe('/provider/concessions', { timeout: 60_000 }, () => {
     await waitFor(() => {
       expect(fixture.meHeaders).toEqual([null, CONCESSION]);
     }, WAIT);
-    expect(
-      await within(region).findByText(text('scr02.provider.operating'), {}, WAIT),
-    ).toBeDefined();
+    expect((await screen.findByRole('status', {}, WAIT)).getAttribute('data-text-key')).toBe(
+      'scr02.provider.operating',
+    );
     // Cualquier petición del transporte real lleva ya la cabecera.
     await concessionsPort.hierarchy.read({});
     expect(fixture.hierarchyHeaders).toEqual([CONCESSION]);
+  });
+
+  it('con una concesión activa el panel no pide nada al volver a montarse (su not_found la terminaría)', async () => {
+    const user = userEvent.setup();
+    const fixture = await mountAt('/provider/concessions');
+    const region = await listTable();
+    await user.click(within(region).getByRole('button', { name: /^Operar bajo esta concesión/ }));
+    const listed = fixture.requests.providerConcessions;
+    // El armazón vuelve a montar la pantalla cuando `GET /me` trae los permisos de la concesión.
+    await act(async () => {
+      await fixture.router.navigate('/concessions');
+    });
+    await act(async () => {
+      await fixture.router.navigate('/provider/concessions');
+    });
+    expect((await screen.findByRole('status', {}, WAIT)).getAttribute('data-text-key')).toBe(
+      'scr02.provider.operating',
+    );
+    expect(screen.queryByRole('region', { name: text('scr02.provider.list') })).toBeNull();
+    expect(screen.queryByRole('button', { name: text('scr02.request.open') })).toBeNull();
+    expect(fixture.requests.providerConcessions).toBe(listed);
+    expect(fixture.concession.getSnapshot().active?.concession_id).toBe(CONCESSION);
   });
 
   it('sin «operar», ninguna petición lleva la cabecera de concesión', async () => {
@@ -136,24 +158,19 @@ describe('/provider/concessions', { timeout: 60_000 }, () => {
     expect(fixture.concession.getSnapshot().active).toBeNull();
   });
 
-  it('con otra concesión ya activa, «operar» no la cambia y lo dice', async () => {
+  it('una concesión que ya venció no se activa y el panel lo dice', async () => {
     const user = userEvent.setup();
+    // La lista la dio por activa, pero su vencimiento ya pasó con el reloj de la pestaña.
     const fixture = await mountAt('/provider/concessions', {
-      providerConcessions: [
-        providerConcession(),
-        providerConcession({ concession_id: OTHER_CONCESSION }),
-      ],
+      providerConcessions: [providerConcession({ expires_at: '2026-01-01T11:00:00.000Z' })],
     });
     const region = await listTable();
-    const buttons = within(region).getAllByRole('button', { name: /^Operar bajo esta concesión/ });
-    await user.click(nth(buttons, 0));
-    await user.click(
-      nth(within(region).getAllByRole('button', { name: /^Operar bajo esta concesión/ }), 0),
-    );
-    expect(fixture.concession.getSnapshot().active?.concession_id).toBe(CONCESSION);
+    await user.click(within(region).getByRole('button', { name: /^Operar bajo esta concesión/ }));
+    expect(fixture.concession.getSnapshot().active).toBeNull();
     expect((await screen.findByRole('alert', {}, WAIT)).getAttribute('data-text-key')).toBe(
       'scr02.provider.operate_refused',
     );
+    expect(fixture.meHeaders).toEqual([null]);
   });
 
   it('la vista previa «el cliente verá» se muestra antes de enviar y solo desde ella se envía', async () => {

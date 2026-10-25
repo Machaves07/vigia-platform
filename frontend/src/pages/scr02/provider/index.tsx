@@ -6,9 +6,14 @@
  * aviso permanente (UI-04). Tras activarla se vuelve a pedir `GET /me`, que bajo la concesión
  * devuelve los permisos con que se reconstruye la navegación.
  *
+ * Con una concesión activa el panel no pide nada: bajo la cabecera, `GET/POST
+ * /provider/concessions` responden `not_found` y ese `not_found` terminaría la concesión recién
+ * elegida (el armazón vuelve a montar la pantalla al cambiar los permisos). Solo dice bajo qué
+ * concesión se opera; cambiarla o dejarla se hace desde el aviso (BR-APP-68), y al terminar el
+ * armazón vuelve a este panel, que entonces lista sin cabecera.
+ *
  * «Operar» se ofrece solo en las concesiones activas: es la máquina de estados local de
- * `ActiveConcession` (no activa una vencida ni con otra ya activa; el cambio se hace desde el
- * aviso, BR-APP-68), no una regla de autorización.
+ * `ActiveConcession` (no activa una vencida ni con otra ya activa), no una regla de autorización.
  */
 import { useState, useSyncExternalStore } from 'react';
 
@@ -41,6 +46,17 @@ export default function Page() {
   const [refused, setRefused] = useState(false);
   const timeZone = browserTimeZone();
 
+  if (activeId !== null) {
+    return (
+      <main>
+        <h1>{text('scr02.provider.title')}</h1>
+        <p role="status" data-text-key="scr02.provider.operating">
+          {text('scr02.provider.operating')}
+        </p>
+      </main>
+    );
+  }
+
   const operate = (row: ProviderConcession) => {
     const ok = store?.activate(row) ?? false;
     setRefused(!ok);
@@ -48,9 +64,6 @@ export default function Page() {
   };
 
   const actions = (row: ProviderConcession) => {
-    if (row.concession_id === activeId) {
-      return <span role="status">{text('scr02.provider.operating')}</span>;
-    }
     if (row.status !== 'active') return null;
     return (
       <button

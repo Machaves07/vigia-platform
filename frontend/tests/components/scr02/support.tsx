@@ -255,6 +255,7 @@ export async function mountAt(
     requests,
     meHeaders,
     hierarchyHeaders,
+    router,
     container: view.container,
   };
 }
