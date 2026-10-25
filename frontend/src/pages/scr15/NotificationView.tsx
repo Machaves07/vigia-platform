@@ -22,7 +22,8 @@ export function notificationDestination(item: Notification): string | null {
     case 'export':
       return `/exports?export_id=${id}`;
     case 'zone':
-      return `/transparency/${id}`;
+      // No hay destino común a todos los destinatarios; SCR-16 exige otro permiso.
+      return null;
     case 'node':
       return `/fleet/nodes/${id}`;
     case 'organization':
@@ -41,11 +42,7 @@ export function NotificationView({ item }: { readonly item: Notification }) {
       <dt>{text('scr15.level')}</dt>
       <dd>{label('notification_urgency', item.urgency)}</dd>
       <dt>{text('scr15.zone')}</dt>
-      <dd>
-        {item.deep_link_ref.kind === 'zone'
-          ? item.deep_link_ref.id
-          : text('scr15.zone_unavailable')}
-      </dd>
+      <dd>{text('scr15.zone_unavailable')}</dd>
       <dt>{text('scr15.moment')}</dt>
       <dd>
         <TimestampWithOffset instant={item.created_at} timeZone="UTC" />

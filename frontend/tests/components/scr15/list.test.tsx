@@ -1,5 +1,5 @@
 /** Lista propia: cursor, destinos, acciones unitarias, estados y árbol accesible. */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -12,18 +12,34 @@ import { CURSOR, ID, INSTANT, SECOND, WAIT, apiError, notification, setup } from
 
 describe('SCR-15 lista', { timeout: 60_000 }, () => {
   it('sin acción todas: un clic produce exactamente un POST y actualiza la campana', async () => {
-    const { calls, view } = await setup({ withBell: true });
-    const button = await screen.findByRole('button', { name: text('scr15.mark_read') }, WAIT);
-    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
+    const { calls, view } = await setup({
+      withBell: true,
+      items: [notification(), notification(SECOND)],
+    });
+    const rows = await screen.findAllByRole('listitem', {}, WAIT);
+    expect(rows).toHaveLength(2);
+    const [untouched, clicked] = rows;
+    if (untouched === undefined || clicked === undefined) throw new Error('Faltan los dos avisos');
+    const clickedRow = within(clicked);
+    const untouchedRow = within(untouched);
+    const button = clickedRow.getByRole('button', { name: text('scr15.mark_read') });
+    await screen.findByText(`${text('scr15.unread')}: 2`, {}, WAIT);
     expect(screen.getAllByRole('button').map((node) => node.textContent)).toEqual([
       text('components_status.refresh.button'),
       text('components_status.refresh.button'),
       text('scr15.mark_read'),
+      text('scr15.mark_read'),
     ]);
     fireEvent.click(button);
-    await screen.findByText(`${text('scr15.unread')}: 0`, {}, WAIT);
-    expect(calls.marks).toEqual([ID]);
-    expect(screen.queryByRole('button', { name: text('scr15.mark_read') })).toBeNull();
+    await waitFor(() => {
+      expect(calls.marks).toEqual([SECOND]);
+      expect(clickedRow.queryByRole('button', { name: text('scr15.mark_read') })).toBeNull();
+      expect(untouchedRow.getByRole('button', { name: text('scr15.mark_read') })).toHaveProperty(
+        'disabled',
+        false,
+      );
+    }, WAIT);
+    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
     expect(
       (await axe(view.container)).violations.filter(
         (v) => v.impact === 'serious' || v.impact === 'critical',
@@ -106,7 +122,6 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     ['queue_item', `/review-queue?item_id=${ID}`],
     ['package', `/zones/monthly?package_id=${ID}`],
     ['export', `/exports?export_id=${ID}`],
-    ['zone', `/transparency/${ID}`],
     ['node', `/fleet/nodes/${ID}`],
     ['organization', '/admin/organization'],
   ])('resuelve el destino interno %s', (kind, expected) => {
@@ -125,6 +140,21 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     expect(notificationDestination({ ...notification(), event_name: 'action_assigned' })).toBe(
       `/findings/${ID}/loop`,
     );
+  });
+
+  it('sin nombre ni destino común de zona, no muestra UUID ni enlaza a transparencia', () => {
+    const item = { ...notification(), deep_link_ref: { kind: 'zone', id: ID } };
+    expect(notificationDestination(item)).toBeNull();
+    const view = render(
+      <MemoryRouter>
+        <NotificationView item={item} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(view.container.querySelectorAll('dd')[2]?.textContent).toBe(
+      text('scr15.zone_unavailable'),
+    );
+    expect(screen.getByText(text('scr15.origin_unavailable'))).not.toBeNull();
   });
 
   it('no convierte kinds desconocidos en URL ni muestra cuerpo, imágenes o campos extra', () => {
