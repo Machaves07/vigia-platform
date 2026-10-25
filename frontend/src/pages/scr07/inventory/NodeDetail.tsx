@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { fleetPort } from '@/ports/scr07Fleet';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { ScreenState } from '@/pages/shared/ScreenState';
@@ -32,6 +33,11 @@ export function NodeDetail({ nodeId }: { readonly nodeId: string }) {
     <main>
       <FleetNav />
       <h1>{text('scr07.detail')}</h1>
+      <p>
+        <Link to={`/fleet/nodes/${nodeId}/lifecycle`}>{text('scr07.lifecycle.title')}</Link>
+        {' · '}
+        <Link to={`/fleet/nodes/${nodeId}/enrollment`}>{text('scr07.enrollment.title')}</Link>
+      </p>
       <FleetRefresh query={query} operation={operation} />
       <FleetResult query={query} empty={false}>
         {data !== undefined && (
