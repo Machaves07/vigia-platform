@@ -12,7 +12,19 @@ import registration from '../../views/scr04';
 import { assertNoPersonData, assertOrganizationIsolation } from '../../support/viewProperties';
 import { settle } from '../../support/queryCache';
 import { server } from '../../msw/server';
-import { fixture, fill, next, ORG, payload, PLANT, STANDARD, version, ZONE } from './support';
+import {
+  CLIENT,
+  detail,
+  fixture,
+  fill,
+  next,
+  ORG,
+  payload,
+  PLANT,
+  STANDARD,
+  version,
+  ZONE,
+} from './support';
 
 describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
   it('RV-07: propiedades de privacidad y organización sobre la vista real', () => {
@@ -22,6 +34,7 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
   it('rechaza catálogos de otra zona u organización antes de pintar acciones', () => {
     expect(() => catalogPayload(version(), PLANT, ORG)).toThrow('Catálogo de otra zona.');
     expect(() => catalogPayload(version(), ZONE, PLANT)).toThrow('Catálogo de otra organización.');
+    expect(catalogPayload(version(), ZONE, PLANT, ORG)).toEqual(payload());
   });
   it('familias admitidas: recorre páginas sin ofrecer rechazos ni repetir cursores', async () => {
     await fixture();
@@ -81,6 +94,35 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
       result.violations.filter((item) => item.impact === 'serious' || item.impact === 'critical'),
     ).toEqual([]);
   });
+  it.each(['catalog', 'standards'])(
+    'catalog.read no ofrece ninguna gestión en la ruta %s',
+    async (group) => {
+      const { Wrapper } = await fixture(`/zones/${ZONE}/${group}`, {
+        permissions: ['catalog.read'],
+      });
+      render(<Page />, { wrapper: Wrapper });
+      await screen.findByRole('heading', { name: 'Estándar sintético 1' });
+      await screen.findByRole('table', { name: text('scr04.catalog.history') });
+      expect(
+        screen
+          .getAllByRole('button')
+          .map((button) => button.textContent)
+          .sort(),
+      ).toEqual(
+        [
+          text('components_status.refresh.button'),
+          text('components_status.refresh.button'),
+          text('components_status.refresh.button'),
+          text('components_status.refresh.button'),
+          text('scr04.catalog.compare'),
+        ].sort(),
+      );
+      expect(screen.queryByRole('heading', { name: text('scr04.catalog.declare') })).toBeNull();
+      expect(screen.getAllByRole('form').map((form) => form.getAttribute('aria-label'))).toEqual([
+        text('scr04.catalog.compare'),
+      ]);
+    },
+  );
   it('crear versión invalida catálogo y regresión y muestra la marca del servidor', async () => {
     const { Wrapper } = await fixture();
     let changed = false;
@@ -161,7 +203,9 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
         return HttpResponse.json(version(2));
       }),
     );
-    render(<Changes zoneId={ZONE} version={version()} />, { wrapper: Wrapper });
+    render(<Changes zoneId={ZONE} version={version()} timeZone="America/Bogota" />, {
+      wrapper: Wrapper,
+    });
     fill('scr04.catalog.window', String(window));
     fireEvent.click(screen.getByRole('checkbox'));
     fill('scr04.catalog.reason', 'Motivo sintético suficiente');
@@ -185,7 +229,9 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
         return HttpResponse.json(version(2));
       }),
     );
-    render(<Changes zoneId={ZONE} version={version()} />, { wrapper: Wrapper });
+    render(<Changes zoneId={ZONE} version={version()} timeZone="America/Bogota" />, {
+      wrapper: Wrapper,
+    });
     const write = vi.spyOn(catalogPort.occupancy, 'write');
     fill('scr04.catalog.window', String(window));
     fill('scr04.catalog.reason', 'Motivo sintético suficiente');
@@ -215,9 +261,12 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
         },
       ),
     );
-    render(<Changes zoneId={ZONE} version={version()} standardId={STANDARD} />, {
-      wrapper: Wrapper,
-    });
+    render(
+      <Changes zoneId={ZONE} version={version()} standardId={STANDARD} timeZone="America/Bogota" />,
+      {
+        wrapper: Wrapper,
+      },
+    );
     fill('scr04.catalog.retirement_date', '2026-01-01T12:00');
     fill('scr04.catalog.reason', 'Motivo sintético suficiente');
     fireEvent.click(screen.getByRole('button', { name: text('scr04.catalog.retire') }));
@@ -225,7 +274,7 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
       await screen.findByText(label('catalog_detail_code', 'catalog_last_standard_in_zone')),
     ).toBeDefined();
     expect(sent).toEqual([
-      { effective_from: '2026-01-01T12:00:00.000Z', reason_es: 'Motivo sintético suficiente' },
+      { effective_from: '2026-01-01T17:00:00.000Z', reason_es: 'Motivo sintético suficiente' },
     ]);
     expect(
       screen.getByLabelText(text('scr04.catalog.retirement_date')).getAttribute('aria-invalid'),
@@ -233,6 +282,102 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
     expect(
       screen.getByRole('button', { name: text('scr04.catalog.retire') }).hasAttribute('disabled'),
     ).toBe(false);
+  });
+  it.each([
+    ['', 'America/Bogota'],
+    ['2026-03-08T02:30', 'America/New_York'],
+    ['2026-01-01T12:00', 'Zona/Inexistente'],
+  ])('no envía un retiro con fecha no convertible %s en %s', async (date, timeZone) => {
+    const { Wrapper } = await fixture();
+    render(
+      <Changes zoneId={ZONE} version={version()} standardId={STANDARD} timeZone={timeZone} />,
+      { wrapper: Wrapper },
+    );
+    const write = vi.spyOn(catalogPort.retire, 'write');
+    fill('scr04.catalog.retirement_date', date);
+    fill('scr04.catalog.reason', 'Motivo sintético suficiente');
+    await act(async () => {
+      fireEvent.submit(screen.getByRole('form', { name: text('scr04.catalog.retire') }));
+      await settle();
+    });
+    expect(write).not.toHaveBeenCalled();
+    expect(
+      screen.getByLabelText(text('scr04.catalog.retirement_date')).getAttribute('aria-invalid'),
+    ).toBe('true');
+    expect(screen.getByRole('alert').textContent).toBe(text('validation.invalid'));
+  });
+  it('la página usa la zona horaria de planta al retirar', async () => {
+    const { Wrapper } = await fixture();
+    const write = vi.spyOn(catalogPort.retire, 'write').mockResolvedValue(version(2));
+    render(<Page />, { wrapper: Wrapper });
+    await screen.findByRole('heading', { name: 'Estándar sintético 1' });
+    fill('scr04.catalog.retirement_date', '2026-01-01T07:00');
+    // El reloj inyectado marca 12:00Z; 07:00 en Bogotá es ese mismo instante.
+    fireEvent.change(
+      screen.getAllByLabelText(
+        `${text('scr04.catalog.reason')} (${text('components_forms.reason.required')})`,
+      )[0] ?? document.body,
+      { target: { value: 'Motivo sintético suficiente' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: text('scr04.catalog.retire') }));
+    await waitFor(() => {
+      expect(write).toHaveBeenCalledWith({
+        path: { zone_id: ZONE, standard_id: STANDARD },
+        body: {
+          effective_from: '2026-01-01T12:00:00.000Z',
+          reason_es: 'Motivo sintético suficiente',
+        },
+      });
+    });
+  });
+  it('provider_installer lee catálogo y compara bajo la concesión del cliente', async () => {
+    const { Wrapper } = await fixture(`/zones/${ZONE}/catalog`, {
+      permissions: ['catalog.read'],
+      concessionOrganizationId: CLIENT,
+    });
+    const calls: string[] = [];
+    server.use(
+      http.get(
+        `http://localhost/zones/${ZONE}/catalog/versions/:version`,
+        ({ params, request }) => {
+          calls.push(request.headers.get('X-Vigia-Concession') ?? '');
+          return HttpResponse.json({
+            ...detail(Number(params.version)),
+            catalog: { ...payload(Number(params.version)), organization_id: CLIENT },
+          });
+        },
+      ),
+    );
+    render(<Page />, { wrapper: Wrapper });
+    await screen.findByRole('heading', { name: 'Estándar sintético 1' });
+    fill('scr04.catalog.from', '1');
+    fill('scr04.catalog.to', '2');
+    fireEvent.click(screen.getByRole('button', { name: text('scr04.catalog.compare') }));
+    await screen.findByRole('heading', { name: text('scr04.catalog.changed') });
+    expect(calls).toEqual([STANDARD, STANDARD]);
+    expect(screen.queryByRole('button', { name: text('scr04.catalog.declare') })).toBeNull();
+    expect(() =>
+      catalogPayload(
+        { ...version(), catalog: { ...payload(), organization_id: PLANT } },
+        ZONE,
+        ORG,
+        CLIENT,
+      ),
+    ).toThrow('Catálogo de otra organización.');
+  });
+  it('una concesión no permite leer catálogos de un tercer cliente', async () => {
+    const { Wrapper } = await fixture(`/zones/${ZONE}/catalog`, {
+      permissions: ['catalog.read'],
+      concessionOrganizationId: CLIENT,
+    });
+    server.use(
+      http.get(`http://localhost/zones/${ZONE}/catalog`, () =>
+        HttpResponse.json({ ...version(), catalog: { ...payload(), organization_id: PLANT } }),
+      ),
+    );
+    render(<Page />, { wrapper: Wrapper });
+    await screen.findByRole('table', { name: text('scr04.catalog.history') });
+    expect(screen.queryByRole('heading', { name: 'Estándar sintético 1' })).toBeNull();
   });
   it('no muestra otra organización y admite la organización de una concesión', () => {
     const data = { ...payload(), organization_id: PLANT };

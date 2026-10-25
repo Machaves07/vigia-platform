@@ -1,5 +1,9 @@
 /** RV-07: proyección explícita; nunca se recorren campos arbitrarios del servidor. */
-import type { Catalog, CatalogVersion } from '@/ports/scr04Catalog';
+import {
+  catalogOrganizationAllowed,
+  type Catalog,
+  type CatalogVersion,
+} from '@/ports/scr04Catalog';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
@@ -21,8 +25,7 @@ export function CatalogView({
   readonly reportContractError?: (error: { code: string }) => void;
 }) {
   if (
-    catalog.organization_id !== organizationId &&
-    catalog.organization_id !== concessionOrganizationId
+    !catalogOrganizationAllowed(catalog.organization_id, organizationId, concessionOrganizationId)
   ) {
     reportContractError?.({ code: 'foreign_organization' });
     return <ScreenState state="error" />;

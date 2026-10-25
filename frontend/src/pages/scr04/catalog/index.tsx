@@ -18,19 +18,27 @@ function ZoneCatalog({
   plant,
   overview = false,
   declare = false,
+  concessionOrganizationId,
 }: {
   readonly zoneId: string;
   readonly plant: Plant;
   readonly overview?: boolean;
   readonly declare?: boolean;
+  readonly concessionOrganizationId: string | null;
 }) {
   const { principal } = useUiSession();
+  const canManage = principal?.effective_permissions.includes('catalog.manage') === true;
   const [form, setForm] = useState<'declare' | Standard | null>(declare ? 'declare' : null);
   const query = useCatalogQuery('GET /zones/{zone_id}/catalog', zoneId, async (signal) => {
     const version = await catalogPort.current.read({ path: { zone_id: zoneId } }, signal);
     return {
       version,
-      catalog: catalogPayload(version, zoneId, principal?.organization.organization_id ?? ''),
+      catalog: catalogPayload(
+        version,
+        zoneId,
+        principal?.organization.organization_id ?? '',
+        concessionOrganizationId,
+      ),
     };
   });
   const regression = useCatalogQuery(
@@ -58,6 +66,7 @@ function ZoneCatalog({
             {...query.data}
             timeZone={timeZone}
             organizationId={principal?.organization.organization_id ?? ''}
+            concessionOrganizationId={concessionOrganizationId}
           />
         )}
       </Result>
@@ -72,59 +81,67 @@ function ZoneCatalog({
             )}
           </Result>
           <Link to={`/zones/${zoneId}/commissioning`}>{text('scr04.catalog.regression')}</Link>
-          <button
-            type="button"
-            onClick={() => {
-              setForm('declare');
-            }}
-          >
-            {text('scr04.catalog.declare')}
-          </button>
-          {data === undefined
-            ? null
-            : data.catalog.standards.map((standard) => (
-                <div key={standard.standard_id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForm(standard);
-                    }}
-                  >
-                    {text('scr04.catalog.new_version')} · {standard.title_es}
-                  </button>
-                  <Changes
-                    zoneId={zoneId}
-                    version={data.version}
-                    standardId={standard.standard_id}
-                  />
-                </div>
-              ))}
-          {form === null ? null : (
+          {canManage ? (
             <>
               <button
                 type="button"
                 onClick={() => {
-                  setForm(null);
+                  setForm('declare');
                 }}
               >
-                {text('scr04.catalog.cancel')}
+                {text('scr04.catalog.declare')}
               </button>
-              <StandardForm
-                key={form === 'declare' ? 'declare' : `${form.standard_id}:${String(form.version)}`}
-                zoneId={zoneId}
-                plantId={plant.plant_id}
-                {...(form === 'declare' ? {} : { standard: form })}
-              />
+              {data === undefined
+                ? null
+                : data.catalog.standards.map((standard) => (
+                    <div key={standard.standard_id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm(standard);
+                        }}
+                      >
+                        {text('scr04.catalog.new_version')} · {standard.title_es}
+                      </button>
+                      <Changes
+                        zoneId={zoneId}
+                        version={data.version}
+                        standardId={standard.standard_id}
+                        timeZone={timeZone}
+                      />
+                    </div>
+                  ))}
+              {form === null ? null : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(null);
+                    }}
+                  >
+                    {text('scr04.catalog.cancel')}
+                  </button>
+                  <StandardForm
+                    key={
+                      form === 'declare' ? 'declare' : `${form.standard_id}:${String(form.version)}`
+                    }
+                    zoneId={zoneId}
+                    plantId={plant.plant_id}
+                    {...(form === 'declare' ? {} : { standard: form })}
+                  />
+                </>
+              )}
+              {query.data === undefined ? null : (
+                <Changes zoneId={zoneId} version={query.data.version} timeZone={timeZone} />
+              )}
             </>
-          )}
-          {query.data === undefined ? null : (
-            <Changes zoneId={zoneId} version={query.data.version} />
-          )}
+          ) : null}
           {query.status === 'pending' ? null : (
             <Versions
               key={query.data?.version.catalog_version ?? 'initial'}
               zoneId={zoneId}
               timeZone={timeZone}
+              concessionOrganizationId={concessionOrganizationId}
             />
           )}
         </>
@@ -134,6 +151,7 @@ function ZoneCatalog({
 }
 
 export default function Page() {
+  const { principal } = useUiSession();
   const { zone_id, plant_id } = useParams();
   const standards = useMatch('/zones/:zone_id/standards') !== null;
   const hierarchy = useCatalogQuery('GET /hierarchy', plant_id ?? zone_id ?? 'all', (signal) =>
@@ -144,6 +162,10 @@ export default function Page() {
       ? item.zones.some((zone) => zone.zone_id === zone_id)
       : item.plant_id === plant_id,
   );
+  const concessionOrganizationId =
+    principal?.organization.kind === 'provider' && principal.concession_id !== null
+      ? (hierarchy.data?.organization.organization_id ?? null)
+      : null;
   if (hierarchy.status === 'success' && plant === undefined)
     return <ScreenState state="not_available_in_scope" />;
   return (
@@ -156,7 +178,13 @@ export default function Page() {
       >
         {plant === undefined ? null : zone_id === undefined ? (
           plant.zones.map((zone) => (
-            <ZoneCatalog key={zone.zone_id} zoneId={zone.zone_id} plant={plant} overview />
+            <ZoneCatalog
+              key={zone.zone_id}
+              zoneId={zone.zone_id}
+              plant={plant}
+              overview
+              concessionOrganizationId={concessionOrganizationId}
+            />
           ))
         ) : (
           <ZoneCatalog
@@ -164,6 +192,7 @@ export default function Page() {
             zoneId={zone_id}
             plant={plant}
             declare={standards}
+            concessionOrganizationId={concessionOrganizationId}
           />
         )}
       </Result>

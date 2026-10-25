@@ -14,7 +14,7 @@
   "scr04.catalog.new_version": "Crear versión nueva o ajustar umbral temporal",
   "scr04.catalog.retire": "Retirar estándar",
   "scr04.catalog.effective_from": "Inicio de vigencia",
-  "scr04.catalog.retirement_date": "Fecha de retiro (UTC)",
+  "scr04.catalog.retirement_date": "Fecha de retiro (hora de la planta)",
   "scr04.catalog.author": "Autor",
   "scr04.catalog.version": "Versión",
   "scr04.catalog.history": "Historial de versiones",

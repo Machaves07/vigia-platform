@@ -1,5 +1,6 @@
 /** Retiro y unipersonal siempre publican una versión, con motivo obligatorio. */
 import { useId, useState } from 'react';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { FieldNotice, NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import { noticeForField } from '@/components/NoticeStack/notice';
@@ -17,10 +18,12 @@ export function Changes({
   zoneId,
   version,
   standardId,
+  timeZone,
 }: {
   readonly zoneId: string;
   readonly version: CatalogVersion;
   readonly standardId?: string;
+  readonly timeZone: string;
 }) {
   const id = useId();
   const retirement = standardId !== undefined;
@@ -29,12 +32,19 @@ export function Changes({
   const [occupancy, setOccupancy] = useState(version.single_occupancy);
   const [window, setWindow] = useState(version.aggregation_window_minutes);
   const [date, setDate] = useState('');
+  const parsed = fromZonedTime(date, timeZone);
+  // La ida y vuelta también rechaza fechas civiles normalizadas y horas inexistentes por DST.
+  const effectiveFrom =
+    Number.isFinite(parsed.getTime()) &&
+    formatInTimeZone(parsed, timeZone, "yyyy-MM-dd'T'HH:mm") === date
+      ? parsed.toISOString()
+      : null;
   const mutation = useScreenMutation({
     write: async () =>
       retirement
         ? catalogPort.retire.write({
             path: { zone_id: zoneId, standard_id: standardId },
-            body: { effective_from: `${date}:00.000Z`, reason_es: reason.normalize('NFC') },
+            body: { effective_from: effectiveFrom ?? '', reason_es: reason.normalize('NFC') },
           })
         : catalogPort.occupancy.write({
             path: { zone_id: zoneId },
@@ -62,7 +72,7 @@ export function Changes({
         if (
           reasonIssueKey(reason, LIMITS) !== null ||
           (!retirement && (!Number.isInteger(window) || window < 15 || window > 480)) ||
-          (retirement && date === '')
+          (retirement && effectiveFrom === null)
         )
           return;
         void mutation.run(undefined).catch(() => undefined);
@@ -90,9 +100,20 @@ export function Changes({
             onChange={(event) => {
               setDate(event.target.value);
             }}
-            aria-invalid={dateNotice !== undefined}
-            aria-describedby={dateNotice === undefined ? undefined : `${id}-date-notice`}
+            aria-invalid={dateNotice !== undefined || (showErrors && effectiveFrom === null)}
+            aria-describedby={
+              dateNotice !== undefined
+                ? `${id}-date-notice`
+                : showErrors && effectiveFrom === null
+                  ? `${id}-date-invalid`
+                  : undefined
+            }
           />
+          {showErrors && effectiveFrom === null ? (
+            <p id={`${id}-date-invalid`} role="alert">
+              {text('validation.invalid')}
+            </p>
+          ) : null}
           {dateNotice === undefined ? null : (
             <FieldNotice id={`${id}-date-notice`} notice={dateNotice} />
           )}

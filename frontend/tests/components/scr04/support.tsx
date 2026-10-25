@@ -20,6 +20,7 @@ export const ZONE = '0190a1b2-0000-7000-8000-000000000011';
 export const PLANT = '0190a1b2-0000-7000-8000-000000000012';
 export const ORG = '0190a1b2-0000-7000-8000-0000000000f1';
 export const STANDARD = '0190a1b2-0000-7000-8000-000000000013';
+export const CLIENT = '0190a1b2-0000-7000-8000-000000000014';
 const INSTANT = '2026-01-01T12:00:00.000Z';
 export const PREDICATE = {
   all_of: [{ presence: true }, { signal_role: 'energy', value: 'asserted' }],
@@ -93,7 +94,13 @@ afterEach(() => {
   installTransport(null);
 });
 
-export async function fixture(path = `/zones/${ZONE}/catalog`) {
+export async function fixture(
+  path = `/zones/${ZONE}/catalog`,
+  options: {
+    readonly permissions?: readonly string[];
+    readonly concessionOrganizationId?: string;
+  } = {},
+) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
@@ -103,8 +110,14 @@ export async function fixture(path = `/zones/${ZONE}/catalog`) {
   const me = meResponse({
     idleExpiresAt: clock.now() + 1800000,
     absoluteExpiresAt: clock.now() + 28800000,
-    permissions: ['catalog.read', 'catalog.manage'],
+    permissions: options.permissions ?? ['catalog.read', 'catalog.manage'],
   });
+  const concessionId = options.concessionOrganizationId === undefined ? null : STANDARD;
+  if (concessionId !== null) {
+    me.organization.kind = 'provider';
+    me.concession_id = concessionId;
+    me.assignments = [{ role: 'provider_installer', scope_level: 'organization', scope_id: ORG }];
+  }
   const session = createSessionStore({
     clock,
     port: { me: { read: () => Promise.resolve(me) }, logout: { write: () => Promise.resolve() } },
@@ -115,11 +128,21 @@ export async function fixture(path = `/zones/${ZONE}/catalog`) {
     storages: [],
   });
   await session.load();
-  installTransport(createTransport({ clock, connection, origin: 'http://localhost' }));
+  installTransport(
+    createTransport({
+      clock,
+      connection,
+      origin: 'http://localhost',
+      concession: () => concessionId,
+    }),
+  );
   server.use(
     http.get('http://localhost/hierarchy', () =>
       HttpResponse.json({
-        organization: me.organization,
+        organization: {
+          ...me.organization,
+          organization_id: options.concessionOrganizationId ?? ORG,
+        },
         plants: [
           {
             plant_id: STANDARD,
@@ -153,7 +176,12 @@ export async function fixture(path = `/zones/${ZONE}/catalog`) {
         nodes: [],
       }),
     ),
-    http.get(`http://localhost/zones/${ZONE}/catalog`, () => HttpResponse.json(version())),
+    http.get(`http://localhost/zones/${ZONE}/catalog`, () =>
+      HttpResponse.json({
+        ...version(),
+        catalog: { ...payload(), organization_id: options.concessionOrganizationId ?? ORG },
+      }),
+    ),
     http.get(`http://localhost/zones/${ZONE}/catalog/versions`, () =>
       HttpResponse.json({ versions: [version(2), version(1)], next_after: null }),
     ),

@@ -140,6 +140,7 @@ export function catalogPayload(
   version: CatalogVersion,
   expectedZoneId?: string,
   expectedOrganizationId?: string,
+  concessionOrganizationId: string | null = null,
 ): Catalog {
   if (!validateZoneCatalog(version.catalog)) throw new Error('Catálogo fuera del contrato.');
   if (
@@ -149,10 +150,23 @@ export function catalogPayload(
     throw new Error('Catálogo de otra zona.');
   if (
     expectedOrganizationId !== undefined &&
-    version.catalog.organization_id !== expectedOrganizationId
+    !catalogOrganizationAllowed(
+      version.catalog.organization_id,
+      expectedOrganizationId,
+      concessionOrganizationId,
+    )
   )
     throw new Error('Catálogo de otra organización.');
   return version.catalog;
+}
+
+/** La concesión activa identifica al cliente mediante GET /hierarchy, nunca mediante el catálogo. */
+export function catalogOrganizationAllowed(
+  organizationId: string,
+  expectedOrganizationId: string,
+  concessionOrganizationId: string | null = null,
+): boolean {
+  return organizationId === expectedOrganizationId || organizationId === concessionOrganizationId;
 }
 
 export async function readVersion(
@@ -160,12 +174,13 @@ export async function readVersion(
   catalogVersion: number,
   organizationId: string,
   signal: AbortSignal,
+  concessionOrganizationId: string | null = null,
 ) {
   const version = await catalogPort.version.read(
     { path: { zone_id: zoneId, catalog_version: catalogVersion } },
     signal,
   );
-  catalogPayload(version, zoneId, organizationId);
+  catalogPayload(version, zoneId, organizationId, concessionOrganizationId);
   if (!validateSignedZoneCatalog(version.envelope)) throw new Error('Sobre fuera del contrato.');
   return version;
 }
