@@ -26,7 +26,7 @@ export const descriptor: ScreenDescriptor = {
     },
     {
       id: 'parameters',
-      paths: ['/zones/:zone_id/parameters'],
+      paths: ['/zones/:zone_id/catalog/parameters', '/zones/:zone_id/parameters'],
       access: 'permission',
       required_permissions: ['catalog.manage'],
       load: () => import('./parameters'),

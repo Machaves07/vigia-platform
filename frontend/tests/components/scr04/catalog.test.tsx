@@ -24,7 +24,7 @@ import {
   STANDARD,
   version,
   ZONE,
-} from './support';
+} from './catalogSupport';
 
 describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
   it('RV-07: propiedades de privacidad y organización sobre la vista real', () => {

@@ -7,7 +7,7 @@ import { parsePredicate, predicateTemplate } from '@/ports/scr04Catalog';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { server } from '../../msw/server';
-import { fixture, fill, next, payload, PLANT, PREDICATE, version, ZONE } from './support';
+import { fixture, fill, next, payload, PLANT, PREDICATE, version, ZONE } from './catalogSupport';
 
 async function declaration() {
   const { Wrapper } = await fixture();

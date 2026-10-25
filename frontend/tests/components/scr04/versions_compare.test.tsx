@@ -11,7 +11,7 @@ import {
   assertOrganizationIsolation,
   forbiddenRendered,
 } from '../../support/viewProperties';
-import { detail, fixture, fill, ORG, payload, ZONE } from './support';
+import { detail, fixture, fill, ORG, payload, ZONE } from './catalogSupport';
 
 describe('SCR-04 comparación', { timeout: 30_000 }, () => {
   it('RV-07 comparación: propiedades de privacidad y organización sobre la vista real', () => {
