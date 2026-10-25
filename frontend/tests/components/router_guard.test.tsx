@@ -3,7 +3,7 @@
  *
  * - Toda ruta sin permiso alcanzada por URL pinta exactamente el mismo árbol que una ruta que no
  *   existe (se compara el DOM serializado, no los textos), y no carga la porción de la pantalla.
- * - Con permiso, la ruta pinta su propia página (con su encabezado de nivel 1 del catálogo).
+ * - Con permiso, la ruta pinta su propia página y **no** el árbol de «no disponible en su alcance».
  * - `/` lleva al panel de inicio del rol más operativo; sin sesión, al inicio de sesión.
  * - Precargar el inicio y sus enlazadas, y navegar por ellas, no dispara ninguna petición (MSW
  *   cuenta cero).
