@@ -9,5 +9,5 @@
     "*.{ts,js}"
   ],
   "ignoreDependencies": [],
-  "ignoreBinaries": []
+  "ignoreBinaries": ["uv"]
 }
