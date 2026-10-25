@@ -1,7 +1,8 @@
 /** RV-10 usa el componente de producción, no una réplica para las propiedades. */
 import { createElement } from 'react';
 import { MemoryRouter } from 'react-router';
-import type { FleetNode } from '@/ports/scr07Fleet';
+import type { EnrollmentAttempt, FleetNode } from '@/ports/scr07Fleet';
+import { AttemptsTable } from '@/pages/scr07/enrollment/EnrollmentCode';
 import { FleetView } from '@/pages/scr07/inventory/FleetView';
 import { readView } from '../generators';
 import type { ViewRegistration } from './types';
@@ -51,5 +52,24 @@ export default {
       'live_view_local_url',
     ],
     // NodeInventoryView no lleva organization_id: el servidor acota por sesión/concesión.
+  },
+  enrollment_attempts: {
+    screen: 'SCR-07',
+    view: 'RV-10',
+    data: readView('EnrollmentAttemptsPage'),
+    render: (data) =>
+      createElement(AttemptsTable, {
+        attempts: data.attempts as EnrollmentAttempt[],
+        timeZone: 'America/Bogota',
+      }),
+    // Sin `node_id` ni `attempt_id`: la tabla no los pinta. `next_after` es el cursor, no un dato.
+    allowedFields: [
+      'attempts',
+      'result',
+      'hardware_fingerprint',
+      'software_version',
+      'contract_version',
+      'attempted_at',
+    ],
   },
 } satisfies Record<string, ViewRegistration>;

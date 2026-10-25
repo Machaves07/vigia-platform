@@ -1,6 +1,9 @@
 /** Integración con los proveedores de sesión y consulta del armazón (VIG-320). */
+import { fromZonedTime } from 'date-fns-tz';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
+import type { Notice } from '@/components/NoticeStack/notice';
 import { fleetClock, fleetFailure, fleetPort } from '@/ports/scr07Fleet';
 import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/state/query';
 import { useUiSession } from '@/state/session';
@@ -17,7 +20,12 @@ export function useFleetContext() {
     policy: policyFor('GET /hierarchy'),
     read: ({ signal }) => fleetPort.hierarchy.read({}, signal),
   });
-  return { scope, concession, plants: hierarchy.data?.plants ?? [] };
+  return {
+    scope,
+    concession,
+    plants: hierarchy.data?.plants ?? [],
+    nodes: hierarchy.data?.nodes ?? [],
+  };
 }
 
 export function FleetNav() {
@@ -26,8 +34,36 @@ export function FleetNav() {
       <Link to="/fleet">{text('scr07.title')}</Link>
       {' · '}
       <Link to="/fleet/alarms">{text('scr07.alarms')}</Link>
+      {' · '}
+      <Link to="/fleet/enrollment">{text('scr07.declare.title')}</Link>
+      {' · '}
+      <Link to="/fleet/target-versions">{text('scr07.target_version.title')}</Link>
     </nav>
   );
+}
+
+/**
+ * Aviso del servidor de una escritura: junto al campo que nombra (`field`) o, con `field="form"`,
+ * los que no se anclan a ningún campo. El mensaje sale del mapa cerrado de errores (BR-APP-71).
+ */
+export function FleetNotice({
+  notice,
+  field,
+  id,
+}: {
+  readonly notice: Notice | null;
+  readonly field: string;
+  readonly id: string;
+}) {
+  if (notice?.field !== field) return null;
+  return <FieldNotice id={id} notice={notice} />;
+}
+
+/** `datetime-local` en la zona de la planta → instante UTC con milisegundos, o `null`. */
+export function plantInstant(value: string, timeZone: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value) || timeZone === '') return null;
+  const date = fromZonedTime(value, timeZone);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 export function FleetRefresh({
