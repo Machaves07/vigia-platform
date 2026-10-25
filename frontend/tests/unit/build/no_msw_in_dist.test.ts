@@ -25,20 +25,31 @@ const TRACES = [
   /\[MSW\]/,
 ];
 
+/** Activos de texto del paquete; los precomprimidos (`.gz`, `.br`) son binarios y derivan de ellos. */
+const TEXT_ASSET = /\.(?:js|mjs|cjs|css|html|json|txt|svg|xml|webmanifest|map)$/i;
+
 function files(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory() ? files(join(directory, entry.name)) : [join(directory, entry.name)],
   );
 }
 
-/** `archivo: huella` de cada huella encontrada en `directory`. */
+/**
+ * `archivo: huella` de cada huella encontrada en `directory`.
+ *
+ * Solo se miran los activos de texto: un flujo comprimido (`.gz`, `.br`) es binario y puede
+ * contener la secuencia de una huella por azar, lo que marcaba un paquete limpio. Como el
+ * precomprimido se deriva del activo de texto, mirar el de texto conserva la comprobación.
+ */
 function traces(directory: string): string[] {
-  return files(directory).flatMap((file) => {
-    const content = readFileSync(file, 'latin1');
-    return TRACES.filter((trace) => trace.test(content)).map(
-      (trace) => `${relative(directory, file)}: ${String(trace)}`,
-    );
-  });
+  return files(directory)
+    .filter((file) => TEXT_ASSET.test(file))
+    .flatMap((file) => {
+      const content = readFileSync(file, 'latin1');
+      return TRACES.filter((trace) => trace.test(content)).map(
+        (trace) => `${relative(directory, file)}: ${String(trace)}`,
+      );
+    });
 }
 
 const directories: string[] = [];

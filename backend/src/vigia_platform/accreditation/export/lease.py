@@ -396,10 +396,24 @@ class SqlExportLeaseStore:
         Con el escritor y un paquete del compositor real (con sus conteos), en la misma
         transacción y **antes** que nada (la cadena de la planta primero, como toda escritura de
         U-04) se escribe ``export_produced`` con su evento ``export_available`` (BR-LAZ-100); su
-        ``record_id`` queda en la solicitud. Si la valla no confirma, se deshace también."""
+        ``record_id`` queda en la solicitud. La valla va **antes** que el paquete: un proceso que
+        perdió el arrendamiento cuando otro ya cerró la solicitud recibe ``LeaseLost``, no un
+        choque con la clave de ``export_package``. Si la valla no confirma, se deshace todo."""
         checkpoint_ids = lease.checkpoint_record_ids or ()
         async with self._database.transaction(context) as transaction:
             record_id = await self._produced(transaction, context, lease, package, now, expires_at)
+            row = (
+                await transaction.execute(
+                    _READY,
+                    {
+                        **_fence(lease, now),
+                        "expires_at": expires_at,
+                        "record_id": None if record_id is None else str(record_id),
+                    },
+                )
+            ).first()
+            if row is None:
+                raise LeaseLost()
             await transaction.execute(
                 _INSERT_PACKAGE,
                 {
@@ -416,18 +430,6 @@ class SqlExportLeaseStore:
                     "stored_objects": json.dumps(package.stored.to_json()),
                 },
             )
-            row = (
-                await transaction.execute(
-                    _READY,
-                    {
-                        **_fence(lease, now),
-                        "expires_at": expires_at,
-                        "record_id": None if record_id is None else str(record_id),
-                    },
-                )
-            ).first()
-            if row is None:
-                raise LeaseLost()
 
     async def _produced(
         self,
