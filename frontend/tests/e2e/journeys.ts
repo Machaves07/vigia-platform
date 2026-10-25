@@ -9,7 +9,7 @@ export async function confirmFinding(page: Page, findingId: string, reason: stri
   const form = page.getByRole('form', { name: 'Registrar una clasificación' });
   await form.getByRole('radio', { name: 'confirmado', exact: true }).check();
   await form.getByLabel('Categoría del motivo').selectOption('real_coexistence');
-  await form.getByLabel('Motivo de la clasificación', { exact: true }).fill(reason);
+  await form.getByLabel('Motivo de la clasificación (Obligatorio)', { exact: true }).fill(reason);
   const written = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/loop/findings/${findingId}/classifications`) &&

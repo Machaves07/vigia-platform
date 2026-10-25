@@ -40,7 +40,10 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       nonProductive.getByRole('group', { name: /^Estado de observabilidad:/ }),
     ).toHaveCount(0);
     await expect(nonProductive).not.toContainText(/\d|hallazgos|personas/i);
-    await page.getByRole('link', { name: 'Abrir la bandeja completa' }).click();
+    await page
+      .getByRole('region', { name: 'Hallazgos nuevos', exact: true })
+      .getByRole('link', { name: 'Abrir la bandeja completa' })
+      .click();
     await expect(page.getByRole('heading', { name: 'Bandeja de hallazgos' })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: 'Acciones vencidas en el alcance, sin filtros' }),
@@ -97,7 +100,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await form.getByRole('radio', { name: 'descartado en revisión', exact: true }).check();
     await form.getByLabel('Categoría del motivo').selectOption('no_person_present');
     await form
-      .getByLabel('Motivo de la decisión', { exact: true })
+      .getByLabel('Motivo de la decisión (Obligatorio)', { exact: true })
       .fill('La evidencia sintética corresponde al resguardo de la zona sin coexistencia');
     const written = page.waitForResponse(
       (response) =>
@@ -110,11 +113,12 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('acción, PNG declarado sin personas y cierre firmado', async () => {
     await page.goto(`/findings/${selected.closure}/loop`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
     await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
     const action = page.getByRole('form', { name: 'Comprometer una acción sobre la zona' });
     await action.getByLabel('Tipo de acción').selectOption('engineering');
     await action
-      .getByLabel('Descripción de la acción', { exact: true })
+      .getByLabel('Descripción de la acción (Obligatorio)', { exact: true })
       .fill('Instalar un resguardo fijo en el acceso de la zona sintética');
     await action.getByRole('button', { name: 'Registrar la acción', exact: true }).click();
     await expect(page.getByText('Acción registrada con plazo', { exact: false })).toBeVisible();
@@ -122,7 +126,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await page.getByRole('button', { name: 'Consultar el expediente de cierre' }).click();
     const evidence = page.getByRole('form', { name: 'Añadir evidencia de la acción' });
     await evidence
-      .getByLabel('Descripción estructurada de lo ejecutado', { exact: true })
+      .getByLabel('Descripción estructurada de lo ejecutado (Obligatorio)', { exact: true })
       .fill('Resguardo fijo instalado y anclado al piso del acceso de la zona');
     await evidence
       .getByLabel('Fecha y hora de ejecución en la planta')
@@ -151,7 +155,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     ).toBeVisible();
     const close = page.getByRole('region', { name: 'Cerrar y firmar', exact: true });
     await close
-      .getByLabel('Descripción del cierre', { exact: true })
+      .getByLabel('Descripción del cierre (Obligatorio)', { exact: true })
       .fill('Resguardo fijo verificado con la evidencia de la acción sobre la zona');
     await expect(close).toContainText('SST-SINTETICA-E2E');
     const signed = page.waitForResponse(
@@ -178,18 +182,18 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       'Criterios sintéticos de hallazgos sin alternativa segura',
     );
     await page
-      .getByLabel('Alternativa evaluada', { exact: true })
+      .getByLabel('Alternativa evaluada (Obligatorio)', { exact: true })
       .fill('Resguardo fijo evaluado en el acceso de la zona sintética');
     await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await page
-      .getByLabel('Motivo de descarte', { exact: true })
+      .getByLabel('Motivo de descarte (Obligatorio)', { exact: true })
       .fill('La geometría del acceso no permite instalar el resguardo fijo');
     await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await page.getByLabel('Fecha de la decisión', { exact: true }).fill(world.journeys.today);
     await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await page
-      .getByLabel('Medida compensatoria', { exact: true })
+      .getByLabel('Medida compensatoria (Obligatorio)', { exact: true })
       .fill('Delimitar el acceso con una barrera física temporal en la zona');
     await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await page
@@ -238,7 +242,10 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       page.getByText('Progreso guardado en el servidor.', { exact: true }),
     ).toBeVisible();
     // La firma del análisis queda deliberadamente humana, separada del borrador (P8).
-    await page.getByRole('link', { name: 'Notificaciones', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Navegación principal' })
+      .getByRole('link', { name: 'Notificaciones', exact: true })
+      .click();
     const leave = page.getByRole('button', { name: 'Salir sin guardar', exact: true });
     await expect(leave).toBeVisible();
     await leave.click();
