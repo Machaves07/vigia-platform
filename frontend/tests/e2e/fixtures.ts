@@ -25,6 +25,8 @@ interface WorkerFixtures {
   roleSession: (role: Role) => Promise<BrowserContext>;
 }
 
+const sessionPolicyChecks = new WeakMap<BrowserContext, () => void>();
+
 export const test = base.extend<Fixtures>({
   world: async ({}, use) => {
     await use(readWorld());
@@ -79,7 +81,9 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
           hasTouch: workerInfo.project.use.hasTouch ?? false,
         });
         sessions.set(role, context);
-        checks.push(await watchPolicy(context, role));
+        const check = await watchPolicy(context, role);
+        sessionPolicyChecks.set(context, check);
+        checks.push(check);
         const page = await context.newPage();
         try {
           await page.goto('/login');
@@ -116,6 +120,8 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
       await use(page);
     } finally {
       await page.close();
+      // Atribuir la violación a esta prueba, además de la guarda final del worker.
+      sessionPolicyChecks.get(context)?.();
     }
   },
 });
