@@ -101,4 +101,4 @@ frontend-check:
 	cd $(FRONTEND) && npm run check
 
 frontend-e2e:
-	cd $(FRONTEND) && npm run build && npm run e2e
+	cd $(FRONTEND) && npm run build && node scripts/install_webkit.mjs && npm run e2e

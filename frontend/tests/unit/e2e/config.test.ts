@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import config from '../../../playwright.config';
+import { compatibleWebkitExecutable } from '../../browser/webkit';
 
 describe('matriz real de Playwright', () => {
   const projects = config.projects ?? [];
@@ -24,10 +25,13 @@ describe('matriz real de Playwright', () => {
     }
   });
 
-  it('usa el perfil Chrome oficial, sin el identificador HeadlessChrome ajeno a la política', () => {
-    for (const project of projects.filter((item) => item.use?.browserName === 'chromium')) {
-      expect(project.use?.userAgent).toMatch(/ Chrome\/\d+/);
-      expect(project.use?.userAgent).not.toContain('HeadlessChrome');
+  it('conserva la identificación nativa y fija el WebKit compatible con CSP', () => {
+    for (const project of projects) {
+      expect(project.use?.userAgent).toBeUndefined();
+      if (project.use?.browserName === 'chromium') expect(project.use.headless).toBe(false);
+      if (project.use?.browserName === 'webkit') {
+        expect(project.use.launchOptions?.executablePath).toBe(compatibleWebkitExecutable());
+      }
     }
   });
 });

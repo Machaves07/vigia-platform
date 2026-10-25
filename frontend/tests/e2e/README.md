@@ -6,6 +6,7 @@ Desde la raíz: `make frontend-e2e`. Alternativamente, después de `npm ci` y
 ```sh
 cd backend && uv sync --frozen
 cd ../frontend && npm run build
+node scripts/install_webkit.mjs
 npm run e2e -- tests/e2e/smoke.spec.ts
 ```
 
@@ -14,6 +15,10 @@ Necesita Docker. En el WSL del proyecto se usa
 `VIGIA_TEST_USE_COMPOSE=1` reutiliza los servicios previamente levantados con `make up`;
 no detiene servicios ajenos. Por omisión cada ejecución posee sus contenedores de
 PostgreSQL y LocalStack, y los libera con el mismo arnés de U-04.
+
+Chromium corre gráfico con su agente de usuario nativo: necesita una pantalla o Xvfb.
+WebKit usa la revisión fijada en VIG-345, instalada por `scripts/install_webkit.mjs`
+(también admite `VIGIA_WEBKIT_DIR`); no se relaja CSP ni se filtran sus eventos.
 
 `globalSetup` mantiene abierto un canal al mundo Python: migraciones y bootstrap,
 API con la raíz de producción y `frontend/dist`, TLS local, worker con el único doble

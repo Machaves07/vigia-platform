@@ -1,13 +1,8 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
+
+import { compatibleWebkitExecutable } from './tests/browser/webkit';
 
 const engines = ['chromium', 'firefox', 'webkit'] as const;
-// Perfiles oficiales del mismo paquete/versión: Chrome anuncia Chrome, no HeadlessChrome.
-// No cambian las capacidades nativas que comprueba el arranque de producción.
-const desktopProfiles = {
-  chromium: devices['Desktop Chrome'],
-  firefox: devices['Desktop Firefox'],
-  webkit: devices['Desktop Safari'],
-};
 const sizes = [
   { name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false },
   { name: 'tablet', viewport: { width: 768, height: 1024 }, hasTouch: true },
@@ -32,7 +27,17 @@ export default defineConfig({
   projects: engines.flatMap((browserName) =>
     sizes.map(({ name, viewport, hasTouch }) => ({
       name: `${browserName}-${name}`,
-      use: { ...desktopProfiles[browserName], browserName, viewport, hasTouch },
+      use: {
+        browserName,
+        viewport,
+        hasTouch,
+        // Chromium gráfico conserva su identificación nativa, sin simular el agente de usuario.
+        ...(browserName === 'chromium' ? { headless: false } : {}),
+        // VIG-345: la revisión 2370 genera una violación nativa al crear select.
+        ...(browserName === 'webkit'
+          ? { launchOptions: { executablePath: compatibleWebkitExecutable() } }
+          : {}),
+      },
     })),
   ),
 });
