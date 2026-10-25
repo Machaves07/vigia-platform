@@ -69,6 +69,7 @@ RUN --mount=type=ssh \
 
 # Lo que la aplicación lee de `backend/`: la especificación de `generate --check` y las etiquetas.
 COPY backend/openapi/app.yaml /src/backend/openapi/app.yaml
+COPY backend/tools/vigia_verify.py /src/backend/tools/vigia_verify.py
 COPY backend/resources/labels.platform.es.json backend/resources/labels.loop.es.json \
      /src/backend/resources/
 COPY frontend/ ./

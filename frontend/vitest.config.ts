@@ -20,6 +20,15 @@ export default defineConfig(({ mode }) => {
     readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
   ) as { dependencies: Record<string, string> };
   return {
+    server: {
+      fs: {
+        allow: [
+          fileURLToPath(new URL('.', import.meta.url)),
+          fileURLToPath(new URL('../backend/tools/vigia_verify.py', import.meta.url)),
+          `${fileURLToPath(new URL('../backend/tools/vigia_verify.py', import.meta.url))}?url`,
+        ],
+      },
+    },
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },

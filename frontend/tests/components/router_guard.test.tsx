@@ -141,6 +141,19 @@ describe('con permiso, cada grupo pinta su página', () => {
   };
 
   it.each(open)('%s', async (_name, descriptor, path) => {
+    if (descriptor.screen_id === 'SCR-03') {
+      // SCR-03 ya no es un relevo. Aquí se prueba el enrutador sin proveedores de datos;
+      // sus páginas reales, consultas y acciones se recorren en components/scr03/.
+      const group = descriptor.route_groups.find((entry) => entry.paths.includes(path));
+      if (group === undefined) throw new Error('La ruta no tiene grupo.');
+      vi.spyOn(group, 'load').mockResolvedValue({
+        default: () => (
+          <main>
+            <h1>{text(descriptor.title_text)}</h1>
+          </main>
+        ),
+      });
+    }
     const missing = await renderAt(everything, NOT_FOUND);
     missing.unmount();
     const page = await renderAt(everything, concrete(path));
