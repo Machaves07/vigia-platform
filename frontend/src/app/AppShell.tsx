@@ -40,6 +40,7 @@ import { AppRouter } from '@/app/router';
 import { SCREENS } from '@/app/screens';
 import { ConcessionBanner } from '@/components/ConcessionBanner/ConcessionBanner';
 import { SessionGate } from '@/pages/scr01/SessionGate';
+import { ConcessionProvider } from '@/state/concession';
 import { ScreenQueryProvider } from '@/state/query';
 import { useScope } from '@/state/scope';
 import { isAuthenticated, needsReauth, SessionProvider, useUiSession } from '@/state/session';
@@ -329,7 +330,9 @@ export function App({
       <ShellContext.Provider value={shell}>
         <SessionProvider store={services.session}>
           <ScreenQueryProvider cache={services.cache}>
-            <Boot fallback={fallback} {...(createRouter === undefined ? {} : { createRouter })} />
+            <ConcessionProvider store={services.concession}>
+              <Boot fallback={fallback} {...(createRouter === undefined ? {} : { createRouter })} />
+            </ConcessionProvider>
           </ScreenQueryProvider>
         </SessionProvider>
       </ShellContext.Provider>
