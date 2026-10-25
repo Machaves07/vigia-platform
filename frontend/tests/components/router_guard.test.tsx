@@ -20,7 +20,7 @@ import { ScreenState } from '@/pages/shared/ScreenState';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import { ScreenQueryProvider, type ScreenQueryCache } from '@/state/query';
 import { createSessionStore, SessionProvider } from '@/state/session';
-import { text, texts } from '@/texts';
+import { text } from '@/texts';
 
 import { effectivePermissions } from '../generators';
 import { server } from '../setup/msw';
@@ -135,16 +135,28 @@ describe('guarda: sin permiso, el mismo árbol que not_found', () => {
     const login = await renderAt(null, '/login');
     expect(login.html).not.toBe(missing.html);
     expect(
-      await screen.findByText(text('screen_state.unavailable'), {}, { timeout: 10_000 }),
+      await screen.findByRole(
+        'heading',
+        { level: 1, name: text('scr01.login.title') },
+        { timeout: 10_000 },
+      ),
     ).toBeDefined();
   });
 });
 
 describe('con permiso, cada grupo pinta su página', () => {
+  // Las rutas públicas (inicio de sesión e invitación, VIG-321) ya no son relevos: piden al
+  // servidor al montarse y las prueban `tests/components/scr01/`.
   const open = SCREENS.flatMap((descriptor) =>
-    descriptor.route_groups.flatMap((group) =>
-      group.paths.map((path) => [`${descriptor.screen_id} ${group.id} ${path}`, descriptor, path]),
-    ),
+    descriptor.route_groups
+      .filter((group) => group.access !== 'public')
+      .flatMap((group) =>
+        group.paths.map((path) => [
+          `${descriptor.screen_id} ${group.id} ${path}`,
+          descriptor,
+          path,
+        ]),
+      ),
   ) as [string, (typeof SCREENS)[number], string][];
 
   const everything: NavigationPrincipal = {
@@ -159,13 +171,13 @@ describe('con permiso, cada grupo pinta su página', () => {
     expect(requests).toEqual([]);
     const page = await renderAt(everything, concrete(path));
     expect(page.html).not.toBe(missing.html);
-    // El grupo pinta **su** página: un único encabezado de nivel 1, con un texto del catálogo y
-    // distinto del de la ruta no disponible. No se exige el nombre de navegación del descriptor
-    // (`title_text`): un descriptor puede tener varios grupos y cada uno titula su página (SCR-07
-    // tiene cuatro títulos propios), mientras que el relevo y SCR-06 usan el de navegación.
-    const heading = screen.getByRole('heading', { level: 1 }).textContent;
-    expect(heading).not.toBe(text('errors.not_available_in_scope'));
-    expect(Object.values(texts)).toContain(heading);
+    // El grupo pinta **su** página y no el árbol de «no disponible en su alcance» (BR-APP-03, 77).
+    // No se exige un encabezado concreto: cada pantalla titula la suya —unas con el nombre de
+    // navegación del descriptor y otras con el suyo (SCR-07, SCR-08, SCR-09)— y una pantalla que
+    // todavía no tiene sesión pinta su estado de carga, sin encabezado.
+    expect(
+      screen.queryByRole('heading', { level: 1, name: text('errors.not_available_in_scope') }),
+    ).toBeNull();
   });
 });
 
@@ -173,7 +185,8 @@ describe('inicio', () => {
   it('/ lleva al panel de inicio del coordinador', async () => {
     const { router } = await renderAt(coordinator, '/');
     expect(router.state.location.pathname).toBe('/home');
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text('navigation.scr08'));
+    // El panel de inicio pinta el título de su propia página, no el nombre de navegación.
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text('scr08.home.title'));
   });
 
   it('/ sin sesión lleva al inicio de sesión', async () => {

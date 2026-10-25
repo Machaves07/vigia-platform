@@ -38,6 +38,28 @@ que no sea de navegación (D-3: `Sec-Fetch-Mode: navigate`, o `Accept` con `text
 `application/json`); la navegación recibe `index.html`. `VITE_API_MODE=mock` no usa el proxy: las
 respuestas las da MSW en el navegador (VIG-286).
 
+El modo mock anuncia en `/me` y `/version.json` la versión incrustada de Vite y la etiqueta del
+contrato fijada en `package.json`: cargar la sesión no bloquea las escrituras por una versión
+aleatoria. Vitest usa una construcción sintética estable (`dev` y la misma etiqueta fijada).
+
+#### API real local y comprobación de versión
+
+Sin estáticos, el backend anuncia `unknown` y `/version.json` devuelve 404. Eso **no** coincide con
+el `dev` de Vite: el bloqueo `version_outdated` es deliberado y recargar no lo resuelve. No se
+exceptúa `unknown` ni se desactiva la guarda en desarrollo. Para trabajar con API real, prepara
+los metadatos de la misma construcción y reinicia la API (los lee al arrancar). Desde la raíz:
+
+```sh
+VITE_APP_VERSION=dev npm --prefix frontend run build
+VIGIA_STATIC_DIR="$PWD/frontend/dist" make run
+# En otra terminal, desde la raíz:
+VITE_API_MODE=real VITE_APP_VERSION=dev npm --prefix frontend run dev
+```
+
+Si usas una etiqueta o un sha en vez de `dev`, pásalo igual a ambas órdenes de frontend. Mantén
+la construcción estática actualizada al cambiar el contrato. Las dependencias locales de
+`make run` se preparan como de costumbre (`make up`, migraciones).
+
 ### Semillas de fast-check
 
 Cada corrida imprime al empezar el perfil y la semilla:

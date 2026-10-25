@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   browserProbe,
   UNSUPPORTED_SECTION_ID,
+  type BrowserEnvironment,
   type CapabilityId,
   type CapabilityProbe,
 } from '@/bootstrap/check';
@@ -58,6 +59,26 @@ export class DateTimeFormatWithoutZones {
 }
 
 /**
+ * `HTMLMediaElement` sintético que se comporta como el nativo (VIG-342): su `canPlayType` lanza
+ * `TypeError` («Illegal invocation») si el receptor no es uno de sus elementos y, si lo es,
+ * responde `verdict`. El documento crea esos elementos.
+ */
+export function mediaEnvironment(
+  verdict: string,
+): Required<Pick<BrowserEnvironment, 'HTMLMediaElement' | 'document'>> {
+  class SyntheticMediaElement {
+    canPlayType(): string {
+      if (!(this instanceof SyntheticMediaElement)) throw new TypeError('Illegal invocation');
+      return verdict;
+    }
+  }
+  return {
+    HTMLMediaElement: SyntheticMediaElement,
+    document: { createElement: () => new SyntheticMediaElement() },
+  };
+}
+
+/**
  * Sonda con exactamente las capacidades de `present`: las ausentes quedan como las de un navegador
  * que no las tiene (`fetch` y `crypto.subtle` sin definir, `canPlayType` que declara que no, un
  * agente por debajo del mínimo).
@@ -68,9 +89,7 @@ export function probeWith(present: readonly CapabilityId[]): CapabilityProbe {
     fetch: has('fetch') ? () => undefined : undefined,
     Intl: has('intl_timezone') ? { DateTimeFormat: Intl.DateTimeFormat } : undefined,
     crypto: has('crypto_subtle') ? { subtle: { digest: () => undefined } } : undefined,
-    HTMLMediaElement: {
-      prototype: { canPlayType: has('video_h264') ? () => 'probably' : () => '' },
-    },
+    ...mediaEnvironment(has('video_h264') ? 'probably' : ''),
     navigator: { userAgent: has('browser_version') ? CURRENT_CHROME_UA : OLD_CHROME_UA },
   });
 }

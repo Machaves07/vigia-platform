@@ -1,8 +1,10 @@
 /**
- * Punto de entrada: monta el enrutador (VIG-290) con el esqueleto de la aplicación mientras llega
- * la primera porción. Hasta que el arranque en tres pasos (capacidades, `GET /me`, navegación) de
- * VIG-289 (TASK-416) entregue el `Principal`, el enrutador se monta sin sesión: solo las rutas
- * públicas y `/` lleva al inicio de sesión.
+ * Punto de entrada (paso 2 de PAT-APP-REN-01): crea los servicios de la aplicación, instala el
+ * transporte y el manejador global de fallos (UI-09) y monta el armazón (`App`, VIG-320), que
+ * ejecuta el paso 3 (`GET /me` y `GET /hierarchy`) y monta el enrutador (VIG-290).
+ *
+ * `createRoot` recibe `rootErrorOptions`: sin ellas React escribe en la consola cada error que
+ * captura un límite, también en producción (NFR-APP-18).
  *
  * Con `VITE_API_MODE=mock` en desarrollo, antes de montar se activan los manejadores de MSW
  * generados desde `app.yaml` (`src/mocks/browser.ts`, PAT-APP-MAN-02). Al construir, Vite
@@ -12,21 +14,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { AppRouter } from './app/router';
+import { App } from './app/AppShell';
+import { createAppServices } from './app/bootstrap';
+import { installChunkLoadGuard } from './app/chunkLoadGuard';
+import { installGlobalErrorHandler, rootErrorOptions } from './app/GlobalErrorHandler';
+import { appVersion } from './app/version';
+import { installTransport } from './ports/base';
 import './styles/base.css';
-import styles from './styles/AppSkeleton.module.css';
-import { text } from './texts';
-
-function AppSkeleton() {
-  return (
-    <main className={styles.skeleton}>
-      <h1 className={styles.title}>{text('common.app_name')}</h1>
-      <p className={styles.status} role="status">
-        {text('common.loading')}
-      </p>
-    </main>
-  );
-}
 
 async function start(): Promise<void> {
   if (import.meta.env.DEV && import.meta.env.VITE_API_MODE === 'mock') {
@@ -34,10 +28,15 @@ async function start(): Promise<void> {
     startMockApi();
   }
   const container = document.getElementById('vigia-app');
+  installChunkLoadGuard();
+  void appVersion.start();
   if (container === null) throw new Error('Falta el contenedor #vigia-app en index.html.');
-  createRoot(container).render(
+  const services = createAppServices();
+  installTransport(services.transport);
+  installGlobalErrorHandler(window, services.errors, services.currentRoute);
+  createRoot(container, rootErrorOptions).render(
     <StrictMode>
-      <AppRouter principal={null} fallback={AppSkeleton} />
+      <App services={services} />
     </StrictMode>,
   );
 }

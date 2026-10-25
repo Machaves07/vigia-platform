@@ -24,9 +24,12 @@
  * - Toda respuesta no 2xx se traduce con `behaviourFor` (`ports.errors`); `unauthenticated` y
  *   `privacy_notice_required` se emiten además como eventos de sesión (`state.session`, VIG-300);
  *   cualquier otra respuesta HTTP se avisa como respuesta autenticada (renueva la inactividad).
- * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración.
+ * - Registro de desarrollo (`devLog.ts`): método, plantilla de ruta, código y duración; solo en
+ *   desarrollo, y la construcción de producción lo elimina.
  */
 import { OPERATIONS } from '@/client';
+import { appVersion, type AppVersion } from '@/app/version';
+import { text } from '@/texts';
 import type { Clock, TimerHandle } from '@/state/clock';
 import {
   createConnection,
@@ -65,8 +68,11 @@ export interface TransportConnection {
   register(dependency: Dependency, outcome: Outcome<CircuitError>): void;
 }
 
+/** `state.connection` con los errores de `ports.base`: lo anterior más `subscribe` y `tick`. */
+export type PortConnection = ReturnType<typeof createConnection<CircuitError>>;
+
 /** Circuitos de la aplicación con la clasificación de `ports.errors` (`counts_for_circuit`). */
-export function createPortConnection(clock: Clock): TransportConnection {
+export function createPortConnection(clock: Clock): PortConnection {
   return createConnection<CircuitError>({
     clock,
     counts_for_circuit: (error, dependency) =>
@@ -77,6 +83,7 @@ export function createPortConnection(clock: Clock): TransportConnection {
 
 /** Por qué falló una operación de un puerto; la pantalla decide qué mostrar con `behaviour`. */
 export type PortFailure =
+  | { readonly kind: 'version_outdated'; readonly message: string }
   /** Operación `assumed`: la especificación aún no la tiene; no se llamó a la red (BR-APP-63). */
   | { readonly kind: 'unavailable' }
   /** Circuito abierto o reintentos agotados (BR-APP-73, 74). */
@@ -115,6 +122,8 @@ export interface TransportOptions {
   readonly onConcessionNotFound?: (concessionId: string) => void;
   /** Observador de `X-Vigia-Api-Version` (VIG-302). */
   readonly onApiVersion?: (version: string) => void;
+  /** Controlador común; inyectable para aislar pruebas y aplicaciones embebidas. */
+  readonly version?: AppVersion;
   /** Eventos de sesión (VIG-300). */
   readonly onSessionEvent?: (event: SessionEvent) => void;
   /**
@@ -144,6 +153,7 @@ export interface ApiRequest {
 
 export interface Transport {
   readonly clock: Clock;
+  assertVersionCurrent?(): void;
   request(request: ApiRequest): Promise<unknown>;
 }
 
@@ -248,11 +258,19 @@ const SILENT = (): void => undefined;
 
 export function createTransport(options: TransportOptions): Transport {
   const { clock, connection } = options;
+  const versionGuard = options.version ?? appVersion;
+  const assertVersionCurrent = (): void => {
+    if (!versionGuard.canWrite()) {
+      throw new PortError({ kind: 'version_outdated', message: text('version.outdated') });
+    }
+  };
   // Sin `fetch` inyectado se resuelve el global en cada llamada (MSW lo sustituye en pruebas).
   const fetchImpl =
     options.fetch ??
     ((input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init));
-  const devLog = options.devLog ?? createDevLog();
+  // Fuera de desarrollo, ningún registro: `DEV` es la constante `false` en la construcción de
+  // producción, así que `createDevLog` y su `console` desaparecen de `dist/` (NFR-APP-18).
+  const devLog = options.devLog ?? (import.meta.env.DEV ? createDevLog() : SILENT);
 
   const headersFor = (request: ApiRequest, concession: string | null): Headers => {
     const headers = new Headers({ Accept: 'application/json' });
@@ -270,6 +288,7 @@ export function createTransport(options: TransportOptions): Transport {
   const observe = (response: Response): void => {
     const version = response.headers.get(API_VERSION_HEADER)?.trim();
     if (version !== undefined && version.length > 0 && version.length <= MAX_API_VERSION_LENGTH) {
+      versionGuard.observeApiVersion(version);
       options.onApiVersion?.(version);
     }
   };
@@ -317,6 +336,7 @@ export function createTransport(options: TransportOptions): Transport {
       } catch {
         if (response.ok) return { type: 'fault', fault: { kind: 'network' } };
       }
+      if (response.ok && request.operationId === 'me_me_get') versionGuard.observeMe(body);
       return response.ok
         ? { type: 'ok', status: response.status, value: body }
         : { type: 'http', error: httpError(response, body), concession };
@@ -404,6 +424,7 @@ export function createTransport(options: TransportOptions): Transport {
     connection.getSnapshot().circuits[dependency].state === 'closed';
 
   const write = async (request: ApiRequest): Promise<unknown> => {
+    assertVersionCurrent();
     if (!connection.canWrite()) throw new PortError({ kind: 'offline' });
     // Una escritura enviada no se cancela desde la pantalla: su resultado se conoce siempre.
     const result = await attempt({ ...request, signal: undefined });
@@ -431,6 +452,7 @@ export function createTransport(options: TransportOptions): Transport {
 
   return {
     clock,
+    assertVersionCurrent,
     request: (request) => {
       const { method } = OPERATIONS[request.operationId];
       if (request.kind === 'read' && method !== 'get') {

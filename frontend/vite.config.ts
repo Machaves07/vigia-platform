@@ -74,6 +74,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), vigiaBootstrap({ root }), vigiaRelease({ release, sourcemapDir })],
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+      'import.meta.env.VITE_CONTRACT_TAG': JSON.stringify(release.contract_tag),
     },
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

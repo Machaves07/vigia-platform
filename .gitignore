@@ -40,5 +40,8 @@ backend/resources/pwned-top100k.txt
 # Secretos y configuración local
 .env
 .env.*
+frontend/tests/e2e/.world.json
+frontend/test-results/
+frontend/playwright-report/
 *.pem
 *.key

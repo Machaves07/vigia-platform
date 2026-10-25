@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DateTimeFormatWithoutZones } from '../../support/capabilities';
+import { DateTimeFormatWithoutZones, mediaEnvironment } from '../../support/capabilities';
 import {
   browserProbe,
   CAPABILITIES,
@@ -58,7 +58,7 @@ const COMPLETE: CapabilityProbe = browserProbe({
   fetch: () => undefined,
   Intl: { DateTimeFormat: Intl.DateTimeFormat },
   crypto: { subtle: { digest: () => undefined } },
-  HTMLMediaElement: { prototype: { canPlayType: () => 'probably' } },
+  ...mediaEnvironment('probably'),
   navigator: { userAgent: userAgent('chrome', 156, 0) },
 });
 
@@ -134,7 +134,7 @@ describe('crypto.subtle.digest', () => {
 });
 
 describe('video con H.264', () => {
-  it('pregunta por el tipo exacto del diseño', () => {
+  it('pregunta por MP4/H.264 con perfil y nivel AVC explícitos', () => {
     const asked: string[] = [];
     expect(
       supportsH264((type) => {
@@ -143,7 +143,7 @@ describe('video con H.264', () => {
       }),
     ).toBe(true);
     expect(asked).toEqual([H264_TYPE]);
-    expect(H264_TYPE).toBe('video/mp4; codecs="avc1"');
+    expect(H264_TYPE).toBe('video/mp4; codecs="avc1.42E01E"');
   });
 
   it('acepta «maybe» y «probably» y rechaza el resto', () => {

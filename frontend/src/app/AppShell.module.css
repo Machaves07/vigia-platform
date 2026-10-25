@@ -1,0 +1,194 @@
+/* Armazón de la aplicación (UI-01, 02, 05, 06, 07 y 09): solo variables de `tokens.css`. */
+
+.skeleton,
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6);
+}
+
+.skeletonTitle {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+
+.skeletonStatus {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.brand {
+  color: var(--color-text);
+  font-size: var(--font-size-large);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin-left: auto;
+}
+
+.account {
+  position: relative;
+}
+
+.accountMenu {
+  position: absolute;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 14rem;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2);
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.accountMenu[hidden] {
+  display: none;
+}
+
+.button {
+  min-height: var(--touch-target-min);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link {
+  color: var(--color-observable);
+}
+
+.button:focus-visible,
+.link:focus-visible,
+.brand:focus-visible,
+.navLink:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.notices:empty {
+  display: none;
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 2px solid var(--color-degraded);
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.noticeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+}
+
+.noticeText {
+  margin: 0;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.nav {
+  flex: 0 0 16rem;
+  padding: var(--space-4);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+}
+
+.navList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.navLink {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.navLink[aria-current='page'] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.lock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-6) 0;
+}
+
+.lockMessage {
+  margin: 0;
+  font-weight: 600;
+}
+
+.failure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.failureTitle {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+
+.correlation {
+  margin: 0;
+}
+
+.copied {
+  color: var(--color-text-muted);
+}

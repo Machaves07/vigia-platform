@@ -333,6 +333,11 @@ export async function uploadFile(
   file: File,
   options: UploadOptions,
 ): Promise<UploadResult> {
+  try {
+    currentTransport().assertVersionCurrent?.();
+  } catch (error) {
+    throw new UploadError(portFailure(error));
+  }
   const rejected = precheck(target, file, options.declared);
   if (rejected !== null) throw new UploadError(rejected);
   options.onStage?.('hashing');
@@ -352,6 +357,12 @@ export async function uploadFile(
   }
   const put = options.putObject ?? xhrPutObject;
   options.onStage?.('uploading');
+  // La versión puede cambiar durante el hash, la concesión o el callback de progreso.
+  try {
+    currentTransport().assertVersionCurrent?.();
+  } catch (error) {
+    throw new UploadError(portFailure(error));
+  }
   try {
     await put({
       url,

@@ -1,6 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/**/*.mjs", "tests/views/index.ts", "tests/msw/scenarios/index.ts"],
+  "entry": [
+    "scripts/**/*.mjs",
+    "tests/views/index.ts",
+    "tests/msw/scenarios/index.ts",
+    "tests/browser/probe.ts"
+  ],
   "project": [
     "src/**/*.{ts,tsx}",
     "tests/**/*.{ts,tsx}",
@@ -9,5 +14,5 @@
     "*.{ts,js}"
   ],
   "ignoreDependencies": [],
-  "ignoreBinaries": []
+  "ignoreBinaries": ["uv"]
 }
