@@ -1,0 +1,83 @@
+/* SCR-05 en escritorio: una sola columna legible; formularios y secciones apilados. */
+.page {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-6);
+}
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.notice {
+  padding: var(--space-3);
+  border-left: 4px solid var(--color-border);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fact {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.declared {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  padding-left: 0;
+  list-style: none;
+}
+
+.list > li {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.button {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+}
+
+.scroll {
+  overflow-x: auto;
+}
