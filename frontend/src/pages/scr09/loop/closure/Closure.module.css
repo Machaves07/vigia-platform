@@ -1,0 +1,29 @@
+.page {
+  display: grid;
+  gap: 1rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.page form,
+.page fieldset {
+  display: grid;
+  gap: 1rem;
+}
+
+.page label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.page input,
+.page textarea,
+.page select {
+  max-width: 100%;
+  font: inherit;
+}
+
+.page li {
+  margin-bottom: 0.75rem;
+}
