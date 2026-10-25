@@ -1,0 +1,24 @@
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-block: 1rem;
+  align-items: end;
+}
+
+.filters label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.scroll th,
+.scroll td {
+  text-align: start;
+  vertical-align: top;
+  padding: 0.5rem;
+  border-bottom: 1px solid currentColor;
+}
