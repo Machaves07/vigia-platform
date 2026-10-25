@@ -25,11 +25,17 @@ npm ci
 | `npm run knip`           | Dependencias, archivos y exportaciones sin uso (`knip.json` más `knip.ignore.*.json`) |
 | `npm test`               | vitest con el perfil `ci` de fast-check (200 ejemplos)                                |
 | `npm run test:nightly`   | vitest con el perfil `nightly` (2 000 ejemplos)                                       |
-| `npm run check`          | Cada comprobación de `scripts/checks/*.mjs`, en orden                                 |
+| `npm run check`          | Cada comprobación de `scripts/checks/*.mjs`, en orden (salvo `size.mjs`)              |
 | `npm run generate`       | Cliente, validadores y esquemas espejo desde `backend/openapi/app.yaml`               |
 | `npm run generate:check` | Falla con la diferencia si algo generado no coincide con `app.yaml`                   |
 | `npm run e2e`            | Playwright contra la plataforma local (lo completa VIG-299)                           |
-| `npm run size`           | Presupuesto de tamaño por porción (lo completa VIG-294)                               |
+| `npm run size`           | Presupuesto de tamaño de `dist/` por porción (NFR-APP-01), tras `npm run build`       |
+| `npm run audit:check`    | `npm audit`: alta o crítica bloquea, salvo la excepción de `@lhci/cli` (VIG-294)      |
+
+El trabajo «frontend (verificaciones, pruebas y construcción)» de `.github/workflows/ci.yml` corre
+en cada PR: `npm ci --ignore-scripts`, `generate:check`, `lint`, `typecheck`, `knip`, `check`,
+`npm test -- --coverage` (umbrales de NFR-APP-46 en `vitest.config.ts`), `audit:check`, `build` y
+`size`.
 
 ### Modo de la API en desarrollo
 

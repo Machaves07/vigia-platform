@@ -29,7 +29,8 @@
     "test:bootstrap:browsers": "playwright test --config tests/browser/playwright.config.ts",
     "check": "node scripts/checks/run.mjs",
     "e2e": "playwright test",
-    "size": "node scripts/pending.mjs size VIG-294 TASK-412"
+    "size": "node scripts/checks/size.mjs",
+    "audit:check": "node scripts/audit.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.5",

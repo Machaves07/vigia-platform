@@ -52,6 +52,10 @@
 # - flujos (actionlint): lint de .github/workflows con shellcheck (TASK-151).
 # - infra (pruebas y cdk synth): pruebas de plantilla de CDK y síntesis sin credenciales.
 #   Incluye tests/test_loop_stack.py (U-04), bloqueante en el mismo check.
+# - frontend (verificaciones, pruebas y construcción) (U-05, VIG-294): npm ci con la clave de
+#   despliegue, generate --check, ESLint y Prettier, tsc, knip, npm run check (con las licencias),
+#   vitest con el perfil ci y los umbrales de cobertura de NFR-APP-46, npm audit, construcción y
+#   presupuesto de tamaño (NFR-APP-01) con su tabla en el resumen del trabajo.
 # Los checks obligatorios conservan su nombre: escaneo de secretos, los «backend» de siempre (los
 # dos de la integración, ahora agregadores) e infra.
 name: ci
@@ -133,6 +137,60 @@ jobs:
         run: |
           if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then RANGO="$HEAD"; else RANGO="$BASE..$HEAD"; fi
           ./gitleaks detect --source . --no-banner --redact --log-opts="$RANGO"
+
+  # VIG-294 (TASK-412; NFR-APP-01, 16, 25, 45 y 46; PAT-APP-SEG-09): las verificaciones de frontend/ en cada
+  # cambio. No depende de «rutas»: un cambio de backend/openapi/app.yaml también puede romper el cliente
+  # generado. `npm ci --ignore-scripts`: ningún guion de instalación de terceros corre mientras la clave de
+  # despliegue está en disco. Las pruebas de las prohibiciones (PR-APP-07, 08, 10 y el catálogo de textos)
+  # y axe (vitest-axe) van en `npm test`; el escaneo de secretos cubre frontend/ («escaneo de secretos»).
+  frontend:
+    name: frontend (verificaciones, pruebas y construcción)
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada (npm ci sin guiones de instalación)
+        run: npm ci --ignore-scripts
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: generate --check (cliente y esquemas espejo de backend/openapi/app.yaml)
+        run: npm run generate:check
+      - name: ESLint y Prettier
+        run: npm run lint
+      - name: tsc --noEmit
+        run: npm run typecheck
+      - name: knip
+        run: npm run knip
+      - name: comprobaciones (textos, etiquetas, destinos, permisos, aviso, MSW y licencias)
+        run: npm run check
+      - name: vitest con el perfil ci y cobertura (≥ 80 % en estado, puertos, validadores, errores y cobertura)
+        run: npm test -- --coverage
+      - name: npm audit (alta o crítica bloquea)
+        run: npm run audit:check
+      - name: construcción de producción
+        run: npm run build
+      - name: presupuesto de tamaño (NFR-APP-01, informe en el resumen)
+        run: npm run size
 
   # El backend va en jobs paralelos (2026-10-01): con ~2900 pruebas el job único tardaba 32-37 min de un tope
   # de 45. Entre todos cubren exactamente la suite: `-m "not integration"` ∪ `-m integration`, y la integración

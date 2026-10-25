@@ -22,10 +22,12 @@ canalización promete y un cambio descuidado rompería sin que nadie lo viera:
 - **Herramientas de CI fijadas por suma**: ``coverage`` y ``pip-audit`` con ``--require-hashes``.
 - **Descargas verificadas**: toda orden que descarga con ``curl`` comprueba la suma con
   ``sha256sum -c`` en el mismo paso.
-- **ci.yml**: conserva los nombres de los catorce trabajos, incluidos los checks obligatorios,
+- **ci.yml**: conserva los nombres de sus trabajos, incluidos los checks obligatorios,
   y tiene los trabajos de cobertura (que
   ejecuta ``tools/check_coverage.py``), licencias, pip-audit, imagen arm64 con ``--ssh default``,
   auditoría de la imagen y arranque N-1.
+- **frontend (VIG-294)**: Node 22 fijado, ``npm ci --ignore-scripts`` con la clave de despliegue en
+  un archivo que se borra, y cada verificación de TASK-412 en su orden (``frontend_job_problems``).
 - **Imágenes base por digest**: cada ``FROM`` de ``backend/Dockerfile`` es una etapa anterior o una
   imagen ``@sha256:``, nunca ``latest``; la de PostgreSQL de ``tools/run_boot_check.py`` es la
   de las pruebas de integración.
@@ -78,6 +80,8 @@ REQUIRED_CHECKS = (
     "arranque N-1 contra el esquema N",
     "flujos (actionlint)",
     "infra (pruebas y cdk synth)",
+    # VIG-294 (TASK-412): al fusionarlo, la sesión de control lo añade a los checks de procesar.py.
+    "frontend (verificaciones, pruebas y construcción)",
 )
 """Los checks obligatorios de la rama (AGENTS.md): renombrarlos deja la rama sin protección."""
 
@@ -93,6 +97,7 @@ FIRST_PARTY_ACTIONS = frozenset(
         "astral-sh/setup-uv",
         "actions/upload-artifact",
         "actions/download-artifact",
+        "actions/setup-node",  # VIG-294: Node 22 fijado del trabajo frontend de ci.yml.
     }
 )
 """Las acciones que ya fija ``ci.yml``. La federación y el token de ``vigia-release`` van por
@@ -898,6 +903,144 @@ def test_dependabot_watches_python_npm_actions_and_the_base_image() -> None:
         ("github-actions", "/"),
         ("docker", "/backend"),
     }
+    # PAT-APP-SEG-09 (VIG-294): npm de frontend/ semanal y agrupado.
+    (npm,) = [u for u in config["updates"] if u["package-ecosystem"] == "npm"]
+    assert npm["schedule"]["interval"] == "weekly"
+    assert npm["groups"] and all(group.get("update-types") for group in npm["groups"].values())
+
+
+FRONTEND_JOB = "frontend"
+FRONTEND_COMMANDS = (
+    "npm ci --ignore-scripts",
+    "rm -f ~/.ssh/vigia_contracts",
+    "npm run generate:check",
+    "npm run lint",
+    "npm run typecheck",
+    "npm run knip",
+    "npm run check",
+    "npm test -- --coverage",
+    "npm run audit:check",
+    "npm run build",
+    "npm run size",
+)
+"""Pasos de TASK-412, en este orden: la construcción y su tamaño, al final."""
+_NODE_22 = re.compile(r"^22\.\d+\.\d+$")
+
+
+def frontend_job_problems(text: str) -> list[str]:
+    """VIG-294 (TASK-412): el trabajo ``frontend`` de ``ci.yml`` corre cada verificación de
+    ``frontend/`` en su orden, con Node 22 fijado y la clave de despliegue solo en un archivo que
+    se borra pase lo que pase; ningún paso se salta por condición ni deja seguir tras un fallo."""
+    jobs = _load(text).get("jobs") or {}
+    job = jobs.get(FRONTEND_JOB)
+    if not isinstance(job, dict):
+        return ["no hay trabajo frontend"]
+    problems = []
+    if job.get("name") != "frontend (verificaciones, pruebas y construcción)":
+        problems.append(f"nombre del trabajo: {job.get('name')!r}")
+    if job.get("runs-on") != "ubuntu-24.04":
+        problems.append(f"runs-on: {job.get('runs-on')!r}")
+    if job.get("defaults", {}).get("run", {}).get("working-directory") != "frontend":
+        problems.append("los pasos no corren en frontend/")
+    if "needs" in job or job.get("continue-on-error"):
+        problems.append("el trabajo depende de otro o no bloquea")
+    steps = job.get("steps") or []
+    setup = [step for step in steps if str(step.get("uses", "")).startswith("actions/setup-node")]
+    version = str(setup[0].get("with", {}).get("node-version", "")) if setup else ""
+    if not _NODE_22.match(version):
+        problems.append(f"Node 22 sin fijar: {version!r}")
+    runs = [str(step.get("run") or "") for step in steps]
+    positions = []
+    for command in FRONTEND_COMMANDS:
+        found = [index for index, run in enumerate(runs) if command in run]
+        if not found:
+            problems.append(f"falta el paso «{command}»")
+        else:
+            positions.append(found[0])
+    if positions != sorted(positions):
+        problems.append("los pasos no siguen el orden de TASK-412")
+    for step in steps:
+        run = str(step.get("run") or "")
+        if run.startswith("npm ") and (step.get("if") or step.get("continue-on-error")):
+            problems.append(f"«{run}» tiene condición o no bloquea")
+        if "npm install" in run or ("npm ci" in run and "--ignore-scripts" not in run):
+            problems.append(f"«{run}» instala sin bloqueo o con guiones de instalación")
+    cleanup = [step for step in steps if "rm -f ~/.ssh/vigia_contracts" in str(step.get("run"))]
+    if not cleanup or cleanup[0].get("if") != "always()":
+        problems.append("la clave de despliegue no se borra con if: always()")
+    secrets = set(re.findall(r"secrets\.(\w+)", yaml.safe_dump(job)))
+    if secrets - {"VIGIA_CONTRACTS_DEPLOY_KEY"}:
+        problems.append(f"secretos no permitidos: {sorted(secrets)}")
+    return problems
+
+
+def test_the_frontend_job_runs_every_check_of_task_412() -> None:
+    assert frontend_job_problems((WORKFLOWS / "ci.yml").read_text(encoding="utf-8")) == []
+    # Los guiones que corre existen y los umbrales de NFR-APP-46 están en la configuración.
+    frontend = REPOSITORY / "frontend"
+    scripts = json.loads((frontend / "package.json").read_text(encoding="utf-8"))["scripts"]
+    assert scripts["size"] == "node scripts/checks/size.mjs"
+    assert scripts["audit:check"] == "node scripts/audit.mjs"
+    assert (frontend / "scripts" / "checks" / "licenses.mjs").is_file()
+    vitest = (frontend / "vitest.config.ts").read_text(encoding="utf-8")
+    for area in ("src/state/**", "src/ports/**", "src/ports/validation/**", "src/ports/errors/**"):
+        assert f"'{area}': {{ lines: 80 }}" in vitest, area
+    assert "'src/state/coverage/**': { lines: 80 }" in vitest
+
+
+def _ci_with_frontend(change: Any) -> str:
+    ci = _ci()
+    change(ci["jobs"][FRONTEND_JOB])
+    return yaml.safe_dump(ci, allow_unicode=True)
+
+
+def _drop_step(command: str) -> Any:
+    def change(job: dict[Any, Any]) -> None:
+        job["steps"] = [step for step in job["steps"] if command not in str(step.get("run"))]
+
+    return change
+
+
+def _edit_step(command: str, **fields: Any) -> Any:
+    def change(job: dict[Any, Any]) -> None:
+        for step in job["steps"]:
+            if command in str(step.get("run")):
+                step.update(fields)
+
+    return change
+
+
+@pytest.mark.parametrize("command", FRONTEND_COMMANDS)
+def test_dropping_a_frontend_step_is_detected(command: str) -> None:
+    assert frontend_job_problems(_ci_with_frontend(_drop_step(command)))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(_edit_step("npm run size", run="npm run build"), id="tamaño-antes"),
+        pytest.param(_edit_step("npm run audit:check", **{"if": "false"}), id="audit-con-if"),
+        pytest.param(
+            _edit_step("npm test -- --coverage", **{"continue-on-error": True}),
+            id="test-no-bloquea",
+        ),
+        pytest.param(_edit_step("npm ci --ignore-scripts", run="npm ci"), id="con-guiones"),
+        pytest.param(_edit_step("rm -f ~/.ssh/vigia_contracts", **{"if": None}), id="clave-queda"),
+        pytest.param(
+            lambda job: job["steps"][1]["with"].update({"node-version": 22}), id="node-sin-fijar"
+        ),
+        pytest.param(
+            lambda job: job["steps"][1]["with"].update({"node-version": "20.19.0"}), id="node-20"
+        ),
+        pytest.param(lambda job: job.update({"needs": ["rutas"]}), id="depende-de-rutas"),
+        pytest.param(lambda job: job.update({"name": "frontend"}), id="nombre"),
+        pytest.param(
+            lambda job: job["steps"].append({"run": "echo ${{ secrets.OTRO }}"}), id="secreto"
+        ),
+    ],
+)
+def test_each_frontend_job_rule_fails_on_its_own(change: Any) -> None:
+    assert frontend_job_problems(_ci_with_frontend(change))
 
 
 # --- Negativos: cada regla falla con un flujo que la incumple ----------------------------------
@@ -1392,7 +1535,7 @@ def test_the_route_filter_fails_closed_and_never_gates_the_security_jobs() -> No
     text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
     condiciones = re.findall(r"needs\.rutas\.outputs\.backend\s*(==|!=)\s*'(\w+)'", text)
     assert condiciones and all(valor == "false" for _, valor in condiciones)
-    for job_id in ("secretos", "dependencias", "imagen", "flujos"):
+    for job_id in ("secretos", "dependencias", "imagen", "flujos", "frontend"):
         assert "needs" not in jobs[job_id], job_id
         assert "rutas" not in str(jobs[job_id]), job_id
     pesados = (

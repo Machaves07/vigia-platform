@@ -53,6 +53,16 @@ export default defineConfig(({ mode }) => {
         include: ['src/**/*.{ts,tsx}'],
         reporter: ['text-summary', 'lcov'],
         reportsDirectory: 'coverage',
+        // NFR-APP-46 `[objetivo propio]`: ≥ 80 % de líneas en el estado, los puertos, los
+        // validadores, el mapa de errores y la composición de cobertura, cada área por separado.
+        // Solo se aplica con `--coverage` (el trabajo `frontend` de `ci.yml`; VIG-294).
+        thresholds: {
+          'src/state/**': { lines: 80 },
+          'src/ports/**': { lines: 80 },
+          'src/ports/validation/**': { lines: 80 },
+          'src/ports/errors/**': { lines: 80 },
+          'src/state/coverage/**': { lines: 80 },
+        },
       },
     },
   };
