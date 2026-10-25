@@ -1,0 +1,12 @@
+.zones {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+}
+
+.card {
+  border: 1px solid currentColor;
+  border-radius: 0.4rem;
+  padding: 1rem;
+}
