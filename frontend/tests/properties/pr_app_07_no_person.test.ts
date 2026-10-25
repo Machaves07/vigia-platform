@@ -24,14 +24,13 @@ const registered = Object.entries(views);
 const count = `${String(registered.length)} vistas`;
 
 describe('PR-APP-07: ninguna pantalla pinta campos fuera de su vista ni datos de persona', () => {
-  it(
-    `vistas registradas en tests/views (${count})`,
-    () => {
-      process.stdout.write(`PR-APP-07: ${count}\n`);
-      for (const [name, registration] of registered) {
-        expect(personFieldsDeclared(registration), name).toEqual([]);
-        assertNoPersonData(registration);
-      }
+  // Cada vista conserva todos los ejemplos y su tope propio. Un solo tope para el registro
+  // completo caducaba al crecer de 37 a 40 vistas, sin señalar qué pantalla estaba ejecutando.
+  it.each(registered)(
+    `vista %s de tests/views (${count})`,
+    (name, registration) => {
+      expect(personFieldsDeclared(registration), name).toEqual([]);
+      assertNoPersonData(registration);
     },
     PROPERTY_TIMEOUT_MS,
   );
