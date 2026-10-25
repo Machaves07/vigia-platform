@@ -79,7 +79,7 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
           hasTouch: workerInfo.project.use.hasTouch ?? false,
         });
         sessions.set(role, context);
-        checks.push(await watchPolicy(context));
+        checks.push(await watchPolicy(context, role));
         const page = await context.newPage();
         try {
           await page.goto('/login');

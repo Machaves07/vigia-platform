@@ -1,7 +1,7 @@
 import { expect, type BrowserContext } from '@playwright/test';
 
 /** Cubre páginas, marcos, ventanas nuevas y navegación, antes del primer guion de la app. */
-export async function watchPolicy(context: BrowserContext): Promise<() => void> {
+export async function watchPolicy(context: BrowserContext, label = ''): Promise<() => void> {
   const violations: string[] = [];
   await context.exposeBinding('__vigiaPolicyViolation', (_source, directive: string) => {
     violations.push(directive);
@@ -34,6 +34,8 @@ export async function watchPolicy(context: BrowserContext): Promise<() => void> 
     });
   });
   return () => {
-    expect(violations, 'Violaciones de CSP o Trusted Types').toEqual([]);
+    expect(violations, `Violaciones de CSP o Trusted Types${label ? ` (${label})` : ''}`).toEqual(
+      [],
+    );
   };
 }
