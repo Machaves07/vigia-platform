@@ -16,12 +16,16 @@ import { afterAll, describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const VITE = join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
 
-/** Huellas de MSW y de los manejadores generados. */
+/**
+ * Huellas de MSW y de los manejadores generados. Un `operationId` no sirve de huella: desde que el
+ * armazón instala el transporte (VIG-320), la tabla `OPERATIONS` del cliente real va en `dist/` con
+ * todos ellos. El PDF mínimo de `tests/msw/handlers.ts` solo está en los manejadores.
+ */
 const TRACES = [
   /\bmsw\b/i,
   /mockServiceWorker/i,
   /x-vigia-mock-operation/,
-  /live_health_live_get/,
+  /\/Type\/Catalog/,
   /\[MSW\]/,
 ];
 

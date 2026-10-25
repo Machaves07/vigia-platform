@@ -15,6 +15,7 @@ export {
   READ_RETRY_DELAYS_MS,
   TIMEOUT_MS,
   type OperationId,
+  type PortConnection,
   type RequestKind,
   type TransportConnection,
   type TransportOptions,

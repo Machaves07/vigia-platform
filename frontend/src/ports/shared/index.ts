@@ -4,4 +4,4 @@
  * entre pantallas (sesión, VIG-300) viven también en esta carpeta.
  */
 export { isPortError, PortError } from '../base';
-export { sessionPort, type MeResponse } from './session';
+export { sessionPort, type HierarchyView, type MeResponse } from './session';

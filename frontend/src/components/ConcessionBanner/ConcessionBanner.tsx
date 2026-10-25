@@ -8,7 +8,7 @@
  */
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { useConcession, type ConcessionEnd, type ConcessionStore } from '@/state/concession';
-import { text } from '@/texts';
+import { text, texts } from '@/texts';
 
 import styles from './ConcessionBanner.module.css';
 
@@ -28,7 +28,9 @@ export function ConcessionBanner({ store, timeZone = 'UTC' }: ConcessionBannerPr
   if (active === null) return null;
   const client =
     active.client_organization_name ?? text('components_concession.banner.client_pending');
-  const scope = `${text(`components_concession.scope.${active.scope_level}`)}${
+  // Un alcance fuera de la lista se muestra «desconocido» (NFR-APP-30), nunca como uno válido.
+  const scopeKey = `components_concession.scope.${active.scope_level}`;
+  const scope = `${Object.hasOwn(texts, scopeKey) ? text(scopeKey) : text('common.unknown')}${
     active.scope_level !== 'organization' && active.scope_name !== null
       ? `: ${active.scope_name}`
       : ''
