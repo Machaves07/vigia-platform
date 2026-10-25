@@ -107,6 +107,15 @@ function traffic(page: Page) {
   };
 }
 
+/**
+ * Campo de SCR-14 por el comienzo de su etiqueta: el nombre accesible de un control dentro de su
+ * `<label>` incluye también su valor (la opción elegida, la fecha escrita).
+ */
+function field(form: Locator, key: string): Locator {
+  const label = catalogText(scr14, key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return form.getByLabel(new RegExp(`^${label}`));
+}
+
 function day(value: number): string {
   return `2026-01-${String(value).padStart(2, '0')}T08:00`;
 }
@@ -122,7 +131,7 @@ async function openAndFill(
   await page.goto('/exports');
   const form = page.getByRole('form', { name: catalogText(scr14, 'scr14.request') });
   await expect(form).toBeVisible();
-  const plant = form.getByLabel(catalogText(scr14, 'scr14.plant'), { exact: true });
+  const plant = field(form, 'scr14.plant');
   const offered = plant.locator('option:not([value=""])');
   await expect(offered.first()).toBeAttached({ timeout: 30_000 });
   const plantId = (await offered.first().getAttribute('value')) ?? '';
@@ -130,27 +139,23 @@ async function openAndFill(
   const zones = form.getByRole('checkbox');
   await expect(zones.first()).toBeVisible();
   for (let index = 0; index < draft.zones; index += 1) await zones.nth(index).check();
-  await form.getByLabel(catalogText(scr14, 'scr14.from'), { exact: true }).fill(day(draft.day));
-  await form.getByLabel(catalogText(scr14, 'scr14.to'), { exact: true }).fill(day(draft.day + 1));
-  await form
-    .getByLabel(catalogText(scr14, 'scr14.package_form'), { exact: true })
-    .selectOption(draft.packageForm);
+  await field(form, 'scr14.from').fill(day(draft.day));
+  await field(form, 'scr14.to').fill(day(draft.day + 1));
+  await field(form, 'scr14.package_form').selectOption(draft.packageForm);
   return { form, plantOption: plant.locator(`option[value="${plantId}"]`) };
 }
 
 async function formValues(form: Locator) {
   return {
-    plant: await form.getByLabel(catalogText(scr14, 'scr14.plant'), { exact: true }).inputValue(),
+    plant: await field(form, 'scr14.plant').inputValue(),
     zones: await form
       .getByRole('checkbox')
       .evaluateAll((boxes) =>
         boxes.map((box) => (box as HTMLInputElement).checked).filter(Boolean),
       ),
-    from: await form.getByLabel(catalogText(scr14, 'scr14.from'), { exact: true }).inputValue(),
-    to: await form.getByLabel(catalogText(scr14, 'scr14.to'), { exact: true }).inputValue(),
-    packageForm: await form
-      .getByLabel(catalogText(scr14, 'scr14.package_form'), { exact: true })
-      .inputValue(),
+    from: await field(form, 'scr14.from').inputValue(),
+    to: await field(form, 'scr14.to').inputValue(),
+    packageForm: await field(form, 'scr14.package_form').inputValue(),
   };
 }
 

@@ -67,6 +67,8 @@ export const faults = {
   evidenceUrlSeconds: 300,
   /** FS-APP-06: la sesión venció en el servidor; la vuelve a abrir `POST /auth/login`. */
   sessionExpired: false,
+  /** FS-APP-06: el inicio de sesión pide el segundo factor antes de completar la sesión. */
+  secondFactor: false,
   /** FS-APP-07: hay una versión nueva del aviso de tratamiento sin aceptar. */
   noticePending: false,
   noticeVersion: 'v0-pendiente',
@@ -88,6 +90,7 @@ export function resetFaults(): void {
   faults.storageDown = false;
   faults.evidenceUrlSeconds = 300;
   faults.sessionExpired = false;
+  faults.secondFactor = false;
   faults.noticePending = false;
   faults.noticeVersion = 'v0-pendiente';
   faults.apiVersion = null;
@@ -247,6 +250,12 @@ const expiringEvidenceUrl: HttpHandler[] = [
 /** FS-APP-06: con la sesión vencida, toda ruta con sesión responde `unauthenticated`. */
 const sessionExpired: HttpHandler[] = [
   at('login_auth_login_post', () => {
+    // Con segundo factor, la sesión solo se completa con el código (como la cuenta del mundo).
+    if (faults.secondFactor) return HttpResponse.json({ status: 'second_factor_required' });
+    faults.sessionExpired = false;
+    return HttpResponse.json({ status: 'authenticated' });
+  }),
+  at('second_factor_auth_second_factor_post', () => {
     faults.sessionExpired = false;
     return HttpResponse.json({ status: 'authenticated' });
   }),

@@ -33,59 +33,74 @@ import {
 const WRITE = '/accreditation/exports';
 
 describe('FS-APP-06 · sesión vencida a mitad de un formulario largo', { timeout: 120_000 }, () => {
-  it('bloquea con el borrador conservado y, tras reautenticar en la pestaña, vuelve a la ruta con él', async (context) => {
-    const parameters = scenarioCase(
-      context,
-      'FS-APP-06',
-      fc.record({
-        draft: exportDraft,
-        writingMs: integer(0, 25 * 60_000),
-        idleAfterExpiryMs: integer(0, 90_000),
-      }),
-    );
-    const fixture = await mountExports();
-    const log = traffic();
-    server.use(...scenario('fs_app_06_session_expired'));
+  // Con segundo factor la reautenticación pasa por /login/second-factor y vuelve a la ruta: la
+  // pantalla se monta de nuevo en esa navegación (es lo que hacen las cuentas del mundo real).
+  it.for([
+    ['sin segundo factor', false],
+    ['con segundo factor', true],
+  ] as const)(
+    '%s: bloquea con el borrador conservado y, tras reautenticar en la pestaña, vuelve a la ruta con él',
+    async ([, secondFactor], context) => {
+      const parameters = scenarioCase(
+        context,
+        'FS-APP-06',
+        fc.record({
+          secondFactor: fc.constant(secondFactor),
+          draft: exportDraft,
+          writingMs: integer(0, 25 * 60_000),
+          idleAfterExpiryMs: integer(0, 90_000),
+        }),
+      );
+      const fixture = await mountExports();
+      const log = traffic();
+      server.use(...scenario('fs_app_06_session_expired'));
+      faults.secondFactor = secondFactor;
 
-    fillExportRequest(parameters.draft);
-    const written = exportFormValues();
-    // Dentro de la ventana de 30 min: el aviso de los 28 min puede salir, pero la sesión sigue.
-    await pump(fixture.clock, parameters.writingMs, 60_000);
-    expect(fixture.services.session.getSnapshot().status).toBe('active');
+      fillExportRequest(parameters.draft);
+      const written = exportFormValues();
+      // Dentro de la ventana de 30 min: el aviso de los 28 min puede salir, pero la sesión sigue.
+      await pump(fixture.clock, parameters.writingMs, 60_000);
+      expect(fixture.services.session.getSnapshot().status).toBe('active');
 
-    faults.sessionExpired = true;
-    await pump(fixture.clock, parameters.idleAfterExpiryMs);
-    const lockedByWrite = fixture.services.session.getSnapshot().status === 'active';
-    if (lockedByWrite) submitExportRequest();
-    const lock = await screen.findByRole('alert', {}, WAIT);
-    expect(lock.dataset.textKey).toBe('errors.reauth');
-    expect(fixture.services.session.getSnapshot().status).toBe('locked_for_reauth');
-    expect(fixture.route()).toBe('/exports');
-    // Bloqueada: ni el formulario, ni la cabecera, ni el menú.
-    expect(screen.queryByRole('form', { name: text('scr14.request') })).toBeNull();
-    expect(screen.queryByRole('banner')).toBeNull();
-    expect(screen.queryByRole('navigation')).toBeNull();
-    const writesBeforeLock = log.count('POST', WRITE);
-    expect(writesBeforeLock).toBe(lockedByWrite ? 1 : 0);
+      faults.sessionExpired = true;
+      await pump(fixture.clock, parameters.idleAfterExpiryMs);
+      const lockedByWrite = fixture.services.session.getSnapshot().status === 'active';
+      if (lockedByWrite) submitExportRequest();
+      const lock = await screen.findByRole('alert', {}, WAIT);
+      expect(lock.dataset.textKey).toBe('errors.reauth');
+      expect(fixture.services.session.getSnapshot().status).toBe('locked_for_reauth');
+      expect(fixture.route()).toBe('/exports');
+      // Bloqueada: ni el formulario, ni la cabecera, ni el menú.
+      expect(screen.queryByRole('form', { name: text('scr14.request') })).toBeNull();
+      expect(screen.queryByRole('banner')).toBeNull();
+      expect(screen.queryByRole('navigation')).toBeNull();
+      const writesBeforeLock = log.count('POST', WRITE);
+      expect(writesBeforeLock).toBe(lockedByWrite ? 1 : 0);
 
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(text('scr01.login.email')), 'persona@ejemplo.test');
-    await user.type(screen.getByLabelText(text('scr01.login.password')), 'clave-sintetica-larga');
-    await user.click(screen.getByRole('button', { name: text('scr01.login.submit') }));
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText(text('scr01.login.email')), 'persona@ejemplo.test');
+      await user.type(screen.getByLabelText(text('scr01.login.password')), 'clave-sintetica-larga');
+      await user.click(screen.getByRole('button', { name: text('scr01.login.submit') }));
+      if (secondFactor) {
+        const code = await screen.findByLabelText(text('scr01.second_factor.code'), {}, WAIT);
+        await user.type(code, '123456');
+        await user.click(screen.getByRole('button', { name: text('scr01.second_factor.submit') }));
+      }
 
-    // Misma ruta, mismo borrador; la escritura que recibió `unauthenticated` no se reenvió.
-    await screen.findByRole('form', { name: text('scr14.request') }, WAIT);
-    await waitFor(() => {
-      expect(exportFormValues()).toEqual(written);
-    }, WAIT);
-    expect(fixture.route()).toBe('/exports');
-    expect(fixture.services.session.getSnapshot().status).toBe('active');
-    expect(log.count('POST', '/auth/login')).toBe(1);
-    await pump(fixture.clock, 60_000);
-    expect(log.count('POST', WRITE)).toBe(writesBeforeLock);
+      // Misma ruta, mismo borrador; la escritura que recibió `unauthenticated` no se reenvió.
+      await screen.findByRole('form', { name: text('scr14.request') }, WAIT);
+      await waitFor(() => {
+        expect(exportFormValues()).toEqual(written);
+      }, WAIT);
+      expect(fixture.route()).toBe('/exports');
+      expect(fixture.services.session.getSnapshot().status).toBe('active');
+      expect(log.count('POST', '/auth/login')).toBe(1);
+      await pump(fixture.clock, 60_000);
+      expect(log.count('POST', WRITE)).toBe(writesBeforeLock);
 
-    submitExportRequest();
-    await screen.findByRole('button', { name: FS_EXPORT }, WAIT);
-    expect(log.count('POST', WRITE)).toBe(writesBeforeLock + 1);
-  });
+      submitExportRequest();
+      await screen.findByRole('button', { name: FS_EXPORT }, WAIT);
+      expect(log.count('POST', WRITE)).toBe(writesBeforeLock + 1);
+    },
+  );
 });
