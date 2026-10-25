@@ -29,6 +29,7 @@ describe('IF-06: navegación del proveedor sin concesión', () => {
       SCREENS,
     );
     expect(navItems(navigation, SCREENS).map((item) => item.path)).toContain('/fleet');
+    expect(navItems(navigation, SCREENS).map((item) => item.path)).not.toContain('/notifications');
   });
 
   it('no restringe la navegación de las organizaciones cliente', () => {

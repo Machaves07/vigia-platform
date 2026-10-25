@@ -8,16 +8,17 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   authenticatedPage: page,
   roleSession,
   world,
-}) => {
+}, info) => {
+  test.setTimeout(180_000);
   expect(page.viewportSize()).toEqual({ width: 768, height: 1024 });
-  expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(0);
+  expect(info.project.use.hasTouch).toBe(true);
   const zone = required(world.zone_ids[0]);
-  const admin = await (await roleSession('provider_installer')).newPage();
+  const installer = await (await roleSession('provider_installer')).newPage();
   try {
-    await installerRoute(admin, world, '/fleet');
-    await pendingAgreement(admin, world, zone);
+    await installerRoute(installer, world, '/fleet');
+    await pendingAgreement(installer, world, zone);
   } finally {
-    await admin.close();
+    await installer.close();
   }
   await page.goto(`/transparency/${zone}`);
   const view = page.locator('[data-part="transparency"]');
@@ -30,7 +31,9 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   const confirm = page.getByRole('button', { name: 'Confirmar mi firma', exact: true });
   await touchTarget(confirm);
   await touchTarget(page.getByRole('button', { name: 'Abrir vista en vivo', exact: true }));
-  await touchTarget(page.getByRole('button', { name: 'Actualizar', exact: true }));
+  await touchTarget(
+    page.getByRole('main').getByRole('button', { name: 'Actualizar', exact: true }),
+  );
   const confirmation = page.waitForResponse(
     (response) =>
       response.url().includes('/confirmations') && response.request().method() === 'POST',

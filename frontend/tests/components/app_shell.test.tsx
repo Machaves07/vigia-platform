@@ -529,6 +529,36 @@ describe('enumeraciones fuera de lista: «desconocido» (NFR-APP-30)', TEST, () 
   });
 });
 
+describe('salida de concesión (IF-06)', TEST, () => {
+  it('al dejar una concesión vuelve a cargar la identidad propia sin conservar el contexto cliente', async () => {
+    const me = shellMe(PERMISSIONS, { kind: 'provider' });
+    serveSession(me);
+    const fixture = mountShell('/findings', SCREENS);
+    await screen.findByRole('heading', { name: 'Formulario sintético' }, WAIT);
+    const id = '0190a1b2-0000-7000-8000-0000000000d1';
+    await act(async () => {
+      fixture.services.concession.activate({
+        concession_id: id,
+        client_organization_id: '0190a1b2-0000-7000-8000-0000000000f2',
+        scope_level: 'plant',
+        scope_id: PLANT_ID,
+        expires_at: new Date(START + 3_600_000).toISOString(),
+        status: 'active',
+      });
+      me.concession_id = id;
+      await fixture.services.session.load();
+    });
+    expect(fixture.services.session.getSnapshot().principal?.concession_id).toBe(id);
+    me.concession_id = null;
+    act(() => {
+      fixture.services.concession.change();
+    });
+    await waitFor(() => {
+      expect(fixture.services.session.getSnapshot().principal?.concession_id).toBeNull();
+    }, WAIT);
+  });
+});
+
 describe('axe sobre el armazón completo (NFR-APP-50)', TEST, () => {
   it('sin violaciones serias con todos los avisos y el menú de cuenta abierto', async () => {
     serveSession(shellMe(PERMISSIONS, { kind: 'provider' }));

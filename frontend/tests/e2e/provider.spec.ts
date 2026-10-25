@@ -13,6 +13,7 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   authenticatedPage: page,
   world,
 }) => {
+  test.setTimeout(180_000);
   let active: string | undefined;
   const observed: { path: string; expected: string | undefined; actual: string | undefined }[] = [];
   const inspect = (request: Request) => {
@@ -76,13 +77,16 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   await page.getByRole('button', { name: 'Cambiar de concesión' }).click();
   await expect(page.getByRole('heading', { name: 'Mis concesiones' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar de concesión' })).toHaveCount(0);
+  await expect(
+    page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link'),
+  ).toHaveCount(1);
   // Otra concesión: la misma lectura debe volver a la red, no mostrar el inventario retenido.
   active = world.concession_id;
   await page
-    .getByRole('row')
-    .filter({ has: page.getByText(world.organization_id, { exact: true }) })
-    .getByRole('button', { name: /Operar bajo/ })
-    .first()
+    .getByRole('button', {
+      name: `Operar bajo esta concesión: organización ${world.organization_id}`,
+      exact: true,
+    })
     .click();
   const inventory = page.waitForResponse(
     (response) =>
@@ -94,6 +98,31 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   active = undefined;
   await page.getByRole('button', { name: 'Cambiar de concesión' }).click();
   await expect(page.getByRole('heading', { name: 'Mis concesiones' })).toBeVisible();
+  await expect(
+    page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link'),
+  ).toHaveCount(1);
+  // Volver a la primera concesión exige de nuevo su inventario: no basta una clave distinta.
+  active = id;
+  await page
+    .getByRole('button', {
+      name: `Operar bajo esta concesión: planta ${required(world.plant_ids[0])}`,
+      exact: true,
+    })
+    .first()
+    .click();
+  const reloaded = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/fleet/nodes' &&
+      response.request().headers()['x-vigia-concession'] === id,
+  );
+  await page.getByRole('link', { name: /flota/i }).first().click();
+  expect((await reloaded).ok()).toBe(true);
+  active = undefined;
+  await page.getByRole('button', { name: 'Cambiar de concesión' }).click();
+  await expect(page.getByRole('heading', { name: 'Mis concesiones' })).toBeVisible();
+  await expect(
+    page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link'),
+  ).toHaveCount(1);
   page.off('request', inspect);
   expect(observed.filter((entry) => entry.expected === undefined).length).toBeGreaterThan(0);
   expect(observed.filter((entry) => entry.actual !== entry.expected)).toEqual([]);

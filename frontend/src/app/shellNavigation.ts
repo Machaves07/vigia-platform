@@ -19,7 +19,14 @@ export function shellNavigation(
             (key) => key === 'concessions.grant',
           ),
         }
-      : principal,
+      : principal.concession_id === null
+        ? principal
+        : {
+            ...principal,
+            effective_permissions: principal.effective_permissions.filter(
+              (key) => key !== 'notifications.read',
+            ),
+          },
     screens,
   );
 }

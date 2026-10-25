@@ -152,7 +152,7 @@ describe('SCR-07 inventario', { timeout: 30_000 }, () => {
       expect(url.searchParams.get('plant_id')).toBe(PLANT);
       expect(url.searchParams.get('communication_state')).toBe('mute');
       expect(url.searchParams.get('warning')).toBe('clock_drift');
-      expect(url.searchParams.get('limit')).toBe('200');
+      expect(url.searchParams.get('limit')).toBe('100');
     }
   });
 

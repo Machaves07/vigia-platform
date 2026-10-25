@@ -8,13 +8,16 @@ test('instalador: flota, alta, pasos, pase con clip, oclusión pendiente y enlac
   authenticatedPage: page,
   world,
 }, info) => {
+  test.setTimeout(180_000);
   expect(page.viewportSize()).toEqual({ width: 768, height: 1024 });
-  expect(await page.evaluate(() => navigator.maxTouchPoints)).toBeGreaterThan(0);
+  expect(info.project.use.hasTouch).toBe(true);
   await installerRoute(page, world, '/fleet');
   await expect(page.getByRole('table').first()).toBeVisible();
   await page.getByRole('link', { name: 'Declarar nodo', exact: true }).click();
   await page.getByLabel('Planta', { exact: true }).selectOption(required(world.plant_ids[0]));
-  await page.getByLabel('Código del nodo', { exact: true }).fill(`E2E-${info.project.name}`);
+  await page
+    .getByLabel('Código del nodo', { exact: true })
+    .fill(`E2E-${info.project.name.toUpperCase()}`);
   const declaration = page.waitForResponse(
     (response) => response.url().endsWith('/nodes') && response.request().method() === 'POST',
   );

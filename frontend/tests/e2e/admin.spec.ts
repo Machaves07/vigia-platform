@@ -36,14 +36,16 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(page.getByText('Rol asignado.', { exact: true })).toBeVisible();
   await page.goto('/admin/hierarchy');
   const zoneForm = page.getByRole('form', { name: 'Crear zona', exact: true }).first();
-  await zoneForm.getByLabel('Código', { exact: true }).fill(`E2E-${suffix}`);
+  await zoneForm.getByLabel('Código', { exact: true }).fill(`E2E-${suffix.toUpperCase()}`);
   await zoneForm.getByLabel('Nombre', { exact: true }).fill(`Zona sintética ${suffix}`);
   const created = page.waitForResponse(
     (response) => response.url().endsWith('/zones') && response.request().method() === 'POST',
   );
   await zoneForm.getByRole('button', { name: 'Crear zona', exact: true }).click();
   expect((await created).ok()).toBe(true);
-  await expect(page.getByText(`Zona sintética ${suffix}`, { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(`E2E-${suffix.toUpperCase()} — Zona sintética ${suffix}`, { exact: true }),
+  ).toBeVisible();
   await page.goto(`/zones/${zone}/standards`);
   await page.getByLabel('Familia admitida', { exact: true }).selectOption('coexistence');
   await page
@@ -57,6 +59,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(page.getByLabel('Predicado', { exact: true })).not.toHaveValue('');
   await nextStep(page);
   await page
+    .getByRole('region', { name: 'Declarar estándar', exact: true })
     .getByLabel('Motivo del cambio (Obligatorio)', { exact: true })
     .fill('Declaración sintética para verificar el recorrido de catálogo');
   await nextStep(page);
@@ -78,7 +81,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(page.locator('[data-failed-criterion="standard"]')).toBeVisible();
   await page.reload();
   await expect(page.getByRole('table', { name: 'Historial de admisiones' })).toContainText(
-    'Rechazada',
+    'rechazada',
   );
   await page.goto('/admin/vocabulary');
   await page
