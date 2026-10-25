@@ -5870,7 +5870,9 @@
         "classification_deadline_business_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5880,7 +5882,9 @@
         "review_deadline_business_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 30,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5890,7 +5894,9 @@
         "action_deadline_default_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 180,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5900,7 +5906,9 @@
         "action_deadline_min_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 180,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5910,7 +5918,9 @@
         "action_deadline_max_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 180,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5920,7 +5930,9 @@
         "manager_highlight_overdue_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5930,7 +5942,9 @@
         "unclosable_review_default_months": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5940,7 +5954,9 @@
         "unclosable_review_max_months": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5950,7 +5966,9 @@
         "monthly_package_generation_day": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 5,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5960,7 +5978,9 @@
         "sample_percent": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5970,7 +5990,9 @@
         "sample_min": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5980,7 +6002,9 @@
         "sample_max": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -5990,7 +6014,9 @@
         "adoption_silence_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -6000,7 +6026,9 @@
         "exposure_coverage_threshold_percent": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 0
             },
             {
               "type": "null"
@@ -6010,7 +6038,9 @@
         "email_grouping_hours": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 24,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -6020,7 +6050,9 @@
         "export_max_days": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 3660,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -6030,7 +6062,9 @@
         "export_max_zones": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -6040,7 +6074,9 @@
         "single_occupancy_default_window_minutes": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 480,
+              "minimum": 15
             },
             {
               "type": "null"
@@ -6050,7 +6086,9 @@
         "reminder_interval_hours": {
           "anyOf": [
             {
-              "type": "integer"
+              "type": "integer",
+              "maximum": 168,
+              "minimum": 1
             },
             {
               "type": "null"
@@ -6070,7 +6108,9 @@
         "reason": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "string",
+              "maxLength": 500,
+              "minLength": 10
             },
             {
               "type": "null"
