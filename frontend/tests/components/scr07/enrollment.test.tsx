@@ -154,12 +154,14 @@ describe('SCR-07 alta del nodo', { timeout: 30_000 }, () => {
     expect(screen.getByText(text('scr07.enrollment.compare'))).toBeDefined();
     expect(calls()).toBe(1);
     // La caché de mutaciones solo guarda el identificador del código, nunca el código.
-    expect(
-      fixture.cache.client
-        .getMutationCache()
-        .getAll()
-        .map((mutation) => mutation.state.data),
-    ).toEqual([{ code_id: CODE_ID }]);
+    await waitFor(() => {
+      expect(
+        fixture.cache.client
+          .getMutationCache()
+          .getAll()
+          .map((mutation) => [mutation.state.status, mutation.state.data]),
+      ).toEqual([['success', { code_id: CODE_ID }]]);
+    }, WAIT);
     expect(await axe(fixture.container)).toHaveNoViolations();
 
     fireEvent.click(screen.getByRole('link', { name: text('scr07.title') }));
