@@ -101,7 +101,9 @@ export function VirtualFleetTable({
                 >
                   {row.cells.map((cell, column) => (
                     <td key={column}>
-                      <div className={styles.cell}>{cell}</div>
+                      {/* Solo la ventana virtual necesita la altura fija de la celda: fuera de
+                          ella, una celda desplazable sería inalcanzable con teclado (NFR-APP-50). */}
+                      {virtual ? <div className={styles.cell}>{cell}</div> : cell}
                     </td>
                   ))}
                 </tr>
