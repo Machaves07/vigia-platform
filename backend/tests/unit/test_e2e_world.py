@@ -161,6 +161,9 @@ def test_browser_store_has_one_closed_origin_and_the_production_headers() -> Non
     }
 
 
+INVITED = uuid.UUID("01900000-0000-7000-8000-0000000000aa")
+
+
 def _invitation_world(
     monkeypatch: pytest.MonkeyPatch, link: str | None
 ) -> tuple[Any, list[Any], list[InviteRequest]]:
@@ -181,7 +184,7 @@ def _invitation_world(
     async def invite_user(context: str, request: InviteRequest) -> Any:
         assert context.startswith("contexto de cookie-")
         requests.append(request)
-        return SimpleNamespace(link=link)
+        return SimpleNamespace(link=link, user_id=INVITED)
 
     monkeypatch.setattr(world_module, "Provisioner", FakeProvisioner)
     users = SimpleNamespace(invite_user=invite_user)
@@ -205,7 +208,13 @@ def test_deploy_check_invitation_is_a_disclosed_coordinator_invitation_of_the_sy
     fleet = SimpleNamespace(organization_id=organization)
     material = deploy_check_invitation(cast(Any, target), cast(Any, fleet), str(administrator))
     assert material == {"invitation_link": link, "email": "deploy-check@e2e.example.test"}
-    assert statements == [f"sesión de {administrator} en {organization}"]
+    session, second_factor = statements
+    assert session == f"sesión de {administrator} en {organization}"
+    # Como las seis cuentas del mundo: el recorrido inscribe el segundo factor de prueba.
+    assert second_factor == (
+        "UPDATE identity.user_account SET second_factor_required = true WHERE user_id = $1",
+        (INVITED,),
+    )
     (request,) = requests
     assert request.disclose_link is True and request.email == material["email"]
     (assignment,) = request.assignments

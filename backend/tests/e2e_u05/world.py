@@ -217,6 +217,10 @@ def deploy_check_invitation(target: LoadTarget, fleet: Fleet, administrator: str
     Es el material ``frontend`` del secreto ``vigia/<entorno>/deploy-checks`` de staging, para
     las comprobaciones de despliegue con ``--target``: la emite la persona administradora por el
     servicio real, con el enlace divulgado una vez en lugar de enviarlo por correo.
+
+    El recorrido inscribe y usa el segundo factor de prueba, que BR-NUC-21 solo exige a
+    administración y operación (sin panel de inicio ni bandeja). Como las seis cuentas del
+    mundo, la cuenta se marca por SQL con ``second_factor_required`` antes de activarse.
     """
     provisioner = Provisioner(
         target.stack, target.api, target.app.url, target.tls.ca_file, target.directory
@@ -247,6 +251,14 @@ def deploy_check_invitation(target: LoadTarget, fleet: Fleet, administrator: str
     outcome = target.api.call(invite())
     if not outcome.link:
         raise RuntimeError("La invitación de la comprobación de despliegue no divulgó su enlace")
+    target.stack.admin(
+        [
+            (
+                "UPDATE identity.user_account SET second_factor_required = true WHERE user_id = $1",
+                (outcome.user_id,),
+            )
+        ]
+    )
     return {"invitation_link": outcome.link, "email": email}
 
 

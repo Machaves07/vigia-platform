@@ -33,6 +33,9 @@ export default defineConfig({
       name: 'deploy-check',
       use: {
         browserName: 'chromium',
+        // Como playwright.config.ts: el agente sin cabeza («HeadlessChrome/») queda fuera de la
+        // política de navegadores de la SPA. Gráfico, con su identificación nativa (pantalla o Xvfb).
+        headless: false,
         // Sin relajar TLS: Chromium acepta solo el certificado cuya clave coincide.
         ...(pinnedKey
           ? { launchOptions: { args: [`--ignore-certificate-errors-spki-list=${pinnedKey}`] } }

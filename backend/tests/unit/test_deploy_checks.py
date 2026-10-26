@@ -1115,7 +1115,13 @@ def test_the_local_options_reject_malformed_values(extra: tuple[str, ...]) -> No
     assert raised.value.code == 2
 
 
-def test_local_material_is_only_accepted_with_a_target(tmp_path: Path) -> None:
+def test_local_material_is_only_accepted_with_a_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def never(*arguments: Any, **kwargs: Any) -> Any:
+        raise AssertionError("sin --target no debe llegar a ejecutar las comprobaciones")
+
+    monkeypatch.setattr(deploy_checks, "run_checks", never)
     fixtures = _private(tmp_path / "deploy-checks.json", {})
     ca = tmp_path / "ca.pem"
     ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
