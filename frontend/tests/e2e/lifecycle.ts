@@ -29,7 +29,10 @@ export async function startWorld(): Promise<void> {
   const processChild = child;
   exited = new Promise((resolve, reject) => {
     processChild.once('error', reject);
-    processChild.once('close', resolve);
+    processChild.once('close', (code, signal) => {
+      if (signal !== null) reject(new Error(`El proceso del mundo terminó por ${signal}`));
+      else resolve(code);
+    });
   });
   try {
     await new Promise<void>((resolve, reject) => {
@@ -38,19 +41,45 @@ export async function startWorld(): Promise<void> {
         reject(new Error('El mundo no arrancó en 15 minutos'));
       }, 900_000);
       let output = '';
+      let startupFailure = 'sin diagnóstico reconocido';
       processChild.stdout.on('data', (chunk: Buffer) => {
         output = (output + chunk.toString()).slice(-4096);
+        const failure = /VIGIA_WORLD_FAILURE ([^\r\n]+)/.exec(output)?.[1];
+        if (failure !== undefined) {
+          clearTimeout(timer);
+          reject(new Error(`Fallo del mundo: ${failure}`));
+        }
         if (output.includes('VIGIA_WORLD_READY')) {
           clearTimeout(timer);
           resolve();
         }
       });
-      // Drenar sin publicar: ni errores de librerías ni sus cuerpos llegan al informe de UI.
-      processChild.stderr.resume();
+      // Solo se clasifican marcadores fijos; nunca se publica stderr, cuerpos ni mensajes.
+      processChild.stderr.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        if (text.includes('error: Failed to')) startupFailure = 'preparación de uv';
+        for (const name of [
+          'SyntaxError',
+          'ImportError',
+          'ModuleNotFoundError',
+          'MemoryError',
+          'ParamValidationError',
+          'ClientError',
+          'EndpointConnectionError',
+          'Skipped',
+          'Failed',
+        ]) {
+          if (text.includes(`${name}:`)) startupFailure = name;
+        }
+      });
       void exited?.then(
-        () => {
+        (code) => {
           clearTimeout(timer);
-          reject(new Error('El mundo terminó antes de estar listo'));
+          reject(
+            new Error(
+              `El mundo terminó antes de estar listo (código ${String(code)}; ${startupFailure})`,
+            ),
+          );
         },
         (error: unknown) => {
           clearTimeout(timer);
@@ -59,7 +88,8 @@ export async function startWorld(): Promise<void> {
       );
     });
   } catch (error) {
-    await stopWorld();
+    // La limpieza no debe ocultar el diagnóstico seguro del arranque.
+    await stopWorld().catch(() => undefined);
     throw error;
   }
 }
