@@ -40,6 +40,7 @@ import {
   resetTransport,
   renderScreen,
   row,
+  selectRowName,
   session,
   type CapturedRequest,
   type TestSession,
@@ -55,7 +56,6 @@ const TOKENS_CSS = sheet('src/styles/tokens.css');
 
 const CHOOSE_ROW = text('scr06.matrix.form.choose_row');
 const REGISTER = text('scr06.matrix.form.submit');
-const SELECT_ROW = text('scr06.matrix.select');
 const RESULT_LABEL = text('scr06.matrix.form.result');
 const EVIDENCE_LABEL = text('scr06.matrix.form.evidence');
 /** Un identificador que no cumple `format: uuid` del contrato: el espejo del puerto lo rechaza. */
@@ -117,12 +117,10 @@ function openScreen(): {
 describe('matriz de pases', () => {
   it('muestra las filas postura × estado de señal con avance y pases requeridos', async () => {
     openScreen();
-    await screen.findByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` });
+    await screen.findByRole('button', { name: selectRowName('standing', 1) });
     const rows = document.querySelectorAll('[data-part="matrix_row"]');
     expect(rows).toHaveLength(2);
-    expect(
-      screen.getByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'crouched')} 2` }),
-    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: selectRowName('crouched', 2) })).toBeTruthy();
     const progress = Array.from(
       document.querySelectorAll('[data-part="row_progress"]'),
       (cell) => cell.textContent,
@@ -143,7 +141,7 @@ describe('matriz de pases', () => {
     const { calls } = openScreen();
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+        name: selectRowName('standing', 1),
       }),
     );
     fireEvent.change(screen.getByRole('combobox', { name: RESULT_LABEL }), {
@@ -176,7 +174,7 @@ describe('matriz de pases', () => {
     const { calls } = openScreen();
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+        name: selectRowName('standing', 1),
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: REGISTER }));
@@ -194,7 +192,7 @@ describe('matriz de pases', () => {
     openScreen();
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'crouched')} 2`,
+        name: selectRowName('crouched', 2),
       }),
     );
     // La postura sola no distingue dos filas con condiciones distintas: la etiqueta lleva las
@@ -208,7 +206,7 @@ describe('matriz de pases', () => {
     const { calls } = openScreen();
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+        name: selectRowName('standing', 1),
       }),
     );
     fireEvent.change(screen.getByRole('combobox', { name: EVIDENCE_LABEL }), {
@@ -239,7 +237,7 @@ describe('matriz de pases', () => {
     renderScreen((clock) => <MatrixScreen zoneId={ZONE_ID} clock={clock} />);
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+        name: selectRowName('standing', 1),
       }),
     );
     const evidence = screen.getByRole('combobox', { name: EVIDENCE_LABEL });
@@ -279,7 +277,7 @@ describe('matriz de pases', () => {
     renderScreen((clock) => <MatrixScreen zoneId={ZONE_ID} clock={clock} />);
     fireEvent.click(
       await screen.findByRole('button', {
-        name: `${SELECT_ROW}: ${label('posture', 'standing')} 1`,
+        name: selectRowName('standing', 1),
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: REGISTER }));
@@ -292,7 +290,7 @@ describe('matriz de pases', () => {
 
   it('pide elegir una fila antes de registrar', async () => {
     openScreen();
-    await screen.findByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` });
+    await screen.findByRole('button', { name: selectRowName('standing', 1) });
     expect(screen.getByText(CHOOSE_ROW)).toBeTruthy();
     expect(screen.queryByRole('button', { name: REGISTER })).toBeNull();
   });
@@ -409,5 +407,20 @@ describe('objetivo táctil en tableta (768 × 1024)', () => {
     );
     expect(serious).toEqual([]);
     expect(results).toHaveNoViolations();
+  });
+
+  // `label-content-name-mismatch` de axe cayó en Firefox y WebKit (VIG-356); en jsdom esa regla no
+  // se evalúa, así que se comprueba directamente que el nombre empieza por el texto visible.
+  it('el nombre accesible de cada «Fila n» empieza por su texto visible (WCAG 2.5.3)', () => {
+    const { container } = render(
+      <main>
+        <PassMatrixTable session={matrixSession()} onSelectRow={() => undefined} />
+      </main>,
+    );
+    const buttons = [...container.querySelectorAll('[data-part="select_row"]')];
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button.getAttribute('aria-label')?.startsWith(button.textContent)).toBe(true);
+    }
   });
 });
