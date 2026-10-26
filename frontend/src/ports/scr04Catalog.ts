@@ -109,27 +109,21 @@ export function predicateTemplate(family: StandardBody['family']) {
   );
 }
 
-/** El validador Ajv del contrato empareja familia y plantilla. Estos metadatos no se envían. */
+/**
+ * El validador Ajv del contrato empareja familia y predicado sin metadatos inventados: con solo
+ * `family` y `predicate`, Ajv evalúa primero el `oneOf` raíz (familia × predicado) y, si lo
+ * cumple, el primer fallo es un campo obligatorio de los que asigna la plataforma. Las pruebas de
+ * cada familia fijan ese orden: si cambiara, los predicados inválidos dejarían de rechazarse.
+ */
 export function parsePredicate(family: string, source: string): Record<string, unknown> | null {
   try {
     const predicate: unknown = JSON.parse(source);
-    const candidate = {
-      standard_id: '0190a1b2-0000-7000-8000-000000000001',
-      version: 1,
-      family,
-      title_es: 'Estándar de seguridad',
-      declared_text: 'Presencia en la zona con señal afirmada.',
-      declared_by: {
-        user_id: '0190a1b2-0000-7000-8000-000000000002',
-        display_name: 'Responsable',
-        role: 'administrator',
-      },
-      effective_from: '2026-01-01T00:00:00.000Z',
-      tier_policy: 'tier_1_when_signal_valid',
-      predicate,
-    };
-    if (!validateDeclaredStandard(candidate)) return null;
-    return predicate as Record<string, unknown>;
+    // Sin metadatos el documento nunca es válido: un `true` sería un esquema distinto.
+    if (validateDeclaredStandard({ family, predicate })) return null;
+    // `family` y `predicate` siempre están: el campo que falta en la raíz es un metadato.
+    const first = validateDeclaredStandard.errors?.[0];
+    const onlyMetadataMissing = first?.keyword === 'required' && first.instancePath === '';
+    return onlyMetadataMissing ? (predicate as Record<string, unknown>) : null;
   } catch {
     return null;
   }

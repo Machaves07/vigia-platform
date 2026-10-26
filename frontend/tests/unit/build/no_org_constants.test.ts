@@ -25,9 +25,11 @@ const RULES: readonly Rule[] = [
     pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
   },
   {
+    // `=` es asignación en cualquier posición; `:` solo cuenta como clave de objeto (tras `{`, `,`,
+    // `(` o al inicio de línea), para no confundir la rama falsa de un ternario `c ? zoneId : …`.
     name: 'identificador o código de organización, planta, zona o nodo',
     pattern:
-      /\b(organi[sz]ation|org|tenant|customer|client|plant|planta|zone|zona|node)[_-]?(id|code|slug|key)\b\s*[:=]\s*['"`][^'"`]+['"`]/i,
+      /\b(?:organi[sz]ation|org|tenant|customer|client|plant|planta|zone|zona|node)[_-]?(?:id|code|slug|key)\b\s*=\s*['"`][^'"`]+['"`]|(?:^|[{,(])\s*(?:organi[sz]ation|org|tenant|customer|client|plant|planta|zone|zona|node)[_-]?(?:id|code|slug|key)\b\s*:\s*['"`][^'"`]+['"`]/im,
   },
   { name: 'URL absoluta', pattern: /\b(https?|wss?):\/\/[^\s'"`)]+/i },
   {
@@ -87,6 +89,18 @@ describe('cada regla detecta su caso (sondas)', () => {
     ['identificador o código de organización, planta, zona o nodo', "const plantCode = 'PL-01';"],
     ['identificador o código de organización, planta, zona o nodo', "{ organization_id: 'acme' }"],
     ['identificador o código de organización, planta, zona o nodo', 'const org_slug = `acme`;'],
+    [
+      'identificador o código de organización, planta, zona o nodo',
+      "config.zoneId = 'zona-norte';",
+    ],
+    ['identificador o código de organización, planta, zona o nodo', "{ a: 1, zone_id: 'z-1' }"],
+    ['identificador o código de organización, planta, zona o nodo', "fn({ plantId: 'pl-1' })"],
+    ['identificador o código de organización, planta, zona o nodo', "f(nodeId = 'nodo-1')"],
+    [
+      'identificador o código de organización, planta, zona o nodo',
+      "const x = {\n  zoneId: 'z-1',\n};",
+    ],
+    ['identificador o código de organización, planta, zona o nodo', 'const zoneCode = `Z-01`;'],
     ['URL absoluta', "fetch('https://api.example.test/me');"],
     ['dominio fijo', "const host = 'app.vigia.example.com';"],
     ['dominio fijo', "const host = 'planta-norte.co';"],
@@ -106,6 +120,10 @@ describe('cada regla detecta su caso (sondas)', () => {
     "export * from './labels.es.json';",
     'const value = config.app;',
     'const zoneId = props.zoneId;',
+    'return zone === undefined ? zoneId : `${zone.name} (${zone.code})`;',
+    "const label = missing ? props.zoneId : 'sin nombre';",
+    "const label = missing\n  ? zoneId\n  : 'sin nombre';",
+    "if (zoneId === 'nuevo') return;",
     "document.getElementById('vigia-app');",
     'navigator.userAgent.includes(value)',
   ])('no confunde código normal: %s', (content) => {
