@@ -411,10 +411,12 @@ ASSISTANT_REQUEST: Final = Table(
     _text("inference_geo", nullable=True),
     _text("stop_reason", nullable=True),
     _text("provider_request_id", nullable=True),
+    _text("rejection_reason", nullable=True),
 )
 """§2.11 ``AssistantRequest`` ⛓ (solo organización, A-69); el límite exacto se cuenta sobre
 ``(organization_id, user_id, requested_at)``. El uso por solicitud (fichas, duración, modelo de
-la respuesta, región y motivo de parada) es de ``laz_0033`` (TASK-316, NFR-LAZ-31)."""
+la respuesta, región y motivo de parada) es de ``laz_0033`` (TASK-316, NFR-LAZ-31); el motivo
+cerrado de ``rejected_by_validators``, de ``laz_0041`` (VIG-344)."""
 
 ASSISTANT_DRAFT: Final = Table(
     "assistant_draft",

@@ -118,7 +118,8 @@ export const API_ERROR_CODES: readonly string[] = (() => {
 
 /**
  * Respuesta de error con un `ApiErrorBody` válido (`code`, `message_es` y `correlation_id`
- * fijos por código; `retry_after_seconds` y `detail_code` si se dan).
+ * fijos por código; `retry_after_seconds`, `detail_code` y `rejection` si se dan: el rechazo de
+ * un validador de texto libre de U-04, `{code, term?, suggestion?}`, VIG-344).
  */
 export function apiError(
   code: string,
@@ -127,6 +128,7 @@ export function apiError(
     readonly retryAfterSeconds?: number;
     readonly detailCode?: string;
     readonly operationId?: string;
+    readonly rejection?: Readonly<{ code: string; term?: string; suggestion?: string }>;
   } = {},
 ): Response {
   if (!API_ERROR_CODES.includes(code)) {
@@ -143,6 +145,7 @@ export function apiError(
     code,
     detail_code: extra.detailCode ?? null,
     retry_after_seconds: extra.retryAfterSeconds ?? null,
+    rejection: extra.rejection ?? null,
   };
   const headers: Record<string, string> = {};
   if (extra.operationId !== undefined) headers[MOCK_OPERATION_HEADER] = extra.operationId;

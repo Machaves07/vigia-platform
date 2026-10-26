@@ -14,6 +14,8 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
 import loopLabels from '../../../../backend/resources/labels.loop.es.json';
+import { apiError as mswApiError } from '../../msw/handlers';
+import { openApiValidators, readAppYaml } from '../../support/openapiAjv';
 import {
   advance,
   analysis,
@@ -29,6 +31,12 @@ import {
 } from './support';
 
 const detail = loopLabels.loop_detail_code;
+
+/** Validador de `ApiErrorBody` contra `backend/openapi/app.yaml` (el archivo, no la copia). */
+function errorBody() {
+  const document = readAppYaml() as { components: { schemas: Record<string, unknown> } };
+  return openApiValidators(document.components.schemas).component('ApiErrorBody');
+}
 
 async function setup(options: Parameters<typeof providers>[0] = {}) {
   const env = await providers(options);
@@ -172,10 +180,16 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     await start();
     const term = 'término-sintético-7Qx';
     const suggestion = 'alternativa sintética 41Z';
-    loop.state.stepResponse = () =>
-      apiError('invalid_request', 400, 'loop_blocked_vocabulary_term', {
-        rejection: { code: 'blocked_vocabulary_term', term, suggestion },
-      });
+    // La respuesta de MSW generada desde `app.yaml` (VIG-344: `ApiErrorBody.rejection`), y no un
+    // cuerpo a mano: si U-04 cambia la forma, esta prueba cae.
+    const response = mswApiError('invalid_request', 400, {
+      detailCode: 'loop_blocked_vocabulary_term',
+      rejection: { code: 'blocked_vocabulary_term', term, suggestion },
+    });
+    const body: unknown = await response.clone().json();
+    const validate = errorBody();
+    expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
+    loop.state.stepResponse = () => response.clone();
     fireEvent.change(statement(1), {
       target: { value: 'Texto sintético rechazado por el validador.' },
     });
@@ -190,7 +204,7 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     expect(box?.querySelector('[data-part="rejection-suggestion"]')?.textContent).toBe(suggestion);
   });
 
-  it('sin término ni sugerencia en la respuesta (U-04 hoy) solo muestra el código, sin inventarlos', async () => {
+  it('sin término ni sugerencia en la respuesta (versión anterior de U-04) solo muestra el código, sin inventarlos', async () => {
     const { loop } = await setup();
     await start();
     loop.state.stepResponse = () =>

@@ -16,6 +16,10 @@ pendiente nº 33): ``{code, detail_code?, message_es, correlation_id, retry_afte
   nunca un texto del llamador, una traza, una ruta interna, una versión ni un detalle de la base.
 - ``retry_after_seconds`` solo en los códigos transitorios (``TRANSIENT_CODES``); va también en
   la cabecera ``Retry-After``.
+- ``rejection`` es opcional (VIG-344, aditivo): solo en un ``invalid_request`` con ``detail_code``
+  que rechazó un validador de texto libre (``ApiErrorRejection``: el motivo cerrado, el término
+  que cayó y la alternativa, si el validador los da). Lo ve solo quien envió el texto; el
+  término y la sugerencia que no caben o vienen en blanco no salen.
 
 ``translate`` convierte cualquier excepción en un ``ApiError``: ``ApiError`` tal cual;
 ``ContextAbsent`` y todo lo desconocido en ``internal_error`` (una excepción en autorización,
@@ -53,6 +57,7 @@ from starlette.responses import JSONResponse, Response
 from vigia_platform.identity.authz.authorize import ResourceNotFound
 from vigia_platform.identity.authz.context import ContextUnavailable, ContextUnavailableReason
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
+from vigia_platform.ledger.free_text import FreeTextHint
 from vigia_platform.shared.api.labels import PlatformLabels
 from vigia_platform.shared.api.request_state import request_state
 from vigia_platform.shared.bulkheads import BulkheadSaturated
@@ -70,11 +75,13 @@ __all__ = [
     "HTTP_STATUS",
     "MAX_DETAIL_CODE_CHARS",
     "MAX_MESSAGE_CHARS",
+    "MAX_REJECTION_TEXT_CHARS",
     "MAX_RETRY_AFTER_SECONDS",
     "TRANSIENT_CODES",
     "ApiError",
     "ApiErrorBody",
     "ApiErrorCode",
+    "ApiErrorRejection",
     "ApiStartupError",
     "DetailCodeRegistry",
     "ErrorBoundary",
@@ -93,6 +100,8 @@ MAX_DETAIL_CODE_CHARS: Final = 64
 DEFAULT_RETRY_AFTER_SECONDS: Final = 5
 """``retry_after_seconds`` de un transitorio sin valor propio ``[objetivo propio]``."""
 MAX_RETRY_AFTER_SECONDS: Final = 3_600
+MAX_REJECTION_TEXT_CHARS: Final = 200
+"""Tope del término y de la sugerencia de ``rejection`` (VIG-344): el mismo que lee la interfaz."""
 
 DETAIL_CODE_PREFIXES: Final = (
     "catalog_",
@@ -106,6 +115,10 @@ DETAIL_CODE_PREFIXES: Final = (
 
 _DETAIL_CODE: Final = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
 """``snake_case`` ASCII de al menos dos palabras (el prefijo y el resto), sin espacios."""
+
+_REJECTION_CODE: Final = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+"""El motivo cerrado de un validador (``FreeTextRejected.reason``): ``snake_case`` ASCII, anclado
+también en el esquema publicado."""
 
 _CORRELATION_STATE_KEY: Final = "correlation_id"
 
@@ -248,6 +261,8 @@ class ApiError(Exception):
     El mensaje en español no se pasa: sale de la etiqueta del código al responder, así que nunca
     puede llevar un dato de la petición. ``retry_after_seconds`` solo en los transitorios (por
     defecto ``DEFAULT_RETRY_AFTER_SECONDS``); en los demás es un error de programación.
+    ``rejection`` (la pista de un validador de texto libre, VIG-344) solo en un
+    ``invalid_request`` con ``detail_code``.
     """
 
     def __init__(
@@ -256,6 +271,7 @@ class ApiError(Exception):
         *,
         detail_code: str | None = None,
         retry_after_seconds: int | None = None,
+        rejection: FreeTextHint | None = None,
     ) -> None:
         if not isinstance(code, ApiErrorCode):
             raise TypeError("code debe ser ApiErrorCode")
@@ -263,6 +279,11 @@ class ApiError(Exception):
             problem = _detail_code_problem(detail_code)
             if problem is not None:
                 raise ValueError(problem)
+        if rejection is not None:
+            if not isinstance(rejection, FreeTextHint):
+                raise TypeError("rejection debe ser FreeTextHint")
+            if code is not ApiErrorCode.INVALID_REQUEST or detail_code is None:
+                raise ValueError("rejection solo va en un invalid_request con detail_code")
         if code in TRANSIENT_CODES:
             retry = (
                 DEFAULT_RETRY_AFTER_SECONDS if retry_after_seconds is None else retry_after_seconds
@@ -274,6 +295,7 @@ class ApiError(Exception):
         self.code = code
         self.detail_code = detail_code
         self.retry_after_seconds = retry_after_seconds
+        self.rejection = rejection
 
     @property
     def status_code(self) -> int:
@@ -319,11 +341,18 @@ def from_ledger_rejection(rejection: LedgerRejection) -> ApiError:
     """``ApiError`` de un rechazo del expediente; el puntero del campo no sale en la respuesta.
 
     Un ``free_text_rejected`` de un validador enchufado lleva su ``detail_code`` (p. ej.
-    ``loop_blocked_vocabulary_term``, U-04); la política base no lo lleva.
+    ``loop_blocked_vocabulary_term``, U-04) y su pista (``rejection``, VIG-344); la política base
+    no lleva ninguno de los dos.
     """
     if not isinstance(rejection, LedgerRejection):
         raise TypeError("rejection debe ser LedgerRejection")
-    return ApiError(_REJECTION_CODES[rejection.code], detail_code=rejection.detail_code)
+    code = _REJECTION_CODES[rejection.code]
+    hinted = code is ApiErrorCode.INVALID_REQUEST and rejection.detail_code is not None
+    return ApiError(
+        code,
+        detail_code=rejection.detail_code,
+        rejection=rejection.hint if hinted else None,
+    )
 
 
 _HTTP_EXCEPTION_CODES: Final[Mapping[int, ApiErrorCode]] = {
@@ -381,8 +410,23 @@ def translate(error: BaseException) -> ApiError:
 # --- Respuesta ---------------------------------------------------------------------------------
 
 
+class ApiErrorRejection(BaseModel):
+    """El rechazo de un validador de texto libre (VIG-344; ``rejection`` de ``AssistantRequest``,
+    plataforma-aplicacion §2.19): ``code`` es el motivo cerrado del validador (p. ej.
+    ``blocked_vocabulary_term``); ``term`` y ``suggestion``, el término que cayó y la alternativa,
+    si el validador los da. Nunca lleva el texto enviado completo."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    code: str = Field(
+        min_length=1, max_length=MAX_DETAIL_CODE_CHARS, pattern=_REJECTION_CODE.pattern
+    )
+    term: str | None = Field(default=None, min_length=1, max_length=MAX_REJECTION_TEXT_CHARS)
+    suggestion: str | None = Field(default=None, min_length=1, max_length=MAX_REJECTION_TEXT_CHARS)
+
+
 class ApiErrorBody(BaseModel):
-    """Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."""
+    """Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33; VIG-344)."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
@@ -393,6 +437,28 @@ class ApiErrorBody(BaseModel):
     message_es: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
     correlation_id: uuid.UUID
     retry_after_seconds: int | None = Field(default=None, ge=1, le=MAX_RETRY_AFTER_SECONDS)
+    rejection: ApiErrorRejection | None = None
+
+
+def _shown(value: str | None) -> str | None:
+    """Un término o una sugerencia que se puede mostrar tal cual; si no, nada (no se recorta)."""
+    if value is None or not value.strip() or len(value) > MAX_REJECTION_TEXT_CHARS:
+        return None
+    return value
+
+
+def _rejection_body(hint: FreeTextHint) -> ApiErrorRejection | None:
+    """``rejection`` de la pista de un validador; sin motivo cerrado válido, no sale."""
+    if (
+        len(hint.code) > MAX_DETAIL_CODE_CHARS
+        or not hint.code.isascii()
+        or _REJECTION_CODE.fullmatch(hint.code) is None
+    ):
+        _log.error("pista de rechazo sin motivo cerrado válido: no se incluye")
+        return None
+    return ApiErrorRejection(
+        code=hint.code, term=_shown(hint.term), suggestion=_shown(hint.suggestion_es)
+    )
 
 
 class ErrorCatalog:
@@ -431,6 +497,7 @@ class ErrorCatalog:
             message_es=self._labels.label("api_error_code", error.code.value),
             correlation_id=correlation_id,
             retry_after_seconds=error.retry_after_seconds,
+            rejection=None if error.rejection is None else _rejection_body(error.rejection),
         )
 
     def response(self, error: ApiError, correlation_id: uuid.UUID) -> Response:

@@ -8,7 +8,8 @@
  *   detienen la consulta. Ninguno de esos estados toca el flujo guiado: el panel nunca lo
  *   bloquea ni lo oculta.
  * - El rechazo se lee con la forma del diseño (`rejection: {code, term?, suggestion?}`) por
- *   lectura tolerante; U-04 hoy solo da el código (`detail_code`) y la pantalla no inventa el
+ *   lectura tolerante (U-04 lo da en `ApiErrorBody.rejection` desde VIG-344; una respuesta sin
+ *   él, de una versión anterior, deja solo el código de `detail_code`) y la pantalla no inventa el
  *   término ni la sugerencia.
  *
  * Ningún estado depende del reloj del sistema: el instante llega en cada evento.

@@ -97,6 +97,60 @@ def test_close_without_license_rejects_with_signer_license_missing(
     assert response.status_code == 201, response.text
 
 
+_BLOCKED_TEXT = (
+    "La zona quedó garantizada sin ningún riesgo y el cierre queda documentado con su evidencia."
+)
+"""Contiene ``garantizar`` (lista inicial, §14.2): el vocabulario bloqueado de producción la
+rechaza."""
+_ATTRIBUTED_TEXT = "El resguardo quedó instalado porque el operario omitió el bloqueo del equipo."
+"""Un cargo como sujeto de una omisión (``role_action``): la atribución de producción la rechaza."""
+
+
+@pytest.mark.parametrize(
+    ("text", "rejection"),
+    [
+        (
+            _BLOCKED_TEXT,
+            {
+                "code": "blocked_vocabulary_term",
+                "term": "garantizada",
+                "suggestion": (
+                    "Cita la cifra medida, con su periodo y su fuente, en lugar de prometerla."
+                ),
+            },
+        ),
+        (
+            _ATTRIBUTED_TEXT,
+            {
+                "code": "person_attribution_detected",
+                "suggestion": (
+                    "Describa la condición de la zona, del equipo o del procedimiento, no lo que"
+                    " hizo una persona."
+                ),
+            },
+        ),
+    ],
+)
+def test_close_with_a_text_rejected_by_a_validator_names_it_and_writes_nothing(
+    stack: ActionsStack,
+    coordinator: Who,
+    assignee: uuid.UUID,
+    text: str,
+    rejection: dict[str, str],
+) -> None:
+    """VIG-344: el escritor rechaza el texto del cierre con uno de los dos validadores; la
+    respuesta es ``invalid_request`` con su ``detail_code`` y ``rejection`` exacto (antes era
+    ``internal_error``), y no se escribe nada."""
+    finding, _action_id = stack.with_evidence(coordinator, assignee)
+    before = stack.untouched(finding)
+    detail = f"loop_{rejection['code']}"
+    for field in ("closure_description", "verification_note"):
+        response = stack.close(coordinator, finding, stack.closure_body(**{field: text}))
+        assert _error(response) == (400, "invalid_request", detail), (field, response.text)
+        assert response.json()["rejection"] == rejection, field
+    assert stack.untouched(finding) == before
+
+
 def test_close_with_attachment_store_down_still_succeeds(
     stack: ActionsStack, coordinator: Who, assignee: uuid.UUID
 ) -> None:

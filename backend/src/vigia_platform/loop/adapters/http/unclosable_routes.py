@@ -208,7 +208,7 @@ def review_view(result: ReviewResult) -> UnclosableReviewOut:
 
 def _rejected(rejected: UnclosableRejected) -> ApiError:
     code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-    return ApiError(code, detail_code=rejected.detail_code.value)
+    return ApiError(code, detail_code=rejected.detail_code.value, rejection=rejected.hint)
 
 
 def _action_body(body: ReviewActionBody | None) -> dict[str, Any] | None:

@@ -18,9 +18,12 @@ Rechazos de negocio, como ``invalid_request`` con su ``detail_code`` (400, A-68)
 ``loop_action_on_person_forbidden``, ``loop_deadline_out_of_range``,
 ``loop_blocked_vocabulary_term`` y ``loop_person_attribution_detected``;
 ``loop_closure_requires_assigned_action`` y ``loop_transition_not_allowed`` viajan como
-``conflict`` (409). Un cuerpo que no tiene la forma del esquema es ``invalid_request`` sin
-``detail_code``. Un hallazgo inexistente, de otra organización, fuera de alcance o pedido bajo
-concesión de proveedor responde ``not_found``, sin escribir nada.
+``conflict`` (409). Los dos de los validadores llevan ``rejection`` (VIG-344) en el cierre y en
+la reapertura: el motivo, el término (solo el del vocabulario) y la sugerencia; antes, en el
+cierre, un texto rechazado por ellos salía como ``internal_error``. Un cuerpo que no tiene la
+forma del esquema es ``invalid_request`` sin ``detail_code``. Un hallazgo inexistente, de otra
+organización, fuera de alcance o pedido bajo concesión de proveedor responde ``not_found``, sin
+escribir nada.
 """
 
 from __future__ import annotations
@@ -84,6 +87,8 @@ _CLOSURE_CODES: Final = (
     LoopDetailCode.SIGNER_LICENSE_MISSING.value,
     LoopDetailCode.CLOSURE_REQUIRES_ASSIGNED_ACTION.value,
     LoopDetailCode.TRANSITION_NOT_ALLOWED.value,
+    LoopDetailCode.BLOCKED_VOCABULARY_TERM.value,
+    LoopDetailCode.PERSON_ATTRIBUTION_DETECTED.value,
 )
 _REOPENING_CODES: Final = (
     LoopDetailCode.REOPENING_REASON_REQUIRED.value,
@@ -202,6 +207,11 @@ def _reopening_rejected(error: ReopeningRejected) -> ApiError:
     return ApiError(code, detail_code=error.detail_code.value)
 
 
+def _action_rejected(error: ActionRejected) -> ApiError:
+    code, _status = HTTP_STATUS_BY_DETAIL_CODE[error.detail_code]
+    return ApiError(code, detail_code=error.detail_code.value, rejection=error.hint)
+
+
 def closure_router() -> APIRouter:
     router = APIRouter(tags=["lazo"])
 
@@ -229,6 +239,9 @@ def closure_router() -> APIRouter:
             )
         except ClosureRejected as rejected:
             raise _closure_rejected(rejected) from None
+        except ActionRejected as rejected:
+            # El escritor rechazó un texto del cierre con uno de los dos validadores (VIG-344).
+            raise _action_rejected(rejected) from None
         except (ActionRequestInvalid, ClosureRequestInvalid):
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return closure_view(result)
@@ -261,8 +274,7 @@ def closure_router() -> APIRouter:
         except (ReopeningRejected, ActionRejected) as rejected:
             if isinstance(rejected, ReopeningRejected):
                 raise _reopening_rejected(rejected) from None
-            code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-            raise ApiError(code, detail_code=rejected.detail_code.value) from None
+            raise _action_rejected(rejected) from None
         except (ActionRequestInvalid, ReopeningRequestInvalid):
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return reopening_view(result)

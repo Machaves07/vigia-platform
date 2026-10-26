@@ -249,7 +249,9 @@ def review_queue_router() -> APIRouter:
             )
         except ReviewResolutionRejected as rejected:
             code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-            raise ApiError(code, detail_code=rejected.detail_code.value) from None
+            raise ApiError(
+                code, detail_code=rejected.detail_code.value, rejection=rejected.hint
+            ) from None
         except ReviewQueueRequestInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return _resolution_view(result)

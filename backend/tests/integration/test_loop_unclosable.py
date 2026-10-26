@@ -359,6 +359,28 @@ def test_every_one_of_the_five_fields_is_required(
     assert stack.untouched(subject) == before
 
 
+def test_a_field_rejected_by_the_vocabulary_names_the_term_and_writes_nothing(
+    stack: UnclosableStack, coordinator: Who, responsible: uuid.UUID
+) -> None:
+    """SUP-U05-12 (VIG-344): un texto de la declaración que el vocabulario bloqueado rechaza
+    responde su ``detail_code`` con ``rejection`` exacto, sin escribir nada."""
+    subject = stack.opened()
+    _signed(stack, subject.organization)
+    body = stack.declaration_body(
+        responsible,
+        compensatory_measure="Vigilancia permanente que garantiza la zona en el turno de carga",
+    )
+    before = stack.untouched(subject)
+    response = stack.declare(coordinator, subject, body)
+    assert _error(response) == (400, "invalid_request", "loop_blocked_vocabulary_term")
+    assert response.json()["rejection"] == {
+        "code": "blocked_vocabulary_term",
+        "term": "garantiza",
+        "suggestion": "Cita la cifra medida, con su periodo y su fuente, en lugar de prometerla.",
+    }
+    assert stack.untouched(subject) == before
+
+
 @pytest.mark.parametrize(
     "changes",
     [
