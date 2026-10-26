@@ -25,7 +25,6 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import type { LoopContext } from '../classify/common';
 
-const DESCRIPTION_LIMITS = reasonLimits(assignBody, 'action_description');
 const EXPECTED_MAX = 1000;
 
 const ACTION_FIELDS: Readonly<Record<string, string>> = {
@@ -52,6 +51,9 @@ export function ActionForm({
   readonly timeZone: string;
   readonly onWritten: () => void;
 }) {
+  // La construcción comparte el esquema con la entrada lazy de este grupo. Leerlo al
+  // renderizar evita consumir su exportación antes de que termine el ciclo de módulos.
+  const [descriptionLimits] = useState(() => reasonLimits(assignBody, 'action_description'));
   const id = useId();
   const canReadConfiguration = context.permissions.includes('hierarchy.read');
   const configuration = useScreenQuery({
@@ -104,7 +106,7 @@ export function ActionForm({
         if (
           type === '' ||
           assignee === '' ||
-          reasonIssueKey(description, DESCRIPTION_LIMITS) !== null
+          reasonIssueKey(description, descriptionLimits) !== null
         )
           return;
         void mutation
@@ -152,7 +154,7 @@ export function ActionForm({
         label={text('scr09.loop.action_description')}
         name="action_description"
         value={description}
-        limits={DESCRIPTION_LIMITS}
+        limits={descriptionLimits}
         showErrors={showErrors}
         notice={at('action_description')}
         onChange={edit(setDescription)}

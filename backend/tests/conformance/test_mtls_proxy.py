@@ -172,6 +172,27 @@ def world(tmp_path: Path) -> World:
     return World(tmp_path)
 
 
+def test_expect_continue_releases_the_request_body_before_forwarding(world: World) -> None:
+    """VIG-332: boto3 no envía el paquete hasta recibir el acuse HTTP 100 del proxy TLS."""
+    context = ssl.create_default_context(cafile=str(world.tls.ca_file))
+    with (
+        echo_backend() as backend,
+        mtls_proxy("aws", [backend], world.tls, preserve_host=True) as proxy,
+        socket.create_connection(("127.0.0.1", proxy.port), timeout=10) as raw,
+        context.wrap_socket(raw, server_hostname="127.0.0.1") as connection,
+        connection.makefile("rb") as response,
+    ):
+        connection.sendall(
+            b"PUT /synthetic-package HTTP/1.1\r\nHost: localhost\r\n"
+            b"Expect: 100-continue\r\nContent-Length: 9\r\n\r\n"
+        )
+        assert response.readline().split()[:2] == [b"HTTP/1.1", b"100"]
+        assert response.readline() == b"\r\n"
+        connection.sendall(b"sintetico")
+        assert response.readline().split()[:2] == [b"HTTP/1.1", b"200"]
+    assert len(proxy.exchanges) == 1
+
+
 def _mtls(received: list[list[str]]) -> dict[str, str]:
     return {name: value for name, value in received if name.startswith("x-amzn-mtls-")}
 

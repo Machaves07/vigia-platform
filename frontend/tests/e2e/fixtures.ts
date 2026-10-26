@@ -18,11 +18,12 @@ interface Fixtures {
 }
 interface AuthFixtures {
   role: Role;
+  reuseRoleSession: boolean;
   authenticatedPage: Page;
   _privateArtifacts: undefined;
 }
 interface WorkerFixtures {
-  roleSession: (role: Role) => Promise<BrowserContext>;
+  roleSession: (role: Role, reuse?: boolean) => Promise<BrowserContext>;
 }
 
 const sessionPolicyChecks = new WeakMap<BrowserContext, () => void>();
@@ -50,6 +51,7 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
   video: 'off',
   screenshot: 'off',
   role: ['coordinator_sst', { option: true }],
+  reuseRoleSession: [true, { option: true }],
   _privateArtifacts: [
     async ({ trace, video, screenshot }, use) => {
       assertPrivateArtifacts({ trace, video, screenshot });
@@ -61,9 +63,10 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
     async ({ browser }, use, workerInfo) => {
       const world = readWorld();
       const sessions = new Map<Role, BrowserContext>();
+      const contexts = new Set<BrowserContext>();
       const checks: (() => void)[] = [];
-      const login = async (role: Role): Promise<BrowserContext> => {
-        const reused = sessions.get(role);
+      const login = async (role: Role, reuse = true): Promise<BrowserContext> => {
+        const reused = reuse ? sessions.get(role) : undefined;
         if (reused) return reused;
         expect(statSync(world.credentials_file).mode & 0o777).toBe(0o600);
         const accounts = JSON.parse(readFileSync(world.credentials_file, 'utf8')) as Record<
@@ -81,7 +84,8 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
           hasTouch: workerInfo.project.use.hasTouch ?? false,
         });
         context.setDefaultTimeout(30_000);
-        sessions.set(role, context);
+        contexts.add(context);
+        if (reuse) sessions.set(role, context);
         const check = await watchPolicy(context, role);
         sessionPolicyChecks.set(context, check);
         checks.push(check);
@@ -119,19 +123,24 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
       try {
         await use(login);
       } finally {
-        await Promise.all([...sessions.values()].map((context) => context.close()));
+        await Promise.all([...contexts].map((context) => context.close()));
         for (const check of checks) check();
       }
     },
     { scope: 'worker', timeout: 180_000 },
   ],
-  authenticatedPage: async ({ roleSession, role }, use) => {
-    const context = await roleSession(role);
+  authenticatedPage: async ({ roleSession, role, reuseRoleSession }, use) => {
+    // Los recorridos con logout nunca reciben ni reemplazan el contexto compartido del rol.
+    const context = await roleSession(role, reuseRoleSession);
     const page = await context.newPage();
     try {
       await use(page);
     } finally {
-      await page.close();
+      try {
+        await page.close();
+      } finally {
+        if (!reuseRoleSession) await context.close();
+      }
       // Atribuir la violación a esta prueba, además de la guarda final del worker.
       sessionPolicyChecks.get(context)?.();
     }

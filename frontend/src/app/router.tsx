@@ -7,7 +7,7 @@
  *   «no existe» de «no es suyo». La guarda es comodidad: el servidor autoriza cada petición.
  * - Las rutas se construyen para un `Principal`: si un `GET /me` (cambio de concesión, otra
  *   persona) cambia sus permisos o sus roles, `AppRouter` construye un enrutador nuevo. Sin
- *   `Principal` solo se abren las rutas públicas y `/` lleva al inicio de sesión.
+ *   `Principal` solo se abren las rutas públicas; `/` y las URL protegidas llevan al inicio de sesión.
  * - **Precarga** (PAT-APP-REN-02): tras la primera pintura, una vez, la porción del panel de inicio
  *   y la de las pantallas enlazadas desde él que el usuario puede abrir. Solo código: no hay
  *   cargadores de datos en las rutas, así que precargar nunca dispara una consulta.
@@ -33,7 +33,16 @@ function permissionsOf(principal: NavigationPrincipal | null): ReadonlySet<strin
   return principal === null ? null : new Set(principal.effective_permissions);
 }
 
-function groupRoute(path: string, group: RouteGroup, open: boolean): RouteObject {
+function groupRoute(
+  path: string,
+  group: RouteGroup,
+  open: boolean,
+  anonymous: boolean,
+): RouteObject {
+  // Tras logout, una URL protegida exige volver a iniciar sesión (TASK-450).
+  // Una sesión activa sin permiso conserva la respuesta uniforme de alcance.
+  if (anonymous && group.access !== 'public')
+    return { path, element: <Navigate to={LOGIN_PATH} replace /> };
   if (!open) return { path, Component: NotAvailableInScope };
   return {
     path,
@@ -66,7 +75,8 @@ export function createAppRoutes(
   for (const screen of screens) {
     for (const group of screen.route_groups) {
       const open = canEnterGroup(group, permissions);
-      for (const path of group.paths) children.push(groupRoute(path, group, open));
+      for (const path of group.paths)
+        children.push(groupRoute(path, group, open, principal === null));
     }
   }
   children.push({ path: '*', Component: NotAvailableInScope });

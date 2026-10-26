@@ -14,6 +14,7 @@ import pytest
 
 from tests.conformance.platform_target import PlatformStack
 from tests.e2e_u05 import __main__ as cli
+from tests.e2e_u05.journeys import browser_store_cors
 from tests.e2e_u05.world import (
     assert_no_leaks,
     configure_store_origin,
@@ -137,4 +138,18 @@ def test_store_cors_uses_the_single_application_origin_and_production_headers() 
                 }
             ]
         },
+    }
+
+
+def test_browser_store_has_one_closed_origin_and_the_production_headers() -> None:
+    assert browser_store_cors("https://127.0.0.1:4443") == {
+        "CORSRules": [
+            {
+                "AllowedOrigins": ["https://127.0.0.1:4443"],
+                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
     }

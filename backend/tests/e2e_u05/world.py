@@ -29,6 +29,7 @@ from tests.conformance.platform_target import (
     platform_stack,
 )
 from tests.e2e_u05.commissioning import commissioning_clips
+from tests.e2e_u05.journeys import prepare_journeys
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
 from tests.integration.test_u04_end_to_end import (
     _expected_subjects,
@@ -139,6 +140,14 @@ def users(target: LoadTarget, fleet: Fleet) -> tuple[dict[str, Any], dict[str, A
             user = uuid.UUID(str(rows[0]["user_id"]))
         else:
             user, statements = provisioner._user(organization, role)
+            if role is Role.LINE_MANAGER:
+                # La asignación nace acotada; identity no permite reescribir su alcance.
+                assignment, parameters = statements[-1]
+                assert "'organization', $2" in assignment
+                statements[-1] = (
+                    assignment.replace("'organization', $2", "'zone', $7"),
+                    (*parameters, fleet.zone_ids[0]),
+                )
             target.stack.admin(statements)
         password = secrets.token_urlsafe(32)
         secret = secrets.token_bytes(20)
@@ -277,10 +286,12 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
         cache.mkdir()
         dataset = directory / "dataset"
         dataset.mkdir()
+        profile = PROFILES["u04-e2e"]
+        seed = 449
         fleet, result, analysis, _ = run_load(
             target,
-            PROFILES["u04-e2e"],
-            dataset=write_sealed_dataset(dataset, 449, WALL.now()),
+            profile,
+            dataset=write_sealed_dataset(dataset, seed, WALL.now()),
             cache=cache,
             work=work,
         )
@@ -296,6 +307,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             message="La bandeja no alcanzó al expediente",
         )
         public, credentials = users(target, fleet)
+        journeys = prepare_journeys(target, fleet, public, profile=profile.name, seed=seed)
         non_productive = non_productive_zone(target, fleet, public["administrator"]["user_id"])
         credentials_file = directory / "credentials.json"
         private_json(credentials_file, credentials)
@@ -311,6 +323,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             "zone_ids": [str(value) for value in fleet.zone_ids],
             "non_productive_zone_id": str(non_productive),
             "concession_id": str(fleet.console.concession_id),
+            "journeys": journeys,
         }
         try:
             with published_manifest(manifest, document):
