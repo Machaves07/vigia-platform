@@ -90,7 +90,8 @@ la construcción estática actualizada al cambiar el contrato. Las dependencias 
 | `npm run generate`       | Cliente, validadores y esquemas espejo desde `backend/openapi/app.yaml`               |
 | `npm run generate:check` | Falla con la diferencia si algo generado no coincide con `app.yaml`                   |
 | `npm run e2e`            | Playwright contra la plataforma real local, en seis proyectos (VIG-299)               |
-| `npm run size`           | Presupuesto de tamaño por porción (lo completa VIG-294)                               |
+| `npm run size`           | Presupuesto de tamaño de `dist/` por porción (NFR-APP-01), tras `npm run build`       |
+| `npm run audit:check`    | `npm audit`: alta o crítica bloquea, salvo la excepción de `@lhci/cli` (A-71)         |
 | `npm run lighthouse`     | Lighthouse CI sobre la construcción servida por el mundo (`lighthouserc.json`)        |
 
 `npm test -- <ruta>` limita vitest a unos archivos o carpetas, por ejemplo
@@ -190,9 +191,11 @@ Lo que fija `tech-stack-decisions.md` §5 de U-05 para `frontend/`:
 
 Estado en `main`:
 
-- **`ci.yml`**: el trabajo `frontend` lo añade VIG-294 (TASK-412), que fusiona el dueño. Hasta
-  entonces, un PR que solo toca `frontend/` o `docs/` salta los trabajos de backend, y la imagen
-  `arm64` de `ci.yml` ya construye la etapa `frontend-build`.
+- **`ci.yml`**: el trabajo «frontend (verificaciones, pruebas y construcción)» (VIG-294, TASK-412)
+  corre en cada PR: `npm ci --ignore-scripts`, `generate:check`, `lint`, `typecheck`, `knip`,
+  `check`, `npm test -- --coverage` (umbrales de NFR-APP-46 en `vitest.config.ts`), `audit:check`,
+  `build` y `size`, sin depender de «rutas». Un PR que solo toca `frontend/` o `docs/` salta los
+  trabajos de backend, y la imagen `arm64` de `ci.yml` construye además la etapa `frontend-build`.
 - **`nightly.yml`**: los trabajos de `frontend-nightly` los añade VIG-337 (TASK-456), que fusiona el
   dueño; VIG-339 los contrasta con la ejecución real.
 - **`release.yml`**: tras desplegar, `backend/tools/deploy_checks.py` corre la comprobación nº 8 en
