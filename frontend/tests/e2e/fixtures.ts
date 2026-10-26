@@ -83,28 +83,40 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
             : {}),
           hasTouch: workerInfo.project.use.hasTouch ?? false,
         });
+        context.setDefaultTimeout(30_000);
         contexts.add(context);
         if (reuse) sessions.set(role, context);
         const check = await watchPolicy(context, role);
         sessionPolicyChecks.set(context, check);
         checks.push(check);
         const page = await context.newPage();
+        let phase = 'navegación';
+        const statuses: number[] = [];
+        page.on('response', (response) => {
+          if (['/auth/login', '/auth/second-factor'].includes(new URL(response.url()).pathname))
+            statuses.push(response.status());
+        });
         try {
           await page.goto('/login');
+          phase = 'formulario de acceso';
           await expect(page.getByLabel(/correo/i)).toBeVisible();
           await page.getByLabel(/correo/i).fill(world.users[role].email);
           await page.getByLabel(/contraseña/i).fill(account.password);
           await page.getByRole('button', { name: /iniciar sesión|entrar/i }).click();
+          phase = 'segundo factor';
           await page
             .getByLabel(/código de 6 dígitos/i)
             .fill(await nextTotp(account.totp_hex, role, world.credentials_file));
           await page.getByRole('button', { name: /verificar|confirmar/i }).click();
+          phase = 'sesión completa';
           await expect(page).not.toHaveURL(/\/login(?:\/|$)/);
           await page.close();
         } catch {
           await page.close();
           // No propagar errores de fill/expect que puedan adjuntar el valor secreto.
-          throw new Error('No se pudo completar el acceso por interfaz con segundo factor');
+          throw new Error(
+            `No se pudo completar el acceso por interfaz con segundo factor (${phase}; HTTP ${statuses.join(',')})`,
+          );
         }
         return context;
       };

@@ -1,6 +1,181 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { expect } from './fixtures';
+import type { World } from './world';
+
+export function required<T>(value: T | null | undefined): T {
+  if (value === undefined || value === null) throw new Error('Falta un dato obligatorio del mundo');
+  return value;
+}
+
+export function engineZone(world: World, project: string): string {
+  const index = ['chromium', 'firefox', 'webkit'].indexOf(required(project.split('-')[0]));
+  return required(world.zone_ids[index]);
+}
+
+/** Solo para preparar precondiciones: peticiones al servidor real con la sesión del navegador. */
+export async function prepare<T>(
+  page: Page,
+  path: string,
+  body?: unknown,
+  method = 'POST',
+  concession?: string,
+): Promise<T> {
+  const result = await page.evaluate(
+    async ({ path, body, method, concession }) => {
+      const response = await fetch(path, {
+        method,
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout(60_000),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(concession === undefined ? {} : { 'X-Vigia-Concession': concession }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, body: (await response.json()) as unknown };
+    },
+    { path, body, method, concession },
+  );
+  expect(result.status, `Precondición real: ${method} ${path}`).toBeGreaterThanOrEqual(200);
+  expect(result.status, `Precondición real: ${method} ${path}`).toBeLessThan(300);
+  return result.body as T;
+}
+
+/** La concesión vive solo en memoria: una entrada por URL se activa desde el panel y vuelve con Atrás. */
+export async function installerRoute(page: Page, world: World, path: string): Promise<void> {
+  await page.goto(path);
+  await page
+    .getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('link', { name: 'Concesiones', exact: true })
+    .click();
+  await page
+    .getByRole('button', {
+      name: `Operar bajo esta concesión: organización ${world.organization_id}`,
+      exact: true,
+    })
+    .click();
+  await expect(page.getByRole('button', { name: 'Cambiar de concesión' })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(new URL(path, world.base_url).href);
+}
+
+/** Se comprueban ambos ejes, no solo la altura CSS declarada. */
+export async function touchTarget(control: Locator): Promise<void> {
+  await expect(control).toBeVisible();
+  const box = await control.boundingBox();
+  expect(box).not.toBeNull();
+  expect(required(box).width).toBeGreaterThanOrEqual(44);
+  expect(required(box).height).toBeGreaterThanOrEqual(44);
+}
+
+export async function nextStep(scope: Page | Locator): Promise<void> {
+  await scope.getByRole('button', { name: 'Siguiente', exact: true }).click();
+}
+
+/** Ninguna aserción de Playwright se ejecuta mientras el secreto pueda entrar en su contexto de error. */
+export async function acknowledgeSecret(
+  page: Page,
+  kind: 'invitation_link' | 'enrollment_code',
+  nodeId?: string,
+): Promise<void> {
+  const secret = page.locator(`[data-kind="${kind}"]`);
+  let observation: {
+    visible: boolean;
+    valueShape: boolean;
+    nodeMatches: boolean;
+    fingerprints: boolean;
+  } | null = null;
+  let disappeared = false;
+  try {
+    await secret.waitFor({ state: 'visible' });
+    observation = await secret.evaluate(
+      (element, { kind, nodeId }) => {
+        const value = element.querySelector('[data-part="value"]')?.textContent ?? '';
+        const box = element.getBoundingClientRect();
+        let valueShape = /^[A-Z0-9]{12}$/.test(value.trim());
+        if (kind === 'invitation_link') {
+          try {
+            const link = new URL(value.trim(), location.origin);
+            valueShape =
+              link.pathname === '/invitacion' && link.hash.length > 1 && link.search === '';
+          } catch {
+            valueShape = false;
+          }
+        }
+        return {
+          visible: box.width > 0 && box.height > 0,
+          valueShape,
+          nodeMatches:
+            nodeId === undefined ||
+            element.querySelector('[data-part="node_id"]')?.textContent === nodeId,
+          fingerprints:
+            kind === 'invitation_link' ||
+            [...element.querySelectorAll('[data-part="fingerprints"] code')].some((item) =>
+              /^[a-f0-9]{64}$/i.test(item.textContent),
+            ),
+        };
+      },
+      { kind, nodeId },
+    );
+    await secret.getByRole('button', { name: 'Lo guardé', exact: true }).click();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        }),
+    );
+    // Se observa el resultado ANTES de la limpieza defensiva, sin copiar el valor secreto a Node.
+    disappeared = (await secret.count()) === 0;
+  } catch {
+    throw new Error('No se pudo comprobar la entrega de una sola muestra');
+  } finally {
+    // Si la aplicación falla al descartarlo, no se permite que el diagnóstico lo publique.
+    await secret
+      .evaluateAll((elements) => {
+        for (const element of elements) element.remove();
+      })
+      .catch(() => undefined);
+  }
+  expect(observation).toEqual({
+    visible: true,
+    valueShape: true,
+    nodeMatches: true,
+    fingerprints: true,
+  });
+  expect(disappeared, 'La aplicación descartó el secreto al confirmar').toBe(true);
+}
+
+/** Política de prueba con tres cuentas distintas, incluida representación de trabajadores. */
+export async function pendingAgreement(page: Page, world: World, zoneId: string): Promise<string> {
+  await prepare(
+    page,
+    `/plants/${required(world.plant_ids[0])}/signatory-policy`,
+    {
+      required_roles: ['administrator', 'plant_manager', 'copasst'],
+      minimum: 3,
+    },
+    'PUT',
+    world.concession_id,
+  );
+  const agreement = await prepare<{ agreement_id: string }>(
+    page,
+    `/zones/${zoneId}/use-agreements`,
+    {
+      signatories: ['administrator', 'plant_manager', 'copasst'].map((role) => ({
+        role,
+        user_id: world.users[role as keyof World['users']].user_id,
+      })),
+      document_ref: null,
+      replaces_agreement_id: null,
+    },
+    'POST',
+    world.concession_id,
+  );
+  return agreement.agreement_id;
+}
 
 /** Las escrituras se hacen siempre desde la interfaz; solo se observa su respuesta real. */
 export async function confirmFinding(page: Page, findingId: string, reason: string) {

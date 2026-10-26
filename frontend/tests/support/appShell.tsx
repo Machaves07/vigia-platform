@@ -155,12 +155,14 @@ export function mountShell(
   disposers.push(() => {
     services.dispose();
   });
-  let first = true;
-  // Un enrutador nuevo (otros permisos) arranca donde estaba el anterior.
+  let previousRouter: ReturnType<typeof createMemoryRouter> | null = null;
+  // StrictMode puede construir dos veces antes de montar RouterBridge: la ubicación
+  // anterior del propio enrutador es autoritativa también durante esa ventana.
   const createRouter = (routes: RouteObject[]) => {
-    const entry = first ? path : services.currentRoute();
-    first = false;
-    return createMemoryRouter(routes, { initialEntries: [entry] });
+    const entry = previousRouter?.state.location ?? path;
+    const next = createMemoryRouter(routes, { initialEntries: [entry] });
+    previousRouter = next;
+    return next;
   };
   const app = <App services={services} screens={screens} createRouter={createRouter} />;
   const view = render(options.strict === false ? app : <StrictMode>{app}</StrictMode>, {
