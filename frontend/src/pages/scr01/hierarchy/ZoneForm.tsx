@@ -1,6 +1,10 @@
 import { useId, useState } from 'react';
-import { hierarchyPort, zoneIssues, type ZoneBody } from '@/ports/scr01Hierarchy';
-import type { ValidationIssue } from '@/ports/validation';
+import {
+  hierarchyPort,
+  zoneIssues,
+  type ValidationIssue,
+  type ZoneBody,
+} from '@/ports/scr01Hierarchy';
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import { AdminField, AdminMutationResult } from './FormFields';
