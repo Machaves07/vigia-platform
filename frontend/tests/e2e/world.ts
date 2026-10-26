@@ -19,6 +19,8 @@ export interface World {
   readonly store_origin: string;
   readonly users: Record<Role, { readonly email: string; readonly user_id: string }>;
   readonly credentials_file: string;
+  /** Material privado de las comprobaciones de despliegue con --target (VIG-352). */
+  readonly deploy_checks_file: string;
   readonly ca_file: string;
   readonly organization_id: string;
   readonly plant_ids: readonly string[];
@@ -34,6 +36,8 @@ export interface World {
     readonly line_finding_id: string;
     readonly findings: Record<string, { readonly closure: string; readonly unclosable: string }>;
   };
+  /** Canal local del intermediario de fallos entre la aplicación y la API (`faults.ts`). */
+  readonly fault_control_url: string;
 }
 
 /** Archivo escrito exclusivamente por el proceso local del mundo, no por la aplicación. */

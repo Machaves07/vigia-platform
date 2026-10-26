@@ -570,7 +570,7 @@ describe('axe sobre el armazón completo (NFR-APP-50)', TEST, () => {
     await screen.findByRole('heading', { name: 'Formulario sintético' }, WAIT);
     advance(fixture.clock, 28 * 60_000);
     await screen.findByRole('button', { name: text('app_shell.session.keep_working') }, WAIT);
-    // Después del aviso de los 28 min: un fallo cuenta 30 s en la ventana del circuito.
+    // Después del aviso de los 28 min: un fallo cuenta en la ventana móvil del circuito.
     act(() => {
       fixture.services.connection.register('platform', {
         ok: false,

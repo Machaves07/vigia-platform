@@ -37,10 +37,17 @@ afterEach(() => {
 
 describe('tests/views y tests/msw/scenarios', () => {
   it('con cero archivos el agregado está vacío', () => {
-    // El agregador en sí: sin módulos no hay registros. `tests/views/` ya tiene vistas de pantalla
-    // (cada tarea de pantalla registra la suya), así que aquí se prueba el caso vacío explícito.
+    // El agregador en sí: sin módulos no hay registros. `tests/views/` y `tests/msw/scenarios/` ya
+    // tienen registros (vistas de pantalla y FS-APP), así que aquí se prueba el caso vacío explícito.
     expect(aggregateModules('x', {})).toEqual({});
-    expect(scenarios).toEqual({});
+  });
+
+  it('registra los escenarios de MSW por descubrimiento (FS-APP, VIG-334)', () => {
+    expect(Object.keys(scenarios).length).toBeGreaterThan(0);
+    for (const [name, handlers] of Object.entries(scenarios)) {
+      expect(name).toMatch(/^[a-z][a-z0-9_]*$/u);
+      expect(Array.isArray(handlers) && handlers.length > 0).toBe(true);
+    }
   });
 
   it('registra las vistas de pantalla por descubrimiento', () => {

@@ -15,8 +15,14 @@ export function startConnectionProbe(options: {
   readonly document: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
   readonly fetch: typeof fetch;
   readonly origin: (dep: Dependency) => string;
+  /**
+   * Dependencias que sondea; por omisión, todas. Las que no tienen un `GET /health/live` propio
+   * se quedan fuera: vuelven a `closed` con la siguiente lectura correcta en `half_open`.
+   */
+  readonly dependencies?: readonly Dependency[];
 }): () => void {
   const { clock, connection, document } = options;
+  const probed = options.dependencies ?? DEPENDENCIES;
   const active = new Map<Dependency, { abort: AbortController; timeout: TimerHandle }>();
   let timer: TimerHandle | undefined;
   let stopped = false;
@@ -80,7 +86,7 @@ export function startConnectionProbe(options: {
       }
       const { circuits } = connection.getSnapshot();
       let next = Infinity;
-      for (const dep of DEPENDENCIES) {
+      for (const dep of probed) {
         const circuit = circuits[dep];
         // Otro puerto puede reabrir mientras la sonda anterior sigue en vuelo.
         if (circuit.state === 'open') cancel(dep);

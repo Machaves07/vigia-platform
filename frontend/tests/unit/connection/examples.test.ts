@@ -28,6 +28,19 @@ describe('conexión con reloj inyectado', () => {
     expect(connection.writeBlockReason()).toBe('sin conexión con la plataforma');
   });
 
+  it('con tiempos de espera de 10 s, el cuarto fallo de la misma lectura abre (FS-APP-01)', () => {
+    const { clock, connection, fail } = fixture();
+    // Cada intento vence a los 10 s; entre uno y otro, 2, 4 y 8 s: 44 s del primer fallo al cuarto.
+    for (const gap of [12_000, 14_000, 18_000]) {
+      fail();
+      expect(connection.getSnapshot().circuits.platform.state).toBe('closed');
+      clock.advance(gap);
+    }
+    fail();
+    expect(connection.getSnapshot().circuits.platform.state).toBe('open');
+    expect(connection.canWrite()).toBe(false);
+  });
+
   it('permanece abierto 30 s completos desde el cuarto fallo y pasa a half_open', () => {
     const { clock, connection, open, fail } = fixture();
     open();
@@ -46,10 +59,12 @@ describe('conexión con reloj inyectado', () => {
     expect(connection.writeBlockReason()).toBeNull();
   });
 
-  it('vence la ventana móvil justo a los 30 s sin abrir por fallos dispersos', () => {
+  it('vence la ventana móvil justo a los 60 s sin abrir por fallos dispersos', () => {
     const { clock, connection, fail } = fixture();
     fail();
-    clock.advance(30_000);
+    clock.advance(59_999);
+    expect(connection.getSnapshot().circuits.platform.failures).toHaveLength(1);
+    clock.advance(1);
     expect(connection.getSnapshot().connection.state).toBe('online');
     for (let i = 0; i < 3; i++) fail();
     expect(connection.getSnapshot().circuits.platform.state).toBe('closed');
