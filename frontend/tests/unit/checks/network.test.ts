@@ -122,6 +122,32 @@ describe('network.mjs', () => {
     expect(result.stderr).toContain('src/app/version.ts: «fetch» sin una ruta literal');
   });
 
+  it('el adaptador de la sonda solo puede reenviar sus parámetros', () => {
+    const adapter = run(
+      tree({
+        'src/app/bootstrap.ts':
+          'export const adaptar = (input: RequestInfo, init?: RequestInit) => globalThis.fetch(input, init);\n',
+      }),
+    );
+    expect(adapter.stderr).toBe('');
+    expect(adapter.status).toBe(0);
+
+    const result = run(
+      tree({
+        'src/app/bootstrap.ts':
+          "export const pedir = (init?: RequestInit) => globalThis.fetch(new URL('/uso', location.origin), init);\n",
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('no solo reenvía los parámetros del adaptador');
+  });
+
+  it('falla si la detección de capacidades llama a fetch', () => {
+    const result = run(tree({ 'src/bootstrap/check.ts': "export const x = () => fetch('/x');\n" }));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/bootstrap/check.ts: llama a «fetch»');
+  });
+
   it('falla con una URL nueva o relativa al protocolo en dist/', () => {
     const result = run(
       tree({

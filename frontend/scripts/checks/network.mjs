@@ -9,7 +9,8 @@
  *   protocolo (`//host`), salvo los identificadores inertes de `INERT` (no se piden nunca);
  * - ninguna API de red (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`,
  *   trabajadores…) se nombra fuera de `src/ports/`, salvo la lista cerrada `OUTSIDE_PORTS`, donde
- *   cada llamada a `fetch` lleva como destino `new URL('/ruta', origen)` con una ruta literal.
+ *   cada archivo declara qué llamadas a `fetch` admite (ruta literal del propio origen, adaptador
+ *   que reenvía sus parámetros, ninguna o solo desarrollo).
  *
  * En `dist/` (si existe; `npm run build` lo crea): toda URL absoluta o relativa al protocolo de
  * los archivos de texto está en `INERT` (mensajes de error de dependencias, espacios de nombres
@@ -81,16 +82,47 @@ const NETWORK_APIS = new Set([
 ]);
 
 /**
- * Fuera de `src/ports/`, lista cerrada: archivo relativo a `src/` → motivo. Toda llamada a `fetch`
- * de estos archivos tiene como destino `new URL('/ruta', origen)` con una ruta literal; el origen
- * lo da el armazón (el propio o el de una dependencia declarada), nunca un texto del código.
+ * Fuera de `src/ports/`, lista cerrada: archivo relativo a `src/` → qué llamadas a `fetch` admite y
+ * por qué. `path`: el destino es `new URL('/ruta', origen)` con una ruta literal; el origen lo da
+ * el armazón (el propio o el de una dependencia declarada), nunca un texto del código. `adapter`:
+ * el `fetch` solo reenvía los parámetros de su función (el destino lo fija quien lo llama, con la
+ * regla `path`). `none`: no se llama. `dev`: solo desarrollo, fuera de `dist/`.
+ * @type {ReadonlyMap<string, { readonly calls: 'path' | 'adapter' | 'none' | 'dev', readonly reason: string }>}
  */
 const OUTSIDE_PORTS = new Map([
-  ['app/version.ts', '`/version.json` del propio origen (LC-APP-04)'],
-  ['state/connection/probe.ts', 'sonda `/health/live` del origen de cada dependencia (LC-APP-06)'],
-  ['bootstrap/check.ts', 'detección de capacidades: comprueba que `fetch` existe, no la llama'],
-  ['mocks/browser.ts', 'modo simulado de desarrollo; no entra en `dist/` (no_msw_in_dist)'],
+  ['app/version.ts', { calls: 'path', reason: '`/version.json` del propio origen (LC-APP-04)' }],
+  [
+    'state/connection/probe.ts',
+    { calls: 'path', reason: 'sonda `/health/live` del origen de cada dependencia (LC-APP-06)' },
+  ],
+  [
+    'app/bootstrap.ts',
+    { calls: 'adapter', reason: 'adaptador `fetch` de la sonda de conexión (`probe.ts`)' },
+  ],
+  [
+    'bootstrap/check.ts',
+    { calls: 'none', reason: 'detección de capacidades: comprueba que `fetch` existe' },
+  ],
+  [
+    'mocks/browser.ts',
+    { calls: 'dev', reason: 'modo simulado; fuera de `dist/` (no_msw_in_dist)' },
+  ],
 ]);
+
+/** ¿Los argumentos de `call` son exactamente parámetros de la función que lo envuelve? */
+function forwardsParameters(/** @type {ts.CallExpression} */ call) {
+  let current = call.parent;
+  while (current !== undefined && !ts.isFunctionLike(current)) current = current.parent;
+  if (current === undefined) return false;
+  const parameters = new Set(
+    current.parameters.flatMap((parameter) =>
+      ts.isIdentifier(parameter.name) ? [parameter.name.text] : [],
+    ),
+  );
+  return call.arguments.every(
+    (argument) => ts.isIdentifier(argument) && parameters.has(argument.text),
+  );
+}
 
 /** @param {string} url */
 const inert = (url) => INERT.some(({ prefix }) => url.startsWith(prefix));
@@ -152,7 +184,8 @@ function checkSource(file) {
     file.endsWith('x') ? ts.ScriptKind.TSX : undefined,
   );
   const inPorts = name.startsWith('ports/');
-  const allowed = OUTSIDE_PORTS.has(name);
+  const exception = OUTSIDE_PORTS.get(name);
+  const allowed = exception !== undefined;
   /** @type {string[]} */
   const errors = [];
   /** @param {ts.Node} node */
@@ -173,15 +206,20 @@ function checkSource(file) {
       errors.push(`src/${name}: «${api}» fuera de src/ports/.`);
     }
     if (
-      allowed &&
+      exception !== undefined &&
+      exception.calls !== 'dev' &&
       ts.isCallExpression(node) &&
       ((ts.isIdentifier(node.expression) && node.expression.text === 'fetch') ||
         (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'fetch') ||
-        ts.isParenthesizedExpression(node.expression)) &&
-      !sameOriginTarget(node) &&
-      name !== 'mocks/browser.ts'
+        ts.isParenthesizedExpression(node.expression))
     ) {
-      errors.push(`src/${name}: «fetch» sin una ruta literal del propio origen.`);
+      if (exception.calls === 'none') {
+        errors.push(`src/${name}: llama a «fetch», y la lista cerrada solo admite nombrarlo.`);
+      } else if (exception.calls === 'adapter' && !forwardsParameters(node)) {
+        errors.push(`src/${name}: «fetch» que no solo reenvía los parámetros del adaptador.`);
+      } else if (exception.calls === 'path' && !sameOriginTarget(node)) {
+        errors.push(`src/${name}: «fetch» sin una ruta literal del propio origen.`);
+      }
     }
     ts.forEachChild(node, visit);
   };
