@@ -315,6 +315,15 @@ function findButton(label: string): HTMLButtonElement | undefined {
   );
 }
 
+/** Las lecturas de la caché que siguen en vuelo (las que esperan un reintento en el reloj simulado). */
+function inFlight(fixture: ShellFixture): string[] {
+  return fixture.services.cache.client
+    .getQueryCache()
+    .getAll()
+    .filter((query) => query.state.fetchStatus === 'fetching')
+    .map((query) => String(query.queryKey[1]));
+}
+
 /** Lo que impide dar la pantalla por pintada, o `null` si ya lo está. */
 function pending(fixture: ShellFixture): string | null {
   const main = document.querySelector('main');
@@ -322,35 +331,50 @@ function pending(fixture: ShellFixture): string | null {
   if (main.querySelector('h1') === null) return 'sin título de pantalla';
   const loading = LOADING_TEXTS.find((value) => main.textContent.includes(value));
   if (loading !== undefined) return `texto de carga visible: «${loading}»`;
-  const fetching = fixture.services.cache.client
-    .getQueryCache()
-    .getAll()
-    .filter((query) => query.state.fetchStatus === 'fetching')
-    .map((query) => String(query.queryKey[1]));
+  const fetching = inFlight(fixture);
   if (fetching.length > 0) return `lecturas en vuelo: ${fetching.join(', ')}`;
   if (document.querySelector('[aria-busy="true"]') !== null) return 'indicador de carga visible';
   return null;
 }
 
 /**
+ * Plazo real para lo que corre en tiempo real (las porciones de ruta se importan de verdad):
+ * cada vuelta espera al menos `REAL_STEP_MS` reales, así que las vueltas acotan el plazo por
+ * abajo sin leer la hora (PAT-APP-RES-06).
+ */
+const REAL_BUDGET_MS = 20_000;
+const REAL_STEP_MS = 20;
+/** Plazo simulado: los reintentos de `ports.base`; lejos del vencimiento de la sesión. */
+const SIMULATED_BUDGET_MS = 30_000;
+const SIMULATED_STEP_MS = 500;
+
+/**
  * Espera a que la pantalla esté pintada: su título, ninguna porción de ruta ni lectura pendiente
- * y ningún indicador de carga. Entre comprobaciones avanza 500 ms el reloj simulado (los
- * reintentos de `ports.base` esperan en ese reloj) y deja correr el tiempo real (las porciones
- * de ruta se importan de verdad). Como mucho 30 s simulados: lejos del vencimiento de la sesión.
+ * y ningún indicador de carga. Los dos plazos van por separado: el reloj simulado solo avanza
+ * (500 ms por vuelta, hasta 30 s) mientras hay lecturas en vuelo, que son las que esperan en él;
+ * una porción de ruta que aún se importa espera en tiempo real, hasta 20 s, sin tocar ese reloj.
  */
 async function quiet(fixture: ShellFixture): Promise<void> {
+  let simulated = 0;
   let reason = 'sin comprobar';
-  for (let round = 0; round < 60; round += 1) {
+  for (
+    let round = 0;
+    round < REAL_BUDGET_MS / REAL_STEP_MS && simulated <= SIMULATED_BUDGET_MS;
+    round += 1
+  ) {
     await act(async () => {
       await settle(5);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, REAL_STEP_MS));
     });
     const problem = pending(fixture);
     if (problem === null) return;
     reason = problem;
-    act(() => {
-      fixture.clock.advance(500);
-    });
+    if (inFlight(fixture).length > 0) {
+      simulated += SIMULATED_STEP_MS;
+      act(() => {
+        fixture.clock.advance(SIMULATED_STEP_MS);
+      });
+    }
   }
   throw new Error(`La pantalla no terminó de pintarse: ${reason}`);
 }
