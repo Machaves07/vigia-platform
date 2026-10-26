@@ -74,6 +74,7 @@
   "scr06.matrix.passes.recorded_at": "Momento del registro (hora del servidor)",
   "scr06.matrix.passes.evidence": "Clip de evidencia",
   "scr06.matrix.passes.evidence_none": "Sin evidencia",
+  "scr06.matrix.clips.loading": "Cargando los clips de comisionamiento de la zona…",
   "scr06.matrix.clips.empty": "Esta zona no tiene clips de comisionamiento disponibles.",
   "scr06.matrix.exposure.pending": "Muestra de exposición pendiente de enviar.",
   "scr06.matrix.exposure.sent": "Muestra de exposición enviada.",
