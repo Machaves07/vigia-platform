@@ -317,13 +317,8 @@ export function forbiddenRendered(
 
 // --- Generadores ----------------------------------------------------------------------------
 
-/**
- * Sin sesgo (`noBias`): con sesgo, fast-check inyecta en las cadenas trozos como `constructor` o
- * `__proto__`, que también salen en los valores permitidos y coinciden con el texto unido de otros
- * nodos (semilla 1685707884: `W-constructor` frente a «…SW» + «constructor_»), no con una fuga.
- */
 const token = (min: number, max: number) =>
-  fc.noBias(fc.stringMatching(new RegExp(`^[a-z0-9]{${String(min)},${String(max)}}$`)));
+  fc.stringMatching(new RegExp(`^[a-z0-9]{${String(min)},${String(max)}}$`));
 
 /** Campos de persona observada con valores plausibles y distinguibles (≥ 8 caracteres plegados). */
 const PERSON_VALUES: Readonly<Record<string, fc.Arbitrary<unknown>>> = {
@@ -332,7 +327,7 @@ const PERSON_VALUES: Readonly<Record<string, fc.Arbitrary<unknown>>> = {
     fc.integer({ min: 10_000_000, max: 2_147_483_647 }),
     token(8, 12).map((value) => `trk-${value}`),
   ),
-  face: fc.noBias(fc.base64String({ minLength: 16, maxLength: 64 })),
+  face: fc.base64String({ minLength: 16, maxLength: 64 }),
   worker_id: token(8, 12).map((value) => `W-${value}`),
   worker_name: fc.stringMatching(/^[A-Z][a-z]{4,9} [A-Z][a-z]{4,9}$/),
   document_number: fc.stringMatching(/^[0-9]{8,11}$/),
@@ -340,7 +335,17 @@ const PERSON_VALUES: Readonly<Record<string, fc.Arbitrary<unknown>>> = {
   phone: fc.stringMatching(/^\+57 3[0-9]{2} [0-9]{3} [0-9]{4}$/),
 };
 
-/** Campos extra que se inyectan: de persona y de nombre cualquiera, nunca de `excluded`. */
+/**
+ * Campos extra que se inyectan: de persona y de nombre cualquiera, nunca de `excluded`.
+ *
+ * Sin sesgo (`noBias`, que alcanza a todos los generadores de dentro). Con sesgo, fast-check
+ * genera valores que coinciden por azar con el texto unido de otros nodos, también sesgado, y
+ * eso no es una fuga:
+ * - trozos como `constructor` o `__proto__` en las cadenas (semilla 1685707884: `W-constructor`
+ *   frente a «…SW» + «constructor_»);
+ * - enteros pegados a los límites (semilla 2142514304: `person_id` 10000001 dentro del UUID
+ *   `…bfff-fff100000014` de la organización).
+ */
 function injectedFields(excluded: ReadonlySet<string>): fc.Arbitrary<Record<string, unknown>> {
   const person = fc.record(PERSON_VALUES, { requiredKeys: [] });
   const other = fc.dictionary(
@@ -348,12 +353,14 @@ function injectedFields(excluded: ReadonlySet<string>): fc.Arbitrary<Record<stri
     fc.oneof(token(10, 20), fc.integer({ min: 100_000_000, max: 2_147_483_647 })),
     { maxKeys: 3 },
   );
-  return fc
-    .tuple(person, other)
-    .map(([a, b]) =>
-      Object.fromEntries(Object.entries({ ...b, ...a }).filter(([key]) => !excluded.has(key))),
-    )
-    .filter((fields) => Object.keys(fields).length > 0);
+  return fc.noBias(
+    fc
+      .tuple(person, other)
+      .map(([a, b]) =>
+        Object.fromEntries(Object.entries({ ...b, ...a }).filter(([key]) => !excluded.has(key))),
+      )
+      .filter((fields) => Object.keys(fields).length > 0),
+  );
 }
 
 interface Session {
