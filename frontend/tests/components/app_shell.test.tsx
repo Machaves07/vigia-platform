@@ -205,11 +205,15 @@ describe('arranque: GET /me y GET /hierarchy (PAT-APP-REN-01, PAT-APP-RES-07)', 
       http.get(`${ORIGIN}/me`, () => apiError('unauthenticated', 401)),
       http.get(`${ORIGIN}/hierarchy`, () => apiError('unauthenticated', 401)),
     );
-    const fixture = mountShell('/findings', SCREENS);
-    await screen.findByRole('heading', { name: text('errors.not_available_in_scope') }, WAIT);
+    // VIG-332 redirige las URL protegidas anónimas a la pantalla pública real de acceso.
+    const fixture = mountShell('/findings', [
+      ...SCREENS,
+      ...APP_SCREENS.filter((descriptor) => descriptor.screen_id === 'SCR-01'),
+    ]);
+    await screen.findByLabelText(text('scr01.login.email'), {}, WAIT);
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(screen.queryByRole('banner')).toBeNull();
-    expect(fixture.route()).toBe('/findings');
+    expect(fixture.route()).toBe('/login');
   });
 
   it('GET /me y GET /hierarchy salen en paralelo y la jerarquía llena el selector', async () => {
