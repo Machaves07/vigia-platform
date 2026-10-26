@@ -187,6 +187,20 @@ describe('agregado del arnés y datos en el cliente (VIG-336)', () => {
     else expect(check).not.toThrow();
   });
 
+  // VIG-356: `framenavigated` llegó con la URL vacía en Chromium y `new URL('')` tumbaba el
+  // recorrido. Un marco sin URL absoluta no es del origen; el documento sigue exigiendo la política.
+  it.each(['', '/findings/juan-perez', 'about:blank'])(
+    'tolera un marco con la URL «%s» y sigue exigiendo la política del documento',
+    async (frameUrl) => {
+      const { page, check, mainFrame } = await harness({ origin: ORIGIN });
+      mainFrame.url = () => frameUrl;
+      expect(() => page.emit('framenavigated', mainFrame)).not.toThrow();
+      expect(check).not.toThrow();
+      page.emit('response', documentResponse(`${ORIGIN}/home`, "default-src 'self'"));
+      expect(check).toThrow(/Violaciones de CSP o Trusted Types/);
+    },
+  );
+
   it('admite el token de invitación solo tras /invitations', () => {
     const token = 'Sint_'.repeat(9);
     expect(urlProblem(new URL(`${ORIGIN}/invitations/${token}`))).toBeNull();
