@@ -125,11 +125,11 @@ describe('guarda: sin permiso, el mismo árbol que not_found', () => {
     expect(requests).toEqual([]);
   });
 
-  it('cuenta y administración sin sesión también son not_found; el inicio de sesión no', async () => {
+  it('cuenta sin sesión lleva al inicio de sesión sin cargar su grupo', async () => {
     const missing = await renderAt(null, NOT_FOUND);
     missing.unmount();
     const account = await renderAt(null, '/account');
-    expect(account.html).toBe(missing.html);
+    expect(account.router.state.location.pathname).toBe('/login');
     account.unmount();
     const login = await renderAt(null, '/login');
     expect(login.html).not.toBe(missing.html);
@@ -140,6 +140,18 @@ describe('guarda: sin permiso, el mismo árbol que not_found', () => {
         { timeout: 10_000 },
       ),
     ).toBeDefined();
+  });
+
+  it('la bandeja tras cerrar sesión vuelve a login sin cargar código protegido (VIG-332)', async () => {
+    const group = SCREENS.flatMap((descriptor) => descriptor.route_groups).find((candidate) =>
+      candidate.paths.includes('/findings'),
+    );
+    expect(group).toBeDefined();
+    if (group === undefined) throw new Error('Falta la ruta de la bandeja');
+    const loader = vi.spyOn(group, 'load');
+    const page = await renderAt(null, '/findings');
+    expect(page.router.state.location.pathname).toBe('/login');
+    expect(loader).not.toHaveBeenCalled();
   });
 });
 

@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import config from '../../../playwright.config';
 import { compatibleWebkitExecutable } from '../../browser/webkit';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe('matriz real de Playwright', () => {
   const projects = config.projects ?? [];
@@ -32,6 +37,21 @@ describe('matriz real de Playwright', () => {
       if (project.use?.browserName === 'webkit') {
         expect(project.use.launchOptions?.executablePath).toBe(compatibleWebkitExecutable());
       }
+    }
+  });
+
+  it('solo WebKit puede usar el servidor alternativo con red de bucle local', async () => {
+    vi.stubEnv('VIGIA_WEBKIT_WS_ENDPOINT', 'ws://127.0.0.1:9325/vigia-e2e-webkit');
+    vi.resetModules();
+    const { default: remote } = await import('../../../playwright.config');
+    for (const project of remote.projects ?? []) {
+      if (project.use?.browserName === 'webkit') {
+        expect(project.use.connectOptions).toEqual({
+          wsEndpoint: 'ws://127.0.0.1:9325/vigia-e2e-webkit',
+          exposeNetwork: '<loopback>',
+        });
+        expect(project.use.launchOptions).toBeUndefined();
+      } else expect(project.use?.connectOptions).toBeUndefined();
     }
   });
 });

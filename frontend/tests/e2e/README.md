@@ -45,8 +45,43 @@ mano; un registro de `fill()` expondría contraseña
 y OTP. Las páginas sin autenticación sí conservan traza y vídeo solo al fallar.
 La ejecución es serial para no competir por un mismo TOTP.
 
+Los guiones que cierran sesión declaran `test.use({ reuseRoleSession: false })`:
+su `authenticatedPage` inicia una sesión propia, nunca la incorpora al caché del
+worker y cierra su contexto al terminar. El resto conserva la reutilización por
+rol. `roleSession(role)` sigue devolviendo únicamente la sesión compartida.
+`logout_isolation.spec.ts` comprueba para ambos roles que un logout propio no
+revoca esa sesión, y `session.spec.ts` puede ejecutarse después de los recorridos
+en el mismo worker.
+
 El smoke exige los campos reales de acceso, no un encabezado de relevo ni el aviso
 de navegador incompatible. El arnés no sustituye el acceso por cookies sembradas
 o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestructura
 de autenticación de cada cuenta; los recorridos funcionales por rol pertenecen a
 VIG-332 y VIG-333.
+
+## Recorridos del coordinador y del mando
+
+```sh
+npm run build
+npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts
+# Regresión de orden: logout propio y sesiones reutilizables en el mismo worker.
+npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts tests/e2e/logout_isolation.spec.ts tests/e2e/session.spec.ts --project=chromium-desktop
+```
+
+Estos recorridos usan los tres proyectos de escritorio; los de tableta se omiten
+porque no pertenecen a este guion. Conservan la guarda de CSP del arnés. El mundo
+usa el perfil de nodos `u04-e2e` y la semilla `449`, reserva dos hallazgos distintos
+por motor y prepara una licencia sintética, una política por las rutas reales del
+instalador bajo concesión y un paquete de mes vencido mediante el compositor real.
+La cuenta del mando nace con alcance de una sola zona. Las clasificaciones, la
+evidencia PNG, las firmas, las resoluciones y los compromisos del recorrido se
+registran desde el navegador, sin interceptar ni simular la API.
+
+Si faltan bibliotecas del sistema para WebKit y no se puede instalar
+`npx playwright install-deps webkit`, se admite `playwright run-server` de la misma
+versión de Playwright dentro de su imagen oficial, usando **el ejecutable fijado**
+por `webkit-build.json`, no otro navegador. Publique su puerto solo en
+`127.0.0.1` y pase su dirección por `VIGIA_WEBKIT_WS_ENDPOINT`. El cliente expone
+únicamente su red de bucle local al navegador remoto; el modo `launchServer` no
+activa ese túnel. Ni la API ni las cuentas
+se sustituyen y CSP sigue activa. El contenedor debe detenerse al terminar.
