@@ -36,6 +36,8 @@ export interface World {
     readonly line_finding_id: string;
     readonly findings: Record<string, { readonly closure: string; readonly unclosable: string }>;
   };
+  /** Canal local del intermediario de fallos entre la aplicación y la API (`faults.ts`). */
+  readonly fault_control_url: string;
 }
 
 /** Archivo escrito exclusivamente por el proceso local del mundo, no por la aplicación. */

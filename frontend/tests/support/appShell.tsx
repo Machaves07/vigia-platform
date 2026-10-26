@@ -13,7 +13,7 @@ import { App } from '@/app/AppShell';
 import { createAppServices, type AppServices } from '@/app/bootstrap';
 import type { ScreenDescriptor } from '@/app/descriptor';
 import { installGlobalErrorHandler, rootErrorOptions } from '@/app/GlobalErrorHandler';
-import { createAppVersion } from '@/app/version';
+import { createAppVersion, type AppVersion } from '@/app/version';
 import { installTransport } from '@/ports/base';
 import type { HierarchyView, MeResponse } from '@/ports/shared';
 
@@ -139,7 +139,11 @@ export interface ShellFixture {
 export function mountShell(
   path: string,
   screens: readonly ScreenDescriptor[],
-  options: { readonly strict?: boolean } = {},
+  options: {
+    readonly strict?: boolean;
+    /** Controlador de versión de la prueba (FS-APP-08 inyecta la recarga); por omisión, uno nuevo. */
+    readonly version?: (clock: FakeClock) => AppVersion;
+  } = {},
 ): ShellFixture {
   const clock = new FakeClock(START);
   const services = createAppServices({
@@ -147,7 +151,7 @@ export function mountShell(
     storage: localStorage,
     origin: ORIGIN,
     // Controlador de versión propio: una discrepancia de otra prueba no bloquea las escrituras.
-    version: createAppVersion({ clock }),
+    version: options.version?.(clock) ?? createAppVersion({ clock }),
     activityTarget: null,
   });
   installTransport(services.transport);

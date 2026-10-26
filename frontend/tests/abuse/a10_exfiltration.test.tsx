@@ -5,7 +5,10 @@ import { nodes, sources, styles } from './source';
 
 // Inventario positivo de salidas: transporte de API, sonda de salud, versión y PUT prefirmado.
 // Se fija también la expresión (no solo el archivo) para no permitir otro destino en ese módulo.
+// `app/bootstrap.ts` solo delega en el `fetch` global para la sonda de salud (VIG-334, A-70): su
+// único destino es el `GET /health/live` de `state/connection/probe.ts`.
 const NETWORK = [
+  'app/bootstrap.ts:globalThis.fetch(input, init)',
   'ports/base/http.ts:globalThis.fetch(input, init)',
   "ports/base/http.ts:fetchImpl(url, { method: operation.method.toUpperCase(), headers: headersFor(request, concession), credentials: 'same-origin', signal: controller.signal, ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }), })",
   "ports/scr01Admin.ts:globalThis.fetch(new URL('/version.json', globalThis.location.origin), { cache: 'no-store', credentials: 'same-origin', signal, })",

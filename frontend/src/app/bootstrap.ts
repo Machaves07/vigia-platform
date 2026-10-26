@@ -2,8 +2,10 @@
  * Arranque, paso 3 de PAT-APP-REN-01 (LC-APP-01 y 02, PAT-APP-RES-07): los servicios de la
  * aplicación conectados entre sí y la carga de `GET /me` y `GET /hierarchy` en paralelo.
  *
- * - `createAppServices` crea una vez el reloj, los circuitos (`state.connection`), la caché de
- *   consultas con sus puertas (visibilidad, circuito `platform` y actividad), `UiPreferences`, la
+ * - `createAppServices` crea una vez el reloj, los circuitos (`state.connection`) con la sonda
+ *   `GET /health/live` del circuito `platform` (PAT-APP-RES-01: cada 30 s mientras no está
+ *   cerrado), la caché de consultas con sus puertas (visibilidad, circuito `platform` y
+ *   actividad), `UiPreferences`, la
  *   selección de planta, la concesión, la sesión, los fallos globales y el transporte con todos
  *   sus ganchos (sesión, concesión, versión). El cierre de sesión vacía además `UiPreferences`, la
  *   selección y la concesión (nota de VIG-301): si solo se vaciara el almacenamiento, la siguiente
@@ -20,6 +22,7 @@ import { isPortError, type PortConnection } from '@/ports/base';
 import { createPortConnection, createTransport, type Transport } from '@/ports/base/http';
 import { sessionPort } from '@/ports/shared';
 import { systemClock, type Clock } from '@/state/clock';
+import { startConnectionProbe } from '@/state/connection';
 import { createConcessionStore, transportOptions, type ConcessionStore } from '@/state/concession';
 import { createScreenQueryCache, refreshGates, type ScreenQueryCache } from '@/state/query';
 import {
@@ -74,7 +77,10 @@ export interface AppServicesOptions {
   /** Origen de la API; por omisión, el de la página. */
   readonly origin?: string;
   readonly version?: AppVersion;
-  readonly document?: Pick<Document, 'visibilityState'>;
+  readonly document?: Pick<
+    Document,
+    'visibilityState' | 'addEventListener' | 'removeEventListener'
+  >;
   /** Dónde escucha la puerta de actividad; por omisión `window`. */
   readonly activityTarget?: EventTarget | null;
 }
@@ -96,7 +102,18 @@ function locationRoute(): string {
 export function createAppServices(options: AppServicesOptions = {}): AppServices {
   const clock = options.clock ?? systemClock;
   const version = options.version ?? appVersion;
+  const page = options.document ?? document;
   const connection = createPortConnection(clock);
+  // Solo `platform` tiene sonda en su origen; un almacén vuelve a `closed` con la siguiente
+  // lectura correcta en `half_open`.
+  const stopProbe = startConnectionProbe({
+    connection,
+    clock,
+    document: page,
+    fetch: (input, init) => globalThis.fetch(input, init),
+    origin: () => options.origin ?? globalThis.location.origin,
+    dependencies: ['platform'],
+  });
   const activity = createActivityGate({
     clock,
     ...(options.activityTarget === undefined ? {} : { target: options.activityTarget }),
@@ -104,7 +121,7 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
   const cache = createScreenQueryCache({
     clock,
     gates: refreshGates({
-      document: options.document ?? document,
+      document: page,
       connection,
       isActive: () => activity.isOpen(),
     }),
@@ -210,6 +227,7 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
     currentRoute,
     loadHierarchy,
     dispose() {
+      stopProbe();
       session.dispose();
       concession.dispose();
       activity.dispose();

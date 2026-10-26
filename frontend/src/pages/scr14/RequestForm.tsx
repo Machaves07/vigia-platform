@@ -12,9 +12,20 @@ import {
   type Plant,
 } from '@/ports/scr14Exports';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
+import { useFormDraft } from '@/state/session';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { Result } from './shared';
+
+function textValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function listValue(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
 
 function ZoneOption({
   zone,
@@ -66,11 +77,29 @@ export function RequestForm({
   readonly onRequested: (job: ExportJob) => void;
 }) {
   const id = useId();
-  const [plantId, setPlantId] = useState('');
-  const [zones, setZones] = useState<string[]>([]);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [form, setForm] = useState<ExportRequest['package_form']>('without_clips');
+  // Borrador en memoria (NFR-APP-38): si la sesión se bloquea, vuelve tal cual al reautenticar.
+  const [draft, dispatch] = useFormDraft('SCR-14', 'request');
+  const plantId = textValue(draft.values.plant_id);
+  const zones = listValue(draft.values.zone_ids);
+  const from = textValue(draft.values.from);
+  const to = textValue(draft.values.to);
+  const form: ExportRequest['package_form'] =
+    draft.values.package_form === 'with_clips' ? 'with_clips' : 'without_clips';
+  const setPlantId = (value: string) => {
+    dispatch({ type: 'set_value', field: 'plant_id', value });
+  };
+  const setZones = (update: (old: readonly string[]) => readonly string[]) => {
+    dispatch({ type: 'set_value', field: 'zone_ids', value: update(zones) });
+  };
+  const setFrom = (value: string) => {
+    dispatch({ type: 'set_value', field: 'from', value });
+  };
+  const setTo = (value: string) => {
+    dispatch({ type: 'set_value', field: 'to', value });
+  };
+  const setForm = (value: ExportRequest['package_form']) => {
+    dispatch({ type: 'set_value', field: 'package_form', value });
+  };
   const [invalid, setInvalid] = useState(false);
   const plant = plants.find((item) => item.plant_id === plantId);
   // Una sola entrada agregada: veinte observadores individuales superarían el LRU por pantalla.
@@ -80,7 +109,7 @@ export function RequestForm({
       operation: 'GET /zones/{zone_id}/gates',
       scope,
       concession,
-      params: { zone_ids: zones },
+      params: { zone_ids: [...zones] },
     }),
     policy: policyFor('GET /zones/{zone_id}/gates'),
     enabled: zones.length > 0,
@@ -108,7 +137,7 @@ export function RequestForm({
     try {
       body = {
         plant_id: plantId,
-        zone_ids: zones,
+        zone_ids: [...zones],
         period: {
           from: fromZonedTime(from, plant?.timezone ?? 'UTC').toISOString(),
           to: fromZonedTime(to, plant?.timezone ?? 'UTC').toISOString(),
@@ -126,7 +155,10 @@ export function RequestForm({
     setInvalid(false);
     void mutation
       .run(body)
-      .then(onRequested)
+      .then((job) => {
+        dispatch({ type: 'saved' });
+        onRequested(job);
+      })
       .catch(() => undefined);
   };
   return (
@@ -145,7 +177,7 @@ export function RequestForm({
           value={plantId}
           onChange={(event) => {
             setPlantId(event.target.value);
-            setZones([]);
+            setZones(() => []);
             mutation.reset();
           }}
         >
