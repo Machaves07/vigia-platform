@@ -57,6 +57,15 @@ from vigia_platform.shared.signing.service import SigningService
 from vigia_platform.shared.tokens import LiveViewTokenService
 
 LIVE_VIEW_URL: Final = "https://nodo-sintetico.local:8443/"
+PROCESS_LOCK_TIMEOUT_MS: Final = 60_000
+"""``lock_timeout`` de los procesos simulados: no es lo que se prueba (VIG-341).
+
+Las emisiones de un mismo usuario esperan en fila su candado consultivo (``tokens.py``, la
+exclusión que hace exacto el límite), y la espera crece con la lentitud de la máquina: con los
+2 s de producción, un runner cargado agotaba la espera y la propiedad fallaba sin defecto.
+"""
+PROCESS_POOL_TIMEOUT_SECONDS: Final = 60.0
+"""Por lo mismo, la espera de una conexión del pool (dos por proceso, hasta 14 peticiones)."""
 
 
 class SkewedClock:
@@ -140,7 +149,12 @@ class LiveViewEnvironment:
     def process(self, clock: Clock | None = None) -> SimulatedProcess:
         """Otro proceso: motor, auditoría y servicio de firma propios sobre la misma base."""
         sessions = self.authz.sessions
-        database = app_database(sessions.migrated, worker_pool_size=2)
+        database = app_database(
+            sessions.migrated,
+            worker_pool_size=2,
+            lock_timeout_ms=PROCESS_LOCK_TIMEOUT_MS,
+            pool_timeout_seconds=PROCESS_POOL_TIMEOUT_SECONDS,
+        )
         own_clock = clock or self.clock
         signing = build_service(self.clock, self.secrets, self.store, self.events)
         self.run(signing.start())
