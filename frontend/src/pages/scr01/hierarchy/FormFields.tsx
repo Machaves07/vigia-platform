@@ -2,8 +2,7 @@
 import { useId } from 'react';
 import { FieldNotice, NoticeStack } from '@/components/NoticeStack/NoticeStack';
 import { isAnchored } from '@/components/NoticeStack/notice';
-import { hierarchyClock, hierarchyNotice } from '@/ports/scr01Hierarchy';
-import type { ValidationIssue } from '@/ports/validation';
+import { hierarchyClock, hierarchyNotice, type ValidationIssue } from '@/ports/scr01Hierarchy';
 import { text } from '@/texts';
 import styles from '../scr01.module.css';
 
