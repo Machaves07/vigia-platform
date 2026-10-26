@@ -19,6 +19,8 @@ export interface World {
   readonly store_origin: string;
   readonly users: Record<Role, { readonly email: string; readonly user_id: string }>;
   readonly credentials_file: string;
+  /** Material privado de las comprobaciones de despliegue con --target (VIG-352). */
+  readonly deploy_checks_file: string;
   readonly ca_file: string;
   readonly organization_id: string;
   readonly plant_ids: readonly string[];

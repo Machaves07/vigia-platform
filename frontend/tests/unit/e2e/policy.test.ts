@@ -5,15 +5,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { watchPolicy } from '../../e2e/policy';
 
-async function harness() {
+async function harness({ alreadyOpen = false } = {}) {
   const disposable = { dispose: vi.fn(), [Symbol.asyncDispose]: vi.fn() };
+  const page = new EventEmitter();
   const context = Object.assign(new EventEmitter(), {
     exposeBinding: vi.fn<BrowserContext['exposeBinding']>().mockResolvedValue(disposable),
     addInitScript: vi.fn<BrowserContext['addInitScript']>().mockResolvedValue(disposable),
+    pages: vi.fn(() => (alreadyOpen ? [page] : [])),
   });
   const check = await watchPolicy(context as unknown as BrowserContext);
-  const page = new EventEmitter();
-  context.emit('page', page);
+  if (!alreadyOpen) context.emit('page', page);
   return { context, page, check };
 }
 
@@ -25,6 +26,12 @@ describe('guarda de CSP y tipos confiables del arnés', () => {
   ])('rechaza el diagnóstico del navegador: %s', async (diagnostic) => {
     const { page, check } = await harness();
     page.emit('console', { text: () => diagnostic });
+    expect(check).toThrow(/Violaciones de CSP o Trusted Types/);
+  });
+
+  it('vigila también la página que ya estaba abierta al instalar la guarda', async () => {
+    const { page, check } = await harness({ alreadyOpen: true });
+    page.emit('console', { text: () => "This document requires 'TrustedHTML' assignment" });
     expect(check).toThrow(/Violaciones de CSP o Trusted Types/);
   });
 

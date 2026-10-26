@@ -12,6 +12,8 @@ const sizes = [
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Este recorrido recibe credenciales efímeras únicamente desde la comprobación de despliegue.
+  testIgnore: 'deploy_check_staging.spec.ts',
   globalSetup: './tests/e2e/global-setup.ts',
   globalTeardown: './tests/e2e/global-teardown.ts',
   // Una plataforma por ejecución y un usuario por rol: no competir por el mismo paso TOTP.

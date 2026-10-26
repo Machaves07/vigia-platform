@@ -16,7 +16,7 @@ export async function watchPolicy(context: BrowserContext, label = ''): Promise<
       void report(event.effectiveDirective);
     });
   });
-  context.on('page', (page) => {
+  const watchPage = (page: import('@playwright/test').Page) => {
     page.on('console', (message) => {
       const text = message.text();
       if (
@@ -32,7 +32,9 @@ export async function watchPolicy(context: BrowserContext, label = ''): Promise<
         violations.push('pageerror: Trusted Types');
       }
     });
-  });
+  };
+  context.on('page', watchPage);
+  for (const page of context.pages()) watchPage(page);
   return () => {
     expect(violations, `Violaciones de CSP o Trusted Types${label ? ` (${label})` : ''}`).toEqual(
       [],

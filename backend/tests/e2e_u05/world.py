@@ -45,11 +45,14 @@ from tests.load.provision import Fleet, load_api
 from tests.load.test_load_ci import assert_functional, ledger_check, run_load
 from tests.resilience.harness import free_port, wait_until
 from vigia_platform.identity.application.hierarchy import ZoneSpec
+from vigia_platform.identity.application.invitations import InvitationOutcome
+from vigia_platform.identity.application.roles import AssignmentRequest
+from vigia_platform.identity.application.users import InviteRequest
 from vigia_platform.identity.auth.passwords import hash_password
 from vigia_platform.identity.auth.second_factor import credential_aad
 from vigia_platform.loop import registration
 from vigia_platform.loop.adapters.assistant.fake import FakeAssistantProvider, Script
-from vigia_platform.shared.context import Role
+from vigia_platform.shared.context import Role, ScopeLevel
 from vigia_platform.shared.crypto import EnvelopeCipher
 from vigia_platform.shared.secrets import AwsSettings, KmsAdapter
 
@@ -210,6 +213,57 @@ def non_productive_zone(target: LoadTarget, fleet: Fleet, administrator: str) ->
     return target.api.call(create())
 
 
+def deploy_check_invitation(target: LoadTarget, fleet: Fleet, administrator: str) -> dict[str, str]:
+    """Invitación de un solo uso de coordinación SST en la organización sintética (VIG-352).
+
+    Es el material ``frontend`` del secreto ``vigia/<entorno>/deploy-checks`` de staging, para
+    las comprobaciones de despliegue con ``--target``: la emite la persona administradora por el
+    servicio real, con el enlace divulgado una vez en lugar de enviarlo por correo.
+
+    El recorrido inscribe y usa el segundo factor de prueba, que BR-NUC-21 solo exige a
+    administración y operación (sin panel de inicio ni bandeja). Como las seis cuentas del
+    mundo, la cuenta se marca por SQL con ``second_factor_required`` antes de activarse.
+    """
+    provisioner = Provisioner(
+        target.stack, target.api, target.app.url, target.tls.ca_file, target.directory
+    )
+    cookie, statement = provisioner._session(fleet.organization_id, uuid.UUID(administrator))
+    target.stack.admin([statement])
+    email = "deploy-check@e2e.example.test"
+
+    async def invite() -> InvitationOutcome:
+        assert target.api.runtime is not None and target.api.runtime.identity is not None
+        users = target.api.runtime.identity.users
+        assert users is not None
+        context = await provisioner._context(cookie, None)
+        return await users.invite_user(
+            context,
+            InviteRequest(
+                email=email,
+                display_name="Comprobación de despliegue",
+                assignments=(
+                    AssignmentRequest(
+                        Role.COORDINATOR_SST, ScopeLevel.ORGANIZATION, fleet.organization_id
+                    ),
+                ),
+                disclose_link=True,
+            ),
+        )
+
+    outcome = target.api.call(invite())
+    if not outcome.link:
+        raise RuntimeError("La invitación de la comprobación de despliegue no divulgó su enlace")
+    target.stack.admin(
+        [
+            (
+                "UPDATE identity.user_account SET second_factor_required = true WHERE user_id = $1",
+                (outcome.user_id,),
+            )
+        ]
+    )
+    return {"invitation_link": outcome.link, "email": email}
+
+
 def configure_store_origin(platform: PlatformStack, origin: str) -> None:
     """CORS de vigia-evidence como en infra/stacks/data.py, con el origen TLS efímero.
 
@@ -313,14 +367,19 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
         public, credentials = users(target, fleet)
         journeys = prepare_journeys(target, fleet, public, profile=profile.name, seed=seed)
         non_productive = non_productive_zone(target, fleet, public["administrator"]["user_id"])
+        invitation = deploy_check_invitation(target, fleet, public["administrator"]["user_id"])
         credentials_file = directory / "credentials.json"
         private_json(credentials_file, credentials)
         private_json(Path(str(credentials_file) + ".steps"), {})
+        # Misma forma que el secreto vigia/<entorno>/deploy-checks (tools/deploy_checks.py).
+        deploy_checks_file = directory / "deploy-checks.json"
+        private_json(deploy_checks_file, {"frontend": invitation})
         document = {
             "base_url": app.url,
             "store_origin": aws.url,
             "users": public,
             "credentials_file": str(credentials_file),
+            "deploy_checks_file": str(deploy_checks_file),
             "ca_file": str(tls.ca_file),
             "organization_id": str(fleet.organization_id),
             "plant_ids": [str(value) for value in fleet.plant_ids],
@@ -348,5 +407,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
                     base64.b64encode(bytes.fromhex(account["totp_hex"])).decode(),
                 )
             )
+            # El token de la invitación de despliegue, también tras activarse.
+            forbidden += (invitation["invitation_link"].rsplit("#", 1)[-1],)
             assert_no_leaks((ROOT / "frontend", BACKEND), forbidden)
-            assert_no_leaks((directory,), forbidden, allowed=(credentials_file,))
+            assert_no_leaks((directory,), forbidden, allowed=(credentials_file, deploy_checks_file))
