@@ -10,6 +10,7 @@ import {
   isViteOwnedPath,
   parseApiMode,
   screenChunkName,
+  vendorChunkName,
 } from '../../../config/build';
 import { NUM_RUNS, parseSeed, resolveProfile } from '../../../config/fastCheckProfile';
 
@@ -68,6 +69,25 @@ describe('porciones y modo de API', () => {
     ['/repo/node_modules/react/index.js', null],
   ])('%s → %s', (id, chunk) => {
     expect(screenChunkName(id)).toBe(chunk);
+  });
+
+  it.each([
+    ['/repo/frontend/node_modules/react/cjs/react.production.js', 'vendor'],
+    ['C:\\repo\\frontend\\node_modules\\react-dom\\cjs\\react-dom-client.production.js', 'vendor'],
+    ['/repo/frontend/node_modules/scheduler/index.js', 'vendor'],
+    ['/repo/frontend/node_modules/react-router/dist/production/index.mjs', 'vendor'],
+    ['/repo/frontend/node_modules/@tanstack/query-core/build/modern/query.js', 'vendor'],
+    ['/repo/frontend/node_modules/@tanstack/react-query/build/modern/index.js', 'vendor'],
+    // Las de carga diferida (gráficas, validación) y las parecidas por nombre se quedan fuera.
+    ['/repo/frontend/node_modules/recharts/es6/index.js', null],
+    ['/repo/frontend/node_modules/ajv/dist/ajv.js', null],
+    ['/repo/frontend/node_modules/react-is/index.js', null],
+    ['/repo/frontend/node_modules/react-redux/dist/react-redux.mjs', null],
+    ['/repo/frontend/node_modules/@tanstack/other/index.js', null],
+    ['/repo/frontend/src/react/index.ts', null],
+    ['/repo/frontend/src/pages/scr01/Login.tsx', null],
+  ])('%s → porción %s', (id, chunk) => {
+    expect(vendorChunkName(id)).toBe(chunk);
   });
 
   it('VITE_API_MODE es mock o real; sin valor, real; otro valor detiene', () => {
