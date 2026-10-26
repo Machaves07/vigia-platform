@@ -79,6 +79,7 @@ NOTICE_VERSION_FALLBACK: Final = "1"
 ALARM_POLL_SECONDS: Final = 60
 METRIC_WINDOW: Final = timedelta(minutes=5)
 TIMEOUT_SECONDS: Final = 15
+PLAYWRIGHT_TIMEOUT_SECONDS: Final = 90
 _PATH_LINE: Final = re.compile(r'^  "(/[^"]*)":\s*$')
 _HEX64: Final = re.compile(r"^[0-9a-f]{64}$")
 _STAGING: Final = re.compile(r"^staging-[1-9][0-9]{0,8}$")
@@ -182,6 +183,7 @@ class Conformance(Protocol):
 @dataclass(frozen=True)
 class PlaywrightVerdict:
     passed: bool
+    detail: str = ""
 
 
 class Playwright(Protocol):
@@ -441,12 +443,21 @@ class LocalPlaywright:
                 capture_output=True,
                 text=True,
                 env=environment,
+                timeout=PLAYWRIGHT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return PlaywrightVerdict(
+                passed=False,
+                detail=f"el proceso agotó el límite de {PLAYWRIGHT_TIMEOUT_SECONDS} s",
             )
         finally:
             Path(credentials_path).unlink(missing_ok=True)
         # stdout y stderr pueden contener valores escritos por una dependencia;
         # nunca llegan al informe.
-        return PlaywrightVerdict(passed=completed.returncode == 0)
+        return PlaywrightVerdict(
+            passed=completed.returncode == 0,
+            detail=f"el proceso terminó con código {completed.returncode}",
+        )
 
 
 # --- Contexto -------------------------------------------------------------------------------
@@ -460,10 +471,9 @@ class Target:
     repository: Path
     now: datetime
     watch_minutes: int = 15
-    operator_email: str | None = None
+    operator_email: str | None = None  # Correo del primer operador invitado (nº 5).
     app_version: str | None = None
-    target_url: str | None = None
-    """Correo del primer operador que el arranque de ``staging-<n>`` invitó (nº 5)."""
+    target_url: str | None = None  # Origen HTTPS alternativo para el recorrido local.
 
     @property
     def staging(self) -> bool:
@@ -503,19 +513,6 @@ class Target:
 
     def has_frontend(self) -> bool:
         return (self.repository / "frontend" / "package.json").is_file()
-
-
-def _pending(number: int, name: str, available: bool, reason: str) -> Result:
-    """Omitida mientras falte su requisito; fallida si ya existe y no está escrita."""
-    if not available:
-        return Result(number, name, "skipped", reason)
-    return Result(
-        number,
-        name,
-        "failed",
-        "el requisito ya existe en el repositorio y la comprobación no está escrita: "
-        "escríbela en tools/deploy_checks.py antes de desplegar",
-    )
 
 
 # --- Comprobaciones ----------------------------------------------------------------------------
@@ -734,7 +731,8 @@ def check_playwright(target: Target, fixtures: Fixtures, playwright: Playwright)
     if verdict is None:
         return Result(8, name, "skipped", "Playwright no está instalado en el runner")
     if not verdict.passed:
-        return Result(8, name, "failed", "el recorrido de Playwright falló")
+        detail = verdict.detail or "el proceso no informó detalle"
+        return Result(8, name, "failed", f"el recorrido de Playwright falló: {detail}")
     return Result(8, name, "ok", "recorrido y política CSP/Trusted Types sin violaciones")
 
 

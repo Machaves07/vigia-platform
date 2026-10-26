@@ -50,6 +50,7 @@ function totp(provisioningUri: string): string {
 test('el despliegue activa la invitación y recorre el panel sin violaciones de política', async ({
   page,
 }) => {
+  await page.goto('/');
   const privateInput = credentials();
   const token = new URL(privateInput.invitation_link).hash.slice(1);
   if (!token) throw new Error('El enlace de invitación no contiene un token');

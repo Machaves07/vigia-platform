@@ -630,12 +630,49 @@ def test_local_playwright_never_prints_or_keeps_the_private_credential_file(
         assert private_path.read_text(encoding="utf-8")
         assert os.stat(private_path).st_mode & 0o777 == 0o600
         assert secret.invitation_link not in " ".join(arguments)
+        assert kwargs["timeout"] == deploy_checks.PLAYWRIGHT_TIMEOUT_SECONDS
         return CompletedProcess(arguments, 1, stdout=secret.invitation_link, stderr=secret.email)
 
     monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
     monkeypatch.setattr(deploy_checks.subprocess, "run", fake_run)
     verdict = deploy_checks.LocalPlaywright(tmp_path).run("https://staging-7.vigia.example", secret)
-    assert verdict == PlaywrightVerdict(False)
+    assert verdict is not None and not verdict.passed
+    assert verdict.detail == "el proceso terminó con código 1"
+    captured = capsys.readouterr()
+    assert secret.invitation_link not in captured.out + captured.err
+    assert secret.email not in captured.out + captured.err
+    assert not Path(seen["path"]).exists()
+
+
+def test_local_playwright_fails_safely_when_its_process_exceeds_the_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli = tmp_path / "frontend" / "node_modules" / "@playwright" / "test" / "cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    secret = FrontendCredentials(
+        invitation_link="https://staging-7.vigia.example/invitacion#secret-synthetic",
+        email="secret@example.test",
+    )
+    seen: dict[str, str] = {}
+
+    def fake_run(arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        private_path = Path(environment["VIGIA_DEPLOY_CHECK_CREDENTIALS_FILE"])
+        seen["path"] = str(private_path)
+        assert kwargs["timeout"] == deploy_checks.PLAYWRIGHT_TIMEOUT_SECONDS
+        raise deploy_checks.subprocess.TimeoutExpired(
+            arguments,
+            deploy_checks.PLAYWRIGHT_TIMEOUT_SECONDS,
+            output=secret.invitation_link,
+            stderr=secret.email,
+        )
+
+    monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(deploy_checks.subprocess, "run", fake_run)
+    verdict = deploy_checks.LocalPlaywright(tmp_path).run("https://staging-7.vigia.example", secret)
+    assert verdict == PlaywrightVerdict(False, "el proceso agotó el límite de 90 s")
     captured = capsys.readouterr()
     assert secret.invitation_link not in captured.out + captured.err
     assert secret.email not in captured.out + captured.err
@@ -669,6 +706,24 @@ def test_pilot_index_rejects_a_version_distinct_from_the_release() -> None:
     http.routes[("GET", "/version.json")] = lambda _: _json(200, {"app_version": "other"})
     result = _run(_target(environment="pilot", operator_email=None), http=http)[9]
     assert result.status == "failed" and "release" in result.detail
+
+
+def test_pilot_index_fails_when_the_index_has_no_vigia_app_marker() -> None:
+    http = _healthy_http()
+    http.routes[("GET", "/")] = lambda _: Response(
+        200, b'<main></main><script type="module" src="/assets/app-123.js"></script>'
+    )
+    result = _run(_target(environment="pilot", operator_email=None), http=http)[9]
+    assert result.status == "failed" and "marcador vigia-app" in result.detail
+
+
+def test_pilot_index_fails_when_the_initial_asset_is_not_immutable() -> None:
+    http = _healthy_http()
+    http.routes[("GET", "/assets/app-123.js")] = lambda _: Response(
+        200, b"console.log('synthetic')", {"Cache-Control": "public, max-age=31536000"}
+    )
+    result = _run(_target(environment="pilot", operator_email=None), http=http)[9]
+    assert result.status == "failed" and "immutable" in result.detail
 
 
 def test_pilot_index_fails_if_route53_does_not_report_success() -> None:
@@ -806,7 +861,7 @@ def _repository(tmp_path: Path, *paths: str, frontend: bool = False) -> Path:
     return tmp_path
 
 
-def test_the_u05_checks_skip_when_the_frontend_is_missing(tmp_path: Path) -> None:
+def test_the_u05_checks_run_when_the_frontend_exists(tmp_path: Path) -> None:
     repository = _repository(tmp_path, "/api/nodes/enrollment", frontend=True)
     assert _run(_target(repository=repository))[8].status == "ok"
     pilot = _run(_target(repository=repository, environment="pilot", operator_email=None))
