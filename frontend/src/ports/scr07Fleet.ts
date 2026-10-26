@@ -210,7 +210,8 @@ export async function readFleet(filters: NodeFilters, signal: AbortSignal): Prom
   let after: string | null = null;
   const seen = new Set<string>();
   do {
-    const page = await fleetPort.nodes.read({ query: { ...filters, limit: 200, after } }, signal);
+    // MAX_NODES_PAGE de la API de flota es 100, no el máximo genérico de UI-14.
+    const page = await fleetPort.nodes.read({ query: { ...filters, limit: 100, after } }, signal);
     nodes.push(...page.nodes);
     after = page.next_after;
     if (after !== null) {

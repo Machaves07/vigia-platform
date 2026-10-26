@@ -1,14 +1,24 @@
 /** Consultas propias por persona, organización, alcance y concesión; refresco compartido D-4. */
-import type { ReactNode } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { notificationsClock, notificationsFailure } from '@/ports/scr15Notifications';
 import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/state/query';
 import type { QueryParams } from '@/state/query/keys';
 import { useUiSession } from '@/state/session';
+import { useConcessionStore } from '@/state/concession';
+
+const noSubscription = () => () => undefined;
 
 export function useNotificationsContext() {
   const { principal } = useUiSession();
+  const store = useConcessionStore();
+  const active = useSyncExternalStore(
+    store?.subscribe ?? noSubscription,
+    () => store?.getSnapshot().active?.concession_id ?? null,
+  );
+  // La activación precede a GET /me: tampoco se consulta durante esa ventana.
+  const concession = active ?? principal?.concession_id ?? null;
   return {
     scope: `${principal?.organization.organization_id ?? 'none'}:${principal?.user_id ?? 'none'}:${
       principal?.assignments
@@ -16,8 +26,11 @@ export function useNotificationsContext() {
         .sort()
         .join(',') ?? ''
     }`,
-    concession: principal?.concession_id ?? null,
-    enabled: principal?.effective_permissions.includes('notifications.read') ?? false,
+    concession,
+    // A-69: son datos propios; el servidor los rechaza bajo concesión.
+    enabled:
+      concession === null &&
+      (principal?.effective_permissions.includes('notifications.read') ?? false),
   };
 }
 

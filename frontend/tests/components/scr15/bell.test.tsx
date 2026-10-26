@@ -7,7 +7,7 @@ import { descriptor } from '@/pages/scr15/descriptor';
 import { readNotificationPages } from '@/ports/scr15Notifications';
 import { text } from '@/texts';
 import { settle } from '../../support/queryCache';
-import { mountShell, serveSession, shellMe } from '../../support/appShell';
+import { mountShell, serveSession, shellMe, START, syntheticScreen } from '../../support/appShell';
 import { server } from '../../msw/server';
 import { CURSOR, WAIT, apiError, notification, setup } from './support';
 import { USER_B } from '../../support/session';
@@ -180,7 +180,7 @@ describe('SCR-15 campana', { timeout: 60_000 }, () => {
     expect(calls.reads).toHaveLength(0);
   });
 
-  it('cada cambio de persona, organización, alcance o concesión usa otra clave propia', async () => {
+  it('cada cambio de persona, organización o alcance usa otra clave propia', async () => {
     const { calls, me, session } = await setup({ page: 'bell' });
     await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
     const changes = [
@@ -194,9 +194,6 @@ describe('SCR-15 campana', { timeout: 60_000 }, () => {
         const assignment = me.assignments[0];
         if (assignment !== undefined) assignment.scope_id = '0190a1b2-0000-7000-8000-0000000000f3';
       },
-      () => {
-        me.concession_id = '0190a1b2-0000-7000-8000-0000000000c1';
-      },
     ];
     for (let index = 0; index < changes.length; index++) {
       await act(async () => {
@@ -208,5 +205,75 @@ describe('SCR-15 campana', { timeout: 60_000 }, () => {
         expect(calls.reads).toHaveLength(index + 2);
       }, WAIT);
     }
+  });
+
+  it('A-69: no consulta notificaciones propias bajo concesión ni la termina por un not_found', async () => {
+    const { calls, me, session, clock } = await setup({ page: 'bell' });
+    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
+    await act(async () => {
+      me.concession_id = '0190a1b2-0000-7000-8000-0000000000c1';
+      await session.load();
+      await settle();
+      clock.advance(60_000);
+      await settle();
+    });
+    await screen.findByText(text('scr15.own_without_concession'), {}, WAIT);
+    expect(calls.reads).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: text('navigation.bell') })).toBeNull();
+    await act(async () => {
+      me.concession_id = null;
+      await session.load();
+      await settle();
+    });
+    await act(async () => {
+      clock.advance(60_000);
+      await settle();
+    });
+    await waitFor(() => {
+      expect(calls.reads).toHaveLength(2);
+    }, WAIT);
+    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
+  });
+
+  it('suspende la campana desde la activación, antes de que GET /me refleje la concesión', async () => {
+    let reads = 0;
+    serveSession(shellMe(['fleet.read', 'notifications.read'], { kind: 'provider' }));
+    server.use(
+      http.get('http://localhost/notifications', () => {
+        reads++;
+        return HttpResponse.json({ items: [notification()], next_after: null });
+      }),
+    );
+    const fixture = mountShell('/fleet', [
+      syntheticScreen({
+        id: 'SCR-07',
+        title: 'navigation.scr07',
+        path: '/fleet',
+        permission: 'fleet.read',
+        page: () => null,
+      }),
+    ]);
+    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
+    await act(async () => {
+      expect(
+        fixture.services.concession.activate({
+          concession_id: '0190a1b2-0000-7000-8000-0000000000d1',
+          client_organization_id: '0190a1b2-0000-7000-8000-0000000000f2',
+          scope_level: 'organization',
+          scope_id: '0190a1b2-0000-7000-8000-0000000000f2',
+          expires_at: new Date(START + 3_600_000).toISOString(),
+          status: 'active',
+        }),
+      ).toBe(true);
+      await settle();
+    });
+    await screen.findByText(text('scr15.own_without_concession'), {}, WAIT);
+    await act(async () => {
+      fixture.clock.advance(60_000);
+      await settle();
+    });
+    expect(reads).toBe(1);
+    expect(fixture.services.concession.header()).not.toBeNull();
+    expect(fixture.services.session.getSnapshot().principal?.concession_id).toBeNull();
   });
 });

@@ -21,7 +21,14 @@ from typing import Any
 import pytest
 
 from tests.conformance.mtls_proxy import server_tls
-from tests.conformance.platform_target import BACKEND, WALL, Provisioner, platform_stack
+from tests.conformance.platform_target import (
+    BACKEND,
+    WALL,
+    PlatformStack,
+    Provisioner,
+    platform_stack,
+)
+from tests.e2e_u05.commissioning import commissioning_clips
 from tests.e2e_u05.journeys import prepare_journeys
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
 from tests.integration.test_u04_end_to_end import (
@@ -201,6 +208,29 @@ def non_productive_zone(target: LoadTarget, fleet: Fleet, administrator: str) ->
     return target.api.call(create())
 
 
+def configure_store_origin(platform: PlatformStack, origin: str) -> None:
+    """CORS de vigia-evidence como en infra/stacks/data.py, con el origen TLS efímero.
+
+    El arnés de carga solo usa clientes de servidor y crea depósitos sin CORS. El
+    navegador necesita la misma regla de producción, nunca un origen comodín.
+    """
+    with contextlib.closing(platform.localstack.aws_client("s3")) as store:
+        store.put_bucket_cors(
+            Bucket=platform.environ["VIGIA_EVIDENCE_BUCKET"],
+            CORSConfiguration={
+                "CORSRules": [
+                    {
+                        "AllowedOrigins": [origin],
+                        "AllowedMethods": ["PUT", "GET", "HEAD"],
+                        "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                        "ExposeHeaders": ["ETag"],
+                        "MaxAgeSeconds": 3600,
+                    }
+                ]
+            },
+        )
+
+
 @contextlib.contextmanager
 def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
     """Arranque y liberación simétricos, incluidos los fallos antes de publicar el manifiesto."""
@@ -235,6 +265,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             VIGIA_PUBLIC_ORIGIN=app.url,
             VIGIA_CSP_STORE_ORIGINS=aws.url,
         )
+        configure_store_origin(platform, app.url)
         api = stack.enter_context(load_api(platform.environ, port, log_file=directory / "api.log"))
         node_ca = directory / "node-ca.crt"
         node_ca.write_bytes(platform.node_ca_root())
@@ -265,6 +296,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             work=work,
         )
         assert_functional(analysis, ledger_check(target, fleet, set(result["journal"]["emitted"])))
+        commissioning_clips(target, fleet)
         expected = _expected_subjects(target, fleet.organization_id)
         assert expected["finding"] and expected["detection"], "La carga no llenó bandeja y cola"
         wait_until(

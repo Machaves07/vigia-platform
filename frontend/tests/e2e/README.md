@@ -59,6 +59,40 @@ o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestruc
 de autenticación de cada cuenta; los recorridos funcionales por rol pertenecen a
 VIG-332 y VIG-333.
 
+## Recorridos de gerente, administración, instalador, COPASST y proveedor
+
+```sh
+npm run e2e -- tests/e2e/manager.spec.ts tests/e2e/admin.spec.ts tests/e2e/installer_tablet.spec.ts tests/e2e/copasst_tablet.spec.ts tests/e2e/provider.spec.ts
+```
+
+Los recorridos de escritorio se ejecutan en Chromium, Firefox y WebKit; los del
+instalador y COPASST, en los proyectos táctiles de 768 × 1024. Las combinaciones
+que no corresponden al dispositivo se omiten explícitamente.
+
+El administrador invita, asigna roles compatibles y configura el catálogo. El acta
+de alcance y el alta del acuerdo requieren `commissioning.run`: esa parte del
+recorrido la realiza la sesión del instalador bajo concesión; después el
+administrador confirma únicamente su propia firma desde su sesión. COPASST recibe
+otro acuerdo pendiente preparado por el instalador mediante la API real.
+
+La carga inicial usa servicios internos, por lo que el recorrido del gerente
+provoca antes una consulta HTTP real del proveedor para obtener su rastro de
+acceso. El mundo también concede, sube y confirma clips sintéticos por las rutas
+mTLS del nodo: sirven al selector de evidencia, no a una prueba de reproducción
+ni al cierre del acta.
+
+Las concesiones viven solo en memoria. Para abrir una subruta del instalador por
+URL, el recorrido entra al panel, activa la concesión y vuelve con «Atrás», sin
+inyectar tokens ni estado de React. La vista local del nodo no existe: se inspecciona
+el fragmento del enlace y se pulsa cancelando solo la navegación externa al nodo
+inexistente, sin impedir que el manejador real descarte el enlace ni afirmar que reproduzca.
+
+Los diagnósticos del arranque del mundo incluyen solo el tipo de excepción y las
+ubicaciones de la pila, nunca el mensaje de una librería o su cuerpo HTTP.
+Para invitaciones y códigos de alta se devuelven solo proyecciones booleanas desde
+el navegador: las aserciones se realizan después de descartar el secreto. La
+desaparición se observa antes de cualquier limpieza defensiva del diagnóstico.
+
 ## Recorridos del coordinador y del mando
 
 ```sh
