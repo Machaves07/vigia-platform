@@ -48,6 +48,7 @@ import hashlib
 import hmac
 import http.cookiejar
 import json
+import os
 import re
 import secrets
 import shutil
@@ -144,11 +145,24 @@ class Certificate:
 
 @dataclass(frozen=True)
 class Fixtures:
-    """Lo que el entorno publica para las comprobaciones de U-03 (nº 3, 10 y 11)."""
+    """Lo que el entorno publica para las comprobaciones de U-03 y U-05."""
 
     valid_certificate: Certificate | None = None
     revoked_certificate: Certificate | None = None
     synthetic_zone_id: str | None = None
+    frontend: FrontendCredentials | None = None
+
+
+@dataclass(frozen=True)
+class FrontendCredentials:
+    """Material de un solo uso para activar la invitación sintética desde Playwright.
+
+    El enlace lleva el secreto de invitación. Nunca se incorpora al informe de comprobaciones ni a
+    la salida del subproceso: solo se entrega en un archivo temporal con permisos privados.
+    """
+
+    invitation_link: str
+    email: str
 
 
 class FixtureSource(Protocol):
@@ -163,6 +177,17 @@ class ConformanceVerdict:
 
 class Conformance(Protocol):
     def run(self, target_url: str) -> ConformanceVerdict: ...
+
+
+@dataclass(frozen=True)
+class PlaywrightVerdict:
+    passed: bool
+
+
+class Playwright(Protocol):
+    def run(
+        self, target_url: str, credentials: FrontendCredentials
+    ) -> PlaywrightVerdict | None: ...
 
 
 # --- Adaptadores reales -----------------------------------------------------------------------
@@ -329,6 +354,7 @@ class SecretsFixtures:
             valid_certificate=_certificate(data.get("valid")),
             revoked_certificate=_certificate(data.get("revoked")),
             synthetic_zone_id=data.get("synthetic_zone_id") or None,
+            frontend=_frontend_credentials(data.get("frontend")),
         )
 
 
@@ -340,6 +366,16 @@ def _certificate(entry: object) -> Certificate | None:
     if not isinstance(chain, str) or not isinstance(key, str) or not chain or not key:
         return None
     return Certificate(certificate_pem=chain, key_pem=key)
+
+
+def _frontend_credentials(entry: object) -> FrontendCredentials | None:
+    if not isinstance(entry, dict):
+        return None
+    link = entry.get("invitation_link")
+    email = entry.get("email")
+    if not isinstance(link, str) or not isinstance(email, str) or not link or not email:
+        return None
+    return FrontendCredentials(invitation_link=link, email=email)
 
 
 class KitConformance:
@@ -363,6 +399,56 @@ class KitConformance:
         return ConformanceVerdict(passed=completed.returncode == 0, detail=summary)
 
 
+class LocalPlaywright:
+    """Ejecuta solo el recorrido de despliegue cuando el árbol ya tiene Playwright instalado."""
+
+    def __init__(self, repository: Path) -> None:
+        self._frontend = repository / "frontend"
+
+    def run(self, target_url: str, credentials: FrontendCredentials) -> PlaywrightVerdict | None:
+        node = shutil.which("node")
+        cli = self._frontend / "node_modules" / "@playwright" / "test" / "cli.js"
+        if node is None or not cli.is_file():
+            return None
+        descriptor, credentials_path = tempfile.mkstemp(
+            prefix="vigia-deploy-check-", suffix=".json"
+        )
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "invitation_link": credentials.invitation_link,
+                        "email": credentials.email,
+                    },
+                    handle,
+                )
+            environment = {
+                **os.environ,
+                "VIGIA_DEPLOY_CHECK_TARGET": target_url,
+                "VIGIA_DEPLOY_CHECK_CREDENTIALS_FILE": credentials_path,
+            }
+            completed = subprocess.run(
+                [
+                    node,
+                    str(cli),
+                    "test",
+                    "--config",
+                    "tests/e2e/deploy_check_staging.config.ts",
+                ],
+                cwd=self._frontend,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        finally:
+            Path(credentials_path).unlink(missing_ok=True)
+        # stdout y stderr pueden contener valores escritos por una dependencia;
+        # nunca llegan al informe.
+        return PlaywrightVerdict(passed=completed.returncode == 0)
+
+
 # --- Contexto -------------------------------------------------------------------------------
 
 
@@ -375,6 +461,8 @@ class Target:
     now: datetime
     watch_minutes: int = 15
     operator_email: str | None = None
+    app_version: str | None = None
+    target_url: str | None = None
     """Correo del primer operador que el arranque de ``staging-<n>`` invitó (nº 5)."""
 
     @property
@@ -395,6 +483,8 @@ class Target:
 
     @property
     def app_url(self) -> str:
+        if self.target_url is not None:
+            return self.target_url
         return f"https://{self.app_host}"
 
     @property
@@ -627,19 +717,95 @@ def check_alarms(target: Target, aws: Aws, sleep: Callable[[float], None]) -> Re
     return Result(7, name, "ok", f"{target.watch_minutes + 1} sondeos sin alarmas en ALARM")
 
 
-def check_frontend(target: Target) -> list[Result]:
-    reason = "omitida: el repositorio no tiene frontend/ (U-05)"
-    playwright = "recorrido de Playwright con la organización sintética"
-    index = "GET / con vigia-app, version.json y paquete immutable"
-    if target.staging:
-        return [
-            _pending(8, playwright, target.has_frontend(), reason),
-            Result(9, index, "skipped", "solo en pilot"),
-        ]
-    return [
-        Result(8, playwright, "skipped", "solo en staging"),
-        _pending(9, index, target.has_frontend(), reason),
+def check_playwright(target: Target, fixtures: Fixtures, playwright: Playwright) -> Result:
+    name = "recorrido de Playwright con la organización sintética"
+    if not target.staging:
+        return Result(8, name, "skipped", "solo en staging")
+    if not target.has_frontend():
+        return Result(8, name, "skipped", "omitida: el repositorio no tiene frontend/ (U-05)")
+    if fixtures.frontend is None:
+        return Result(
+            8,
+            name,
+            "skipped",
+            "sin invitación y correo de prueba del entorno (secreto vigia/<entorno>/deploy-checks)",
+        )
+    verdict = playwright.run(target.app_url, fixtures.frontend)
+    if verdict is None:
+        return Result(8, name, "skipped", "Playwright no está instalado en el runner")
+    if not verdict.passed:
+        return Result(8, name, "failed", "el recorrido de Playwright falló")
+    return Result(8, name, "ok", "recorrido y política CSP/Trusted Types sin violaciones")
+
+
+def _header(headers: dict[str, str], name: str) -> str:
+    return next((value for key, value in headers.items() if key.lower() == name.lower()), "")
+
+
+def _initial_asset(index: bytes) -> str | None:
+    match = re.search(rb'<script[^>]+src=["\'](/assets/[^"\']+)["\']', index, re.IGNORECASE)
+    return None if match is None else match.group(1).decode("ascii", errors="strict")
+
+
+def _app_index_health_check(target: Target, aws: Aws) -> bool:
+    checks = aws("route53", "list-health-checks").get("HealthChecks") or []
+    matching = [
+        check
+        for check in checks
+        if check.get("HealthCheckConfig", {}).get("FullyQualifiedDomainName") == target.app_host
+        and check.get("HealthCheckConfig", {}).get("ResourcePath") == "/version.json"
+        and check.get("HealthCheckConfig", {}).get("Type") == "HTTPS_STR_MATCH"
+        and check.get("HealthCheckConfig", {}).get("SearchString") == "app_version"
     ]
+    if len(matching) != 1 or not isinstance(matching[0].get("Id"), str):
+        return False
+    observations = (
+        aws("route53", "get-health-check-status", "--health-check-id", matching[0]["Id"]).get(
+            "HealthCheckObservations"
+        )
+        or []
+    )
+    statuses = [item.get("StatusReport", {}).get("Status") for item in observations]
+    return bool(statuses) and all(status == "Success" for status in statuses)
+
+
+def check_app_index(target: Target, http: Http, aws: Aws) -> Result:
+    name = "GET / con vigia-app, version.json y paquete immutable"
+    if target.staging:
+        return Result(9, name, "skipped", "solo en pilot")
+    if not target.has_frontend():
+        return Result(9, name, "skipped", "omitida: el repositorio no tiene frontend/ (U-05)")
+    if target.app_version is None:
+        return Result(9, name, "failed", "sin versión de release (--app-version o VERSION)")
+    index = http.request("GET", f"{target.app_url}/", headers={"Accept": "text/html"})
+    if index.status != 200 or b"vigia-app" not in index.body:
+        return Result(
+            9, name, "failed", f"GET / respondió {index.status} sin el marcador vigia-app"
+        )
+    version = http.request("GET", f"{target.app_url}/version.json")
+    if version.status != 200:
+        return Result(9, name, "failed", f"GET /version.json respondió {version.status}")
+    try:
+        app_version = version.json().get("app_version")
+    except (AttributeError, ValueError, UnicodeDecodeError):
+        return Result(9, name, "failed", "GET /version.json no devolvió un objeto JSON")
+    if app_version != target.app_version:
+        return Result(
+            9,
+            name,
+            "failed",
+            f"version.json publicó {app_version!r}; release {target.app_version!r}",
+        )
+    asset = _initial_asset(index.body)
+    if asset is None:
+        return Result(9, name, "failed", "GET / no declaró el paquete inicial bajo /assets/")
+    package = http.request("GET", f"{target.app_url}{asset}")
+    cache_control = _header(package.headers, "Cache-Control").lower()
+    if package.status != 200 or "immutable" not in cache_control:
+        return Result(9, name, "failed", f"GET {asset} no respondió 200 immutable")
+    if not _app_index_health_check(target, aws):
+        return Result(9, name, "failed", "la comprobación vigia-app-index no está en OK")
+    return Result(9, name, "ok", "marcador, versión, paquete immutable y vigia-app-index en OK")
 
 
 def _rejection_code(answer: Response) -> str:
@@ -853,6 +1019,7 @@ def run_checks(
     network: Network,
     fixtures: Fixtures | None = None,
     conformance: Conformance | None = None,
+    playwright: Playwright | None = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] | None = None,
 ) -> list[Result]:
@@ -861,6 +1028,7 @@ def run_checks(
     clock = now or (lambda: target.now)
     material = fixtures or Fixtures()
     kit = conformance or KitConformance()
+    browser = playwright or LocalPlaywright(target.repository)
 
     def guarded(
         number: int, name: str, check: Callable[[], Result | list[Result]]
@@ -879,7 +1047,8 @@ def run_checks(
         (4, "conformidad", lambda: check_conformance(target, kit)),
         (5, "inicio de sesión", lambda: check_session(target, http, aws, clock)),
         (6, "well-known", lambda: check_well_known(target, http)),
-        (8, "frontend", lambda: check_frontend(target)),
+        (8, "frontend", lambda: check_playwright(target, material, browser)),
+        (9, "frontend", lambda: check_app_index(target, http, aws)),
         (10, "U-03", lambda: check_revoked_certificate(target, network, aws, material, sleep)),
         (11, "U-03", lambda: check_signed_catalog(target, http, network, material)),
         (12, "U-03", lambda: check_enrollment_reachable(target, http, network)),
@@ -913,6 +1082,19 @@ def _sha256(value: str) -> str:
     return value
 
 
+def _target_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise argparse.ArgumentTypeError("URL HTTPS de origen, sin ruta ni consulta")
+    return value.rstrip("/")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Comprobaciones de despliegue (§3.2).")
     parser.add_argument("--environment", required=True, type=_environment)
@@ -921,6 +1103,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--watch-minutes", type=int, default=15)
     parser.add_argument("--operator-email", help="staging: correo del operador del arranque")
+    parser.add_argument(
+        "--app-version", default=os.environ.get("VERSION"), help="versión de la release"
+    )
+    parser.add_argument(
+        "--target", type=_target_url, help="origen HTTPS alternativo para el recorrido local"
+    )
     parser.add_argument("--report", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args(argv)
@@ -932,6 +1120,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         now=datetime.now(UTC),  # noqa: TID251 - herramienta de la canalización, no del núcleo
         watch_minutes=args.watch_minutes,
         operator_email=args.operator_email,
+        app_version=args.app_version,
+        target_url=args.target,
     )
     results = run_checks(
         target,

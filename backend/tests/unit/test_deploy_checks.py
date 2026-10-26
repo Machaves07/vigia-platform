@@ -9,10 +9,12 @@ requisito, fallida si el requisito ya existe y la comprobación no está escrita
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Any
 
 import pytest
@@ -22,6 +24,8 @@ from tools.deploy_checks import (
     Certificate,
     ConformanceVerdict,
     Fixtures,
+    FrontendCredentials,
+    PlaywrightVerdict,
     Response,
     Result,
     Target,
@@ -31,6 +35,7 @@ from tools.deploy_checks import (
 REPOSITORY = Path(__file__).resolve().parents[3]
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
 VERIFIER = "b" * 64
+APP_VERSION = "1.2.3"
 TOTP_URI = "otpauth://totp/Vigia:op?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=Vigia"
 TG_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:targetgroup/tg-api-staging-7/abc"
 LB_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:loadbalancer/app/vigia-alb-app/def"
@@ -38,6 +43,10 @@ STORE_ARN = "arn:aws:elasticloadbalancing:us-east-1:111:truststore/vigia-node-tr
 ZONE = "01900000-0000-7000-8000-000000000003"
 VALID = Certificate("-----BEGIN CERTIFICATE-----\nvalid\n", "-----BEGIN KEY-----\nvalid\n")
 REVOKED = Certificate("-----BEGIN CERTIFICATE-----\nrevoked\n", "-----BEGIN KEY-----\nrevoked\n")
+FRONTEND = FrontendCredentials(
+    invitation_link="https://staging-7.vigia.example/invitacion#synthetic-invitation",
+    email="operadora@staging-7.vigia.example",
+)
 
 
 def _target(**changes: Any) -> Target:
@@ -49,12 +58,18 @@ def _target(**changes: Any) -> Target:
         now=NOW,
         watch_minutes=2,
         operator_email="operadora@staging-7.vigia.example",
+        app_version=APP_VERSION,
     )
     return replace(base, **changes)
 
 
 def _fixtures(**changes: Any) -> Fixtures:
-    base = Fixtures(valid_certificate=VALID, revoked_certificate=REVOKED, synthetic_zone_id=ZONE)
+    base = Fixtures(
+        valid_certificate=VALID,
+        revoked_certificate=REVOKED,
+        synthetic_zone_id=ZONE,
+        frontend=FRONTEND,
+    )
     return replace(base, **changes)
 
 
@@ -85,6 +100,13 @@ class FakeHttp:
 
 def _healthy_http() -> FakeHttp:
     http = FakeHttp()
+    http.routes[("GET", "/")] = lambda _: Response(
+        200, b'<main id="vigia-app"></main><script type="module" src="/assets/app-123.js"></script>'
+    )
+    http.routes[("GET", "/version.json")] = lambda _: _json(200, {"app_version": APP_VERSION})
+    http.routes[("GET", "/assets/app-123.js")] = lambda _: Response(
+        200, b"console.log('synthetic')", {"Cache-Control": "public, max-age=31536000, immutable"}
+    )
     http.routes[("GET", "/health/live")] = lambda _: _json(200, {"status": "live"})
     http.routes[("GET", "/.well-known/vigia-checkpoint-keys")] = lambda _: _json(
         200, {"keys": [{"key_id": "vigia-catalog-2026"}]}
@@ -157,6 +179,22 @@ class FakeAws:
         if (service, operation) == ("secretsmanager", "get-secret-value"):
             invitation = {"link": "https://staging-7.vigia.example/invitacion#tok_123"}
             return {"SecretString": json.dumps(invitation)}
+        if (service, operation) == ("route53", "list-health-checks"):
+            return {
+                "HealthChecks": [
+                    {
+                        "Id": "app-index",
+                        "HealthCheckConfig": {
+                            "FullyQualifiedDomainName": "app.vigia.example",
+                            "ResourcePath": "/version.json",
+                            "Type": "HTTPS_STR_MATCH",
+                            "SearchString": "app_version",
+                        },
+                    }
+                ]
+            }
+        if (service, operation) == ("route53", "get-health-check-status"):
+            return {"HealthCheckObservations": [{"StatusReport": {"Status": "Success"}}]}
         raise AssertionError(f"llamada inesperada: {arguments}")
 
 
@@ -193,6 +231,17 @@ class FakeConformance:
     def run(self, target_url: str) -> ConformanceVerdict:
         self.calls.append(target_url)
         return ConformanceVerdict(self.passed, self.detail)
+
+
+@dataclass
+class FakePlaywright:
+    available: bool = True
+    passed: bool = True
+    calls: list[tuple[str, FrontendCredentials]] = field(default_factory=list)
+
+    def run(self, target_url: str, credentials: FrontendCredentials) -> PlaywrightVerdict | None:
+        self.calls.append((target_url, credentials))
+        return PlaywrightVerdict(self.passed) if self.available else None
 
 
 def _healthy_network() -> FakeNetwork:
@@ -232,6 +281,7 @@ def _run(
     network: FakeNetwork | None = None,
     fixtures: Fixtures | None = None,
     conformance: FakeConformance | None = None,
+    playwright: FakePlaywright | None = None,
     sleeps: list[float] | None = None,
 ) -> dict[int, Result]:
     pauses = sleeps if sleeps is not None else []
@@ -242,6 +292,7 @@ def _run(
         network=network or _healthy_network(),
         fixtures=_fixtures() if fixtures is None else fixtures,
         conformance=conformance or FakeConformance(),
+        playwright=playwright or FakePlaywright(),
         sleep=pauses.append,
     )
     numbers = [r.number for r in results]
@@ -252,9 +303,7 @@ def _run(
 # --- Conjunto ---------------------------------------------------------------------------
 
 
-def test_a_healthy_staging_has_no_failures_but_the_pending_u05_check() -> None:
-    # VIG-277 creó frontend/package.json: la nº 8 (U-05) deja de omitirse y queda fallida
-    # hasta que VIG-319 (TASK-457) la escriba en tools/deploy_checks.py.
+def test_a_healthy_staging_has_no_failures_and_runs_the_u05_check() -> None:
     results = _run()
     assert {n for n, r in results.items() if r.status == "ok"} == {
         1,
@@ -264,14 +313,14 @@ def test_a_healthy_staging_has_no_failures_but_the_pending_u05_check() -> None:
         5,
         6,
         7,
+        8,
         10,
         11,
         12,
         13,
     }
     assert results[9].status == "skipped" and results[9].detail == "solo en pilot"
-    assert {n for n, r in results.items() if r.status == "failed"} == {8}
-    assert "no está escrita" in results[8].detail
+    assert {n for n, r in results.items() if r.status == "failed"} == set()
 
 
 def test_a_repository_without_u03_routes_skips_the_u03_checks_with_a_reason(tmp_path: Path) -> None:
@@ -301,6 +350,7 @@ def test_pilot_uses_its_own_hosts_and_leaves_the_owner_session_manual() -> None:
     assert results[5].status == "manual"
     assert results[13].detail == "solo en staging"
     assert results[8].detail == "solo en staging"
+    assert results[9].status == "ok"
     assert (
         "ecs",
         "describe-services",
@@ -532,6 +582,112 @@ def test_a_composite_u04_alarm_also_blocks_pilot() -> None:
     assert result.status == "failed"
 
 
+# --- 8 y 9: aplicación de página única --------------------------------------------------------
+
+
+def test_playwright_runs_against_staging_with_the_private_frontend_fixture() -> None:
+    playwright = FakePlaywright()
+    result = _run(playwright=playwright)[8]
+    assert result.status == "ok"
+    assert playwright.calls == [("https://staging-7.vigia.example", FRONTEND)]
+
+
+def test_playwright_fails_without_copying_a_credential_to_the_report() -> None:
+    secret = FrontendCredentials(
+        invitation_link="https://staging-7.vigia.example/invitacion#secret-synthetic",
+        email="secret@example.test",
+    )
+    result = _run(fixtures=_fixtures(frontend=secret), playwright=FakePlaywright(passed=False))[8]
+    rendered = deploy_checks.summary(_target(), [result])
+    assert result.status == "failed"
+    assert secret.invitation_link not in rendered and secret.email not in rendered
+
+
+def test_playwright_skips_without_the_secret_or_the_installed_runner() -> None:
+    missing_secret = _run(fixtures=_fixtures(frontend=None))[8]
+    assert missing_secret.status == "skipped" and "secreto" in missing_secret.detail
+    unavailable = _run(playwright=FakePlaywright(available=False))[8]
+    assert unavailable.status == "skipped" and "no está instalado" in unavailable.detail
+
+
+def test_local_playwright_never_prints_or_keeps_the_private_credential_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli = tmp_path / "frontend" / "node_modules" / "@playwright" / "test" / "cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    secret = FrontendCredentials(
+        invitation_link="https://staging-7.vigia.example/invitacion#secret-synthetic",
+        email="secret@example.test",
+    )
+    seen: dict[str, str] = {}
+
+    def fake_run(arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        private_path = Path(environment["VIGIA_DEPLOY_CHECK_CREDENTIALS_FILE"])
+        seen["path"] = str(private_path)
+        assert private_path.read_text(encoding="utf-8")
+        assert os.stat(private_path).st_mode & 0o777 == 0o600
+        assert secret.invitation_link not in " ".join(arguments)
+        return CompletedProcess(arguments, 1, stdout=secret.invitation_link, stderr=secret.email)
+
+    monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(deploy_checks.subprocess, "run", fake_run)
+    verdict = deploy_checks.LocalPlaywright(tmp_path).run("https://staging-7.vigia.example", secret)
+    assert verdict == PlaywrightVerdict(False)
+    captured = capsys.readouterr()
+    assert secret.invitation_link not in captured.out + captured.err
+    assert secret.email not in captured.out + captured.err
+    assert not Path(seen["path"]).exists()
+
+
+def test_pilot_index_checks_marker_version_asset_and_route53_health() -> None:
+    aws = FakeAws()
+    result = _run(_target(environment="pilot", operator_email=None), aws=aws)[9]
+    assert result.status == "ok"
+    assert ("route53", "list-health-checks") in aws.calls
+    assert ("route53", "get-health-check-status", "--health-check-id", "app-index") in aws.calls
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        ("GET", "/"),
+        ("GET", "/version.json"),
+        ("GET", "/assets/app-123.js"),
+    ],
+)
+def test_pilot_index_fails_when_an_http_resource_is_invalid(route: tuple[str, str]) -> None:
+    http = _healthy_http()
+    http.routes[route] = lambda _: Response(500, b"{}")
+    assert _run(_target(environment="pilot", operator_email=None), http=http)[9].status == "failed"
+
+
+def test_pilot_index_rejects_a_version_distinct_from_the_release() -> None:
+    http = _healthy_http()
+    http.routes[("GET", "/version.json")] = lambda _: _json(200, {"app_version": "other"})
+    result = _run(_target(environment="pilot", operator_email=None), http=http)[9]
+    assert result.status == "failed" and "release" in result.detail
+
+
+def test_pilot_index_fails_if_route53_does_not_report_success() -> None:
+    class UnhealthyAws(FakeAws):
+        def __call__(self, *arguments: str) -> Any:
+            if arguments[:2] == ("route53", "get-health-check-status"):
+                return {"HealthCheckObservations": [{"StatusReport": {"Status": "Failure"}}]}
+            return super().__call__(*arguments)
+
+    result = _run(_target(environment="pilot", operator_email=None), aws=UnhealthyAws())[9]
+    assert result.status == "failed"
+
+
+def test_pilot_index_skips_without_the_frontend(tmp_path: Path) -> None:
+    repository = _repository(tmp_path, "/api/nodes/enrollment")
+    result = _run(_target(repository=repository, environment="pilot", operator_email=None))[9]
+    assert result.status == "skipped" and "no tiene frontend" in result.detail
+
+
 # --- 10: certificado revocado en dos capas ----------------------------------------------------
 
 
@@ -650,11 +806,11 @@ def _repository(tmp_path: Path, *paths: str, frontend: bool = False) -> Path:
     return tmp_path
 
 
-def test_the_u05_checks_fail_once_the_frontend_exists(tmp_path: Path) -> None:
+def test_the_u05_checks_skip_when_the_frontend_is_missing(tmp_path: Path) -> None:
     repository = _repository(tmp_path, "/api/nodes/enrollment", frontend=True)
-    assert _run(_target(repository=repository))[8].status == "failed"
+    assert _run(_target(repository=repository))[8].status == "ok"
     pilot = _run(_target(repository=repository, environment="pilot", operator_email=None))
-    assert pilot[9].status == "failed"
+    assert pilot[9].status == "ok"
 
 
 def test_the_current_repository_has_contract_routes_enrollment_and_frontend() -> None:
