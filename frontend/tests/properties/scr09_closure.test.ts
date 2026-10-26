@@ -73,4 +73,40 @@ describe('RV-13 de cierre', { timeout: 120_000 }, () => {
       'RV-13 (SCR-09): «items[1].content.description» de un registro de otra organización aparece en el texto.',
     );
   });
+  it('cae en rojo si la vista pinta deduplicado un texto repetido en dos registros ajenos', () => {
+    const repeated = {
+      items: [
+        record(1, OWN, 'reopening', { reason_text: 'motivo propio' }),
+        record(2, FOREIGN, 'action_evidence_added', { description: 'descripcion-confidencial' }),
+        record(3, FOREIGN, 'action_evidence_added', { description: 'descripcion-confidencial' }),
+      ],
+    };
+    const deduplicating: ViewRegistration = {
+      ...registrations.history,
+      render: (data, context) => {
+        const items = data.items as LedgerRecord[];
+        for (const item of items) {
+          if (item.organization_id !== context.organizationId) {
+            context.reportContractError({ code: 'foreign_organization' });
+          }
+        }
+        const texts = new Set(
+          items.map((item) => Object.values(item.content as Record<string, string>).join(' ')),
+        );
+        return createElement(
+          'ul',
+          null,
+          [...texts].map((text) => createElement('li', { key: text }, text)),
+        );
+      },
+    };
+    expect(
+      organizationLeaks(deduplicating, repeated, session, [
+        ['items', 1],
+        ['items', 2],
+      ]),
+    ).toContain(
+      'RV-13 (SCR-09): «items[1].content.description» de un registro de otra organización aparece en el texto.',
+    );
+  });
 });

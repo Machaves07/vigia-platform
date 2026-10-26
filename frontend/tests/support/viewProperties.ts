@@ -536,9 +536,11 @@ function renderedHaystacks(
  * rótulo fijo puede formar por azar el valor ajeno (semilla 1457963427: `reason_text`
  * «"DpropertyIsEnumerabl» + «Escalamiento del vencimiento» contiene la `description` ajena
  * «:propertyIsEnumerable»). Por eso un valor ajeno que aparece se contrasta: se vuelve a pintar
- * la vista con solo ese valor cambiado por un relleno (`withFiller`) y es fuga si, en alguna
- * fuente, aparece más veces que en el contraste. Una aparición por azar no pasa por el valor y
- * sigue en el contraste; una que sale del valor desaparece con él.
+ * la vista con ese valor, y todo valor ajeno que lo contenga, cambiados por un relleno
+ * (`withFiller`), y es fuga si, en alguna fuente, aparece más veces que en el contraste. Una
+ * aparición por azar no pasa por los valores ajenos y sigue en el contraste; una que sale de
+ * ellos desaparece con ellos. Se cambian todos a la vez porque una vista que deduplica (dos
+ * registros ajenos con el mismo título pintados una vez) seguiría mostrando el otro.
  */
 export function organizationLeaks(
   registration: ViewRegistration,
@@ -572,14 +574,20 @@ export function organizationLeaks(
     );
   const all = leaves(data);
   const ownValues = all.filter((leaf) => !isForeign(leaf.path)).map((leaf) => fold(leaf.value));
-  for (const leaf of all.filter((item) => isForeign(item.path))) {
+  const foreign = all.filter((item) => isForeign(item.path));
+  for (const leaf of foreign) {
     const folded = fold(leaf.value);
     if (folded.length < MIN_FOLDED_LENGTH) continue;
     if (ownValues.some((value) => value.includes(folded))) continue;
     if (!rendered.some((haystack) => haystack.text.includes(folded))) continue;
+    const sources = foreign.filter((item) => fold(item.value).includes(folded));
+    const filled = sources.reduce<unknown>(
+      (current, item) => withFiller(current, item, fold(item.value)),
+      data,
+    );
     const contrast = renderedHaystacks(
       registration,
-      withFiller(data, leaf, folded) as Record<string, unknown>,
+      filled as Record<string, unknown>,
       context,
     ).rendered;
     const where = rendered.find((haystack, index) => {
