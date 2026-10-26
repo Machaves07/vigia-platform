@@ -29,6 +29,7 @@
     "test:bootstrap:browsers": "playwright test --config tests/browser/playwright.config.ts",
     "check": "node scripts/checks/run.mjs",
     "e2e": "playwright test",
+    "lighthouse": "lhci autorun --config=lighthouserc.json",
     "size": "node scripts/pending.mjs size VIG-294 TASK-412"
   },
   "dependencies": {
