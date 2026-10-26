@@ -85,8 +85,12 @@ export interface SessionStore {
   takeReturnRoute(): string | null;
   /** Una pantalla que se desmonta deja su borrador; solo se guarda con la sesión perdida. */
   keepDraft(draft: FormDraft): void;
-  /** El borrador guardado de este formulario en la ruta actual, ya restaurado; o `null`. */
-  takeDraft(screenId: string, formId: string): FormDraft | null;
+  /**
+   * El borrador guardado de este formulario en `route` (por omisión, la ruta actual), ya
+   * restaurado; o `null`. La pantalla que se monta pasa la ruta que pinta: tras pasar por otra
+   * (el segundo factor), la del puente del enrutador se actualiza después de pintarla.
+   */
+  takeDraft(screenId: string, formId: string, route?: string): FormDraft | null;
   logout(): Promise<void>;
   /** Cancela el temporizador. */
   dispose(): void;
@@ -193,12 +197,12 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
         draft: formDraftReducer(draft, { type: 'lock' }),
       });
     },
-    takeDraft(screenId, formId) {
+    takeDraft(screenId, formId, route = options.currentRoute()) {
       const key = draftKey(screenId, formId);
       const kept = drafts.get(key);
       if (kept === undefined || !isAuthenticated(session.status)) return null;
       // En otra ruta sigue guardado: vuelve si la persona abre luego el formulario original.
-      if (kept.route !== options.currentRoute()) return null;
+      if (kept.route !== route) return null;
       drafts.delete(key);
       return formDraftReducer(kept.draft, { type: 'restore' });
     },

@@ -37,6 +37,8 @@ export default defineConfig(({ mode }) => {
       include: ['tests/**/*.test.{ts,tsx}'],
       exclude: ['tests/e2e/**', 'node_modules/**'],
       globalSetup: ['tests/setup/global.ts'],
+      // Además de la salida habitual, el informe de los escenarios FS-APP cuando corre alguno.
+      reporters: ['default', './tests/resilience/report.ts'],
       setupFiles: ['tests/setup/index.ts'],
       env: {
         // Misma construcción sintética para el controlador y MSW, sin depender del entorno local.

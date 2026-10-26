@@ -8,7 +8,14 @@ export const DEPENDENCIES = [
 
 export type Dependency = (typeof DEPENDENCIES)[number];
 const OPEN_MS = 30_000;
-const FAILURE_WINDOW_MS = 30_000;
+/**
+ * Ventana en la que cuentan los fallos. Abarca el ciclo de una lectura que agota sus reintentos
+ * por tiempo de espera (U05-H-10: el cuarto fallo es el del tercer reintento): 4 intentos de 10 s
+ * separados 2, 4 y 8 s ponen 44 s entre el primer fallo y el cuarto. Con 30 s, una API que no
+ * responde nunca abría el circuito (FS-APP-01). Adenda A-70 (decisión del dueño, 2026-10-26):
+ * PR-APP-23 se lee con 60 s.
+ */
+const FAILURE_WINDOW_MS = 60_000;
 const FAILURE_THRESHOLD = 4;
 
 interface Circuit {
