@@ -1,6 +1,6 @@
 # vigia-platform
 
-Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. U-02 (plataforma núcleo) está construida: expediente, identidad, auditoría, bandeja de salida, worker, orden administrativa, seis pilas de CDK y canalización. U-03 (gobernanza y flota) y U-04 (lazo de cierre, acreditación y notificaciones) también lo están; U-05 añade la aplicación de página única. Lo que entra en cada versión está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
+Plataforma núcleo de Vigía (U-02 a U-05): backend FastAPI + PostgreSQL, aplicación de página única y despliegue en AWS con CDK. U-02 (plataforma núcleo) está construida: expediente, identidad, auditoría, bandeja de salida, worker, orden administrativa, seis pilas de CDK y canalización. U-03 (gobernanza y flota) y U-04 (lazo de cierre, acreditación y notificaciones) también lo están, y U-05 añade la aplicación de página única en `frontend/`, servida desde la misma imagen que la API. Lo que entra en cada versión está en [CHANGELOG.md](CHANGELOG.md); los procedimientos de operación, en [docs/runbooks/](docs/runbooks/README.md).
 
 **Sin AWS por ahora (adenda A-47)**: U-02 se cierra sin cuenta de AWS. El primer despliegue (TASK-154, VIG-98) está diferido, y los trabajos de la canalización que tocan AWS solo corren con la variable de repositorio `VIGIA_AWS_ENABLED=true`.
 
@@ -23,9 +23,10 @@ vigia-platform/
     openapi/               especificación generada de la aplicación (U-05 genera su cliente)
     tools/                 chequeos de lint propios y guiones de verificación
     tests/                 unit, properties, examples, abuse, isolation, integration, resilience, benchmarks
+  frontend/                aplicación de página única (U-05): React 19, TypeScript estricto y Vite (frontend/README.md)
   infra/                   pilas de AWS CDK en Python (TASK-144 a 150)
   docs/                    formatos del paquete y del archivo de auditoría
-  docs/runbooks/           procedimientos de operación 6.1 a 6.6 (U-02), los u03-* (U-03), los u04-* (U-04) y contingencias
+  docs/runbooks/           procedimientos de operación 6.1 a 6.6 (U-02), los u03-* (U-03), los u04-* (U-04), los u05-* (U-05) y contingencias
   .github/workflows/       flujos de la canalización (TASK-143 y 151)
   .github/scripts/         pasos de AWS de los flujos (tareas puntuales, salidas, barrido)
   local/                   configuración de los servicios locales (colector de OpenTelemetry)
@@ -323,6 +324,38 @@ Todas no secretas; las lee `shared/runtime/config.py`:
 
 Fuera de `pilot`, los nombres de alcance de cuenta (alarmas, alias, política) llevan además el sufijo del despliegue.
 
+## Aplicación de página única (U-05)
+
+U-05 añade `frontend/`: la aplicación de página única de las personas (16 pantallas, SCR-01 a SCR-16), en React 19, TypeScript 5 estricto y Vite. No añade servicios ni pilas: la etapa `frontend-build` de `backend/Dockerfile` construye la aplicación y la imagen la copia en `/app/static`, y `vigia-api` la sirve desde el mismo origen que la API (`shared/api/static.py`). La aplicación se despliega y se revierte **con la imagen**. Instalación, órdenes, pruebas, política de navegadores, presupuesto de dependencias y cómo añadir una pantalla: [`frontend/README.md`](frontend/README.md). Lo que entra está en [CHANGELOG.md](CHANGELOG.md).
+
+### Arranque local
+
+| Orden (desde la raíz) | Qué hace |
+|---|---|
+| `make frontend-dev` | Servidor de desarrollo de Vite en `:5173` en compose (perfil `frontend`), con proxy hacia `vigia-api` de `make run`; `VITE_API_MODE=mock make frontend-dev` usa MSW sin backend |
+| `make frontend-test` | vitest con el perfil `ci` de fast-check |
+| `make frontend-check` | Comprobaciones de `frontend/scripts/checks/` (textos, etiquetas, permisos, aviso de privacidad, MSW) |
+| `make frontend-e2e` | Construcción y recorridos de Playwright contra la plataforma real local ([`frontend/tests/e2e/README.md`](frontend/tests/e2e/README.md)) |
+
+### Lo que sirve `vigia-api`
+
+| Ruta | Contenido | Caché |
+|---|---|---|
+| `/` y las rutas de pantalla | `index.html`, **solo a peticiones de navegación** (D-3); cualquier otra petición va a la API | `no-store` |
+| `/assets/*` | Recursos con hash de contenido, `.br` y `.gz` según `Accept-Encoding` | `public, max-age=31536000, immutable` |
+| `/version.json` | `{app_version, contract_tag, built_at}` de la construcción | `no-store` |
+
+Una imagen sin la etapa `frontend-build` arranca sin aplicación (`/version.json` en `404`); una construcción no servible detiene el arranque. La variable `VIGIA_STATIC_DIR` cambia el directorio (por omisión `/app/static`), y `VIGIA_CSP_STORE_ORIGINS` añade el depósito de evidencias a `media-src` y `connect-src` de la política de contenido.
+
+### Despliegue y observación
+
+- **Comprobaciones de despliegue** (`backend/tools/deploy_checks.py`, VIG-319): la nº 8 en `staging-<n>` (recorrido de Playwright con la organización sintética y cero violaciones de la política de contenido) y la nº 9 en `pilot` (`GET /` con `vigia-app`, `/version.json` con el `app_version` de la release, paquete inicial `immutable` y la comprobación `vigia-app-index` en `OK`). Las dos se ensayan sin AWS contra el mundo local (VIG-352).
+- **Alarma `vigia-app-index-unhealthy`**: la comprobación de Route 53 `app-index` busca `app_version` en `/version.json` (adenda A-49). Panel «Aplicacion (n 12)» del tablero `vigia-pilot`, con `health_ready` por `app_version`.
+- **La interfaz no instrumenta ni alerta** (NFR-APP-29 y 40): todo se observa en el servidor. Cada error que ve una persona lleva su `correlation_id` copiable (NFR-APP-41), que soporte busca en los registros con el [manual de soporte](docs/runbooks/u05-soporte-correlation-id.md).
+- **Canalización**: el trabajo `frontend` de `ci.yml` (VIG-294) y el `frontend-nightly` de `nightly.yml` (VIG-337) los fusiona el dueño; hasta entonces, la imagen `arm64` de `ci.yml` ya construye la etapa `frontend-build`.
+
+Procedimientos: [runbooks u05-6.1 a 6.4](docs/runbooks/README.md#índice).
+
 ## Variables de configuración
 
 Cada proceso lee su configuración del entorno **una vez**, al arrancar, con un modelo estricto de Pydantic (`extra="forbid"`). Si falta una variable obligatoria o no es válida, el proceso no arranca. Ningún secreto, clave ni `.env` entra al repositorio. En AWS, las tareas solo reciben **nombres o ARN** de secretos y claves (`infra/stacks/compute.py`), nunca sus valores. Las del entorno local están en «Variables del entorno local».
@@ -407,6 +440,7 @@ Los procedimientos de conmutación y recuperación (RESILIENCY-13, NFR-NUC-12) e
 - [6.6 contraseña de la base](docs/runbooks/6.6-database-password-rotation.md);
 - los de U-03, [u03-6.1 a 6.4](docs/runbooks/README.md#índice);
 - los de U-04: [7.1 reconstrucción de la proyección](docs/runbooks/u04-7.1-loop-projection-rebuild.md), [7.2 colas muertas del lazo](docs/runbooks/u04-7.2-dead-letter-replay.md), [7.3 objeto perdido de `closure/`](docs/runbooks/u04-7.3-lost-closure-object.md), [7.4 clave del asistente](docs/runbooks/u04-7.4-assistant-key-rotation.md), [7.5 arenero y reputación del correo](docs/runbooks/u04-7.5-email-sandbox-and-reputation.md) y [7.6 exportación atascada](docs/runbooks/u04-7.6-export-stuck-or-failed.md), con los ensayos DR-LAZ-01 a 04 dentro de 6.1;
+- los de U-05: [6.1 la aplicación no carga](docs/runbooks/u05-6.1-la-aplicacion-no-carga.md), [6.2 la versión nueva no aparece](docs/runbooks/u05-6.2-version-nueva-no-aparece.md), [6.3 el cortafuegos bloquea a una planta](docs/runbooks/u05-6.3-cortafuegos-bloquea-una-planta.md), [6.4 la política de contenido bloquea](docs/runbooks/u05-6.4-politica-de-contenido-bloquea.md) y el [manual de soporte del código de correlación](docs/runbooks/u05-soporte-correlation-id.md);
 - y las contingencias.
 
 Los enlaces relativos de este archivo y de `docs/` se comprueban con:
@@ -417,7 +451,8 @@ uv run --project backend python backend/tools/check_links.py README.md docs/
 
 ## Documentación de referencia
 
-- Diseño aprobado (fuente del *qué*): `aidlc-docs/construction/plataforma-nucleo/` del espacio de trabajo de Vigía, fuera de este repositorio.
+- Diseño aprobado (fuente del *qué*): `aidlc-docs/construction/plataforma-nucleo/` (U-02), `plataforma-gobernanza-flota/` (U-03), `plataforma-lazo-acreditacion/` (U-04) y `plataforma-aplicacion/` (U-05) del espacio de trabajo de Vigía, fuera de este repositorio.
+- Aplicación de página única: [`frontend/README.md`](frontend/README.md).
 - Decisiones posteriores del dueño: `docs/decisions/adenda-al-diseno.md` del plan; mandan sobre el diseño donde difieran.
 - Formatos de este repositorio: [paquete `vigia-package`](docs/package-format.md) y [archivo de auditoría](docs/audit-archive-format.md).
 - Registro de cambios: [CHANGELOG.md](CHANGELOG.md).
