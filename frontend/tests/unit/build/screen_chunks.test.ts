@@ -40,6 +40,9 @@ describe('porciones de pantalla en dist/', () => {
       Array.from({ length: 16 }, (_, i) => `scr${String(i + 1).padStart(2, '0')}`),
     );
 
+    // React, React Router y TanStack Query en una sola porción (VIG-355, NFR-APP-01).
+    expect(assets.filter((name) => /^vendor-[A-Za-z0-9_-]+\.js$/.test(name))).toHaveLength(1);
+
     const html = readFileSync(join(outDir, 'index.html'), 'utf8');
     expect(html).not.toMatch(/scr\d{2}-/);
     const entries = assets.filter((name) => /^index-.*\.js$/.test(name));
