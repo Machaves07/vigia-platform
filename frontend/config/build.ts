@@ -36,7 +36,7 @@ export function screenChunkName(moduleId: string): string | null {
 }
 
 /** Nombre de la porción de las dependencias del arranque (`vendorChunkName`). */
-export const VENDOR_CHUNK = 'vendor';
+const VENDOR_CHUNK = 'vendor';
 
 const VENDOR_MODULE =
   /[\\/]node_modules[\\/](?:react|react-dom|scheduler|react-router|@tanstack[\\/](?:react-query|query-core))[\\/]/;
