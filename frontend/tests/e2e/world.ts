@@ -25,6 +25,15 @@ export interface World {
   readonly zone_ids: readonly string[];
   readonly non_productive_zone_id: string;
   readonly concession_id: string;
+  readonly journeys: {
+    readonly profile: string;
+    readonly seed: number;
+    readonly period: string;
+    readonly today: string;
+    readonly review_date: string;
+    readonly line_finding_id: string;
+    readonly findings: Record<string, { readonly closure: string; readonly unclosable: string }>;
+  };
   /** Canal local del intermediario de fallos entre la aplicación y la API (`faults.ts`). */
   readonly fault_control_url: string;
 }

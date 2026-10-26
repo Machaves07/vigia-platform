@@ -2,9 +2,10 @@
 import { Link } from 'react-router';
 import { readNotificationPages } from '@/ports/scr15Notifications';
 import { text } from '@/texts';
-import { NotificationsRefresh, useNotificationsRead } from './shared';
+import { NotificationsRefresh, useNotificationsContext, useNotificationsRead } from './shared';
 
 export function Bell() {
+  const { concession } = useNotificationsContext();
   const query = useNotificationsRead(
     'GET /notifications',
     { status: 'unread', all_pages: true },
@@ -12,6 +13,7 @@ export function Bell() {
     true,
   );
   const count = query.error === null ? query.data?.items.length : undefined;
+  if (concession !== null) return <span>{text('scr15.own_without_concession')}</span>;
   return (
     <div>
       <Link to="/notifications" aria-label={text('navigation.bell')}>

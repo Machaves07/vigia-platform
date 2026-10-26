@@ -18,7 +18,9 @@ export const LIVE_VIEW_LINK_REL = 'noopener noreferrer';
 
 /** Límites del contrato: `live_view_local_url` ≤ 256 caracteres; el token, una JWS compacta. */
 const MAX_LOCAL_URL_LENGTH = 256;
-const MAX_TOKEN_LENGTH = 512;
+// La JWS real de U-02 incluye seis UUID, rol, tiempos, cabecera y firma: supera 512.
+// Se mantiene un presupuesto de transporte acotado, sin interpretar ni verificar reclamos aquí.
+const MAX_TOKEN_LENGTH = 2048;
 const LOCAL_URL_SCHEME = 'https:';
 /** Token del nodo: JWS compacta (segmentos `base64url` separados por puntos). */
 const TOKEN = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;

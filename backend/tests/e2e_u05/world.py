@@ -21,8 +21,16 @@ from typing import Any
 import pytest
 
 from tests.conformance.mtls_proxy import server_tls
-from tests.conformance.platform_target import BACKEND, WALL, Provisioner, platform_stack
+from tests.conformance.platform_target import (
+    BACKEND,
+    WALL,
+    PlatformStack,
+    Provisioner,
+    platform_stack,
+)
+from tests.e2e_u05.commissioning import commissioning_clips
 from tests.e2e_u05.faults import fault_control
+from tests.e2e_u05.journeys import prepare_journeys
 from tests.fault_proxy import fault_proxy
 from tests.integration.conftest import localstack_endpoint_session, postgres_endpoint_session
 from tests.integration.test_u04_end_to_end import (
@@ -134,6 +142,14 @@ def users(target: LoadTarget, fleet: Fleet) -> tuple[dict[str, Any], dict[str, A
             user = uuid.UUID(str(rows[0]["user_id"]))
         else:
             user, statements = provisioner._user(organization, role)
+            if role is Role.LINE_MANAGER:
+                # La asignación nace acotada; identity no permite reescribir su alcance.
+                assignment, parameters = statements[-1]
+                assert "'organization', $2" in assignment
+                statements[-1] = (
+                    assignment.replace("'organization', $2", "'zone', $7"),
+                    (*parameters, fleet.zone_ids[0]),
+                )
             target.stack.admin(statements)
         password = secrets.token_urlsafe(32)
         secret = secrets.token_bytes(20)
@@ -194,6 +210,29 @@ def non_productive_zone(target: LoadTarget, fleet: Fleet, administrator: str) ->
     return target.api.call(create())
 
 
+def configure_store_origin(platform: PlatformStack, origin: str) -> None:
+    """CORS de vigia-evidence como en infra/stacks/data.py, con el origen TLS efímero.
+
+    El arnés de carga solo usa clientes de servidor y crea depósitos sin CORS. El
+    navegador necesita la misma regla de producción, nunca un origen comodín.
+    """
+    with contextlib.closing(platform.localstack.aws_client("s3")) as store:
+        store.put_bucket_cors(
+            Bucket=platform.environ["VIGIA_EVIDENCE_BUCKET"],
+            CORSConfiguration={
+                "CORSRules": [
+                    {
+                        "AllowedOrigins": [origin],
+                        "AllowedMethods": ["PUT", "GET", "HEAD"],
+                        "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                        "ExposeHeaders": ["ETag"],
+                        "MaxAgeSeconds": 3600,
+                    }
+                ]
+            },
+        )
+
+
 @contextlib.contextmanager
 def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
     """Arranque y liberación simétricos, incluidos los fallos antes de publicar el manifiesto."""
@@ -230,6 +269,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             VIGIA_PUBLIC_ORIGIN=app.url,
             VIGIA_CSP_STORE_ORIGINS=aws.url,
         )
+        configure_store_origin(platform, app.url)
         api = stack.enter_context(load_api(platform.environ, port, log_file=directory / "api.log"))
         node_ca = directory / "node-ca.crt"
         node_ca.write_bytes(platform.node_ca_root())
@@ -250,14 +290,17 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
         cache.mkdir()
         dataset = directory / "dataset"
         dataset.mkdir()
+        profile = PROFILES["u04-e2e"]
+        seed = 449
         fleet, result, analysis, _ = run_load(
             target,
-            PROFILES["u04-e2e"],
-            dataset=write_sealed_dataset(dataset, 449, WALL.now()),
+            profile,
+            dataset=write_sealed_dataset(dataset, seed, WALL.now()),
             cache=cache,
             work=work,
         )
         assert_functional(analysis, ledger_check(target, fleet, set(result["journal"]["emitted"])))
+        commissioning_clips(target, fleet)
         expected = _expected_subjects(target, fleet.organization_id)
         assert expected["finding"] and expected["detection"], "La carga no llenó bandeja y cola"
         wait_until(
@@ -268,6 +311,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             message="La bandeja no alcanzó al expediente",
         )
         public, credentials = users(target, fleet)
+        journeys = prepare_journeys(target, fleet, public, profile=profile.name, seed=seed)
         non_productive = non_productive_zone(target, fleet, public["administrator"]["user_id"])
         credentials_file = directory / "credentials.json"
         private_json(credentials_file, credentials)
@@ -283,6 +327,7 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
             "zone_ids": [str(value) for value in fleet.zone_ids],
             "non_productive_zone_id": str(non_productive),
             "concession_id": str(fleet.console.concession_id),
+            "journeys": journeys,
             "fault_control_url": fault_url,
         }
         try:

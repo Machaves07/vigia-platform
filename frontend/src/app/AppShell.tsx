@@ -35,7 +35,7 @@ import {
 } from 'react-router';
 
 import type { ScreenDescriptor } from '@/app/descriptor';
-import { buildNavigationMap } from '@/app/navigation';
+import { shellNavigation } from '@/app/shellNavigation';
 import { AppRouter } from '@/app/router';
 import { SCREENS } from '@/app/screens';
 import { ConcessionBanner } from '@/components/ConcessionBanner/ConcessionBanner';
@@ -152,7 +152,7 @@ function AppShell({
   readonly screens: readonly ScreenDescriptor[];
   readonly children?: ReactNode;
 }): ReactNode {
-  const navigation = useMemo(() => buildNavigationMap(principal, screens), [principal, screens]);
+  const navigation = useMemo(() => shellNavigation(principal, screens), [principal, screens]);
   const { plantId, availablePlants } = useScope(services.scope);
   const timeZone = availablePlants?.find((plant) => plant.plant_id === plantId)?.timezone ?? 'UTC';
   return (

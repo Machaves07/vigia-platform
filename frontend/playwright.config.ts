@@ -3,6 +3,8 @@ import { defineConfig } from '@playwright/test';
 import { compatibleWebkitExecutable } from './tests/browser/webkit';
 
 const engines = ['chromium', 'firefox', 'webkit'] as const;
+// Alternativa para anfitriones sin bibliotecas de WebKit: servidor local en la imagen oficial.
+const webkitEndpoint = process.env.VIGIA_WEBKIT_WS_ENDPOINT;
 const sizes = [
   { name: 'desktop', viewport: { width: 1280, height: 800 }, hasTouch: false },
   { name: 'tablet', viewport: { width: 768, height: 1024 }, hasTouch: true },
@@ -35,7 +37,9 @@ export default defineConfig({
         ...(browserName === 'chromium' ? { headless: false } : {}),
         // VIG-345: la revisión 2370 genera una violación nativa al crear select.
         ...(browserName === 'webkit'
-          ? { launchOptions: { executablePath: compatibleWebkitExecutable() } }
+          ? webkitEndpoint
+            ? { connectOptions: { wsEndpoint: webkitEndpoint, exposeNetwork: '<loopback>' } }
+            : { launchOptions: { executablePath: compatibleWebkitExecutable() } }
           : {}),
       },
     })),

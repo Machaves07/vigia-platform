@@ -272,6 +272,13 @@ class MtlsProxy:
                     continue
                 if isinstance(event, h11.Request):
                     request, body = event, bytearray()
+                    if connection.they_are_waiting_for_100_continue:
+                        # El cliente S3 espera este acuse antes de enviar el paquete. Sin él,
+                        # el proxy espera el cuerpo y boto3 espera al proxy hasta agotar el tope.
+                        writer.write(
+                            connection.send(h11.InformationalResponse(status_code=100, headers=[]))
+                        )
+                        await writer.drain()
                 elif isinstance(event, h11.Data):
                     body += event.data
                 elif isinstance(event, h11.EndOfMessage) and request is not None:

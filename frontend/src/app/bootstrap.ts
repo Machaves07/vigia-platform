@@ -151,6 +151,8 @@ export function createAppServices(options: AppServicesOptions = {}): AppServices
     cache,
     onEnded: () => {
       navigate(PROVIDER_PANEL);
+      // La identidad de GET /me anterior todavía refleja la concesión terminada.
+      void sessionRef?.load().catch(() => undefined);
     },
   });
 

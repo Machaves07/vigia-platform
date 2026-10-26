@@ -9,6 +9,9 @@ import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
 import { checkFreeText, validateBody, type ValidationIssue } from './validation';
 
+/** BR-APP-62: las páginas de SCR-01 leen el tipo de los avisos de validación por su propio puerto. */
+export type { ValidationIssue };
+
 export type Hierarchy = components['schemas']['HierarchyView'];
 export type Plant = components['schemas']['PlantView'];
 export type PlantBody = components['schemas']['PlantBody'];
