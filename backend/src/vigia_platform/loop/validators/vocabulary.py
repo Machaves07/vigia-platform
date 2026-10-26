@@ -36,7 +36,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from vigia_platform.ledger.free_text import FreeTextCandidate, FreeTextField, FreeTextRejected
+from vigia_platform.ledger.free_text import (
+    FreeTextCandidate,
+    FreeTextField,
+    FreeTextHint,
+    FreeTextRejected,
+)
 from vigia_platform.loop.domain.enums import BlockedTermCategory, BlockedTermForm, BlockedTermOrigin
 from vigia_platform.loop.observability.metrics import LoopMetricName, get_loop_metrics
 from vigia_platform.loop.record_types import VALIDATOR_EXEMPT_PATHS
@@ -136,7 +141,11 @@ class BlockedVocabularyVerdict:
 
 
 class BlockedVocabularyRejected(FreeTextRejected):
-    """Rechazo del vocabulario bloqueado, con su veredicto (que nunca llega al expediente)."""
+    """Rechazo del vocabulario bloqueado, con su veredicto (que nunca llega al expediente).
+
+    La pista para quien escribió (VIG-344) nombra el término (el tramo de la forma de validación
+    que coincidió, nunca el texto completo) y propone la alternativa del término de la lista.
+    """
 
     def __init__(self, field: FreeTextField, verdict: BlockedVocabularyVerdict) -> None:
         super().__init__(
@@ -144,6 +153,11 @@ class BlockedVocabularyRejected(FreeTextRejected):
             field,
             _MESSAGE,
             detail_code=DETAIL_CODE,
+            hint=FreeTextHint(
+                code=BLOCKED_VOCABULARY_TERM,
+                term=verdict.matched_value,
+                suggestion_es=verdict.suggestion_es,
+            ),
         )
         self.verdict = verdict
 

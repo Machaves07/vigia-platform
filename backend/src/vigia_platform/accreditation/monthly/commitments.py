@@ -71,7 +71,12 @@ from vigia_platform.ledger.application.writer import (
     Receipt,
     RecordScope,
 )
-from vigia_platform.ledger.free_text import FreeTextField, FreeTextRejected, apply_base_policy
+from vigia_platform.ledger.free_text import (
+    FreeTextField,
+    FreeTextHint,
+    FreeTextRejected,
+    apply_base_policy,
+)
 from vigia_platform.loop.detail_codes import LoopDetailCode, U04DetailCode
 from vigia_platform.loop.domain.enums import CommitmentState
 from vigia_platform.loop.projection.store import LoopProjectionStore
@@ -174,11 +179,13 @@ _VALIDATOR_CODES: Final[Mapping[str, LoopDetailCode]] = {
 
 
 class CommitmentRejected(Exception):
-    """Un rechazo de negocio, con su ``detail_code`` (acreditación o validadores del lazo)."""
+    """Un rechazo de negocio, con su ``detail_code`` (acreditación o validadores del lazo) y, si
+    lo rechazó un validador de texto libre, su pista para quien escribió (``hint``, VIG-344)."""
 
-    def __init__(self, detail_code: U04DetailCode) -> None:
+    def __init__(self, detail_code: U04DetailCode, hint: FreeTextHint | None = None) -> None:
         super().__init__(detail_code.value)
         self.detail_code = detail_code
+        self.hint = hint
 
 
 class CommitmentRequestInvalid(Exception):
@@ -344,7 +351,7 @@ def _written(result: Receipt | LedgerRejection) -> Receipt:
         if result.code is LedgerRejectionCode.FREE_TEXT_REJECTED:
             code = _VALIDATOR_CODES.get(result.detail_code or "")
             if code is not None:
-                raise CommitmentRejected(code)
+                raise CommitmentRejected(code, result.hint)
             raise CommitmentRequestInvalid("texto libre rechazado por el expediente")
         if result.code is LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT:
             raise CommitmentUnavailable("ledger_chain")

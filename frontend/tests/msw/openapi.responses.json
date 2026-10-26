@@ -3612,6 +3612,17 @@
             }
           ],
           "default": null
+        },
+        "rejection": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ApiErrorRejection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3640,6 +3651,47 @@
         "storage_unavailable"
       ],
       "type": "string"
+    },
+    "ApiErrorRejection": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "term": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
     },
     "ApprovalOut": {
       "properties": {

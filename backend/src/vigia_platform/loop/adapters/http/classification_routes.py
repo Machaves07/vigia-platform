@@ -137,7 +137,9 @@ def classification_router() -> APIRouter:
             )
         except ClassificationRejected as rejected:
             code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-            raise ApiError(code, detail_code=rejected.detail_code.value) from None
+            raise ApiError(
+                code, detail_code=rejected.detail_code.value, rejection=rejected.hint
+            ) from None
         except ClassificationRequestInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return view(result)

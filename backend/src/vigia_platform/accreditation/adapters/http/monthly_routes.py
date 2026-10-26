@@ -337,7 +337,7 @@ def _commitment_view(row: CommitmentRow) -> CommitmentOut:
 
 def _rejected(error: SampleAuditRejected | CommitmentRejected) -> ApiError:
     code, _status = HTTP_STATUS_BY_DETAIL_CODE[error.detail_code]
-    return ApiError(code, detail_code=error.detail_code.value)
+    return ApiError(code, detail_code=error.detail_code.value, rejection=error.hint)
 
 
 def _package_view(row: MonthlyPackageRow) -> MonthlyPackageOut:

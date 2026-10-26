@@ -42,6 +42,7 @@ from vigia_platform.ledger.evidence import EvidenceVerifier
 from vigia_platform.ledger.free_text import (
     FreeTextCandidate,
     FreeTextField,
+    FreeTextHint,
     FreeTextPolicyRegistry,
     FreeTextRejected,
 )
@@ -57,7 +58,12 @@ from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
     "ATTRIBUTION_MARKER",
+    "ATTRIBUTION_REJECTION",
+    "ATTRIBUTION_SUGGESTION",
     "BLOCKED_REASON",
+    "BLOCKED_REJECTION",
+    "BLOCKED_SUGGESTION",
+    "BLOCKED_TERM",
     "CONCESSION_HEADER",
     "PATH",
     "REASON",
@@ -75,21 +81,44 @@ REASON: Final = "Coexistencia observada entre la carretilla y el peatón en el p
 REINFORCED_REASON: Final = "Revisado el clip completo con mantenimiento: la intervención constaba"
 BLOCKED_REASON: Final = "La zona quedó garantizada sin ningún riesgo tras la revisión del clip"
 """Contiene ``garantizar`` (lista inicial de vocabulario bloqueado, BLM §14.2)."""
+BLOCKED_TERM: Final = "garantizada"
+"""La flexión de ``garantizar`` que cae en ``BLOCKED_REASON``: el ``rejection.term`` (VIG-344)."""
+BLOCKED_SUGGESTION: Final = (
+    "Cita la cifra medida, con su periodo y su fuente, en lugar de prometerla."
+)
+"""La alternativa de ``garantizar`` en la lista inicial (§14.2): el ``rejection.suggestion``."""
 ATTRIBUTION_MARKER: Final = "lo provocó el auxiliar"
 """El doble de ``person_attribution`` rechaza un texto que lo contiene (TASK-340 trae el real)."""
+ATTRIBUTION_SUGGESTION: Final = "Sugerencia sintética del doble: describa la condición del proceso."
+"""La alternativa que da el doble; como el real, nunca da el término (P3)."""
+BLOCKED_REJECTION: Final = {
+    "code": "blocked_vocabulary_term",
+    "term": BLOCKED_TERM,
+    "suggestion": BLOCKED_SUGGESTION,
+}
+"""El ``rejection`` exacto de la respuesta a ``BLOCKED_REASON`` (VIG-344)."""
+ATTRIBUTION_REJECTION: Final = {
+    "code": "person_attribution_detected",
+    "suggestion": ATTRIBUTION_SUGGESTION,
+}
+"""El del doble de atribución: la alternativa sin el término (P3)."""
 PERSON_ATTRIBUTION: Final = "person_attribution"
 
 Who = tuple[SessionCookie, uuid.UUID | None]
 
 
 def _person_attribution_double(candidate: FreeTextCandidate, field: FreeTextField) -> None:
-    """Doble del validador ``person_attribution`` (BLM §14.5): el mismo contrato de rechazo."""
+    """Doble del validador ``person_attribution`` (BLM §14.5): el mismo contrato de rechazo, con
+    la pista sin término del real (VIG-344)."""
     if ATTRIBUTION_MARKER in candidate.text.casefold():
         raise FreeTextRejected(
             "person_attribution_detected",
             field,
             "el texto atribuye la causa a una persona",
             detail_code=LoopDetailCode.PERSON_ATTRIBUTION_DETECTED.value,
+            hint=FreeTextHint(
+                code="person_attribution_detected", suggestion_es=ATTRIBUTION_SUGGESTION
+            ),
         )
 
 

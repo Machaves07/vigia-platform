@@ -35,7 +35,8 @@ Todo texto libre del expediente vive en una ruta declarada en ``free_text_paths`
    U-04 comprueba ahí la versión de la lista de vocabulario de la organización (PAT-LAZ-REN-02).
 
 El rechazo lo traduce el escritor (TASK-113) a ``free_text_rejected``, con el ``detail_code`` del
-validador si lo lleva (U-04: ``loop_blocked_vocabulary_term``).
+validador si lo lleva (U-04: ``loop_blocked_vocabulary_term``) y su pista (``FreeTextHint``,
+VIG-344): el motivo, el término y la sugerencia que la interfaz muestra a quien escribió.
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
 __all__ = [
     "FreeTextCandidate",
     "FreeTextField",
+    "FreeTextHint",
     "FreeTextPolicyRegistry",
     "FreeTextPreparation",
     "FreeTextPreparer",
@@ -151,12 +153,28 @@ class FreeTextField:
             raise ValueError("límites de longitud incoherentes")
 
 
+@dataclass(frozen=True, slots=True)
+class FreeTextHint:
+    """Lo que un validador enchufado deja ver de su rechazo a quien escribió el texto (VIG-344).
+
+    ``code`` es el motivo cerrado del validador (su ``FreeTextRejected.reason``); ``term``, el
+    término que cayó, solo si el validador puede mostrarlo sin repetir un dato de una persona
+    (P3); ``suggestion_es``, la alternativa. Solo viaja en la respuesta a quien escribió: nunca
+    llega al expediente, a la auditoría ni al registro, y ``repr`` no muestra el término.
+    """
+
+    code: str
+    term: str | None = dataclasses.field(default=None, repr=False)
+    suggestion_es: str | None = None
+
+
 class FreeTextRejected(ValueError):
     """Un texto que no pasa la política; ``reason`` es un código cerrado, sin el texto.
 
     ``detail_code`` es el ``detail_code`` registrado de la unidad del validador (p. ej.
     ``loop_blocked_vocabulary_term``), que el escritor conserva en su rechazo; la política base no
-    lo lleva.
+    lo lleva. ``hint`` es la pista del validador para quien escribió (``FreeTextHint``); la
+    política base tampoco la lleva.
     """
 
     def __init__(
@@ -166,11 +184,13 @@ class FreeTextRejected(ValueError):
         message: str,
         *,
         detail_code: str | None = None,
+        hint: FreeTextHint | None = None,
     ) -> None:
         super().__init__(f"{field.record_type} {field.path}: {message}")
         self.reason = reason
         self.field = field
         self.detail_code = detail_code
+        self.hint = hint
 
 
 _REPEATED_SPACES: Final = re.compile(" {2,}")

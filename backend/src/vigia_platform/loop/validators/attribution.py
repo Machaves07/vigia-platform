@@ -77,7 +77,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-from vigia_platform.ledger.free_text import FreeTextCandidate, FreeTextField, FreeTextRejected
+from vigia_platform.ledger.free_text import (
+    FreeTextCandidate,
+    FreeTextField,
+    FreeTextHint,
+    FreeTextRejected,
+)
 from vigia_platform.loop.observability.metrics import LoopMetricName, get_loop_metrics
 from vigia_platform.loop.record_types import VALIDATOR_EXEMPT_PATHS
 from vigia_platform.loop.validators.folding import confusable_map, validation_form
@@ -491,10 +496,22 @@ def _verdict(pattern: AttributionPattern) -> PersonAttributionVerdict:
 
 
 class PersonAttributionRejected(FreeTextRejected):
-    """Rechazo por atribución a persona, con su veredicto (que nunca llega al expediente)."""
+    """Rechazo por atribución a persona, con su veredicto (que nunca llega al expediente).
+
+    La pista para quien escribió (VIG-344) lleva solo la alternativa del patrón: **nunca el
+    término**, porque lo que coincidió es un dato de una persona (P3).
+    """
 
     def __init__(self, field: FreeTextField, verdict: PersonAttributionVerdict) -> None:
-        super().__init__(PERSON_ATTRIBUTION_DETECTED, field, _MESSAGE, detail_code=DETAIL_CODE)
+        super().__init__(
+            PERSON_ATTRIBUTION_DETECTED,
+            field,
+            _MESSAGE,
+            detail_code=DETAIL_CODE,
+            hint=FreeTextHint(
+                code=PERSON_ATTRIBUTION_DETECTED, suggestion_es=verdict.suggestion_es
+            ),
+        )
         self.verdict = verdict
 
 

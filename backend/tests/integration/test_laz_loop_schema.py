@@ -59,6 +59,7 @@ from tests.loop_db import (
     seed_loop,
 )
 from vigia_platform.loop.adapters.postgres import tables as loop_tables
+from vigia_platform.loop.assistant.consumer import RejectionReason
 
 pytestmark = pytest.mark.integration
 
@@ -82,6 +83,8 @@ def _load(name: str) -> Any:
 MIGRATION = _load("laz_0029_loop_schema.py")
 USAGE = _load("laz_0033_assistant_usage.py")
 """laz_0033 (TASK-316): las columnas de uso de ``assistant_request``, de trabajo del guardián."""
+LAZ_0041 = _load("laz_0041_assistant_rejection_reason.py")
+"""laz_0041 (VIG-344): el motivo del rechazo de una salida del asistente, un cierre más."""
 LAZ_0037 = _load("laz_0037_projection_rebuild_shadow.py")
 
 LAZ_0037_SHADOW_TABLES: Final = LAZ_0037._SHADOW_TABLES
@@ -285,6 +288,8 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         if MIGRATION.app_updatable_columns(table)
     }
     expected["assistant_request"] |= set(USAGE.USAGE_COLUMNS)
+    # El motivo del rechazo (laz_0041, VIG-344): un cierre más, aditivo sobre laz_0029.
+    expected["assistant_request"] |= {"rejection_reason"}
     # Arrendamiento (laz_0037, TASK-306) y frontera de ingesta (laz_0040, VIG-273): columnas
     # aditivas sobre lo que laz_0029 ya dejaba actualizable en loop_projection_checkpoint.
     expected["loop_projection_checkpoint"] |= {
@@ -326,6 +331,7 @@ async def test_app_update_privileges_are_exactly_the_whitelist(superuser: Any) -
         "state",
         "resolved_at",
         "unavailable_cause",
+        "rejection_reason",
         "attempt_count",
         *USAGE.USAGE_COLUMNS,
     }
@@ -573,6 +579,49 @@ async def test_assistant_request_leaves_pending_once(app: Any, superuser: Any, l
         "UPDATE loop.assistant_request SET analysis_id = gen_random_uuid() WHERE request_id = $1"
     )
     assert await _steps(app, organization, (other, [request_id])) == INSUFFICIENT_PRIVILEGE
+
+
+@pytest.mark.asyncio
+async def test_assistant_request_rejection_reason_closes_once_and_only_when_rejected(
+    app: Any, superuser: Any, loop: Loop
+) -> None:
+    """laz_0041 (VIG-344): el motivo se escribe con la salida de ``pending`` a
+    ``rejected_by_validators``, una sola vez, solo con ese estado y de la lista cerrada; la imagen
+    anterior, que no lo escribe, sigue pudiendo rechazar."""
+    request_id = await _request(superuser, loop.a)
+    resolve = (
+        "UPDATE loop.assistant_request SET state = $2, rejection_reason = $3,"
+        " resolved_at = requested_at + interval '1 minute' WHERE request_id = $1"
+    )
+    again = "UPDATE loop.assistant_request SET rejection_reason = $2 WHERE request_id = $1"
+    organization = loop.a.organization_id
+    rejected = "rejected_by_validators"
+    for reason in LAZ_0041.REJECTION_REASONS:
+        assert await _steps(app, organization, (resolve, [request_id, rejected, reason])) == "ok"
+    assert await _steps(app, organization, (resolve, [request_id, rejected, None])) == "ok"
+    assert (
+        await _steps(app, organization, (resolve, [request_id, rejected, "free_text"]))
+        == CHECK_VIOLATION
+    )
+    assert (
+        await _steps(app, organization, (resolve, [request_id, "ready", "schema_invalid"]))
+        == CHECK_VIOLATION
+    )
+    assert (
+        await _steps(
+            app,
+            organization,
+            (resolve, [request_id, rejected, "schema_invalid"]),
+            (again, [request_id, "no_evidence"]),
+        )
+        == RESTRICT_VIOLATION
+    )
+
+
+def test_rejection_reasons_are_the_consumer_reasons() -> None:
+    """La lista cerrada de ``laz_0041`` es exactamente ``RejectionReason`` del consumidor."""
+    assert set(LAZ_0041.REJECTION_REASONS) == {reason.value for reason in RejectionReason}
+    assert tuple(LAZ_0041.WORK_COLUMNS) == ("attempt_count", *USAGE.USAGE_COLUMNS)
 
 
 @pytest.mark.asyncio
