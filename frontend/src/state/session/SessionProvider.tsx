@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { useLocation } from 'react-router';
 
 import {
   createFormDraft,
@@ -63,10 +64,14 @@ export function useFormDraft(
   formId: string,
 ): readonly [FormDraft, (event: FormDraftEvent) => void] {
   const store = useSession();
+  // La ruta que pinta esta pantalla, no la que el puente del enrutador registrará tras pintarla.
+  const { pathname, search } = useLocation();
   const [draft, dispatch] = useReducer(
     formDraftReducer,
     null,
-    () => store.takeDraft(screenId, formId) ?? createFormDraft(screenId, formId),
+    () =>
+      store.takeDraft(screenId, formId, `${pathname}${search}`) ??
+      createFormDraft(screenId, formId),
   );
   const latest = useRef(draft);
   useEffect(() => {

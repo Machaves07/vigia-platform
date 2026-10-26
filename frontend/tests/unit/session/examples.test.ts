@@ -7,6 +7,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { HttpResponse } from 'msw';
 import { createElement, type ChangeEvent, type SyntheticEvent } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
@@ -32,6 +33,7 @@ import {
   type SessionNotice,
   type SessionStoreOptions,
 } from '@/state/session';
+import type { SessionStore } from '@/state/session/store';
 
 import { apiError, variant } from '../../msw/handlers';
 import { server } from '../../setup/msw';
@@ -498,6 +500,20 @@ function InviteForm() {
   );
 }
 
+/**
+ * El formulario montado por el enrutador en `route`: `useFormDraft` recupera el borrador de la
+ * ruta que pinta la pantalla, como en la aplicación.
+ */
+function renderInviteForm(store: SessionStore, route: string) {
+  return render(
+    createElement(
+      MemoryRouter,
+      { initialEntries: [route] },
+      createElement(SessionProvider, { store }, createElement(InviteForm)),
+    ),
+  );
+}
+
 describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, NFR-APP-38)', () => {
   async function lockMidForm(options: {
     reauthAs: string;
@@ -515,7 +531,7 @@ describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, N
         return apiError('unauthenticated', 401);
       }),
     );
-    const view = render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+    const view = renderInviteForm(store, context.route.current);
     fireEvent.change(screen.getByLabelText('Correo'), { target: { value: 'nueva@ejemplo.test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Invitar' }));
     await vi.waitFor(() => {
@@ -528,7 +544,7 @@ describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, N
       // Antes de saber quién reautentica, el formulario no recupera nada; al desmontarse en
       // blanco no pisa el borrador guardado.
       context.route.current = FORM_ROUTE;
-      const locked = render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+      const locked = renderInviteForm(store, context.route.current);
       expect(screen.getByLabelText('Correo')).toHaveProperty('value', '');
       locked.unmount();
       context.route.current = LOGIN_ROUTE;
@@ -542,13 +558,13 @@ describe('unauthenticated a mitad de un formulario (BR-APP-16, PAT-APP-RES-05, N
     if (options.detour === true) {
       // La persona pasa antes por otra pantalla con el mismo formulario: el borrador no es suyo.
       context.route.current = '/users';
-      const other = render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+      const other = renderInviteForm(store, context.route.current);
       expect(screen.getByLabelText('Correo')).toHaveProperty('value', '');
       other.unmount();
     }
     // Sin ruta guardada, la persona vuelve a abrir el mismo formulario por su cuenta.
     context.route.current = back ?? FORM_ROUTE;
-    render(createElement(SessionProvider, { store }, createElement(InviteForm)));
+    renderInviteForm(store, context.route.current);
     // Tiempo para los temporizadores y una petición testigo por el mismo transporte y MSW: una
     // escritura reenviada saldría antes que ella.
     clock.advance(10 * MINUTE_MS);
