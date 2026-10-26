@@ -20,6 +20,19 @@ export async function setPlatformFault(world: World, mode: FaultMode): Promise<v
  * peticiones ya abandonadas en cola) y después reenvía. Sin el corte, la reserva de conexiones del
  * balanceador recibía de golpe esa cola y retrasaba la primera carga de la prueba siguiente.
  */
+/**
+ * Saca de la ventana del límite de exportación (5 por usuario y hora, PAT-LAZ-ESC-02) las
+ * solicitudes ya hechas en el mundo, como si hubiera pasado la hora (VIG-356). Los seis proyectos
+ * comparten mundo y persona coordinadora: sin esto, FS-APP-01 y 06 recibían 429 a partir del
+ * tercer proyecto. El límite de producción no cambia.
+ */
+export async function rewindExportWindow(world: World): Promise<void> {
+  const response = await fetch(`${world.fault_control_url}/exports/rewind`, { method: 'POST' });
+  if (response.status !== 204) {
+    throw new Error(`El mundo no reinició la ventana de exportación (${String(response.status)}).`);
+  }
+}
+
 export async function restorePlatform(world: World): Promise<void> {
   await setPlatformFault(world, 'refuse');
   await setPlatformFault(world, 'forward');

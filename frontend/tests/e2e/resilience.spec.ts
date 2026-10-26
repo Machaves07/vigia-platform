@@ -21,7 +21,7 @@ import fc from 'fast-check';
 import { systemClock } from '../../src/state/clock';
 
 import { nextTotp } from './authenticator';
-import { restorePlatform, setPlatformFault } from './faults';
+import { restorePlatform, rewindExportWindow, setPlatformFault } from './faults';
 import { authenticatedTest as test, expect } from './fixtures';
 
 /** Un archivo del catálogo de textos (Node exige atributos para importar JSON). */
@@ -173,6 +173,10 @@ async function track(id: string, parameters: Draft, run: () => Promise<void>): P
 
 test.describe('FS-APP con la plataforma real y el intermediario de fallos', () => {
   test.use({ role: 'coordinator_sst' });
+  // Cada escenario con el cupo de exportación de una hora nueva (VIG-356).
+  test.beforeEach(async ({ world }) => {
+    await rewindExportWindow(world);
+  });
 
   test('FS-APP-01 · la API no responde 2 minutos', async ({ authenticatedPage: page, world }) => {
     test.setTimeout(360_000);
