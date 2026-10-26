@@ -6,6 +6,7 @@
  * de número. Corre también sobre la vista de autoprueba y sobre sus mutaciones, que deben caer.
  */
 import { render } from '@testing-library/react';
+import fc from 'fast-check';
 import { createElement, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { describe, expect, it } from 'vitest';
@@ -187,6 +188,62 @@ describe('PR-APP-07: inspección de valores renderizados, no de textos fijos', (
     expect(
       violations(createElement('span', null, createElement('b', null, 'trk-8841'), '2093')),
     ).toEqual(['RV-00 (SCR-00): campo «track_id» fuera de allowedFields aparece en el texto.']);
+  });
+
+  it('no marca un campo prohibido que coincide con el ordinal (n + 1) de un campo permitido', () => {
+    const ordinal = { view: 'RV-00', screen: 'SCR-00', allowedFields: ['segment_index'] } as const;
+    const check = (values: Record<string, number>, text: string) => {
+      const { baseElement, unmount } = render(createElement('h3', null, text));
+      try {
+        return forbiddenRendered(ordinal, values, baseElement);
+      } finally {
+        unmount();
+      }
+    };
+    // Contraejemplo de la semilla 1138177627 (VIG-350): «Tramo» pinta `segment_index + 1`.
+    expect(
+      check({ segment_index: 2147483634, classification_count: 2147483635 }, 'Tramo 2147483635'),
+    ).toEqual([]);
+    // El campo prohibido que no coincide con ningún ordinal sigue cayendo.
+    expect(
+      check(
+        { segment_index: 2147483634, classification_count: 2147483633 },
+        'Tramo 2147483635 · 2147483633',
+      ),
+    ).toEqual([
+      'RV-00 (SCR-00): campo «classification_count» fuera de allowedFields aparece en el texto.',
+    ]);
+  });
+
+  it('RV-12 (SCR-08) no marca classification_count igual al ordinal del tramo (semilla 1138177627)', () => {
+    const detailView = views.findingDetail;
+    if (detailView === undefined) throw new Error('falta la vista findingDetail');
+    const [base] = fc.sample(
+      detailView.data.filter(
+        (value) => Array.isArray(value.records) && (value.records as unknown[]).length > 0,
+      ),
+      { seed: 1138177627, numRuns: 1 },
+    );
+    if (base === undefined) throw new Error('sin muestra');
+    const [first, ...rest] = base.records as Record<string, unknown>[];
+    const data = {
+      ...base,
+      classification_count: 2147483635,
+      records: [{ ...first, segment_index: 2147483634 }, ...rest],
+    };
+    const { baseElement, unmount } = render(
+      detailView.render(data, {
+        organizationId: '00000000-0000-4000-8000-000000000001',
+        concessionOrganizationId: null,
+        reportContractError: () => undefined,
+      }),
+    );
+    try {
+      expect(baseElement.textContent).toContain('2147483635');
+      expect(forbiddenRendered(detailView, data, baseElement)).toEqual([]);
+    } finally {
+      unmount();
+    }
   });
 
   it('no marca textos fijos que solo se parecen a un campo de persona', () => {
