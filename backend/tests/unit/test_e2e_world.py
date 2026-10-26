@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import stat
+import uuid
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,13 +16,17 @@ import pytest
 
 from tests.conformance.platform_target import PlatformStack
 from tests.e2e_u05 import __main__ as cli
+from tests.e2e_u05 import world as world_module
 from tests.e2e_u05.journeys import browser_store_cors
 from tests.e2e_u05.world import (
     assert_no_leaks,
     configure_store_origin,
+    deploy_check_invitation,
     private_json,
     published_manifest,
 )
+from vigia_platform.identity.application.users import InviteRequest
+from vigia_platform.shared.context import Role, ScopeLevel
 
 
 def test_private_file_is_0600_from_creation_and_never_overwrites(tmp_path: Path) -> None:
@@ -153,3 +159,73 @@ def test_browser_store_has_one_closed_origin_and_the_production_headers() -> Non
             }
         ]
     }
+
+
+INVITED = uuid.UUID("01900000-0000-7000-8000-0000000000aa")
+
+
+def _invitation_world(
+    monkeypatch: pytest.MonkeyPatch, link: str | None
+) -> tuple[Any, list[Any], list[InviteRequest]]:
+    """Mundo mínimo: la persona administradora invita por ``UserService`` (doble)."""
+    statements: list[Any] = []
+    requests: list[InviteRequest] = []
+
+    class FakeProvisioner:
+        def __init__(self, *_: Any) -> None:
+            pass
+
+        def _session(self, organization: uuid.UUID, user: uuid.UUID) -> tuple[str, str]:
+            return f"cookie-{user}", f"sesión de {user} en {organization}"
+
+        async def _context(self, cookie: str, concession: None) -> str:
+            return f"contexto de {cookie}"
+
+    async def invite_user(context: str, request: InviteRequest) -> Any:
+        assert context.startswith("contexto de cookie-")
+        requests.append(request)
+        return SimpleNamespace(link=link, user_id=INVITED)
+
+    monkeypatch.setattr(world_module, "Provisioner", FakeProvisioner)
+    users = SimpleNamespace(invite_user=invite_user)
+    target = SimpleNamespace(
+        stack=SimpleNamespace(admin=statements.extend),
+        api=SimpleNamespace(runtime=SimpleNamespace(identity=SimpleNamespace(users=users))),
+        app=SimpleNamespace(url="https://127.0.0.1:1"),
+        tls=SimpleNamespace(ca_file=Path("ca")),
+        directory=Path("d"),
+    )
+    target.api.call = asyncio.run
+    return target, statements, requests
+
+
+def test_deploy_check_invitation_is_a_disclosed_coordinator_invitation_of_the_synthetic_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link = f"https://127.0.0.1:1/invitations#{secrets.token_urlsafe(16)}"
+    target, statements, requests = _invitation_world(monkeypatch, link)
+    organization, administrator = uuid.uuid4(), uuid.uuid4()
+    fleet = SimpleNamespace(organization_id=organization)
+    material = deploy_check_invitation(cast(Any, target), cast(Any, fleet), str(administrator))
+    assert material == {"invitation_link": link, "email": "deploy-check@e2e.example.test"}
+    session, second_factor = statements
+    assert session == f"sesión de {administrator} en {organization}"
+    # Como las seis cuentas del mundo: el recorrido inscribe el segundo factor de prueba.
+    assert second_factor == (
+        "UPDATE identity.user_account SET second_factor_required = true WHERE user_id = $1",
+        (INVITED,),
+    )
+    (request,) = requests
+    assert request.disclose_link is True and request.email == material["email"]
+    (assignment,) = request.assignments
+    assert assignment.role is Role.COORDINATOR_SST
+    assert (assignment.scope_level, assignment.scope_id) == (ScopeLevel.ORGANIZATION, organization)
+
+
+def test_deploy_check_invitation_fails_closed_without_a_disclosed_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target, _, _ = _invitation_world(monkeypatch, None)
+    fleet = SimpleNamespace(organization_id=uuid.uuid4())
+    with pytest.raises(RuntimeError, match="no divulgó"):
+        deploy_check_invitation(cast(Any, target), cast(Any, fleet), str(uuid.uuid4()))

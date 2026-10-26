@@ -1,0 +1,62 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "node perf/world-server.mjs",
+      "startServerReadyPattern": "VIGIA_PERF_READY",
+      "startServerReadyTimeout": 900000,
+      "url": ["https://127.0.0.1:47330/login"],
+      "numberOfRuns": 3,
+      "headful": true,
+      "settings": {
+        "emulatedUserAgent": false,
+        "onlyCategories": ["performance"],
+        "formFactor": "desktop",
+        "screenEmulation": {
+          "mobile": false,
+          "width": 1280,
+          "height": 800,
+          "deviceScaleFactor": 1,
+          "disabled": false
+        },
+        "throttlingMethod": "simulate",
+        "throttling": {
+          "rttMs": 40,
+          "throughputKbps": 10240,
+          "requestLatencyMs": 0,
+          "downloadThroughputKbps": 10240,
+          "uploadThroughputKbps": 10240,
+          "cpuSlowdownMultiplier": 4
+        },
+        "chromeFlags": "--no-sandbox --ignore-certificate-errors"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "resource-summary:stylesheet:count": [
+          "error",
+          {
+            "minNumericValue": 1
+          }
+        ],
+        "first-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 717,
+            "aggregationMethod": "median-run"
+          }
+        ],
+        "interactive": [
+          "error",
+          {
+            "maxNumericValue": 1333,
+            "aggregationMethod": "median-run"
+          }
+        ]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": ".lighthouseci/reports"
+    }
+  }
+}

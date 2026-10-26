@@ -5,8 +5,8 @@ import {
   hierarchyPort,
   plantIssues,
   type PlantBody,
+  type ValidationIssue,
 } from '@/ports/scr01Hierarchy';
-import type { ValidationIssue } from '@/ports/validation';
 import { useScreenMutation } from '@/state/query';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { text } from '@/texts';

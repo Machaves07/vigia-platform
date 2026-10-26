@@ -30,6 +30,7 @@ npm ci
 | `npm run generate:check` | Falla con la diferencia si algo generado no coincide con `app.yaml`                   |
 | `npm run e2e`            | Playwright contra la plataforma local (lo completa VIG-299)                           |
 | `npm run size`           | Presupuesto de tamaño por porción (lo completa VIG-294)                               |
+| `npm run lighthouse`     | Lighthouse CI sobre la construcción servida por el mundo (`lighthouserc.json`)        |
 
 ### Modo de la API en desarrollo
 
@@ -70,6 +71,20 @@ Cada corrida imprime al empezar el perfil y la semilla:
 
 `FC_SEED=<semilla>` repite la corrida; `FC_PROFILE=nightly` usa 2 000 ejemplos. Todo contraejemplo
 reducido se guarda como prueba de regresión en `tests/regressions/` (PBT-10).
+
+### Rendimiento (NFR-APP-02, 03, 05 a 07)
+
+- `npm test -- tests/perf`: marcas de interacción (tendencia en `ci`, bloqueantes con
+  `npm run test:nightly`), consumo de la API en reposo y pestañas sin caché compartida.
+- `npm run e2e -- tests/e2e/memory.spec.ts`: montón de la pestaña con la bandeja de 200 filas
+  (Chromium de escritorio).
+- `npm run lighthouse`: arranca el mundo con `perf/world-server.mjs` (puerto fijo `47330`), tres
+  corridas con 10 Mbit/s y CPU ×4 simulados, y falla si la mediana supera el umbral de
+  `perf/baseline.json` (mediana calibrada + 20 %, sin pasar del presupuesto). Chrome corre con
+  interfaz gráfica y su agente de usuario nativo: el emulado de Lighthouse no pasa la comprobación
+  de navegadores. En WSL, `CHROME_PATH` debe apuntar al Chromium de Playwright (si no, se elige el
+  Chrome de Windows). Recalibrar: tres corridas y
+  `node perf/calibrate.mjs --write --machine "<equipo>" --load "<carga>"`.
 
 ## Archivos por descubrimiento
 
