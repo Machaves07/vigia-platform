@@ -146,7 +146,11 @@ npm run e2e -- tests/e2e/smoke.spec.ts
 ```
 
 El mundo levanta PostgreSQL y LocalStack propios, la API con la raíz de producción y `dist/`, y
-cuentas sintéticas; al terminar los libera. La política de contenido y los tipos confiables están
+cuentas sintéticas; al terminar los libera. Si WebKit no arranca por bibliotecas del sistema que
+faltan en el anfitrión, la alternativa es `playwright run-server` en la imagen oficial con
+`VIGIA_WEBKIT_WS_ENDPOINT` ([`tests/e2e/README.md`](tests/e2e/README.md)); para la revisión fijada
+2359 sirve la variante `mcr.microsoft.com/playwright:v1.64.1-jammy` (enlaza ICU 70, que la
+variante `noble` no trae). La política de contenido y los tipos confiables están
 activos y una violación falla la prueba.
 
 ### Semillas de fast-check
