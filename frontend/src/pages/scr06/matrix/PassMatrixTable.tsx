@@ -83,7 +83,9 @@ export function PassMatrixTable({
                       className={styles.button}
                       data-part="select_row"
                       data-row-id={row.row_id}
-                      aria-label={`${text('scr06.matrix.select')}: ${posture} ${String(number)}`}
+                      // El nombre accesible empieza por el texto visible (WCAG 2.5.3, regla
+                      // `label-content-name-mismatch` de axe): quien dicta «Fila 1» lo encuentra.
+                      aria-label={`${text('scr06.matrix.row')} ${String(number)}: ${text('scr06.matrix.select')}, ${posture}`}
                       onClick={() => {
                         onSelectRow(row.row_id);
                       }}
