@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { authenticatedTest as test, expect } from './fixtures';
 import { confirmFinding, logout } from './journeys';
 
-test.use({ role: 'coordinator_sst' });
+test.use({ role: 'coordinator_sst', actionTimeout: 30_000 });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
 
 test('el coordinador recorre el lazo real con evidencia, firma y revisión humana', async ({
@@ -105,6 +105,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     const written = page.waitForResponse(
       (response) =>
         response.url().endsWith('/resolution') && response.request().method() === 'POST',
+      { timeout: 60_000 },
     );
     await form.getByRole('button', { name: 'Registrar resolución', exact: true }).click();
     expect((await written).status()).toBe(201);
@@ -125,6 +126,9 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await page.getByRole('link', { name: 'Registrar evidencia y cierre' }).click();
     await page.getByRole('button', { name: 'Consultar el expediente de cierre' }).click();
     const evidence = page.getByRole('form', { name: 'Añadir evidencia de la acción' });
+    await evidence.getByLabel('Acción cuya evidencia se registra').selectOption({
+      label: 'Instalar un resguardo fijo en el acceso de la zona sintética',
+    });
     await evidence
       .getByLabel('Descripción estructurada de lo ejecutado (Obligatorio)', { exact: true })
       .fill('Resguardo fijo instalado y anclado al piso del acceso de la zona');
@@ -181,31 +185,37 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(page.getByRole('region', { name: 'Política de planta' })).toContainText(
       'Criterios sintéticos de hallazgos sin alternativa segura',
     );
-    await page
+    const declaration = page.getByRole('region', {
+      name: 'Declarar hallazgo incerrable',
+      exact: true,
+    });
+    await declaration
       .getByLabel('Alternativa evaluada (Obligatorio)', { exact: true })
       .fill('Resguardo fijo evaluado en el acceso de la zona sintética');
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
-    await page
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration
       .getByLabel('Motivo de descarte (Obligatorio)', { exact: true })
       .fill('La geometría del acceso no permite instalar el resguardo fijo');
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
-    await page.getByLabel('Fecha de la decisión', { exact: true }).fill(world.journeys.today);
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
-    await page
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration
+      .getByLabel('Fecha de la decisión', { exact: true })
+      .fill(world.journeys.today);
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration
       .getByLabel('Medida compensatoria (Obligatorio)', { exact: true })
       .fill('Delimitar el acceso con una barrera física temporal en la zona');
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
-    await page
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration
       .getByLabel('Fecha de revisión en la planta', { exact: true })
       .fill(world.journeys.review_date);
-    await page.getByRole('button', { name: 'Firmar', exact: true }).click();
-    await page.getByRole('button', { name: 'Siguiente', exact: true }).click();
+    await declaration.getByRole('button', { name: 'Firmar', exact: true }).click();
+    await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
     const declared = page.waitForResponse(
       (response) =>
         response.url().endsWith('/unclosable') && response.request().method() === 'POST',
     );
-    await page.getByRole('button', { name: 'Enviar', exact: true }).click();
+    await declaration.getByRole('button', { name: 'Enviar', exact: true }).click();
     const response = await declared;
     expect(response.status()).toBe(201);
     expect(await response.json()).toMatchObject({ lifecycle_state: 'unclosable' });

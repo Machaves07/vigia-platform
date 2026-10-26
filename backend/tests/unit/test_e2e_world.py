@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.e2e_u05.journeys import browser_store_cors
 from tests.e2e_u05.world import assert_no_leaks, private_json, published_manifest
 
 
@@ -74,3 +75,17 @@ def test_manifest_collision_never_deletes_another_run(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError), published_manifest(path, {}):
         pytest.fail("No debe entrar en el mundo de otra ejecución")
     assert path.read_text() == "otra ejecución"
+
+
+def test_browser_store_has_one_closed_origin_and_the_production_headers() -> None:
+    assert browser_store_cors("https://127.0.0.1:4443") == {
+        "CORSRules": [
+            {
+                "AllowedOrigins": ["https://127.0.0.1:4443"],
+                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
+    }

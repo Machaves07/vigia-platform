@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import uuid
 from typing import Any, cast
@@ -29,6 +30,21 @@ from vigia_platform.shared.runtime.core import build_core, s3_storage
 from vigia_platform.shared.runtime.units import RuntimeDatabase, registered_units
 
 
+def browser_store_cors(origin: str) -> dict[str, Any]:
+    """Misma regla de infra/stacks/data.py (A-33), con el origen efímero del mundo."""
+    return {
+        "CORSRules": [
+            {
+                "AllowedOrigins": [origin],
+                "AllowedMethods": ["PUT", "GET", "HEAD"],
+                "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
+    }
+
+
 def prepare_journeys(
     target: LoadTarget, fleet: Fleet, users: dict[str, Any], *, profile: str, seed: int
 ) -> dict[str, Any]:
@@ -37,6 +53,11 @@ def prepare_journeys(
     Solo la identidad de las cuentas se configura con el bootstrap del arnés. Ninguna
     clasificación, firma o compromiso del recorrido se siembra ni se sustituye su API.
     """
+    with contextlib.closing(target.stack.localstack.aws_client("s3")) as store:
+        store.put_bucket_cors(
+            Bucket=target.stack.environ["VIGIA_EVIDENCE_BUCKET"],
+            CORSConfiguration=browser_store_cors(target.app.url),
+        )
     coordinator = uuid.UUID(users["coordinator_sst"]["user_id"])
     target.stack.admin(
         [

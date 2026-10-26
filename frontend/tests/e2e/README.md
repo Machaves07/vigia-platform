@@ -66,3 +66,12 @@ instalador bajo concesión y un paquete de mes vencido mediante el compositor re
 La cuenta del mando nace con alcance de una sola zona. Las clasificaciones, la
 evidencia PNG, las firmas, las resoluciones y los compromisos del recorrido se
 registran desde el navegador, sin interceptar ni simular la API.
+
+Si faltan bibliotecas del sistema para WebKit y no se puede instalar
+`npx playwright install-deps webkit`, se admite `playwright run-server` de la misma
+versión de Playwright dentro de su imagen oficial, usando **el ejecutable fijado**
+por `webkit-build.json`, no otro navegador. Publique su puerto solo en
+`127.0.0.1` y pase su dirección por `VIGIA_WEBKIT_WS_ENDPOINT`. El cliente expone
+únicamente su red de bucle local al navegador remoto; el modo `launchServer` no
+activa ese túnel. Ni la API ni las cuentas
+se sustituyen y CSP sigue activa. El contenedor debe detenerse al terminar.
