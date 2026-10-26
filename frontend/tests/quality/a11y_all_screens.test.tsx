@@ -4,8 +4,11 @@
  * OpenAPI y pasa `axe` sin violaciones de impacto serio ni crítico. Las moderadas y menores se
  * informan, no fallan.
  *
- * La prueba exige antes que la pantalla esté pintada (`mountEntry`) y que no sea la página de
- * fallo del armazón: `axe` sobre «Algo falló» no diría nada de la pantalla.
+ * La prueba exige antes que la pantalla muestre su contenido: `mountEntry` espera a que esté
+ * pintada y pulsa su consulta auditada (el lazo, la clasificación, el acta, la causa raíz…), y
+ * aquí se descartan la página de fallo del armazón, el estado de error de sección y cualquier
+ * texto de carga. `axe` sobre un botón de consulta o sobre «No se pudo cargar esta pantalla.» no
+ * diría nada de la pantalla.
  *
  * jsdom no calcula estilos ni geometría: `color-contrast` y las reglas de tamaño quedan como
  * «incompletas» y las cubre `tests/e2e/a11y.spec.ts` en navegadores reales. La revisión manual
@@ -17,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 import { SCREENS } from '@/app/screens';
 import { text } from '@/texts';
 
-import { mountEntry, SCREEN_ENTRIES } from '../support/screenTour';
+import { mountEntry, revealButton, SCREEN_ENTRIES, unrevealed } from '../support/screenTour';
 
 const BLOCKING = new Set(['serious', 'critical']);
 
@@ -44,9 +47,12 @@ describe('NFR-APP-50: axe en todas las pantallas', { timeout: 60_000 }, () => {
     const fixture = await mountEntry(entry);
     expect(fixture.services.errors.getSnapshot()).toBeNull();
     expect(document.querySelector('main h1')?.textContent).not.toBe(text('app_shell.error.title'));
+    expect(unrevealed()).toBeNull();
 
     const results = await axeCore.run(document.body, { resultTypes: ['violations', 'passes'] });
-    process.stdout.write(`${report(`${entry.screen} ${entry.template}`, results)}\n`);
+    const reveal = revealButton(entry);
+    const label = `${entry.screen} ${entry.template}${reveal === null ? '' : ` (tras «${reveal}»)`}`;
+    process.stdout.write(`${report(label, results)}\n`);
     const blocking = results.violations
       .filter((violation) => BLOCKING.has(violation.impact ?? ''))
       .map((violation) => ({

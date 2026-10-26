@@ -41,43 +41,148 @@ export function policySummary(): string {
 const PRODUCTION_DIRECTIVES = [
   "default-src 'self'",
   "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self'",
+  "frame-src 'none'",
+  "object-src 'none'",
   "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
   "require-trusted-types-for 'script'",
 ] as const;
 
+/**
+ * Rutas declaradas por las pantallas (`SCREENS`; el arnés de Playwright no carga `src/`, así que
+ * la lista se copia aquí y `tests/unit/e2e/policy.test.ts` comprueba que coincide).
+ */
+export const DECLARED_ROUTES: readonly string[] = [
+  '/account',
+  '/admin/hierarchy',
+  '/admin/organization',
+  '/admin/users',
+  '/admin/vocabulary',
+  '/concessions',
+  '/exports',
+  '/findings',
+  '/findings/:finding_state_id',
+  '/findings/:finding_state_id/classify',
+  '/findings/:finding_state_id/loop',
+  '/findings/:finding_state_id/loop/closure',
+  '/findings/:finding_state_id/loop/reopening',
+  '/findings/:finding_state_id/loop/unclosable',
+  '/findings/:finding_state_id/root-cause',
+  '/findings/labels',
+  '/fleet',
+  '/fleet/alarms',
+  '/fleet/enrollment',
+  '/fleet/nodes/:node_id',
+  '/fleet/nodes/:node_id/enrollment',
+  '/fleet/nodes/:node_id/lifecycle',
+  '/fleet/target-versions',
+  '/home',
+  '/integrity',
+  '/invitations/:token',
+  '/login',
+  '/login/enroll',
+  '/login/second-factor',
+  '/metrics',
+  '/metrics/weekly',
+  '/notifications',
+  '/notifications/preferences',
+  '/plants/:plant_id/admissions',
+  '/plants/:plant_id/catalog',
+  '/plants/:plant_id/fleet-thresholds',
+  '/plants/:plant_id/gates',
+  '/plants/:plant_id/policy',
+  '/provider/concessions',
+  '/review-queue',
+  '/transparency',
+  '/transparency/:zone_id',
+  '/zones/:zone_id/catalog',
+  '/zones/:zone_id/catalog/parameters',
+  '/zones/:zone_id/commissioning',
+  '/zones/:zone_id/commissioning/close',
+  '/zones/:zone_id/commissioning/matrix',
+  '/zones/:zone_id/commissioning/occlusion',
+  '/zones/:zone_id/commissioning/records/:record_id',
+  '/zones/:zone_id/coverage',
+  '/zones/:zone_id/gates',
+  '/zones/:zone_id/monthly/:period',
+  '/zones/:zone_id/parameters',
+  '/zones/:zone_id/standards',
+  '/zones/monthly',
+];
+
+/** Lecturas `GET` de la API que una pantalla abre como documento (el acta de comisionamiento). */
+export const API_DOCUMENTS: readonly string[] = ['/commissioning-records/:record_id/document'];
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const WORD = /^[a-z][a-z0-9-]*$/;
-const PERIOD = /^\d{4}-\d{2}$/;
-const INVITATION_TOKEN = /^[A-Za-z0-9_-]{16,512}$/;
+/** Forma de cada parámetro de ruta; cualquier otro nombre sería texto libre posible. */
+const PARAM_FORMS: Readonly<Record<string, RegExp>> = {
+  zone_id: UUID,
+  plant_id: UUID,
+  finding_state_id: UUID,
+  node_id: UUID,
+  record_id: UUID,
+  period: /^\d{4}-(?:0[1-9]|1[0-2])$/,
+  // Token opaco del enlace de invitación (BR-APP-18): base64url, sin datos de la persona.
+  token: /^[A-Za-z0-9_-]{16,512}$/,
+};
+
+function matches(segments: readonly string[], template: string): boolean {
+  const expected = template.split('/').slice(1);
+  return (
+    expected.length === segments.length &&
+    expected.every((part, index) => {
+      const segment = segments[index] ?? '';
+      if (!part.startsWith(':')) return part === segment;
+      return PARAM_FORMS[part.slice(1)]?.test(decodeURIComponent(segment)) === true;
+    })
+  );
+}
 
 /**
- * Problema de una URL del propio origen (NFR-APP-32): segmentos fijos, identificadores UUID, el
- * mes o el token opaco de invitación; sin consulta y como mucho el ancla de un elemento.
+ * Problema de una URL del propio origen (NFR-APP-32): una ruta declarada (o un documento de la
+ * API) con cada parámetro de su forma cerrada; sin consulta y como mucho el ancla de un elemento.
  */
 export function urlProblem(url: URL): string | null {
   if (url.search !== '') return 'consulta en la URL';
   if (!/^(?:#[A-Za-z0-9_-]{1,80})?$/.test(url.hash)) return 'fragmento con datos en la URL';
-  const segments = url.pathname
-    .split('/')
-    .slice(1)
-    .filter((segment) => segment !== '');
-  for (const [index, segment] of segments.entries()) {
-    if (WORD.test(segment) || UUID.test(segment) || PERIOD.test(segment)) continue;
-    if (segments[index - 1] === 'invitations' && INVITATION_TOKEN.test(segment)) continue;
-    return 'texto libre en la ruta';
+  if (url.pathname === '/') return null;
+  const segments = url.pathname.split('/').slice(1);
+  const known = [...DECLARED_ROUTES, ...API_DOCUMENTS].some((template) =>
+    matches(segments, template),
+  );
+  return known ? null : 'texto libre en la ruta';
+}
+
+/**
+ * `media-src` y `connect-src` de `policy` admiten exactamente el propio origen y el del depósito
+ * (`VIGIA_CSP_STORE_ORIGINS` del mundo); devuelve la directiva que no lo hace, o `null`.
+ */
+function storeDirectivesProblem(policy: readonly string[], storeOrigin: string): string | null {
+  for (const name of ['media-src', 'connect-src']) {
+    const directive = policy.find((entry) => entry.split(/\s+/)[0] === name);
+    const sources = new Set(directive?.split(/\s+/).slice(1));
+    const expected = new Set(["'self'", storeOrigin]);
+    if (sources.size !== expected.size || [...expected].some((source) => !sources.has(source))) {
+      return name;
+    }
   }
   return null;
 }
 
 /**
  * Cubre páginas, marcos, ventanas nuevas y navegación, antes del primer guion de la app. Con
- * `origin`, además exige la política de producción en cada documento de ese origen, rechaza las
- * URL con texto libre y cualquier escritura de los guiones de la aplicación en la consola.
+ * `origin`, además exige la política de producción en cada documento de ese origen (con
+ * `storeOrigin`, también `media-src` y `connect-src` con el depósito), rechaza las URL con texto
+ * libre y cualquier escritura de los guiones de la aplicación en la consola.
  */
 export async function watchPolicy(
   context: BrowserContext,
   label = '',
   origin?: string,
+  storeOrigin?: string,
 ): Promise<() => void> {
   const violations: string[] = [];
   const clientData: string[] = [];
@@ -140,7 +245,10 @@ export async function watchPolicy(
       const policy = (response.headers()['content-security-policy'] ?? '')
         .split(';')
         .map((directive) => directive.trim());
-      if (PRODUCTION_DIRECTIVES.every((directive) => policy.includes(directive))) {
+      if (
+        PRODUCTION_DIRECTIVES.every((directive) => policy.includes(directive)) &&
+        (storeOrigin === undefined || storeDirectivesProblem(policy, storeOrigin) === null)
+      ) {
         totals.documents += 1;
       } else {
         violations.push('documento sin la política de producción');

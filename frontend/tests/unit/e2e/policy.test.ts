@@ -3,12 +3,23 @@ import { EventEmitter } from 'node:events';
 import type { BrowserContext } from '@playwright/test';
 import { describe, expect, it, vi } from 'vitest';
 
-import { policySummary, policyTotals, urlProblem, watchPolicy } from '../../e2e/policy';
+import { SCREENS } from '@/app/screens';
+
+import {
+  API_DOCUMENTS,
+  DECLARED_ROUTES,
+  policySummary,
+  policyTotals,
+  urlProblem,
+  watchPolicy,
+} from '../../e2e/policy';
+import { API_OPERATIONS } from '../../generators/openapi';
 
 async function harness({
   alreadyOpen = false,
   origin,
-}: { alreadyOpen?: boolean; origin?: string } = {}) {
+  store,
+}: { alreadyOpen?: boolean; origin?: string; store?: string } = {}) {
   const disposable = { dispose: vi.fn(), [Symbol.asyncDispose]: vi.fn() };
   const mainFrame = { url: () => `${origin ?? ''}/` };
   const page = Object.assign(new EventEmitter(), { mainFrame: () => mainFrame });
@@ -17,7 +28,7 @@ async function harness({
     addInitScript: vi.fn<BrowserContext['addInitScript']>().mockResolvedValue(disposable),
     pages: vi.fn(() => (alreadyOpen ? [page] : [])),
   });
-  const check = await watchPolicy(context as unknown as BrowserContext, '', origin);
+  const check = await watchPolicy(context as unknown as BrowserContext, '', origin, store);
   if (!alreadyOpen) context.emit('page', page);
   return { context, page, check, mainFrame };
 }
@@ -57,9 +68,12 @@ describe('guarda de CSP y tipos confiables del arnés', () => {
 });
 
 const ORIGIN = 'https://127.0.0.1:8443';
+const STORE = 'http://127.0.0.1:4566';
 const POLICY =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; " +
-  "frame-ancestors 'none'; require-trusted-types-for 'script'";
+  `media-src 'self' ${STORE}; connect-src 'self' ${STORE}; frame-src 'none'; ` +
+  "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; " +
+  "require-trusted-types-for 'script'";
 
 function documentResponse(url: string, policy: string | null) {
   return {
@@ -105,6 +119,39 @@ describe('agregado del arnés y datos en el cliente (VIG-336)', () => {
     expect(bad.check).toThrow(/Violaciones de CSP o Trusted Types/);
   });
 
+  it.each([
+    [
+      'sin el depósito en media-src',
+      POLICY.replace(`media-src 'self' ${STORE}`, "media-src 'self'"),
+    ],
+    ['otro origen en connect-src', POLICY.replace(STORE, `${STORE} https://otro.invalid`)],
+    ['sin connect-src', POLICY.replace(`connect-src 'self' ${STORE}; `, '')],
+  ])('con el depósito del mundo, rechaza el documento %s', async (_case, policy) => {
+    const good = await harness({ origin: ORIGIN, store: STORE });
+    good.page.emit('response', documentResponse(`${ORIGIN}/home`, POLICY));
+    expect(good.check).not.toThrow();
+
+    const bad = await harness({ origin: ORIGIN, store: STORE });
+    bad.page.emit('response', documentResponse(`${ORIGIN}/home`, policy));
+    expect(bad.check).toThrow(/Violaciones de CSP o Trusted Types/);
+  });
+
+  it('la lista de rutas del arnés es la de las pantallas registradas', () => {
+    const declared = SCREENS.flatMap((screen) =>
+      screen.route_groups.flatMap((group) => [...group.paths]),
+    );
+    expect([...DECLARED_ROUTES].sort()).toEqual([...new Set(declared)].sort());
+  });
+
+  it('los documentos de la API que admite son lecturas GET de app.yaml', () => {
+    const reads = new Set(
+      API_OPERATIONS.filter((operation) => operation.method === 'get').map((operation) =>
+        operation.path.replace(/\{([a-z_]+)\}/g, ':$1'),
+      ),
+    );
+    for (const path of API_DOCUMENTS) expect(reads.has(path), path).toBe(true);
+  });
+
   it('rechaza la consola de los guiones de la aplicación y no la del navegador', async () => {
     const browser = await harness({ origin: ORIGIN });
     browser.page.emit('console', {
@@ -127,6 +174,11 @@ describe('agregado del arnés y datos en el cliente (VIG-336)', () => {
     ['/account#sessions', false],
     ['/findings?zona=L%C3%ADnea%203', true],
     ['/findings/Juan%20P%C3%A9rez', true],
+    ['/findings/juan-perez', true],
+    ['/zones/0190a1b2-1111-7000-8000-000000000001/monthly/septiembre', true],
+    ['/commissioning-records/0190a1b2-7777-7000-8000-000000000001/document', false],
+    ['/commissioning-records/juan-perez/document', true],
+    ['/otra/ruta', true],
   ] as const)('navegación a %s: rechazada %s', async (path, rejected) => {
     const { page, check, mainFrame } = await harness({ origin: ORIGIN });
     mainFrame.url = () => `${ORIGIN}${path}`;

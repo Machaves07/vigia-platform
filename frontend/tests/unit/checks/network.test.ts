@@ -1,7 +1,8 @@
 // @vitest-environment node
 /**
  * `scripts/checks/network.mjs` (PR-APP-28 estática, VIG-336): pasa con `src/` real y falla con un
- * componente que hace `fetch('https://ejemplo.invalid')`, con una API de red fuera de `ports/`,
+ * componente que hace `fetch('https://ejemplo.invalid')`, con una API de red fuera de `ports/`
+ * (también otra que `fetch` en la lista cerrada), con un acceso con corchetes a un objeto global,
  * con un `fetch` de la lista cerrada hacia un destino que no es una ruta literal, y con una URL
  * nueva o relativa al protocolo en la salida construida.
  */
@@ -140,6 +141,43 @@ describe('network.mjs', () => {
     );
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('no solo reenvía los parámetros del adaptador');
+  });
+
+  it('la lista cerrada solo admite fetch: otra API de red falla también allí', () => {
+    const result = run(
+      tree({
+        'src/state/connection/probe.ts':
+          "export const sonda = (origen: string) => new WebSocket(new URL('/canal', origen));\n",
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'src/state/connection/probe.ts: «WebSocket» fuera de src/ports/',
+    );
+  });
+
+  it.each([
+    ["globalThis['fe' + 'tch']('/x')", 'acceso calculado a «globalThis»'],
+    ['window[nombre]', 'acceso calculado a «window»'],
+    ["self['WebSocket']", '«WebSocket»'],
+  ])('falla con el acceso con corchetes %s fuera de src/ports/', (expression, problem) => {
+    const result = run(
+      tree({
+        'src/state/connection/probe.ts': `const nombre = 'x';\nexport const x = () => ${expression};\n`,
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `src/state/connection/probe.ts: ${problem} fuera de src/ports/`,
+    );
+  });
+
+  it('admite el acceso con corchetes con una clave literal que no es de red', () => {
+    const result = run(
+      tree({ 'src/state/tema.ts': "export const x = () => window['matchMedia']('(x)');\n" }),
+    );
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 
   it('falla si la detección de capacidades llama a fetch', () => {

@@ -44,7 +44,7 @@ export const test = base.extend<Fixtures, SummaryFixtures>({
     await use(world.base_url);
   },
   context: async ({ context, world }, use) => {
-    const check = await watchPolicy(context, '', originOf(world));
+    const check = await watchPolicy(context, '', originOf(world), world.store_origin);
     try {
       await use(context);
       for (const page of context.pages()) await assertClientState(page, originOf(world));
@@ -103,7 +103,7 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
         context.setDefaultTimeout(30_000);
         contexts.add(context);
         if (reuse) sessions.set(role, context);
-        const check = await watchPolicy(context, role, originOf(world));
+        const check = await watchPolicy(context, role, originOf(world), world.store_origin);
         sessionPolicyChecks.set(context, check);
         checks.push(check);
         const page = await context.newPage();

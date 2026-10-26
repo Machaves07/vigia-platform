@@ -7,7 +7,8 @@
  *   la invitación); ninguna lleva consulta ni fragmento.
  * - Enlaces internos: con cada pantalla pintada con los datos de MSW, todo enlace del propio
  *   origen apunta a una ruta declarada con parámetros de esa forma, sin consulta y como mucho con
- *   el ancla de un elemento de la página (`#sessions`).
+ *   el ancla de un elemento de la página (`#sessions`); o a una lectura `GET` de la API (el
+ *   documento del acta) con identificadores UUID.
  * - Título: ningún archivo de `src/` escribe `document.title` ni pinta `<title>`; el de
  *   `index.html` es «Vigía» y montar cualquier pantalla no lo cambia.
  * - Almacenamiento: tras montar cada pantalla solo existe la clave de `UiPreferences` en
@@ -25,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 import { SCREENS } from '@/app/screens';
 import { PREFERENCES_KEY } from '@/state/scope';
 
+import { API_OPERATIONS } from '../generators/openapi';
 import { mountEntry, SCREEN_ENTRIES } from '../support/screenTour';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -47,20 +49,36 @@ const TEMPLATES: readonly string[] = SCREENS.flatMap((screen) =>
   screen.route_groups.flatMap((group) => [...group.paths]),
 );
 
+/**
+ * Lecturas de la API (comparte origen con la aplicación) que una pantalla puede enlazar, como el
+ * documento del acta: sus parámetros (`{record_id}`) solo se admiten como UUID.
+ */
+const API_READS: readonly string[] = API_OPERATIONS.filter(
+  (operation) => operation.method === 'get',
+).map((operation) => operation.path.replace(/\{([a-z_]+)\}/g, ':$1'));
+
+/** ¿`path` encaja en `template` con cada parámetro de la forma que da `form`? */
+function matches(path: string, template: string, form: (name: string) => RegExp | undefined) {
+  const segments = path.split('/').slice(1);
+  const expected = template.split('/').slice(1);
+  return (
+    expected.length === segments.length &&
+    expected.every((part, index) => {
+      const segment = segments[index] ?? '';
+      if (!part.startsWith(':')) return part === segment;
+      return form(part.slice(1))?.test(decodeURIComponent(segment)) === true;
+    })
+  );
+}
+
 /** ¿`path` encaja en alguna ruta declarada con parámetros de la forma admitida? */
 function declared(path: string): boolean {
-  const segments = path.split('/').slice(1);
-  return TEMPLATES.some((template) => {
-    const expected = template.split('/').slice(1);
-    return (
-      expected.length === segments.length &&
-      expected.every((part, index) => {
-        const segment = segments[index] ?? '';
-        if (!part.startsWith(':')) return part === segment;
-        return PARAM_FORMS[part.slice(1)]?.test(decodeURIComponent(segment)) === true;
-      })
-    );
-  });
+  return TEMPLATES.some((template) => matches(path, template, (name) => PARAM_FORMS[name]));
+}
+
+/** ¿`path` es una lectura de la API con identificadores UUID? */
+function apiRead(path: string): boolean {
+  return API_READS.some((template) => matches(path, template, () => UUID));
 }
 
 function sources(directory: string): string[] {
@@ -87,6 +105,11 @@ describe('NFR-APP-32: rutas declaradas', () => {
     expect(declared('/findings/Juan%20P%C3%A9rez')).toBe(false);
     expect(declared('/zones/0190a1b2-1111-7000-8000-000000000001/monthly/septiembre')).toBe(false);
     expect(declared('/otra/ruta')).toBe(false);
+    expect(apiRead('/commissioning-records/0190a1b2-7777-7000-8000-000000000001/document')).toBe(
+      true,
+    );
+    expect(apiRead('/commissioning-records/Juan%20P%C3%A9rez/document')).toBe(false);
+    expect(apiRead('/commissioning-records/0190a1b2-7777-7000-8000-000000000001/otro')).toBe(false);
   });
 });
 
@@ -121,7 +144,7 @@ describe(
         // Solo anclas a un elemento de la propia página (`#sessions`), nunca un dato.
         expect(url.hash, url.href).toMatch(/^(?:#[A-Za-z0-9_-]{1,80})?$/);
         if (url.pathname === '/') continue;
-        expect(declared(url.pathname), url.pathname).toBe(true);
+        expect(declared(url.pathname) || apiRead(url.pathname), url.pathname).toBe(true);
         if (/\/[0-9a-f]{8}-/.test(url.pathname)) withParameters += 1;
       }
 

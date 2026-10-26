@@ -8,9 +8,11 @@
  * - ningún texto literal contiene una URL absoluta (`https://…`, `wss://…`) ni relativa al
  *   protocolo (`//host`), salvo los identificadores inertes de `INERT` (no se piden nunca);
  * - ninguna API de red (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`,
- *   trabajadores…) se nombra fuera de `src/ports/`, salvo la lista cerrada `OUTSIDE_PORTS`, donde
- *   cada archivo declara qué llamadas a `fetch` admite (ruta literal del propio origen, adaptador
- *   que reenvía sus parámetros, ninguna o solo desarrollo).
+ *   trabajadores…) se nombra fuera de `src/ports/`, salvo `fetch` en la lista cerrada
+ *   `OUTSIDE_PORTS`, donde cada archivo declara qué llamadas admite (ruta literal del propio
+ *   origen, adaptador que reenvía sus parámetros, ninguna o solo desarrollo);
+ * - fuera de `src/ports/`, ningún acceso con corchetes a un objeto global (`globalThis`, `window`,
+ *   `self`, `navigator`) usa una clave calculada o el nombre de una API de red.
  *
  * En `dist/` (si existe; `npm run build` lo crea): toda URL absoluta o relativa al protocolo de
  * los archivos de texto está en `INERT` (mensajes de error de dependencias, espacios de nombres
@@ -161,6 +163,22 @@ function sameOriginTarget(/** @type {ts.CallExpression} */ call) {
   );
 }
 
+/** Objetos globales por los que se alcanza una API de red con un acceso calculado. */
+const GLOBALS = new Set(['globalThis', 'window', 'self', 'navigator']);
+
+/**
+ * Acceso con corchetes a un objeto global (`globalThis['fe' + 'tch']`, `window[nombre]`): esquiva
+ * la regla de los nombres, así que fuera de `src/ports/` solo se admite con una clave literal que
+ * no sea una API de red. Devuelve el problema o `null`.
+ */
+function computedGlobal(/** @type {ts.Node} */ node) {
+  if (!ts.isElementAccessExpression(node)) return null;
+  if (!ts.isIdentifier(node.expression) || !GLOBALS.has(node.expression.text)) return null;
+  const key = node.argumentExpression;
+  if (!ts.isStringLiteralLike(key)) return `acceso calculado a «${node.expression.text}»`;
+  return NETWORK_APIS.has(key.text) ? `«${key.text}»` : null;
+}
+
 /** Nombre de la API de red que nombra `node` en posición de valor, o `null`. */
 function networkName(/** @type {ts.Node} */ node) {
   if (!ts.isIdentifier(node) || !NETWORK_APIS.has(node.text)) return null;
@@ -202,9 +220,12 @@ function checkSource(file) {
       }
     }
     const api = networkName(node);
-    if (api !== null && !inPorts && !allowed) {
+    // La lista cerrada solo admite `fetch`: cualquier otra API de red sigue fuera de `ports/`.
+    if (api !== null && !inPorts && (!allowed || api !== 'fetch')) {
       errors.push(`src/${name}: «${api}» fuera de src/ports/.`);
     }
+    const computed = inPorts ? null : computedGlobal(node);
+    if (computed !== null) errors.push(`src/${name}: ${computed} fuera de src/ports/.`);
     if (
       exception !== undefined &&
       exception.calls !== 'dev' &&

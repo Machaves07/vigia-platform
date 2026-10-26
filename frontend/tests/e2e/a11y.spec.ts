@@ -7,7 +7,8 @@
  *
  * Los roles de escritorio corren en los proyectos de escritorio y los de campo (instalador y
  * COPASST) en los de tableta. Cada pantalla se analiza con su contenido cargado: título de la
- * pantalla visible y ningún indicador de carga.
+ * pantalla visible, ningún indicador ni texto de carga y ningún estado de error de sección. Las
+ * pantallas de consulta auditada (SCR-09 y SCR-11) se analizan después de pulsar la consulta.
  */
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
@@ -19,10 +20,23 @@ import type { Role, World } from './world';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 const BLOCKING = new Set(['serious', 'critical']);
 
+/** Con uno de estos textos en `<main>` la pantalla no muestra su contenido. */
+const NOT_CONTENT = [
+  'No se pudo cargar esta pantalla.',
+  'Cargando…',
+  'Cargando la aplicación…',
+  'Cargando datos…',
+];
+
 /** Analiza la página y devuelve la línea del informe; falla con las serias o críticas. */
 async function audit(page: Page, label: string): Promise<void> {
   await expect(page.locator('main h1').first()).toBeVisible();
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 });
+  for (const value of NOT_CONTENT) {
+    await expect(page.locator('main').getByText(value, { exact: true }), label).toHaveCount(0, {
+      timeout: 30_000,
+    });
+  }
   const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   const count = (impact: string) =>
     results.violations.filter((violation) => violation.impact === impact).length;
@@ -85,6 +99,51 @@ function routes(world: World, role: Role): readonly string[] {
   }
 }
 
+/**
+ * Pantallas de consulta auditada del coordinador (SCR-09 y SCR-11) con los hallazgos del motor:
+ * se pulsa la consulta y se espera su contenido antes de analizar. Solo lecturas, salvo el inicio
+ * de la causa raíz, que crea un análisis nuevo cada vez y no estorba al recorrido del coordinador.
+ */
+function auditedRoutes(
+  world: World,
+  engine: string,
+): readonly { readonly path: string; readonly button: string; readonly content: string }[] {
+  const selected = required(world.journeys.findings[engine]);
+  const history = 'Historial de evidencia, cierres y declaraciones';
+  return [
+    {
+      path: `/findings/${selected.closure}/classify`,
+      button: 'Consultar el hallazgo y su historial',
+      content: 'Historial de clasificaciones',
+    },
+    {
+      path: `/findings/${selected.closure}/loop`,
+      button: 'Consultar el lazo',
+      content: 'Comprometer una acción sobre la zona',
+    },
+    {
+      path: `/findings/${selected.closure}/loop/closure`,
+      button: 'Consultar el expediente de cierre',
+      content: history,
+    },
+    {
+      path: `/findings/${selected.unclosable}/loop/unclosable`,
+      button: 'Consultar el expediente de cierre',
+      content: history,
+    },
+    {
+      path: `/findings/${selected.unclosable}/loop/reopening`,
+      button: 'Consultar el expediente de cierre',
+      content: history,
+    },
+    {
+      path: `/findings/${selected.unclosable}/root-cause`,
+      button: 'Iniciar el análisis de causa raíz',
+      content: 'Plantilla guiada de causa raíz',
+    },
+  ];
+}
+
 /** Rutas del instalador bajo concesión (se activa desde el panel, como en su recorrido). */
 function installerRoutes(world: World): readonly string[] {
   const zone = required(world.zone_ids[0]);
@@ -120,11 +179,26 @@ for (const role of [...DESKTOP, ...TABLET]) {
 
     authenticatedTest(
       `pantallas de ${role} sin violaciones serias ni críticas`,
-      async ({ authenticatedPage: page, world }) => {
+      async ({ authenticatedPage: page, world, browserName }) => {
         authenticatedTest.setTimeout(300_000);
         for (const path of routes(world, role)) {
           await page.goto(path);
           await audit(page, `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')}`);
+        }
+        if (role === 'coordinator_sst') {
+          for (const { path, button, content } of auditedRoutes(world, browserName)) {
+            await page.goto(path);
+            await page.getByRole('button', { name: button, exact: true }).click();
+            await expect(
+              page.locator('main').getByText(content, { exact: true }).first(),
+            ).toBeVisible({
+              timeout: 60_000,
+            });
+            await audit(
+              page,
+              `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')} (tras «${button}»)`,
+            );
+          }
         }
         if (role === 'provider_installer') {
           for (const path of installerRoutes(world)) {

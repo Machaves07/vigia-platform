@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { act, waitFor } from '@testing-library/react';
+import { act, fireEvent, waitFor } from '@testing-library/react';
 import { getResponse, http, HttpResponse, type HttpHandler } from 'msw';
 
 import type { RouteGroup, ScreenDescriptor } from '@/app/descriptor';
@@ -115,20 +115,112 @@ function relay({ extra = [], rewrite }: TourOptions): HttpHandler {
       headers: request.headers,
       body,
     });
-    const response = await getResponse([...extra, ...handlers], forwarded);
+    const response = await getResponse([...extra, ...TOUR_DATA, ...handlers], forwarded);
     if (response === undefined) return apiError('not_found', 404);
-    if (rewrite === undefined || !response.headers.get('content-type')?.includes('json')) {
-      return response;
-    }
+    if (!response.headers.get('content-type')?.includes('json')) return response;
+    const transform = rewrite ?? ((value: unknown) => value);
     // El cuerpo cambia de longitud: la cabecera original ya no vale.
     const headers = new Headers(response.headers);
     headers.delete('content-length');
-    return HttpResponse.json(rewrite(await response.json()) as never, {
+    return HttpResponse.json(transform(onePage(await response.json())) as never, {
       status: response.status,
       headers,
     });
   });
 }
+
+/**
+ * Los ejemplos generados repiten el mismo cursor en cada página y los puertos rechazan un cursor
+ * repetido («Cursor de revisión inválido o repetido.»): el recorrido sirve una sola página.
+ */
+function onePage(body: unknown): unknown {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return body;
+  const page: Record<string, unknown> = { ...body };
+  for (const field of ['next_cursor', 'next_after']) if (field in page) page[field] = null;
+  return page;
+}
+
+const INSTANT = '2026-01-01T12:00:00.000Z';
+
+/**
+ * Catálogo de zona que cumple el esquema del contrato (el ejemplo genérico de la OpenAPI es un
+ * diccionario libre y SCR-04 lo rechaza con «Catálogo fuera del contrato.»).
+ */
+function zoneCatalog(): Record<string, unknown> {
+  const catalog = {
+    zone_id: PARAMS.zone_id,
+    zone_code: 'Z-SINT',
+    plant_id: PARAMS.plant_id,
+    organization_id: shellHierarchy().organization.organization_id,
+    version: 1,
+    issued_at: INSTANT,
+    cameras: [
+      {
+        camera_id: PARAMS.node_id,
+        code: 'CAM-SINT',
+        role_in_zone: 'primary',
+        declared_min_fps: 10,
+      },
+    ],
+    minimum_coverage: { required_count: 1, required_camera_ids: [] },
+    signals: [],
+    standards: [
+      {
+        standard_id: PARAMS.record_id,
+        version: 1,
+        family: 'dwell',
+        title_es: 'Estándar sintético',
+        declared_text: 'Presencia en zona con energía afirmada.',
+        declared_by: {
+          user_id: PARAMS.plant_id,
+          display_name: 'Responsable sintético',
+          role: 'administrator',
+        },
+        effective_from: INSTANT,
+        tier_policy: 'tier_1_when_signal_valid',
+        predicate: {
+          all_of: [{ presence: true }, { signal_role: 'energy', value: 'asserted' }],
+          min_duration_ms: 1000,
+        },
+      },
+    ],
+    thresholds: { review: 0.4, publication: 0.8 },
+    clip_window: { pre_seconds: 5, post_seconds: 5 },
+    episode: { grouping_window_ms: 3000, max_segment_ms: 900000 },
+    commissioning_watermark: true,
+  };
+  return {
+    zone_id: PARAMS.zone_id,
+    catalog_version: 1,
+    issued_at: INSTANT,
+    issued_by: PARAMS.plant_id,
+    role_in_use: 'administrator',
+    reason_es: 'Motivo sintético de publicación',
+    changed_fields: ['standards'],
+    superseded_at: null,
+    single_occupancy: false,
+    aggregation_window_minutes: 60,
+    catalog,
+  };
+}
+
+/**
+ * El ejemplo generado de `GET /loop/findings/{id}` con la planta y la zona de la jerarquía: sin
+ * ellas SCR-09 no conoce la zona horaria de la planta y deja el lazo en «Cargando…».
+ */
+const loopFinding = http.get('/loop/findings/:finding_state_id', async ({ request }) => {
+  const response = await getResponse([...handlers], request);
+  if (response === undefined) return apiError('not_found', 404);
+  const body = (await response.json()) as Record<string, unknown>;
+  const finding = { ...body, plant_id: PARAMS.plant_id, zone_id: PARAMS.zone_id };
+  return HttpResponse.json(finding as never, { status: response.status });
+});
+
+/** Datos del recorrido por delante de los generados (rutas relativas, como ellos). */
+const TOUR_DATA: readonly HttpHandler[] = [
+  http.get('/zones/:zone_id/catalog', () => HttpResponse.json(zoneCatalog())),
+  loopFinding,
+];
 
 /** Jerarquía sintética con la planta y la zona de los parámetros de ruta. */
 function tourHierarchy(): HierarchyView {
@@ -164,12 +256,72 @@ function serveEntry(entry: ScreenEntry, options: TourOptions = {}): void {
   server.use(http.get(`${ORIGIN}/hierarchy`, () => HttpResponse.json(tourHierarchy())));
 }
 
+/** Textos de carga: con uno visible la pantalla aún no muestra su contenido. */
+const LOADING_TEXTS: readonly string[] = [
+  'common.loading',
+  'common.loading_data',
+  'components_status.loading.label',
+  'screen_state.loading',
+  'scr06.matrix.clips.loading',
+  'scr08.detail.contract_loading',
+].map((key) => text(key));
+
+/**
+ * Consultas auditadas (BR-APP-…: no se piden solas) que el recorrido pulsa para auditar el
+ * contenido de la pantalla y no solo su botón de consulta.
+ */
+const REVEAL: Readonly<Record<string, RevealStep>> = {
+  'SCR-06 record': { button: 'scr06.record.request' },
+  'SCR-08 labels': {
+    fill: { from: '2025-12-01', to: '2026-01-01' },
+    button: 'scr08.labels.submit',
+  },
+  'SCR-09 classify': { button: 'scr09.classify.load' },
+  'SCR-09 loop': { button: 'scr09.loop.load' },
+  'SCR-09 loop/closure': { button: 'scr09.closure.load' },
+  'SCR-09 loop/unclosable': { button: 'scr09.closure.load' },
+  'SCR-09 loop/reopening': { button: 'scr09.closure.load' },
+  'SCR-11 root_cause': { button: 'scr11.start' },
+};
+
+interface RevealStep {
+  /** Campos (`name` → valor) que la consulta exige antes de pulsarla. */
+  readonly fill?: Readonly<Record<string, string>>;
+  /** Clave del texto del botón de la consulta. */
+  readonly button: string;
+}
+
+/** Texto visible del botón de consulta auditada que el recorrido pulsa en `entry`, si lo hay. */
+export function revealButton(entry: ScreenEntry): string | null {
+  const step = REVEAL[`${entry.screen} ${entry.group}`];
+  return step === undefined ? null : text(step.button);
+}
+
+/**
+ * Lo que impide auditar la pantalla montada: el estado de error de sección o un texto de carga;
+ * `null` si muestra su contenido. Las consultas auditadas las pulsa y comprueba `mountEntry`.
+ */
+export function unrevealed(): string | null {
+  const main = document.querySelector('main');
+  if (main === null) return 'sin región principal';
+  if (main.textContent.includes(text('screen_state.error'))) return 'estado de error de sección';
+  const loading = LOADING_TEXTS.find((value) => main.textContent.includes(value));
+  return loading === undefined ? null : `texto de carga visible: «${loading}»`;
+}
+
+function findButton(label: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('main button')].find(
+    (button) => button.textContent.trim() === label,
+  );
+}
+
 /** Lo que impide dar la pantalla por pintada, o `null` si ya lo está. */
 function pending(fixture: ShellFixture): string | null {
   const main = document.querySelector('main');
   if (main === null) return 'sin región principal';
   if (main.querySelector('h1') === null) return 'sin título de pantalla';
-  if (main.textContent.includes(text('common.loading'))) return 'porción de ruta sin cargar';
+  const loading = LOADING_TEXTS.find((value) => main.textContent.includes(value));
+  if (loading !== undefined) return `texto de carga visible: «${loading}»`;
   const fetching = fixture.services.cache.client
     .getQueryCache()
     .getAll()
@@ -203,7 +355,10 @@ async function quiet(fixture: ShellFixture): Promise<void> {
   throw new Error(`La pantalla no terminó de pintarse: ${reason}`);
 }
 
-/** Monta `entry` sin `StrictMode` (como la construcción de producción) y espera la calma. */
+/**
+ * Monta `entry` sin `StrictMode` (como la construcción de producción), espera la calma y pulsa
+ * sus consultas auditadas (`revealButtons`), esperando la calma tras cada una.
+ */
 export async function mountEntry(
   entry: ScreenEntry,
   options: TourOptions = {},
@@ -214,5 +369,29 @@ export async function mountEntry(
     if (document.querySelector('main') === null) throw new Error('sin región principal');
   }, WAIT);
   await quiet(fixture);
+  const step = REVEAL[`${entry.screen} ${entry.group}`];
+  if (step !== undefined) {
+    const label = text(step.button);
+    for (const [name, value] of Object.entries(step.fill ?? {})) {
+      const field = document.querySelector<HTMLInputElement>(`main [name="${name}"]`);
+      if (field === null) throw new Error(`Sin el campo «${name}» de la consulta «${label}»`);
+      act(() => {
+        fireEvent.change(field, { target: { value } });
+      });
+    }
+    const button = findButton(label);
+    if (button === undefined) throw new Error(`Sin el botón de consulta «${label}»`);
+    const before = document.querySelector('main')?.textContent ?? '';
+    act(() => {
+      fireEvent.click(button);
+    });
+    await quiet(fixture);
+    // La consulta tiene que haber pintado algo, y no un aviso de validación: si no, axe
+    // auditaría solo el formulario de consulta.
+    if ((document.querySelector('main')?.textContent ?? '') === before)
+      throw new Error(`La consulta «${label}» no pintó contenido`);
+    if (document.querySelector('main [aria-invalid="true"]') !== null)
+      throw new Error(`La consulta «${label}» quedó con un campo inválido`);
+  }
   return fixture;
 }
