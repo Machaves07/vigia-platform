@@ -94,6 +94,7 @@ from vigia_platform.ledger.application.writer import (
 )
 from vigia_platform.ledger.free_text import (
     FreeTextField,
+    FreeTextHint,
     FreeTextRejected,
     apply_base_policy,
 )
@@ -255,11 +256,13 @@ _DECLARE_CODES: Final[Mapping[LifecycleCode, LoopDetailCode]] = {
 
 
 class UnclosableRejected(Exception):
-    """Un rechazo de negocio del incerrable, con su ``detail_code`` (LoopDetailCode)."""
+    """Un rechazo de negocio del incerrable, con su ``detail_code`` (LoopDetailCode) y, si lo
+    rechazó un validador de texto libre, su pista para quien escribió (``hint``, VIG-344)."""
 
-    def __init__(self, detail_code: LoopDetailCode) -> None:
+    def __init__(self, detail_code: LoopDetailCode, hint: FreeTextHint | None = None) -> None:
         super().__init__(detail_code.value)
         self.detail_code = detail_code
+        self.hint = hint
 
 
 class UnclosableRequestInvalid(Exception):
@@ -1000,7 +1003,7 @@ class UnclosableService:
                 transaction, context, updated, locked, assignment, pending_action_id=action_id
             )
         except ActionRejected as rejected:
-            raise UnclosableRejected(rejected.detail_code) from None
+            raise UnclosableRejected(rejected.detail_code, rejected.hint) from None
         except ActionUnavailable:
             raise UnclosableUnavailable("ledger_chain") from None
         return result.record_id, result.lifecycle_state
@@ -1173,7 +1176,7 @@ def _written(result: Receipt | LedgerRejection) -> Receipt:
     try:
         return written(result, UnclosableUnavailable)
     except ActionRejected as rejected:
-        raise UnclosableRejected(rejected.detail_code) from None
+        raise UnclosableRejected(rejected.detail_code, rejected.hint) from None
     except ActionRequestInvalid:
         raise UnclosableRequestInvalid("texto libre rechazado por el expediente") from None
 

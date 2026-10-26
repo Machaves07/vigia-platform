@@ -21,8 +21,9 @@ import asyncio
 import functools
 import json
 import uuid
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import pytest
 from fastapi import APIRouter
@@ -44,6 +45,7 @@ from vigia_platform.fleet.detail_codes import FLEET_DETAIL_CODE_LABEL_BINDINGS
 from vigia_platform.fleet.domain.enums import FLEET_LABEL_BINDINGS
 from vigia_platform.fleet.domain.fleet_warnings import INVENTORY_LABEL_BINDINGS
 from vigia_platform.ledger.application.writer import LedgerRejection, LedgerRejectionCode
+from vigia_platform.ledger.free_text import FreeTextHint
 from vigia_platform.loop.registration import LOOP_LABELS
 from vigia_platform.notifications.registration import NOTIFICATIONS_LABELS
 from vigia_platform.shared.api.app import (
@@ -55,11 +57,14 @@ from vigia_platform.shared.api.app import (
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import (
     HTTP_STATUS,
+    MAX_REJECTION_TEXT_CHARS,
     TRANSIENT_CODES,
     ApiError,
     ApiErrorBody,
     ApiErrorCode,
     ApiStartupError,
+    DetailCodeRegistry,
+    ErrorCatalog,
     ExternalDependencyDown,
     from_ledger_rejection,
     translate,
@@ -194,6 +199,155 @@ def test_an_unregistered_detail_code_at_runtime_is_an_internal_error() -> None:
     error = ApiError(ApiErrorCode.CONFLICT, detail_code="loop_not_registered")
     body = _body(_call(_raising(error)))
     assert body.code is ApiErrorCode.INTERNAL_ERROR and body.detail_code is None
+
+
+# --- rejection (VIG-344) -----------------------------------------------------------------------
+
+_VOCABULARY: Final = "loop_blocked_vocabulary_term"
+
+
+def _catalog() -> ErrorCatalog:
+    registry = DetailCodeRegistry()
+    registry.register([_VOCABULARY])
+    return ErrorCatalog(LABELS, registry)
+
+
+def _rejected(hint: FreeTextHint, detail_code: str = _VOCABULARY) -> Any:
+    """La respuesta del catálogo de errores (sin montar una aplicación por caso)."""
+    error = ApiError(ApiErrorCode.INVALID_REQUEST, detail_code=detail_code, rejection=hint)
+    response = _catalog().response(error, uuid.UUID(int=7))
+    assert response.status_code == 400
+    return json.loads(bytes(response.body))
+
+
+def test_a_validator_rejection_travels_with_its_term_and_suggestion() -> None:
+    """De punta a punta por la aplicación: el manejador global responde ``rejection``."""
+    hint = FreeTextHint(
+        code="blocked_vocabulary_term", term="garantizada", suggestion_es="Cita la cifra medida."
+    )
+    error = ApiError(ApiErrorCode.INVALID_REQUEST, detail_code=_VOCABULARY, rejection=hint)
+    response = _call(_raising(error, (_VOCABULARY,)))
+    assert response.status_code == 400
+    body = response.json()
+    assert set(body) == {"code", "detail_code", "message_es", "correlation_id", "rejection"}
+    assert body["rejection"] == {
+        "code": "blocked_vocabulary_term",
+        "term": "garantizada",
+        "suggestion": "Cita la cifra medida.",
+    }
+    assert _body(response).rejection is not None
+
+
+def test_a_rejection_without_term_or_suggestion_has_only_its_code() -> None:
+    body = _rejected(FreeTextHint(code="person_attribution_detected"))
+    assert body["rejection"] == {"code": "person_attribution_detected"}
+
+
+@pytest.mark.parametrize(
+    ("code", "detail_code"),
+    [
+        (ApiErrorCode.CONFLICT, "loop_closure_already_signed"),
+        (ApiErrorCode.INVALID_REQUEST, None),
+        (ApiErrorCode.NOT_FOUND, None),
+    ],
+)
+def test_a_rejection_only_goes_with_an_invalid_request_and_its_detail_code(
+    code: ApiErrorCode, detail_code: str | None
+) -> None:
+    with pytest.raises(ValueError, match="rejection"):
+        ApiError(code, detail_code=detail_code, rejection=FreeTextHint(code="motivo"))
+
+
+def test_a_rejection_is_a_free_text_hint() -> None:
+    with pytest.raises(TypeError):
+        ApiError(
+            ApiErrorCode.INVALID_REQUEST,
+            detail_code=_VOCABULARY,
+            rejection=cast(Any, {"code": "blocked_vocabulary_term"}),
+        )
+
+
+@pytest.mark.parametrize(
+    ("text", "shown"),
+    [
+        ("t", True),
+        ("t" * MAX_REJECTION_TEXT_CHARS, True),
+        ("t" * (MAX_REJECTION_TEXT_CHARS + 1), False),
+        ("", False),
+        ("   ", False),
+        (chr(0x3000), False),
+    ],
+)
+def test_a_term_or_a_suggestion_is_shown_whole_or_not_at_all(text: str, shown: bool) -> None:
+    """Nunca se recorta: lo que no cabe o va en blanco no sale (la interfaz no lo inventa)."""
+    hint = FreeTextHint(code="blocked_vocabulary_term", term=text, suggestion_es=text)
+    rejection = _rejected(hint)["rejection"]
+    expected = {"code": "blocked_vocabulary_term"}
+    if shown:
+        expected |= {"term": text, "suggestion": text}
+    assert rejection == expected
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["", "Blocked", "blocked vocabulary", "blocked-vocabulary", "códe", "_x", "x" * 65, "x__y"],
+)
+def test_a_hint_without_a_closed_code_leaves_the_rejection_out(code: str) -> None:
+    body = _rejected(FreeTextHint(code=code, term="t", suggestion_es="s"))
+    assert body["detail_code"] == _VOCABULARY
+    assert "rejection" not in body
+
+
+def test_an_unregistered_detail_code_drops_the_rejection_too() -> None:
+    error = ApiError(
+        ApiErrorCode.INVALID_REQUEST,
+        detail_code="loop_not_registered",
+        rejection=FreeTextHint(code="blocked_vocabulary_term", term="t"),
+    )
+    body = _catalog().body(error, uuid.UUID(int=7))
+    assert body.code is ApiErrorCode.INTERNAL_ERROR
+    assert body.rejection is None
+
+
+@given(term=st.text(max_size=MAX_REJECTION_TEXT_CHARS + 20))
+@example(term=chr(0x200B))
+@example(term="a" * MAX_REJECTION_TEXT_CHARS)
+def test_property_the_term_is_the_hint_term_or_absent(term: str) -> None:
+    """Para cualquier término: sale exactamente igual, o no sale; nunca otro valor."""
+    hint = FreeTextHint(code="blocked_vocabulary_term", term=term)
+    error = ApiError(ApiErrorCode.INVALID_REQUEST, detail_code=_VOCABULARY, rejection=hint)
+    body = _catalog().body(error, uuid.UUID(int=7))
+    assert body.rejection is not None
+    if term.strip() and len(term) <= MAX_REJECTION_TEXT_CHARS:
+        assert body.rejection.term == term
+    else:
+        assert body.rejection.term is None
+
+
+def test_from_ledger_rejection_carries_the_hint_only_with_a_validator_detail_code() -> None:
+    hint = FreeTextHint(code="blocked_vocabulary_term", term="garantizada", suggestion_es="s")
+    free_text = LedgerRejectionCode.FREE_TEXT_REJECTED
+    with_code = LedgerRejection.of(free_text, "/reason", detail_code=_VOCABULARY, hint=hint)
+    assert from_ledger_rejection(with_code).rejection is hint
+    without_code = LedgerRejection.of(free_text, "/reason", hint=hint)
+    assert from_ledger_rejection(without_code).rejection is None
+    locked = LedgerRejection.of(LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT, detail_code=_VOCABULARY)
+    assert from_ledger_rejection(replace(locked, hint=hint)).rejection is None
+
+
+def test_the_hint_term_never_appears_in_a_repr() -> None:
+    """La pista no llega a un registro por ``repr`` (P3): ni la pista ni el rechazo la muestran."""
+    hint = FreeTextHint(code="blocked_vocabulary_term", term="TERMINO-DE-PRUEBA-91")
+    rejection = LedgerRejection.of(
+        LedgerRejectionCode.FREE_TEXT_REJECTED, "/x", detail_code=_VOCABULARY, hint=hint
+    )
+    error = ApiError(ApiErrorCode.INVALID_REQUEST, detail_code=_VOCABULARY, rejection=hint)
+    for shown in (repr(hint), repr(rejection), repr(error), str(error)):
+        assert "TERMINO-DE-PRUEBA-91" not in shown
+    # El rechazo con pista es igual al que no la lleva: la pista no cuenta para la igualdad.
+    assert rejection == LedgerRejection.of(
+        LedgerRejectionCode.FREE_TEXT_REJECTED, "/x", detail_code=_VOCABULARY
+    )
 
 
 # --- Traducción --------------------------------------------------------------------------------

@@ -5954,7 +5954,7 @@
       "description": "Las tres preguntas (BR-GOB-13): estándar escrito, remedio de ingeniería o de proceso, y\ndato que pierde sentido al desagregarlo por persona."
     "ApiErrorBody":
       "additionalProperties": false
-      "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33)."
+      "description": "Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33; VIG-344)."
       "properties":
         "code":
           "$ref": "#/components/schemas/ApiErrorCode"
@@ -5983,6 +5983,11 @@
             - "type": "null"
           "default": null
           "title": "Retry After Seconds"
+        "rejection":
+          "anyOf":
+            - "$ref": "#/components/schemas/ApiErrorRejection"
+            - "type": "null"
+          "default": null
       "required":
         - "code"
         - "message_es"
@@ -6009,6 +6014,36 @@
         - "storage_unavailable"
       "title": "ApiErrorCode"
       "type": "string"
+    "ApiErrorRejection":
+      "additionalProperties": false
+      "description": "El rechazo de un validador de texto libre (VIG-344; ``rejection`` de ``AssistantRequest``,\nplataforma-aplicacion §2.19): ``code`` es el motivo cerrado del validador (p. ej.\n``blocked_vocabulary_term``); ``term`` y ``suggestion``, el término que cayó y la alternativa,\nsi el validador los da. Nunca lleva el texto enviado completo."
+      "properties":
+        "code":
+          "maxLength": 64
+          "minLength": 1
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+          "title": "Code"
+          "type": "string"
+        "term":
+          "anyOf":
+            - "maxLength": 200
+              "minLength": 1
+              "type": "string"
+            - "type": "null"
+          "default": null
+          "title": "Term"
+        "suggestion":
+          "anyOf":
+            - "maxLength": 200
+              "minLength": 1
+              "type": "string"
+            - "type": "null"
+          "default": null
+          "title": "Suggestion"
+      "required":
+        - "code"
+      "title": "ApiErrorRejection"
+      "type": "object"
     "ApprovalOut":
       "properties":
         "agreement":

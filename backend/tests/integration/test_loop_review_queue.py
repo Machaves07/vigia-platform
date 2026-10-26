@@ -31,6 +31,7 @@ import pytest
 
 from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject
+from tests.loop_classification_support import BLOCKED_REASON, BLOCKED_REJECTION
 from tests.loop_review_queue_support import (
     REASON,
     ReviewQueueStack,
@@ -488,6 +489,19 @@ def test_reason_borders_and_shape(stack: ReviewQueueStack, coordinator: Who) -> 
     assert _untouched(stack, detection) == before
     accepted = stack.resolve(coordinator, detection, reason_text="x" * 20)
     assert accepted.status_code == 201, accepted.text
+
+
+def test_a_blocked_reason_names_the_term_and_the_suggestion_and_writes_nothing(
+    stack: ReviewQueueStack, coordinator: Who
+) -> None:
+    """SUP-U05-06 (VIG-344): el escritor rechaza el motivo con el vocabulario bloqueado y la
+    respuesta trae ``rejection`` exacto."""
+    detection = stack.in_review()
+    before = _untouched(stack, detection)
+    response = stack.resolve(coordinator, detection, reason_text=BLOCKED_REASON)
+    assert _error(response) == (400, "invalid_request", "loop_blocked_vocabulary_term")
+    assert response.json()["rejection"] == BLOCKED_REJECTION
+    assert _untouched(stack, detection) == before
 
 
 def test_transition_not_allowed_writes_nothing(stack: ReviewQueueStack, coordinator: Who) -> None:

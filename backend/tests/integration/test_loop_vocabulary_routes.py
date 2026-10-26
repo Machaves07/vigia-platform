@@ -378,6 +378,13 @@ def test_a_declared_name_stops_being_a_proper_name_in_the_next_write(
     # Sin declarar, el nombre de la máquina parece el de una persona: fallo cerrado.
     rejected = stack.post(admin, {"added": [term("pasillo")], "reason": reason})
     assert _error(rejected) == _mapped(LoopDetailCode.PERSON_ATTRIBUTION_DETECTED)
+    # VIG-344: la alternativa del patrón, sin el nombre que coincidió (P3).
+    assert rejected.json()["rejection"] == {
+        "code": "person_attribution_detected",
+        "suggestion": (
+            "Retire el nombre de la persona; nombre la zona, el equipo o el cargo sin persona."
+        ),
+    }
     declared = stack.post(
         admin,
         {
@@ -430,6 +437,14 @@ def test_a_declared_name_with_a_blocked_term_is_rejected(
         {"declared_names_added": [{"kind": "zone", "value": "Zona Despejada"}], "reason": REASON},
     )
     assert _error(response) == _mapped(LoopDetailCode.BLOCKED_VOCABULARY_TERM)
+    # VIG-344: el término que cayó (plegado) y la alternativa de la lista inicial (§14.1).
+    assert response.json()["rejection"] == {
+        "code": "blocked_vocabulary_term",
+        "term": "despejada",
+        "suggestion": (
+            "Describe lo que el sistema observó y en qué periodo; no afirmes lo que no se observó."
+        ),
+    }
     _nothing_written(stack, site.organization_id)
 
 

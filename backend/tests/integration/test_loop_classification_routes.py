@@ -41,7 +41,9 @@ from tests.integration.conftest import PostgresEndpoint
 from tests.laz_support import IngestedSubject
 from tests.loop_classification_support import (
     ATTRIBUTION_MARKER,
+    ATTRIBUTION_REJECTION,
     BLOCKED_REASON,
+    BLOCKED_REJECTION,
     REASON,
     REINFORCED_REASON,
     ClassificationStack,
@@ -210,22 +212,28 @@ def test_reason_borders_and_shape(stack: ClassificationStack, coordinator: Who) 
 
 
 @pytest.mark.parametrize(
-    ("text", "code"),
+    ("text", "code", "rejection"),
     [
-        (BLOCKED_REASON, "loop_blocked_vocabulary_term"),
+        (BLOCKED_REASON, "loop_blocked_vocabulary_term", BLOCKED_REJECTION),
         (
             f"El cruce {ATTRIBUTION_MARKER} del turno de noche en la zona",
             "loop_person_attribution_detected",
+            ATTRIBUTION_REJECTION,
         ),
     ],
 )
 def test_a_rejected_text_writes_nothing_in_a_first_classification_or_a_reclassification(
-    stack: ClassificationStack, coordinator: Who, text: str, code: str
+    stack: ClassificationStack,
+    coordinator: Who,
+    text: str,
+    code: str,
+    rejection: dict[str, str],
 ) -> None:
     finding = stack.received()
     before = _untouched(stack, finding)
     response = stack.classify(coordinator, finding, reason_text=text)
     assert _error(response) == (400, "invalid_request", code), response.text
+    assert response.json()["rejection"] == rejection  # VIG-344: término y sugerencia exactos
     assert _untouched(stack, finding) == before
     assert stack.classify(coordinator, finding).status_code == 201
     before = _untouched(stack, finding)
@@ -233,6 +241,7 @@ def test_a_rejected_text_writes_nothing_in_a_first_classification_or_a_reclassif
         coordinator, finding, "false_positive", "no_person_present", text, reinforced=True
     )
     assert _error(response) == (400, "invalid_request", code), response.text
+    assert response.json()["rejection"] == rejection
     assert _untouched(stack, finding) == before
 
 

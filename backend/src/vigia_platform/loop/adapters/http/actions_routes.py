@@ -215,7 +215,7 @@ def evidence_view(result: EvidenceResult) -> EvidenceEntryOut:
 
 def _rejected(error: ActionRejected) -> ApiError:
     code, _status = HTTP_STATUS_BY_DETAIL_CODE[error.detail_code]
-    return ApiError(code, detail_code=error.detail_code.value)
+    return ApiError(code, detail_code=error.detail_code.value, rejection=error.hint)
 
 
 def _verifier(request: Request, body: EvidenceEntryBody) -> AttachmentVerifier | None:

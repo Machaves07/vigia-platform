@@ -37,12 +37,12 @@ import {
   resetTransport,
   renderScreen,
   row,
+  selectRowName,
   session,
   type CapturedRequest,
   type TestSession,
 } from './support';
 
-const SELECT_ROW = text('scr06.matrix.select');
 const REGISTER = text('scr06.matrix.form.submit');
 
 /** Sesión con la matriz y, tras registrar el pase, con el pase ya en la lista. */
@@ -138,14 +138,12 @@ async function openScreen(
     { clock },
   );
   mounted = rendered;
-  await screen.findByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` });
+  await screen.findByRole('button', { name: selectRowName('standing', 1) });
   return { sampleCalls, passCalls, scheduler, mounted: rendered };
 }
 
 function registerPass(): void {
-  fireEvent.click(
-    screen.getByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: selectRowName('standing', 1) }));
   fireEvent.change(screen.getByRole('combobox', { name: text('scr06.matrix.form.evidence') }), {
     target: { value: CLIP_A },
   });
@@ -247,7 +245,7 @@ describe('muestra de exposición (BR-APP-84)', () => {
     );
     const rendered = renderScreen((clock) => <MatrixScreen zoneId={ZONE_ID} clock={clock} />);
     mounted = rendered;
-    await screen.findByRole('button', { name: `${SELECT_ROW}: ${label('posture', 'standing')} 1` });
+    await screen.findByRole('button', { name: selectRowName('standing', 1) });
     registerPass();
     await waitFor(() => {
       expect(spy).toHaveBeenCalled();

@@ -20,9 +20,16 @@ import type {
   WalkTestStep,
 } from '@/ports/scr06Commissioning';
 import { createScreenQueryCache, ScreenQueryProvider, type ScreenQueryCache } from '@/state/query';
+import { text } from '@/texts';
+import { label } from '@/texts/labels';
 
 import { mswPath } from '../../msw/handlers';
 import { FakeClock } from '../../support/fakeClock';
+
+/** Nombre accesible del botón «Fila n» de la matriz: empieza por su texto visible (WCAG 2.5.3). */
+export function selectRowName(posture: string, number: number): string {
+  return `${text('scr06.matrix.row')} ${String(number)}: ${text('scr06.matrix.select')}, ${label('posture', posture)}`;
+}
 
 export const ZONE_ID = '0190a1b2-0000-7000-8000-000000000001';
 export const SESSION_ID = '0190a1b2-0000-7000-8000-000000000002';

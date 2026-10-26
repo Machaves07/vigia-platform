@@ -256,6 +256,9 @@ export async function watchPolicy(
     });
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
+      // Un marco puede navegar con la URL vacía (o no absoluta) mientras se crea: no es un
+      // documento del origen, cuya política ya exige el `response` de arriba (VIG-356).
+      if (!URL.canParse(frame.url())) return;
       const url = new URL(frame.url());
       if (url.origin !== origin) return;
       const problem = urlProblem(url);

@@ -77,6 +77,7 @@ from vigia_platform.ledger.application.writer import (
 )
 from vigia_platform.ledger.free_text import (
     FreeTextField,
+    FreeTextHint,
     FreeTextRejected,
     apply_base_policy,
     canonical_form,
@@ -195,11 +196,13 @@ _VALIDATOR_CODES: Final[Mapping[str, LoopDetailCode]] = {
 
 
 class ActionRejected(Exception):
-    """Un rechazo de negocio del lazo, con su ``detail_code`` (LoopDetailCode)."""
+    """Un rechazo de negocio del lazo, con su ``detail_code`` (LoopDetailCode) y, si lo rechazó
+    un validador de texto libre, su pista para quien escribió (``hint``, VIG-344)."""
 
-    def __init__(self, detail_code: LoopDetailCode) -> None:
+    def __init__(self, detail_code: LoopDetailCode, hint: FreeTextHint | None = None) -> None:
         super().__init__(detail_code.value)
         self.detail_code = detail_code
+        self.hint = hint
 
 
 class ActionRequestInvalid(Exception):
@@ -517,7 +520,7 @@ def written(
         if result.code is LedgerRejectionCode.FREE_TEXT_REJECTED:
             code = _VALIDATOR_CODES.get(result.detail_code or "")
             if code is not None:
-                raise ActionRejected(code)
+                raise ActionRejected(code, result.hint)
             raise ActionRequestInvalid("texto libre rechazado por el expediente")
         if result.code is LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT:
             raise unavailable("ledger_chain")

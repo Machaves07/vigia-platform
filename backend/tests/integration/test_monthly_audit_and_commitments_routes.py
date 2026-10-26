@@ -31,7 +31,7 @@ from typing import Any, Final
 import pytest
 
 from tests.integration.conftest import PostgresEndpoint
-from tests.loop_classification_support import BLOCKED_REASON
+from tests.loop_classification_support import BLOCKED_REASON, BLOCKED_REJECTION
 from tests.monthly_review_support import (
     COMMITMENT_TEXT,
     MonthlyReviewStack,
@@ -276,6 +276,7 @@ def test_a_blocked_term_in_the_comment_is_rejected_by_the_validator(
     )
     assert response.status_code == 400, response.text
     assert response.json()["detail_code"] == "loop_blocked_vocabulary_term"
+    assert response.json()["rejection"] == BLOCKED_REJECTION  # VIG-344
     assert stack.results_of(seed) == []
     assert all(row["outcome"] is None for row in stack.item_rows(seed.sample_id))
 
@@ -566,6 +567,7 @@ def test_a_blocked_term_in_a_commitment_is_rejected_by_the_validator(
     )
     assert response.status_code == 400, response.text
     assert response.json()["detail_code"] == "loop_blocked_vocabulary_term"
+    assert response.json()["rejection"] == BLOCKED_REJECTION  # VIG-344
     assert stack.records_of(organization.organization_id, "commitments_recorded") == [] or all(
         record["content"]["package_id"] != str(seed.package_id)
         for record in stack.records_of(organization.organization_id, "commitments_recorded")
@@ -716,6 +718,7 @@ def test_a_note_of_exactly_500_and_a_blocked_note(stack: MonthlyReviewStack) -> 
     )
     assert blocked.status_code == 400, blocked.text
     assert blocked.json()["detail_code"] == "loop_blocked_vocabulary_term"
+    assert blocked.json()["rejection"] == BLOCKED_REJECTION  # VIG-344
     longest = stack.update_commitment(
         line_manager, commitment_id, {"state": "done", "note": "n" * 500}
     )

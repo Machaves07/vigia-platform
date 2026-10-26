@@ -11,19 +11,24 @@ import { assertOrganizationIsolation } from '../support/viewProperties';
 import { views } from '../views';
 import { renderSelftest, selftestView } from '../views/_selftest';
 
-const scoped = Object.values(views).filter(
-  (registration) => registration.organizationOf !== undefined,
+// La clave del registro identifica la prueba: dos registros comparten `RV-07`.
+const scoped = Object.entries(views).filter(
+  ([, registration]) => registration.organizationOf !== undefined,
 );
 const count = `${String(scoped.length)} vistas`;
 
 describe('PR-APP-10: ninguna pantalla pinta datos de otra organización', () => {
-  it(
-    `vistas registradas en tests/views con organizationOf (${count})`,
-    () => {
-      process.stdout.write(`PR-APP-10: ${count}\n`);
-      for (const registration of scoped) {
-        expect(assertOrganizationIsolation(registration), registration.view).toBeGreaterThan(0);
-      }
+  it(`hay vistas registradas en tests/views con organizationOf (${count})`, () => {
+    process.stdout.write(`PR-APP-10: ${count}\n`);
+    expect(scoped.length).toBeGreaterThan(0);
+  });
+
+  // Una prueba por vista, cada una con su tope: con el perfil nightly (2 000 ejemplos) las siete
+  // juntas pasaban de 300 s en el runner de GitHub (VIG-356).
+  it.each(scoped)(
+    'vista registrada %s con organizationOf',
+    (_name, registration) => {
+      expect(assertOrganizationIsolation(registration), registration.view).toBeGreaterThan(0);
     },
     PROPERTY_TIMEOUT_MS,
   );

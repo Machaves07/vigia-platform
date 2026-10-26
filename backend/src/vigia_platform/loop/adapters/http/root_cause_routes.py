@@ -20,7 +20,8 @@ Rechazos de negocio, como ``invalid_request`` con su ``detail_code`` (400, A-68)
 ``loop_cause_category_not_allowed``, ``loop_blocked_vocabulary_term``,
 ``loop_person_attribution_detected``, ``loop_signer_license_missing`` y
 ``loop_analysis_information_insufficient`` (la firma no procede: el análisis queda
-``pending_information`` con lo que falta). Como ``conflict`` (409):
+``pending_information`` con lo que falta). Los dos de los validadores llevan ``rejection``
+(VIG-344): el motivo, el término (solo el del vocabulario) y la sugerencia. Como ``conflict`` (409):
 ``loop_analysis_step_out_of_order`` y ``loop_transition_not_allowed`` (análisis ya firmado). Sin
 el texto del estándar, ``loop_standard_text_unavailable`` (503). Un cuerpo que no tiene la forma
 del esquema (paso fuera de 1 a 5, ``kind`` desconocido, textos fuera de sus límites, campos de
@@ -336,7 +337,7 @@ def _refs_in(refs: tuple[EvidenceRefBody, ...]) -> list[dict[str, Any]]:
 
 def _rejected(rejected: AnalysisRejected) -> ApiError:
     code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-    return ApiError(code, detail_code=rejected.detail_code.value)
+    return ApiError(code, detail_code=rejected.detail_code.value, rejection=rejected.hint)
 
 
 def root_cause_router() -> APIRouter:

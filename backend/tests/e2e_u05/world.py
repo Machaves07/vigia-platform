@@ -44,6 +44,7 @@ from tests.load.profiles import PROFILES, write_sealed_dataset
 from tests.load.provision import Fleet, load_api
 from tests.load.test_load_ci import assert_functional, ledger_check, run_load
 from tests.resilience.harness import free_port, wait_until
+from vigia_platform.accreditation.export.request import RATE_WINDOW
 from vigia_platform.identity.application.hierarchy import ZoneSpec
 from vigia_platform.identity.application.invitations import InvitationOutcome
 from vigia_platform.identity.application.roles import AssignmentRequest
@@ -287,6 +288,24 @@ def configure_store_origin(platform: PlatformStack, origin: str) -> None:
         )
 
 
+def rewind_export_window(platform: PlatformStack) -> None:
+    """Saca de la ventana del límite de exportación las solicitudes ya hechas en el mundo (VIG-356).
+
+    Mueve ``requested_at`` una ventana entera hacia atrás, como si hubiera pasado la hora: el
+    límite exacto de producción (5 por usuario y 20 por organización, PAT-LAZ-ESC-02) sigue
+    contando igual las solicitudes que vengan después. Ninguna fila se borra.
+    """
+    platform.admin(
+        [
+            (
+                "UPDATE accreditation.export_request"
+                " SET requested_at = requested_at - $1::interval",
+                (RATE_WINDOW,),
+            )
+        ]
+    )
+
+
 @contextlib.contextmanager
 def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
     """Arranque y liberación simétricos, incluidos los fallos antes de publicar el manifiesto."""
@@ -316,7 +335,9 @@ def world(manifest: Path = MANIFEST) -> Iterator[dict[str, Any]]:
         # Entre el balanceador de la aplicación y la API, el intermediario de fallos de U-02: los
         # escenarios FS-APP lo congelan o lo cortan desde Playwright (``fault_control_url``).
         api_faults = stack.enter_context(fault_proxy("127.0.0.1", port))
-        fault_url = stack.enter_context(fault_control(api_faults))
+        fault_url = stack.enter_context(
+            fault_control(api_faults, rewind_exports=lambda: rewind_export_window(platform))
+        )
         app = stack.enter_context(balancer_process("app", [api_faults.url], tls, directory))
         platform.environ.update(
             VIGIA_STATIC_DIR=str(static),
