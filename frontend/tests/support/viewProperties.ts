@@ -317,8 +317,13 @@ export function forbiddenRendered(
 
 // --- Generadores ----------------------------------------------------------------------------
 
+/**
+ * Sin sesgo (`noBias`): con sesgo, fast-check inyecta en las cadenas trozos como `constructor` o
+ * `__proto__`, que también salen en los valores permitidos y coinciden con el texto unido de otros
+ * nodos (semilla 1685707884: `W-constructor` frente a «…SW» + «constructor_»), no con una fuga.
+ */
 const token = (min: number, max: number) =>
-  fc.stringMatching(new RegExp(`^[a-z0-9]{${String(min)},${String(max)}}$`));
+  fc.noBias(fc.stringMatching(new RegExp(`^[a-z0-9]{${String(min)},${String(max)}}$`)));
 
 /** Campos de persona observada con valores plausibles y distinguibles (≥ 8 caracteres plegados). */
 const PERSON_VALUES: Readonly<Record<string, fc.Arbitrary<unknown>>> = {
@@ -327,7 +332,7 @@ const PERSON_VALUES: Readonly<Record<string, fc.Arbitrary<unknown>>> = {
     fc.integer({ min: 10_000_000, max: 2_147_483_647 }),
     token(8, 12).map((value) => `trk-${value}`),
   ),
-  face: fc.base64String({ minLength: 16, maxLength: 64 }),
+  face: fc.noBias(fc.base64String({ minLength: 16, maxLength: 64 })),
   worker_id: token(8, 12).map((value) => `W-${value}`),
   worker_name: fc.stringMatching(/^[A-Z][a-z]{4,9} [A-Z][a-z]{4,9}$/),
   document_number: fc.stringMatching(/^[0-9]{8,11}$/),

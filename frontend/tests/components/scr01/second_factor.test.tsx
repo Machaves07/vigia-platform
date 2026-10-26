@@ -72,16 +72,12 @@ describe('segundo paso del inicio de sesión', { timeout: 60_000 }, () => {
     }
   });
 
-  it('sin sesión pendiente, /home sigue siendo «no disponible en su alcance»', async () => {
+  it('sin sesión pendiente, /home lleva a /login y no al segundo paso (TASK-450)', async () => {
     const fixture = mount('/home', { routes: 'app' });
     expect(
-      await screen.findByRole(
-        'heading',
-        { level: 1, name: text('errors.not_available_in_scope') },
-        WAIT,
-      ),
+      await screen.findByRole('heading', { level: 1, name: text('scr01.login.title') }, WAIT),
     ).toBeDefined();
-    expect(location(fixture)).toBe('/home');
+    expect(location(fixture)).toBe('/login');
   });
 
   it('acepta TOTP y código de recuperación; otra forma no se envía', async () => {

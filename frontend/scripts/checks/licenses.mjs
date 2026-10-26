@@ -89,7 +89,7 @@ const EXCEPTIONS = [
     reason: 'Solo herramientas de desarrollo que no se distribuyen (spdx-exceptions).',
   },
   {
-    id: 'A-43, EX-06/07 (análoga)',
+    id: 'A-71 (extiende A-43 al frontend)',
     license: 'CC-BY-4.0',
     scope: 'desarrollo',
     review: '2027-03-31',

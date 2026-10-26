@@ -3,10 +3,10 @@
  * `npm run audit:check` (NFR-APP-25; VIG-294): `npm audit` con alta o crítica bloqueante sobre **todo**
  * el árbol (producción y desarrollo), con una única salvedad registrada abajo.
  *
- * Salvedad (aviso de VIG-277 en VIG-294, decisión del dueño pendiente): `@lhci/cli` 0.15.1, la
+ * Salvedad (A-71, aprobada por el dueño el 2026-10-26): `@lhci/cli` 0.15.1, la
  * última publicada, arrastra avisos altos (`lighthouse` → `puppeteer-core`, `proxy-agent`,
  * `tmp`, `uuid`…) sin arreglo; `npm audit fix --force` propone bajar a 0.1.0. Es de desarrollo,
- * solo la usa `nightly` (VIG-330) y no llega a `dist/` ni a la imagen. Un aviso se exceptúa solo
+ * solo la usan `nightly` (VIG-330) y `npm run lighthouse` (VIG-334), y no llega a `dist/` ni a la imagen. Un aviso se exceptúa solo
  * si **todas** sus rutas hacia `package.json` pasan por esa dependencia directa; si el mismo
  * paquete vulnerable llega también por otra, o si el aviso alcanza producción, bloquea. La
  * excepción vence en su fecha de revisión.
@@ -37,7 +37,7 @@ const EXCEPTIONS = [
     root: '@lhci/cli',
     review: '2026-12-31',
     reason:
-      'Lighthouse CI de nightly (VIG-330), solo desarrollo; sin versión que corrija los avisos.',
+      'A-71: Lighthouse CI (VIG-330, VIG-334), solo desarrollo; sin versión que corrija los avisos.',
   },
 ];
 
