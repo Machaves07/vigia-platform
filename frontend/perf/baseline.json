@@ -1,0 +1,37 @@
+{
+  "$comment": "Línea base de Lighthouse (NFR-APP-02, R-APP-3). La genera perf/calibrate.mjs con tres corridas; no se edita a mano.",
+  "calibrated_at": "2026-10-26T10:13:07.824Z",
+  "machine": "Intel Core i7-12700H (20 hilos), WSL2 6.18 con 9 GB, Chrome for Testing 156 (Playwright 1.64) con interfaz gráfica (WSLg), mundo de U-05 en Docker local",
+  "load": "carga media de 1 min 0,92 al empezar y 2,17 al terminar; WSL compartido con otros agentes de OpenSymphony (sin contar cuántos activos); throttling simulado 10 Mbit/s, RTT 40 ms, CPU x4",
+  "url": "/login",
+  "budget_ms": {
+    "first-contentful-paint": 2000,
+    "interactive": 3000
+  },
+  "regression_tolerance": 0.2,
+  "runs": [
+    {
+      "fetched_at": "2026-10-26T10:12:40.958Z",
+      "first-contentful-paint": 673,
+      "interactive": 1493
+    },
+    {
+      "fetched_at": "2026-10-26T10:12:55.207Z",
+      "first-contentful-paint": 598,
+      "interactive": 1111
+    },
+    {
+      "fetched_at": "2026-10-26T10:13:07.824Z",
+      "first-contentful-paint": 597,
+      "interactive": 1065
+    }
+  ],
+  "median_ms": {
+    "first-contentful-paint": 598,
+    "interactive": 1111
+  },
+  "threshold_ms": {
+    "first-contentful-paint": 717,
+    "interactive": 1333
+  }
+}
