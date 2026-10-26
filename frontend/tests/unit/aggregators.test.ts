@@ -72,9 +72,12 @@ describe('tests/views y tests/msw/scenarios', () => {
 });
 
 describe('scripts/checks/run.mjs', () => {
-  it('pasa con las comprobaciones del repositorio (hoy, ninguna)', () => {
+  // Tope de 60 s: con la suite completa en paralelo, lanzar cada comprobación pasaba de 5 s.
+  it('pasa con las comprobaciones del repositorio', { timeout: 60_000 }, () => {
     const result = runChecks();
     expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('== comprobación licenses.mjs');
+    expect(result.stdout).not.toContain('size.mjs');
   });
 
   it('pasa con una carpeta vacía', () => {
@@ -94,5 +97,16 @@ describe('scripts/checks/run.mjs', () => {
     expect(result.status).toBe(1);
     expect(result.stdout.match(/^[abc]$/gm)).toEqual(['a', 'b', 'c']);
     expect(result.stderr).toContain('Comprobaciones fallidas (1): b-fails.mjs');
+  });
+
+  it('omite size.mjs, que mide la construcción después de npm run build', () => {
+    const directory = checksDirectory({
+      'a-passes.mjs': "process.stdout.write('a\\n');",
+      'size.mjs': "process.stdout.write('size\\n'); process.exit(1);",
+    });
+    const result = runChecks(directory);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain('size');
+    expect(result.stdout).toContain('Comprobaciones superadas: 1.');
   });
 });
