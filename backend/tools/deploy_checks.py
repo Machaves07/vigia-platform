@@ -36,6 +36,19 @@ que existan»): una comprobación cuyo requisito todavía no está en el reposit
 ya existe y la comprobación todavía no está escrita, sale ``failed``: nunca se omite en silencio
 algo que ya se puede comprobar.
 
+**Evidencia local sin AWS** (VIG-352). ``--target`` apunta las comprobaciones al balanceador
+``app.`` del mundo de U-05 (``frontend/tests/e2e/README.md``); ``--only 8`` o ``--only 9`` limita
+la ejecución (las demás salen ``skipped`` con motivo). Con ``--target``:
+
+- ``--fixtures-file`` sustituye al secreto ``vigia/<entorno>/deploy-checks``: el mundo escribe
+  ahí, con la misma forma, una invitación temporal de la organización sintética. Se rechaza si no
+  es un archivo regular sin permisos de grupo ni de otros; su contenido nunca se informa.
+- ``--ca-file`` es la raíz efímera del balanceador: verifica el TLS de las peticiones HTTP y
+  fija, para Chromium, solo la clave pública del certificado que esa raíz verificó.
+- la nº 9 sustituye la comprobación ``vigia-app-index`` de Route 53 por una sonda local
+  equivalente (``HTTPS_STR_MATCH``: ``app_version`` en los primeros 5120 bytes de
+  ``/version.json``, respuesta 2xx o 3xx).
+
 Salida: informe JSON (``--report``) y tabla en Markdown para ``$GITHUB_STEP_SUMMARY``
 (``--summary``). Código 0 si ninguna falla; 1 si alguna falla; 2 por uso.
 """
@@ -54,6 +67,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import stat
 import struct
 import subprocess
 import sys
@@ -80,6 +94,12 @@ ALARM_POLL_SECONDS: Final = 60
 METRIC_WINDOW: Final = timedelta(minutes=5)
 TIMEOUT_SECONDS: Final = 15
 PLAYWRIGHT_TIMEOUT_SECONDS: Final = 90
+CHECK_NUMBERS: Final = frozenset(range(1, 14))
+APP_INDEX_PATH: Final = "/version.json"
+APP_INDEX_SEARCH: Final = "app_version"
+"""``vigia-app-index``: los mismos valores de ``infra/stacks/observability.py``."""
+APP_INDEX_SEARCH_BYTES: Final = 5120
+"""Route 53 busca la cadena de ``HTTPS_STR_MATCH`` solo en los primeros 5120 bytes."""
 _PATH_LINE: Final = re.compile(r'^  "(/[^"]*)":\s*$')
 _HEX64: Final = re.compile(r"^[0-9a-f]{64}$")
 _STAGING: Final = re.compile(r"^staging-[1-9][0-9]{0,8}$")
@@ -196,12 +216,16 @@ class Playwright(Protocol):
 
 
 class UrllibHttp:
-    """HTTPS con verificación de certificado y sesión por cookie (comprobación nº 5)."""
+    """HTTPS con verificación de certificado y sesión por cookie (comprobación nº 5).
 
-    def __init__(self) -> None:
+    ``ca_file`` (solo con ``--target``) sustituye a las raíces del sistema por la raíz efímera
+    del mundo local: se sigue verificando la cadena y el nombre."""
+
+    def __init__(self, ca_file: Path | None = None) -> None:
+        context = ssl.create_default_context(cafile=None if ca_file is None else str(ca_file))
         self._opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
-            urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+            urllib.request.HTTPSHandler(context=context),
         )
 
     def request(
@@ -348,16 +372,42 @@ class SecretsFixtures:
             )
         except subprocess.CalledProcessError:
             return Fixtures()
+        return _parsed_fixtures(secret.get("SecretString") or "{}")
+
+
+class FileFixtures:
+    """El material del secreto, leído de un archivo privado local (``--fixtures-file``).
+
+    Solo para la evidencia local con ``--target``: lo escribe el mundo de U-05 dentro de su
+    directorio ``0700``. ``private_file`` ya rechazó enlaces, no regulares y permisos abiertos.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def load(self, environment: str) -> Fixtures:
         try:
-            data = json.loads(secret.get("SecretString") or "{}")
-        except json.JSONDecodeError:
+            text = self._path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             return Fixtures()
-        return Fixtures(
-            valid_certificate=_certificate(data.get("valid")),
-            revoked_certificate=_certificate(data.get("revoked")),
-            synthetic_zone_id=data.get("synthetic_zone_id") or None,
-            frontend=_frontend_credentials(data.get("frontend")),
-        )
+        return _parsed_fixtures(text)
+
+
+def _parsed_fixtures(text: str) -> Fixtures:
+    """Material con la forma del secreto; un documento ilegible deja todo sin material."""
+    try:
+        data = json.loads(text)
+    except (ValueError, RecursionError):
+        return Fixtures()
+    if not isinstance(data, dict):
+        return Fixtures()
+    zone = data.get("synthetic_zone_id")
+    return Fixtures(
+        valid_certificate=_certificate(data.get("valid")),
+        revoked_certificate=_certificate(data.get("revoked")),
+        synthetic_zone_id=zone if isinstance(zone, str) and zone else None,
+        frontend=_frontend_credentials(data.get("frontend")),
+    )
 
 
 def _certificate(entry: object) -> Certificate | None:
@@ -401,17 +451,85 @@ class KitConformance:
         return ConformanceVerdict(passed=completed.returncode == 0, detail=summary)
 
 
-class LocalPlaywright:
-    """Ejecuta solo el recorrido de despliegue cuando el árbol ya tiene Playwright instalado."""
+def _der_element(data: bytes, offset: int) -> tuple[int, int]:
+    """Inicio del contenido y fin del elemento DER que empieza en ``offset``."""
+    length = data[offset + 1]
+    start = offset + 2
+    if length & 0x80:
+        count = length & 0x7F
+        if not 0 < count <= 4:
+            raise ValueError("longitud DER no admitida")
+        length = int.from_bytes(data[start : start + count], "big")
+        start += count
+    end = start + length
+    if end > len(data):
+        raise ValueError("elemento DER truncado")
+    return start, end
 
-    def __init__(self, repository: Path) -> None:
+
+def spki_sha256(certificate_der: bytes) -> str:
+    """SHA-256 en base64 de ``subjectPublicKeyInfo`` (formato de Chromium para fijar claves).
+
+    ``Certificate ::= SEQUENCE { tbsCertificate, ... }`` y ``tbsCertificate`` es
+    ``[0] version`` opcional, serie, algoritmo, emisor, validez, sujeto y ``subjectPublicKeyInfo``.
+    """
+    try:
+        tbs, _ = _der_element(certificate_der, 0)
+        position, _ = _der_element(certificate_der, tbs)
+        if certificate_der[position] == 0xA0:
+            position = _der_element(certificate_der, position)[1]
+        for _skipped in range(5):
+            position = _der_element(certificate_der, position)[1]
+        if certificate_der[position] != 0x30:
+            raise ValueError("subjectPublicKeyInfo no es una secuencia")
+        spki = certificate_der[position : _der_element(certificate_der, position)[1]]
+    except IndexError:
+        raise ValueError("certificado DER truncado") from None
+    return base64.b64encode(hashlib.sha256(spki).digest()).decode("ascii")
+
+
+def verified_certificate_pin(target_url: str, ca_file: Path) -> str:
+    """Huella de la clave del certificado que presenta ``target_url``, verificado con ``ca_file``.
+
+    Chromium no admite una raíz propia sin tocar el almacén del usuario; en cambio acepta
+    ``--ignore-certificate-errors-spki-list`` para una clave concreta. Solo se fija la clave de
+    un certificado que la raíz efímera ya verificó (cadena y nombre)."""
+    parsed = urllib.parse.urlparse(target_url)
+    host = parsed.hostname or ""
+    context = ssl.create_default_context(cafile=str(ca_file))
+    with (
+        socket.create_connection((host, parsed.port or 443), timeout=TIMEOUT_SECONDS) as raw,
+        context.wrap_socket(raw, server_hostname=host) as tls,
+    ):
+        certificate = tls.getpeercert(binary_form=True)
+    if not certificate:
+        raise ssl.SSLError("el destino no presentó certificado")
+    return spki_sha256(certificate)
+
+
+class LocalPlaywright:
+    """Ejecuta solo el recorrido de despliegue cuando el árbol ya tiene Playwright instalado.
+
+    Con ``ca_file`` (mundo local, ``--target``) Chromium acepta solo la clave del certificado
+    que esa raíz verificó (``VIGIA_DEPLOY_CHECK_SPKI``); sin ella, el almacén del sistema."""
+
+    def __init__(self, repository: Path, ca_file: Path | None = None) -> None:
         self._frontend = repository / "frontend"
+        self._ca_file = ca_file
 
     def run(self, target_url: str, credentials: FrontendCredentials) -> PlaywrightVerdict | None:
         node = shutil.which("node")
         cli = self._frontend / "node_modules" / "@playwright" / "test" / "cli.js"
         if node is None or not cli.is_file():
             return None
+        pin: dict[str, str] = {}
+        if self._ca_file is not None:
+            try:
+                pin["VIGIA_DEPLOY_CHECK_SPKI"] = verified_certificate_pin(target_url, self._ca_file)
+            except (OSError, ValueError):
+                return PlaywrightVerdict(
+                    passed=False, detail="el destino no presentó un certificado de --ca-file"
+                )
         descriptor, credentials_path = tempfile.mkstemp(
             prefix="vigia-deploy-check-", suffix=".json"
         )
@@ -426,7 +544,12 @@ class LocalPlaywright:
                     handle,
                 )
             environment = {
-                **os.environ,
+                **{
+                    key: value
+                    for key, value in os.environ.items()
+                    if key != "VIGIA_DEPLOY_CHECK_SPKI"
+                },
+                **pin,
                 "VIGIA_DEPLOY_CHECK_TARGET": target_url,
                 "VIGIA_DEPLOY_CHECK_CREDENTIALS_FILE": credentials_path,
             }
@@ -725,7 +848,8 @@ def check_playwright(target: Target, fixtures: Fixtures, playwright: Playwright)
             8,
             name,
             "skipped",
-            "sin invitación y correo de prueba del entorno (secreto vigia/<entorno>/deploy-checks)",
+            "sin invitación y correo de prueba del entorno (secreto vigia/<entorno>/deploy-checks"
+            " o --fixtures-file)",
         )
     verdict = playwright.run(target.app_url, fixtures.frontend)
     if verdict is None:
@@ -751,9 +875,9 @@ def _app_index_health_check(target: Target, aws: Aws) -> bool:
         check
         for check in checks
         if check.get("HealthCheckConfig", {}).get("FullyQualifiedDomainName") == target.app_host
-        and check.get("HealthCheckConfig", {}).get("ResourcePath") == "/version.json"
+        and check.get("HealthCheckConfig", {}).get("ResourcePath") == APP_INDEX_PATH
         and check.get("HealthCheckConfig", {}).get("Type") == "HTTPS_STR_MATCH"
-        and check.get("HealthCheckConfig", {}).get("SearchString") == "app_version"
+        and check.get("HealthCheckConfig", {}).get("SearchString") == APP_INDEX_SEARCH
     ]
     if len(matching) != 1 or not isinstance(matching[0].get("Id"), str):
         return False
@@ -765,6 +889,16 @@ def _app_index_health_check(target: Target, aws: Aws) -> bool:
     )
     statuses = [item.get("StatusReport", {}).get("Status") for item in observations]
     return bool(statuses) and all(status == "Success" for status in statuses)
+
+
+def local_app_index_probe(target: Target, http: Http) -> bool:
+    """Sonda local equivalente a ``vigia-app-index`` (``HTTPS_STR_MATCH`` de Route 53).
+
+    Como Route 53: ``GET`` sin cabeceras de navegación, respuesta 2xx o 3xx y la cadena en los
+    primeros ``APP_INDEX_SEARCH_BYTES`` bytes del cuerpo."""
+    answer = http.request("GET", f"{target.app_url}{APP_INDEX_PATH}")
+    head = answer.body[:APP_INDEX_SEARCH_BYTES]
+    return 200 <= answer.status < 400 and APP_INDEX_SEARCH.encode("ascii") in head
 
 
 def check_app_index(target: Target, http: Http, aws: Aws) -> Result:
@@ -801,6 +935,16 @@ def check_app_index(target: Target, http: Http, aws: Aws) -> Result:
     cache_control = _header(package.headers, "Cache-Control").lower()
     if package.status != 200 or "immutable" not in cache_control:
         return Result(9, name, "failed", f"GET {asset} no respondió 200 immutable")
+    if target.target_url is not None:
+        # Destino local: no hay Route 53; la sonda equivalente consulta el mismo recurso.
+        if not local_app_index_probe(target, http):
+            return Result(9, name, "failed", "la sonda local equivalente a vigia-app-index falló")
+        return Result(
+            9,
+            name,
+            "ok",
+            "marcador, versión, paquete immutable y sonda local equivalente a vigia-app-index",
+        )
     if not _app_index_health_check(target, aws):
         return Result(9, name, "failed", "la comprobación vigia-app-index no está en OK")
     return Result(9, name, "ok", "marcador, versión, paquete immutable y vigia-app-index en OK")
@@ -1020,9 +1164,11 @@ def run_checks(
     playwright: Playwright | None = None,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] | None = None,
+    only: frozenset[int] | None = None,
 ) -> list[Result]:
     """Las trece comprobaciones; la nº 7 al final por sus 15 minutos. Un error inesperado de una
-    comprobación la deja ``failed`` con el error, sin impedir las demás."""
+    comprobación la deja ``failed`` con el error, sin impedir las demás. Con ``only`` (``--only``)
+    las no seleccionadas no se ejecutan y salen ``skipped`` con ese motivo."""
     clock = now or (lambda: target.now)
     material = fixtures or Fixtures()
     kit = conformance or KitConformance()
@@ -1053,7 +1199,15 @@ def run_checks(
         (13, "U-03", lambda: check_cross_origin_and_checksum(target, http)),
         (7, "alarmas", lambda: check_alarms(target, aws, sleep)),
     ]
-    results = [result for number, name, check in steps for result in guarded(number, name, check)]
+    results = [
+        result
+        for number, name, check in steps
+        for result in (
+            guarded(number, name, check)
+            if only is None or number in only
+            else [Result(number, name, "skipped", "no seleccionada (--only)")]
+        )
+    ]
     return sorted(results, key=lambda result: result.number)
 
 
@@ -1093,6 +1247,28 @@ def _target_url(value: str) -> str:
     return value.rstrip("/")
 
 
+def _only(value: str) -> frozenset[int]:
+    try:
+        numbers = frozenset(int(item) for item in value.split(","))
+    except ValueError:
+        raise argparse.ArgumentTypeError("números de comprobación separados por comas") from None
+    if not numbers or not numbers <= CHECK_NUMBERS:
+        raise argparse.ArgumentTypeError("números de comprobación entre 1 y 13")
+    return numbers
+
+
+def private_file(value: str) -> Path:
+    """Archivo regular, sin enlace simbólico y sin permisos de grupo ni de otros."""
+    path = Path(value)
+    try:
+        status = path.lstat()
+    except OSError:
+        raise argparse.ArgumentTypeError("el archivo no existe o no se puede leer") from None
+    if not stat.S_ISREG(status.st_mode) or status.st_mode & 0o077:
+        raise argparse.ArgumentTypeError("debe ser un archivo regular privado (0600)")
+    return path
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Comprobaciones de despliegue (§3.2).")
     parser.add_argument("--environment", required=True, type=_environment)
@@ -1107,9 +1283,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--target", type=_target_url, help="origen HTTPS alternativo para el recorrido local"
     )
+    parser.add_argument(
+        "--fixtures-file",
+        type=private_file,
+        help="con --target: material del secreto deploy-checks en un archivo privado local",
+    )
+    parser.add_argument(
+        "--ca-file", type=Path, help="con --target: raíz TLS efímera del destino local"
+    )
+    parser.add_argument("--only", type=_only, help="solo estas comprobaciones, p. ej. 8,9")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args(argv)
+    if args.target is None and (args.fixtures_file is not None or args.ca_file is not None):
+        parser.error("--fixtures-file y --ca-file solo se admiten con --target")
+    if args.ca_file is not None and not args.ca_file.is_file():
+        parser.error("--ca-file no es un archivo")
     target = Target(
         environment=args.environment,
         domain=args.domain,
@@ -1121,14 +1310,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         app_version=args.app_version,
         target_url=args.target,
     )
+    source: FixtureSource = (
+        SecretsFixtures(aws_cli) if args.fixtures_file is None else FileFixtures(args.fixtures_file)
+    )
     results = run_checks(
         target,
-        http=UrllibHttp(),
+        http=UrllibHttp(args.ca_file),
         aws=aws_cli,
         network=SocketNetwork(),
-        fixtures=SecretsFixtures(aws_cli).load(args.environment),
+        fixtures=source.load(args.environment),
         conformance=KitConformance(),
+        playwright=LocalPlaywright(args.repository, args.ca_file),
         now=lambda: datetime.now(UTC),  # noqa: TID251
+        only=args.only,
     )
     if args.report:
         args.report.write_text(

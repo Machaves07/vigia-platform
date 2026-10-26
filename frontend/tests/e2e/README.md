@@ -59,6 +59,47 @@ o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestruc
 de autenticación de cada cuenta; los recorridos funcionales por rol pertenecen a
 VIG-332 y VIG-333.
 
+## Comprobaciones de despliegue nº 8 y 9 contra el mundo (sin AWS)
+
+`backend/tools/deploy_checks.py` corre en local contra este mundo con `--target`
+(VIG-352). El mundo emite, por el servicio real, una invitación de un solo uso de
+coordinación SST en la organización sintética y la escribe en
+`deploy_checks_file` (`0600`, en su directorio temporal `0700`), con la misma forma
+que el secreto `vigia/<entorno>/deploy-checks`. Ese archivo se borra al parar el
+mundo, y el barrido de fugas busca también el token de la invitación.
+
+Con el mundo en marcha (`uv run --frozen python -m tests.e2e_u05` en `backend/`,
+que espera `VIGIA_WORLD_READY` y se para con EOF), desde `backend/`:
+
+```sh
+WORLD=../frontend/tests/e2e/.world.json
+TARGET=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_url"])' "$WORLD")
+CA=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ca_file"])' "$WORLD")
+FIXTURES=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deploy_checks_file"])' "$WORLD")
+VERSION=$(python3 -c 'import json; print(json.load(open("../frontend/dist/version.json"))["app_version"])')
+UNUSED=$(python3 -c 'print("0" * 64)')  # la nº 6 no corre con --only
+# nº 8: recorrido de Playwright de staging (Chromium headless)
+uv run --no-project python tools/deploy_checks.py --environment staging-1 --domain vigia.test \
+  --verifier-sha256 "$UNUSED" --target "$TARGET" --ca-file "$CA" \
+  --fixtures-file "$FIXTURES" --only 8
+# nº 9: índice, version.json, paquete immutable y sonda local de vigia-app-index
+uv run --no-project python tools/deploy_checks.py --environment pilot --domain vigia.test \
+  --verifier-sha256 "$UNUSED" --target "$TARGET" --ca-file "$CA" \
+  --app-version "$VERSION" --only 9
+```
+
+- `--only` deja las demás comprobaciones en `skipped` con motivo: dependen de AWS.
+- `--ca-file` verifica el TLS con la raíz efímera. Chromium no admite esa raíz sin tocar el
+  almacén del usuario, así que se le fija solo la clave del certificado que esa raíz verificó
+  (`--ignore-certificate-errors-spki-list`); nunca `ignoreHTTPSErrors`.
+- En `--target`, la nº 9 cambia la comprobación `vigia-app-index` de Route 53 por una sonda
+  local equivalente: `HTTPS_STR_MATCH` de `app_version` en los primeros 5120 bytes de
+  `/version.json`, respuesta 2xx o 3xx.
+- La invitación es de un solo uso: para repetir la nº 8, arranca otro mundo.
+- `--fixtures-file` y `--ca-file` solo se admiten con `--target`; el archivo de material se
+  rechaza si es un enlace o tiene permisos de grupo u otros. Ni el informe ni la salida
+  incluyen el enlace, el token o el correo.
+
 ## Recorridos de gerente, administración, instalador, COPASST y proveedor
 
 ```sh

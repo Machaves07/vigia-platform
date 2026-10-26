@@ -8,17 +8,28 @@ requisito, fallida si el requisito ya existe y la comprobación no está escrita
 
 from __future__ import annotations
 
+import base64
+import contextlib
+import hashlib
 import json
 import os
-from collections.abc import Callable
+import socket
+import ssl
+import threading
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 
+from tests.conformance.mtls_proxy import server_tls
 from tools import deploy_checks
 from tools.deploy_checks import (
     Certificate,
@@ -31,6 +42,7 @@ from tools.deploy_checks import (
     Target,
     run_checks,
 )
+from vigia_platform.shared.clock import SystemClock
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
@@ -925,3 +937,368 @@ def test_the_summary_is_a_markdown_table() -> None:
     results = [Result(1, "a", "ok", "bien"), Result(2, "b", "skipped", "motivo")]
     text = deploy_checks.summary(_target(), results)
     assert "| 1 | a | ok | bien |" in text and "| 2 | b | skipped | motivo |" in text
+
+
+# --- Evidencia local con --target (VIG-352) ----------------------------------------------------
+
+LOCAL = "https://127.0.0.1:8443"
+SEARCH_END_IN_BODY = len('{"p": "') + len('", "') + len("app_version")
+"""Bytes del cuerpo de la sonda que no son relleno, hasta el final de ``app_version``."""
+
+
+def _local_pilot(**changes: Any) -> Target:
+    return _target(environment="pilot", operator_email=None, target_url=LOCAL, **changes)
+
+
+def test_a_local_target_uses_the_local_index_probe_and_never_route53() -> None:
+    aws = FakeAws()
+    http = _healthy_http()
+    result = _run(_local_pilot(), http=http, aws=aws)[9]
+    assert result.status == "ok" and "sonda local" in result.detail
+    assert not [call for call in aws.calls if call[0] == "route53"]
+    probes = [call for call in http.calls if call[1] == "/version.json"]
+    # La sonda repite el recurso de Route 53 sin cabeceras de navegación.
+    assert len(probes) == 2 and probes[-1][3] == {}
+
+
+def test_without_a_local_target_route53_is_still_required() -> None:
+    aws = FakeAws()
+    _run(_target(environment="pilot", operator_email=None), aws=aws)
+    assert ("route53", "list-health-checks") in aws.calls
+
+
+@pytest.mark.parametrize(("end", "status"), [(5120, "ok"), (5121, "failed")])
+def test_the_local_probe_only_searches_the_first_5120_bytes(end: int, status: str) -> None:
+    http = _healthy_http()
+    body = '{"p": "' + "x" * (end - SEARCH_END_IN_BODY) + '", "app_version": "1.2.3"}'
+    assert body.index("app_version") + len("app_version") == end
+    http.routes[("GET", "/version.json")] = lambda _: Response(200, body.encode())
+    result = _run(_local_pilot(), http=http)[9]
+    assert result.status == status
+    if status == "failed":
+        assert "sonda local" in result.detail
+
+
+@pytest.mark.parametrize(
+    ("code", "healthy"), [(199, False), (200, True), (302, True), (399, True), (400, False)]
+)
+def test_the_local_probe_accepts_2xx_and_3xx_like_route53(code: int, healthy: bool) -> None:
+    http = FakeHttp()
+    http.routes[("GET", "/version.json")] = lambda _: _json(code, {"app_version": APP_VERSION})
+    assert deploy_checks.local_app_index_probe(_local_pilot(), http) is healthy
+
+
+def _selected(target: Target, aws: FakeAws, playwright: FakePlaywright, only: int) -> list[Result]:
+    return run_checks(
+        target,
+        http=_healthy_http(),
+        aws=aws,
+        network=_healthy_network(),
+        fixtures=_fixtures(),
+        conformance=FakeConformance(),
+        playwright=playwright,
+        sleep=lambda _: None,
+        only=frozenset({only}),
+    )
+
+
+def test_only_runs_the_selected_checks_and_skips_the_others_with_a_reason() -> None:
+    playwright = FakePlaywright()
+    by_number = {
+        r.number: r for r in _selected(_target(target_url=LOCAL), FakeAws(), playwright, 8)
+    }
+    assert sorted(by_number) == list(range(1, 14))
+    assert by_number[8].status == "ok"
+    for number in set(range(1, 14)) - {8}:
+        assert by_number[number].status == "skipped"
+        assert by_number[number].detail == "no seleccionada (--only)"
+    assert playwright.calls == [(LOCAL, FRONTEND)]
+
+
+def test_only_never_calls_aws_for_the_unselected_checks() -> None:
+    aws = FakeAws()
+    results = {r.number: r for r in _selected(_local_pilot(), aws, FakePlaywright(), 9)}
+    assert results[9].status == "ok"
+    assert aws.calls == []
+
+
+def _private(path: Path, document: object, mode: int = 0o600) -> Path:
+    path.write_text(json.dumps(document), encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+def test_file_fixtures_read_the_secret_shape(tmp_path: Path) -> None:
+    path = _private(
+        tmp_path / "deploy-checks.json",
+        {
+            "frontend": {"invitation_link": FRONTEND.invitation_link, "email": FRONTEND.email},
+            "synthetic_zone_id": ZONE,
+            "unknown": {"kept": "aside"},
+        },
+    )
+    loaded = deploy_checks.FileFixtures(path).load("staging-7")
+    assert loaded == Fixtures(frontend=FRONTEND, synthetic_zone_id=ZONE)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "no es json",
+        "[]",
+        '"texto"',
+        "NaN",
+        "[" * 100_000 + "]" * 100_000,
+        '{"frontend": {"invitation_link": 1, "email": "a@b.c"}, "synthetic_zone_id": 7}',
+        '{"frontend": {"invitation_link": "", "email": "a@b.c"}}',
+        '{"frontend": "enlace"}',
+    ],
+    ids=["vacio", "texto", "lista", "cadena", "nan", "anidado", "tipos", "vacios", "plano"],
+)
+def test_file_fixtures_leave_everything_without_material_on_garbage(
+    tmp_path: Path, text: str
+) -> None:
+    path = tmp_path / "deploy-checks.json"
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o600)
+    assert deploy_checks.FileFixtures(path).load("staging-7") == Fixtures()
+
+
+def test_file_fixtures_tolerate_a_missing_or_binary_file(tmp_path: Path) -> None:
+    assert deploy_checks.FileFixtures(tmp_path / "ausente.json").load("staging-7") == Fixtures()
+    binary = tmp_path / "binario.json"
+    binary.write_bytes(b"\xff\xfe\x00")
+    assert deploy_checks.FileFixtures(binary).load("staging-7") == Fixtures()
+
+
+@pytest.mark.parametrize("mode", [0o640, 0o604, 0o610, 0o601, 0o660, 0o644])
+def test_the_fixtures_file_must_be_private(tmp_path: Path, mode: int) -> None:
+    path = _private(tmp_path / "deploy-checks.json", {}, mode)
+    with pytest.raises(deploy_checks.argparse.ArgumentTypeError, match="privado"):
+        deploy_checks.private_file(str(path))
+    path.chmod(0o600)
+    assert deploy_checks.private_file(str(path)) == path
+    path.chmod(0o400)
+    assert deploy_checks.private_file(str(path)) == path
+
+
+def test_the_fixtures_file_rejects_links_directories_and_missing_paths(tmp_path: Path) -> None:
+    real = _private(tmp_path / "real.json", {})
+    link = tmp_path / "enlace.json"
+    link.symlink_to(real)
+    for value in (link, tmp_path, tmp_path / "ausente.json"):
+        with pytest.raises(deploy_checks.argparse.ArgumentTypeError):
+            deploy_checks.private_file(str(value))
+
+
+def _arguments(*extra: str) -> list[str]:
+    required = ["--environment", "staging-7", "--domain", "vigia.test"]
+    return [*required, "--verifier-sha256", VERIFIER, *extra]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ("--only", "0"),
+        ("--only", "14"),
+        ("--only", "8,x"),
+        ("--only", ""),
+        ("--only", "8,,9"),
+        ("--fixtures-file", "/no/existe.json"),
+        ("--target", LOCAL, "--ca-file", "/no/existe.pem"),
+    ],
+)
+def test_the_local_options_reject_malformed_values(extra: tuple[str, ...]) -> None:
+    with pytest.raises(SystemExit) as raised:
+        deploy_checks.main(_arguments(*extra))
+    assert raised.value.code == 2
+
+
+def test_local_material_is_only_accepted_with_a_target(tmp_path: Path) -> None:
+    fixtures = _private(tmp_path / "deploy-checks.json", {})
+    ca = tmp_path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    for extra in (("--fixtures-file", str(fixtures)), ("--ca-file", str(ca))):
+        with pytest.raises(SystemExit) as raised:
+            deploy_checks.main(_arguments(*extra))
+        assert raised.value.code == 2
+
+
+def test_the_command_runs_a_local_check_from_the_private_file_without_revealing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = FrontendCredentials(
+        invitation_link=f"{LOCAL}/invitations#token-sintetico-{os.getpid()}",
+        email="deploy-check@e2e.example.test",
+    )
+    fixtures = _private(
+        tmp_path / "deploy-checks.json",
+        {"frontend": {"invitation_link": secret.invitation_link, "email": secret.email}},
+    )
+    ca = tmp_path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+    seen: dict[str, Any] = {}
+
+    class RecordingPlaywright:
+        def __init__(self, repository: Path, ca_file: Path | None = None) -> None:
+            seen["ca_file"] = ca_file
+
+        def run(self, target_url: str, credentials: FrontendCredentials) -> PlaywrightVerdict:
+            seen["run"] = (target_url, credentials)
+            return PlaywrightVerdict(True)
+
+    def no_aws(*arguments: str) -> Any:
+        raise AssertionError(f"sin AWS en local: {arguments}")
+
+    monkeypatch.setattr(deploy_checks, "LocalPlaywright", RecordingPlaywright)
+    monkeypatch.setattr(deploy_checks, "UrllibHttp", lambda ca_file=None: _healthy_http())
+    monkeypatch.setattr(deploy_checks, "aws_cli", no_aws)
+    report = tmp_path / "report.json"
+    summary = tmp_path / "summary.md"
+    code = deploy_checks.main(
+        _arguments(
+            "--target", LOCAL + "/", "--fixtures-file", str(fixtures), "--ca-file", str(ca),
+            "--only", "8", "--report", str(report), "--summary", str(summary),
+        )
+    )  # fmt: skip
+    assert code == 0
+    assert seen == {"ca_file": ca, "run": (LOCAL, secret)}
+    results = {item["number"]: item for item in json.loads(report.read_text(encoding="utf-8"))}
+    assert results[8]["status"] == "ok"
+    captured = capsys.readouterr()
+    written = captured.out + captured.err + report.read_text("utf-8") + summary.read_text("utf-8")
+    token = secret.invitation_link.rsplit("#", 1)[-1]
+    for value in (secret.invitation_link, token, secret.email):
+        assert value not in written
+
+
+def _server_certificate(directory: Path) -> tuple[bytes, Path, Path, Path]:
+    """Raíz efímera y certificado de servidor del balanceador local (como el mundo de U-05)."""
+    directory.mkdir()
+    tls = server_tls(directory, SystemClock().now())
+    leaf = x509.load_pem_x509_certificate(tls.certificate_file.read_bytes())
+    return (
+        leaf.public_bytes(serialization.Encoding.DER),
+        tls.ca_file,
+        tls.certificate_file,
+        tls.key_file,
+    )
+
+
+def _expected_pin(certificate_der: bytes) -> str:
+    spki = (
+        x509.load_der_x509_certificate(certificate_der)
+        .public_key()
+        .public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    )
+    return base64.b64encode(hashlib.sha256(spki).digest()).decode()
+
+
+def test_spki_pin_is_the_sha256_of_the_subject_public_key_info(tmp_path: Path) -> None:
+    certificate, *_ = _server_certificate(tmp_path / "tls")
+    assert deploy_checks.spki_sha256(certificate) == _expected_pin(certificate)
+
+
+def test_spki_pin_of_an_rsa_certificate_with_long_form_lengths() -> None:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "rsa.vigia.test")])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(7)
+        .not_valid_before(NOW)
+        .not_valid_after(NOW + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+        .public_bytes(serialization.Encoding.DER)
+    )
+    assert deploy_checks.spki_sha256(certificate) == _expected_pin(certificate)
+
+
+@pytest.mark.parametrize("cut", [0, 1, 2, 10, 200])
+def test_spki_pin_rejects_a_truncated_certificate(tmp_path: Path, cut: int) -> None:
+    certificate, *_ = _server_certificate(tmp_path / "tls")
+    with pytest.raises(ValueError):
+        deploy_checks.spki_sha256(certificate[:cut])
+
+
+@contextlib.contextmanager
+def _serve_once(certificate: Path, key: Path) -> Iterator[int]:
+    """Un saludo TLS en 127.0.0.1; el cliente decide si confía en el certificado."""
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certificate, key)
+    listener = socket.create_server(("127.0.0.1", 0))
+    listener.settimeout(60)
+
+    def serve() -> None:
+        with contextlib.suppress(OSError):
+            connection, _ = listener.accept()
+            with context.wrap_socket(connection, server_side=True):
+                pass
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield listener.getsockname()[1]
+    finally:
+        thread.join(timeout=60)
+        listener.close()
+
+
+def test_the_pin_comes_only_from_a_certificate_the_local_root_verified(tmp_path: Path) -> None:
+    certificate, ca, leaf, key = _server_certificate(tmp_path / "a")
+    with _serve_once(leaf, key) as port:
+        pin = deploy_checks.verified_certificate_pin(f"https://127.0.0.1:{port}", ca)
+    assert pin == _expected_pin(certificate)
+    _, other_ca, _, _ = _server_certificate(tmp_path / "b")
+    with _serve_once(leaf, key) as port, pytest.raises(ssl.SSLCertVerificationError):
+        deploy_checks.verified_certificate_pin(f"https://127.0.0.1:{port}", other_ca)
+
+
+def _fake_cli(tmp_path: Path) -> None:
+    cli = tmp_path / "frontend" / "node_modules" / "@playwright" / "test" / "cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+
+
+def test_local_playwright_pins_the_verified_key_only_with_a_ca_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_cli(tmp_path)
+    environments: list[dict[str, str]] = []
+
+    def fake_run(arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        environments.append(dict(kwargs["env"]))
+        return CompletedProcess(arguments, 0, stdout="", stderr="")
+
+    pin = "A" * 43 + "="
+    monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(deploy_checks.subprocess, "run", fake_run)
+    monkeypatch.setattr(deploy_checks, "verified_certificate_pin", lambda url, ca: pin)
+    # Una huella heredada del entorno nunca llega al navegador.
+    monkeypatch.setenv("VIGIA_DEPLOY_CHECK_SPKI", "B" * 43 + "=")
+    verdict = deploy_checks.LocalPlaywright(tmp_path, tmp_path / "ca.pem").run(LOCAL, FRONTEND)
+    assert verdict == PlaywrightVerdict(True, "el proceso terminó con código 0")
+    assert deploy_checks.LocalPlaywright(tmp_path).run(LOCAL, FRONTEND) is not None
+    assert environments[0]["VIGIA_DEPLOY_CHECK_SPKI"] == pin
+    assert "VIGIA_DEPLOY_CHECK_SPKI" not in environments[1]
+
+
+def test_local_playwright_fails_without_running_when_the_target_is_not_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_cli(tmp_path)
+
+    def unverified(url: str, ca: Path) -> str:
+        raise ssl.SSLCertVerificationError("certificate verify failed")
+
+    def never(*arguments: Any, **kwargs: Any) -> Any:
+        raise AssertionError("no debe lanzar Playwright")
+
+    monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
+    monkeypatch.setattr(deploy_checks.subprocess, "run", never)
+    monkeypatch.setattr(deploy_checks, "verified_certificate_pin", unverified)
+    verdict = deploy_checks.LocalPlaywright(tmp_path, tmp_path / "ca.pem").run(LOCAL, FRONTEND)
+    assert verdict == PlaywrightVerdict(False, "el destino no presentó un certificado de --ca-file")
