@@ -4,7 +4,8 @@
  *
  * - Salida estática con nombres con hash de contenido bajo `assets/`, sin mapas de fuente dentro
  *   de `dist/` y sin `eval` (sin CSS en JavaScript ni plantillas evaluadas; NFR-APP-14, 19).
- * - Una porción de código por pantalla `src/pages/scrNN` (NFR-APP-01, 02).
+ * - Una porción de código por pantalla `src/pages/scrNN` (NFR-APP-01, 02) y otra, `vendor`, con
+ *   React, React Router y TanStack Query (VIG-355).
  * - Arranque (VIG-289): `index.html` carga `src/bootstrap/check.ts` (comprobación de capacidades)
  *   y el complemento `vigia-bootstrap` escribe la versión mínima de `browserslist` y añade el
  *   `modulepreload` del paquete inicial.
@@ -32,6 +33,7 @@ import {
   parseApiProxy,
   resolveAppVersion,
   screenChunkName,
+  vendorChunkName,
 } from './config/build.ts';
 import { vigiaBootstrap } from './config/bootstrap.ts';
 import { vigiaRelease } from './config/release.ts';
@@ -108,7 +110,10 @@ export default defineConfig(({ mode }) => {
           // porción de la primera.
           codeSplitting: {
             includeDependenciesRecursively: false,
-            groups: [{ name: screenChunkName, debugName: 'screens' }],
+            groups: [
+              { name: screenChunkName, debugName: 'screens' },
+              { name: vendorChunkName, debugName: 'vendor' },
+            ],
           },
         },
       },
