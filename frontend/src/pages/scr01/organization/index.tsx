@@ -7,8 +7,8 @@ import {
   settingsIssues,
   type OrganizationSettings,
   type SettingsBody,
+  type ValidationIssue,
 } from '@/ports/scr01Hierarchy';
-import type { ValidationIssue } from '@/ports/validation';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
 import { AdminField, AdminMutationResult } from '../hierarchy/FormFields';

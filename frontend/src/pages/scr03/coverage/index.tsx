@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ScreenState } from '@/pages/shared/ScreenState';
-import { isPortError } from '@/ports/base';
 import { belongsToOrganization, integrityClock, integrityPort } from '@/ports/scr03Integrity';
+import { isPortError } from '@/ports/shared';
 import {
   DEFAULT_PERIOD_MS,
   composeCoverage,
