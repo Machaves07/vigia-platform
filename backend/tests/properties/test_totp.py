@@ -36,7 +36,7 @@ from urllib.parse import parse_qs, urlparse
 import pyotp
 import pytest
 from argon2 import PasswordHasher, Type
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from tests.factories import make_context
@@ -262,10 +262,15 @@ def test_a_step_is_never_accepted_twice(
 
 
 @given(secret=secrets_, step=steps)
+@example(secret=b" :\x8e\x05\xedJ\xaf\xb3\x82\x8e\x18\x1c\x0b:\x850\xc0F\x83\xa9", step=41976944)
 def test_same_code_twice_in_the_same_step_is_rejected(secret: bytes, step: int) -> None:
+    code = independent_code(secret, step)
+    # Las ventanas de ±1 paso alrededor de los instantes probados cubren de step - 2 a step + 2. Si
+    # el código de otro paso de ese rango coincide (1 entre 10^6 por paso), es válido de verdad ahí:
+    # no sería una reutilización (main@c87fadd, step 41976944 y step + 2 dan el mismo código).
+    assume(all(independent_code(secret, step + k) != code for k in (-2, -1, 1, 2)))
     h = harness(at_step(step))
     credential = seeded_credential(h, secret)
-    code = independent_code(secret, step)
     assert run(h.service.verify_totp(h.context, credential, code, at_step(step, 5))) is True
     for offset in (5, 29, 30, -30):
         assert (
