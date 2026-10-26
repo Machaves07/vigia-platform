@@ -1,7 +1,8 @@
 /**
  * Piezas puras de `vite.config.ts` (LC-APP-29), separadas para probarlas sin arrancar Vite.
  *
- * - `screenChunkName`: una porción de código por pantalla `src/pages/scrNN` (NFR-APP-01, 02).
+ * - `screenChunkName`: una porción de código por pantalla `src/pages/scrNN` (NFR-APP-01, 02);
+ *   `vendorChunkName`: una sola porción con las dependencias del arranque (VIG-355).
  * - `isNavigationRequest`: la regla D-3 de `infrastructure-design.md` §3. Solo una petición de
  *   navegación recibe `index.html`; todo lo demás es de la API y el servidor de desarrollo lo
  *   reenvía a `vigia-api`, porque varias rutas de la API sin prefijo (`/concessions`, `/zones/*`,
@@ -32,6 +33,22 @@ const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/](?!descriptor\.ts$)
 export function screenChunkName(moduleId: string): string | null {
   const match = SCREEN_MODULE.exec(moduleId);
   return match?.[1] ?? null;
+}
+
+/** Nombre de la porción de las dependencias del arranque (`vendorChunkName`). */
+export const VENDOR_CHUNK = 'vendor';
+
+const VENDOR_MODULE =
+  /[\\/]node_modules[\\/](?:react|react-dom|scheduler|react-router|@tanstack[\\/](?:react-query|query-core))[\\/]/;
+
+/**
+ * `vendor` si el módulo es de React, React Router o TanStack Query, o `null`. Todas van en el
+ * paquete inicial; juntas en una porción, el reparto automático de Rolldown no las parte en
+ * varios archivos con sus importaciones cruzadas (VIG-355: tras VIG-334 el paquete inicial superó
+ * los 250 KB de NFR-APP-01).
+ */
+export function vendorChunkName(moduleId: string): string | null {
+  return VENDOR_MODULE.test(moduleId) ? VENDOR_CHUNK : null;
 }
 
 type HeaderValue = string | readonly string[] | undefined;
