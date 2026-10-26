@@ -21,7 +21,7 @@ import fc from 'fast-check';
 import { systemClock } from '../../src/state/clock';
 
 import { nextTotp } from './authenticator';
-import { setPlatformFault } from './faults';
+import { restorePlatform, setPlatformFault } from './faults';
 import { authenticatedTest as test, expect } from './fixtures';
 
 /** Un archivo del catálogo de textos (Node exige atributos para importar JSON). */
@@ -130,7 +130,9 @@ async function openAndFill(
 ): Promise<{ readonly form: Locator; readonly plantOption: Locator }> {
   await page.goto('/exports');
   const form = page.getByRole('form', { name: catalogText(scr14, 'scr14.request') });
-  await expect(form).toBeVisible();
+  // Primera carga de la construcción de producción (arranque y GET /me) en un mundo que puede
+  // compartir la máquina con otros: tope explícito, como el de la jerarquía de abajo.
+  await expect(form).toBeVisible({ timeout: 30_000 });
   const plant = field(form, 'scr14.plant');
   const offered = plant.locator('option:not([value=""])');
   await expect(offered.first()).toBeAttached({ timeout: 30_000 });
@@ -211,7 +213,7 @@ test.describe('FS-APP con la plataforma real y el intermediario de fallos', () =
         // La caída dura 2 minutos desde que se congeló la API.
         await page.waitForTimeout(Math.max(0, outageStart + OUTAGE_MS - systemClock.now()));
       } finally {
-        await setPlatformFault(world, 'forward');
+        await restorePlatform(world);
       }
       // Vuelve la API: la sonda cierra el circuito y el aviso desaparece.
       await expect(notice).toHaveCount(0, { timeout: 75_000 });
@@ -286,7 +288,7 @@ test.describe('FS-APP con la plataforma real y el intermediario de fallos', () =
       // Misma ruta, mismo borrador; la escritura que recibió `unauthenticated` no se reenvió.
       await expect(page).toHaveURL(/\/exports$/, { timeout: 30_000 });
       const restored = page.getByRole('form', { name: catalogText(scr14, 'scr14.request') });
-      await expect(restored).toBeVisible();
+      await expect(restored).toBeVisible({ timeout: 30_000 });
       await expect.poll(() => formValues(restored)).toEqual(written);
       await page.waitForTimeout(3_000);
       expect(log.count('POST', WRITE)).toBe(1);

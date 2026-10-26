@@ -14,3 +14,13 @@ export async function setPlatformFault(world: World, mode: FaultMode): Promise<v
     throw new Error(`El canal de fallos rechazó el modo ${mode} (${String(response.status)}).`);
   }
 }
+
+/**
+ * Fin de una caída `freeze`: primero corta las conexiones que el intermediario retuvo (con sus
+ * peticiones ya abandonadas en cola) y después reenvía. Sin el corte, la reserva de conexiones del
+ * balanceador recibía de golpe esa cola y retrasaba la primera carga de la prueba siguiente.
+ */
+export async function restorePlatform(world: World): Promise<void> {
+  await setPlatformFault(world, 'refuse');
+  await setPlatformFault(world, 'forward');
+}

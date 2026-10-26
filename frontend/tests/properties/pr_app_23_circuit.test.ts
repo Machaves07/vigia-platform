@@ -49,7 +49,8 @@ describe('PR-APP-23', () => {
             now += event.elapsed;
             clock.advance(event.elapsed);
             for (const value of Object.values(model)) {
-              // Ventana de 60 s: cabe el ciclo de una lectura que agota sus reintentos (U05-H-10).
+              // Ventana de 60 s (A-70, decisión del dueño del 2026-10-26): cabe el ciclo de una
+              // lectura que agota sus reintentos (U05-H-10). PR-APP-23 se lee con 60 s.
               value.failures = value.failures.filter((at) => at > now - 60_000);
               if (value.blockedUntil !== null && value.blockedUntil <= now) {
                 value.blockedUntil = null;
