@@ -4,7 +4,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
 
 import { nextTotp } from './authenticator';
-import { watchPolicy } from './policy';
+import { assertClientState, policySummary, watchPolicy } from './policy';
 import { assertPrivateArtifacts } from './private-artifacts';
 import { readWorld, type Role, type World } from './world';
 
@@ -15,6 +15,9 @@ interface Account {
 
 interface Fixtures {
   world: World;
+}
+interface SummaryFixtures {
+  _policySummary: undefined;
 }
 interface AuthFixtures {
   role: Role;
@@ -28,21 +31,35 @@ interface WorkerFixtures {
 
 const sessionPolicyChecks = new WeakMap<BrowserContext, () => void>();
 
-export const test = base.extend<Fixtures>({
+/** Origen de la plataforma del mundo (sin barra final). */
+function originOf(world: World): string {
+  return new URL(world.base_url).origin;
+}
+
+export const test = base.extend<Fixtures, SummaryFixtures>({
   world: async ({}, use) => {
     await use(readWorld());
   },
   baseURL: async ({ world }, use) => {
     await use(world.base_url);
   },
-  context: async ({ context }, use) => {
-    const check = await watchPolicy(context);
+  context: async ({ context, world }, use) => {
+    const check = await watchPolicy(context, '', originOf(world));
     try {
       await use(context);
+      for (const page of context.pages()) await assertClientState(page, originOf(world));
     } finally {
       check();
     }
   },
+  // Resumen agregado del arnés al cerrar el worker (VIG-336): CSP, tipos confiables y cliente.
+  _policySummary: [
+    async ({}, use) => {
+      await use(undefined);
+      process.stdout.write(`${policySummary()}\n`);
+    },
+    { scope: 'worker', auto: true },
+  ],
 });
 
 /** Playwright instrumenta incluso browser.newContext(): el acceso requiere otra política de artefactos. */
@@ -86,7 +103,7 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
         context.setDefaultTimeout(30_000);
         contexts.add(context);
         if (reuse) sessions.set(role, context);
-        const check = await watchPolicy(context, role);
+        const check = await watchPolicy(context, role, originOf(world));
         sessionPolicyChecks.set(context, check);
         checks.push(check);
         const page = await context.newPage();
@@ -129,12 +146,13 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
     },
     { scope: 'worker', timeout: 180_000 },
   ],
-  authenticatedPage: async ({ roleSession, role, reuseRoleSession }, use) => {
+  authenticatedPage: async ({ roleSession, role, reuseRoleSession, world }, use) => {
     // Los recorridos con logout nunca reciben ni reemplazan el contexto compartido del rol.
     const context = await roleSession(role, reuseRoleSession);
     const page = await context.newPage();
     try {
       await use(page);
+      await assertClientState(page, originOf(world));
     } finally {
       try {
         await page.close();
