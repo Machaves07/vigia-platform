@@ -89,6 +89,10 @@ uv run --no-project python tools/deploy_checks.py --environment pilot --domain v
 ```
 
 - `--only` deja las demás comprobaciones en `skipped` con motivo: dependen de AWS.
+- La nº 8 corre Chromium gráfico, como los demás recorridos: sin cabeza se identifica como
+  `HeadlessChrome/`, fuera de la política de navegadores de la SPA. Necesita pantalla o Xvfb.
+- La cuenta invitada nace con `second_factor_required`, como las seis del mundo: el recorrido
+  inscribe el segundo factor de prueba y espera un paso TOTP nuevo para iniciar sesión.
 - `--ca-file` verifica el TLS con la raíz efímera. Chromium no admite esa raíz sin tocar el
   almacén del usuario, así que se le fija solo la clave del certificado que esa raíz verificó
   (`--ignore-certificate-errors-spki-list`); nunca `ignoreHTTPSErrors`.

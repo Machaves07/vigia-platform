@@ -93,7 +93,8 @@ NOTICE_VERSION_FALLBACK: Final = "1"
 ALARM_POLL_SECONDS: Final = 60
 METRIC_WINDOW: Final = timedelta(minutes=5)
 TIMEOUT_SECONDS: Final = 15
-PLAYWRIGHT_TIMEOUT_SECONDS: Final = 90
+PLAYWRIGHT_TIMEOUT_SECONDS: Final = 150
+"""Arranque de Chromium y el recorrido (tope de 90 s, con la espera de un paso TOTP nuevo)."""
 CHECK_NUMBERS: Final = frozenset(range(1, 14))
 APP_INDEX_PATH: Final = "/version.json"
 APP_INDEX_SEARCH: Final = "app_version"

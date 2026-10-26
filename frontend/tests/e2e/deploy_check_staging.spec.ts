@@ -29,7 +29,17 @@ function credentials(): DeployCredentials {
   return JSON.parse(readFileSync(path, 'utf8')) as DeployCredentials;
 }
 
-function totp(provisioningUri: string): string {
+let lastStep = -1;
+
+/** Un paso TOTP aún no usado: la plataforma rechaza repetir el de la activación en el login. */
+async function totp(provisioningUri: string): Promise<string> {
+  await expect
+    .poll(() => Math.floor(systemClock.now() / 30_000) > lastStep, {
+      timeout: 35_000,
+      message: 'Esperar un paso TOTP aún no utilizado',
+    })
+    .toBe(true);
+  lastStep = Math.floor(systemClock.now() / 30_000);
   const encoded = new URL(provisioningUri).searchParams.get('secret');
   if (!encoded) throw new Error('La inscripción no entregó un secreto TOTP');
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -41,7 +51,7 @@ function totp(provisioningUri: string): string {
   }
   const secret = Buffer.from(bits.match(/.{8}/g)?.map((octet) => Number.parseInt(octet, 2)) ?? []);
   const counter = Buffer.alloc(8);
-  counter.writeBigUInt64BE(BigInt(Math.floor(systemClock.now() / 30_000)));
+  counter.writeBigUInt64BE(BigInt(lastStep));
   const digest = createHmac('sha1', secret).update(counter).digest();
   const offset = digest.at(-1) ?? 0;
   return String((digest.readUInt32BE(offset & 15) & 0x7fffffff) % 1_000_000).padStart(6, '0');
@@ -71,7 +81,7 @@ test('el despliegue activa la invitación y recorre el panel sin violaciones de 
   await page.getByLabel('Repita la contraseña').fill(password);
   await page.getByRole('button', { name: 'Siguiente' }).click();
   await page.getByRole('button', { name: 'Lo guardé' }).click();
-  await page.getByLabel('Código de 6 dígitos de la aplicación').fill(totp(provisioningUri));
+  await page.getByLabel('Código de 6 dígitos de la aplicación').fill(await totp(provisioningUri));
   await page.getByRole('button', { name: 'Siguiente' }).click();
   await page.getByLabel('He leído el aviso de tratamiento de datos y lo acepto').check();
   await page.getByRole('button', { name: 'Siguiente' }).click();
@@ -82,8 +92,14 @@ test('el despliegue activa la invitación y recorre el panel sin violaciones de 
   await page.getByLabel('Correo').fill(privateInput.email);
   await page.getByLabel('Contraseña').fill(password);
   await page.getByRole('button', { name: 'Entrar' }).click();
-  await page.getByLabel('Código de 6 dígitos o código de recuperación').fill(totp(provisioningUri));
+  await page
+    .getByLabel('Código de 6 dígitos o código de recuperación')
+    .fill(await totp(provisioningUri));
   await page.getByRole('button', { name: 'Verificar' }).click();
+  // Como el arnés (fixtures.ts): sesión completa fuera de /login y después el panel por la raíz,
+  // que redirige al inicio del rol.
+  await expect(page).not.toHaveURL(/\/login(?:\/|$)/);
+  await page.goto('/');
   await expect(page.getByRole('heading', { name: /Inicio/ })).toBeVisible();
   await page
     .getByRole('link', { name: /bandeja/i })

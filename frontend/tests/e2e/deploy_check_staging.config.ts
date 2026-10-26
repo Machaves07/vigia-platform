@@ -18,7 +18,8 @@ export default defineConfig({
   testMatch: 'deploy_check_staging.spec.ts',
   workers: 1,
   retries: 0,
-  timeout: 60_000,
+  // Incluye la espera de un paso TOTP nuevo (hasta 30 s) entre la activación y el login.
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   reporter: 'list',
   use: {

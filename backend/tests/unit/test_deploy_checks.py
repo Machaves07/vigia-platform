@@ -684,7 +684,7 @@ def test_local_playwright_fails_safely_when_its_process_exceeds_the_limit(
     monkeypatch.setattr(deploy_checks.shutil, "which", lambda _: "/usr/bin/node")
     monkeypatch.setattr(deploy_checks.subprocess, "run", fake_run)
     verdict = deploy_checks.LocalPlaywright(tmp_path).run("https://staging-7.vigia.example", secret)
-    assert verdict == PlaywrightVerdict(False, "el proceso agotó el límite de 90 s")
+    assert verdict == PlaywrightVerdict(False, "el proceso agotó el límite de 150 s")
     captured = capsys.readouterr()
     assert secret.invitation_link not in captured.out + captured.err
     assert secret.email not in captured.out + captured.err
