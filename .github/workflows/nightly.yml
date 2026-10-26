@@ -21,6 +21,11 @@
 # en carga; los 17 objetivos NFR-LAZ-01 en bancos (50 %, sin cambiar el 20 % de U-03); un año
 # y un millón de notificaciones en volumetria. Ninguna de esas suites largas se duplica en
 # integracion ni en propiedades (el trabajo sin tests/properties).
+# U-05 (VIG-337, TASK-456; tech-stack-decisions §5 e infrastructure-design §4): el trabajo
+# frontend-nightly corre vitest con el perfil nightly (propiedades, FS-APP-01 a 10 y A-1 a 10),
+# Playwright en Chromium, Firefox y WebKit × escritorio y tableta contra el mundo de VIG-299
+# (todos los tests/e2e/*.spec.ts, memoria incluida), y Lighthouse CI con la línea base; informes
+# FS-APP, trazas de Playwright y Lighthouse 90 días (PAT-APP-RES-08).
 #
 # Seguridad: igual que ci.yml (permisos de solo lectura, acciones fijadas por hash y la clave de
 # despliegue de vigia-contracts solo para instalar, borrada después). Ningún trabajo toca AWS.
@@ -458,9 +463,106 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # Aplicación de U-05 (VIG-337). Las claves de vigia-contracts (uv del mundo y npm de
+  # @vigia/contracts) solo existen mientras se instala; `npm ci --ignore-scripts` como en ci.yml.
+  # vitest escribe el informe FS-APP en test-results/, que Playwright vacía al empezar (su
+  # outputDir): se sube antes de lanzar Playwright. El mundo (tests/e2e/lifecycle.ts) arranca sus
+  # contenedores con el Docker del runner y los libera al terminar. Chromium corre gráfico (su
+  # agente de usuario nativo, política de navegadores) y Lighthouse también: ambos con Xvfb.
+  # WebKit es la revisión fijada por VIG-345 (scripts/install_webkit.mjs, con su SHA-256).
+  # Cada suite corre aunque falle la anterior, para que el informe diga todo lo que falló.
+  frontend-nightly:
+    name: frontend nightly (propiedades, resiliencia, abuso, recorridos y rendimiento)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada del backend (el mundo de extremo a extremo)
+        working-directory: backend
+        run: uv sync --frozen
+      - name: instalación congelada (npm ci sin guiones de instalación)
+        id: npm
+        run: npm ci --ignore-scripts
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
+      - name: navegadores de Playwright (Chromium y Firefox con dependencias; WebKit fijado de VIG-345)
+        id: navegadores
+        run: |
+          npx playwright install --with-deps chromium firefox
+          npx playwright install-deps webkit
+          node scripts/install_webkit.mjs
+      - name: vitest perfil nightly (propiedades y demás, sin resiliencia ni abuso)
+        run: npm run test:nightly -- --exclude 'tests/resilience/**' --exclude 'tests/abuse/**'
+      - name: FS-APP-01 a 10 con MSW (perfil nightly)
+        if: ${{ !cancelled() && steps.npm.outcome == 'success' }}
+        run: npm run test:nightly -- tests/resilience
+      - name: informe FS-APP (antes de Playwright, que vacía test-results/)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-frontend-fs-app
+          path: frontend/test-results/fs-app-*.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: A-1 a A-10 (perfil nightly)
+        if: ${{ !cancelled() && steps.npm.outcome == 'success' }}
+        run: npm run test:nightly -- tests/abuse
+      - name: construcción de producción (la sirve el mundo)
+        id: construccion
+        if: ${{ !cancelled() && steps.npm.outcome == 'success' }}
+        run: npm run build
+      - name: Playwright, todos los tests/e2e/*.spec.ts en 3 motores × escritorio y tableta (memoria incluida)
+        if: ${{ !cancelled() && steps.navegadores.outcome == 'success' && steps.construccion.outcome == 'success' }}
+        run: xvfb-run -a npm run e2e
+      - name: trazas de Playwright e informes FS-APP del navegador
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: frontend-playwright
+          path: frontend/test-results/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Lighthouse CI con la línea base (perf/baseline.json)
+        if: ${{ !cancelled() && steps.navegadores.outcome == 'success' && steps.construccion.outcome == 'success' }}
+        run: |
+          CHROME_PATH=$(node -e "import('@playwright/test').then((m) => console.log(m.chromium.executablePath()))")
+          export CHROME_PATH
+          xvfb-run -a npm run lighthouse
+      - name: informe de Lighthouse
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: informe-frontend-lighthouse
+          path: frontend/.lighthouseci/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 90
+
   informe:
     name: informe nocturno
-    needs: [propiedades, propiedades-suite, integracion, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance]
+    needs: [propiedades, propiedades-suite, integracion, propiedades-integracion, carga, bancos, volumetria, resiliencia, conformance, frontend-nightly]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10

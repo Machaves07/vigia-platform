@@ -93,6 +93,7 @@ la construcción estática actualizada al cambiar el contrato. Las dependencias 
 | `npm run size`           | Presupuesto de tamaño de `dist/` por porción (NFR-APP-01), tras `npm run build`       |
 | `npm run audit:check`    | `npm audit`: alta o crítica bloquea, salvo la excepción de `@lhci/cli` (A-71)         |
 | `npm run lighthouse`     | Lighthouse CI sobre la construcción servida por el mundo (`lighthouserc.json`)        |
+| `npm run sbom`           | Inventario CycloneDX 1.6 de npm sin desarrollo, por la salida estándar (release)      |
 
 `npm test -- <ruta>` limita vitest a unos archivos o carpetas, por ejemplo
 `npm test -- tests/unit/docs`. Desde la raíz, `make frontend-test`, `make frontend-check` y
@@ -196,9 +197,16 @@ Estado en `main`:
   `check`, `npm test -- --coverage` (umbrales de NFR-APP-46 en `vitest.config.ts`), `audit:check`,
   `build` y `size`, sin depender de «rutas». Un PR que solo toca `frontend/` o `docs/` salta los
   trabajos de backend, y la imagen `arm64` de `ci.yml` construye además la etapa `frontend-build`.
-- **`nightly.yml`**: los trabajos de `frontend-nightly` los añade VIG-337 (TASK-456), que fusiona el
-  dueño; VIG-339 los contrasta con la ejecución real.
-- **`release.yml`**: tras desplegar, `backend/tools/deploy_checks.py` corre la comprobación nº 8 en
+- **`nightly.yml`**: el trabajo «frontend nightly (propiedades, resiliencia, abuso, recorridos y
+  rendimiento)» (VIG-337, TASK-456) corre `npm run test:nightly` (aparte `tests/resilience` y
+  `tests/abuse`), todos los `tests/e2e/*.spec.ts` en los seis proyectos con Xvfb (memoria incluida) y
+  `npm run lighthouse`. Artefactos de 90 días: `informe-frontend-fs-app` (subido antes de Playwright,
+  que vacía `test-results/`), `frontend-playwright` (trazas e informes FS-APP del navegador) e
+  `informe-frontend-lighthouse`. VIG-339 los contrasta con la ejecución real.
+- **`release.yml`**: el trabajo `imagen` construye con `APP_VERSION` de la release y adjunta al
+  release `frontend-sourcemaps.tar.gz`, `sbom-npm.cdx.json` (`npm run sbom`), `frontend-dist.sha256`
+  (SHA-256 de cada archivo de `dist/`), `version.json` y `frontend-size.txt`, sacados de la etapa
+  `frontend-build` tras comprobar que `dist/` es idéntico a `/app/static` de la imagen. Tras desplegar, `backend/tools/deploy_checks.py` corre la comprobación nº 8 en
   `staging-<n>` (recorrido de Playwright con la organización sintética y cero violaciones de la
   política de contenido) y la nº 9 en `pilot` (`GET /` con `vigia-app`, `/version.json` con el
   `app_version` de la release, paquete inicial `200 immutable` y `vigia-app-index` en `OK`),
