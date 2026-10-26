@@ -45,6 +45,14 @@ mano; un registro de `fill()` expondría contraseña
 y OTP. Las páginas sin autenticación sí conservan traza y vídeo solo al fallar.
 La ejecución es serial para no competir por un mismo TOTP.
 
+Los guiones que cierran sesión declaran `test.use({ reuseRoleSession: false })`:
+su `authenticatedPage` inicia una sesión propia, nunca la incorpora al caché del
+worker y cierra su contexto al terminar. El resto conserva la reutilización por
+rol. `roleSession(role)` sigue devolviendo únicamente la sesión compartida.
+`logout_isolation.spec.ts` comprueba para ambos roles que un logout propio no
+revoca esa sesión, y `session.spec.ts` puede ejecutarse después de los recorridos
+en el mismo worker.
+
 El smoke exige los campos reales de acceso, no un encabezado de relevo ni el aviso
 de navegador incompatible. El arnés no sustituye el acceso por cookies sembradas
 o rutas HTTP simuladas. La prueba `session.spec.ts` solo verifica la infraestructura
@@ -56,6 +64,8 @@ VIG-332 y VIG-333.
 ```sh
 npm run build
 npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts
+# Regresión de orden: logout propio y sesiones reutilizables en el mismo worker.
+npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts tests/e2e/logout_isolation.spec.ts tests/e2e/session.spec.ts --project=chromium-desktop
 ```
 
 Estos recorridos usan los tres proyectos de escritorio; los de tableta se omiten

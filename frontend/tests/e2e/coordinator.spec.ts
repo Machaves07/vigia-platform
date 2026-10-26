@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { authenticatedTest as test, expect } from './fixtures';
 import { confirmFinding, logout } from './journeys';
 
-test.use({ role: 'coordinator_sst', actionTimeout: 30_000 });
+test.use({ role: 'coordinator_sst', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
 
 test('el coordinador recorre el lazo real con evidencia, firma y revisión humana', async ({

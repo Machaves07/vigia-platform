@@ -1,7 +1,7 @@
 import { authenticatedTest as test, expect } from './fixtures';
 import { logout } from './journeys';
 
-test.use({ role: 'line_manager', actionTimeout: 30_000 });
+test.use({ role: 'line_manager', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
 
 test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-9)', async ({
