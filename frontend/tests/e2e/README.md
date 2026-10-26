@@ -76,7 +76,11 @@ ni al cierre del acta.
 Las concesiones viven solo en memoria. Para abrir una subruta del instalador por
 URL, el recorrido entra al panel, activa la concesión y vuelve con «Atrás», sin
 inyectar tokens ni estado de React. La vista local del nodo no existe: se inspecciona
-el fragmento del enlace, se pulsa y se cierra la pestaña sin afirmar que reproduzca.
+el fragmento del enlace y se pulsa cancelando solo la navegación externa al nodo
+inexistente, sin impedir que el manejador real descarte el enlace ni afirmar que reproduzca.
 
 Los diagnósticos del arranque del mundo incluyen solo el tipo de excepción y las
 ubicaciones de la pila, nunca el mensaje de una librería o su cuerpo HTTP.
+Para invitaciones y códigos de alta se devuelven solo proyecciones booleanas desde
+el navegador: las aserciones se realizan después de descartar el secreto. La
+desaparición se observa antes de cualquier limpieza defensiva del diagnóstico.

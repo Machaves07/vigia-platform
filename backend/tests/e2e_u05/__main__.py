@@ -19,7 +19,9 @@ def main() -> int:
         with world():
             print("VIGIA_WORLD_READY", flush=True)
             sys.stdin.read()
-    except Exception as error:
+    except BaseException as error:
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            raise
         # Solo tipos y ubicaciones: ni mensajes de librerías ni cuerpos o credenciales.
         frames = traceback.extract_tb(error.__traceback__)
         locations = ", ".join(f"{frame.name}:{frame.lineno}" for frame in frames[-4:])

@@ -1,5 +1,12 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { engineZone, installerRoute, prepare, required, touchTarget } from './journeys';
+import {
+  acknowledgeSecret,
+  engineZone,
+  installerRoute,
+  prepare,
+  required,
+  touchTarget,
+} from './journeys';
 
 test.use({ role: 'provider_installer' });
 test.skip(({ hasTouch }) => !hasTouch, 'Recorrido táctil de SCR-06.');
@@ -14,7 +21,11 @@ test('instalador: flota, alta, pasos, pase con clip, oclusión pendiente y enlac
   await installerRoute(page, world, '/fleet');
   await expect(page.getByRole('table').first()).toBeVisible();
   await page.getByRole('link', { name: 'Declarar nodo', exact: true }).click();
-  await page.getByLabel('Planta', { exact: true }).selectOption(required(world.plant_ids[0]));
+  const declarationForm = page.getByRole('form', { name: 'Declarar nodo', exact: true });
+  await expect(declarationForm).toBeVisible();
+  await declarationForm
+    .getByRole('combobox', { name: 'Planta', exact: true })
+    .selectOption(required(world.plant_ids[0]));
   await page
     .getByLabel('Código del nodo', { exact: true })
     .fill(`E2E-${info.project.name.toUpperCase()}`);
@@ -27,17 +38,7 @@ test('instalador: flota, alta, pasos, pase con clip, oclusión pendiente y enlac
   const { node_id: nodeId } = (await declared.json()) as { node_id: string };
   await page.getByRole('link', { name: /código de alta/i }).click();
   await page.getByRole('button', { name: /Emitir.*código|Solicitar.*código/i }).click();
-  const secret = page.getByRole('region', { name: 'Código de alta del nodo', exact: true });
-  try {
-    await expect(secret).toBeVisible();
-    await expect(secret).toContainText(nodeId);
-    await expect(secret.getByText(/[0-9a-f]{64}/i).first()).toBeVisible();
-  } finally {
-    // Retirar el secreto antes de que Playwright prepare el contexto de un posible fallo.
-    const acknowledge = secret.getByRole('button', { name: 'Lo guardé' });
-    if ((await acknowledge.count()) > 0) await acknowledge.click();
-  }
-  await expect(secret).toHaveCount(0);
+  await acknowledgeSecret(page, 'enrollment_code', nodeId);
   const zone = engineZone(world, info.project.name);
   await installerRoute(page, world, `/zones/${zone}/commissioning`);
   const open = page.locator('[data-part="open_session"]');
@@ -55,23 +56,73 @@ test('instalador: flota, alta, pasos, pase con clip, oclusión pendiente y enlac
   await step.locator('[data-part="close_step"]').tap();
   await step.locator('[data-part="close_without_correction"]').tap();
   await expect(page.locator('[data-part="step"][data-open="true"]')).toHaveCount(0);
+  await touchTarget(page.getByRole('button', { name: 'Abrir vista en vivo', exact: true }));
+  const delivery = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/zones/${zone}/live-view-token` &&
+      response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Abrir vista en vivo', exact: true }).tap();
+  expect((await delivery).status(), 'Emisión real del token de vista local').toBe(200);
   const live = page.getByRole('link', {
     name: 'Abrir la vista en vivo del nodo en una pestaña nueva',
   });
-  await expect(live).toBeVisible();
-  const href = new URL(required(await live.getAttribute('href')));
-  // Solo se comprueba la entrega: el nodo de borde no está desplegado en este mundo.
-  expect(href.protocol).toBe('https:');
-  expect(href.port).toBe('8443');
-  expect(href.pathname).toBe('/');
-  expect(href.search).toBe('');
-  expect(href.hash.startsWith('#token=')).toBe(true);
-  expect(href.hash.length).toBeGreaterThan(7);
-  const popup = page.context().waitForEvent('page');
-  await live.tap();
-  await (await popup).close();
-  await expect(live).toHaveCount(0);
+  // Solo se comprueba la entrega. El token no sale del navegador ni entra en el diagnóstico.
+  await live.waitFor({ state: 'visible' });
+  const handoff = await live.evaluate((element) => {
+    const href = new URL(element.getAttribute('href') ?? '', location.origin);
+    const box = element.getBoundingClientRect();
+    return {
+      protocol: href.protocol,
+      port: href.port,
+      pathname: href.pathname,
+      search: href.search,
+      tokenInFragment: /^#token=[A-Za-z0-9._-]+$/.test(href.hash),
+      width: box.width,
+      height: box.height,
+    };
+  });
+  let discarded = false;
+  try {
+    // El nodo no está en el mundo: se cancela solo la navegación, no el manejador React.
+    await live.evaluate((element) => {
+      element.addEventListener(
+        'click',
+        (event) => {
+          event.preventDefault();
+        },
+        { once: true },
+      );
+    });
+    await live.tap();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        }),
+    );
+    discarded = (await live.count()) === 0;
+  } catch {
+    throw new Error('No se pudo consumir el enlace efímero del nodo');
+  } finally {
+    await live
+      .evaluateAll((elements) => {
+        for (const element of elements) element.remove();
+      })
+      .catch(() => undefined);
+  }
+  expect(handoff).toMatchObject({
+    protocol: 'https:',
+    port: '8443',
+    pathname: '/',
+    search: '',
+    tokenInFragment: true,
+  });
+  expect(handoff.width).toBeGreaterThanOrEqual(44);
+  expect(handoff.height).toBeGreaterThanOrEqual(44);
+  expect(discarded, 'El enlace se descartó antes de limpiar el diagnóstico').toBe(true);
   await installerRoute(page, world, `/zones/${zone}/commissioning/matrix`);
   await page.locator('[data-part="select_row"]').first().tap();
   const clips = page.locator('[data-part="evidence_select"]');

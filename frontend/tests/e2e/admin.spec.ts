@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { installerRoute, nextStep, prepare, required } from './journeys';
+import { acknowledgeSecret, installerRoute, nextStep, prepare, required } from './journeys';
 
 test.use({ role: 'administrator' });
 test.skip(({ hasTouch }) => hasTouch, 'Recorrido de escritorio del administrador.');
@@ -22,10 +22,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await invite.getByLabel('Nivel', { exact: true }).selectOption('zone');
   await invite.getByLabel('Alcance', { exact: true }).selectOption(zone);
   await invite.getByRole('button', { name: 'Invitar', exact: true }).click();
-  const once = page.getByRole('region', { name: 'Enlace de invitación', exact: true });
-  await expect(once).toBeVisible();
-  await once.getByRole('button', { name: 'Lo guardé' }).click();
-  await expect(once).toHaveCount(0);
+  await acknowledgeSecret(page, 'invitation_link');
   const user = page.getByRole('row').filter({ hasText: `${suffix}@journey.example.test` });
   await user.getByRole('button', { name: /Gestionar/ }).click();
   const roles = page.getByRole('form', { name: 'Roles con alcance', exact: true });
@@ -70,7 +67,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
     }),
   ).toBeVisible();
   await page.goto(`/plants/${plant}/admissions`);
-  await page.getByLabel('Familia', { exact: true }).selectOption('dwell');
+  await page.getByRole('combobox', { name: 'Familia', exact: true }).selectOption('dwell');
   await page.getByRole('radio', { name: 'No', exact: true }).check();
   await nextStep(page);
   await page.getByRole('radio', { name: 'Sí', exact: true }).check();
@@ -97,6 +94,14 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   ).toContainText('Registro creado');
   // El acta la registra commissioning.run (instalador); el administrador confirma solo su firma.
   const installer = await (await roleSession('provider_installer')).newPage();
+  const uploadStatuses: number[] = [];
+  installer.on('response', (response) => {
+    if (
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).origin === world.store_origin
+    )
+      uploadStatuses.push(response.status());
+  });
   try {
     await installerRoute(installer, world, '/fleet');
     await prepare(
@@ -137,7 +142,13 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
       ),
     });
     await scope.getByRole('button', { name: 'Subir', exact: true }).click();
-    await expect(scope.getByText(/synthetic.png/)).toBeVisible();
+    try {
+      await expect(scope.getByText(/synthetic.png/)).toBeVisible();
+    } catch {
+      throw new Error(
+        `Falló la subida PNG al almacén (HTTP ${uploadStatuses.join(',') || 'sin respuesta'})`,
+      );
+    }
     await nextStep(scope);
     await scope.getByLabel('Documento firmado del acta de alcance', { exact: true }).setInputFiles({
       name: 'scope.pdf',
@@ -165,6 +176,16 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
     await installer.close();
   }
   await page.goto(`/zones/${zone}/gates`);
+  const confirmation = page.waitForResponse(
+    (response) =>
+      response.url().includes('/confirmations') && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Confirmar mi firma', exact: true }).click();
+  const confirmed = await confirmation;
+  expect(confirmed.ok()).toBe(true);
+  expect((await confirmed.json()) as unknown).toMatchObject({
+    user_id: world.users.administrator.user_id,
+    role_in_use: 'administrator',
+  });
   await expect(page.locator('[data-part="confirmed"]')).toContainText('Firma confirmada');
 });

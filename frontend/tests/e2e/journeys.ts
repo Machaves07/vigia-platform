@@ -26,6 +26,7 @@ export async function prepare<T>(
       const response = await fetch(path, {
         method,
         credentials: 'same-origin',
+        signal: AbortSignal.timeout(60_000),
         headers: {
           'Content-Type': 'application/json',
           ...(concession === undefined ? {} : { 'X-Vigia-Concession': concession }),
@@ -70,6 +71,81 @@ export async function touchTarget(control: Locator): Promise<void> {
 
 export async function nextStep(scope: Page | Locator): Promise<void> {
   await scope.getByRole('button', { name: 'Siguiente', exact: true }).click();
+}
+
+/** Ninguna aserción de Playwright se ejecuta mientras el secreto pueda entrar en su contexto de error. */
+export async function acknowledgeSecret(
+  page: Page,
+  kind: 'invitation_link' | 'enrollment_code',
+  nodeId?: string,
+): Promise<void> {
+  const secret = page.locator(`[data-kind="${kind}"]`);
+  let observation: {
+    visible: boolean;
+    valueShape: boolean;
+    nodeMatches: boolean;
+    fingerprints: boolean;
+  } | null = null;
+  let disappeared = false;
+  try {
+    await secret.waitFor({ state: 'visible' });
+    observation = await secret.evaluate(
+      (element, { kind, nodeId }) => {
+        const value = element.querySelector('[data-part="value"]')?.textContent ?? '';
+        const box = element.getBoundingClientRect();
+        let valueShape = /^[A-Z0-9]{12}$/.test(value.trim());
+        if (kind === 'invitation_link') {
+          try {
+            const link = new URL(value.trim(), location.origin);
+            valueShape =
+              link.pathname === '/invitacion' && link.hash.length > 1 && link.search === '';
+          } catch {
+            valueShape = false;
+          }
+        }
+        return {
+          visible: box.width > 0 && box.height > 0,
+          valueShape,
+          nodeMatches:
+            nodeId === undefined ||
+            element.querySelector('[data-part="node_id"]')?.textContent === nodeId,
+          fingerprints:
+            kind === 'invitation_link' ||
+            [...element.querySelectorAll('[data-part="fingerprints"] code')].some((item) =>
+              /^[a-f0-9]{64}$/i.test(item.textContent),
+            ),
+        };
+      },
+      { kind, nodeId },
+    );
+    await secret.getByRole('button', { name: 'Lo guardé', exact: true }).click();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        }),
+    );
+    // Se observa el resultado ANTES de la limpieza defensiva, sin copiar el valor secreto a Node.
+    disappeared = (await secret.count()) === 0;
+  } catch {
+    throw new Error('No se pudo comprobar la entrega de una sola muestra');
+  } finally {
+    // Si la aplicación falla al descartarlo, no se permite que el diagnóstico lo publique.
+    await secret
+      .evaluateAll((elements) => {
+        for (const element of elements) element.remove();
+      })
+      .catch(() => undefined);
+  }
+  expect(observation).toEqual({
+    visible: true,
+    valueShape: true,
+    nodeMatches: true,
+    fingerprints: true,
+  });
+  expect(disappeared, 'La aplicación descartó el secreto al confirmar').toBe(true);
 }
 
 /** Política de prueba con tres cuentas distintas, incluida representación de trabajadores. */

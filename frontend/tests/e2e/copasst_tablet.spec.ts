@@ -41,6 +41,10 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   await confirm.tap();
   const result = await confirmation;
   expect(result.ok()).toBe(true);
+  expect((await result.json()) as unknown).toMatchObject({
+    user_id: world.users.copasst.user_id,
+    role_in_use: 'copasst',
+  });
   await expect(page.locator('[data-part="confirmed"]')).toContainText('Firma confirmada');
   await expect(confirm).toHaveCount(0);
   await page.reload();

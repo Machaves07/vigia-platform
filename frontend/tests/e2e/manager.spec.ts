@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { installerRoute, required } from './journeys';
+import { installerRoute, prepare, required } from './journeys';
 import { systemClock } from '../../src/state/clock';
 
 test.use({ role: 'plant_manager' });
@@ -63,7 +63,11 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   );
   await expect(page.getByRole('table', { name: 'Resumen del periodo' })).toBeVisible();
   await page.goto('/metrics');
-  await page.getByLabel('Zona', { exact: true }).selectOption(zone);
+  await expect(
+    page.getByRole('heading', { name: 'Métricas del programa', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Zona', exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Zona', exact: true }).selectOption(zone);
   const exposureResponse = page.waitForResponse(
     (response) => new URL(response.url()).pathname === '/accreditation/exposure',
     { timeout: 60_000 },
@@ -75,14 +79,29 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
     'Minutos pendientes de clasificación (no se suman)',
     'Cobertura observable del periodo (%)',
   ]) {
-    await expect(page.getByText(name, { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole('region', { name: 'Exposición', exact: true })
+        .locator('dt')
+        .filter({ hasText: name }),
+    ).toBeVisible();
   }
   await expect(page.getByRole('table', { name: 'Resumen del periodo' })).toBeVisible();
   await expect(page.getByLabel(/usuario|equipo|turno/i)).toHaveCount(0);
   await page.goto('/exports');
+  const hierarchy = await prepare<{ plants: { plant_id: string; zones: { zone_id: string }[] }[] }>(
+    page,
+    '/hierarchy',
+    undefined,
+    'GET',
+  );
+  const zoneIndex = required(
+    hierarchy.plants.find((entry) => entry.plant_id === plant),
+  ).zones.findIndex((entry) => entry.zone_id === zone);
+  expect(zoneIndex).toBeGreaterThanOrEqual(0);
   const form = page.getByRole('form', { name: 'Solicitar exportación' });
-  await form.getByLabel('Planta', { exact: true }).selectOption(plant);
-  await form.getByRole('checkbox').first().check();
+  await form.getByRole('combobox', { name: 'Planta', exact: true }).selectOption(plant);
+  await form.getByRole('checkbox').nth(zoneIndex).check();
   const now = new Date(systemClock.now());
   const from = new Date(now.getTime() - 86400_000).toISOString().slice(0, 16);
   const to = now.toISOString().slice(0, 16);
@@ -98,6 +117,12 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   await form.getByRole('button', { name: 'Solicitar exportación' }).click();
   const exportResponse = await requested;
   expect(exportResponse.ok()).toBe(true);
+  const body = exportResponse.request().postDataJSON() as {
+    zone_ids: string[];
+    package_form: string;
+  };
+  expect(body.zone_ids).toEqual([zone]);
+  expect(body.package_form).toBe('without_clips');
   const { export_id: exportId } = (await exportResponse.json()) as { export_id: string };
   const job = page.getByRole('region', { name: exportId, exact: true });
   await test.step('Consultar hasta que la exportación sin clips esté lista', async () => {
@@ -113,6 +138,6 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   const download = page.waitForEvent('download', { timeout: 60_000 });
   await link.click();
   const volume = await download;
-  expect(await volume.failure()).toBeNull();
+  expect((await volume.failure()) === null, 'Descarga real del volumen completada').toBe(true);
   expect(await volume.path()).not.toBeNull();
 });

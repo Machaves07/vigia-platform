@@ -48,6 +48,10 @@
 }
 
 .anchor {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
   color: inherit;
 }
 

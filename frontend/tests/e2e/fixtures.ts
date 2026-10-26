@@ -80,6 +80,7 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
             : {}),
           hasTouch: workerInfo.project.use.hasTouch ?? false,
         });
+        context.setDefaultTimeout(30_000);
         sessions.set(role, context);
         const check = await watchPolicy(context, role);
         sessionPolicyChecks.set(context, check);

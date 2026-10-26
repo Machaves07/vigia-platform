@@ -7,11 +7,19 @@ import secrets
 import stat
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
+from tests.conformance.platform_target import PlatformStack
 from tests.e2e_u05 import __main__ as cli
-from tests.e2e_u05.world import assert_no_leaks, private_json, published_manifest
+from tests.e2e_u05.world import (
+    assert_no_leaks,
+    configure_store_origin,
+    private_json,
+    published_manifest,
+)
 
 
 def test_private_file_is_0600_from_creation_and_never_overwrites(tmp_path: Path) -> None:
@@ -77,19 +85,56 @@ def test_manifest_collision_never_deletes_another_run(tmp_path: Path) -> None:
     assert path.read_text() == "otra ejecución"
 
 
+@pytest.mark.parametrize("kind", ["ValueError", "Skipped", "Failed"])
 def test_world_startup_diagnostic_never_includes_exception_payload(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], kind: str
 ) -> None:
     value = secrets.token_hex(20)
 
     def unavailable() -> None:
+        if kind == "Skipped":
+            pytest.skip(value)
+        if kind == "Failed":
+            pytest.fail(value)
         raise ValueError(value)
 
     monkeypatch.setattr(cli, "world", unavailable)
     monkeypatch.setattr(cli.signal, "signal", lambda *_: None)
     assert cli.main() == 1
     output = capsys.readouterr()
-    assert output.out.startswith("VIGIA_WORLD_FAILURE ValueError (")
+    assert output.out.startswith(f"VIGIA_WORLD_FAILURE {kind} (")
     assert "unavailable:" in output.out
     assert value not in output.out
     assert output.err == ""
+
+
+def test_store_cors_uses_the_single_application_origin_and_production_headers() -> None:
+    calls: list[dict[str, Any]] = []
+    closed: list[bool] = []
+    store = SimpleNamespace(
+        put_bucket_cors=lambda **kwargs: calls.append(kwargs), close=lambda: closed.append(True)
+    )
+    platform = cast(
+        PlatformStack,
+        SimpleNamespace(
+            environ={"VIGIA_EVIDENCE_BUCKET": "evidence-synthetic"},
+            localstack=SimpleNamespace(aws_client=lambda _service: store),
+        ),
+    )
+    configure_store_origin(platform, "https://app.example.test")
+    assert closed == [True]
+    assert len(calls) == 1
+    assert calls[0] == {
+        "Bucket": "evidence-synthetic",
+        "CORSConfiguration": {
+            "CORSRules": [
+                {
+                    "AllowedOrigins": ["https://app.example.test"],
+                    "AllowedMethods": ["PUT", "GET", "HEAD"],
+                    "AllowedHeaders": ["Content-Type", "x-amz-checksum-sha256", "x-amz-meta-*"],
+                    "ExposeHeaders": ["ETag"],
+                    "MaxAgeSeconds": 3600,
+                }
+            ]
+        },
+    }
