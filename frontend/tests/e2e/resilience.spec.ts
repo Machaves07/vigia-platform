@@ -15,7 +15,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
-import type { Locator, Page, Request } from '@playwright/test';
+import type { Locator, Page, Request, Route } from '@playwright/test';
 import fc from 'fast-check';
 
 import { systemClock } from '../../src/state/clock';
@@ -246,15 +246,32 @@ test.describe('FS-APP con la plataforma real y el intermediario de fallos', () =
 
       // La sesión termina en el servidor (como al vencer o al cerrarla desde otra pestaña): el
       // cierre sale del propio navegador, con su `Sec-Fetch-Site`, y la cookie deja de valer.
-      const ended = await page.evaluate(async () => {
-        const response = await fetch('/auth/logout', {
-          method: 'POST',
-          credentials: 'same-origin',
+      // Termina mientras la escritura ya enviada espera, sin cambiarla (VIG-361): cerrada antes del
+      // clic, una lectura de la pantalla podía recibir `unauthenticated` primero y el bloqueo
+      // retiraba el formulario bajo el clic (`element was detached`, Chromium y WebKit).
+      let ended = 0;
+      let sent = false;
+      const write = (url: URL) => url.pathname === WRITE;
+      const endSession = async (route: Route) => {
+        if (route.request().method() !== 'POST') {
+          await route.continue();
+          return;
+        }
+        ended = await page.evaluate(async () => {
+          const response = await fetch('/auth/logout', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          return response.status;
         });
-        return response.status;
-      });
-      expect(ended).toBe(204);
+        await route.continue();
+        sent = true;
+      };
+      await page.route(write, endSession);
       await form.getByRole('button', { name: catalogText(scr14, 'scr14.request') }).click();
+      await expect.poll(() => sent).toBe(true);
+      await page.unroute(write, endSession);
+      expect(ended).toBe(204);
       const lock = page.locator('[data-part="session_lock"]');
       await expect(lock.getByRole('alert')).toHaveText(catalogText(errors, 'errors.reauth'));
       await expect(page).toHaveURL(/\/exports$/);

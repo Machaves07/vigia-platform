@@ -1,4 +1,4 @@
-import type { Request } from '@playwright/test';
+import type { Locator, Request } from '@playwright/test';
 
 import { authenticatedTest as test, expect } from './fixtures';
 import { required } from './journeys';
@@ -16,6 +16,8 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   test.setTimeout(180_000);
   let active: string | undefined;
   const observed: { path: string; expected: string | undefined; actual: string | undefined }[] = [];
+  // Orden de las peticiones de la lista de concesiones: el relistado tras conceder (VIG-361).
+  const listings: string[] = [];
   const inspect = (request: Request) => {
     if (
       new URL(request.url()).origin !== world.base_url ||
@@ -28,8 +30,29 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
       expected: active,
       actual: request.headers()['x-vigia-concession'],
     });
+    if (new URL(request.url()).pathname === '/provider/concessions')
+      listings.push(request.method());
   };
   page.on('request', inspect);
+  // «Operar bajo» se pulsa con las lecturas del panel terminadas: al cambiar de concesión llegan
+  // a la vez la sesión, la lista y las notificaciones, la página se recoloca y un clic en ese
+  // intervalo no activaba la concesión en Firefox (VIG-361).
+  const pending = new Set<Request>();
+  page.on('request', (request) => {
+    if (['fetch', 'xhr'].includes(request.resourceType())) pending.add(request);
+  });
+  const settle = (request: Request) => {
+    pending.delete(request);
+  };
+  page.on('requestfinished', settle);
+  page.on('requestfailed', settle);
+  const operate = async (button: Locator, concession: string) => {
+    await expect(button).toBeVisible();
+    await expect.poll(() => pending.size, { message: 'El panel terminó sus lecturas' }).toBe(0);
+    active = concession;
+    await button.click();
+    await expect(page.getByRole('button', { name: 'Cambiar de concesión' })).toBeVisible();
+  };
   await page.goto('/provider/concessions');
   await expect(page.getByRole('heading', { name: 'Mis concesiones' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: /principal/i }).getByRole('link')).toHaveCount(
@@ -58,16 +81,19 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   const response = await granted;
   expect(response.ok()).toBe(true);
   const { concession_id: id } = (await response.json()) as { concession_id: string };
+  // Al conceder, el panel monta de nuevo la lista y la vuelve a pedir, sin cabecera. Desde el
+  // segundo motor, la lista anterior ya trae una fila «Operar bajo» de esta planta: sin esperar a
+  // esa petición, `active` podía fijarse antes de que saliera (VIG-361). Una vez emitida, la lista
+  // anterior ya no está montada y la primera fila de la planta es la concesión nueva.
+  await expect
+    .poll(() => listings.slice(listings.lastIndexOf('POST') + 1).includes('GET'), {
+      message: 'El panel vuelve a pedir la lista tras conceder',
+    })
+    .toBe(true);
   const row = page
     .getByRole('row')
     .filter({ has: page.getByText(required(world.plant_ids[0]), { exact: true }) });
-  await expect(row.getByRole('button', { name: /Operar bajo/ }).first()).toBeVisible();
-  active = id;
-  await row
-    .getByRole('button', { name: /Operar bajo/ })
-    .first()
-    .click();
-  await expect(page.getByRole('button', { name: 'Cambiar de concesión' })).toBeVisible();
+  await operate(row.getByRole('button', { name: /Operar bajo/ }).first(), id);
   await expect(page.getByText(/cada consulta queda registrada/i).first()).toBeVisible();
   await page.getByRole('link', { name: /flota/i }).first().click();
   await expect(page.getByRole('table').first()).toBeVisible();
@@ -81,13 +107,13 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
     page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link'),
   ).toHaveCount(1);
   // Otra concesión: la misma lectura debe volver a la red, no mostrar el inventario retenido.
-  active = world.concession_id;
-  await page
-    .getByRole('button', {
+  await operate(
+    page.getByRole('button', {
       name: `Operar bajo esta concesión: organización ${world.organization_id}`,
       exact: true,
-    })
-    .click();
+    }),
+    world.concession_id,
+  );
   const inventory = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === '/fleet/nodes' &&
@@ -102,14 +128,15 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
     page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('link'),
   ).toHaveCount(1);
   // Volver a la primera concesión exige de nuevo su inventario: no basta una clave distinta.
-  active = id;
-  await page
-    .getByRole('button', {
-      name: `Operar bajo esta concesión: planta ${required(world.plant_ids[0])}`,
-      exact: true,
-    })
-    .first()
-    .click();
+  await operate(
+    page
+      .getByRole('button', {
+        name: `Operar bajo esta concesión: planta ${required(world.plant_ids[0])}`,
+        exact: true,
+      })
+      .first(),
+    id,
+  );
   const reloaded = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === '/fleet/nodes' &&

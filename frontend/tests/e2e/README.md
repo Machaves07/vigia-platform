@@ -150,7 +150,8 @@ npm run e2e -- tests/e2e/coordinator.spec.ts tests/e2e/line_lead.spec.ts tests/e
 Estos recorridos usan los tres proyectos de escritorio; los de tableta se omiten
 porque no pertenecen a este guion. Conservan la guarda de CSP del arnés. El mundo
 usa el perfil de nodos `u04-e2e` y la semilla `449`, reserva dos hallazgos distintos
-por motor y prepara una licencia sintética, una política por las rutas reales del
+por motor fuera de la última zona (el recorrido del administrador la deja con la regresión de
+walk-test pendiente y la bandeja muestra sus filas sin enlace) y prepara una licencia sintética, una política por las rutas reales del
 instalador bajo concesión y un paquete de mes vencido mediante el compositor real.
 La cuenta del mando nace con alcance de una sola zona. Las clasificaciones, la
 evidencia PNG, las firmas, las resoluciones y los compromisos del recorrido se
