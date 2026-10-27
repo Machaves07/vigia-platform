@@ -35,7 +35,8 @@ y, para la solicitud ``pending``, en este orden:
    de alias** (y de su clase); ``citations`` vacía solo con ``insufficient_evidence_declared``;
    y **los dos validadores** de U-04 (``blocked_vocabulary`` y ``person_attribution``) sobre
    ``draft_text`` y sobre cada hecho citado. Cualquier rechazo deja la solicitud
-   ``rejected_by_validators`` **sin borrador**: el texto no se guarda ni se muestra.
+   ``rejected_by_validators`` **sin borrador**: el texto no se guarda ni se muestra; solo su
+   motivo cerrado (``rejection_reason``, VIG-344).
 7. **Borrador** en ``loop.assistant_draft``, fuera del expediente (BR-LAZ-73), con el modelo
    **de la respuesta** y las citas resueltas a sus referencias reales; la solicitud, ``ready``.
 
@@ -195,7 +196,7 @@ _USAGE: Final = text(
 )
 _RESOLVE: Final = text(
     "UPDATE loop.assistant_request SET state = :state, unavailable_cause = :cause,"
-    " resolved_at = :at"
+    " rejection_reason = :reason, resolved_at = :at"
     " WHERE organization_id = :organization_id AND request_id = :request_id"
     " AND state = 'pending' RETURNING requested_at"
 )
@@ -216,7 +217,10 @@ class AssistantProviderDown(ExternalDependencyDown):
 
 
 class RejectionReason(enum.StrEnum):
-    """Por qué una salida no se muestra (``rejected_by_validators``); nunca lleva el texto."""
+    """Por qué una salida no se muestra (``rejected_by_validators``); nunca lleva el texto.
+
+    Se guarda en ``assistant_request.rejection_reason`` (``laz_0041``, VIG-344): la consulta de
+    estado lo devuelve en ``rejection.code`` si es de uno de los dos validadores."""
 
     SCHEMA_INVALID = "schema_invalid"
     CITATION_OUTSIDE_LIST = "citation_outside_list"
@@ -321,6 +325,8 @@ class _Resolution:
     cause: AssistantUnavailableCause | None = None
     accepted: Accepted | None = None
     completion: AssistantCompletion | None = None
+    reason: RejectionReason | None = None
+    """Solo con ``rejected_by_validators``: el motivo, sin el texto (VIG-344)."""
 
 
 class AssistantWorker:
@@ -499,7 +505,7 @@ class AssistantWorker:
         )
         if isinstance(verdict, Rejected):
             _log.warning("salida del asistente rechazada", reason=verdict.reason.value)
-            return _Resolution(AssistantRequestState.REJECTED_BY_VALIDATORS)
+            return _Resolution(AssistantRequestState.REJECTED_BY_VALIDATORS, reason=verdict.reason)
         return _Resolution(AssistantRequestState.READY, accepted=verdict, completion=completion)
 
     # --- lecturas y escrituras -------------------------------------------------------------------
@@ -578,6 +584,7 @@ class AssistantWorker:
                         **self._keys(context, pending),
                         "state": resolution.state.value,
                         "cause": None if resolution.cause is None else resolution.cause.value,
+                        "reason": None if resolution.reason is None else resolution.reason.value,
                         "at": at,
                     },
                 )

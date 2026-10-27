@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { axe } from 'vitest-axe';
 import { downloadZone } from '@/ports/scr12Monthly';
 import { text } from '@/texts';
+import { PROPERTY_TIMEOUT_MS } from '../../support/timeouts';
 import { assertNoPersonData } from '../../support/viewProperties';
 import views from '../../views/scr12';
 import { apiError, PERIOD, PLANT, setup, URL_ZONE, WAIT, ZONE } from './support';
@@ -128,7 +129,17 @@ describe('SCR-12 paquete mensual', { timeout: 60_000 }, () => {
     ).toEqual([]);
   });
 
-  it('RV-16 rechaza campos de persona y campos ajenos con las vistas de producción', () => {
-    for (const view of Object.values(views)) assertNoPersonData(view);
-  }, 180_000);
+  // Una prueba por vista, cada una con su tope: con el perfil nightly (2 000 ejemplos) las tres
+  // juntas pasaban de 180 s en el runner de GitHub (VIG-356).
+  it.each(Object.keys(views))(
+    'RV-16 rechaza campos de persona y campos ajenos con la vista de producción %s',
+    (name) => {
+      assertNoPersonData(views[name as keyof typeof views]);
+    },
+    PROPERTY_TIMEOUT_MS,
+  );
+
+  it('RV-16 cubre las tres vistas de producción', () => {
+    expect(Object.keys(views)).toEqual(['package', 'commitment', 'sample']);
+  });
 });

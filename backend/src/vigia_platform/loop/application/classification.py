@@ -82,6 +82,7 @@ from vigia_platform.ledger.application.writer import (
 )
 from vigia_platform.ledger.free_text import (
     FreeTextField,
+    FreeTextHint,
     FreeTextRejected,
     FreeTextRejection,
     apply_base_policy,
@@ -210,11 +211,13 @@ _VALIDATOR_CODES: Final[Mapping[str, LoopDetailCode]] = MappingProxyType(
 
 
 class ClassificationRejected(Exception):
-    """Un rechazo de negocio de la clasificación, con su ``detail_code`` (LoopDetailCode)."""
+    """Un rechazo de negocio de la clasificación, con su ``detail_code`` (LoopDetailCode) y, si lo
+    rechazó un validador de texto libre, su pista para quien escribió (``hint``, VIG-344)."""
 
-    def __init__(self, detail_code: LoopDetailCode) -> None:
+    def __init__(self, detail_code: LoopDetailCode, hint: FreeTextHint | None = None) -> None:
         super().__init__(detail_code.value)
         self.detail_code = detail_code
+        self.hint = hint
 
 
 class ClassificationRequestInvalid(Exception):
@@ -346,7 +349,7 @@ def _written(written: Receipt | LedgerRejection) -> Receipt:
         if written.code is LedgerRejectionCode.FREE_TEXT_REJECTED:
             code = _VALIDATOR_CODES.get(written.detail_code or "")
             if code is not None:
-                raise ClassificationRejected(code)
+                raise ClassificationRejected(code, written.hint)
             raise ClassificationRequestInvalid("texto libre rechazado por el expediente")
         if written.code is LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT:
             raise ClassificationUnavailable("ledger_chain")

@@ -8,6 +8,7 @@ import secrets
 import stat
 import uuid
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -24,7 +25,9 @@ from tests.e2e_u05.world import (
     deploy_check_invitation,
     private_json,
     published_manifest,
+    rewind_export_window,
 )
+from vigia_platform.accreditation.export.request import RATE_WINDOW
 from vigia_platform.identity.application.users import InviteRequest
 from vigia_platform.shared.context import Role, ScopeLevel
 
@@ -229,3 +232,17 @@ def test_deploy_check_invitation_fails_closed_without_a_disclosed_link(
     fleet = SimpleNamespace(organization_id=uuid.uuid4())
     with pytest.raises(RuntimeError, match="no divulgó"):
         deploy_check_invitation(cast(Any, target), cast(Any, fleet), str(uuid.uuid4()))
+
+
+def test_export_window_rewind_moves_requests_back_one_window_without_deleting() -> None:
+    """VIG-356: el límite de producción no cambia; las solicitudes ya hechas salen de su hora."""
+    statements: list[tuple[str, tuple[Any, ...]]] = []
+    platform = SimpleNamespace(admin=statements.extend)
+    rewind_export_window(cast(PlatformStack, platform))
+    assert statements == [
+        (
+            "UPDATE accreditation.export_request SET requested_at = requested_at - $1::interval",
+            (RATE_WINDOW,),
+        )
+    ]
+    assert timedelta(hours=1) == RATE_WINDOW

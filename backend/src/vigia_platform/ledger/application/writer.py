@@ -11,11 +11,12 @@ de verificación; el primer fallo fija el código (como BR-CTR-32):
    y bytes canónicos ≤ 256 KB (``content_invalid`` con el puntero del primer campo que falla),
    todo antes de cualquier consulta a la base;
 4. **texto libre**: cada ruta de ``free_text_paths`` pasa ``FreeTextPolicy``; se guarda el texto
-   en NFC (``free_text_rejected``, con el ``detail_code`` del validador que lo rechazó si lo
-   lleva). Si algún validador registró un preparador, corre antes, con la organización del
-   contexto y una lectura de la base (PAT-LAZ-REN-02): el validador no consulta la base. Sin la
-   transacción del llamador, esa lectura y la consulta del paso 5 comparten una transacción de
-   lectura (``Database.read_many``); la fila encontrada se mira igual en el paso 5;
+   en NFC (``free_text_rejected``, con el ``detail_code`` del validador que lo rechazó y su pista
+   para quien escribió, si los lleva). Si algún validador registró un preparador, corre antes,
+   con la organización del contexto y una lectura de la base (PAT-LAZ-REN-02): el validador no
+   consulta la base. Sin la transacción del llamador, esa lectura y la consulta del paso 5
+   comparten una transacción de lectura (``Database.read_many``); la fila encontrada se mira
+   igual en el paso 5;
 5. **idempotencia** por (organización, tipo, ``source_key``): mismo ``content_hash`` →
    ``accepted_duplicate`` con el recibo original y sin registro nuevo; distinto →
    ``idempotency_conflict`` (BR-NUC-48);
@@ -52,6 +53,7 @@ llamador no se mide aquí: su exclusión dura lo que dure esa transacción.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import hashlib
 import json
@@ -95,6 +97,7 @@ from vigia_platform.ledger.evidence import (
     first_failure,
 )
 from vigia_platform.ledger.free_text import (
+    FreeTextHint,
     FreeTextPolicyRegistry,
     FreeTextPreparation,
     FreeTextRejected,
@@ -252,6 +255,10 @@ class LedgerRejection:
     message_es: str = ""
     detail_code: str | None = None
     """El ``detail_code`` del validador de texto libre que rechazó (``free_text_rejected``)."""
+    # ``dataclasses.field``: el atributo ``field`` de arriba lo taparía en el cuerpo de la clase.
+    hint: FreeTextHint | None = dataclasses.field(default=None, repr=False, compare=False)
+    """La pista del validador para quien escribió (VIG-344): solo va a su respuesta, nunca a un
+    registro; no cuenta para la igualdad ni sale en ``repr``."""
 
     @classmethod
     def of(
@@ -260,9 +267,14 @@ class LedgerRejection:
         field: str | None = None,
         *,
         detail_code: str | None = None,
+        hint: FreeTextHint | None = None,
     ) -> LedgerRejection:
         return cls(
-            code=code, field=field or None, message_es=_MESSAGES[code], detail_code=detail_code
+            code=code,
+            field=field or None,
+            message_es=_MESSAGES[code],
+            detail_code=detail_code,
+            hint=hint,
         )
 
 
@@ -455,9 +467,13 @@ class _Rejected(Exception):
 
 
 def _reject(
-    code: LedgerRejectionCode, field: str | None = None, *, detail_code: str | None = None
+    code: LedgerRejectionCode,
+    field: str | None = None,
+    *,
+    detail_code: str | None = None,
+    hint: FreeTextHint | None = None,
 ) -> _Rejected:
-    return _Rejected(LedgerRejection.of(code, field, detail_code=detail_code))
+    return _Rejected(LedgerRejection.of(code, field, detail_code=detail_code, hint=hint))
 
 
 def _document(content: object) -> Any:
@@ -886,6 +902,7 @@ class EscritorExpediente:
                         LedgerRejectionCode.FREE_TEXT_REJECTED,
                         located.pointer,
                         detail_code=rejected.detail_code,
+                        hint=rejected.hint,
                     ) from None
                 if normalized != located.value:
                     replace_value(document, located.segments, normalized)

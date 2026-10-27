@@ -77,6 +77,30 @@ def test_the_yaml_reads_back_as_the_specification() -> None:
     assert "csrf_rejected" not in schemas["ApiErrorCode"]["enum"]
 
 
+def test_the_published_rejection_is_the_optional_code_term_and_suggestion() -> None:
+    """VIG-344: ``ApiErrorBody.rejection`` opcional (aditivo), con los campos exactos que lee la
+    interfaz (``rejection.code``, ``rejection.term``, ``rejection.suggestion``)."""
+    schemas = yaml.safe_load(DEFAULT_OUTPUT.read_text(encoding="utf-8"))["components"]["schemas"]
+    body = schemas["ApiErrorBody"]
+    assert body["properties"]["rejection"] == {
+        "anyOf": [{"$ref": "#/components/schemas/ApiErrorRejection"}, {"type": "null"}],
+        "default": None,
+    }
+    assert "rejection" not in body["required"]
+    assert body["required"] == ["code", "message_es", "correlation_id"]
+    rejection = schemas["ApiErrorRejection"]
+    assert rejection["additionalProperties"] is False
+    assert rejection["required"] == ["code"]
+    assert list(rejection["properties"]) == ["code", "term", "suggestion"]
+    code = rejection["properties"]["code"]
+    assert (code["type"], code["minLength"], code["maxLength"]) == ("string", 1, 64)
+    assert code["pattern"].startswith("^") and code["pattern"].endswith("$")
+    for name in ("term", "suggestion"):
+        text, null = rejection["properties"][name]["anyOf"]
+        assert text == {"type": "string", "minLength": 1, "maxLength": 200}
+        assert null == {"type": "null"}
+
+
 json_leaves = st.one_of(
     st.none(),
     st.booleans(),

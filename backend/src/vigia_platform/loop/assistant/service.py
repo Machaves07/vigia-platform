@@ -21,7 +21,8 @@ orden; si algo falla no escribe nada ni publica nada:
 organización con ``root_cause.analyze`` sobre su zona; ``ready`` con su borrador (marcado como
 tal, con sus citas y el modelo **de la respuesta**), ``pending`` o ``unavailable`` con su causa.
 Una solicitud ``rejected_by_validators`` responde ``AssistantOutputRejected``
-(``loop_assistant_output_rejected``, A-68): el texto rechazado nunca se guardó ni se muestra.
+(``loop_assistant_output_rejected``, A-68) con su motivo cerrado (VIG-344): el texto rechazado
+nunca se guardó ni se muestra.
 
 Esta capa **no construye ningún adaptador** del proveedor ni conoce su clave: la clave vive solo
 en ``vigia-worker`` (NFR-LAZ-26). Sin clave, el consumidor responde ``no_api_key``.
@@ -101,7 +102,7 @@ _INSERT: Final = text(
 )
 _REQUEST: Final = text(
     "SELECT request_id, organization_id, plant_id, zone_id, analysis_id, state,"
-    " unavailable_cause, requested_at, resolved_at, attempt_count"
+    " unavailable_cause, rejection_reason, requested_at, resolved_at, attempt_count"
     " FROM loop.assistant_request"
     " WHERE organization_id = :organization_id AND request_id = :request_id"
 )
@@ -122,7 +123,15 @@ class AssistantUnavailable(Exception):
 
 
 class AssistantOutputRejected(Exception):
-    """La salida no pasó los validadores y no se muestra (``loop_assistant_output_rejected``)."""
+    """La salida no pasó los validadores y no se muestra (``loop_assistant_output_rejected``).
+
+    ``reason`` es su motivo cerrado (``RejectionReason`` del consumidor, VIG-344), o ``None`` si
+    la rechazó una imagen anterior a ``laz_0041``; nunca el texto rechazado.
+    """
+
+    def __init__(self, reason: str | None = None) -> None:
+        super().__init__(reason or "rejected_by_validators")
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +163,8 @@ class AssistantRequestView:
     resolved_at: datetime | None
     attempt_count: int
     draft: AssistantDraftView | None = None
+    rejection_reason: str | None = None
+    """El motivo de ``rejected_by_validators`` (VIG-344), sin el texto."""
 
 
 class TransactionSource(Protocol):
@@ -209,6 +220,7 @@ async def read_request(
         resolved_at=row["resolved_at"],
         attempt_count=int(row["attempt_count"]),
         draft=draft,
+        rejection_reason=row["rejection_reason"],
     )
 
 
@@ -345,7 +357,7 @@ class AssistantService:
             ),
         )
         if found.state is AssistantRequestState.REJECTED_BY_VALIDATORS:
-            raise AssistantOutputRejected()
+            raise AssistantOutputRejected(found.rejection_reason)
         return found
 
     # --- alcance ---------------------------------------------------------------------------------

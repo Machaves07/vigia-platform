@@ -57,7 +57,7 @@ from vigia_platform.ledger.application.writer import (
     LedgerRejectionCode,
     Receipt,
 )
-from vigia_platform.ledger.free_text import FreeTextCandidate, canonical_form
+from vigia_platform.ledger.free_text import FreeTextCandidate, FreeTextHint, canonical_form
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain.enums import BlockedTermForm
 from vigia_platform.loop.validators import lexicon
@@ -108,6 +108,12 @@ def test_every_inflection_or_pattern_instance_is_rejected_naming_the_term(
     assert verdict.suggestion_es
     assert rejection.reason == BLOCKED_VOCABULARY_TERM
     assert rejection.detail_code == LoopDetailCode.BLOCKED_VOCABULARY_TERM.value
+    # VIG-344: la pista nombra el tramo que cayó (nunca el texto entero) y su alternativa.
+    assert rejection.hint == FreeTextHint(
+        code=BLOCKED_VOCABULARY_TERM,
+        term=verdict.matched_value,
+        suggestion_es=verdict.suggestion_es,
+    )
 
 
 @pytest.mark.parametrize(

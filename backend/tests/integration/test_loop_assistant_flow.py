@@ -159,17 +159,22 @@ def test_a_draft_that_declares_insufficient_evidence_is_ready_without_citations(
 
 
 @pytest.mark.parametrize(
-    ("script", "state", "cause"),
+    ("script", "state", "cause", "reason"),
     [
-        (Script.SCHEMA_INVALID, "rejected_by_validators", None),
-        (Script.CITATION_OUTSIDE_LIST, "rejected_by_validators", None),
-        (Script.REFUSAL, "unavailable", "provider_error"),
-        (Script.MAX_TOKENS, "unavailable", "provider_error"),
-        (Script.BAD_REQUEST, "unavailable", "provider_error"),
+        (Script.SCHEMA_INVALID, "rejected_by_validators", None, "schema_invalid"),
+        (Script.CITATION_OUTSIDE_LIST, "rejected_by_validators", None, "citation_outside_list"),
+        (Script.REFUSAL, "unavailable", "provider_error", None),
+        (Script.MAX_TOKENS, "unavailable", "provider_error", None),
+        (Script.BAD_REQUEST, "unavailable", "provider_error", None),
     ],
 )
 def test_no_draft_is_ever_kept_for_a_rejected_or_failed_answer(
-    stack: AssistantStack, coordinator: Who, script: Script, state: str, cause: str | None
+    stack: AssistantStack,
+    coordinator: Who,
+    script: Script,
+    state: str,
+    cause: str | None,
+    reason: str | None,
 ) -> None:
     provider = stack.provider(script)
     stack.use(provider)
@@ -178,12 +183,16 @@ def test_no_draft_is_ever_kept_for_a_rejected_or_failed_answer(
     assert provider.call_count == 1  # ninguno se reintenta
     row = stack.request_row(request_id)
     assert (row["state"], row["unavailable_cause"]) == (state, cause)
+    # VIG-344: el motivo queda en la fila (sin el texto) solo con rejected_by_validators.
+    assert row["rejection_reason"] == reason
     assert stack.drafts(request_id) == []
     assert stack.sleep.waits == [2.0]  # la latencia del doble: ningún retroceso
     response = stack.get(coordinator, request_id)
     if state == "rejected_by_validators":
         assert response.status_code == 400, response.text
         assert response.json()["detail_code"] == "loop_assistant_output_rejected"
+        # No es el motivo de un validador: la respuesta no lleva ``rejection``.
+        assert "rejection" not in response.json()
     else:
         assert response.status_code == 200, response.text
         assert response.json()["draft"] is None
@@ -192,14 +201,29 @@ def test_no_draft_is_ever_kept_for_a_rejected_or_failed_answer(
         assert row["stop_reason"] == "refusal"
 
 
-def test_an_attributing_answer_is_rejected_and_never_stored(
-    stack: AssistantStack, coordinator: Who
+@pytest.mark.parametrize(
+    ("draft_text", "reason"),
+    [
+        (
+            "El operario del turno noche omitió el bloqueo antes del atasco de la prensa.",
+            "person_attribution_detected",
+        ),
+        (
+            "La guarda nueva garantiza que la prensa no vuelva a atascarse en el turno.",
+            "blocked_vocabulary_term",
+        ),
+    ],
+)
+def test_an_answer_rejected_by_a_validator_is_never_stored_and_only_its_reason_is_shown(
+    stack: AssistantStack, coordinator: Who, draft_text: str, reason: str
 ) -> None:
+    """SUP-U05-20 (VIG-344): ``rejection`` lleva solo el motivo del validador; ni el término ni
+    la sugerencia, que saldrían del texto rechazado (nunca guardado, A-68)."""
     request_id = stack.requested(coordinator)
     blamed = FakeAssistantProvider(
         content=json.dumps(
             {
-                "draft_text": "El operario del turno noche tuvo la culpa del atasco de la prensa.",
+                "draft_text": draft_text,
                 "citations": [],
                 "insufficient_evidence_declared": True,
                 "proposed_cause_category": "organization",
@@ -210,8 +234,31 @@ def test_an_attributing_answer_is_rejected_and_never_stored(
     )
     stack.use(blamed)
     stack.deliver(request_id)
-    assert stack.request_row(request_id)["state"] == "rejected_by_validators"
+    row = stack.request_row(request_id)
+    assert (row["state"], row["rejection_reason"]) == ("rejected_by_validators", reason)
     assert stack.drafts(request_id) == []
+    response = stack.get(coordinator, request_id)
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["detail_code"] == "loop_assistant_output_rejected"
+    assert body["rejection"] == {"code": reason}
+
+
+def test_a_rejection_written_by_the_previous_image_has_no_reason_to_show(
+    stack: AssistantStack, coordinator: Who
+) -> None:
+    """Una solicitud que rechazó la imagen anterior (sin ``rejection_reason``): la respuesta es la
+    de siempre, sin ``rejection`` (N-1 contra el esquema N)."""
+    request_id = stack.requested(coordinator)
+    stack.execute(
+        "UPDATE loop.assistant_request SET state = 'rejected_by_validators',"
+        " resolved_at = requested_at WHERE request_id = $1",
+        uuid.UUID(str(request_id)),
+    )
+    response = stack.get(coordinator, request_id)
+    assert response.status_code == 400, response.text
+    assert response.json()["detail_code"] == "loop_assistant_output_rejected"
+    assert "rejection" not in response.json()
 
 
 # --- degradación (PR-LAZ-21) --------------------------------------------------------------------

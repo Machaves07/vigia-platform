@@ -112,6 +112,18 @@ async function requestToken(): Promise<HTMLAnchorElement> {
   return screen.findByRole<HTMLAnchorElement>('link', { name: text('live_view.link') });
 }
 
+/**
+ * Espera a que el lanzador arme sus dos temporizadores: el cierre exacto (`useLayoutEffect`, en el
+ * mismo compromiso que el enlace) y el tic de la cuenta (`useEffect`, que React ejecuta después).
+ * Bajo carga el enlace llega al DOM antes que el tic, y avanzar el reloj entonces no repinta la
+ * cuenta (VIG-356: «600 s» donde se esperaba «1 s» en el nightly de GitHub).
+ */
+async function countdownArmed(harness: LiveViewHarness): Promise<void> {
+  await waitFor(() => {
+    expect(harness.clock.pendingCount).toBe(2);
+  }, WAIT);
+}
+
 /** Todas las claves del catálogo que la pantalla muestra con `data-text-key`. */
 function shownKeys(container: HTMLElement): string[] {
   return [...container.querySelectorAll('[data-text-key]')].map(
@@ -236,6 +248,7 @@ describe('enlace con el token en el fragmento (BR-APP-65, PR-APP-20)', () => {
     renderLauncher(harness);
     const link = await requestToken();
     expect(link).toBeDefined();
+    await countdownArmed(harness);
 
     act(() => {
       harness.clock.advance((LIVE_VIEW_TOKEN_SECONDS - 1) * 1000);
