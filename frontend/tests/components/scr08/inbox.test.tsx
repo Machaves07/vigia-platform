@@ -71,7 +71,9 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
-    expect(container.querySelector('tbody td')?.getAttribute('colspan')).toBe('11');
+    // Toda la fila, también la columna del siguiente paso (VIG-359): ningún acceso al hallazgo.
+    expect(container.querySelector('tbody td')?.getAttribute('colspan')).toBe('12');
+    expect(container.querySelector('[data-part="finding_actions"]')).toBeNull();
     expect(container.querySelector('tbody td')?.textContent).toBe(
       `${zone().name} ${text('components_status.gate.no_scope_record')}`,
     );
@@ -348,5 +350,56 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     server.use(http.get('http://localhost/loop/findings', () => HttpResponse.json(page())));
     fireEvent.click(screen.getByRole('button', { name: text('screen_state.retry') }));
     await screen.findByText(text('scr08.inbox.empty'), {}, WAIT);
+  });
+
+  it('VIG-359: cada fila ofrece el acceso de su estado: la cola, clasificar o el lazo', async () => {
+    const { Wrapper, cache } = await fixture({
+      path: '/findings',
+      permissions: ['findings.read', 'catalog.read', 'findings.classify', 'actions.manage'],
+    });
+    const states = ['in_review', 'received', 'open', 'overdue', 'unclosable'] as const;
+    const items = states.map((state, index) => ({
+      ...finding(index + 1),
+      lifecycle_state: state,
+    }));
+    server.use(
+      http.get('http://localhost/loop/findings', () => HttpResponse.json(page(items))),
+      http.get('http://localhost/zones/:id/gates', () => HttpResponse.json(gate())),
+    );
+    const { container } = render(<Inbox />, { wrapper: Wrapper });
+    await screen.findByRole('columnheader', { name: text('finding_journey.navigation') }, WAIT);
+    await waitFor(() => {
+      expect(cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    const rows = [...container.querySelectorAll('tbody tr')];
+    expect(rows).toHaveLength(states.length);
+    const offered = rows.map((row) =>
+      [...row.querySelectorAll('[data-part="finding_actions"] a')].map((link) => [
+        link.getAttribute('data-access'),
+        link.getAttribute('href'),
+      ]),
+    );
+    const id = (index: number) => finding(index).finding_state_id;
+    expect(offered).toEqual([
+      [['review_queue', '/review-queue']],
+      [['classify', `/findings/${id(2)}/classify`]],
+      [
+        ['loop', `/findings/${id(3)}/loop`],
+        ['reclassify', `/findings/${id(3)}/classify`],
+      ],
+      [
+        ['loop', `/findings/${id(4)}/loop`],
+        ['reclassify', `/findings/${id(4)}/classify`],
+      ],
+      [
+        ['loop', `/findings/${id(5)}/loop`],
+        ['reclassify', `/findings/${id(5)}/classify`],
+      ],
+    ]);
+    // El detalle sigue siendo el enlace de la zona; los accesos no lo sustituyen.
+    expect(rows.map((row) => row.querySelector('td a')?.getAttribute('href'))).toEqual(
+      items.map((item) => `/findings/${item.finding_state_id}`),
+    );
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

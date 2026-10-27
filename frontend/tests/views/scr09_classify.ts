@@ -59,10 +59,11 @@ export default {
       const history = data as unknown as History;
       return createElement(ClassificationHistory, {
         classifications: history.classifications,
+        reviewResolutions: history.review_resolutions,
         timeAggregated: history.time_aggregated,
         timeZone: 'America/Bogota',
       });
     },
-    allowedFields: CLASSIFICATION_FIELDS,
+    allowedFields: [...CLASSIFICATION_FIELDS, 'review_resolutions', 'resolved_at', 'resolved_by'],
   },
 } satisfies Record<string, ViewRegistration>;

@@ -7002,6 +7002,11 @@
             "$ref": "#/components/schemas/ClassificationItemOut"
           "type": "array"
           "title": "Classifications"
+        "review_resolutions":
+          "items":
+            "$ref": "#/components/schemas/ReviewResolutionItemOut"
+          "type": "array"
+          "title": "Review Resolutions"
       "additionalProperties": false
       "type": "object"
       "required":
@@ -7009,6 +7014,7 @@
         - "time_aggregated"
         - "aggregation_window_minutes"
         - "classifications"
+        - "review_resolutions"
       "title": "ClassificationHistoryOut"
     "ClassificationItemOut":
       "properties":
@@ -14308,6 +14314,42 @@
       "type": "object"
       "title": "ReviewResolutionBody"
       "description": "La decisión: salida, categoría y motivo (20 a 1000 caracteres)."
+    "ReviewResolutionItemOut":
+      "properties":
+        "resolution_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Resolution Id"
+        "record_id":
+          "type": "string"
+          "format": "uuid"
+          "title": "Record Id"
+        "outcome":
+          "type": "string"
+          "title": "Outcome"
+        "reason_category":
+          "type": "string"
+          "title": "Reason Category"
+        "reason_text":
+          "type": "string"
+          "title": "Reason Text"
+        "resolved_at":
+          "type": "string"
+          "title": "Resolved At"
+        "resolved_by":
+          "$ref": "#/components/schemas/ClassifiedByOut"
+      "additionalProperties": false
+      "type": "object"
+      "required":
+        - "resolution_id"
+        - "record_id"
+        - "outcome"
+        - "reason_category"
+        - "reason_text"
+        - "resolved_at"
+        - "resolved_by"
+      "title": "ReviewResolutionItemOut"
+      "description": "La resolución de la detección en la cola (T05 o T06): no es una clasificación."
     "ReviewResolutionOut":
       "properties":
         "detection_id":

@@ -5,7 +5,7 @@ Uso (desde ``backend/``)::
     uv run python -m vigia_platform.shared.api.export_u05_fixtures          # escribe el archivo
     uv run python -m vigia_platform.shared.api.export_u05_fixtures --check  # 0 si no hay diferencia
 
-El archivo tiene dos secciones, que ``frontend/`` consume por igualdad y no por heurística:
+El archivo tiene tres secciones, que ``frontend/`` consume por igualdad y no por heurística:
 
 - ``permissions`` (BR-APP-02, PR-APP-01, PAT-APP-SEG-06): el registro consolidado de claves de
   ``PermissionKey`` (U-02 §2.6 con las notas fechadas de U-03 y U-04, A-13), la columna de cada uno
@@ -23,6 +23,10 @@ El archivo tiene dos secciones, que ``frontend/`` consume por igualdad y no por 
   caracteres de control, invisibles (A-45), no admitidos, marcado y longitud. Los validadores
   enchufados de U-04 (vocabulario y atribución) no entran, porque la interfaz solo replica las
   restricciones estructurales y el mensaje del servidor prevalece (BR-APP-42).
+- ``lifecycle`` (BR-APP-43, VIG-359): la tabla §4.1 del ciclo de vida del hallazgo tal como la
+  aplica ``loop.domain.lifecycle`` (estados de origen, destino, claves y registros de cada
+  transición). La interfaz ofrece en cada estado el acceso que esta tabla admite (revisar en la
+  cola, clasificar, reclasificar, lazo), y una prueba suya lo contrasta por igualdad.
 
 ``--check`` compara byte a byte con el archivo versionado y termina en 1 si difiere o falta;
 entonces imprime cada diferencia con su clave, rol, ruta o caso, y el principio del diff. El JSON
@@ -50,6 +54,8 @@ from vigia_platform.ledger.free_text import (
     FreeTextRejected,
     FreeTextRejection,
 )
+from vigia_platform.loop.domain.enums import FindingLifecycleState
+from vigia_platform.loop.domain.lifecycle import TRANSITIONS, Transition
 from vigia_platform.shared.context import Role
 from vigia_platform.shared.runtime.units import record_type_registry, registered_units
 
@@ -68,6 +74,7 @@ __all__ = [
     "evaluate",
     "free_text_routes",
     "free_text_section",
+    "lifecycle_section",
     "main",
     "permission_differences",
     "permissions_section",
@@ -77,7 +84,8 @@ __all__ = [
 DEFAULT_OUTPUT: Final = Path(__file__).resolve().parents[4] / "openapi/u05-fixtures.json"
 """``backend/openapi/u05-fixtures.json``."""
 FORMAT: Final = "vigia-platform/u05-fixtures"
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
+"""2: la sección ``lifecycle`` (VIG-359)."""
 """Versión del formato del archivo: sube si cambia la forma, no si cambian los datos."""
 CORPUS_SEED: Final = 462
 """Semilla del corpus (TASK-462): elige rutas y relleno; el mismo código da el mismo archivo."""
@@ -468,6 +476,29 @@ def free_text_section(
     }
 
 
+# --- Ciclo de vida del hallazgo -----------------------------------------------------------------
+
+
+def lifecycle_section(transitions: Mapping[str, Transition]) -> dict[str, Any]:
+    """La tabla §4.1 de U-04 tal como la aplica el servidor (``loop.domain.lifecycle``): de qué
+    estados sale cada transición, adónde llega, qué claves exige y qué registros escribe. La
+    interfaz deriva de aquí qué acceso ofrece en cada estado (VIG-359), sin reglas propias
+    (BR-APP-43). ``from`` vacío es «—»: el sujeto aún no existe (T01, T02)."""
+    return {
+        "states": [state.value for state in FindingLifecycleState],
+        "transitions": [
+            {
+                "id": row.transition_id,
+                "from": sorted(origin.value for origin in row.origins if origin is not None),
+                "to": row.destination.value,
+                "permissions": [key.value for key in row.permission_keys],
+                "records": list(row.record_types),
+            }
+            for row in transitions.values()
+        ],
+    }
+
+
 # --- Documento --------------------------------------------------------------------------------
 
 
@@ -476,6 +507,7 @@ def build_document(
     matrix: Mapping[Role, Collection[str]],
     routes: Sequence[FreeTextRoute],
     policy: FreeTextPolicyRegistry,
+    transitions: Mapping[str, Transition] = TRANSITIONS,
 ) -> dict[str, Any]:
     """El documento completo, con su cabecera de formato."""
     return {
@@ -490,11 +522,13 @@ def build_document(
                 "concede la asignación de ese rol en ese contexto; free_text.vectors[].verdict es "
                 "'accepted' o el motivo de rechazo de la política base, y normalized, el texto "
                 "NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres "
-                "Unicode tras NFC, no unidades UTF-16."
+                "Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del "
+                "ciclo de vida del hallazgo que aplica el servidor."
             ),
         },
         "permissions": permissions_section(keys, matrix),
         "free_text": free_text_section(routes, policy),
+        "lifecycle": lifecycle_section(transitions),
     }
 
 
@@ -510,7 +544,7 @@ def differences(committed: object, current: Mapping[str, Any]) -> list[tuple[str
         return [("invalid_file",)]
     found: list[tuple[str, ...]] = [
         ("field_differs", name)
-        for name in ("format", "schema_version", "generated")
+        for name in ("format", "schema_version", "generated", "lifecycle")
         if committed.get(name) != current[name]
     ]
     permissions = committed.get("permissions")

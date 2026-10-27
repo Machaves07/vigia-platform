@@ -38,6 +38,7 @@ from tests.properties.laz.strategies.detail import (
     detail_inputs,
     history_marks,
     marks,
+    review_resolution_rows,
 )
 from tests.properties.laz.strategies.inbox import (
     PrivacyZone,
@@ -244,11 +245,16 @@ def test_pr_laz_02_every_mark_of_the_history_is_aggregated_only_in_single_occupa
 ) -> None:
     (subject,) = data.draw(findings_over_time(zone, min_size=1, max_size=1))
     rows = data.draw(classification_rows())
-    before = copy.deepcopy(rows)
-    view = history_view(classification_history(subject, rows)).model_dump(mode="json")
-    assert rows == before
+    resolutions = data.draw(review_resolution_rows())
+    before = copy.deepcopy((rows, resolutions))
+    view = history_view(classification_history(subject, rows, resolutions)).model_dump(mode="json")
+    assert (rows, resolutions) == before
     assert view["time_aggregated"] is zone.single_occupancy
     assert [c["sequence_in_subject"] for c in view["classifications"]] == [
         r["sequence_in_subject"] for r in rows
     ]
-    _assert_marks(view, history_marks(rows), zone)
+    # La resolución de la cola va aparte (VIG-359) y su marca también se agrega.
+    assert [r["resolution_id"] for r in view["review_resolutions"]] == [
+        r["resolution_id"] for r in resolutions
+    ]
+    _assert_marks(view, history_marks(rows, resolutions), zone)

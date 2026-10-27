@@ -9,6 +9,8 @@ import platform from '../../../../../backend/resources/labels.platform.es.json';
 import { BlurredClipPlayer } from '@/components/BlurredClipPlayer/BlurredClipPlayer';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
+import type { ReviewResolutionItem } from '@/ports/shared';
 import {
   reasonList,
   type ClassificationItem,
@@ -431,19 +433,29 @@ function Records({
   );
 }
 
-/** Historial completo de clasificaciones (SUP-U05-04): ninguna se edita ni se borra (P4). */
+/**
+ * Historial completo de clasificaciones (SUP-U05-04): ninguna se edita ni se borra (P4). Si el
+ * hallazgo pasó por la cola, su resolución va antes, distinguida de las clasificaciones (VIG-359).
+ */
 export function History({
   classifications,
+  reviewResolutions,
   timeAggregated,
   timeZone,
 }: {
   readonly classifications: readonly ClassificationItem[];
+  readonly reviewResolutions: readonly ReviewResolutionItem[];
   readonly timeAggregated: boolean;
   readonly timeZone: string;
 }) {
   return (
     <section aria-label={text('scr08.detail.history')}>
       <h2>{text('scr08.detail.history')}</h2>
+      <ReviewResolutions
+        resolutions={reviewResolutions}
+        timeAggregated={timeAggregated}
+        timeZone={timeZone}
+      />
       {classifications.length === 0 ? (
         <p>{text('scr08.detail.history_empty')}</p>
       ) : (

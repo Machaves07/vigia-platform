@@ -1,8 +1,17 @@
-/** IF-21: cola por plazo, proyección periódica y resolución exclusivamente individual. */
-import { useState } from 'react';
+/**
+ * IF-21: cola por plazo, proyección periódica y resolución exclusivamente individual.
+ *
+ * VIG-359: el panel de evidencia o de resolución se abre junto a la fila de su detección, con el
+ * foco en su encabezado, y lo devuelve al botón que lo abrió al cerrarse. Si el enlace del detalle
+ * del hallazgo trae una detección en el estado de la navegación (nunca en la URL), esa detección se
+ * señala y recibe el foco; si ya no está en las páginas cargadas, se dice.
+ */
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
+import { reviewQueueTarget } from '@/pages/shared/FindingActions';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   queueClock,
@@ -10,6 +19,7 @@ import {
   readDetection,
   readQueue,
   reviewQueuePort,
+  type Plant,
   type QueueItem,
   type ResolutionResult,
 } from '@/ports/scr10ReviewQueue';
@@ -19,8 +29,9 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { descriptor } from '../descriptor';
 import { EvidenceView } from './EvidenceView';
-import { QueueView } from './QueueView';
+import { panelId, QueueView, type PanelKind } from './QueueView';
 import { Resolution } from './Resolution';
+import styles from './queue.module.css';
 
 /** El POST no devuelve rol: se lee el registro creado, sin volver a enviar la decisión. */
 function Receipt({
@@ -122,13 +133,72 @@ function Evidence({
   );
 }
 
+/**
+ * El panel de una detección, en la fila siguiente a la suya (VIG-359): al abrirse recibe el foco
+ * en su encabezado; «Cerrar detalle» lo devuelve al botón que lo abrió.
+ */
+function Panel({
+  item,
+  kind,
+  plants,
+  onClose,
+  children,
+}: {
+  readonly item: QueueItem;
+  readonly kind: PanelKind;
+  readonly plants: readonly Plant[];
+  readonly onClose: () => void;
+  readonly children: ReactNode;
+}) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+  const plant = plants.find((p) => p.plant_id === item.plant_id);
+  return (
+    <section
+      id={panelId(item.detection_id)}
+      aria-labelledby={headingId}
+      className={styles.panel}
+      data-part="panel"
+      data-kind={kind}
+    >
+      <h2 id={headingId} ref={heading} tabIndex={-1}>
+        {text(
+          kind === 'resolve' ? 'finding_journey.panel_resolve' : 'finding_journey.panel_evidence',
+        )}
+        {': '}
+        {plant?.zones.find((zone) => zone.zone_id === item.zone_id)?.name ?? text('common.unknown')}
+        {' · '}
+        {label('predicate_family', item.family)}
+      </h2>
+      <TimestampWithOffset instant={item.review_due_at} timeZone={plant?.timezone ?? ''} />
+      <button type="button" onClick={onClose}>
+        {text('scr10.cancel')}
+      </button>
+      {children}
+    </section>
+  );
+}
+
+/** La detección que señala el enlace del hallazgo (estado de la navegación), si la hay. */
+function useTarget(): string | null {
+  return reviewQueueTarget(useLocation().state);
+}
+
 export default function Page() {
   const { principal } = useUiSession();
   const [pages, setPages] = useState(1);
   const [selected, setSelected] = useState<{
     item: QueueItem;
-    kind: 'resolve' | 'evidence';
+    kind: PanelKind;
   } | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const targetCell = useRef<HTMLTableCellElement>(null);
+  const focusedTarget = useRef(false);
+  const receipt = useRef<HTMLDivElement>(null);
+  const target = useTarget();
   const [written, setWritten] = useState<ResolutionResult | null>(null);
   const scope = `${principal?.organization.organization_id ?? 'none'}:${
     principal?.assignments
@@ -159,12 +229,65 @@ export default function Page() {
     read: ({ signal }) => readQueue(pages, signal),
   });
   const failure = query.error === null ? null : queueFailure(query.error);
+  const plants = hierarchy.data?.plants ?? [];
+  const targetListed = query.data?.items.some((item) => item.detection_id === target) ?? false;
+  useEffect(() => {
+    // La detección señalada recibe el foco una sola vez, al aparecer en la cola.
+    if (targetListed && !focusedTarget.current) {
+      focusedTarget.current = true;
+      targetCell.current?.focus();
+    }
+  }, [targetListed]);
+  useEffect(() => {
+    if (written !== null) receipt.current?.focus();
+  }, [written]);
+  const open = (item: QueueItem, kind: PanelKind, button: HTMLButtonElement) => {
+    trigger.current = button;
+    setSelected({ item, kind });
+  };
+  const close = () => {
+    setSelected(null);
+    trigger.current?.focus();
+  };
+  const panel = selected !== null && (
+    <Panel
+      key={`${selected.kind}:${selected.item.detection_id}`}
+      item={selected.item}
+      kind={selected.kind}
+      plants={plants}
+      onClose={close}
+    >
+      {selected.kind === 'resolve' ? (
+        canResolve && (
+          <Resolution
+            item={selected.item}
+            onWritten={(outcome) => {
+              setWritten(outcome);
+              setSelected(null);
+            }}
+          />
+        )
+      ) : (
+        <Evidence
+          item={selected.item}
+          scope={scope}
+          concession={concession}
+          organizationId={principal?.organization.organization_id ?? ''}
+          canViewClips={granted.has('evidence.read')}
+        />
+      )}
+    </Panel>
+  );
   return (
     <main>
       <h1>{text('scr10.title')}</h1>
       <p>{text('scr10.explanation')}</p>
       <p>{text('scr10.confidence_context')}</p>
-      {written !== null && <Receipt result={written} scope={scope} concession={concession} />}
+      {written !== null && (
+        <div ref={receipt} tabIndex={-1} data-part="receipt">
+          <Receipt result={written} scope={scope} concession={concession} />
+        </div>
+      )}
       <RefreshIndicator
         clock={queueClock()}
         fetchedAt={query.fetchedAt}
@@ -174,6 +297,14 @@ export default function Page() {
           void query.refresh();
         }}
       />
+      {target !== null &&
+        query.data !== undefined &&
+        !targetListed &&
+        written?.detection_id !== target && (
+          <p role="status" data-part="target_missing">
+            {text('finding_journey.queue_target_missing')}
+          </p>
+        )}
       {failure !== null ? (
         failure === 'error' ? (
           <ScreenState
@@ -193,15 +324,23 @@ export default function Page() {
         <ScreenState state="ready">
           <QueueView
             items={query.data.items}
-            plants={hierarchy.data?.plants ?? []}
+            plants={plants}
             now={queueClock().now()}
             canResolve={canResolve}
-            onResolve={(item) => {
-              setSelected({ item, kind: 'resolve' });
+            onResolve={(item, button) => {
+              open(item, 'resolve', button);
             }}
-            onEvidence={(item) => {
-              setSelected({ item, kind: 'evidence' });
+            onEvidence={(item, button) => {
+              open(item, 'evidence', button);
             }}
+            open={
+              selected === null
+                ? null
+                : { detectionId: selected.item.detection_id, kind: selected.kind }
+            }
+            panel={panel}
+            target={target}
+            targetRef={targetCell}
           />
         </ScreenState>
       )}
@@ -215,52 +354,6 @@ export default function Page() {
         >
           {text('scr10.more')}
         </button>
-      )}
-      {selected !== null && (
-        <div key={`${selected.kind}:${selected.item.detection_id}`}>
-          <h2>
-            {hierarchy.data?.plants
-              .flatMap((p) => p.zones)
-              .find((zone) => zone.zone_id === selected.item.zone_id)?.name ??
-              text('common.unknown')}
-            {' · '}
-            {label('predicate_family', selected.item.family)}
-          </h2>
-          <TimestampWithOffset
-            instant={selected.item.review_due_at}
-            timeZone={
-              hierarchy.data?.plants.find((p) => p.plant_id === selected.item.plant_id)?.timezone ??
-              ''
-            }
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setSelected(null);
-            }}
-          >
-            {text('scr10.cancel')}
-          </button>
-          {selected.kind === 'resolve' ? (
-            canResolve && (
-              <Resolution
-                item={selected.item}
-                onWritten={(outcome) => {
-                  setWritten(outcome);
-                  setSelected(null);
-                }}
-              />
-            )
-          ) : (
-            <Evidence
-              item={selected.item}
-              scope={scope}
-              concession={concession}
-              organizationId={principal?.organization.organization_id ?? ''}
-              canViewClips={granted.has('evidence.read')}
-            />
-          )}
-        </div>
       )}
     </main>
   );

@@ -276,4 +276,125 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     expect(screen.getByText(STANDARD_TEXT)).toBeDefined();
     expect(document.querySelector('[data-part="contract"]')).toBeNull();
   });
+
+  // --- VIG-359: recorrido guiado por el estado y resolución de la cola en el historial ---------
+
+  const COORDINATOR = ['findings.read', 'evidence.read', 'coverage.read', 'findings.classify'];
+
+  function journeyLinks() {
+    const navigation = screen.getByRole('navigation', { name: text('finding_journey.navigation') });
+    return within(navigation)
+      .getAllByRole('link')
+      .map((link) => [link.textContent, link.getAttribute('href')]);
+  }
+
+  it.each([
+    {
+      state: 'in_review',
+      kind: 'detection',
+      expected: () => [[text('finding_journey.review_queue'), '/review-queue']],
+    },
+    {
+      state: 'received',
+      kind: 'finding',
+      expected: (id: string) => [[text('finding_journey.classify'), `/findings/${id}/classify`]],
+    },
+    ...['open', 'action_assigned', 'overdue', 'closed', 'unclosable', 'discarded'].map((state) => ({
+      state,
+      kind: 'finding',
+      expected: (id: string) => [
+        [text('finding_journey.loop'), `/findings/${id}/loop`],
+        [text('finding_journey.reclassify'), `/findings/${id}/classify`],
+      ],
+    })),
+  ])(
+    'VIG-359: en $state ofrece el acceso de su estado, sin escribir la dirección',
+    async ({ state, kind, expected }) => {
+      const env = await fixture({ permissions: COORDINATOR });
+      const value = { ...detail(), lifecycle_state: state, subject_kind: kind };
+      env.responses.detail = () => HttpResponse.json(value);
+      await opened(env);
+      expect(journeyLinks()).toEqual(expected(value.finding_state_id));
+      const suspends = document.querySelector('[data-part="suspends"]');
+      expect(suspends === null).toBe(!['open', 'action_assigned', 'overdue'].includes(state));
+    },
+  );
+
+  it.each([
+    { kind: 'detection', target: (subject: string) => subject },
+    { kind: 'finding', target: () => 'ninguna' },
+  ])(
+    'VIG-359: en revisión, la cola recibe esa detección solo si el sujeto es $kind, sin consulta en la URL',
+    async ({ kind, target }) => {
+      const env = await fixture({ permissions: COORDINATOR });
+      const value = { ...detail(), lifecycle_state: 'in_review', subject_kind: kind };
+      env.responses.detail = () => HttpResponse.json(value);
+      await opened(env);
+      fireEvent.click(
+        within(
+          screen.getByRole('navigation', { name: text('finding_journey.navigation') }),
+        ).getByRole('link', { name: text('finding_journey.review_queue') }),
+      );
+      const queue = await screen.findByTestId('queue', {}, WAIT);
+      expect(queue.textContent).toBe(target(value.subject_id));
+      expect(queue.getAttribute('data-search')).toBe('');
+    },
+  );
+
+  it('VIG-359: sin findings.classify no ofrece clasificar, que la ruta no abriría', async () => {
+    const env = await fixture();
+    env.responses.detail = () => HttpResponse.json({ ...detail(), lifecycle_state: 'received' });
+    await opened(env);
+    expect(screen.queryByRole('navigation', { name: text('finding_journey.navigation') })).toBe(
+      null,
+    );
+  });
+
+  it('VIG-359: el historial muestra la resolución de la cola aparte de las clasificaciones', async () => {
+    const env = await fixture({ permissions: COORDINATOR });
+    const resolution = {
+      resolution_id: '0190a1b2-cccc-7000-8000-000000000001',
+      record_id: '0190a1b2-cccc-7000-8000-000000000002',
+      outcome: 'review_discarded',
+      reason_category: 'reflection_or_glare',
+      reason_text: 'Reflejo sintético sobre la guarda de la zona, sin coexistencia.',
+      resolved_at: '2026-01-01T12:30:00.000Z',
+      resolved_by: {
+        user_id: '0190a1b2-8888-7000-8000-000000000002',
+        display_name: 'Revisión sintética',
+        role_in_use: 'coordinator_sst',
+      },
+    };
+    env.responses.history = () =>
+      HttpResponse.json({ ...history([]), review_resolutions: [resolution] });
+    await opened(env);
+    const historyRegion = screen.getByRole('region', { name: text('scr08.detail.history') });
+    const section = within(historyRegion).getByRole('region', {
+      name: text('finding_journey.resolution'),
+    });
+    const items = section.querySelectorAll('[data-part="review_resolution"]');
+    expect(items).toHaveLength(1);
+    const item = items[0] as HTMLElement;
+    expect(item.getAttribute('data-outcome')).toBe('review_discarded');
+    expect(item.querySelector('strong')?.textContent).toBe(
+      `${text('finding_journey.resolution_outcome')}: ${label('review_resolution_outcome', 'review_discarded')}`,
+    );
+    expect(
+      within(item).getByText(
+        `${text('finding_journey.resolution_reason')}: ${label('reason_category_false_positive', 'reflection_or_glare')}`,
+      ),
+    ).toBeDefined();
+    expect(item.querySelector('[data-part="reason_text"]')?.textContent).toBe(
+      resolution.reason_text,
+    );
+    expect(item.querySelector('time')?.getAttribute('dateTime')).not.toBeNull();
+    const author = item.querySelector('[data-role-in-use]');
+    expect(author?.getAttribute('data-role-in-use')).toBe('coordinator_sst');
+    expect(author?.textContent).toBe(
+      `${text('finding_journey.resolved_by')}: Revisión sintética ${text('finding_journey.role')} ${label('role', 'coordinator_sst')}`,
+    );
+    // Distinguida de las clasificaciones: ninguna resolución cuenta como clasificación.
+    expect(historyRegion.querySelectorAll('[data-part="classification"]')).toHaveLength(0);
+    expect(within(historyRegion).getByText(text('scr08.detail.history_empty'))).toBeDefined();
+  });
 });

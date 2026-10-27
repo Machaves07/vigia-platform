@@ -21,6 +21,8 @@ export default {
         createElement(FindingsView, {
           page,
           plants: [],
+          // Con las claves del coordinador, cada fila pinta también el acceso de su estado.
+          permissions: new Set(['findings.read', 'findings.classify', 'actions.manage']),
           gates: page.items.map((item): ZoneGate => ({
             zone_id: item.zone_id,
             regression: 'current',
