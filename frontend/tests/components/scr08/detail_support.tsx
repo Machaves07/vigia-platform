@@ -3,11 +3,12 @@ import { cleanup, render } from '@testing-library/react';
 import fc from 'fast-check';
 import { HttpResponse, http } from 'msw';
 import type { ReactNode } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach } from 'vitest';
 import type { Finding as ContractFinding } from '@/contracts';
 import Detail from '@/pages/scr08/detail';
 import Labels from '@/pages/scr08/labels';
+import { reviewQueueTarget } from '@/pages/shared/FindingActions';
 import { createPortConnection, createTransport, installTransport } from '@/ports/base';
 import type {
   ClassificationHistory,
@@ -199,6 +200,16 @@ export function apiError(code: string, status: number, detail_code: string | nul
   );
 }
 
+/** La cola de la prueba: muestra la detección que recibe en el estado de la navegación. */
+function QueueProbe() {
+  const location = useLocation();
+  return (
+    <p data-testid="queue" data-search={location.search}>
+      {reviewQueueTarget(location.state) ?? 'ninguna'}
+    </p>
+  );
+}
+
 const disposers: (() => void)[] = [];
 afterEach(() => {
   cleanup();
@@ -324,6 +335,7 @@ export async function fixture({
         <Route path="/findings/labels" element={<Labels />} />
         <Route path="/findings/:finding_state_id" element={<Detail />} />
         <Route path="/findings" element={<p>bandeja</p>} />
+        <Route path="/review-queue" element={<QueueProbe />} />
       </Routes>,
       { wrapper: Wrapper },
     );

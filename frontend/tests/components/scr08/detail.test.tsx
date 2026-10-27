@@ -292,9 +292,7 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     {
       state: 'in_review',
       kind: 'detection',
-      expected: (_id: string, subject: string) => [
-        [text('finding_journey.review_queue'), `/review-queue?detection=${subject}`],
-      ],
+      expected: () => [[text('finding_journey.review_queue'), '/review-queue']],
     },
     {
       state: 'received',
@@ -316,19 +314,32 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
       const value = { ...detail(), lifecycle_state: state, subject_kind: kind };
       env.responses.detail = () => HttpResponse.json(value);
       await opened(env);
-      expect(journeyLinks()).toEqual(expected(value.finding_state_id, value.subject_id));
+      expect(journeyLinks()).toEqual(expected(value.finding_state_id));
       const suspends = document.querySelector('[data-part="suspends"]');
       expect(suspends === null).toBe(!['open', 'action_assigned', 'overdue'].includes(state));
     },
   );
 
-  it('VIG-359: un hallazgo en la cola enlaza la cola entera si no es una detección', async () => {
-    const env = await fixture({ permissions: COORDINATOR });
-    env.responses.detail = () =>
-      HttpResponse.json({ ...detail(), lifecycle_state: 'in_review', subject_kind: 'finding' });
-    await opened(env);
-    expect(journeyLinks()).toEqual([[text('finding_journey.review_queue'), '/review-queue']]);
-  });
+  it.each([
+    { kind: 'detection', target: (subject: string) => subject },
+    { kind: 'finding', target: () => 'ninguna' },
+  ])(
+    'VIG-359: en revisión, la cola recibe esa detección solo si el sujeto es $kind, sin consulta en la URL',
+    async ({ kind, target }) => {
+      const env = await fixture({ permissions: COORDINATOR });
+      const value = { ...detail(), lifecycle_state: 'in_review', subject_kind: kind };
+      env.responses.detail = () => HttpResponse.json(value);
+      await opened(env);
+      fireEvent.click(
+        within(
+          screen.getByRole('navigation', { name: text('finding_journey.navigation') }),
+        ).getByRole('link', { name: text('finding_journey.review_queue') }),
+      );
+      const queue = await screen.findByTestId('queue', {}, WAIT);
+      expect(queue.textContent).toBe(target(value.subject_id));
+      expect(queue.getAttribute('data-search')).toBe('');
+    },
+  );
 
   it('VIG-359: sin findings.classify no ofrece clasificar, que la ruta no abriría', async () => {
     const env = await fixture();

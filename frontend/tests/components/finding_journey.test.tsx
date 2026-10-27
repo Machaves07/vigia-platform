@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { textViolations } from '../../scripts/lib/texts_catalog.mjs';
@@ -18,7 +19,7 @@ import {
   RESUMING_STATE,
   SUSPENDING_STATES,
   findingAccess,
-  reviewQueuePath,
+  reviewQueueTarget,
   type FindingAccess,
 } from '@/pages/shared/FindingActions';
 import journey from '@/texts/finding_journey.json';
@@ -144,7 +145,8 @@ describe('FindingActions', () => {
   it.each([
     {
       state: 'in_review',
-      expected: [[text('finding_journey.review_queue'), `/review-queue?detection=${DETECTION}`]],
+      // Sin consulta en la URL: la detección viaja en el estado de la navegación.
+      expected: [[text('finding_journey.review_queue'), '/review-queue']],
     },
     {
       state: 'received',
@@ -176,11 +178,53 @@ describe('FindingActions', () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
-  it('sin la detección, la cola se abre entera', () => {
-    renderActions('in_review');
-    expect(links()).toEqual([[text('finding_journey.review_queue'), '/review-queue']]);
-    expect(reviewQueuePath(null)).toBe('/review-queue');
-  });
+  it.each([
+    { detectionId: DETECTION, target: DETECTION },
+    { detectionId: null, target: null },
+  ])(
+    'la cola recibe la detección $target en el estado de la navegación, nunca en la URL',
+    async ({ detectionId, target }) => {
+      function Queue() {
+        const location = useLocation();
+        return (
+          <p data-testid="queue" data-search={location.search}>
+            {reviewQueueTarget(location.state) ?? 'ninguna'}
+          </p>
+        );
+      }
+      render(
+        <MemoryRouter initialEntries={['/findings/x']}>
+          <Routes>
+            <Route
+              path="/findings/x"
+              element={
+                <FindingActions
+                  findingId={FINDING}
+                  state="in_review"
+                  detectionId={detectionId}
+                  permissions={COORDINATOR}
+                />
+              }
+            />
+            <Route path="/review-queue" element={<Queue />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await userEvent
+        .setup()
+        .click(screen.getByRole('link', { name: text('finding_journey.review_queue') }));
+      const queue = await screen.findByTestId('queue');
+      expect(queue.textContent).toBe(target ?? 'ninguna');
+      expect(queue.getAttribute('data-search')).toBe('');
+    },
+  );
+
+  it.each([null, undefined, 'texto', 7, {}, { detection: 7 }, { detection: '' }, { other: 'x' }])(
+    'un estado de navegación sin detección válida (%o) no señala ninguna',
+    (state) => {
+      expect(reviewQueueTarget(state)).toBeNull();
+    },
+  );
 
   it.each([
     { removed: 'findings.classify', state: 'received', missing: 'classify' },

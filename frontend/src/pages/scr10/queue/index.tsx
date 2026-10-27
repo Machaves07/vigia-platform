@@ -2,15 +2,16 @@
  * IF-21: cola por plazo, proyección periódica y resolución exclusivamente individual.
  *
  * VIG-359: el panel de evidencia o de resolución se abre junto a la fila de su detección, con el
- * foco en su encabezado, y lo devuelve al botón que lo abrió al cerrarse. Con `?detection=` (el
- * enlace del detalle del hallazgo), esa detección se señala y recibe el foco; si ya no está en las
- * páginas cargadas, se dice.
+ * foco en su encabezado, y lo devuelve al botón que lo abrió al cerrarse. Si el enlace del detalle
+ * del hallazgo trae una detección en el estado de la navegación (nunca en la URL), esa detección se
+ * señala y recibe el foco; si ya no está en las páginas cargadas, se dice.
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
+import { useLocation } from 'react-router';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
+import { reviewQueueTarget } from '@/pages/shared/FindingActions';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   queueClock,
@@ -181,11 +182,9 @@ function Panel({
   );
 }
 
-/** La detección que señala el enlace del hallazgo (`?detection=`), si la hay. */
+/** La detección que señala el enlace del hallazgo (estado de la navegación), si la hay. */
 function useTarget(): string | null {
-  const [params] = useSearchParams();
-  const value = params.get('detection');
-  return value === null || value === '' ? null : value;
+  return reviewQueueTarget(useLocation().state);
 }
 
 export default function Page() {
@@ -298,11 +297,14 @@ export default function Page() {
           void query.refresh();
         }}
       />
-      {target !== null && query.data !== undefined && !targetListed && (
-        <p role="status" data-part="target_missing">
-          {text('finding_journey.queue_target_missing')}
-        </p>
-      )}
+      {target !== null &&
+        query.data !== undefined &&
+        !targetListed &&
+        written?.detection_id !== target && (
+          <p role="status" data-part="target_missing">
+            {text('finding_journey.queue_target_missing')}
+          </p>
+        )}
       {failure !== null ? (
         failure === 'error' ? (
           <ScreenState

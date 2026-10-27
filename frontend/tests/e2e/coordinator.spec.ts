@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 import { authenticatedTest as test, expect } from './fixtures';
-import { confirmFinding, logout, nextSteps, openMenu } from './journeys';
+import { confirmFinding, logout, nextSteps, openInbox } from './journeys';
 
 test.use({ role: 'coordinator_sst', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
@@ -97,7 +97,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
   });
 
   await test.step('clasificación conservada con motivo y rol efectivo', async () => {
-    await openMenu(page, 'Hallazgos');
+    await openInbox(page);
     await page.locator(`a[href="/findings/${selected.closure}"]`).click();
     const history = page.getByRole('region', { name: 'Historial completo de clasificaciones' });
     await expect(history).toContainText('Coexistencia real observada junto al acceso');
@@ -112,7 +112,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('de la bandeja a la cola: la detección se resuelve junto a su fila', async () => {
     const reason = 'Coexistencia sintética confirmada al revisar el clip de la detección';
-    await openMenu(page, 'Hallazgos');
+    await openInbox(page);
     await page
       .locator('tbody tr')
       .filter({ has: page.locator('a[data-access="review_queue"]') })
@@ -124,7 +124,8 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await nextSteps(page)
       .getByRole('link', { name: 'Revisar en la cola de revisión', exact: true })
       .click();
-    await expect(page).toHaveURL(/\/review-queue\?detection=[0-9a-f-]{36}$/);
+    // Sin consulta en la URL: la detección viaja en el estado de la navegación.
+    await expect(page).toHaveURL(/\/review-queue$/);
     const target = page.locator('tbody tr[aria-current="true"]');
     await expect(target).toHaveCount(1);
     await expect(target.getByRole('rowheader')).toBeFocused();
@@ -161,7 +162,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('acción, PNG declarado sin personas y cierre firmado', async () => {
     // De la bandeja al lazo con el acceso de la fila (VIG-359).
-    await openMenu(page, 'Hallazgos');
+    await openInbox(page);
     await page.locator(`a[href="/findings/${selected.closure}/loop"]`).click();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
     await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
@@ -225,7 +226,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('incerrable con política real y fecha de revisión', async () => {
     // De la bandeja a clasificar y al lazo con los accesos de la fila y de la pantalla.
-    await openMenu(page, 'Hallazgos');
+    await openInbox(page);
     await page.locator(`a[href="/findings/${selected.unclosable}/classify"]`).click();
     await confirmFinding(
       page,

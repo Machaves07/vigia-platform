@@ -260,7 +260,8 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     expect(describedBy(form)).toContain(note.id);
     expect(note.querySelector('p')?.textContent).toBe(text('finding_journey.in_review'));
     const link = within(note).getByRole('link', { name: text('finding_journey.review_queue') });
-    expect(link.getAttribute('href')).toBe(`/review-queue?detection=${DETECTION}`);
+    // La detección viaja en el estado de la navegación (lo comprueban el detalle y FindingActions).
+    expect(link.getAttribute('href')).toBe('/review-queue');
     // El aviso llega antes de enviar nada: el servidor sigue siendo quien decide.
     expect(bodies).toHaveLength(0);
     expect(screen.getByRole('button', { name: text('scr09.classify.submit') })).toBeDefined();

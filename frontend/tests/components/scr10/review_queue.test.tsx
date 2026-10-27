@@ -77,7 +77,7 @@ function item(index = 1, due = '2026-01-01T11:00:00.000Z'): QueueItem {
 
 async function mount(
   permissions = ['findings.read', 'review_queue.resolve'],
-  path = '/review-queue',
+  entry: string | { pathname: string; state: unknown } = '/review-queue',
 ) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
@@ -140,7 +140,7 @@ async function mount(
   const view = render(
     <SessionProvider store={session}>
       <ScreenQueryProvider cache={cache}>
-        <MemoryRouter initialEntries={[path]}>
+        <MemoryRouter initialEntries={[entry]}>
           <Page />
         </MemoryRouter>
       </ScreenQueryProvider>
@@ -675,9 +675,19 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
     },
   );
 
-  it('VIG-359: ?detection= señala y enfoca esa detección, que sigue resolviéndose junto a ella', async () => {
+  it('VIG-359: la detección del estado de la navegación se señala y enfoca, y se resuelve junto a ella', async () => {
     const { bodies } = queueServer([item(), item(2), item(3)]);
-    await mount(undefined, `/review-queue?detection=${item(2).detection_id}`);
+    server.use(
+      http.get('http://localhost/ledger/records/:id', () =>
+        HttpResponse.json(
+          exampleFor('get_record_ledger_records__record_id__get') as Record<string, unknown>,
+        ),
+      ),
+    );
+    await mount(undefined, {
+      pathname: '/review-queue',
+      state: { detection: item(2).detection_id },
+    });
     await loaded();
     const current = screen
       .getAllByRole('row')
@@ -709,11 +719,19 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
       expect(bodies).toHaveLength(1);
     }, WAIT);
     expect(required(bodies[0]).id).toBe(item(2).detection_id);
+    // Resuelta, sale de la cola: no se avisa de que «ya no está» la que se acaba de resolver.
+    await waitFor(() => {
+      expect(screen.getAllByRole('rowheader')).toHaveLength(2);
+    }, WAIT);
+    expect(screen.queryByText(text('finding_journey.queue_target_missing'))).toBeNull();
   });
 
   it('VIG-359: una detección señalada que ya no está en la cola lo dice sin señalar otra', async () => {
     queueServer([item(), item(2)]);
-    await mount(undefined, `/review-queue?detection=${item(7).detection_id}`);
+    await mount(undefined, {
+      pathname: '/review-queue',
+      state: { detection: item(7).detection_id },
+    });
     await loaded();
     expect(
       await screen.findByText(text('finding_journey.queue_target_missing'), {}, WAIT),

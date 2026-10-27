@@ -48,11 +48,19 @@ export function findingAccess(state: string): readonly FindingAccess[] {
   return Object.hasOwn(FINDING_ACCESS, state) ? (FINDING_ACCESS[state] ?? []) : [];
 }
 
-/** Ruta de la cola; con la detección, la cola la señala y la enfoca. */
-export function reviewQueuePath(detectionId: string | null): string {
-  return detectionId === null
-    ? '/review-queue'
-    : `/review-queue?${new URLSearchParams({ detection: detectionId }).toString()}`;
+/**
+ * La detección que la cola debe señalar viaja en el estado de la navegación, nunca en la URL: la
+ * aplicación no pone consultas ni datos en la dirección (`urlProblem` de la política de e2e).
+ */
+interface ReviewQueueTarget {
+  readonly detection: string;
+}
+
+/** La detección señalada en el estado de la navegación, si la hay y tiene la forma esperada. */
+export function reviewQueueTarget(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null || !('detection' in state)) return null;
+  const { detection } = state;
+  return typeof detection === 'string' && detection !== '' ? detection : null;
 }
 
 const TARGETS: Readonly<
@@ -70,10 +78,10 @@ function canOpen(access: FindingAccess, permissions: ReadonlySet<string>): boole
   return group !== undefined && canEnterGroup(group, permissions);
 }
 
-function path(access: FindingAccess, findingId: string, detectionId: string | null): string {
+function path(access: FindingAccess, findingId: string): string {
   switch (access) {
     case 'review_queue':
-      return reviewQueuePath(detectionId);
+      return '/review-queue';
     case 'classify':
     case 'reclassify':
       return `/findings/${findingId}/classify`;
@@ -83,10 +91,10 @@ function path(access: FindingAccess, findingId: string, detectionId: string | nu
 }
 
 /**
- * Los enlaces del estado. `detectionId` (el `subject_id` de una detección) hace que la cola la
- * señale; la bandeja no lo tiene y enlaza a la cola entera. `landmark` envuelve los enlaces en una
- * región de navegación (el detalle); en las filas de la bandeja van como lista, sin repetir
- * regiones con el mismo nombre.
+ * Los enlaces del estado. `detectionId` (el `subject_id` de una detección) viaja en el estado de la
+ * navegación para que la cola la señale; la bandeja no lo tiene y enlaza a la cola entera.
+ * `landmark` envuelve los enlaces en una región de navegación (el detalle); en las filas de la
+ * bandeja van como lista, sin repetir regiones con el mismo nombre.
  */
 export function FindingActions({
   findingId,
@@ -108,7 +116,13 @@ export function FindingActions({
     <ul data-part="finding_actions">
       {offered.map((access) => (
         <li key={access}>
-          <Link to={path(access, findingId, detectionId)} data-access={access}>
+          <Link
+            to={path(access, findingId)}
+            {...(access === 'review_queue' && detectionId !== null
+              ? { state: { detection: detectionId } satisfies ReviewQueueTarget }
+              : {})}
+            data-access={access}
+          >
             {text(`finding_journey.${access}`)}
           </Link>
           {access === 'reclassify' && suspends && (

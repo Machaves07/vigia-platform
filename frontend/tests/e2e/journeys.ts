@@ -178,11 +178,21 @@ export async function pendingAgreement(page: Page, world: World, zoneId: string)
 }
 
 /** La navegación principal de la aplicación: el recorrido diario no escribe direcciones. */
-export async function openMenu(page: Page, name: string): Promise<void> {
+async function openMenu(page: Page, name: string): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Navegación principal' })
     .getByRole('link', { name, exact: true })
     .click();
+}
+
+/** La bandeja completa, desde el menú: «Hallazgos» abre el panel de inicio del coordinador. */
+export async function openInbox(page: Page): Promise<void> {
+  await openMenu(page, 'Hallazgos');
+  await page
+    .getByRole('region', { name: 'Hallazgos nuevos', exact: true })
+    .getByRole('link', { name: 'Abrir la bandeja completa' })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Bandeja de hallazgos' })).toBeVisible();
 }
 
 /** Los accesos del estado del hallazgo en su detalle (VIG-359). */
