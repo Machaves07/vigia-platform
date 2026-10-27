@@ -4861,6 +4861,12 @@
             "$ref": "#/components/schemas/ClassificationItemOut"
           },
           "type": "array"
+        },
+        "review_resolutions": {
+          "items": {
+            "$ref": "#/components/schemas/ReviewResolutionItemOut"
+          },
+          "type": "array"
         }
       },
       "additionalProperties": false,
@@ -4869,7 +4875,8 @@
         "finding_state_id",
         "time_aggregated",
         "aggregation_window_minutes",
-        "classifications"
+        "classifications",
+        "review_resolutions"
       ]
     },
     "ClassificationItemOut": {
@@ -13950,6 +13957,44 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "ReviewResolutionItemOut": {
+      "properties": {
+        "resolution_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "record_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "reason_category": {
+          "type": "string"
+        },
+        "reason_text": {
+          "type": "string"
+        },
+        "resolved_at": {
+          "type": "string"
+        },
+        "resolved_by": {
+          "$ref": "#/components/schemas/ClassifiedByOut"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "resolution_id",
+        "record_id",
+        "outcome",
+        "reason_category",
+        "reason_text",
+        "resolved_at",
+        "resolved_by"
+      ]
     },
     "ReviewResolutionOut": {
       "properties": {

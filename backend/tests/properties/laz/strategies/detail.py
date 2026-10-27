@@ -238,6 +238,27 @@ def classification_rows() -> st.SearchStrategy[list[dict[str, Any]]]:
 
 
 @st.composite
+def _review_resolution(draw: st.DrawFn) -> dict[str, Any]:
+    confirmed = draw(st.booleans())
+    return {
+        "resolution_id": str(draw(st.uuids())),
+        "record_id": str(draw(st.uuids())),
+        "outcome": "review_confirmed" if confirmed else "review_discarded",
+        "reason_category": "real_coexistence" if confirmed else "reflection_or_glare",
+        "reason_text": draw(_TEXT),
+        "resolved_by": json.dumps(
+            {"user_id": str(draw(st.uuids())), "display_name": "Revisora", "role_in_use": "x"}
+        ),
+        "resolved_at": _iso(draw(instants())),
+    }
+
+
+def review_resolution_rows() -> st.SearchStrategy[list[dict[str, Any]]]:
+    """Filas de ``loop.review_resolution`` de una detección: ninguna o una (T05 o T06)."""
+    return st.lists(_review_resolution(), max_size=1)
+
+
+@st.composite
 def _action(draw: st.DrawFn) -> dict[str, Any]:
     return {
         "action_id": str(draw(st.uuids())),
@@ -297,8 +318,12 @@ def _instant(value: Any) -> datetime | None:
     return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
 
 
-def history_marks(rows: list[dict[str, Any]]) -> list[datetime]:
-    return [_present(row["classified_at"]) for row in rows]
+def history_marks(
+    rows: list[dict[str, Any]], resolutions: list[dict[str, Any]] | None = None
+) -> list[datetime]:
+    return [_present(row["classified_at"]) for row in rows] + [
+        _present(row["resolved_at"]) for row in resolutions or []
+    ]
 
 
 def _present(value: Any) -> datetime:

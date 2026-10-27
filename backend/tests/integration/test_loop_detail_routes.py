@@ -16,6 +16,9 @@ reales de U-03 y de cobertura contados por ``DetailPorts`` (``InstrumentedPorts`
 - **El historial** es exactamente la lista de registros ``classification`` del sujeto en orden de
   ``chain_sequence`` (oráculo: ``LectorExpediente.list``), sin los de otro sujeto de la zona; el
   detalle lleva el mismo.
+- **La resolución de la cola** (VIG-359): el historial de una detección lleva su resolución aparte
+  de las clasificaciones, solo la suya (ni la de otra detección de la zona ni una de la zona
+  hermana), con la marca agregada en zona unipersonal; el de un hallazgo nunca lleva una.
 - **Guardas de alcance** (BR-LAZ-01): quien tiene ``findings.read`` en la zona hermana, en otra
   planta o en otra organización, quien no tiene la clave y el instalador bajo concesión reciben
   ``not_found`` igual que con un identificador inexistente, sin leer el expediente ni preguntar a
@@ -29,6 +32,7 @@ Solo datos generados.
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timedelta
@@ -318,7 +322,102 @@ def test_the_history_of_an_unclassified_finding_is_empty(
     finding = stack.received()
     history = _ok(stack.history(coordinator, stack.finding_state_id(finding)))
     assert history["classifications"] == []
+    assert history["review_resolutions"] == []
     assert stack.ports.calls == {}  # el historial no pregunta a U-03
+
+
+# --- la resolución de la cola en el historial (VIG-359) -------------------------------------------
+
+_RESOLVED_BY: Final = {
+    "user_id": "0190a1b2-8888-7000-8000-000000000359",
+    "display_name": "Revisión sintética de la cola",
+    "role_in_use": "coordinator_sst",
+}
+_RESOLUTION_REASON: Final = "Coexistencia sintética confirmada al revisar la detección de la zona"
+
+
+def _resolution(
+    stack: DetailStack,
+    subject: IngestedSubject,
+    *,
+    zone_id: uuid.UUID | None = None,
+    outcome: str = "review_confirmed",
+    reason_category: str = "real_coexistence",
+) -> dict[str, Any]:
+    """Una fila de ``loop.review_resolution`` sembrada como superusuario (la escritura real la
+    prueban las rutas de la cola): la lectura del historial es lo que se prueba aquí."""
+    site = subject.organization.site
+    stack.world.stack.tick()
+    row = {
+        "resolution_id": uuid.uuid4(),
+        "record_id": uuid.uuid4(),
+        "outcome": outcome,
+        "reason_category": reason_category,
+        "reason_text": _RESOLUTION_REASON,
+        "resolved_at": stack.world.stack.now(),
+    }
+    stack.world.stack.execute(
+        "INSERT INTO loop.review_resolution (resolution_id, organization_id, plant_id, zone_id,"
+        " detection_id, record_id, outcome, reason_category, reason_text, resolved_by,"
+        " resolved_at, label_id, correlation_id)"
+        " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)",
+        row["resolution_id"],
+        site.organization_id,
+        site.plant_id,
+        zone_id or site.zone_id,
+        subject.subject_id,
+        row["record_id"],
+        outcome,
+        reason_category,
+        _RESOLUTION_REASON,
+        json.dumps(_RESOLVED_BY),
+        row["resolved_at"],
+        uuid.uuid4(),
+        uuid.uuid4(),
+    )
+    return row
+
+
+def test_the_history_of_a_resolved_detection_shows_its_queue_resolution_apart(
+    stack: DetailStack, coordinator: Who
+) -> None:
+    detection = stack.in_review()
+    other = stack.in_review()
+    finding_state_id = stack.finding_state_id(detection)
+    stack.occupancy(finding_state_id, False)
+    own = _resolution(stack, detection)
+    # Otra detección de la zona y la misma detección en la zona hermana: no son suyas.
+    _resolution(stack, other, outcome="review_discarded", reason_category="reflection_or_glare")
+    _resolution(stack, detection, zone_id=detection.organization.site.other_zone_id)
+    history = _ok(stack.history(coordinator, finding_state_id))
+    assert history["classifications"] == []
+    assert history["review_resolutions"] == [
+        {
+            "resolution_id": str(own["resolution_id"]),
+            "record_id": str(own["record_id"]),
+            "outcome": "review_confirmed",
+            "reason_category": "real_coexistence",
+            "reason_text": _RESOLUTION_REASON,
+            "resolved_at": format_timestamp(own["resolved_at"]),
+            "resolved_by": _RESOLVED_BY,
+        }
+    ]
+    assert stack.ports.calls == {}  # el historial no pregunta a U-03
+    # En zona unipersonal, la marca de la resolución también es el inicio de su ventana.
+    stack.occupancy(finding_state_id, True, _WINDOW)
+    aggregated = _ok(stack.history(coordinator, finding_state_id))
+    (shown,) = aggregated["review_resolutions"]
+    assert _on_grid(shown["resolved_at"]), shown["resolved_at"]
+
+
+def test_the_history_of_a_finding_never_shows_a_queue_resolution(
+    stack: DetailStack, coordinator: Who
+) -> None:
+    # Un hallazgo no pasa por la cola: aunque una fila tuviera su sujeto, no se lee (T05/T06).
+    finding = stack.received()
+    _resolution(stack, finding)
+    history = _ok(stack.history(coordinator, stack.finding_state_id(finding)))
+    assert history["review_resolutions"] == []
 
 
 # --- guardas de alcance --------------------------------------------------------------------------
