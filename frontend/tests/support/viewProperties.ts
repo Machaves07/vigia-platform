@@ -115,6 +115,7 @@ function haystacks(root: HTMLElement): Haystack[] {
 
 interface Leaf {
   readonly path: string;
+  readonly segments: JsonPath;
   readonly keys: readonly string[];
   readonly value: string;
 }
@@ -141,6 +142,7 @@ function leaves(value: unknown, path: JsonPath = []): Leaf[] {
   return [
     {
       path: formatPath(path),
+      segments: path,
       keys: path.filter((part): part is string => typeof part === 'string'),
       value: String(value),
     },
@@ -380,7 +382,7 @@ function injectedFields(excluded: ReadonlySet<string>): fc.Arbitrary<Record<stri
   );
 }
 
-interface Session {
+export interface Session {
   readonly organizationId: string;
   readonly concessionOrganizationId: string | null;
 }
@@ -482,6 +484,143 @@ export function assertNoPersonData(registration: ViewRegistration): void {
 
 type Owner = 'own' | 'concession' | 'foreign_a' | 'foreign_b';
 
+/** Caracteres de relleno del contraste: el primero que no esté en el valor plegado. */
+const FILLERS = 'qzxjkwvyfgbhmpucdlotnseriaжшщ';
+const FILLER_DIGITS = '123456789';
+
+function missingChar(chars: string, folded: string): string | undefined {
+  for (const char of chars) if (!folded.includes(char)) return char;
+  return undefined;
+}
+
+/**
+ * `data` con el valor de `leaf` cambiado por otro del mismo tipo y la misma longitud, hecho de un
+ * carácter que no está en su forma plegada: la vista recibe la misma estructura (mismos tipos y
+ * mismas cadenas vacías o no), pero ninguna aparición del valor puede pasar por ese hueco.
+ */
+function withFiller(data: unknown, leaf: Leaf, folded: string): unknown {
+  const filler = missingChar(FILLERS, folded) ?? 'ж';
+  const digit = missingChar(FILLER_DIGITS, folded) ?? '1';
+  const replace = (value: unknown, depth: number): unknown => {
+    if (depth === leaf.segments.length) {
+      if (typeof value === 'number') {
+        return Number(digit.repeat(String(Math.trunc(Math.abs(value))).length));
+      }
+      if (typeof value === 'bigint') return BigInt(digit.repeat(String(value).length));
+      return filler.repeat(leaf.value.length);
+    }
+    const part = leaf.segments[depth];
+    if (Array.isArray(value)) {
+      return value.map((item: unknown, index) =>
+        index === part ? replace(item, depth + 1) : item,
+      );
+    }
+    const record = value as Record<string, unknown>;
+    const key = String(part);
+    return { ...record, [key]: replace(record[key], depth + 1) };
+  };
+  return replace(data, 0);
+}
+
+/** Apariciones de `needle` en `text`, también solapadas. */
+function occurrences(text: string, needle: string): number {
+  let count = 0;
+  for (let index = text.indexOf(needle); index !== -1; index = text.indexOf(needle, index + 1)) {
+    count += 1;
+  }
+  return count;
+}
+
+/** Haystacks de `registration` pintada con `data`, ya desmontada. */
+function renderedHaystacks(
+  registration: ViewRegistration,
+  data: Record<string, unknown>,
+  context: Session,
+): { readonly rendered: Haystack[]; readonly errors: ViewContractError[] } {
+  const view = renderView(registration, data, context);
+  try {
+    return { rendered: haystacks(view.root), errors: view.errors };
+  } finally {
+    view.unmount();
+  }
+}
+
+/**
+ * Infracciones de PR-APP-10 en un ejemplo: `data` pintada en `context`, con los registros de
+ * `foreignPaths` de otra organización.
+ *
+ * El texto de la vista se compara entero, unido entre nodos, y un valor propio seguido de un
+ * rótulo fijo puede formar por azar el valor ajeno (semilla 1457963427: `reason_text`
+ * «"DpropertyIsEnumerabl» + «Escalamiento del vencimiento» contiene la `description` ajena
+ * «:propertyIsEnumerable»). Por eso un valor ajeno que aparece se contrasta: se vuelve a pintar
+ * la vista con ese valor, y todo valor ajeno que lo contenga, cambiados por un relleno
+ * (`withFiller`), y es fuga si, en alguna fuente, aparece más veces que en el contraste. Una
+ * aparición por azar no pasa por los valores ajenos y sigue en el contraste; una que sale de
+ * ellos desaparece con ellos. Se cambian todos a la vez porque una vista que deduplica (dos
+ * registros ajenos con el mismo título pintados una vez) seguiría mostrando el otro.
+ */
+export function organizationLeaks(
+  registration: ViewRegistration,
+  data: Record<string, unknown>,
+  context: Session,
+  foreignPaths: readonly JsonPath[],
+): string[] {
+  const field = registration.organizationOf;
+  if (field === undefined) {
+    throw new Error(`${registration.view}: PR-APP-10 exige organizationOf.`);
+  }
+  const label = `${registration.view} (${registration.screen})`;
+  const { rendered, errors } = renderedHaystacks(registration, data, context);
+  const violations: string[] = [];
+  if (foreignPaths.length > 0 && errors.length === 0) {
+    violations.push(
+      `${label}: ${String(foreignPaths.length)} registros de otra organización y ningún error de contrato.`,
+    );
+  }
+  if (foreignPaths.length === 0 && errors.length > 0) {
+    violations.push(`${label}: error de contrato sin registros de otra organización.`);
+  }
+  const foreignPrefixes = foreignPaths.map(formatPath);
+  const isForeign = (path: string) =>
+    foreignPrefixes.some(
+      (prefix) =>
+        path === prefix ||
+        path.startsWith(`${prefix}.`) ||
+        path.startsWith(`${prefix}[`) ||
+        (prefix === '' && path !== ''),
+    );
+  const all = leaves(data);
+  const ownValues = all.filter((leaf) => !isForeign(leaf.path)).flatMap(shownForms);
+  const foreign = all.filter((item) => isForeign(item.path));
+  for (const leaf of foreign) {
+    const folded = fold(leaf.value);
+    if (folded.length < MIN_FOLDED_LENGTH) continue;
+    if (ownValues.some((value) => value.includes(folded))) continue;
+    if (!rendered.some((haystack) => haystack.text.includes(folded))) continue;
+    const sources = foreign.filter((item) => fold(item.value).includes(folded));
+    const filled = sources.reduce<unknown>(
+      (current, item) => withFiller(current, item, fold(item.value)),
+      data,
+    );
+    const contrast = renderedHaystacks(
+      registration,
+      filled as Record<string, unknown>,
+      context,
+    ).rendered;
+    const where = rendered.find((haystack, index) => {
+      const other = contrast[index];
+      const before = other?.source === haystack.source ? occurrences(other.text, folded) : 0;
+      return occurrences(haystack.text, folded) > before;
+    });
+    if (where !== undefined) {
+      violations.push(
+        `${label}: «${leaf.path}» de un registro de otra organización aparece en ${where.source}.`,
+      );
+    }
+  }
+  return violations;
+}
+
 /**
  * PR-APP-10 sobre una vista con `organizationOf`: cada registro es de la organización del
  * `Principal`, de la concesión activa o de una de dos ajenas. Lanza si la vista pinta un valor
@@ -493,7 +632,6 @@ export function assertOrganizationIsolation(registration: ViewRegistration): num
   if (field === undefined) {
     throw new Error(`${registration.view}: PR-APP-10 exige organizationOf.`);
   }
-  const label = `${registration.view} (${registration.screen})`;
   const sample = fc
     .tuple(registration.data, session, fc.uniqueArray(fc.uuid(), { minLength: 2, maxLength: 2 }))
     .filter(
@@ -529,45 +667,9 @@ export function assertOrganizationIsolation(registration: ViewRegistration): num
   let exercised = 0;
   fc.assert(
     fc.property(sample, ({ data, context, foreignPaths }) => {
-      const view = renderView(registration, data, context);
-      try {
-        const violations: string[] = [];
-        if (foreignPaths.length > 0) exercised += 1;
-        if (foreignPaths.length > 0 && view.errors.length === 0) {
-          violations.push(
-            `${label}: ${String(foreignPaths.length)} registros de otra organización y ningún error de contrato.`,
-          );
-        }
-        if (foreignPaths.length === 0 && view.errors.length > 0) {
-          violations.push(`${label}: error de contrato sin registros de otra organización.`);
-        }
-        const foreignPrefixes = foreignPaths.map(formatPath);
-        const isForeign = (path: string) =>
-          foreignPrefixes.some(
-            (prefix) =>
-              path === prefix ||
-              path.startsWith(`${prefix}.`) ||
-              path.startsWith(`${prefix}[`) ||
-              (prefix === '' && path !== ''),
-          );
-        const all = leaves(data);
-        const ownValues = all.filter((leaf) => !isForeign(leaf.path)).flatMap(shownForms);
-        const rendered = haystacks(view.root);
-        for (const leaf of all.filter((item) => isForeign(item.path))) {
-          const folded = fold(leaf.value);
-          if (folded.length < MIN_FOLDED_LENGTH) continue;
-          if (ownValues.some((value) => value.includes(folded))) continue;
-          const where = rendered.find((haystack) => haystack.text.includes(folded));
-          if (where !== undefined) {
-            violations.push(
-              `${label}: «${leaf.path}» de un registro de otra organización aparece en ${where.source}.`,
-            );
-          }
-        }
-        if (violations.length > 0) throw new Error(violations.join('\n'));
-      } finally {
-        view.unmount();
-      }
+      if (foreignPaths.length > 0) exercised += 1;
+      const violations = organizationLeaks(registration, data, context, foreignPaths);
+      if (violations.length > 0) throw new Error(violations.join('\n'));
     }),
   );
   return exercised;
