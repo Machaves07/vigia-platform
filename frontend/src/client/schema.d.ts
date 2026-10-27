@@ -2690,7 +2690,7 @@ export interface components {
     };
     /**
      * ApiErrorBody
-     * @description Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33).
+     * @description Cuerpo JSON de toda respuesta de error (domain-entities §4.4, pendiente nº 33; VIG-344).
      */
     ApiErrorBody: {
       code: components['schemas']['ApiErrorCode'];
@@ -2711,6 +2711,8 @@ export interface components {
        * @default null
        */
       retry_after_seconds: number | null;
+      /** @default null */
+      rejection: components['schemas']['ApiErrorRejection'] | null;
     };
     /**
      * ApiErrorCode
@@ -2733,6 +2735,27 @@ export interface components {
       | 'period_too_long'
       | 'zone_without_node'
       | 'storage_unavailable';
+    /**
+     * ApiErrorRejection
+     * @description El rechazo de un validador de texto libre (VIG-344; ``rejection`` de ``AssistantRequest``,
+     *     plataforma-aplicacion §2.19): ``code`` es el motivo cerrado del validador (p. ej.
+     *     ``blocked_vocabulary_term``); ``term`` y ``suggestion``, el término que cayó y la alternativa,
+     *     si el validador los da. Nunca lleva el texto enviado completo.
+     */
+    ApiErrorRejection: {
+      /** Code */
+      code: string;
+      /**
+       * Term
+       * @default null
+       */
+      term: string | null;
+      /**
+       * Suggestion
+       * @default null
+       */
+      suggestion: string | null;
+    };
     /** ApprovalOut */
     ApprovalOut: {
       agreement: components['schemas']['AgreementOut'];

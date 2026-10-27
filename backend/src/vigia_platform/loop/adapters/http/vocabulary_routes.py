@@ -255,7 +255,9 @@ def vocabulary_router() -> APIRouter:
             )
         except VocabularyRejected as rejected:
             code, _status = HTTP_STATUS_BY_DETAIL_CODE[rejected.detail_code]
-            raise ApiError(code, detail_code=rejected.detail_code.value) from None
+            raise ApiError(
+                code, detail_code=rejected.detail_code.value, rejection=rejected.hint
+            ) from None
         except VocabularyRequestInvalid:
             raise ApiError(ApiErrorCode.INVALID_REQUEST) from None
         return change_view(result)

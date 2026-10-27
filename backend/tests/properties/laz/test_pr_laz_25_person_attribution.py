@@ -46,6 +46,7 @@ from vigia_platform.ledger.application.writer import LedgerRejection, LedgerReje
 from vigia_platform.ledger.free_text import (
     FreeTextCandidate,
     FreeTextField,
+    FreeTextHint,
     FreeTextPreparation,
     FreeTextRejected,
     RowReader,
@@ -99,6 +100,10 @@ def test_every_attribution_is_rejected_naming_its_pattern(attribution: Attributi
     assert rejection.verdict.suggestion_es
     assert rejection.reason == PERSON_ATTRIBUTION_DETECTED
     assert rejection.detail_code == LoopDetailCode.PERSON_ATTRIBUTION_DETECTED.value
+    # VIG-344: la pista para quien escribió es el motivo y la alternativa, nunca el término (P3).
+    assert rejection.hint == FreeTextHint(
+        code=PERSON_ATTRIBUTION_DETECTED, suggestion_es=rejection.verdict.suggestion_es
+    )
 
 
 @given(variant=attribution_unicode_texts(kinds=("homoglyph", "space", "fullwidth", "mixed")))

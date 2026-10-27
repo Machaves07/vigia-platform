@@ -38,7 +38,13 @@ from typing import Any, Final
 import pytest
 
 from tests.integration.conftest import PostgresEndpoint
-from tests.loop_classification_support import ATTRIBUTION_MARKER, BLOCKED_REASON, Who
+from tests.loop_classification_support import (
+    ATTRIBUTION_MARKER,
+    ATTRIBUTION_REJECTION,
+    BLOCKED_REASON,
+    BLOCKED_REJECTION,
+    Who,
+)
 from tests.loop_root_cause_support import (
     CONCLUSION,
     FACTOR,
@@ -349,6 +355,74 @@ def test_the_two_validators_reject_a_step_and_nothing_is_written(
     for index in (1, 2):
         _error(stack.step(coordinator, analysis_id, index, {"statement": statement}), 400, code)
     assert _row(stack, analysis_id) == before
+
+
+def _rejection(response: Any, code: LoopDetailCode) -> Any:
+    _error(response, 400, code)
+    return response.json()["rejection"]
+
+
+@pytest.mark.parametrize(
+    ("statement", "code", "rejection"),
+    [
+        (BLOCKED_REASON, LoopDetailCode.BLOCKED_VOCABULARY_TERM, BLOCKED_REJECTION),
+        (ATTRIBUTED, LoopDetailCode.PERSON_ATTRIBUTION_DETECTED, ATTRIBUTION_REJECTION),
+    ],
+)
+def test_a_step_rejection_names_the_term_and_the_suggestion(
+    stack: RootCauseStack,
+    coordinator: Who,
+    statement: str,
+    code: LoopDetailCode,
+    rejection: dict[str, str],
+) -> None:
+    """SUP-U05-17 (VIG-344): igualdad exacta de ``rejection``, sin el texto enviado."""
+    analysis_id = stack.with_steps(coordinator, 1)
+    response = stack.step(coordinator, analysis_id, 2, {"statement": statement})
+    assert _rejection(response, code) == rejection
+    assert set(response.json()) == {
+        "code",
+        "detail_code",
+        "message_es",
+        "correlation_id",
+        "rejection",
+    }
+
+
+@pytest.mark.parametrize(
+    ("changes", "code", "rejection"),
+    [
+        ({"conclusion": BLOCKED_REASON}, LoopDetailCode.BLOCKED_VOCABULARY_TERM, BLOCKED_REJECTION),
+        (
+            {"root_cause_statement": ATTRIBUTED},
+            LoopDetailCode.PERSON_ATTRIBUTION_DETECTED,
+            ATTRIBUTION_REJECTION,
+        ),
+    ],
+)
+def test_a_signature_rejection_names_the_term_and_the_suggestion(
+    stack: RootCauseStack,
+    coordinator: Who,
+    changes: dict[str, Any],
+    code: LoopDetailCode,
+    rejection: dict[str, str],
+) -> None:
+    """SUP-U05-18 (VIG-344): la firma rechazada por un validador trae el mismo ``rejection``."""
+    analysis_id = stack.with_steps(coordinator, 1)
+    response = stack.signature(coordinator, analysis_id, complete_signature(**changes))
+    assert _rejection(response, code) == rejection
+
+
+def test_a_rejection_without_a_validator_has_no_rejection(
+    stack: RootCauseStack, coordinator: Who
+) -> None:
+    """Un rechazo que no es de un validador (categoría fuera de las tres) no lleva ``rejection``."""
+    analysis_id = stack.with_steps(coordinator, 1)
+    response = stack.signature(
+        coordinator, analysis_id, complete_signature(root_cause_category="operator")
+    )
+    _error(response, 400, LoopDetailCode.CAUSE_CATEGORY_NOT_ALLOWED)
+    assert "rejection" not in response.json()
 
 
 def test_evidence_refs_are_kept_and_their_shape_is_strict(

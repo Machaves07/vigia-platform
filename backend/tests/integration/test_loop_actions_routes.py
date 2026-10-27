@@ -292,6 +292,56 @@ def test_type_texts_and_shape_are_rejected_without_writing(
     assert stack.untouched(finding) == before
 
 
+_ROLE_ACTION_SUGGESTION: Final = (
+    "Describa la condición de la zona, del equipo o del procedimiento, no lo que hizo una persona."
+)
+"""La alternativa del patrón ``role_action`` del validador real (BLM §14.5)."""
+_HUMAN_ERROR_SUGGESTION: Final = (
+    "Describa qué condición del proceso o de la ingeniería permitió el evento."
+)
+"""La del patrón ``human_error``."""
+_MEASURED_SUGGESTION: Final = (
+    "Cita la cifra medida, con su periodo y su fuente, en lugar de prometerla."
+)
+"""La de ``garantizar`` en la lista inicial (§14.2)."""
+
+
+@pytest.mark.parametrize(
+    ("changes", "rejection"),
+    [
+        (
+            {"action_description": "Instalar un resguardo porque el operario omitió el bloqueo"},
+            {"code": "person_attribution_detected", "suggestion": _ROLE_ACTION_SUGGESTION},
+        ),
+        (
+            {"expected_outcome": "Corregir la falta de atención en el cruce del pasillo"},
+            {"code": "person_attribution_detected", "suggestion": _HUMAN_ERROR_SUGGESTION},
+        ),
+        (
+            {"action_description": "Instalar un resguardo que garantice cero riesgo en la zona"},
+            {
+                "code": "blocked_vocabulary_term",
+                "term": "garantice",
+                "suggestion": _MEASURED_SUGGESTION,
+            },
+        ),
+    ],
+)
+def test_a_validator_rejection_names_the_term_and_the_suggestion(
+    stack: ActionsStack,
+    coordinator: Who,
+    assignee: uuid.UUID,
+    changes: dict[str, Any],
+    rejection: dict[str, str],
+) -> None:
+    """SUP-U05-07 (VIG-344): ``rejection`` exacto con los validadores reales; la atribución
+    nunca repite lo que coincidió (P3)."""
+    finding = stack.opened()
+    response = stack.assign(coordinator, finding, {**stack.action_body(assignee), **changes})
+    assert response.status_code == 400, response.text
+    assert response.json()["rejection"] == rejection
+
+
 @pytest.mark.parametrize(
     ("description", "expected_outcome"),
     [("Instalar resguardo x", "y"), ("Instalar resguardo " + "x" * 1981, "y" * 1000)],
@@ -464,14 +514,31 @@ def test_performed_at_after_the_entry_is_rejected(
 
 
 @pytest.mark.parametrize(
-    ("text", "code"),
+    ("text", "code", "rejection"),
     [
-        ("Resguardo instalado porque el operario omitió el bloqueo", "person_attribution"),
-        ("Resguardo instalado que garantiza cero riesgo en la zona", "blocked_vocabulary"),
+        (
+            "Resguardo instalado porque el operario omitió el bloqueo",
+            "person_attribution",
+            {"code": "person_attribution_detected", "suggestion": _ROLE_ACTION_SUGGESTION},
+        ),
+        (
+            "Resguardo instalado que garantiza cero riesgo en la zona",
+            "blocked_vocabulary",
+            {
+                "code": "blocked_vocabulary_term",
+                "term": "garantiza",
+                "suggestion": _MEASURED_SUGGESTION,
+            },
+        ),
     ],
 )
 def test_the_validators_reject_the_entry_text_without_writing(
-    stack: ActionsStack, coordinator: Who, assignee: uuid.UUID, text: str, code: str
+    stack: ActionsStack,
+    coordinator: Who,
+    assignee: uuid.UUID,
+    text: str,
+    code: str,
+    rejection: dict[str, str],
 ) -> None:
     finding = stack.opened()
     action_id = _assigned(stack, coordinator, finding, assignee)["action_id"]
@@ -484,6 +551,7 @@ def test_the_validators_reject_the_entry_text_without_writing(
             else "loop_blocked_vocabulary_term"
         )
         assert _error(response) == (400, "invalid_request", expected), (field, response.text)
+        assert response.json()["rejection"] == rejection, field  # VIG-344 (SUP-U05-08)
     assert stack.untouched(finding) == before
 
 

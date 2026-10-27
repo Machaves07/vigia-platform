@@ -82,6 +82,7 @@ from vigia_platform.ledger.application.writer import (
 from vigia_platform.ledger.domain.coverage import CoveragePeriod
 from vigia_platform.ledger.free_text import (
     FreeTextField,
+    FreeTextHint,
     FreeTextPolicyRegistry,
     FreeTextPreparation,
     FreeTextRejected,
@@ -268,11 +269,13 @@ _PREVIOUS_CAUSES: Final = text(
 
 
 class AnalysisRejected(Exception):
-    """Un rechazo de negocio del análisis, con su ``detail_code`` (``LoopDetailCode``)."""
+    """Un rechazo de negocio del análisis, con su ``detail_code`` (``LoopDetailCode``) y, si lo
+    rechazó un validador de texto libre, su pista para quien escribió (``hint``, VIG-344)."""
 
-    def __init__(self, detail_code: LoopDetailCode) -> None:
+    def __init__(self, detail_code: LoopDetailCode, hint: FreeTextHint | None = None) -> None:
         super().__init__(detail_code.value)
         self.detail_code = detail_code
+        self.hint = hint
 
 
 class AnalysisRequestInvalid(Exception):
@@ -461,7 +464,7 @@ def checked_text(
     except FreeTextRejected as rejected:
         code = _VALIDATOR_CODES.get(rejected.detail_code or "")
         if code is not None:
-            raise AnalysisRejected(code) from None
+            raise AnalysisRejected(code, rejected.hint) from None
         raise AnalysisRequestInvalid("texto rechazado por la política base") from None
 
 
@@ -541,7 +544,7 @@ def _written(written: Receipt | LedgerRejection) -> Receipt:
         if written.code is LedgerRejectionCode.FREE_TEXT_REJECTED:
             code = _VALIDATOR_CODES.get(written.detail_code or "")
             if code is not None:
-                raise AnalysisRejected(code)
+                raise AnalysisRejected(code, written.hint)
             raise AnalysisRequestInvalid("texto libre rechazado por el expediente")
         if written.code is LedgerRejectionCode.CHAIN_LOCKED_TIMEOUT:
             raise AnalysisUnavailable("ledger_chain")

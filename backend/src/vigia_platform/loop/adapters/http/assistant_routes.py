@@ -15,7 +15,9 @@ Las dos exigen ``root_cause.analyze`` sobre la zona del análisis (coordinación
   ``provider_error`` o ``budget_exceeded``) y, si está lista, el **borrador marcado como tal**
   (``is_draft``) con sus citas (alias de sesión, hecho citado y la referencia real si la hay) y el
   modelo **de la respuesta**. Una salida que no pasó los validadores responde ``400
-  invalid_request`` con ``loop_assistant_output_rejected`` (A-68): su texto nunca se guardó.
+  invalid_request`` con ``loop_assistant_output_rejected`` (A-68): su texto nunca se guardó. Si
+  la rechazó uno de los dos validadores, lleva ``rejection.code`` (``blocked_vocabulary_term`` o
+  ``person_attribution_detected``, VIG-344), sin término ni sugerencia.
 
 Una solicitud o un análisis inexistente, de otra organización, fuera del alcance o pedido bajo
 concesión de proveedor responde ``not_found``. ``Cache-Control: no-store``.
@@ -31,6 +33,7 @@ from pydantic import BaseModel
 
 from vigia_platform.identity.authz.matrix import PermissionKey
 from vigia_platform.ledger.adapters.http.services import exact_query, no_store
+from vigia_platform.ledger.free_text import FreeTextHint
 from vigia_platform.loop.adapters.http.services import LoopHttp, installed, loop_http
 from vigia_platform.loop.assistant.service import (
     AssistantOutputRejected,
@@ -40,6 +43,8 @@ from vigia_platform.loop.assistant.service import (
 )
 from vigia_platform.loop.detail_codes import LoopDetailCode
 from vigia_platform.loop.domain.enums import AssistantUnavailableCause
+from vigia_platform.loop.validators.attribution import PERSON_ATTRIBUTION_DETECTED
+from vigia_platform.loop.validators.vocabulary import BLOCKED_VOCABULARY_TERM
 from vigia_platform.shared.api.declarations import requires
 from vigia_platform.shared.api.errors import MAX_RETRY_AFTER_SECONDS, ApiError, ApiErrorCode
 from vigia_platform.shared.api.middleware import request_context
@@ -56,6 +61,9 @@ __all__ = [
 REQUEST_PATH: Final = "/loop/root-cause-analyses/{analysis_id}/assistant-requests"
 STATUS_PATH: Final = "/loop/assistant-requests/{request_id}"
 _ANALYZE: Final = PermissionKey.ROOT_CAUSE_ANALYZE.value
+_VALIDATOR_REASONS: Final = frozenset({BLOCKED_VOCABULARY_TERM, PERSON_ATTRIBUTION_DETECTED})
+"""Los motivos que se muestran: los de los dos validadores de U-04 (BR-APP-49); son los mismos
+valores que ``RejectionReason`` del consumidor (una prueba lo exige)."""
 
 Services = Annotated[LoopHttp, Depends(loop_http)]
 
@@ -142,6 +150,15 @@ def _citation(citation: Any) -> CitationOut:
     )
 
 
+def _rejection(error: AssistantOutputRejected) -> FreeTextHint | None:
+    """``rejection`` de una salida rechazada (VIG-344): solo el motivo, y solo si es de uno de
+    los dos validadores. Ni término ni sugerencia: saldrían del texto rechazado, que nunca se
+    guardó (A-68, PR-LAZ-20)."""
+    if error.reason not in _VALIDATOR_REASONS:
+        return None
+    return FreeTextHint(code=error.reason)
+
+
 def _unavailable(error: AssistantUnavailable) -> ApiError:
     """Con el circuito abierto, la espera de la sonda (60 s); con el tope de fichas agotado, la
     mayor que admite la interfaz: el tope no se libera hasta el mes siguiente."""
@@ -201,10 +218,11 @@ def assistant_router() -> APIRouter:
             result = await installed(services.assistant).status(
                 request_context(request), request_id
             )
-        except AssistantOutputRejected:
+        except AssistantOutputRejected as rejected:
             raise ApiError(
                 ApiErrorCode.INVALID_REQUEST,
                 detail_code=LoopDetailCode.ASSISTANT_OUTPUT_REJECTED.value,
+                rejection=_rejection(rejected),
             ) from None
         return view(result)
 

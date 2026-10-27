@@ -150,6 +150,23 @@ function leaves(value: unknown, path: JsonPath = []): Leaf[] {
 }
 
 /**
+ * Formas plegadas en que una vista puede pintar un valor que sí puede mostrar: el propio valor y,
+ * si es un entero, su ordinal desde 1 (`n + 1`), como «Tramo N» de RV-12 (`segment_index + 1`) o
+ * «Cámara N». Sin el ordinal, un campo prohibido que vale `n + 1` por azar pasa por filtrado: los
+ * enteros sesgados hacia 2³¹ − 1 lo hacen frecuente (semillas 1138177627, 1650420162 y
+ * 1457963427: `classification_count`, `clips[2].duration_ms` y `chain_sequence` iguales al tramo
+ * de un registro, VIG-350).
+ */
+function shownForms(leaf: Leaf): string[] {
+  const forms = [fold(leaf.value)];
+  const number = Number(leaf.value);
+  if (/^-?\d+$/.test(leaf.value) && Number.isSafeInteger(number)) {
+    forms.push(fold(String(number + 1)));
+  }
+  return forms;
+}
+
+/**
  * Plegado por palabras para el contador de personas: como `fold`, pero quita solo los
  * caracteres de formato invisibles (U+200B, U+2060…) y conserva espacios y puntuación visibles
  * como separadores, para no unir palabras de nodos distintos ni de un rótulo y una fecha.
@@ -296,7 +313,7 @@ export function forbiddenRendered(
   const all = leaves(data);
   const allowedValues = all
     .filter((leaf) => leaf.keys.every((key) => allowed.has(key)))
-    .map((leaf) => fold(leaf.value));
+    .flatMap(shownForms);
   const rendered = haystacks(root);
   const violations: string[] = [];
   for (const leaf of all) {
@@ -573,7 +590,7 @@ export function organizationLeaks(
         (prefix === '' && path !== ''),
     );
   const all = leaves(data);
-  const ownValues = all.filter((leaf) => !isForeign(leaf.path)).map((leaf) => fold(leaf.value));
+  const ownValues = all.filter((leaf) => !isForeign(leaf.path)).flatMap(shownForms);
   const foreign = all.filter((item) => isForeign(item.path));
   for (const leaf of foreign) {
     const folded = fold(leaf.value);
