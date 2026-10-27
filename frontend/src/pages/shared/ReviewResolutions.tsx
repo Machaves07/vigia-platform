@@ -6,7 +6,7 @@
  */
 import platform from '../../../../backend/resources/labels.platform.es.json';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
-import { reasonCategories, type ReviewResolutionItem } from '@/ports/scr10ReviewQueue';
+import { reviewReasonCategories, type ReviewResolutionItem } from '@/ports/shared';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
@@ -19,7 +19,7 @@ function roleLabel(role: string): string {
 }
 
 function reasonLabel(outcome: string, category: string): string {
-  const found = reasonCategories(outcome).find(({ value }) => value === category);
+  const found = reviewReasonCategories(outcome).find(({ value }) => value === category);
   return found === undefined ? text('common.unknown') : label(found.list, category);
 }
 
@@ -27,18 +27,15 @@ export function ReviewResolutions({
   resolutions,
   timeAggregated,
   timeZone,
-  headingLevel = 3,
 }: {
   readonly resolutions: readonly ReviewResolutionItem[];
   readonly timeAggregated: boolean;
   readonly timeZone: string;
-  readonly headingLevel?: 2 | 3;
 }) {
   if (resolutions.length === 0) return null;
-  const Heading = headingLevel === 2 ? 'h2' : 'h3';
   return (
     <section aria-label={text('finding_journey.resolution')} data-part="review_resolutions">
-      <Heading>{text('finding_journey.resolution')}</Heading>
+      <h3>{text('finding_journey.resolution')}</h3>
       <ol>
         {resolutions.map((item) => (
           <li key={item.resolution_id} data-part="review_resolution" data-outcome={item.outcome}>

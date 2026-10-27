@@ -5,3 +5,4 @@
  */
 export { isPortError, PortError } from '../base';
 export { sessionPort, type HierarchyView, type MeResponse } from './session';
+export { reviewReasonCategories, type ReviewResolutionItem } from './reviewResolution';

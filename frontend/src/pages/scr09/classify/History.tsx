@@ -8,7 +8,7 @@ import platform from '../../../../../backend/resources/labels.platform.es.json';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
 import { reasonCategories, type ClassificationItem } from '@/ports/scr09Classify';
-import type { ReviewResolutionItem } from '@/ports/scr10ReviewQueue';
+import type { ReviewResolutionItem } from '@/ports/shared';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 

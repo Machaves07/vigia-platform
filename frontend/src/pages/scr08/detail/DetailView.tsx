@@ -10,7 +10,7 @@ import { BlurredClipPlayer } from '@/components/BlurredClipPlayer/BlurredClipPla
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
-import type { ReviewResolutionItem } from '@/ports/scr10ReviewQueue';
+import type { ReviewResolutionItem } from '@/ports/shared';
 import {
   reasonList,
   type ClassificationItem,
