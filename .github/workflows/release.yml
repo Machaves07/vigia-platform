@@ -5,7 +5,9 @@
 #  1. preparar: versión X.Y.Z, etiqueta libre y nightly verde sobre el mismo commit.
 #  2. imagen: arm64 construida en un runner ARM con la clave de despliegue de vigia-contracts solo en
 #     ssh-agent (--ssh), auditada y escaneada; SBOM de la imagen (Grype, CycloneDX) y del código (uv
-#     export, CycloneDX); vigia_verify.py y su SHA-256.
+#     export, CycloneDX); vigia_verify.py y su SHA-256. U-05 (VIG-337): APP_VERSION de la release y,
+#     de la etapa frontend-build, mapas de fuente, SBOM de npm, SHA-256 de dist/, version.json e
+#     informe de tamaño, adjuntos al release (no a la imagen).
 #  3. síntesis: cdk synth de staging-<n> (first_deploy=true y false) y de pilot.
 #  4. [AWS] publicar: imagen por digest en ECR, escaneo del registro y cdk diff de pilot adjunto.
 #  5. [AWS] staging-<n> (D-8), que nace vacío y con autoridad propia, en el orden corregido del primer
@@ -108,6 +110,7 @@ jobs:
     outputs:
       image-id: ${{ steps.construccion.outputs.image-id }}
       verifier-sha256: ${{ steps.verificador.outputs.sha256 }}
+      dist-sha256: ${{ steps.aplicacion.outputs.dist-sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -123,7 +126,10 @@ jobs:
           eval "$(ssh-agent -s)" > /dev/null
           trap 'ssh-agent -k > /dev/null' EXIT
           printf '%s\n' "$CLAVE" | ssh-add -q -
-          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile -t vigia-platform:release --load .
+          # APP_VERSION es la versión ya validada X.Y.Z (nº 9 la compara con /version.json); nunca la clave.
+          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile --build-arg APP_VERSION="$VERSION" -t vigia-platform:release --load .
+          # La etapa frontend-build de la misma construcción (caché): mapas de fuente y dependencias npm.
+          docker buildx build --platform linux/arm64 --ssh default -f backend/Dockerfile --build-arg APP_VERSION="$VERSION" --target frontend-build -t vigia-frontend-build:release --load .
           echo "image-id=$(docker image inspect --format '{{.Id}}' vigia-platform:release)" >> "$GITHUB_OUTPUT"
       - name: usuario no root y ninguna clave privada en capas ni historial
         env:
@@ -153,6 +159,48 @@ jobs:
           SUMA=$(sha256sum tools/vigia_verify.py | cut -d' ' -f1)
           echo "$SUMA  vigia_verify.py" > "$RUNNER_TEMP/release/vigia_verify.py.sha256"
           echo "sha256=$SUMA" >> "$GITHUB_OUTPUT"
+      # U-05 (VIG-337; infrastructure-design §4): adjuntos al release, nunca a la imagen. dist/ de la
+      # etapa debe ser idéntico a /app/static de la imagen, y version.json debe llevar la versión.
+      # Los dos `docker run` corren sin red: el inventario y el tamaño solo leen la etapa.
+      - name: artefactos de la aplicación (mapas de fuente, SBOM npm, SHA-256 de dist, version.json y tamaño)
+        id: aplicacion
+        run: |
+          APP="$RUNNER_TEMP/aplicacion"
+          mkdir -p "$APP"
+          ETAPA=$(docker create vigia-frontend-build:release)
+          IMAGEN=$(docker create vigia-platform:release)
+          trap 'docker rm -f "$ETAPA" "$IMAGEN" > /dev/null' EXIT
+          docker cp "$ETAPA:/src/frontend/dist" "$APP/dist"
+          docker cp "$ETAPA:/src/frontend-sourcemaps" "$APP/frontend-sourcemaps"
+          docker cp "$IMAGEN:/app/static" "$APP/static"
+          diff -r "$APP/dist" "$APP/static"
+          test -z "$(find "$APP/static" -name '*.map')"
+          test -n "$(find "$APP/frontend-sourcemaps" -name '*.map')"
+          PUBLICADA=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["app_version"])' "$APP/dist/version.json")
+          if [ "$PUBLICADA" != "$VERSION" ]; then
+            echo "version.json publica $PUBLICADA; la release es $VERSION." >&2; exit 1
+          fi
+          cp "$APP/dist/version.json" "$RUNNER_TEMP/release/version.json"
+          (cd "$APP/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/release/frontend-dist.sha256"
+          SUMA=$(sha256sum "$RUNNER_TEMP/release/frontend-dist.sha256" | cut -d' ' -f1)
+          tar -C "$APP" --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - frontend-sourcemaps | gzip -n > "$RUNNER_TEMP/release/frontend-sourcemaps.tar.gz"
+          docker run --rm --network none vigia-frontend-build:release npm run --silent sbom > "$RUNNER_TEMP/release/sbom-npm.cdx.json"
+          python3 -c 'import json, sys; bom = json.load(open(sys.argv[1])); assert bom["bomFormat"] == "CycloneDX" and bom["components"], "inventario npm vacío"' "$RUNNER_TEMP/release/sbom-npm.cdx.json"
+          docker run --rm --network none vigia-frontend-build:release npm run --silent size > "$RUNNER_TEMP/release/frontend-size.txt"
+          echo "dist-sha256=$SUMA" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Artefactos de la aplicación (v$VERSION)"
+            echo
+            echo "- \`version.json\`: \`app_version\` = \`$PUBLICADA\`; \`dist/\` idéntico a \`/app/static\` de la imagen."
+            echo "- \`frontend-dist.sha256\`: $(wc -l < "$RUNNER_TEMP/release/frontend-dist.sha256") archivos; SHA-256 de la lista \`$SUMA\`."
+            echo "- \`frontend-sourcemaps.tar.gz\`: $(find "$APP/frontend-sourcemaps" -name '*.map' | wc -l) mapas de fuente (no servidos)."
+            echo "- \`sbom-npm.cdx.json\`: CycloneDX de npm sin dependencias de desarrollo."
+            echo "- \`frontend-size.txt\`: presupuesto de tamaño (NFR-APP-01)."
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/release/frontend-size.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: artefactos del release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -287,11 +335,16 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
           enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 22.23.4
+          package-manager-cache: false
       - name: instalación congelada de infra
         working-directory: infra
         run: uv sync --frozen
-      - name: clave de despliegue de vigia-contracts (solo lectura, para instalar el backend del soak)
-        if: inputs.soak
+      # La comprobación nº 8 (VIG-319) corre frontend/node_modules/@playwright/test: sin Node,
+      # npm ci y Chromium instalados saldría «skipped». La clave, también para @vigia/contracts de npm.
+      - name: clave de despliegue de vigia-contracts (solo lectura; npm de la nº 8 y backend del soak)
         env:
           CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
         run: |
@@ -300,6 +353,9 @@ jobs:
           chmod 600 ~/.ssh/vigia_contracts
           echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: instalación congelada de frontend (npm ci sin guiones de instalación, para la nº 8)
+        working-directory: frontend
+        run: npm ci --ignore-scripts
       - name: instalación congelada del backend (para el soak)
         if: inputs.soak
         working-directory: backend
@@ -307,6 +363,9 @@ jobs:
       - name: borrar la clave (antes de federar con AWS)
         if: always()
         run: rm -f ~/.ssh/vigia_contracts
+      - name: Chromium de Playwright con dependencias (la nº 8 corre gráfica, con Xvfb)
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
       - name: federación con vigia-deploy (sin claves)
         run: python3 .github/scripts/aws_federation.py --role-arn "$ROLE"
       - name: pilas con first_deploy=true (servicios con 0 tareas, sin almacén de confianza)
@@ -345,7 +404,7 @@ jobs:
         env:
           VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
         run: |
-          uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment "$STAGING" --domain "$DOMAIN" \
+          xvfb-run -a uv run --no-project --python 3.12 python backend/tools/deploy_checks.py --environment "$STAGING" --domain "$DOMAIN" \
             --verifier-sha256 "$VERIFIER" --operator-email "operadora@$STAGING.$DOMAIN" \
             --report "$RUNNER_TEMP/comprobaciones-staging.json" --summary "$GITHUB_STEP_SUMMARY"
       - name: flota y sesión de consola del soak (secreto del entorno; TASK-238)
@@ -537,6 +596,7 @@ jobs:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           DIGEST: ${{ needs.publicar.outputs.digest }}
           VERIFIER: ${{ needs.imagen.outputs.verifier-sha256 }}
+          DIST: ${{ needs.imagen.outputs.dist-sha256 }}
         run: |
           echo "$DIGEST" > "$RUNNER_TEMP/release/image-digest.txt"
           {
@@ -544,7 +604,9 @@ jobs:
             echo
             echo "Verificador \`vigia_verify.py\`: SHA-256 \`$VERIFIER\`"
             echo
-            echo "SBOM CycloneDX de la imagen y del código adjuntos."
+            echo "Aplicación: \`version.json\` y \`frontend-dist.sha256\` (SHA-256 de la lista: \`$DIST\`); mapas de fuente en \`frontend-sourcemaps.tar.gz\` (no servidos) e informe de tamaño."
+            echo
+            echo "SBOM CycloneDX de la imagen, del código y de npm adjuntos."
           } > "$RUNNER_TEMP/notas.md"
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "v$VERSION" \
             --notes-file "$RUNNER_TEMP/notas.md" "$RUNNER_TEMP"/release/*
@@ -567,7 +629,7 @@ jobs:
             echo "### Release v$VERSION sobre \`$GITHUB_SHA\` (dry-run=$DRY_RUN, soak=$SOAK)"
             echo
             if [ "$AWS_ENABLED" != "true" ]; then
-              echo "**Sin AWS (A-47):** \`VIGIA_AWS_ENABLED\` no vale \`true\`. Se ejecutaron los trabajos que no necesitan AWS (véanse sus resultados): precondición de nightly verde, imagen arm64 sin publicar, auditoría, escaneo, SBOM, verificador y \`cdk synth\` de \`$STAGING\` y \`pilot\`, incluida \`vigia-loop\`. Se omitieron ECR, los diff (también el exclusivo de \`vigia-loop\`), despliegue y destrucción de \`$STAGING\`, \`pilot\`, sus comprobaciones y la etiqueta."
+              echo "**Sin AWS (A-47):** \`VIGIA_AWS_ENABLED\` no vale \`true\`. Se ejecutaron los trabajos que no necesitan AWS (véanse sus resultados): precondición de nightly verde, imagen arm64 sin publicar, auditoría, escaneo, SBOM, verificador, artefactos de la aplicación (mapas de fuente, SBOM de npm, SHA-256 de \`dist/\`, \`version.json\` e informe de tamaño, en el artefacto \`release\`) y \`cdk synth\` de \`$STAGING\` y \`pilot\`, incluida \`vigia-loop\`. Se omitieron ECR, los diff (también el exclusivo de \`vigia-loop\`), despliegue y destrucción de \`$STAGING\`, \`pilot\`, sus comprobaciones y la etiqueta."
               echo "No se ejecutaron las comprobaciones nº 14 (rebote simulado → cola → no entregable) y nº 15 (exportación ready, verificador y hash reproducible). Pasan a VIG-252: comprobaciones nº 14 y 15 pendientes de contrato del dueño: VIG-252. Con AWS habilitado, bloquean el despliegue de staging y pilot; no son comprobaciones superadas."
               echo
             fi

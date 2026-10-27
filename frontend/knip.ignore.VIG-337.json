@@ -1,5 +1,0 @@
-{
-  "$comment": "Temporal de VIG-277: lo borra VIG-337 al generar el inventario CycloneDX en el release.",
-  "task": "VIG-337 (TASK-456)",
-  "ignoreDependencies": ["@cyclonedx/cyclonedx-npm"]
-}

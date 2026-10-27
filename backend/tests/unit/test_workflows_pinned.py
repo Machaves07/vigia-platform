@@ -414,7 +414,9 @@ def test_release_builds_scans_and_documents_the_arm64_image() -> None:
     assert job["runs-on"] == "ubuntu-24.04-arm"
     run = _run_text(job)
     assert "--platform linux/arm64 --ssh default -f backend/Dockerfile" in run
-    assert "ssh-add -q -" in run and "> ~/.ssh" not in run and "--build-arg" not in run
+    assert "ssh-add -q -" in run and "> ~/.ssh" not in run
+    # VIG-337: el único argumento de construcción es la versión ya validada (nunca la clave).
+    assert release_build_argument_problems(run) == []
     assert "tools/image_audit.py" in run and "--needle-env CLAVE" in run
     assert "--fail-on high" in run and "cyclonedx-json=" in run
     assert "uv export --frozen --no-dev --format cyclonedx1.5" in run
@@ -1549,3 +1551,468 @@ def test_the_route_filter_fails_closed_and_never_gates_the_security_jobs() -> No
         assert jobs[job_id]["needs"] == ["rutas"], job_id
         condicion = str(jobs[job_id]["if"])
         assert condicion.endswith("&& needs.rutas.outputs.backend != 'false'"), job_id
+
+
+# --- U-05: frontend-nightly y artefactos de la aplicación en el release (VIG-337, TASK-456) -----
+
+FRONTEND_NIGHTLY_JOB = "frontend-nightly"
+FRONTEND_NIGHTLY_NAME = (
+    "frontend nightly (propiedades, resiliencia, abuso, recorridos y rendimiento)"
+)
+FRONTEND_NIGHTLY_COMMANDS = (
+    "uv sync --frozen",
+    "npm ci --ignore-scripts",
+    "rm -f ~/.ssh/vigia_contracts",
+    "npx playwright install --with-deps chromium firefox",
+    "node scripts/install_webkit.mjs",
+    "npm run test:nightly -- --exclude",
+    "npm run test:nightly -- tests/resilience",
+    "npm run test:nightly -- tests/abuse",
+    "npm run build",
+    "xvfb-run -a npm run e2e",
+    "xvfb-run -a npm run lighthouse",
+)
+"""Pasos de TASK-456, en este orden: instalación, vitest nightly, construcción, Playwright y
+Lighthouse (tech-stack-decisions §5 de U-05)."""
+FRONTEND_NIGHTLY_ARTIFACTS = {
+    "informe-frontend-fs-app": "frontend/test-results/fs-app-*.json",
+    "frontend-playwright": "frontend/test-results/",
+    "informe-frontend-lighthouse": "frontend/.lighthouseci/",
+}
+"""Artefactos de PAT-APP-RES-08 (90 días: la retención la comprueba la prueba del nightly)."""
+_VITEST_NIGHTLY_EXCLUSIONS = frozenset({"tests/resilience/**", "tests/abuse/**"})
+"""Lo único que el vitest nightly general deja fuera: resiliencia y abuso corren en su paso."""
+
+
+def _upload(step: dict[Any, Any]) -> str | None:
+    if not str(step.get("uses", "")).startswith("actions/upload-artifact"):
+        return None
+    return str((step.get("with") or {}).get("name"))
+
+
+def frontend_nightly_job_problems(text: str) -> list[str]:
+    """VIG-337: el trabajo ``frontend-nightly`` de ``nightly.yml`` corre vitest con el perfil
+    nightly (sin dejar fuera más que resiliencia y abuso, que corren aparte), **todos** los
+    ``tests/e2e/*.spec.ts`` en los seis proyectos (sin filtros de archivo, proyecto ni título),
+    y Lighthouse; sube el informe FS-APP antes de que Playwright vacíe ``test-results/``; la
+    clave de despliegue solo existe mientras se instala; y ``informe`` lo espera."""
+    jobs = _load(text).get("jobs") or {}
+    job = jobs.get(FRONTEND_NIGHTLY_JOB)
+    if not isinstance(job, dict):
+        return ["no hay trabajo frontend-nightly"]
+    problems = []
+    if job.get("name") != FRONTEND_NIGHTLY_NAME:
+        problems.append(f"nombre del trabajo: {job.get('name')!r}")
+    if job.get("defaults", {}).get("run", {}).get("working-directory") != "frontend":
+        problems.append("los pasos no corren en frontend/")
+    if job.get("continue-on-error") or "if" in job:
+        problems.append("el trabajo tiene condición o no bloquea")
+    if FRONTEND_NIGHTLY_JOB not in ((jobs.get("informe") or {}).get("needs") or []):
+        problems.append("el trabajo informe no espera a frontend-nightly")
+    steps = job.get("steps") or []
+    setup = [step for step in steps if str(step.get("uses", "")).startswith("actions/setup-node")]
+    version = str(setup[0].get("with", {}).get("node-version", "")) if setup else ""
+    if not _NODE_22.match(version):
+        problems.append(f"Node 22 sin fijar: {version!r}")
+    runs = [str(step.get("run") or "") for step in steps]
+    positions = []
+    for command in FRONTEND_NIGHTLY_COMMANDS:
+        found = [index for index, run in enumerate(runs) if command in run]
+        if not found:
+            problems.append(f"falta el paso «{command}»")
+        else:
+            positions.append(found[0])
+    if positions != sorted(positions):
+        problems.append("los pasos no siguen el orden de TASK-456")
+    for step in steps:
+        run = str(step.get("run") or "")
+        if step.get("continue-on-error"):
+            problems.append(f"«{run or step.get('uses')}» no bloquea")
+        if "npm install" in run or ("npm ci" in run and "--ignore-scripts" not in run):
+            problems.append(f"«{run}» instala sin bloqueo o con guiones de instalación")
+        for line in (line.strip() for line in run.splitlines()):
+            if line.startswith("npm run test:nightly -- --exclude"):
+                tokens = shlex.split(line)[4:]
+                pairs = list(zip(tokens[::2], tokens[1::2], strict=False))
+                excluded = {value for flag, value in pairs if flag == "--exclude"}
+                if (
+                    len(tokens) % 2
+                    or any(flag != "--exclude" for flag, _ in pairs)
+                    or (excluded != _VITEST_NIGHTLY_EXCLUSIONS)
+                ):
+                    problems.append(f"vitest nightly deja fuera algo más: «{line}»")
+            if "npm run e2e" in line and line != "xvfb-run -a npm run e2e":
+                problems.append(f"Playwright filtra especificaciones o proyectos: «{line}»")
+    cleanup = [step for step in steps if "rm -f ~/.ssh/vigia_contracts" in str(step.get("run"))]
+    if not cleanup or cleanup[0].get("if") != "always()":
+        problems.append("la clave de despliegue no se borra con if: always()")
+    uploads = {name: index for index, step in enumerate(steps) if (name := _upload(step))}
+    for name, path in FRONTEND_NIGHTLY_ARTIFACTS.items():
+        if name not in uploads:
+            problems.append(f"no sube el artefacto {name}")
+            continue
+        if str(steps[uploads[name]]["with"].get("path")) != path:
+            problems.append(f"el artefacto {name} no sube {path}")
+        if "!cancelled()" not in str(steps[uploads[name]].get("if")):
+            problems.append(f"el artefacto {name} no se sube cuando falla una suite")
+    e2e = [index for index, run in enumerate(runs) if "npm run e2e" in run]
+    if "informe-frontend-fs-app" in uploads and e2e and uploads["informe-frontend-fs-app"] > e2e[0]:
+        problems.append("el informe FS-APP se sube después de que Playwright vacíe test-results/")
+    secrets = set(re.findall(r"secrets\.(\w+)", yaml.safe_dump(job)))
+    if secrets - {"VIGIA_CONTRACTS_DEPLOY_KEY"}:
+        problems.append(f"secretos no permitidos: {sorted(secrets)}")
+    return problems
+
+
+def test_the_frontend_nightly_job_runs_every_suite_of_task_456() -> None:
+    nightly = (WORKFLOWS / "nightly.yml").read_text(encoding="utf-8")
+    assert frontend_nightly_job_problems(nightly) == []
+    # Los guiones que corre existen con lo que el diseño pide: seis proyectos sobre tests/e2e.
+    frontend = REPOSITORY / "frontend"
+    scripts = json.loads((frontend / "package.json").read_text(encoding="utf-8"))["scripts"]
+    assert scripts["test:nightly"] == "vitest run --mode nightly"
+    assert scripts["e2e"] == "playwright test"
+    assert scripts["lighthouse"] == "lhci autorun --config=lighthouserc.json"
+    playwright = (frontend / "playwright.config.ts").read_text(encoding="utf-8")
+    assert "testDir: './tests/e2e'" in playwright
+    assert "['chromium', 'firefox', 'webkit']" in playwright
+    assert "name: 'desktop'" in playwright and "name: 'tablet'" in playwright
+
+
+def _nightly_with_frontend(change: Any) -> str:
+    nightly = _workflow("nightly")
+    change(nightly["jobs"])
+    return str(yaml.safe_dump(nightly, allow_unicode=True))
+
+
+def _frontend_step(command: str, **fields: Any) -> Any:
+    def change(jobs: dict[Any, Any]) -> None:
+        for step in jobs[FRONTEND_NIGHTLY_JOB]["steps"]:
+            if command in str(step.get("run")) or command == _upload(step):
+                step.update(fields)
+
+    return change
+
+
+def _drop_frontend_step(command: str) -> Any:
+    def change(jobs: dict[Any, Any]) -> None:
+        job = jobs[FRONTEND_NIGHTLY_JOB]
+        job["steps"] = [
+            step
+            for step in job["steps"]
+            if command not in str(step.get("run")) and command != _upload(step)
+        ]
+
+    return change
+
+
+def _move_fs_app_report_after_playwright(jobs: dict[Any, Any]) -> None:
+    steps = jobs[FRONTEND_NIGHTLY_JOB]["steps"]
+    (report,) = [step for step in steps if _upload(step) == "informe-frontend-fs-app"]
+    steps.remove(report)
+    e2e = next(i for i, step in enumerate(steps) if "npm run e2e" in str(step.get("run")))
+    steps.insert(e2e + 1, report)
+
+
+@pytest.mark.parametrize("command", [*FRONTEND_NIGHTLY_COMMANDS, *FRONTEND_NIGHTLY_ARTIFACTS])
+def test_dropping_a_frontend_nightly_step_is_detected(command: str) -> None:
+    assert frontend_nightly_job_problems(_nightly_with_frontend(_drop_frontend_step(command)))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(_move_fs_app_report_after_playwright, id="fs-app-tras-playwright"),
+        pytest.param(
+            _frontend_step("npm run e2e", run="xvfb-run -a npm run e2e -- tests/e2e/smoke.spec.ts"),
+            id="e2e-un-archivo",
+        ),
+        pytest.param(
+            _frontend_step("npm run e2e", run="xvfb-run -a npm run e2e -- --project=webkit-tablet"),
+            id="e2e-un-proyecto",
+        ),
+        pytest.param(
+            _frontend_step(
+                "npm run test:nightly -- --exclude",
+                run="npm run test:nightly -- --exclude 'tests/resilience/**' "
+                "--exclude 'tests/abuse/**' --exclude 'tests/properties/**'",
+            ),
+            id="vitest-sin-propiedades",
+        ),
+        pytest.param(
+            _frontend_step(
+                "npm run test:nightly -- --exclude",
+                run="npm run test:nightly -- --exclude 'tests/resilience/**' "
+                "--exclude 'tests/abuse/**' tests/unit",
+            ),
+            id="vitest-solo-una-carpeta",
+        ),
+        pytest.param(
+            _frontend_step("npm run lighthouse", **{"continue-on-error": True}),
+            id="lighthouse-no-bloquea",
+        ),
+        pytest.param(
+            _frontend_step(
+                "informe-frontend-fs-app",
+                **{"with": {"name": "informe-frontend-fs-app", "path": "frontend/test-results/"}},
+            ),
+            id="fs-app-otra-ruta",
+        ),
+        pytest.param(
+            _frontend_step("frontend-playwright", **{"if": "success()"}), id="trazas-solo-en-verde"
+        ),
+        pytest.param(_frontend_step("npm ci --ignore-scripts", run="npm ci"), id="con-guiones"),
+        pytest.param(
+            _frontend_step("rm -f ~/.ssh/vigia_contracts", **{"if": None}), id="clave-queda"
+        ),
+        pytest.param(
+            lambda jobs: jobs[FRONTEND_NIGHTLY_JOB]["steps"][1]["with"].update(
+                {"node-version": "20.19.0"}
+            ),
+            id="node-20",
+        ),
+        pytest.param(
+            lambda jobs: jobs[FRONTEND_NIGHTLY_JOB].update({"name": "frontend nightly"}),
+            id="nombre",
+        ),
+        pytest.param(
+            lambda jobs: jobs[FRONTEND_NIGHTLY_JOB].update({"if": "false"}), id="trabajo-con-if"
+        ),
+        pytest.param(
+            lambda jobs: jobs["informe"]["needs"].remove(FRONTEND_NIGHTLY_JOB),
+            id="informe-no-lo-espera",
+        ),
+        pytest.param(
+            lambda jobs: jobs[FRONTEND_NIGHTLY_JOB]["steps"].append(
+                {"run": "echo ${{ secrets.OTRO }}"}
+            ),
+            id="secreto",
+        ),
+    ],
+)
+def test_each_frontend_nightly_rule_fails_on_its_own(change: Any) -> None:
+    assert frontend_nightly_job_problems(_nightly_with_frontend(change))
+
+
+_BUILD_ARGUMENT = re.compile(r"--build-arg\s+(\S+)")
+RELEASE_BUILD_ARGUMENTS = frozenset({'APP_VERSION="$VERSION"'})
+"""Único argumento de construcción del release: la versión X.Y.Z validada en «preparar»."""
+
+
+def release_build_argument_problems(run: str) -> list[str]:
+    """La clave de despliegue nunca viaja como argumento: solo ``APP_VERSION`` de la release, y en
+    cada ``docker buildx build`` (la imagen y su etapa frontend-build salen de la misma versión)."""
+    problems = [
+        f"argumento de construcción no permitido: {argument}"
+        for argument in _BUILD_ARGUMENT.findall(run)
+        if argument not in RELEASE_BUILD_ARGUMENTS
+    ]
+    for line in run.splitlines():
+        if "docker buildx build" in line and '--build-arg APP_VERSION="$VERSION"' not in line:
+            problems.append(f"construcción sin APP_VERSION de la release: «{line.strip()}»")
+    return problems
+
+
+RELEASE_APP_COMMANDS = (
+    "--target frontend-build -t vigia-frontend-build:release",
+    'diff -r "$APP/dist" "$APP/static"',
+    'test -z "$(find "$APP/static" -name \'*.map\')"',
+    '"$PUBLICADA" != "$VERSION"',
+    'cp "$APP/dist/version.json" "$RUNNER_TEMP/release/version.json"',
+    'xargs -0 sha256sum) > "$RUNNER_TEMP/release/frontend-dist.sha256"',
+    '"$RUNNER_TEMP/release/frontend-sourcemaps.tar.gz"',
+    "docker run --rm --network none vigia-frontend-build:release npm run --silent sbom",
+    "docker run --rm --network none vigia-frontend-build:release npm run --silent size",
+)
+"""infrastructure-design §4 de U-05: mapas de fuente, CycloneDX de npm, SHA-256 de ``dist/``,
+``version.json`` e informe de tamaño, sacados de la etapa y comprobados contra la imagen."""
+
+
+def release_frontend_problems(text: str) -> list[str]:
+    """VIG-337: el trabajo ``imagen`` deja los artefactos de la aplicación en ``release/`` antes de
+    subirlo (los adjunta ``etiqueta`` al release, no a la imagen); ``staging`` instala Node,
+    ``npm ci`` y Chromium antes de las comprobaciones (la nº 8 los necesita) y las corre con Xvfb;
+    el resumen lo dice sin AWS."""
+    jobs = _load(text).get("jobs") or {}
+    problems = []
+    image = jobs.get("imagen") or {}
+    steps = image.get("steps") or []
+    run = _run_text(image)
+    problems += release_build_argument_problems(run)
+    for command in RELEASE_APP_COMMANDS:
+        if command not in run:
+            problems.append(f"imagen: falta «{command}»")
+    app = [index for index, step in enumerate(steps) if step.get("id") == "aplicacion"]
+    upload = [index for index, step in enumerate(steps) if _upload(step) == "release"]
+    if not app or not upload or app[0] > upload[0]:
+        problems.append("imagen: los artefactos de la aplicación no van en el artefacto release")
+    elif steps[app[0]].get("if") or steps[app[0]].get("continue-on-error"):
+        problems.append("imagen: los artefactos de la aplicación tienen condición o no bloquean")
+    outputs = image.get("outputs") or {}
+    if outputs.get("dist-sha256") != "${{ steps.aplicacion.outputs.dist-sha256 }}":
+        problems.append("imagen: no publica el SHA-256 de dist/")
+    tag = _run_text(jobs.get("etiqueta") or {})
+    if '"$RUNNER_TEMP"/release/*' not in tag or "$DIST" not in tag:
+        problems.append("etiqueta: el release no adjunta los artefactos de la aplicación")
+    staging_steps = (jobs.get("staging") or {}).get("steps") or []
+    staging_runs = [str(step.get("run") or "") for step in staging_steps]
+    setup = [
+        index
+        for index, step in enumerate(staging_steps)
+        if str(step.get("uses", "")).startswith("actions/setup-node")
+        and _NODE_22.match(str(step.get("with", {}).get("node-version", "")))
+    ]
+
+    def first(command: str) -> int:
+        found = [index for index, run in enumerate(staging_runs) if command in run]
+        return found[0] if found else -1
+
+    order = [
+        setup[0] if setup else -1,
+        first("npm ci --ignore-scripts"),
+        first("rm -f ~/.ssh/vigia_contracts"),
+        first("npx playwright install --with-deps chromium"),
+        first("aws_federation.py"),
+        first("xvfb-run -a uv run --no-project --python 3.12 python backend/tools/deploy_checks"),
+    ]
+    if -1 in order or order != sorted(order):
+        problems.append(
+            "staging: Node, npm ci, borrado de la clave, Chromium, federación y comprobaciones "
+            f"no van en ese orden: {order}"
+        )
+    for step in staging_steps:
+        command = str(step.get("run") or "")
+        installs = "npm ci" in command or "playwright install" in command
+        if (installs or "> ~/.ssh/vigia_contracts" in command) and (
+            step.get("if") or step.get("continue-on-error")
+        ):
+            problems.append(f"staging: «{command.splitlines()[0]}» tiene condición o no bloquea")
+        if "npm ci" in command and "--ignore-scripts" not in command:
+            problems.append(f"staging: «{command}» instala con guiones de instalación")
+    cleanup = [s for s in staging_steps if "rm -f ~/.ssh/vigia_contracts" in str(s.get("run"))]
+    if not cleanup or cleanup[0].get("if") != "always()":
+        problems.append("staging: la clave de despliegue no se borra con if: always()")
+    if "artefactos de la aplicación" not in _run_text(jobs.get("resumen") or {}):
+        problems.append("resumen: no dice que se produjeron los artefactos de la aplicación")
+    return problems
+
+
+def test_the_release_produces_the_app_artifacts_and_installs_playwright_for_check_8() -> None:
+    release = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
+    assert release_frontend_problems(release) == []
+    package = json.loads((REPOSITORY / "frontend" / "package.json").read_text(encoding="utf-8"))
+    assert package["scripts"]["sbom"] == "cyclonedx-npm --omit dev --output-reproducible --validate"
+    assert "@cyclonedx/cyclonedx-npm" in package["devDependencies"]
+
+
+def _release_with(change: Any) -> str:
+    release = _workflow("release")
+    change(release["jobs"])
+    return str(yaml.safe_dump(release, allow_unicode=True))
+
+
+def _edit_release_run(job_id: str, old: str, new: str) -> Any:
+    def change(jobs: dict[Any, Any]) -> None:
+        for step in jobs[job_id]["steps"]:
+            if old in str(step.get("run")):
+                step["run"] = str(step["run"]).replace(old, new)
+
+    return change
+
+
+def _release_step(job_id: str, command: str, **fields: Any) -> Any:
+    def change(jobs: dict[Any, Any]) -> None:
+        for step in jobs[job_id]["steps"]:
+            if command in str(step.get("run")) or command == step.get("id"):
+                step.update(fields)
+
+    return change
+
+
+def _move_app_step_after_upload(jobs: dict[Any, Any]) -> None:
+    steps = jobs["imagen"]["steps"]
+    (app,) = [step for step in steps if step.get("id") == "aplicacion"]
+    steps.remove(app)
+    steps.append(app)
+
+
+def _install_chromium_after_checks(jobs: dict[Any, Any]) -> None:
+    steps = jobs["staging"]["steps"]
+    (chromium,) = [step for step in steps if "playwright install" in str(step.get("run"))]
+    steps.remove(chromium)
+    checks = next(i for i, step in enumerate(steps) if "deploy_checks.py" in str(step.get("run")))
+    steps.insert(checks + 1, chromium)
+
+
+def _drop_setup_node(jobs: dict[Any, Any]) -> None:
+    jobs["staging"]["steps"] = [
+        step
+        for step in jobs["staging"]["steps"]
+        if not str(step.get("uses", "")).startswith("actions/setup-node")
+    ]
+
+
+@pytest.mark.parametrize("command", RELEASE_APP_COMMANDS)
+def test_dropping_a_release_app_command_is_detected(command: str) -> None:
+    assert release_frontend_problems(_release_with(_edit_release_run("imagen", command, "true")))
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(
+            _edit_release_run(
+                "imagen", '--build-arg APP_VERSION="$VERSION"', '--build-arg CLAVE="$CLAVE"'
+            ),
+            id="clave-como-argumento",
+        ),
+        pytest.param(
+            _edit_release_run(
+                "imagen",
+                '--build-arg APP_VERSION="$VERSION" --target frontend-build',
+                "--target frontend-build",
+            ),
+            id="etapa-sin-version",
+        ),
+        pytest.param(_move_app_step_after_upload, id="aplicacion-tras-subir"),
+        pytest.param(
+            _release_step("imagen", "aplicacion", **{"continue-on-error": True}),
+            id="aplicacion-no-bloquea",
+        ),
+        pytest.param(
+            lambda jobs: jobs["imagen"]["outputs"].pop("dist-sha256"), id="sin-hash-de-dist"
+        ),
+        pytest.param(
+            _edit_release_run(
+                "etiqueta", '"$RUNNER_TEMP"/release/*', '"$RUNNER_TEMP"/release/sbom-*'
+            ),
+            id="etiqueta-sin-artefactos",
+        ),
+        pytest.param(_drop_setup_node, id="staging-sin-node"),
+        pytest.param(
+            _release_step("staging", "npm ci --ignore-scripts", **{"if": "inputs.soak"}),
+            id="npm-solo-con-soak",
+        ),
+        pytest.param(
+            _release_step("staging", "> ~/.ssh/vigia_contracts", **{"if": "inputs.soak"}),
+            id="clave-solo-con-soak",
+        ),
+        pytest.param(
+            _edit_release_run("staging", "npm ci --ignore-scripts", "npm ci"), id="con-guiones"
+        ),
+        pytest.param(_install_chromium_after_checks, id="chromium-tras-comprobaciones"),
+        pytest.param(
+            _edit_release_run("staging", "xvfb-run -a uv run", "uv run"), id="n8-sin-pantalla"
+        ),
+        pytest.param(
+            _release_step("staging", "rm -f ~/.ssh/vigia_contracts", **{"if": None}),
+            id="clave-queda",
+        ),
+        pytest.param(
+            _edit_release_run("resumen", "artefactos de la aplicación", "otros"),
+            id="resumen-calla",
+        ),
+    ],
+)
+def test_each_release_app_rule_fails_on_its_own(change: Any) -> None:
+    assert release_frontend_problems(_release_with(change))
