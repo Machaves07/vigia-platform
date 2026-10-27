@@ -15,10 +15,12 @@ import { PROPERTY_TIMEOUT_MS } from '../support/timeouts';
 import {
   assertNoPersonData,
   forbiddenRendered,
+  personDataLeaks,
   personFieldsDeclared,
 } from '../support/viewProperties';
 import { views } from '../views';
 import { renderSelftest, selftestView } from '../views/_selftest';
+import scr12 from '../views/scr12';
 import type { ViewRegistration } from '../views/types';
 
 const registered = Object.entries(views);
@@ -244,6 +246,84 @@ describe('PR-APP-07: inspección de valores renderizados, no de textos fijos', (
     } finally {
       unmount();
     }
+  });
+
+  describe('regresión de la semilla 1267829153: un valor prohibido dentro de un texto fijo', () => {
+    const packageView: ViewRegistration = scr12.package;
+    const session = {
+      organizationId: '00000000-0000-4000-8000-000000000001',
+      concessionOrganizationId: null,
+    };
+    const [base] = fc.sample(packageView.data, { seed: 1267829153, numRuns: 1 });
+    if (base === undefined) throw new Error('sin muestra');
+    // Contraejemplo de VIG-337: «e|_constru» plegado está en «…no se reconstruyen en la pantalla».
+    const coincidence = {
+      ...base,
+      coverage_summary: [
+        { state: 'ok', duration_ms: 1000 },
+        { state: 'e|_constru', duration_ms: 2000 },
+      ],
+    };
+    const leaked =
+      'RV-16 (SCR-12): campo «coverage_summary[1].state» fuera de allowedFields aparece en el texto.';
+
+    it('RV-16 no lo marca: el contraste lo sigue encontrando sin el valor', () => {
+      const { baseElement, unmount } = render(
+        packageView.render(coincidence, { ...session, reportContractError: () => undefined }),
+      );
+      try {
+        // Sin contraste, la sola subcadena declaraba la fuga.
+        expect(forbiddenRendered(packageView, coincidence, baseElement)).toEqual([leaked]);
+      } finally {
+        unmount();
+      }
+      expect(personDataLeaks(packageView, coincidence, session)).toEqual([]);
+    });
+
+    it('cae en rojo si la vista pinta coverage_summary[].state', () => {
+      const leaky: ViewRegistration = {
+        ...packageView,
+        render: (data, context) =>
+          createElement(
+            Fragment,
+            null,
+            packageView.render(data, context),
+            createElement(
+              'ul',
+              null,
+              ...(data.coverage_summary as { state: string }[]).map((share, index) =>
+                createElement('li', { key: index }, share.state),
+              ),
+            ),
+          ),
+      };
+      expect(personDataLeaks(leaky, coincidence, session)).toEqual([leaked]);
+    });
+
+    it('cae en rojo si la vista pinta una sola vez un valor prohibido repetido', () => {
+      const repeated = {
+        items: [
+          { title: 'a', secret: 'valor-confidencial' },
+          { title: 'b', secret: 'valor-confidencial' },
+        ],
+      };
+      const deduplicating: ViewRegistration = {
+        ...selftestView,
+        allowedFields: ['items', 'title'],
+        render: (data) =>
+          createElement(
+            'ul',
+            null,
+            ...[...new Set((data.items as { secret: string }[]).map((item) => item.secret))].map(
+              (secret) => createElement('li', { key: secret }, secret),
+            ),
+          ),
+      };
+      expect(personDataLeaks(deduplicating, repeated, session)).toEqual([
+        'RV-00 (SCR-00): campo «items[0].secret» fuera de allowedFields aparece en el texto.',
+        'RV-00 (SCR-00): campo «items[1].secret» fuera de allowedFields aparece en el texto.',
+      ]);
+    });
   });
 
   it('no marca textos fijos que solo se parecen a un campo de persona', () => {
