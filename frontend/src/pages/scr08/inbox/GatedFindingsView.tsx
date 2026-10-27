@@ -26,13 +26,22 @@ export function GatedFindingsView({
     enabled: allowed && ids.length > 0,
     read: ({ signal }) => readGates(ids, signal),
   });
-  if (ids.length === 0) return <FindingsView page={page} plants={context.plants} gates={[]} />;
+  const permissions = new Set(context.permissions);
+  if (ids.length === 0)
+    return (
+      <FindingsView page={page} plants={context.plants} gates={[]} permissions={permissions} />
+    );
   if (!allowed) return <ScreenState state="unavailable" />;
   return (
     <>
       <Refresh query={query} operation="GET /zones/{zone_id}/gates" />
       <Result query={query}>
-        <FindingsView page={page} plants={context.plants} gates={query.data ?? []} />
+        <FindingsView
+          page={page}
+          plants={context.plants}
+          gates={query.data ?? []}
+          permissions={permissions}
+        />
       </Result>
     </>
   );

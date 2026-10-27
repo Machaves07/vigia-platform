@@ -3309,6 +3309,8 @@ export interface components {
       aggregation_window_minutes: number | null;
       /** Classifications */
       classifications: components['schemas']['ClassificationItemOut'][];
+      /** Review Resolutions */
+      review_resolutions: components['schemas']['ReviewResolutionItemOut'][];
     };
     /** ClassificationItemOut */
     ClassificationItemOut: {
@@ -7362,6 +7364,31 @@ export interface components {
       reason_category?: string | null;
       /** Reason Text */
       reason_text?: string | null;
+    };
+    /**
+     * ReviewResolutionItemOut
+     * @description La resolución de la detección en la cola (T05 o T06): no es una clasificación.
+     */
+    ReviewResolutionItemOut: {
+      /**
+       * Resolution Id
+       * Format: uuid
+       */
+      resolution_id: string;
+      /**
+       * Record Id
+       * Format: uuid
+       */
+      record_id: string;
+      /** Outcome */
+      outcome: string;
+      /** Reason Category */
+      reason_category: string;
+      /** Reason Text */
+      reason_text: string;
+      /** Resolved At */
+      resolved_at: string;
+      resolved_by: components['schemas']['ClassifiedByOut'];
     };
     /** ReviewResolutionOut */
     ReviewResolutionOut: {

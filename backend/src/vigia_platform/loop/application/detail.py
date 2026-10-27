@@ -42,6 +42,11 @@ escribe bajo la exclusión del sujeto. Mismo alcance que el detalle; sin llamada
 hallazgo sin compuerta de uso aprobada en el instante del hecho tampoco se muestra aquí, por la
 columna de la proyección, como en la bandeja).
 
+Si el sujeto es una detección, el historial lleva también su **resolución de la cola**
+(``loop.review_resolution``, T05 o T06; VIG-359): es la decisión humana que la confirmó o la
+descartó, con su motivo, su autor y su rol en uso, y no es una clasificación (no tiene secuencia
+ni efecto sobre el lazo), así que va en su propia lista.
+
 **Agregación temporal** (BR-LAZ-06 y 07, PR-LAZ-02): en una zona unipersonal **toda** marca del
 detalle y del historial es el inicio de su ventana (``loop.domain.time_aggregation``); el
 expediente conserva la marca exacta y su ``content_hash`` no cambia. ``finding_detail`` y
@@ -105,6 +110,7 @@ __all__ = [
     "NodeView",
     "RecordReader",
     "RecordView",
+    "ReviewResolutionView",
     "SignalView",
     "StandardCitation",
     "classification_history",
@@ -145,6 +151,13 @@ _CLASSIFICATIONS: Final = text(
     " FROM loop.classification WHERE organization_id = :organization_id AND plant_id = :plant_id"
     " AND zone_id = :zone_id AND subject_id = :subject_id"
     " ORDER BY sequence_in_subject, classification_id"
+)
+_REVIEW_RESOLUTIONS: Final = text(
+    "SELECT resolution_id, record_id, outcome, reason_category, reason_text, resolved_by,"
+    " resolved_at"
+    " FROM loop.review_resolution WHERE organization_id = :organization_id"
+    " AND plant_id = :plant_id AND zone_id = :zone_id AND detection_id = :subject_id"
+    " ORDER BY resolved_at, resolution_id"
 )
 _ACTIONS: Final = text(
     "SELECT action_id, record_id, action_type, action_description, expected_outcome, state,"
@@ -330,6 +343,19 @@ class ClassificationView:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ReviewResolutionView:
+    """La resolución humana de la detección en la cola (T05 o T06), con su autor (P8)."""
+
+    resolution_id: uuid.UUID
+    record_id: uuid.UUID
+    outcome: str
+    reason_category: str
+    reason_text: str
+    resolved_at: datetime
+    resolved_by: ClassifiedBy
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ActionView:
     action_id: uuid.UUID
     record_id: uuid.UUID
@@ -397,6 +423,8 @@ class ClassificationHistory:
     time_aggregated: bool
     aggregation_window_minutes: int | None
     classifications: tuple[ClassificationView, ...]
+    review_resolutions: tuple[ReviewResolutionView, ...] = ()
+    """La resolución de la cola si el sujeto es una detección ya resuelta; vacía si no."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -492,16 +520,37 @@ def _classification(row: Mapping[str, Any], shown: _Presenter) -> Classification
     )
 
 
+def _review_resolution(row: Mapping[str, Any], shown: _Presenter) -> ReviewResolutionView:
+    author = _json(row["resolved_by"])
+    return ReviewResolutionView(
+        resolution_id=_uuid(row["resolution_id"]),
+        record_id=_uuid(row["record_id"]),
+        outcome=str(row["outcome"]),
+        reason_category=str(row["reason_category"]),
+        reason_text=str(row["reason_text"]),
+        resolved_at=shown(row["resolved_at"]),
+        resolved_by=ClassifiedBy(
+            user_id=_uuid(author["user_id"]),
+            display_name=str(author["display_name"]),
+            role_in_use=str(author["role_in_use"]),
+        ),
+    )
+
+
 def classification_history(
-    subject: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
+    subject: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    resolutions: Sequence[Mapping[str, Any]] = (),
 ) -> ClassificationHistory:
-    """El historial con sus marcas presentadas; ``rows`` ya viene en orden de secuencia."""
+    """El historial con sus marcas presentadas; ``rows`` ya viene en orden de secuencia y
+    ``resolutions`` (la resolución de la cola de una detección) en orden de ``resolved_at``."""
     shown = _Presenter(subject)
     return ClassificationHistory(
         finding_state_id=_uuid(subject["finding_state_id"]),
         time_aggregated=shown.single,
         aggregation_window_minutes=shown.window_minutes,
         classifications=tuple(_classification(row, shown) for row in rows),
+        review_resolutions=tuple(_review_resolution(row, shown) for row in resolutions),
     )
 
 
@@ -806,12 +855,18 @@ class FindingDetailService:
     async def classifications(
         self, context: ScopeContext, finding_state_id: uuid.UUID
     ) -> ClassificationHistory:
-        """El historial completo de clasificaciones del sujeto, desde la proyección."""
+        """El historial completo de clasificaciones del sujeto, desde la proyección, con la
+        resolución de la cola si el sujeto es una detección (en la misma transacción)."""
         authorized, subject = await self._authorized(context, finding_state_id)
         if subject["zone_gate_status_at_event"] != GateStatus.APPROVED.value:
             raise ResourceNotFound()  # BR-LAZ-12, como la bandeja: sin acuerdo no hay dato
-        rows = await self._database.read(authorized, _CLASSIFICATIONS, _place(subject))
-        return classification_history(subject, _mappings(rows))
+        place = _place(subject)
+        resolutions: Sequence[Any] = ()
+        async with self._database.transaction(authorized) as transaction:
+            rows = (await transaction.execute(_CLASSIFICATIONS, place)).all()
+            if subject["subject_kind"] == SubjectKind.DETECTION.value:
+                resolutions = (await transaction.execute(_REVIEW_RESOLUTIONS, place)).all()
+        return classification_history(subject, _mappings(rows), _mappings(resolutions))
 
     # --- pasos -----------------------------------------------------------------------------------
 

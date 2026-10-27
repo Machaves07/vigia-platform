@@ -59,6 +59,7 @@ export function history(items: ClassificationItem[]): ClassificationHistory {
     time_aggregated: false,
     aggregation_window_minutes: null,
     classifications: items,
+    review_resolutions: [],
   };
 }
 

@@ -6,6 +6,9 @@
  * clasificaciones se pide con él y se muestra completo, porque reclasificar no borra (P4). El
  * `Finding` de cada tramo sale del expediente y se valida con Ajv antes de pintarse.
  *
+ * Recorrido guiado (VIG-359): con el detalle cargado, el acceso que admite su estado (cola,
+ * clasificar, reclasificar o lazo; `FindingActions`), y la resolución de la cola en el historial.
+ *
  * Degradación declarada: `503 loop_gate_state_unavailable` (fallo cerrado de U-04, el cuerpo no
  * trae el hallazgo) y `loop_standard_text_unavailable` degradan su sección con «reintentar», sin
  * abrir el circuito `platform`; el historial, el estado «ahora» y los demás datos siguen.
@@ -13,6 +16,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
+import { FindingActions } from '@/pages/shared/FindingActions';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   detailClock,
@@ -191,6 +195,15 @@ export default function Page() {
       </nav>
       <h1>{text('scr08.detail.title')}</h1>
       <p>{text('scr08.detail.audited')}</p>
+      {detail.data !== undefined && (
+        <FindingActions
+          findingId={context.findingId}
+          state={detail.data.lifecycle_state}
+          detectionId={detail.data.subject_kind === 'detection' ? detail.data.subject_id : null}
+          permissions={context.permissions}
+          landmark
+        />
+      )}
       <RefreshIndicator
         clock={detailClock()}
         fetchedAt={detail.fetchedAt}
@@ -227,6 +240,7 @@ export default function Page() {
       ) : (
         <History
           classifications={history.data.classifications}
+          reviewResolutions={history.data.review_resolutions}
           timeAggregated={history.data.time_aggregated}
           timeZone={timeZone}
         />

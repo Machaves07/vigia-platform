@@ -2,6 +2,7 @@
 import { Link } from 'react-router';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { GateStateChip } from '@/components/GateStateChip/GateStateChip';
+import { FindingActions } from '@/pages/shared/FindingActions';
 import {
   gateDisplay,
   type Finding,
@@ -71,14 +72,19 @@ function Notices({ finding, timeZone }: { readonly finding: Finding; readonly ti
   );
 }
 
+const NO_PERMISSIONS: ReadonlySet<string> = new Set();
+
 export function FindingsView({
   page,
   plants,
   gates,
+  permissions = NO_PERMISSIONS,
 }: {
   readonly page: InboxPage;
   readonly plants: readonly Plant[];
   readonly gates: readonly ZoneGate[];
+  /** Claves de la sesión: cada fila ofrece el acceso de su estado que la sesión abre (VIG-359). */
+  readonly permissions?: ReadonlySet<string>;
 }) {
   const zoneName = (id: string) =>
     plants.flatMap((p) => p.zones).find((z) => z.zone_id === id)?.name ?? id;
@@ -129,6 +135,7 @@ export function FindingsView({
                     {text(`scr08.inbox.${key}`)}
                   </th>
                 ))}
+                <th scope="col">{text('finding_journey.navigation')}</th>
               </tr>
             </thead>
             <tbody>
@@ -146,7 +153,7 @@ export function FindingsView({
                 if (display.state !== 'productive' && !revoked)
                   return (
                     <tr key={finding.finding_state_id}>
-                      <td colSpan={11}>
+                      <td colSpan={12}>
                         {zoneName(finding.zone_id)}{' '}
                         <GateStateChip gate={display} timeZone={timeZone} />
                       </td>
@@ -184,6 +191,13 @@ export function FindingsView({
                       ) : (
                         <FindingTime instant={finding.due_at} timeZone={timeZone} />
                       )}
+                    </td>
+                    <td>
+                      <FindingActions
+                        findingId={finding.finding_state_id}
+                        state={finding.lifecycle_state}
+                        permissions={permissions}
+                      />
                     </td>
                   </tr>
                 );

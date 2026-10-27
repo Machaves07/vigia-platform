@@ -6,6 +6,7 @@ import type { components } from '@/client/schema';
 import { validateDetectionForReview, type DetectionForReview } from '@/contracts';
 import { defineScreenPort, isPortError } from './base';
 import { currentTransport } from './base/http';
+import { reviewReasonCategories } from './shared/reviewResolution';
 import type { Notice } from '@/components/NoticeStack/notice';
 
 export type QueueItem = components['schemas']['ReviewQueueItemOut'];
@@ -60,13 +61,7 @@ export const REASON_LIMITS = { minLength: 20, maxLength: 1000 };
 export const OUTCOMES = Object.keys(loop.review_resolution_outcome);
 
 export function reasonCategories(outcome: string) {
-  const lists =
-    outcome === 'review_confirmed'
-      ? (['reason_category_confirmed'] as const)
-      : outcome === 'review_discarded'
-        ? (['reason_category_authorized', 'reason_category_false_positive'] as const)
-        : [];
-  return lists.flatMap((list) => Object.keys(loop[list]).map((value) => ({ list, value })));
+  return reviewReasonCategories(outcome);
 }
 
 export function queueClock() {

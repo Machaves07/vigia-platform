@@ -32,6 +32,8 @@ export default {
         canResolve: false,
         onResolve: () => undefined,
         onEvidence: () => undefined,
+        // La primera detección, señalada como desde el detalle del hallazgo (VIG-359).
+        target: (data as unknown as QueuePage).items[0]?.detection_id ?? null,
       }),
     allowedFields: [
       'items',

@@ -29,7 +29,8 @@ El detalle y el historial (SUP-U05-02 y 04; LC-LAZ-06; ``loop.application.detail
   con ``loop_gate_state_unavailable``** y ``Retry-After``: el cuerpo es solo el error, ningún
   campo del hallazgo (fallo cerrado, BR-LAZ-12);
 - ``GET /loop/findings/{finding_state_id}/classifications``: todas las clasificaciones del sujeto
-  en orden, con motivo, categoría, autor y fecha.
+  en orden, con motivo, categoría, autor y fecha; si el sujeto es una detección ya resuelta, también
+  su resolución de la cola (``review_resolutions``), aparte porque no es una clasificación.
 
 Inexistente, de otra organización o fuera del alcance: ``not_found``. En zona unipersonal toda
 marca es el inicio de su ventana (``time_aggregated``).
@@ -446,11 +447,25 @@ class FindingDetailOut(_Strict):
     notices: tuple[DetailNoticeOut, ...]
 
 
+class ReviewResolutionItemOut(_Strict):
+    """La resolución de la detección en la cola (T05 o T06): no es una clasificación."""
+
+    resolution_id: uuid.UUID
+    record_id: uuid.UUID
+    outcome: str
+    reason_category: str
+    reason_text: str
+    resolved_at: str
+    resolved_by: ClassifiedByOut
+
+
 class ClassificationHistoryOut(_Strict):
     finding_state_id: uuid.UUID
     time_aggregated: bool
     aggregation_window_minutes: int | None
     classifications: tuple[ClassificationItemOut, ...]
+    review_resolutions: tuple[ReviewResolutionItemOut, ...]
+    """La resolución de la cola si el sujeto es una detección ya resuelta; vacía si no."""
 
 
 def _classification_view(item: ClassificationView) -> ClassificationItemOut:
@@ -640,6 +655,22 @@ def history_view(history: ClassificationHistory) -> ClassificationHistoryOut:
         time_aggregated=history.time_aggregated,
         aggregation_window_minutes=history.aggregation_window_minutes,
         classifications=tuple(_classification_view(c) for c in history.classifications),
+        review_resolutions=tuple(
+            ReviewResolutionItemOut(
+                resolution_id=item.resolution_id,
+                record_id=item.record_id,
+                outcome=item.outcome,
+                reason_category=item.reason_category,
+                reason_text=item.reason_text,
+                resolved_at=format_timestamp(item.resolved_at),
+                resolved_by=ClassifiedByOut(
+                    user_id=item.resolved_by.user_id,
+                    display_name=item.resolved_by.display_name,
+                    role_in_use=item.resolved_by.role_in_use,
+                ),
+            )
+            for item in history.review_resolutions
+        ),
     )
 
 
