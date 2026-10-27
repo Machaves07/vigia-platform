@@ -111,9 +111,7 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
       expect(entry?.textContent).not.toContain('Cuenta como vencida');
       expect(/vencida/iu.test(entry?.textContent ?? '')).toBe(overdue);
       expect(
-        entry?.textContent.includes(
-          'No cuenta para vencimientos mientras el lazo está suspendido',
-        ),
+        entry?.textContent.includes('No cuenta para vencimientos mientras el lazo está suspendido'),
       ).toBe(!counts);
     },
   );
