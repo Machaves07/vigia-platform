@@ -40,7 +40,7 @@
   "scr09.loop.action_state": "Estado de la acción",
   "scr09.loop.assigned_at": "Asignada",
   "scr09.loop.due_at": "Plazo",
-  "scr09.loop.counts_as_overdue": "Cuenta como vencida",
+  "scr09.loop.overdue_count_suspended": "No cuenta para vencimientos mientras el lazo está suspendido",
   "scr09.loop.action_state.assigned": "Asignada",
   "scr09.loop.action_state.overdue": "Vencida",
   "scr09.loop.action_state.closed": "Cerrada",
