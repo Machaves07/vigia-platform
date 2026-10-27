@@ -8,6 +8,8 @@
 - Cada columna efectiva del archivo es exactamente lo que concede ``route_role`` en su contexto.
 - Cada vector del corpus, reevaluado con ``FreeTextPolicy``, da su ``verdict`` (por igualdad) y
   hay al menos un vector rechazado por cada regla de la política.
+- La sección ``lifecycle`` es exactamente ``TRANSITIONS`` y una transición cambiada sin regenerar
+  se nombra en la diferencia (VIG-359).
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ from tests.factories import session_hash, uuid7
 from vigia_platform.identity.authz.authorize import route_role
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
 from vigia_platform.ledger.free_text import FreeTextRejection, apply_base_policy
+from vigia_platform.loop.domain.enums import FindingLifecycleState
+from vigia_platform.loop.domain.lifecycle import TRANSITIONS, Transition
 from vigia_platform.shared.api import export_u05_fixtures
 from vigia_platform.shared.api.export_u05_fixtures import (
     ACCEPTED,
@@ -37,6 +41,7 @@ from vigia_platform.shared.api.export_u05_fixtures import (
     differences,
     evaluate,
     free_text_routes,
+    lifecycle_section,
     main,
     permission_differences,
     permissions_section,
@@ -98,7 +103,44 @@ def test_the_file_is_ascii_with_its_header(committed: dict[str, Any]) -> None:
     assert committed["format"] == FORMAT
     assert committed["schema_version"] == SCHEMA_VERSION
     assert set(committed["generated"]) == {"by", "check", "notice"}
-    assert list(committed) == ["format", "schema_version", "generated", "permissions", "free_text"]
+    assert list(committed) == [
+        "format",
+        "schema_version",
+        "generated",
+        "permissions",
+        "free_text",
+        "lifecycle",
+    ]
+
+
+# --- Ciclo de vida (VIG-359) --------------------------------------------------------------------
+
+
+def test_the_lifecycle_is_exactly_the_transition_table(committed: dict[str, Any]) -> None:
+    lifecycle = committed["lifecycle"]
+    assert lifecycle["states"] == [state.value for state in FindingLifecycleState]
+    assert [row["id"] for row in lifecycle["transitions"]] == list(TRANSITIONS)
+    for row in lifecycle["transitions"]:
+        transition = TRANSITIONS[row["id"]]
+        assert set(row["from"]) == {o.value for o in transition.origins if o is not None}
+        assert row["to"] == transition.destination.value
+        assert row["permissions"] == [key.value for key in transition.permission_keys]
+        assert row["records"] == list(transition.record_types)
+
+
+def test_a_changed_transition_without_regenerating_is_named(committed: dict[str, Any]) -> None:
+    changed = dict(TRANSITIONS)
+    t03 = changed["T03"]
+    changed["T03"] = Transition(
+        t03.transition_id,
+        t03.origins | {FindingLifecycleState.IN_REVIEW},
+        t03.destination,
+        t03.permission_keys,
+        t03.record_types,
+        t03.events,
+    )
+    current = {**committed, "lifecycle": lifecycle_section(changed)}
+    assert ("field_differs", "lifecycle") in differences(committed, current)
 
 
 def test_writing_then_checking_round_trips(tmp_path: Path) -> None:

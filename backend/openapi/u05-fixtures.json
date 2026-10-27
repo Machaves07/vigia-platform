@@ -1,10 +1,10 @@
 {
   "format": "vigia-platform/u05-fixtures",
-  "schema_version": 1,
+  "schema_version": 2,
   "generated": {
     "by": "uv run python -m vigia_platform.shared.api.export_u05_fixtures",
     "check": "uv run python -m vigia_platform.shared.api.export_u05_fixtures --check",
-    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16."
+    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del ciclo de vida del hallazgo que aplica el servidor."
   },
   "permissions": {
     "source": "identity/authz/matrix.py (MATRIX) evaluada como identity/authz/authorize.py",
@@ -4265,6 +4265,295 @@
         "text": "",
         "verdict": "too_short",
         "normalized": null
+      }
+    ]
+  },
+  "lifecycle": {
+    "states": [
+      "received",
+      "in_review",
+      "discarded",
+      "open",
+      "action_assigned",
+      "overdue",
+      "closed",
+      "unclosable",
+      "suspended_by_reclassification"
+    ],
+    "transitions": [
+      {
+        "id": "T01",
+        "from": [],
+        "to": "received",
+        "permissions": [],
+        "records": []
+      },
+      {
+        "id": "T02",
+        "from": [],
+        "to": "in_review",
+        "permissions": [],
+        "records": []
+      },
+      {
+        "id": "T03",
+        "from": [
+          "received"
+        ],
+        "to": "open",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T04",
+        "from": [
+          "received"
+        ],
+        "to": "discarded",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T05",
+        "from": [
+          "in_review"
+        ],
+        "to": "open",
+        "permissions": [
+          "review_queue.resolve"
+        ],
+        "records": [
+          "review_resolution"
+        ]
+      },
+      {
+        "id": "T06",
+        "from": [
+          "in_review"
+        ],
+        "to": "discarded",
+        "permissions": [
+          "review_queue.resolve"
+        ],
+        "records": [
+          "review_resolution"
+        ]
+      },
+      {
+        "id": "T07",
+        "from": [
+          "open"
+        ],
+        "to": "action_assigned",
+        "permissions": [
+          "actions.manage"
+        ],
+        "records": [
+          "action_assigned"
+        ]
+      },
+      {
+        "id": "T08",
+        "from": [
+          "action_assigned"
+        ],
+        "to": "overdue",
+        "permissions": [],
+        "records": [
+          "action_overdue"
+        ]
+      },
+      {
+        "id": "T09",
+        "from": [
+          "action_assigned",
+          "overdue"
+        ],
+        "to": "closed",
+        "permissions": [
+          "findings.close_and_sign"
+        ],
+        "records": [
+          "closure"
+        ]
+      },
+      {
+        "id": "T10",
+        "from": [
+          "action_assigned",
+          "open",
+          "overdue"
+        ],
+        "to": "unclosable",
+        "permissions": [
+          "findings.close_and_sign"
+        ],
+        "records": [
+          "unclosable_state_declared"
+        ]
+      },
+      {
+        "id": "T11",
+        "from": [
+          "unclosable"
+        ],
+        "to": "same",
+        "permissions": [
+          "findings.close_and_sign"
+        ],
+        "records": [
+          "unclosable_review"
+        ]
+      },
+      {
+        "id": "T12",
+        "from": [
+          "unclosable"
+        ],
+        "to": "action_assigned",
+        "permissions": [
+          "findings.close_and_sign",
+          "actions.manage"
+        ],
+        "records": [
+          "unclosable_review",
+          "action_assigned"
+        ]
+      },
+      {
+        "id": "T13",
+        "from": [
+          "closed"
+        ],
+        "to": "action_assigned",
+        "permissions": [
+          "actions.manage"
+        ],
+        "records": [
+          "reopening",
+          "action_assigned"
+        ]
+      },
+      {
+        "id": "T14",
+        "from": [
+          "unclosable"
+        ],
+        "to": "action_assigned",
+        "permissions": [
+          "actions.manage"
+        ],
+        "records": [
+          "reopening",
+          "action_assigned"
+        ]
+      },
+      {
+        "id": "T15",
+        "from": [
+          "action_assigned",
+          "open",
+          "overdue"
+        ],
+        "to": "suspended_by_reclassification",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T16",
+        "from": [
+          "suspended_by_reclassification"
+        ],
+        "to": "previous",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T17",
+        "from": [
+          "discarded"
+        ],
+        "to": "open",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T18",
+        "from": [
+          "discarded"
+        ],
+        "to": "same",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T19",
+        "from": [
+          "closed"
+        ],
+        "to": "same",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T20",
+        "from": [
+          "unclosable"
+        ],
+        "to": "same",
+        "permissions": [
+          "findings.classify"
+        ],
+        "records": [
+          "classification"
+        ]
+      },
+      {
+        "id": "T21",
+        "from": [
+          "action_assigned",
+          "closed",
+          "discarded",
+          "in_review",
+          "open",
+          "overdue",
+          "received",
+          "suspended_by_reclassification",
+          "unclosable"
+        ],
+        "to": "same",
+        "permissions": [],
+        "records": [
+          "late_segment_attached"
+        ]
       }
     ]
   }
