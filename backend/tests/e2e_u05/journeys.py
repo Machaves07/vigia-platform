@@ -152,10 +152,13 @@ def prepare_journeys(
         assert result is not None
 
     target.api.call(seal_monthly())
+    # Fuera de la última zona: el recorrido del administrador cambia su catálogo antes del
+    # coordinador de cada motor y la deja con la regresión de walk-test pendiente, así que la
+    # bandeja muestra sus filas con la compuerta y sin enlace (VIG-361).
     findings = sorted(
         str(row["finding_state_id"])
         for row in _projection(target, fleet.organization_id)
-        if row["subject_kind"] == "finding"
+        if row["subject_kind"] == "finding" and row["zone_id"] != fleet.zone_ids[-1]
     )
     assert len(findings) >= 6, "Se necesitan dos hallazgos distintos por motor"
     return {
