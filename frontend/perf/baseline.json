@@ -1,8 +1,8 @@
 {
   "$comment": "Línea base de Lighthouse (NFR-APP-02, R-APP-3). La genera perf/calibrate.mjs con tres corridas; no se edita a mano.",
-  "calibrated_at": "2026-10-26T10:13:07.824Z",
-  "machine": "Intel Core i7-12700H (20 hilos), WSL2 6.18 con 9 GB, Chrome for Testing 156 (Playwright 1.64) con interfaz gráfica (WSLg), mundo de U-05 en Docker local",
-  "load": "carga media de 1 min 0,92 al empezar y 2,17 al terminar; WSL compartido con otros agentes de OpenSymphony (sin contar cuántos activos); throttling simulado 10 Mbit/s, RTT 40 ms, CPU x4",
+  "calibrated_at": "2026-10-27T02:33:40.493Z",
+  "machine": "ubuntu-24.04 de GitHub Actions (runner alojado estándar, imagen 20261012.334.1), Chrome for Testing 156.0.8078.4 (Playwright 1.64, chromium-1248) con interfaz gráfica bajo Xvfb, mundo de U-05 con el Docker del runner",
+  "load": "trabajo frontend-nightly del run 40430827011 (head 33e787d), justo después de Playwright en el mismo runner; throttling simulado 10 Mbit/s, RTT 40 ms, CPU x4",
   "url": "/login",
   "budget_ms": {
     "first-contentful-paint": 2000,
@@ -11,27 +11,27 @@
   "regression_tolerance": 0.2,
   "runs": [
     {
-      "fetched_at": "2026-10-26T10:12:40.958Z",
-      "first-contentful-paint": 673,
-      "interactive": 1493
+      "fetched_at": "2026-10-27T02:33:15.753Z",
+      "first-contentful-paint": 735,
+      "interactive": 1389
     },
     {
-      "fetched_at": "2026-10-26T10:12:55.207Z",
-      "first-contentful-paint": 598,
-      "interactive": 1111
+      "fetched_at": "2026-10-27T02:33:28.443Z",
+      "first-contentful-paint": 763,
+      "interactive": 1472
     },
     {
-      "fetched_at": "2026-10-26T10:13:07.824Z",
-      "first-contentful-paint": 597,
-      "interactive": 1065
+      "fetched_at": "2026-10-27T02:33:40.493Z",
+      "first-contentful-paint": 740,
+      "interactive": 1388
     }
   ],
   "median_ms": {
-    "first-contentful-paint": 598,
-    "interactive": 1111
+    "first-contentful-paint": 740,
+    "interactive": 1389
   },
   "threshold_ms": {
-    "first-contentful-paint": 717,
-    "interactive": 1333
+    "first-contentful-paint": 888,
+    "interactive": 1666
   }
 }

@@ -179,6 +179,11 @@ reducido se guarda como prueba de regresión en `tests/regressions/` (PBT-10).
   de navegadores. En WSL, `CHROME_PATH` debe apuntar al Chromium de Playwright (si no, se elige el
   Chrome de Windows). Recalibrar: tres corridas y
   `node perf/calibrate.mjs --write --machine "<equipo>" --load "<carga>"`.
+- Máquina de referencia (A-72): `perf/baseline.json` se calibra en el runner `ubuntu-24.04` de
+  GitHub, donde corre el nightly, con las tres corridas que sube el artefacto
+  `informe-frontend-lighthouse` (copiadas a `.lighthouseci/`). Solo se recalibra si cambia la
+  máquina o la imagen del runner. La base del PC del dueño se conserva en
+  `perf/baseline.owner-pc.json` como referencia de ese equipo; en local, compara con esa.
 
 ## Canalización
 
