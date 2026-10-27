@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 import { authenticatedTest as test, expect } from './fixtures';
-import { confirmFinding, logout, nextSteps, openInbox } from './journeys';
+import { confirmFinding, logout, nextSteps, openFromInbox, openInbox } from './journeys';
 
 test.use({ role: 'coordinator_sst', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
@@ -60,7 +60,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     page.on('request', (request) => {
       if (/\/evidence\/[^/]+\/read-url$/.test(request.url())) grants += 1;
     });
-    await page.locator(`a[href="/findings/${selected.closure}"]`).click();
+    await openFromInbox(page, `/findings/${selected.closure}`);
     await expect(page.getByRole('heading', { name: 'Detalle del hallazgo' })).toBeVisible();
     const play = page.getByRole('button', { name: 'Reproducir clip', exact: true }).first();
     await expect(play).toBeVisible();
@@ -98,7 +98,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('clasificación conservada con motivo y rol efectivo', async () => {
     await openInbox(page);
-    await page.locator(`a[href="/findings/${selected.closure}"]`).click();
+    await openFromInbox(page, `/findings/${selected.closure}`);
     const history = page.getByRole('region', { name: 'Historial completo de clasificaciones' });
     await expect(history).toContainText('Coexistencia real observada junto al acceso');
     await expect(history).toContainText('coordinador SST');
@@ -163,7 +163,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
   await test.step('acción, PNG declarado sin personas y cierre firmado', async () => {
     // De la bandeja al lazo con el acceso de la fila (VIG-359).
     await openInbox(page);
-    await page.locator(`a[href="/findings/${selected.closure}/loop"]`).click();
+    await openFromInbox(page, `/findings/${selected.closure}/loop`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
     await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
     const action = page.getByRole('form', { name: 'Comprometer una acción sobre la zona' });
@@ -227,7 +227,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
   await test.step('incerrable con política real y fecha de revisión', async () => {
     // De la bandeja a clasificar y al lazo con los accesos de la fila y de la pantalla.
     await openInbox(page);
-    await page.locator(`a[href="/findings/${selected.unclosable}/classify"]`).click();
+    await openFromInbox(page, `/findings/${selected.unclosable}/classify`);
     await confirmFinding(
       page,
       selected.unclosable,
