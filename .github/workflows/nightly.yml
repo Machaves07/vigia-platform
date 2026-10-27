@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -134,7 +134,7 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" --durations=15 --splits=5 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_nightly --store-durations --clean-durations tests/properties
       - name: tiempos medidos del grupo
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: tiempos-propiedades-${{ matrix.grupo }}
           path: backend/.test_durations_nightly
@@ -157,7 +157,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -196,7 +196,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -219,7 +219,7 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration --durations=15 --splits=5 --group="$GRUPO" --splitting-algorithm=least_duration --durations-path=.test_durations_nightly --store-durations --clean-durations tests/properties
       - name: tiempos medidos del grupo
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: tiempos-integracion-${{ matrix.grupo }}
           path: backend/.test_durations_nightly
@@ -238,7 +238,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -267,7 +267,7 @@ jobs:
         run: cp tests/benchmarks/baseline.json "$RUNNER_TEMP/informes/baseline.json"
       - name: informe de los bancos
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-bancos
           path: ${{ runner.temp }}/informes/
@@ -285,7 +285,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -313,7 +313,7 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "integration and nightly" tests/volumetry/test_laz_volumetry.py
       - name: informe de volumetría
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-volumetria
           path: ${{ runner.temp }}/informes/
@@ -331,7 +331,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -354,7 +354,7 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly tests/resilience
       - name: informes de resiliencia
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-resiliencia
           path: ${{ runner.temp }}/informes/
@@ -379,7 +379,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -404,7 +404,7 @@ jobs:
           uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m integration tests/conformance
       - name: informe de conformidad
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-conformidad
           path: ${{ runner.temp }}/informes/
@@ -429,7 +429,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -456,7 +456,7 @@ jobs:
         run: uv run --frozen pytest -q -p no:cacheprovider --hypothesis-profile=nightly -m "not integration" tests/load
       - name: informe de la carga
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-carga
           path: ${{ runner.temp }}/informes/
@@ -486,7 +486,7 @@ jobs:
         with:
           node-version: 22.23.4
           package-manager-cache: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: false
       - name: clave de despliegue de vigia-contracts (solo lectura)
@@ -520,7 +520,7 @@ jobs:
         run: npm run test:nightly -- tests/resilience
       - name: informe FS-APP (antes de Playwright, que vacía test-results/)
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-frontend-fs-app
           path: frontend/test-results/fs-app-*.json
@@ -538,7 +538,7 @@ jobs:
         run: xvfb-run -a npm run e2e
       - name: trazas de Playwright e informes FS-APP del navegador
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: frontend-playwright
           path: frontend/test-results/
@@ -552,7 +552,7 @@ jobs:
           xvfb-run -a npm run lighthouse
       - name: informe de Lighthouse
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-frontend-lighthouse
           path: frontend/.lighthouseci/
@@ -567,7 +567,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           pattern: informe-*
           path: informe
@@ -588,7 +588,7 @@ jobs:
           echo "$RESULTADOS" | jq -e 'all(.[]; .result == "success")' > /dev/null
       - name: informe archivado 90 días
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: informe-nocturno
           path: informe/
