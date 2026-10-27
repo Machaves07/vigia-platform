@@ -299,14 +299,44 @@ export function personFieldsDeclared(
 }
 
 /**
+ * Texto de la vista pintada con `filled` (los mismos datos con valores cambiados por un relleno),
+ * para el contraste de `forbiddenRendered`. Se llama después de leer `root`: quien lo pasa
+ * desmonta antes el árbol original, porque los dos se pintan en `document.body`.
+ */
+type Contrast = (filled: unknown) => readonly Haystack[];
+
+/**
  * Infracciones de PR-APP-07 en el árbol `root` pintado con `data`: valores de campos fuera de
  * `allowedFields` (en cualquier tramo de su ruta) y «personas» con número. Cada mensaje nombra
  * la vista, la pantalla, el campo y dónde apareció.
+ *
+ * El texto de la vista se compara entero, unido entre nodos, y un texto fijo puede contener por
+ * azar un valor prohibido plegado (semilla 1267829153: `coverage_summary[1].state` «e|_constru»
+ * dentro de «…no se reconstruyen en la pantalla» de RV-16). Con `contrast`, un valor prohibido
+ * que aparece se contrasta como en PR-APP-10 (`organizationLeaks`): se vuelve a pintar la vista
+ * con ese valor, y todo valor prohibido que lo contenga, cambiados por un relleno (`withFiller`),
+ * y es fuga si, en alguna fuente, aparece más veces que en el contraste. Sin `contrast` (un árbol
+ * fijo que no se puede volver a pintar) toda aparición es fuga.
  */
 export function forbiddenRendered(
   registration: Pick<ViewRegistration, 'view' | 'screen' | 'allowedFields'>,
   data: unknown,
   root: HTMLElement,
+  contrast?: Contrast,
+): string[] {
+  const label = `${registration.view} (${registration.screen})`;
+  const rendered = haystacks(root);
+  const counters = personCounters(root).map(
+    (source) => `${label}: «personas» seguido de número en ${source}.`,
+  );
+  return [...forbiddenValues(registration, data, rendered, contrast), ...counters];
+}
+
+function forbiddenValues(
+  registration: Pick<ViewRegistration, 'view' | 'screen' | 'allowedFields'>,
+  data: unknown,
+  rendered: readonly Haystack[],
+  contrast: Contrast | undefined,
 ): string[] {
   const label = `${registration.view} (${registration.screen})`;
   const allowed = new Set(registration.allowedFields);
@@ -314,22 +344,34 @@ export function forbiddenRendered(
   const allowedValues = all
     .filter((leaf) => leaf.keys.every((key) => allowed.has(key)))
     .flatMap(shownForms);
-  const rendered = haystacks(root);
+  const forbidden = all.filter((leaf) => !leaf.keys.every((key) => allowed.has(key)));
   const violations: string[] = [];
-  for (const leaf of all) {
-    if (leaf.keys.every((key) => allowed.has(key))) continue;
+  for (const leaf of forbidden) {
     const folded = fold(leaf.value);
     if (folded.length < MIN_FOLDED_LENGTH) continue;
     if (allowedValues.some((value) => value.includes(folded))) continue;
-    const where = rendered.find((haystack) => haystack.text.includes(folded));
+    if (!rendered.some((haystack) => haystack.text.includes(folded))) continue;
+    const before =
+      contrast === undefined
+        ? undefined
+        : contrast(
+            forbidden
+              .filter((item) => fold(item.value).includes(folded))
+              .reduce<unknown>(
+                (current, item) => withFiller(current, item, fold(item.value)),
+                data,
+              ),
+          );
+    const where = rendered.find((haystack, index) => {
+      const other = before?.[index];
+      const count = other?.source === haystack.source ? occurrences(other.text, folded) : 0;
+      return occurrences(haystack.text, folded) > count;
+    });
     if (where !== undefined) {
       violations.push(
         `${label}: campo «${leaf.path}» fuera de allowedFields aparece en ${where.source}.`,
       );
     }
-  }
-  for (const source of personCounters(root)) {
-    violations.push(`${label}: «personas» seguido de número en ${source}.`);
   }
   return violations;
 }
@@ -469,15 +511,35 @@ export function assertNoPersonData(registration: ViewRegistration): void {
     .noShrink();
   fc.assert(
     fc.property(sample, ({ data, context }) => {
-      const view = renderView(registration, data, context);
-      try {
-        const violations = forbiddenRendered(registration, data, view.root);
-        if (violations.length > 0) throw new Error(violations.join('\n'));
-      } finally {
-        view.unmount();
-      }
+      const violations = personDataLeaks(registration, data, context);
+      if (violations.length > 0) throw new Error(violations.join('\n'));
     }),
   );
+}
+
+/**
+ * Infracciones de PR-APP-07 de `registration` pintada con `data` en `context`, con el contraste
+ * de `forbiddenRendered`: el árbol original se desmonta antes de pintar cada contraste.
+ */
+export function personDataLeaks(
+  registration: ViewRegistration,
+  data: Record<string, unknown>,
+  context: Session,
+): string[] {
+  const view = renderView(registration, data, context);
+  let mounted = true;
+  const release = () => {
+    if (mounted) view.unmount();
+    mounted = false;
+  };
+  try {
+    return forbiddenRendered(registration, data, view.root, (filled) => {
+      release();
+      return renderedHaystacks(registration, filled as Record<string, unknown>, context).rendered;
+    });
+  } finally {
+    release();
+  }
 }
 
 // --- PR-APP-10 ------------------------------------------------------------------------------
