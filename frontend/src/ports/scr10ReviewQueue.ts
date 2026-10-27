@@ -123,6 +123,7 @@ export interface DetectionEvidence {
 }
 
 /** Lectura auditada acotada al recibo de la fila. No usa detection_id como record_id.
+ * El tipo persistido es el evento de recepción, no el nombre del modelo del contrato.
  * El servidor aplica el alcance; aquí además se exige identidad exacta antes de presentar datos.
  */
 export async function readDetection(
@@ -136,7 +137,7 @@ export async function readDetection(
     const page = await reviewQueuePort.records.read(
       {
         query: {
-          record_type: ['detection_for_review'],
+          record_type: ['detection_for_review_received'],
           plant_id: item.plant_id,
           zone_id: item.zone_id,
           received_from: item.received_at,

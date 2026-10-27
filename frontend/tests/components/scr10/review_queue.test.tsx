@@ -470,78 +470,109 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
     }, WAIT);
   });
 
-  it('evidencia solo por apertura explícita, señales etiquetadas y URL solo al reproducir', async () => {
-    queueServer();
-    let records = 0;
-    let urls = 0;
-    const { principal, cache } = await mount(['findings.read', 'evidence.read']);
-    await loaded();
-    const detection = required(fc.sample(detectionForReview(), 1)[0]);
-    const data: DetectionForReview = {
-      ...detection,
-      detection_id: item().detection_id,
-      organization_id: principal.organization.organization_id,
-      plant_id: PLANT,
-      zone_id: ZONE,
-      signals: [
+  it.each(['compartida', 'unipersonal'])(
+    'evidencia de zona %s solo por apertura explícita, señales etiquetadas y URL solo al reproducir',
+    async (zoneKind) => {
+      queueServer([
         {
-          signal_id: item(7).detection_id,
-          role: 'energy',
-          value: 'asserted',
-          valid: true,
-          read_at: INSTANT,
+          ...item(),
+          occurred_at:
+            zoneKind === 'unipersonal' ? '2026-01-01T11:00:00.000Z' : '2026-01-01T11:37:12.345Z',
         },
-      ],
-    };
-    const clipId = required(required(data.cameras[0]).clips[0]).clip_id;
-    server.use(
-      http.get('http://localhost/ledger/records', ({ request }) => {
-        records++;
-        expect(Object.fromEntries(new URL(request.url).searchParams)).toEqual({
-          record_type: 'detection_for_review',
-          plant_id: PLANT,
-          zone_id: ZONE,
-          received_from: INSTANT,
-          received_before: '2026-01-01T12:00:00.001Z',
-          page_size: '50',
-        });
-        return HttpResponse.json({
-          items: [
-            {
-              content: data,
-              evidences: [
-                { evidence_id: item(6).detection_id, clip_id: clipId },
-                { evidence_id: item(5).detection_id, clip_id: item(99).detection_id },
-              ],
-            },
-          ],
-          next_cursor: null,
-        });
-      }),
-      http.post('http://localhost/evidence/:id/read-url', () => {
-        urls++;
-        return HttpResponse.json({
-          url: 'http://localhost/synthetic.mp4',
-          expires_at: '2026-01-01T12:05:00.000Z',
-        });
-      }),
-    );
-    await waitFor(() => {
-      expect(cache.client.isFetching()).toBe(0);
-    }, WAIT);
-    expect(records).toBe(0);
-    expect(urls).toBe(0);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: text('scr10.evidence') }));
-    await screen.findByRole('list', { name: text('scr10.signals') }, WAIT);
-    expect(records).toBe(1);
-    expect(urls).toBe(0);
-    expect(screen.getAllByRole('figure', { name: text('media.clip.label') })).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: text('media.clip.play') }));
-    await waitFor(() => {
-      expect(urls).toBe(1);
-    }, WAIT);
-  });
+      ]);
+      const records: URL[] = [];
+      let urls = 0;
+      const { principal, cache } = await mount(['findings.read', 'evidence.read']);
+      await loaded();
+      const detection = required(fc.sample(detectionForReview(), 1)[0]);
+      const data: DetectionForReview = {
+        ...detection,
+        node_time: {
+          ...detection.node_time,
+          started_at: '2026-01-01T11:37:12.345Z',
+          ended_at: '2026-01-01T11:37:14.345Z',
+        },
+        detection_id: item().detection_id,
+        organization_id: principal.organization.organization_id,
+        plant_id: PLANT,
+        zone_id: ZONE,
+        signals: [
+          {
+            signal_id: item(7).detection_id,
+            role: 'energy',
+            value: 'asserted',
+            valid: true,
+            read_at: INSTANT,
+          },
+        ],
+      };
+      const clipId = required(required(data.cameras[0]).clips[0]).clip_id;
+      server.use(
+        http.get('http://localhost/ledger/records', ({ request }) => {
+          const url = new URL(request.url);
+          records.push(url);
+          // El expediente persiste el evento de recepción, no el nombre del modelo del contrato.
+          if (url.searchParams.get('record_type') !== 'detection_for_review_received')
+            return HttpResponse.json({ items: [], next_cursor: null });
+          return HttpResponse.json({
+            items: [
+              {
+                content: data,
+                evidences: [
+                  { evidence_id: item(6).detection_id, clip_id: clipId },
+                  { evidence_id: item(5).detection_id, clip_id: item(99).detection_id },
+                ],
+              },
+            ],
+            next_cursor: null,
+          });
+        }),
+        http.post('http://localhost/evidence/:id/read-url', () => {
+          urls++;
+          return HttpResponse.json({
+            url: 'http://localhost/synthetic.mp4',
+            expires_at: '2026-01-01T12:05:00.000Z',
+          });
+        }),
+      );
+      await waitFor(() => {
+        expect(cache.client.isFetching()).toBe(0);
+      }, WAIT);
+      expect(records).toHaveLength(0);
+      expect(urls).toBe(0);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: text('scr10.evidence') }));
+      await screen.findByRole('list', { name: text('scr10.signals') }, WAIT);
+      expect(records).toHaveLength(1);
+      expect(Object.fromEntries(required(records[0]).searchParams)).toEqual({
+        record_type: 'detection_for_review_received',
+        plant_id: PLANT,
+        zone_id: ZONE,
+        received_from: INSTANT,
+        received_before: '2026-01-01T12:00:00.001Z',
+        page_size: '50',
+      });
+      expect(urls).toBe(0);
+      expect(screen.getByRole('list', { name: text('scr10.signals') }).textContent).toBe(
+        `${label('signal_role', 'energy')}: ${label('signal_value', 'asserted')} · ${text('scr10.valid')}`,
+      );
+      if (zoneKind === 'unipersonal') {
+        // La cola no presenta el instante exacto del hecho ni el de lectura de señales (RV-14).
+        expect(screen.queryByText(data.node_time.started_at)).toBeNull();
+        expect(document.querySelector(`time[datetime="${data.node_time.started_at}"]`)).toBeNull();
+        expect(
+          screen
+            .getByRole('region', { name: text('scr10.evidence_title') })
+            .querySelectorAll('time'),
+        ).toHaveLength(0);
+      }
+      expect(screen.getAllByRole('figure', { name: text('media.clip.label') })).toHaveLength(1);
+      await user.click(screen.getByRole('button', { name: text('media.clip.play') }));
+      await waitFor(() => {
+        expect(urls).toBe(1);
+      }, WAIT);
+    },
+  );
 
   it.each(['organization_id', 'plant_id', 'zone_id', 'detection_id'] as const)(
     'rechaza evidencia con %s ajeno',
