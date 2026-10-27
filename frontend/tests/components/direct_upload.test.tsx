@@ -564,6 +564,11 @@ describe('lectura de adjuntos de cierre (SUP-U05-10, U05-H-12)', () => {
     render(<AttachmentReadLink attachmentId={ATTACHMENT_ID} clock={clock} />);
     fireEvent.click(screen.getByRole('button', { name: t('media.attachment.prepare') }));
     await screen.findByRole('link', {}, WAIT);
+    // El enlace llega al DOM en el compromiso; el vencimiento lo programa un `useEffect` que React
+    // ejecuta después. Bajo carga, avanzar el reloj antes deja el enlace vivo (VIG-362).
+    await waitFor(() => {
+      expect(clock.pendingCount).toBe(1);
+    }, WAIT);
     act(() => {
       clock.advance(15 * 60_000 - 1);
     });
