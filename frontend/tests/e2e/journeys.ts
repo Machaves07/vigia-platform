@@ -185,14 +185,53 @@ async function openMenu(page: Page, name: string): Promise<void> {
     .click();
 }
 
+/**
+ * Espera a que `target` exista y ninguna sección de la pantalla cargue ni refresque (el botón de
+ * actualizar está deshabilitado mientras lee). Mientras llegan las lecturas, el panel y la bandeja
+ * cambian de alto y un enlace se desplaza miles de píxeles (medido en Firefox): un clic en ese
+ * intervalo no navegaba (VIG-361).
+ */
+async function settled(page: Page, target: Locator): Promise<void> {
+  const loading = page
+    .getByRole('main')
+    .locator('[aria-busy="true"], [data-policy] button:disabled');
+  await expect
+    .poll(async () => (await target.count()) > 0 && (await loading.count()) === 0, {
+      message: 'La pantalla terminó sus lecturas',
+    })
+    .toBe(true);
+}
+
 /** La bandeja completa, desde el menú: «Hallazgos» abre el panel de inicio del coordinador. */
 export async function openInbox(page: Page): Promise<void> {
   await openMenu(page, 'Hallazgos');
-  await page
+  const open = page
     .getByRole('region', { name: 'Hallazgos nuevos', exact: true })
-    .getByRole('link', { name: 'Abrir la bandeja completa' })
-    .click();
+    .getByRole('link', { name: 'Abrir la bandeja completa' });
+  await settled(page, open);
+  await open.click();
   await expect(page.getByRole('heading', { name: 'Bandeja de hallazgos' })).toBeVisible();
+  await settled(page, page.locator('tbody tr'));
+}
+
+/**
+ * Pulsa el acceso `href` de una fila de la bandeja ya abierta. El tamaño del mundo depende de la
+ * semilla de carga (37 y 46 filas medidas) y los hallazgos reservados quedan al final, del más
+ * nuevo al más viejo: si no están en la primera página de 50, se piden más páginas desde la
+ * interfaz, como lo haría la persona (VIG-361).
+ */
+export async function openFromInbox(page: Page, href: string): Promise<void> {
+  const link = page.locator(`a[href="${href}"]`);
+  const more = page.getByRole('button', { name: 'Cargar más hallazgos', exact: true });
+  const rows = page.locator('tbody tr');
+  await settled(page, rows);
+  while ((await link.count()) === 0 && (await more.count()) > 0) {
+    const before = await rows.count();
+    await more.click();
+    await expect.poll(() => rows.count()).toBeGreaterThan(before);
+    await settled(page, rows);
+  }
+  await link.click();
 }
 
 /** Los accesos del estado del hallazgo en su detalle (VIG-359). */
@@ -235,7 +274,14 @@ export async function logout(page: Page) {
     sessionStorage.setItem('e2e-cleanup', 'sintetico');
   });
   await page.getByRole('button', { name: 'Cuenta', exact: true }).click();
+  const sent = page.waitForRequest(
+    (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/auth/logout',
+  );
   await page.getByRole('button', { name: 'Cerrar sesión', exact: true }).click();
+  // La aplicación vuelve a /login cuando `POST /auth/logout` termina, con respuesta o sin ella
+  // (tope de escritura de 30 s). Se espera ese evento: un tope fijo menor dejaba la página en /home
+  // con la limpieza aún pendiente si el mundo compartido tardaba en responder (VIG-361).
+  await (await sent).response();
   await expect(page).toHaveURL(/\/login$/);
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
