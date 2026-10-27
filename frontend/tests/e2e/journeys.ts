@@ -177,9 +177,25 @@ export async function pendingAgreement(page: Page, world: World, zoneId: string)
   return agreement.agreement_id;
 }
 
-/** Las escrituras se hacen siempre desde la interfaz; solo se observa su respuesta real. */
+/** La navegación principal de la aplicación: el recorrido diario no escribe direcciones. */
+export async function openMenu(page: Page, name: string): Promise<void> {
+  await page
+    .getByRole('navigation', { name: 'Navegación principal' })
+    .getByRole('link', { name, exact: true })
+    .click();
+}
+
+/** Los accesos del estado del hallazgo en su detalle (VIG-359). */
+export function nextSteps(page: Page): Locator {
+  return page.getByRole('navigation', { name: 'Siguiente paso con este hallazgo' });
+}
+
+/**
+ * Confirma el hallazgo desde la pantalla de clasificación ya abierta (se llega con clics, VIG-359).
+ * Las escrituras se hacen siempre desde la interfaz; solo se observa su respuesta real.
+ */
 export async function confirmFinding(page: Page, findingId: string, reason: string) {
-  await page.goto(`/findings/${findingId}/classify`);
+  await expect(page).toHaveURL(new RegExp(`/findings/${findingId}/classify$`));
   await page.getByRole('button', { name: 'Consultar el hallazgo y su historial' }).click();
   const form = page.getByRole('form', { name: 'Registrar una clasificación' });
   await form.getByRole('radio', { name: 'confirmado', exact: true }).check();

@@ -75,11 +75,15 @@ export default {
       const history = data as unknown as ClassificationHistory;
       return createElement(History, {
         classifications: history.classifications,
+        reviewResolutions: history.review_resolutions,
         timeAggregated: history.time_aggregated,
         timeZone: TIME_ZONE,
       });
     },
     allowedFields: [
+      'review_resolutions',
+      'resolved_at',
+      'resolved_by',
       'classifications',
       'sequence_in_subject',
       'outcome',

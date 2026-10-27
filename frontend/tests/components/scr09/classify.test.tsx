@@ -11,6 +11,7 @@ import {
   type ClassificationBody,
   type ClassificationItem,
 } from '@/ports/scr09Classify';
+import { RESUMING_STATE as RESUMING } from '@/pages/shared/FindingActions';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { apiError } from '../../msw/handlers';
@@ -184,7 +185,8 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
   });
 
   it('un motivo rechazado por el servidor se ancla al campo y conserva lo escrito', async () => {
-    loopServer([]);
+    // Primera clasificación: solo existe desde `received` (T03/T04), sin motivo reforzado.
+    loopServer([], 'received');
     server.use(
       http.post(`http://localhost/loop/findings/${FINDING}/classifications`, () =>
         apiError('invalid_request', 400, { detailCode: 'loop_person_attribution_detected' }),
@@ -218,5 +220,136 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
       name: text('scr09.classify.reason_category'),
     });
     expect(category.value).toBe('procedure_gap');
+  });
+
+  // --- VIG-359: aviso previo por estado y resolución de la cola en el historial ----------------
+
+  const DETECTION = '0190a1b2-4444-7000-8000-000000000359';
+
+  /** La parte `data-part` del formulario; falla (y `waitFor` reintenta) mientras no está. */
+  function part(form: HTMLElement, name: string): HTMLElement {
+    const found = form.querySelector<HTMLElement>(`[data-part="${name}"]`);
+    if (found === null) throw new Error(`Falta la parte ${name} del formulario.`);
+    return found;
+  }
+
+  function describedBy(form: HTMLElement): string[] {
+    return (form.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean);
+  }
+
+  it('VIG-359: en revisión avisa antes de enviar y enlaza esa detección en la cola, sin 409', async () => {
+    const { bodies } = loopServer([], 'in_review');
+    server.use(
+      http.get(`http://localhost/loop/findings/${FINDING}`, () =>
+        HttpResponse.json(
+          detail({
+            lifecycle_state: 'in_review',
+            subject_kind: 'detection',
+            subject_id: DETECTION,
+            classifications: [],
+            classification_count: 0,
+          }),
+        ),
+      ),
+    );
+    const { container } = await renderScreen('classify');
+    await load();
+    const form = screen.getByRole('form', { name: text('scr09.classify.form') });
+    const note = await waitFor(() => part(form, 'in_review'), WAIT);
+    expect(note.getAttribute('role')).toBe('note');
+    expect(describedBy(form)).toContain(note.id);
+    expect(note.querySelector('p')?.textContent).toBe(text('finding_journey.in_review'));
+    const link = within(note).getByRole('link', { name: text('finding_journey.review_queue') });
+    expect(link.getAttribute('href')).toBe(`/review-queue?detection=${DETECTION}`);
+    // El aviso llega antes de enviar nada: el servidor sigue siendo quien decide.
+    expect(bodies).toHaveLength(0);
+    expect(screen.getByRole('button', { name: text('scr09.classify.submit') })).toBeDefined();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('VIG-359: confirmado en la cola (abierto sin clasificaciones) es una reclasificación que suspende el lazo', async () => {
+    const { bodies } = loopServer([], 'open');
+    await renderScreen('classify');
+    const user = await load();
+    const form = screen.getByRole('form', { name: text('scr09.classify.form') });
+    const state = await waitFor(() => part(form, 'reclassification'), WAIT);
+    expect(describedBy(form)).toContain(state.id);
+    expect(state.querySelector('p')?.textContent).toBe(text('finding_journey.reclassification'));
+    expect(state.querySelector('[data-part="suspends"]')?.textContent).toBe(
+      text('scr09.classify.suspends'),
+    );
+    expect(form.querySelector('[data-part="in_review"]')).toBeNull();
+    await user.click(
+      screen.getByRole('radio', { name: label('classification_outcome', 'false_positive') }),
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: text('scr09.classify.reason_category') }),
+      'reflection_or_glare',
+    );
+    await user.type(screen.getByRole('textbox', { name: REASON_NAME }), REASON);
+    await user.click(screen.getByRole('checkbox', { name: text('scr09.classify.reinforced') }));
+    await user.click(screen.getByRole('button', { name: text('scr09.classify.submit') }));
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    }, WAIT);
+    expect(bodies[0]).toEqual({
+      outcome: 'false_positive',
+      reason_category: 'reflection_or_glare',
+      reason_text: REASON,
+      reinforced_reason: true,
+    });
+  });
+
+  it('VIG-359: un lazo suspendido avisa de que confirmar lo reanuda', async () => {
+    loopServer([classification(1), classification(2, 'false_positive')], RESUMING);
+    await renderScreen('classify');
+    await load();
+    const form = screen.getByRole('form', { name: text('scr09.classify.form') });
+    const resumes = await waitFor(() => part(form, 'resumes'), WAIT);
+    expect(resumes.textContent).toBe(text('finding_journey.resumes'));
+    expect(form.querySelector('[data-part="suspends"]')).toBeNull();
+  });
+
+  it('VIG-359: el historial muestra la resolución de la cola aparte de las clasificaciones', async () => {
+    loopServer([], 'open');
+    const resolution = {
+      resolution_id: '0190a1b2-cccc-7000-8000-000000000011',
+      record_id: '0190a1b2-cccc-7000-8000-000000000012',
+      outcome: 'review_confirmed',
+      reason_category: 'real_coexistence',
+      reason_text: 'Coexistencia sintética confirmada en el clip de la detección revisada.',
+      resolved_at: INSTANT,
+      resolved_by: {
+        user_id: '0190a1b2-8888-7000-8000-000000000011',
+        display_name: 'Revisión sintética',
+        role_in_use: 'coordinator_sst',
+      },
+    };
+    server.use(
+      http.get(`http://localhost/loop/findings/${FINDING}/classifications`, () =>
+        HttpResponse.json({ ...history([]), review_resolutions: [resolution] }),
+      ),
+    );
+    const { container } = await renderScreen('classify');
+    await load();
+    const historyRegion = screen.getByRole('region', { name: text('scr09.classify.history') });
+    const section = within(historyRegion).getByRole('region', {
+      name: text('finding_journey.resolution'),
+    });
+    const item = section.querySelector<HTMLElement>('[data-part="review_resolution"]');
+    expect(item?.getAttribute('data-outcome')).toBe('review_confirmed');
+    expect(item?.querySelector('strong')?.textContent).toBe(
+      `${text('finding_journey.resolution_outcome')}: ${label('review_resolution_outcome', 'review_confirmed')}`,
+    );
+    expect(item?.querySelector('[data-part="reason_text"]')?.textContent).toBe(
+      resolution.reason_text,
+    );
+    expect(item?.querySelector('[data-role-in-use]')?.getAttribute('data-role-in-use')).toBe(
+      'coordinator_sst',
+    );
+    expect(historyRegion.querySelectorAll('[data-part="classification"]')).toHaveLength(0);
+    expect(within(historyRegion).getByText(text('scr09.classify.history_empty'))).toBeDefined();
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

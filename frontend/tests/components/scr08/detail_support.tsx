@@ -90,6 +90,7 @@ export function history(items = [classification(1), classification(2)]): Classif
     time_aggregated: false,
     aggregation_window_minutes: null,
     classifications: items,
+    review_resolutions: [],
   };
 }
 

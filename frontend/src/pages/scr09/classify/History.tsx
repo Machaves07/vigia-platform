@@ -1,11 +1,14 @@
 /**
  * RV-13, historial de clasificaciones (SUP-U05-04): todas, en el orden del servidor, cada una como
  * un registro propio; ninguna se edita ni se borra (BR-APP-24, H-22). Selección explícita de
- * campos: nunca serializa el objeto recibido.
+ * campos: nunca serializa el objeto recibido. La resolución de la cola, si la hay, va antes y
+ * aparte: no es una clasificación (VIG-359).
  */
 import platform from '../../../../../backend/resources/labels.platform.es.json';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
 import { reasonCategories, type ClassificationItem } from '@/ports/scr09Classify';
+import type { ReviewResolutionItem } from '@/ports/scr10ReviewQueue';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
@@ -22,7 +25,37 @@ function reasonLabel(outcome: string, category: string): string {
   return list === '' ? text('common.unknown') : label(list, category);
 }
 
+const NO_RESOLUTIONS: readonly ReviewResolutionItem[] = [];
+
 export function ClassificationHistory({
+  classifications,
+  reviewResolutions = NO_RESOLUTIONS,
+  timeAggregated,
+  timeZone,
+}: {
+  readonly classifications: readonly ClassificationItem[];
+  /** La resolución de la cola, si el hallazgo pasó por ella: va antes y aparte (VIG-359). */
+  readonly reviewResolutions?: readonly ReviewResolutionItem[];
+  readonly timeAggregated: boolean;
+  readonly timeZone: string;
+}) {
+  return (
+    <>
+      <ReviewResolutions
+        resolutions={reviewResolutions}
+        timeAggregated={timeAggregated}
+        timeZone={timeZone}
+      />
+      <Classifications
+        classifications={classifications}
+        timeAggregated={timeAggregated}
+        timeZone={timeZone}
+      />
+    </>
+  );
+}
+
+function Classifications({
   classifications,
   timeAggregated,
   timeZone,

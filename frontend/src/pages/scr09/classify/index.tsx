@@ -2,11 +2,17 @@
  * SCR-09, grupo `classify` (IF-08 pasos 3 y 4; SUP-U05-03 y 04): tres salidas con categoría y
  * motivo. Reclasificar registra una clasificación nueva y la anterior sigue visible; no existe
  * editar ni borrar (BR-APP-24). Los rechazos del servidor se anclan y conservan lo escrito.
+ *
+ * Aviso previo por estado (VIG-359): con el hallazgo consultado, antes de enviar, `in_review`
+ * avisa de que se resuelve en la cola (con su enlace) y cualquier estado posterior a `received`
+ * avisa de que es una reclasificación con motivo reforzado, y, en lazo abierto, de que lo
+ * suspende (BR-LAZ-24). El formulario sigue disponible: el servidor decide (BR-APP-43).
  */
 import { useId, useState } from 'react';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
+import { FindingActions, findingAccess, RESUMING_STATE } from '@/pages/shared/FindingActions';
 import {
   CLASSIFICATION_REASON_LIMITS,
   classifyPort,
@@ -70,13 +76,22 @@ function ClassifyForm({
   const notice = writeNotice(mutation.error, REASON_FIELDS);
   const local = localFailure(mutation.error);
   const categories = reasonCategories(outcome);
-  const reclassification = previous > 0;
+  // El estado del servidor dice si es una reclasificación (VIG-359): un hallazgo confirmado en la
+  // cola está abierto sin ninguna clasificación, y reclasificarlo exige el motivo reforzado.
+  const state = detail?.lifecycle_state ?? null;
+  const access = state === null ? null : findingAccess(state);
+  const reclassification = access === null ? previous > 0 : access.includes('reclassify');
+  const inReview = access?.includes('review_queue') ?? false;
   const missing = showErrors && (outcome === '' || category === '');
   const formNotice = notice !== null && notice.field !== 'reason_text' ? notice : null;
+  const described = [
+    inReview || reclassification ? `${formId}-state` : null,
+    formNotice === null ? null : `${formId}-notice`,
+  ].filter((id) => id !== null);
   return (
     <form
       aria-label={text('scr09.classify.form')}
-      aria-describedby={formNotice === null ? undefined : `${formId}-notice`}
+      aria-describedby={described.length === 0 ? undefined : described.join(' ')}
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
@@ -113,11 +128,35 @@ function ClassifyForm({
       {formNotice !== null && <FieldNotice id={`${formId}-notice`} notice={formNotice} />}
       {local === 'invalid_input' && <p role="alert">{text('scr09.classify.invalid')}</p>}
       {local === 'unavailable' && <p role="alert">{text('screen_state.unavailable')}</p>}
-      {reclassification && <p>{text('scr09.classify.reclassification')}</p>}
-      {reclassification && detail !== undefined && loopIsOpen(detail.lifecycle_state) && (
-        <p role="note" data-part="suspends">
-          {text('scr09.classify.suspends')}
-        </p>
+      {inReview && detail !== undefined && (
+        <div role="note" id={`${formId}-state`} data-part="in_review">
+          <p>{text('finding_journey.in_review')}</p>
+          <FindingActions
+            findingId={context.findingId}
+            state={detail.lifecycle_state}
+            detectionId={detail.subject_kind === 'detection' ? detail.subject_id : null}
+            permissions={new Set(context.permissions)}
+          />
+        </div>
+      )}
+      {reclassification && (
+        <div id={`${formId}-state`} data-part="reclassification">
+          <p>
+            {text(
+              previous > 0 ? 'scr09.classify.reclassification' : 'finding_journey.reclassification',
+            )}
+          </p>
+          {state !== null && loopIsOpen(state) && (
+            <p role="note" data-part="suspends">
+              {text('scr09.classify.suspends')}
+            </p>
+          )}
+          {state === RESUMING_STATE && (
+            <p role="note" data-part="resumes">
+              {text('finding_journey.resumes')}
+            </p>
+          )}
+        </div>
       )}
       <fieldset>
         <legend>{text('scr09.classify.outcome')}</legend>
@@ -243,6 +282,7 @@ export default function Page() {
               <>
                 <ClassificationHistory
                   classifications={history.data.classifications}
+                  reviewResolutions={history.data.review_resolutions}
                   timeAggregated={history.data.time_aggregated}
                   timeZone={timeZone}
                 />

@@ -1,0 +1,22 @@
+{
+  "finding_journey.navigation": "Siguiente paso con este hallazgo",
+  "finding_journey.review_queue": "Revisar en la cola de revisión",
+  "finding_journey.classify": "Clasificar",
+  "finding_journey.reclassify": "Reclasificar",
+  "finding_journey.loop": "Lazo de cierre",
+  "finding_journey.suspends": "Reclasificar como operación autorizada o falso positivo suspende el lazo mientras se resuelve.",
+  "finding_journey.in_review": "Este hallazgo está en revisión: se confirma o se descarta en la cola de revisión, no con una clasificación.",
+  "finding_journey.reclassification": "En este estado, registrar una clasificación es una reclasificación: exige declarar el motivo reforzado.",
+  "finding_journey.resumes": "Reclasificar como confirmado reanuda el lazo suspendido.",
+  "finding_journey.resolution": "Resolución de la cola de revisión",
+  "finding_journey.resolution_outcome": "Resultado",
+  "finding_journey.resolution_reason": "Motivo",
+  "finding_journey.resolved_at": "Resuelta",
+  "finding_journey.resolved_by": "Resuelta por",
+  "finding_journey.role": "con el rol",
+  "finding_journey.aggregated": "Hora agregada a la ventana de la zona",
+  "finding_journey.queue_target": "Detección señalada desde el hallazgo",
+  "finding_journey.queue_target_missing": "La detección señalada no está pendiente en las páginas cargadas de la cola: puede estar ya resuelta.",
+  "finding_journey.panel_evidence": "Clip y señales junto a la detección",
+  "finding_journey.panel_resolve": "Resolución junto a la detección"
+}

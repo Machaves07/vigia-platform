@@ -12,6 +12,8 @@ export type QueueItem = components['schemas']['ReviewQueueItemOut'];
 export type QueuePage = components['schemas']['ReviewQueuePageOut'];
 export type ResolutionBody = components['schemas']['ReviewResolutionBody'];
 export type ResolutionResult = components['schemas']['ReviewResolutionOut'];
+/** La resolución tal como la devuelve el historial del hallazgo (VIG-359). */
+export type ReviewResolutionItem = components['schemas']['ReviewResolutionItemOut'];
 export type Plant = components['schemas']['PlantView'];
 export type Evidence = components['schemas']['EvidenceOut'];
 export type { DetectionForReview };

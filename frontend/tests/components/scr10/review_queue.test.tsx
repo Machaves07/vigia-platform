@@ -75,7 +75,10 @@ function item(index = 1, due = '2026-01-01T11:00:00.000Z'): QueueItem {
   };
 }
 
-async function mount(permissions = ['findings.read', 'review_queue.resolve']) {
+async function mount(
+  permissions = ['findings.read', 'review_queue.resolve'],
+  path = '/review-queue',
+) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
@@ -137,7 +140,7 @@ async function mount(permissions = ['findings.read', 'review_queue.resolve']) {
   const view = render(
     <SessionProvider store={session}>
       <ScreenQueryProvider cache={cache}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
           <Page />
         </MemoryRouter>
       </ScreenQueryProvider>
@@ -629,5 +632,94 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
       .setup()
       .click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
     await screen.findByRole('heading', { name: text('errors.not_available_in_scope') }, WAIT);
+  });
+
+  // --- VIG-359: paneles junto a la fila, foco gestionado y detección señalada -------------------
+
+  function panelName(kind: 'resolve' | 'evidence') {
+    return `${text(`finding_journey.panel_${kind}`)}: Prensas sintéticas · ${label('predicate_family', 'coexistence')}`;
+  }
+
+  it.each(['resolve', 'evidence'] as const)(
+    'VIG-359: el panel %s se abre en la fila siguiente a la suya, con el foco, y lo devuelve al cerrar',
+    async (kind) => {
+      queueServer([item(), item(2), item(3)]);
+      server.use(
+        http.get('http://localhost/ledger/records', () =>
+          HttpResponse.json({ items: [], next_cursor: null }),
+        ),
+      );
+      const { container } = await mount(['findings.read', 'review_queue.resolve']);
+      await loaded();
+      const user = userEvent.setup();
+      const name = text(kind === 'resolve' ? 'scr10.resolve' : 'scr10.evidence');
+      const trigger = required(screen.getAllByRole('button', { name })[1]);
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      await user.click(trigger);
+      const panel = await screen.findByRole('region', { name: panelName(kind) }, WAIT);
+      // Junto a la fila: la fila del panel es la siguiente a la de la detección, no el final.
+      const row = required(trigger.closest('tr'));
+      expect(row.nextElementSibling).toBe(panel.closest('tr'));
+      expect(panel.closest('tr')?.nextElementSibling).not.toBeNull();
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect(trigger.getAttribute('aria-controls')).toBe(panel.id);
+      const heading = within(panel).getByRole('heading', { name: panelName(kind) });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(heading);
+      }, WAIT);
+      expect(await axe(container)).toHaveNoViolations();
+      await user.click(within(panel).getByRole('button', { name: text('scr10.cancel') }));
+      expect(screen.queryByRole('region', { name: panelName(kind) })).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    },
+  );
+
+  it('VIG-359: ?detection= señala y enfoca esa detección, que sigue resolviéndose junto a ella', async () => {
+    const { bodies } = queueServer([item(), item(2), item(3)]);
+    await mount(undefined, `/review-queue?detection=${item(2).detection_id}`);
+    await loaded();
+    const current = screen
+      .getAllByRole('row')
+      .filter((row) => row.getAttribute('aria-current') === 'true');
+    expect(current).toHaveLength(1);
+    const row = required(current[0]);
+    const header = within(row).getByRole('rowheader');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(header);
+    }, WAIT);
+    expect(within(row).getByText(text('finding_journey.queue_target'))).toBeTruthy();
+    expect(screen.queryByText(text('finding_journey.queue_target_missing'))).toBeNull();
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole('button', { name: text('scr10.resolve') }));
+    const panel = await screen.findByRole('region', { name: panelName('resolve') }, WAIT);
+    expect(row.nextElementSibling).toBe(panel.closest('tr'));
+    await user.click(
+      within(panel).getByRole('radio', {
+        name: label('review_resolution_outcome', 'review_confirmed'),
+      }),
+    );
+    await user.selectOptions(
+      within(panel).getByRole('combobox', { name: text('scr10.category') }),
+      'real_coexistence',
+    );
+    await user.type(within(panel).getByRole('textbox', { name: REASON_NAME }), REASON);
+    await user.click(within(panel).getByRole('button', { name: text('scr10.submit') }));
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    }, WAIT);
+    expect(required(bodies[0]).id).toBe(item(2).detection_id);
+  });
+
+  it('VIG-359: una detección señalada que ya no está en la cola lo dice sin señalar otra', async () => {
+    queueServer([item(), item(2)]);
+    await mount(undefined, `/review-queue?detection=${item(7).detection_id}`);
+    await loaded();
+    expect(
+      await screen.findByText(text('finding_journey.queue_target_missing'), {}, WAIT),
+    ).toBeTruthy();
+    expect(
+      screen.getAllByRole('row').filter((row) => row.getAttribute('aria-current') === 'true'),
+    ).toHaveLength(0);
   });
 });
