@@ -14,6 +14,8 @@ import { ClassificationHistory } from '../classify/History';
 const ACTION_STATES: readonly string[] = ['assigned', 'overdue', 'closed', 'superseded'];
 
 function actionState(state: string): string {
+  // El servidor declara el vencimiento; counts_as_overdue solo indica si entra en su cómputo.
+  // No se deduce de due_at, que puede venir agregado por privacidad en zonas unipersonales.
   return text(
     ACTION_STATES.includes(state) ? `scr09.loop.action_state.${state}` : 'scr09.loop.unknown',
   );
@@ -32,7 +34,7 @@ function ActionEntry({
         <strong>{label('action_type', action.action_type)}</strong>
         {' · '}
         {text('scr09.loop.action_state')}: {actionState(action.state)}
-        {action.counts_as_overdue && <> · {text('scr09.loop.counts_as_overdue')}</>}
+        {!action.counts_as_overdue && <> · {text('scr09.loop.overdue_count_suspended')}</>}
       </p>
       <p>{action.action_description}</p>
       <p>{action.expected_outcome ?? text('scr09.loop.expected_none')}</p>

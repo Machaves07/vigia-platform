@@ -60,6 +60,64 @@ const ALL = [
 ];
 
 describe('SCR-09 lazo', { timeout: 40_000 }, () => {
+  it.each([
+    {
+      name: 'en plazo',
+      state: 'assigned',
+      due: '2026-12-08T12:00:00.000Z',
+      counts: true,
+      overdue: false,
+    },
+    {
+      name: 'vencida',
+      state: 'overdue',
+      due: '2025-12-08T12:00:00.000Z',
+      counts: true,
+      overdue: true,
+    },
+    {
+      name: 'suspendida',
+      state: 'assigned',
+      due: '2025-12-08T12:00:00.000Z',
+      counts: false,
+      overdue: false,
+    },
+  ])(
+    'acción $name: distingue vencimiento y cómputo suspendido',
+    ({ state, due, counts, overdue }) => {
+      const { container } = render(
+        <LoopView
+          detail={detail({
+            actions: [
+              {
+                action_id: FINDING,
+                record_id: FINDING,
+                action_type: 'engineering',
+                action_description: 'Instalar una barrera fija en el acceso lateral',
+                expected_outcome: null,
+                state,
+                assigned_at: INSTANT,
+                due_at: due,
+                counts_as_overdue: counts,
+                root_cause_analysis_id: null,
+              },
+            ],
+          })}
+          zone={null}
+          timeZone="UTC"
+        />,
+      );
+      const entry = container.querySelector('[data-part="action"]');
+      expect(entry?.textContent).not.toContain('Cuenta como vencida');
+      expect(/vencida/iu.test(entry?.textContent ?? '')).toBe(overdue);
+      expect(
+        entry?.textContent.includes(
+          'No cuenta para vencimientos mientras el lazo está suspendido',
+        ),
+      ).toBe(!counts);
+    },
+  );
+
   it('la lista del puerto son los nueve estados del esquema generado', () => {
     expect(LIFECYCLE_STATES).toHaveLength(9);
     expect([...LIFECYCLE_STATES].sort()).toEqual([...SCHEMA_STATES].sort());
