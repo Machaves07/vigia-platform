@@ -17,6 +17,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app/AppShell';
 import { createAppServices } from './app/bootstrap';
 import { installChunkLoadGuard } from './app/chunkLoadGuard';
+import { preloadFonts } from './app/fonts';
 import { installGlobalErrorHandler, rootErrorOptions } from './app/GlobalErrorHandler';
 import { appVersion } from './app/version';
 import { installTransport } from './ports/base';
@@ -34,6 +35,7 @@ async function start(): Promise<void> {
   const services = createAppServices();
   installTransport(services.transport);
   installGlobalErrorHandler(window, services.errors, services.currentRoute);
+  preloadFonts();
   createRoot(container, rootErrorOptions).render(
     <StrictMode>
       <App services={services} />
