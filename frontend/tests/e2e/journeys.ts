@@ -377,6 +377,12 @@ export function nextSteps(page: Page): Locator {
 export async function confirmFinding(page: Page, findingId: string, reason: string) {
   await expect(page).toHaveURL(new RegExp(`/findings/${findingId}/classify$`));
   await page.getByRole('button', { name: 'Consultar el hallazgo y su historial' }).click();
+  // El historial llega después y se pinta encima del formulario: con la cabecera de una fila
+  // (VIG-364) el botón empieza dentro de la vista y, sin esperar, el clic caía en el hueco que deja
+  // al bajar (Firefox, medido: de y=720 a y=2210).
+  const history = page.getByRole('region', { name: 'Historial de clasificaciones', exact: true });
+  await expect(history).toBeVisible();
+  await settled(page, history);
   const form = page.getByRole('form', { name: 'Registrar una clasificación' });
   await form.getByRole('radio', { name: 'confirmado', exact: true }).check();
   await form.getByLabel('Categoría del motivo').selectOption('real_coexistence');
@@ -390,7 +396,6 @@ export async function confirmFinding(page: Page, findingId: string, reason: stri
   const response = await written;
   expect(response.status()).toBe(201);
   expect(await response.json()).toMatchObject({ outcome: 'confirmed', lifecycle_state: 'open' });
-  const history = page.getByRole('region', { name: 'Historial de clasificaciones', exact: true });
   await expect(history.getByText(reason, { exact: true })).toBeVisible();
   await expect(page.locator('[data-role-in-use="coordinator_sst"]')).toContainText(
     'coordinador SST',
