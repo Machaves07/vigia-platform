@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { installerRoute, prepare, required } from './journeys';
+import { expectOwnHome, installerRoute, openMenu, prepare, required } from './journeys';
 import { systemClock } from '../../src/state/clock';
 
 test.use({ role: 'plant_manager' });
@@ -13,6 +13,15 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   test.setTimeout(360_000);
   const plant = required(world.plant_ids[0]);
   const zone = required(world.zone_ids[0]);
+  // VIG-363 (hallazgo 18): su inicio es su resumen semanal; su bandeja, con su nombre.
+  await expectOwnHome(page, 'Resumen semanal del gerente', '/metrics/weekly');
+  await openMenu(page, 'Bandeja de hallazgos');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Inicio y bandeja' })
+      .getByRole('link', { name: 'Inicio del coordinador' }),
+  ).toHaveCount(0);
   const provider = await (await roleSession('provider_installer')).newPage();
   try {
     // La carga prepara por servicios internos: esta consulta HTTP produce un provider_query real.

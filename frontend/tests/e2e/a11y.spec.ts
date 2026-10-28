@@ -102,12 +102,17 @@ function routes(world: World, role: Role): readonly string[] {
 /**
  * Pantallas de consulta auditada del coordinador (SCR-09 y SCR-11) con los hallazgos del motor:
  * se pulsa la consulta y se espera su contenido antes de analizar. Solo lecturas, salvo el inicio
- * de la causa raíz, que crea un análisis nuevo cada vez y no estorba al recorrido del coordinador.
+ * de la causa raíz si no hay ninguno en curso (VIG-363: si lo hay, se retoma); el recorrido del
+ * coordinador retoma o inicia igual.
  */
 function auditedRoutes(
   world: World,
   engine: string,
-): readonly { readonly path: string; readonly button: string; readonly content: string }[] {
+): readonly {
+  readonly path: string;
+  readonly button: string | RegExp;
+  readonly content: string;
+}[] {
   const selected = required(world.journeys.findings[engine]);
   const history = 'Historial de evidencia, cierres y declaraciones';
   return [
@@ -119,7 +124,8 @@ function auditedRoutes(
     {
       path: `/findings/${selected.closure}/loop`,
       button: 'Consultar el lazo',
-      content: 'Comprometer una acción sobre la zona',
+      // Lo que se ofrece depende del estado (VIG-363); la navegación del lazo está en todos.
+      content: 'Siguientes registros del lazo',
     },
     {
       path: `/findings/${selected.closure}/loop/closure`,
@@ -138,7 +144,8 @@ function auditedRoutes(
     },
     {
       path: `/findings/${selected.unclosable}/root-cause`,
-      button: 'Iniciar el análisis de causa raíz',
+      // Con un análisis en curso se retoma; sin él, se inicia (VIG-363).
+      button: /^(Iniciar el análisis de causa raíz|Continuar el análisis)$/,
       content: 'Plantilla guiada de causa raíz',
     },
   ];
@@ -196,7 +203,7 @@ for (const role of [...DESKTOP, ...TABLET]) {
             });
             await audit(
               page,
-              `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')} (tras «${button}»)`,
+              `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')} (tras «${String(button)}»)`,
             );
           }
         }

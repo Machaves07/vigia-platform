@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { installerRoute, pendingAgreement, required, touchTarget } from './journeys';
+import { expectOwnHome, installerRoute, pendingAgreement, required, touchTarget } from './journeys';
 
 test.use({ role: 'copasst' });
 test.skip(({ hasTouch }) => !hasTouch, 'Recorrido táctil de SCR-16.');
@@ -12,6 +12,8 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   test.setTimeout(180_000);
   expect(page.viewportSize()).toEqual({ width: 768, height: 1024 });
   expect(info.project.use.hasTouch).toBe(true);
+  // VIG-363 (hallazgo 18): su inicio es la transparencia de sus zonas.
+  await expectOwnHome(page, 'Transparencia', '/transparency');
   const zone = required(world.zone_ids[0]);
   const installer = await (await roleSession('provider_installer')).newPage();
   try {

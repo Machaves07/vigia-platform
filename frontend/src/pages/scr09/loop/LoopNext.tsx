@@ -16,7 +16,7 @@ import styles from './loop.module.css';
 type LoopLink = Exclude<LoopAccess, 'action'>;
 
 /** La revisión abre la pestaña de revisión de la pantalla del incerrable (estado de navegación). */
-export interface UnclosableTarget {
+interface UnclosableTarget {
   readonly review: true;
 }
 
@@ -39,7 +39,7 @@ function canOpen(access: LoopLink, permissions: ReadonlySet<string>): boolean {
 }
 
 /** Los enlaces que la pantalla ofrece para `state` con `permissions`, en el orden de la tabla. */
-export function loopLinks(state: string, permissions: ReadonlySet<string>): readonly LoopLink[] {
+function loopLinks(state: string, permissions: ReadonlySet<string>): readonly LoopLink[] {
   return loopAccess(state).flatMap((access) =>
     access !== 'action' && canOpen(access, permissions) ? [access] : [],
   );

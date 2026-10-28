@@ -1,7 +1,7 @@
 import type { Locator, Request } from '@playwright/test';
 
 import { authenticatedTest as test, expect } from './fixtures';
-import { required } from './journeys';
+import { expectOwnHome, required } from './journeys';
 
 test.use({ role: 'provider_installer' });
 test.skip(
@@ -14,6 +14,8 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   world,
 }) => {
   test.setTimeout(180_000);
+  // VIG-363 (hallazgo 18): sin concesión, su inicio son sus concesiones (antes de observar).
+  await expectOwnHome(page, 'Mis concesiones', '/provider/concessions');
   let active: string | undefined;
   const observed: { path: string; expected: string | undefined; actual: string | undefined }[] = [];
   // Orden de las peticiones de la lista de concesiones: el relistado tras conceder (VIG-361).
