@@ -75,7 +75,7 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   ).toBeVisible();
   // VIG-363 (hallazgo 22): el aviso explica y lleva a lo útil del rol, su paquete mensual.
   await expect(page.locator('main [data-part="scope_explanation"]')).toHaveText(
-    'Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar y registrar está en el menú y en su inicio.',
+    'Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar está en el menú y en su inicio.',
   );
   await page
     .getByRole('link', { name: 'Ir a su inicio: Paquete de revisión mensual', exact: true })

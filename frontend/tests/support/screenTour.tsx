@@ -281,7 +281,8 @@ const REVEAL: Readonly<Record<string, RevealStep>> = {
   'SCR-09 loop/closure': { button: 'scr09.closure.load' },
   'SCR-09 loop/unclosable': { button: 'scr09.closure.load' },
   'SCR-09 loop/reopening': { button: 'scr09.closure.load' },
-  'SCR-11 root_cause': { button: 'scr11.start' },
+  // VIG-363: con un análisis en curso la pantalla ofrece «Continuar» en vez de «Iniciar».
+  'SCR-11 root_cause': { button: 'scr11.start', orButton: 'scr11.continue' },
 };
 
 interface RevealStep {
@@ -289,6 +290,8 @@ interface RevealStep {
   readonly fill?: Readonly<Record<string, string>>;
   /** Clave del texto del botón de la consulta. */
   readonly button: string;
+  /** Otro botón que abre lo mismo según lo que diga el servidor; se pulsa el que aparezca. */
+  readonly orButton?: string;
 }
 
 /** Texto visible del botón de consulta auditada que el recorrido pulsa en `entry`, si lo hay. */
@@ -403,8 +406,13 @@ export async function mountEntry(
         fireEvent.change(field, { target: { value } });
       });
     }
-    const button = findButton(label);
-    if (button === undefined) throw new Error(`Sin el botón de consulta «${label}»`);
+    const other = step.orButton === undefined ? null : text(step.orButton);
+    // La pantalla puede decidir su botón con una lectura propia (SCR-11): se espera a que aparezca.
+    const button = await waitFor(() => {
+      const found = findButton(label) ?? (other === null ? undefined : findButton(other));
+      if (found === undefined) throw new Error(`Sin el botón de consulta «${label}»`);
+      return found;
+    }, WAIT);
     const before = document.querySelector('main')?.textContent ?? '';
     act(() => {
       fireEvent.click(button);

@@ -401,7 +401,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     const saved = page.getByRole('region', { name: 'Análisis en curso', exact: true });
     await expect(saved.locator('[data-part="summary-whys"] li')).toHaveText([why]);
     await expect(saved.locator('[data-part="draft-notice"]')).toHaveText(
-      'Tiene un borrador del asistente, marcado como borrador que requiere revisión: se muestra al continuar.',
+      'Tiene un borrador del asistente para revisar: se muestra al continuar.',
     );
     await expect(start).toHaveCount(0);
     const starts: string[] = [];

@@ -3,13 +3,13 @@
   "role_navigation.plant": "Planta",
   "role_navigation.choose": "Elija una opción",
   "role_navigation.open": "Abrir",
-  "role_navigation.unavailable": "No se pudo cargar la lista de su alcance. Vuelva a intentarlo.",
-  "role_navigation.scope_explanation": "Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar y registrar está en el menú y en su inicio.",
+  "role_navigation.unavailable": "No se pudo cargar la lista de su alcance.",
+  "role_navigation.scope_explanation": "Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar está en el menú y en su inicio.",
   "role_navigation.go_home": "Ir a su inicio",
   "role_navigation.loop.unclosable_review": "Revisar la declaración en la fecha comprometida",
-  "role_navigation.loop.unclosable_review_hint": "Siguiente paso: en la fecha comprometida, revise la declaración para renovarla con su medida compensatoria o convertirla en una acción sobre la zona.",
-  "role_navigation.loop.commitment_unknown": "La fecha comprometida y la medida compensatoria constan en la declaración del expediente.",
+  "role_navigation.loop.unclosable_review_hint": "Siguiente paso: en esa fecha, revise la declaración para renovarla o convertirla en una acción.",
+  "role_navigation.loop.commitment_unknown": "La fecha y la medida constan en la declaración.",
   "role_navigation.loop.review_due_at": "Revisión comprometida",
-  "role_navigation.loop.none": "En este estado el lazo no admite registros. Las clasificaciones se registran desde «Clasificación del hallazgo».",
-  "role_navigation.loop.closed_with_finding": "la cita el cierre firmado del hallazgo"
+  "role_navigation.loop.none": "En este estado el lazo no admite registros.",
+  "role_navigation.loop.closed_with_finding": "la cita el cierre firmado"
 }
