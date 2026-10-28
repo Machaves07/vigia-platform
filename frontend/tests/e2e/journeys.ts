@@ -241,17 +241,36 @@ export async function pendingAgreement(page: Page, world: World, zoneId: string)
  * barra inferior («Accesos rápidos») lo despliega.
  */
 async function fullMenu(page: Page): Promise<Locator> {
+  await shellReady(page);
   const nav = page.getByRole('navigation', { name: 'Navegación principal' });
   const toggle = page
     .getByRole('navigation', { name: 'Accesos rápidos' })
     .getByRole('button', { name: 'Menú', exact: true });
-  if (!(await nav.isVisible()) && (await toggle.count()) > 0) await toggle.click();
+  if (await nav.isVisible()) return nav;
+  // Sin «Menú» (todo el menú cabe en la barra inferior), el menú plegado no ofrece nada más.
+  if ((await toggle.count()) === 0) return nav;
+  await toggle.click();
   await expect(nav).toBeVisible();
   return nav;
 }
 
+/**
+ * Espera al armazón (cabecera y, en tableta, la barra inferior o, en escritorio, el menú) antes de
+ * contar entradas: `count()` no espera y, recién navegada la página, daría cero.
+ */
+async function shellReady(page: Page): Promise<void> {
+  await expect(page.getByRole('banner')).toBeVisible();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Accesos rápidos' })
+      .or(page.getByRole('navigation', { name: 'Navegación principal' }))
+      .first(),
+  ).toBeVisible();
+}
+
 /** La navegación principal de la aplicación: el recorrido diario no escribe direcciones. */
 export async function openMenu(page: Page, name: string): Promise<void> {
+  await shellReady(page);
   const tab = page
     .getByRole('navigation', { name: 'Accesos rápidos' })
     .getByRole('link', { name, exact: true });
