@@ -361,6 +361,29 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, Difference]]] = {
             ),
         ),
     ),
+    ("GET", "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress"): (
+        "SUP-U05-16",
+        Difference(
+            design="SUP-U05-16 solo con POST /loop/findings/{finding_state_id}/root-cause-analyses",
+            code=(
+                "POST y GET …/root-cause-analyses/in-progress, misma clave y alcance (zona del "
+                "sujeto)"
+            ),
+            reason=(
+                "VIG-363 (hallazgo 21 de VIG-338): SUP-U05-16 crea un análisis en cada llamada y "
+                "U-04 no tenía lectura del ya iniciado, así que «Guardar sin terminar» no se podía "
+                "retomar y se duplicaban análisis; PR-LAZ-62 la cuenta como segundo verbo de "
+                "SUP-U05-16 (41 operaciones, 43 rutas)"
+            ),
+            note=(
+                "**Causa raíz** (SCR-11): además de `SUP-U05-16` (`POST`), U-04 sirve "
+                "`GET /loop/findings/{finding_state_id}/root-cause-analyses/in-progress` "
+                "(`root_cause.analyze`, zona), que devuelve el análisis sin firmar más reciente "
+                "del sujeto (`analysis`, o `null`) y la última solicitud al asistente de ese "
+                "análisis (`assistant_request_id`), para retomarlo con «Continuar»."
+            ),
+        ),
+    ),
 }
 
 SCOPES: Final = frozenset({"zona", "planta", "organización", "propias", "zona o planta"})
@@ -554,9 +577,15 @@ def test_the_scope_of_each_addition_is_the_one_of_its_operation(
     app_yaml: dict[str, Any],
 ) -> None:
     for (method, path), (operation_id, _) in ROUTE_ADDITIONS.items():
-        assert DOCUMENTED_OPERATIONS[operation_id].scope == "propias"
+        scope = DOCUMENTED_OPERATIONS[operation_id].scope
         assert not SCOPE_PARAMETERS & set(_parameters(app_yaml, method, path))
-        assert _KINDS[(method, path)] is Kind.OWN
+        if scope == "propias":
+            assert _KINDS[(method, path)] is Kind.OWN
+        else:
+            # VIG-363: la zona del sujeto, que la ruta nombra por su identificador.
+            assert scope == "zona"
+            assert "{finding_state_id}" in path
+            assert _KINDS[(method, path)] is Kind.RESOURCE
 
 
 # --- domain-entities §1.2 Códigos ------------------------------------------------------------

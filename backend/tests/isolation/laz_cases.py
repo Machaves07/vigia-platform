@@ -542,6 +542,15 @@ LAZ_CASES: list[tuple[tuple[str, str], Case]] = [
             lambda i: Call("POST", f"/loop/findings/{i.finding}/root-cause-analyses"),
         ),
     ),
+    # VIG-363: leer el análisis en curso de un hallazgo de B responde igual que con uno inexistente
+    # (not_found, nunca un análisis ni ``analysis: null``).
+    (
+        ("GET", "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress"),
+        Case(
+            Kind.RESOURCE,
+            lambda i: Call("GET", f"/loop/findings/{i.finding}/root-cause-analyses/in-progress"),
+        ),
+    ),
     (
         ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
         Case(
@@ -907,7 +916,13 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
     "SUP-U05-13": frozenset({("POST", "/loop/unclosable/{declaration_id}/reviews")}),
     "SUP-U05-14": frozenset({("POST", "/loop/findings/{finding_state_id}/reopening")}),
     "SUP-U05-15": frozenset({("GET", "/loop/overdue")}),
-    "SUP-U05-16": frozenset({("POST", "/loop/findings/{finding_state_id}/root-cause-analyses")}),
+    # VIG-363: leer el análisis en curso para retomarlo es el segundo verbo de iniciarlo.
+    "SUP-U05-16": frozenset(
+        {
+            ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+            ("GET", "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress"),
+        }
+    ),
     "SUP-U05-17": frozenset(
         {("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}")}
     ),
@@ -945,8 +960,9 @@ LAZ_OPERATION_CASES: Final[Mapping[str, frozenset[tuple[str, str]]]] = {
 }
 """Las 41 operaciones de LC-LAZ §6 y sus rutas.
 
-``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias; por eso las 41 operaciones
-ocupan 42 rutas declaradas y 42 casos de aislamiento.
+``SUP-U05-35`` tiene dos verbos sobre las mismas preferencias propias y ``SUP-U05-16`` lee además
+el análisis en curso para retomarlo (VIG-363); por eso las 41 operaciones ocupan 43 rutas
+declaradas y 43 casos de aislamiento.
 """
 
 LAZ_DENIED_UNDER_CONCESSION: Final[frozenset[tuple[str, str]]] = frozenset(

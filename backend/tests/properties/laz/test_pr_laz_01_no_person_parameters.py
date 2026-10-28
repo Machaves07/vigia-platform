@@ -140,6 +140,12 @@ SIGNER_FIELDS: Final = frozenset(
             "display_name",
         ),
         (
+            "GET",
+            "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress",
+            "response",
+            "display_name",
+        ),
+        (
             "PUT",
             "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}",
             "response",
@@ -221,7 +227,8 @@ REGISTERED_U04: Final = tuple(
     if isinstance(declared.route, APIRoute)
     and declared.path.startswith(("/loop", "/accreditation", "/notifications"))
 )
-"""Las 42 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT)."""
+"""Las 43 rutas que realizan las 41 operaciones de U-04 (preferencias tiene GET y PUT; iniciar la
+causa raíz, POST y la lectura del análisis en curso, VIG-363)."""
 
 
 def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field() -> None:
@@ -243,7 +250,7 @@ def test_pr_laz_01_no_registered_loop_operation_has_a_person_parameter_or_field(
 
 def test_pr_laz_01_no_u04_operation_has_a_person_parameter_or_field() -> None:
     """La misma ausencia estructural se mantiene en la acreditación y las notificaciones."""
-    assert len(REGISTERED_U04) == 42
+    assert len(REGISTERED_U04) == 43
     assert violations(REGISTERED_U04, ("/loop", "/accreditation", "/notifications")) == []
 
 

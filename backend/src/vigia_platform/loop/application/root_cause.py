@@ -20,6 +20,10 @@ business-logic-model.md §4:
    ``EscritorExpediente`` con su evento ``root_cause_analysis_signed`` y su proyección
    (``LoopProjectionStore.write_and_apply``: ``has_signed_root_cause``), y la fila ``signed``.
 
+``in_progress`` (VIG-363) lee, con el alcance de ``start`` y sin escribir, el análisis sin firmar
+más reciente del sujeto y la última solicitud al asistente de ese análisis: así el coordinador
+retoma lo guardado sin terminar en vez de iniciar otro.
+
 Un análisis ``signed`` no admite pasos ni otra firma: ``transition_not_allowed`` (P4). Un sujeto o
 un análisis inexistente, de otra organización, fuera del alcance o pedido bajo concesión de
 proveedor responde ``ResourceNotFound`` (``not_found``) sin escribir nada.
@@ -42,9 +46,9 @@ dos llamadas a U-03 (PAT-LAZ-REN-05: a lo sumo cinco por operación que responde
 3. la cadena de la planta (el disparador del expediente al anexar);
 4. el control de la proyección de la planta y las filas del sujeto (``LoopProjectionStore``).
 
-``put_step`` toma solo 2; ``start`` ninguno. Así dos firmas del mismo análisis se ordenan (la
-segunda lee ``signed`` y recibe ``transition_not_allowed``), un paso nunca se pierde frente a otro
-paso, y un paso que llega durante una firma lee ``signed`` y no toca lo firmado.
+``put_step`` toma solo 2; ``start`` e ``in_progress`` ninguno. Así dos firmas del mismo análisis se
+ordenan (la segunda lee ``signed`` y recibe ``transition_not_allowed``), un paso nunca se pierde
+frente a otro paso, y un paso que llega durante una firma lee ``signed`` y no toca lo firmado.
 
 **Enlace con la acción**: ``linked_analysis`` resuelve el ``root_cause_analysis_record_id``
 opcional del registro ``action_assigned`` (DE §5.2) al ``analysis_id`` de un análisis firmado del
@@ -134,6 +138,7 @@ __all__ = [
     "AnalysisRequestInvalid",
     "AnalysisUnavailable",
     "AnalysisView",
+    "InProgressView",
     "RootCauseService",
     "checked_branches",
     "checked_category",
@@ -223,6 +228,22 @@ _UPDATE_FINAL: Final = text(
     " signer = CAST(:signer AS jsonb), signed_at = :signed_at, updated_at = :at"
     " WHERE organization_id = :organization_id AND analysis_id = :analysis_id"
 )
+_IN_PROGRESS: Final = text(
+    "SELECT analysis_id, organization_id, plant_id, zone_id, subject_kind, subject_id, record_id,"
+    " state, zone_context, why_steps, cause_effect_branches, root_cause_category,"
+    " root_cause_statement, conclusion, missing_information, signer, signed_at, created_at,"
+    " updated_at FROM loop.root_cause_analysis"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id AND zone_id = :zone_id"
+    " AND subject_id = :subject_id AND state <> 'signed'"
+    " ORDER BY updated_at DESC, analysis_id DESC LIMIT 1"
+)
+"""El análisis sin firmar más reciente del sujeto (índice ``root_cause_analysis_scope_subject``)."""
+_LATEST_REQUEST: Final = text(
+    "SELECT request_id FROM loop.assistant_request"
+    " WHERE organization_id = :organization_id AND plant_id = :plant_id"
+    " AND analysis_id = :analysis_id ORDER BY requested_at DESC, request_id DESC LIMIT 1"
+)
+"""La última solicitud al asistente del análisis (índice ``assistant_request_scope_analysis``)."""
 _LINKED: Final = text(
     "SELECT analysis_id FROM loop.root_cause_analysis"
     " WHERE organization_id = :organization_id AND plant_id = :plant_id AND zone_id = :zone_id"
@@ -351,6 +372,15 @@ class AnalysisView:
             return None
         count = len(self.analysis.steps)
         return count + 1 if count < MAX_WHY_STEPS else None
+
+
+@dataclass(frozen=True, slots=True)
+class InProgressView:
+    """El análisis en curso del sujeto, si lo hay, y su última solicitud al asistente (VIG-363)."""
+
+    analysis: AnalysisView | None
+    assistant_request_id: uuid.UUID | None
+    """La solicitud cuyo borrador marcado se vuelve a consultar al retomar; ``None`` sin ninguna."""
 
 
 def _uuid(value: object) -> uuid.UUID:
@@ -642,6 +672,41 @@ class RootCauseService:
             )
             row = await self._locked(transaction, analysis_id)
         return _view(row)
+
+    async def in_progress(
+        self, context: ScopeContext, finding_state_id: uuid.UUID
+    ) -> InProgressView:
+        """El análisis sin firmar más reciente del sujeto y su última solicitud al asistente.
+
+        Lectura para retomar el análisis guardado sin terminar (VIG-363): mismo alcance que
+        ``start`` (``root_cause.analyze`` sobre la zona del sujeto; fuera de él, ``not_found``) y
+        sin escribir nada. Un análisis firmado ya no está en curso.
+        """
+        authorized, subject = await self._authorized_subject(context, finding_state_id)
+        rows = await self._database.read(
+            authorized,
+            _IN_PROGRESS,
+            {
+                "organization_id": subject.organization_id,
+                "plant_id": subject.plant_id,
+                "zone_id": subject.zone_id,
+                "subject_id": subject.subject_id,
+            },
+        )
+        if not rows:
+            return InProgressView(analysis=None, assistant_request_id=None)
+        row = _row(rows[0])
+        requests = await self._database.read(
+            authorized,
+            _LATEST_REQUEST,
+            {
+                "organization_id": row.organization_id,
+                "plant_id": row.plant_id,
+                "analysis_id": row.analysis_id,
+            },
+        )
+        request_id = _uuid(requests[0]._mapping["request_id"]) if requests else None
+        return InProgressView(analysis=_view(row), assistant_request_id=request_id)
 
     # --- SUP-U05-17 ------------------------------------------------------------------------------
 

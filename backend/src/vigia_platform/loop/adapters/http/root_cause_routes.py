@@ -1,9 +1,14 @@
 """Las rutas del análisis de causa raíz guiado (SUP-U05-16 a 18; LC-LAZ §6.6; LC-LAZ-12).
 
-Las tres exigen ``root_cause.analyze`` sobre la zona del sujeto (coordinación SST):
+Las cuatro exigen ``root_cause.analyze`` sobre la zona del sujeto (coordinación SST):
 
 - ``POST /loop/findings/{finding_state_id}/root-cause-analyses``: crea el borrador con el
   contexto objetivo de la zona (``ZoneObjectiveContext``). ``201`` con el análisis.
+- ``GET /loop/findings/{finding_state_id}/root-cause-analyses/in-progress`` (VIG-363, segundo
+  verbo de SUP-U05-16): el análisis sin firmar más reciente del sujeto (``analysis``, ``null`` si
+  no hay ninguno) y la última solicitud al asistente de ese análisis
+  (``assistant_request_id``), para retomar lo guardado sin terminar en vez de crear otro. ``200``;
+  no escribe nada.
 - ``PUT /loop/root-cause-analyses/{analysis_id}/steps/{step_index}``: el porqué ``step_index``
   (1 a 5) con ``statement`` (20 a 1000 caracteres, validado), ``evidence_refs`` (``{kind, id}``,
   ≤ 32) y ``category`` opcional (``process``, ``engineering`` u ``organization``). ``200`` con el
@@ -60,9 +65,11 @@ from vigia_platform.shared.api.middleware import request_context
 from vigia_platform.shared.signing.keys import format_timestamp
 
 __all__ = [
+    "IN_PROGRESS_PATH",
     "SIGNATURE_PATH",
     "START_PATH",
     "STEP_PATH",
+    "AnalysisInProgressOut",
     "AnalysisOut",
     "AnalysisSignatureBody",
     "AnalysisStepBody",
@@ -70,6 +77,7 @@ __all__ = [
 ]
 
 START_PATH: Final = "/loop/findings/{finding_state_id}/root-cause-analyses"
+IN_PROGRESS_PATH: Final = "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress"
 STEP_PATH: Final = "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"
 SIGNATURE_PATH: Final = "/loop/root-cause-analyses/{analysis_id}/signature"
 _ANALYZE: Final = PermissionKey.ROOT_CAUSE_ANALYZE.value
@@ -271,6 +279,15 @@ class AnalysisOut(BaseModel):
     updated_at: str
 
 
+class AnalysisInProgressOut(BaseModel):
+    """El análisis en curso del sujeto para retomarlo (VIG-363)."""
+
+    analysis: AnalysisOut | None
+    """El análisis sin firmar más reciente; ``None`` si no hay ninguno."""
+    assistant_request_id: uuid.UUID | None
+    """La última solicitud al asistente de ese análisis, para volver a mostrar su borrador."""
+
+
 def _refs(refs: tuple[EvidenceReference, ...]) -> list[EvidenceRefOut]:
     return [EvidenceRefOut(kind=ref.kind.value, id=ref.id) for ref in refs]
 
@@ -360,6 +377,23 @@ def root_cause_router() -> APIRouter:
         except AnalysisRejected as rejected:
             raise _rejected(rejected) from None
         return view(result)
+
+    @router.get(
+        IN_PROGRESS_PATH,
+        dependencies=[requires(_ANALYZE), Depends(exact_query())],
+        summary="Lee el análisis de causa raíz sin firmar del hallazgo para retomarlo",
+    )
+    async def in_progress(
+        finding_state_id: uuid.UUID, request: Request, response: Response, services: Services
+    ) -> AnalysisInProgressOut:
+        no_store(response)
+        result = await installed(services.root_cause).in_progress(
+            request_context(request), finding_state_id
+        )
+        return AnalysisInProgressOut(
+            analysis=None if result.analysis is None else view(result.analysis),
+            assistant_request_id=result.assistant_request_id,
+        )
 
     @router.put(
         STEP_PATH,
