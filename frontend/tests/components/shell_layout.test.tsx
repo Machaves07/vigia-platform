@@ -161,6 +161,40 @@ describe('barra inferior de la tableta', () => {
     expect(more).toBe(grouped.some((item) => !tabs.includes(item)));
   });
 
+  it('una entrada que pide zona o planta no es pestaña: se elige en «Menú»', () => {
+    const home = {
+      role: 'line_manager' as const,
+      screen_id: 'SCR-12' as const,
+      group: 'entry',
+      path: '/zones/monthly',
+      sections: [],
+    };
+    const items = [
+      {
+        screen_id: 'SCR-12',
+        group: 'entry',
+        title_text: 'navigation.menu.monthly',
+        path: '/zones/monthly',
+      },
+      {
+        screen_id: 'SCR-04',
+        group: 'catalog',
+        title_text: 'navigation.menu.catalog',
+        path: '/zones/:zone_id/catalog',
+        select: 'zone_id' as const,
+      },
+      {
+        screen_id: 'SCR-13',
+        group: 'metrics',
+        title_text: 'navigation.menu.metrics',
+        path: '/metrics',
+      },
+    ];
+    const { tabs, more } = tabItems(items, home);
+    expect(tabs.map((item) => item.path)).toEqual(['/zones/monthly', '/metrics']);
+    expect(more).toBe(true);
+  });
+
   it('el COPASST lleva sus notificaciones en la barra', () => {
     const navigation = navigationOf('copasst');
     const { tabs } = tabItems(navItems(navigation, SCREENS), navigation.home);

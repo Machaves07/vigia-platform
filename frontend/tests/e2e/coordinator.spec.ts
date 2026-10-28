@@ -8,7 +8,6 @@ import {
   nextSteps,
   openFromInbox,
   openInbox,
-  openMenu,
 } from './journeys';
 
 test.use({ role: 'coordinator_sst', actionTimeout: 30_000, reuseRoleSession: false });
@@ -387,9 +386,10 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(
       page.getByText('Progreso guardado en el servidor.', { exact: true }),
     ).toBeVisible();
-    // La firma del análisis queda deliberadamente humana, separada del borrador (P8).
+    // La firma del análisis queda deliberadamente humana, separada del borrador (P8). Las
+    // notificaciones están en la cabecera (VIG-364), no en el menú agrupado del coordinador.
     await page
-      .getByRole('navigation', { name: 'Navegación principal' })
+      .getByRole('banner')
       .getByRole('link', { name: 'Notificaciones', exact: true })
       .click();
     const leave = page.getByRole('button', { name: 'Salir sin guardar', exact: true });
@@ -417,7 +417,10 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     ).toBeVisible({ timeout: 120_000 });
     page.off('request', countStart);
     expect(starts).toEqual([]);
-    await openMenu(page, 'Notificaciones');
+    await page
+      .getByRole('banner')
+      .getByRole('link', { name: 'Notificaciones', exact: true })
+      .click();
     await expect(page).toHaveURL(/\/notifications$/);
   });
 

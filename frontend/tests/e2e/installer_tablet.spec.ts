@@ -1,10 +1,12 @@
 import { authenticatedTest as test, expect } from './fixtures';
 import {
   acknowledgeSecret,
+  auditTablet,
   engineZone,
   installerRoute,
   prepare,
   required,
+  roleDestinations,
   touchTarget,
 } from './journeys';
 
@@ -151,4 +153,33 @@ test('instalador: flota, alta, pasos, pase con clip, oclusión pendiente y enlac
   await page.locator('[data-part="record_occlusion"]').tap();
   await expect(page.locator('[data-verification="pending"]').last()).toBeVisible();
   await expect(page.getByText(/verificando/i).first()).toBeVisible();
+});
+
+test('instalador en tableta: todas sus pantallas con controles de 44 px y sin desborde', async ({
+  authenticatedPage: page,
+  world,
+}, info) => {
+  test.setTimeout(240_000);
+  await page.goto('/provider/concessions');
+  // Cabecera en una fila y menú lateral plegado (VIG-364, hallazgo 25).
+  const header = await page.getByRole('banner').boundingBox();
+  expect(required(header).height).toBeLessThanOrEqual(65);
+  await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeHidden();
+  for (const path of await roleDestinations(page)) {
+    await page.goto(path);
+    await auditTablet(page, path);
+  }
+  // Las pantallas del cliente, bajo su concesión (vive en memoria: se activa en cada una).
+  const zone = engineZone(world, info.project.name);
+  for (const path of [
+    '/fleet',
+    '/fleet/enrollment',
+    `/zones/${zone}/commissioning`,
+    `/zones/${zone}/commissioning/matrix`,
+    `/zones/${zone}/commissioning/occlusion`,
+    `/zones/${zone}/commissioning/close`,
+  ]) {
+    await installerRoute(page, world, path);
+    await auditTablet(page, path);
+  }
 });

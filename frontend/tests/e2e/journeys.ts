@@ -45,10 +45,9 @@ export async function prepare<T>(
 /** La concesión vive solo en memoria: una entrada por URL se activa desde el panel y vuelve con Atrás. */
 export async function installerRoute(page: Page, world: World, path: string): Promise<void> {
   await page.goto(path);
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name: 'Concesiones', exact: true })
-    .click();
+  // Sin concesión, el único destino del instalador es su inicio: «Mis concesiones».
+  await openMenu(page, 'Inicio');
+  await expect(page).toHaveURL(/\/provider\/concessions$/);
   await page
     .getByRole('button', {
       name: `Operar bajo esta concesión: organización ${world.organization_id}`,
@@ -67,6 +66,66 @@ export async function touchTarget(control: Locator): Promise<void> {
   expect(box).not.toBeNull();
   expect(required(box).width).toBeGreaterThanOrEqual(44);
   expect(required(box).height).toBeGreaterThanOrEqual(44);
+}
+
+/**
+ * Tableta (VIG-364, hallazgo 25): en la pantalla abierta, ningún control interactivo visible mide
+ * menos de 44 × 44 px (`touchTarget` sobre todos a la vez) y la página no desborda en horizontal
+ * (`scrollWidth <= clientWidth`). Espera a que ninguna sección siga cargando.
+ */
+export async function auditTablet(page: Page, where: string): Promise<void> {
+  await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  const report = await page.evaluate(() => {
+    const selector = [
+      'a[href]',
+      'button',
+      'input:not([type="hidden"])',
+      'select',
+      'textarea',
+      'summary',
+      '[role="button"]',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const small: string[] = [];
+    for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      if (box.width === 0 || box.height === 0 || style.visibility === 'hidden') continue;
+      if (box.width >= 44 && box.height >= 44) continue;
+      const part = element.getAttribute('data-part') ?? element.getAttribute('name') ?? '';
+      const caption = (element.getAttribute('aria-label') ?? element.textContent)
+        .trim()
+        .slice(0, 40);
+      small.push(
+        `${element.tagName.toLowerCase()}[${part}] «${caption}» ${String(Math.round(box.width))}×${String(Math.round(box.height))}`,
+      );
+    }
+    const root = document.documentElement;
+    return { small, scrollWidth: root.scrollWidth, clientWidth: root.clientWidth };
+  });
+  expect(report.small, `${where}: controles por debajo de 44 × 44 px`).toEqual([]);
+  expect(
+    report.scrollWidth,
+    `${where}: desborde horizontal (${String(report.scrollWidth)} > ${String(report.clientWidth)})`,
+  ).toBeLessThanOrEqual(report.clientWidth);
+}
+
+/**
+ * Las direcciones a las que el rol llega desde el armazón en la página abierta: barra inferior,
+ * menú completo (desplegado con «Menú»), campana y cuenta. Sin repetir, en orden de aparición.
+ */
+export async function roleDestinations(page: Page): Promise<string[]> {
+  const hrefs = (scope: Locator) =>
+    scope
+      .locator('a[href]')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('href') ?? ''));
+  const tabs = page.getByRole('navigation', { name: 'Accesos rápidos' });
+  const found = [...(await hrefs(tabs))];
+  found.push(...(await hrefs(await fullMenu(page))));
+  found.push(...(await hrefs(page.getByRole('banner'))));
+  found.push('/account');
+  return [...new Set(found.filter((href) => href.startsWith('/') && !href.includes('#')))];
 }
 
 export async function nextStep(scope: Page | Locator): Promise<void> {
@@ -177,12 +236,30 @@ export async function pendingAgreement(page: Page, world: World, zoneId: string)
   return agreement.agreement_id;
 }
 
+/**
+ * El menú completo (VIG-364): en escritorio es el lateral; en tableta no hay lateral y «Menú» de la
+ * barra inferior («Accesos rápidos») lo despliega.
+ */
+async function fullMenu(page: Page): Promise<Locator> {
+  const nav = page.getByRole('navigation', { name: 'Navegación principal' });
+  const toggle = page
+    .getByRole('navigation', { name: 'Accesos rápidos' })
+    .getByRole('button', { name: 'Menú', exact: true });
+  if (!(await nav.isVisible()) && (await toggle.count()) > 0) await toggle.click();
+  await expect(nav).toBeVisible();
+  return nav;
+}
+
 /** La navegación principal de la aplicación: el recorrido diario no escribe direcciones. */
 export async function openMenu(page: Page, name: string): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('link', { name, exact: true })
-    .click();
+  const tab = page
+    .getByRole('navigation', { name: 'Accesos rápidos' })
+    .getByRole('link', { name, exact: true });
+  if ((await tab.count()) > 0) {
+    await tab.click();
+    return;
+  }
+  await (await fullMenu(page)).getByRole('link', { name, exact: true }).click();
 }
 
 /**
@@ -190,7 +267,7 @@ export async function openMenu(page: Page, name: string): Promise<void> {
  * `value` y pulsa «Abrir». Solo clics: la dirección no se escribe.
  */
 export async function openMenuWith(page: Page, name: string, value: string): Promise<void> {
-  const nav = page.getByRole('navigation', { name: 'Navegación principal' });
+  const nav = await fullMenu(page);
   await nav.getByRole('button', { name, exact: true }).click();
   const form = nav.getByRole('form', { name, exact: true });
   await form.getByRole('combobox').selectOption(value);
@@ -209,11 +286,9 @@ export async function expectOwnHome(page: Page, title: string, path: string): Pr
   await expect(page).toHaveURL(new RegExp(`${path}$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
   const coordinator = title === 'Inicio del coordinador';
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Navegación principal' })
-      .getByRole('link', { name: 'Inicio del coordinador', exact: true }),
-  ).toHaveCount(coordinator ? 1 : 0);
+  // El inicio de cada rol se llama «Inicio» en el menú (VIG-364): solo el del coordinador lleva al
+  // panel `/home`. En tableta el menú lateral está plegado y el inicio va en la barra inferior.
+  await expect(page.locator('nav a[href="/home"]:visible')).toHaveCount(coordinator ? 1 : 0);
   if (coordinator) return;
   await page.goto('/home');
   await expect(page).toHaveURL(new RegExp(`${path}$`));
@@ -239,7 +314,7 @@ async function settled(page: Page, target: Locator): Promise<void> {
 
 /** La bandeja completa, desde su entrada del menú (VIG-363: cada entrada con el nombre de su página). */
 export async function openInbox(page: Page): Promise<void> {
-  await openMenu(page, 'Bandeja de hallazgos');
+  await openMenu(page, 'Hallazgos');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
   await settled(page, page.locator('tbody tr'));
 }

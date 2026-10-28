@@ -19,7 +19,12 @@
  * Falla cerrado: sin `dist/index.html`, con una referencia a un archivo que no existe o sin
  * ninguna porción de pantalla, termina en 2.
  *
- * Uso: `size.mjs [carpeta dist] [--initial-kb N] [--chunk-kb N]` (las pruebas reducen los límites).
+ * Margen (VIG-364): además, el paquete inicial deja libre al menos `--initial-margin` % de su
+ * límite (10 % por omisión; 0 lo desactiva), para que la siguiente tarea no llegue al borde. El
+ * límite no cambia: con menos margen el informe lo dice y termina en 1.
+ *
+ * Uso: `size.mjs [carpeta dist] [--initial-kb N] [--chunk-kb N] [--initial-margin P]` (las
+ * pruebas reducen los límites).
  * Termina en 0 si todo cabe, en 1 si algo supera su límite y en 2 si no puede medir.
  *
  * No la ejecuta `npm run check` (`run.mjs` la omite): necesita la construcción y corre después de
@@ -36,15 +41,23 @@ const root = fileURLToPath(new URL('../..', import.meta.url));
 
 /**
  * @param {string[]} argv
- * @returns {{ dist: string, initialKb: number, chunkKb: number }}
+ * @returns {{ dist: string, initialKb: number, chunkKb: number, initialMargin: number }}
  */
 function parseArguments(argv) {
   let dist = join(root, 'dist');
   let initialKb = 250;
   let chunkKb = 150;
+  let initialMargin = 10;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] ?? '';
-    if (argument === '--initial-kb' || argument === '--chunk-kb') {
+    if (argument === '--initial-margin') {
+      const value = Number(argv[index + 1]);
+      if (!Number.isFinite(value) || value < 0 || value >= 100) {
+        fail(`${argument} necesita un porcentaje entre 0 y 100.`);
+      }
+      initialMargin = value;
+      index += 1;
+    } else if (argument === '--initial-kb' || argument === '--chunk-kb') {
       const value = Number(argv[index + 1]);
       if (!Number.isFinite(value) || value <= 0) fail(`${argument} necesita un número positivo.`);
       if (argument === '--initial-kb') initialKb = value;
@@ -56,7 +69,7 @@ function parseArguments(argv) {
       dist = resolve(argument);
     }
   }
-  return { dist, initialKb, chunkKb };
+  return { dist, initialKb, chunkKb, initialMargin };
 }
 
 /**
@@ -68,7 +81,7 @@ function fail(message) {
   process.exit(2);
 }
 
-const { dist, initialKb, chunkKb } = parseArguments(process.argv.slice(2));
+const { dist, initialKb, chunkKb, initialMargin } = parseArguments(process.argv.slice(2));
 const indexHtml = join(dist, 'index.html');
 if (!existsSync(indexHtml)) fail(`no existe ${indexHtml}: ejecuta antes «npm run build».`);
 
@@ -365,6 +378,12 @@ if (!rows.slice(1).some((row) => row.screens.length > 0)) {
 
 const kb = (/** @type {number} */ bytes) => (bytes / 1000).toFixed(1);
 const over = rows.filter((row) => row.gzip > row.limit * 1000);
+// Margen del paquete inicial (VIG-364): bajo su límite y, además, con `initialMargin` % libre,
+// para que la siguiente tarea no llegue al borde. El límite no cambia.
+const [initialRow] = rows;
+const initialLimit = initialKb * 1000;
+const marginLeft = initialRow === undefined ? 0 : (1 - initialRow.gzip / initialLimit) * 100;
+const marginShort = over.length === 0 && marginLeft < initialMargin;
 const header = [
   '| Porción | Pantallas | Archivos | Sin comprimir (KB) | gzip (KB) | brotli (KB) | Límite gzip (KB) | Estado |',
   '|---|---|--:|--:|--:|--:|--:|---|',
@@ -375,12 +394,19 @@ const lines = rows.map(
     `${kb(row.gzip)} | ${kb(row.brotli)} | ${String(row.limit)} | ` +
     `${row.gzip > row.limit * 1000 ? 'SUPERA' : 'cabe'} |`,
 );
+const marginLine =
+  `Margen del paquete inicial: ${marginLeft.toFixed(1)} % de ${String(initialKb)} KB ` +
+  `(mínimo ${String(initialMargin)} %).`;
 const verdict =
-  over.length === 0
-    ? `Presupuesto de tamaño (NFR-APP-01) cumplido: ${String(rows.length)} porciones.`
-    : `Presupuesto de tamaño (NFR-APP-01) superado en ${String(over.length)}: ${over
+  over.length > 0
+    ? `Presupuesto de tamaño (NFR-APP-01) superado en ${String(over.length)}: ${over
         .map((row) => row.name)
-        .join(', ')}.`;
+        .join(', ')}.`
+    : marginShort
+      ? `Presupuesto de tamaño (NFR-APP-01) sin margen: el paquete inicial deja ${marginLeft.toFixed(
+          1,
+        )} % libre y debe dejar ${String(initialMargin)} %.`
+      : `Presupuesto de tamaño (NFR-APP-01) cumplido: ${String(rows.length)} porciones.`;
 const report = [
   '### Presupuesto de tamaño (NFR-APP-01)',
   '',
@@ -389,6 +415,7 @@ const report = [
   ...header,
   ...lines,
   '',
+  marginLine,
   verdict,
   '',
 ].join('\n');
@@ -396,7 +423,7 @@ const report = [
 process.stdout.write(report);
 const summary = process.env.GITHUB_STEP_SUMMARY;
 if (summary) appendFileSync(summary, `${report}\n`);
-if (over.length > 0) {
+if (over.length > 0 || marginShort) {
   process.stderr.write(`${verdict}\n`);
   process.exit(1);
 }
