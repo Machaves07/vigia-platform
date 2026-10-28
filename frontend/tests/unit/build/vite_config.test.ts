@@ -67,6 +67,14 @@ describe('porciones y modo de API', () => {
     ['/repo/frontend/src/components/Badge.tsx', null],
     ['/repo/frontend/src/pages/scr1/x.tsx', null],
     ['/repo/node_modules/react/index.js', null],
+    // Lo que importa el armazón va con él (VIG-364); el resto de la pantalla, en su porción.
+    ['/repo/frontend/src/pages/scr01/SessionGate.tsx', null],
+    ['C:\\repo\\frontend\\src\\pages\\scr01\\login\\LoginForm.tsx', null],
+    ['/repo/frontend/src/pages/scr01/scr01.module.css', null],
+    ['/repo/frontend/src/pages/scr15/Bell.tsx', null],
+    ['/repo/frontend/src/pages/scr01/login/index.tsx', 'scr01'],
+    ['/repo/frontend/src/pages/scr01/users/UsersView.tsx', 'scr01'],
+    ['/repo/frontend/src/pages/scr15/list/index.tsx', 'scr15'],
   ])('%s → %s', (id, chunk) => {
     expect(screenChunkName(id)).toBe(chunk);
   });

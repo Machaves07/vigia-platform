@@ -8,3 +8,4 @@ import './fastCheck';
 import './testingLibrary';
 import './axe';
 import './msw';
+import './texts';

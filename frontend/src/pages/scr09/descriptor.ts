@@ -84,4 +84,6 @@ export const descriptor: ScreenDescriptor = {
   home_for_roles: [],
   home_group: null,
   device_classes: ['desktop'],
+  // La evidencia de la clasificación reutiliza los textos del detalle de SCR-08.
+  texts_from: ['SCR-08'],
 };

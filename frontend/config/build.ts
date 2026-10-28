@@ -26,11 +26,21 @@ export type ApiMode = 'mock' | 'real';
 const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/](?!descriptor\.ts$)/;
 
 /**
+ * Módulos de pantalla que importa el armazón (VIG-364): la puerta de sesión y el formulario de
+ * acceso de SCR-01 y la campana de SCR-15. Van con el armazón, no en la porción de su pantalla:
+ * dentro de ella arrastrarían al paquete inicial la pantalla entera (la administración de SCR-01).
+ */
+const SHELL_SCREEN_MODULE =
+  /[\\/]src[\\/]pages[\\/](?:scr01[\\/](?:SessionGate|PrivacyNoticeGate|privacyNotice|privacyNotices|session|scr01\.module|login[\\/]LoginForm)|scr15[\\/](?:Bell|shared))\.(?:tsx?|json|css)$/;
+
+/**
  * Nombre de la porción de la pantalla a la que pertenece el módulo, o `null` si no es de una.
  * `src/pages/scrNN/descriptor.ts` no es de la porción: la tabla de pantallas lo importa en el
  * paquete inicial y, dentro de la porción, arrastraría todas las pantallas al arranque (VIG-290).
+ * Tampoco lo son los módulos de pantalla del armazón (`SHELL_SCREEN_MODULE`).
  */
 export function screenChunkName(moduleId: string): string | null {
+  if (SHELL_SCREEN_MODULE.test(moduleId)) return null;
   const match = SCREEN_MODULE.exec(moduleId);
   return match?.[1] ?? null;
 }

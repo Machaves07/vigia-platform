@@ -26,6 +26,7 @@ import {
 } from '@/app/navigation';
 import { SCREENS } from '@/app/screens';
 import { NotAvailableInScope, ScreenState } from '@/pages/shared/ScreenState';
+import { loadScreenTexts } from '@/texts';
 
 import { guardChunkLoad } from './chunkLoadGuard';
 
@@ -40,8 +41,14 @@ function permissionsOf(principal: NavigationPrincipal | null): ReadonlySet<strin
   return principal === null ? null : new Set(principal.effective_permissions);
 }
 
+/** Pantallas cuyos textos carga la ruta de `screen`: la propia y las que cita (VIG-364). */
+function screenTextIds(screen: ScreenDescriptor): string[] {
+  return [screen.screen_id, ...(screen.texts_from ?? [])];
+}
+
 function groupRoute(
   path: string,
+  screen: ScreenDescriptor,
   group: RouteGroup,
   open: boolean,
   anonymous: boolean,
@@ -61,7 +68,11 @@ function groupRoute(
   return {
     path,
     lazy: async () => {
-      const module = await guardChunkLoad(group.load);
+      // El código y los textos de la pantalla llegan juntos (VIG-364): no se pinta sin ambos.
+      const [module] = await Promise.all([
+        guardChunkLoad(group.load),
+        guardChunkLoad(() => loadScreenTexts(screenTextIds(screen))),
+      ]);
       return { Component: module.default };
     },
   };
@@ -95,7 +106,9 @@ export function createAppRoutes(
       const open = canEnterGroup(group, permissions);
       const isHome = home?.screen_id === screen.screen_id && home.group === group.id;
       for (const path of group.paths)
-        children.push(groupRoute(path, group, open, principal === null, isHome ? 'this' : home));
+        children.push(
+          groupRoute(path, screen, group, open, principal === null, isHome ? 'this' : home),
+        );
     }
   }
   children.push({ path: '*', Component: NotAvailableInScope });
@@ -129,9 +142,14 @@ export async function preloadHomeCode(
   principal: NavigationPrincipal,
   screens: readonly ScreenDescriptor[] = SCREENS,
 ): Promise<void> {
-  await Promise.allSettled(
-    preloadGroups(principal, screens).map((group) => guardChunkLoad(group.load)),
+  const groups = preloadGroups(principal, screens);
+  const owners = screens.filter((screen) =>
+    screen.route_groups.some((group) => groups.includes(group)),
   );
+  await Promise.allSettled([
+    ...groups.map((group) => guardChunkLoad(group.load)),
+    ...owners.map((screen) => guardChunkLoad(() => loadScreenTexts(screenTextIds(screen)))),
+  ]);
 }
 
 /** Ejecuta `task` tras la primera pintura (fotograma siguiente y cola de tareas); da su cancelación. */
