@@ -21,6 +21,8 @@ import { text } from '@/texts';
 import { AdoptionView, ExposureView, MetricView, OverdueView } from './Views';
 import styles from './scr13.module.css';
 
+const WEEK_MS = 7 * 86_400_000;
+
 /** El mes de negocio usa la zona horaria de la planta, no la del navegador. */
 function monthRange(month: string, timeZone: string) {
   const [year, part] = month.split('-').map(Number);
@@ -295,16 +297,23 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
     read: ({ signal }) => metricsPort.hierarchy.read({}, signal),
   });
   const [zoneId, setZoneId] = useState('');
+  // VIG-363: el resumen del gerente parte del mes de la semana anterior (las cifras son mensuales).
   const [month, setMonth] = useState(() =>
-    formatInTimeZone(metricsClock().now(), 'UTC', 'yyyy-MM'),
+    formatInTimeZone(metricsClock().now() - (weekly ? WEEK_MS : 0), 'UTC', 'yyyy-MM'),
   );
   const [applied, setApplied] = useState<{
     zoneId: string;
     month: string;
     revision: number;
   } | null>(null);
+  const [touched, setTouched] = useState(false);
+  // Su inicio llega cargado con la primera zona de su alcance hasta que elija otra cosa.
+  const firstZone = hierarchy.data?.plants[0]?.zones[0]?.zone_id;
+  const preset = weekly && !touched ? firstZone : undefined;
+  const shownZone = preset ?? zoneId;
+  const shown = applied ?? (preset === undefined ? null : { zoneId: preset, month, revision: 0 });
   const plant = hierarchy.data?.plants.find((entry) =>
-    entry.zones.some((zone) => zone.zone_id === applied?.zoneId),
+    entry.zones.some((zone) => zone.zone_id === shown?.zoneId),
   );
   const context = {
     organizationId,
@@ -323,16 +332,20 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (zoneId !== '' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month))
-              setApplied({ zoneId, month, revision: (applied?.revision ?? 0) + 1 });
+            if (shownZone !== '' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+              setTouched(true);
+              setZoneId(shownZone);
+              setApplied({ zoneId: shownZone, month, revision: (shown?.revision ?? 0) + 1 });
+            }
           }}
         >
           <label>
             {text('scr13.zone')}
             <select
               required
-              value={zoneId}
+              value={shownZone}
               onChange={(event) => {
+                setTouched(true);
                 setZoneId(event.target.value);
                 setApplied(null);
               }}
@@ -354,6 +367,8 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
               type="month"
               value={month}
               onChange={(event) => {
+                setTouched(true);
+                setZoneId(shownZone);
                 setMonth(event.target.value);
                 setApplied(null);
               }}
@@ -362,14 +377,14 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
           <button type="submit">{text('scr13.consult')}</button>
         </form>
       </Section>
-      {applied === null || plant === undefined ? (
+      {shown === null || plant === undefined ? (
         <p>{text('scr13.not_requested')}</p>
       ) : (
         <Results
-          key={`${applied.zoneId}:${applied.month}:${String(applied.revision)}`}
+          key={`${shown.zoneId}:${shown.month}:${String(shown.revision)}`}
           plant={plant}
-          zoneId={applied.zoneId}
-          month={applied.month}
+          zoneId={shown.zoneId}
+          month={shown.month}
           context={context}
           weekly={weekly}
           permissions={principal?.effective_permissions ?? []}

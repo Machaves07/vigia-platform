@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { act, fireEvent, waitFor } from '@testing-library/react';
+import { fromZonedTime } from 'date-fns-tz';
 import { getResponse, http, HttpResponse, type HttpHandler } from 'msw';
 
 import type { RouteGroup, ScreenDescriptor } from '@/app/descriptor';
@@ -216,10 +217,59 @@ const loopFinding = http.get('/loop/findings/:finding_state_id', async ({ reques
   return HttpResponse.json(finding as never, { status: response.status });
 });
 
+/** Cambia, a cualquier profundidad, los campos de alcance y el periodo mensual de `value`. */
+function inScope(value: unknown, period: string | null): unknown {
+  if (Array.isArray(value)) return value.map((item) => inScope(item, period));
+  if (typeof value !== 'object' || value === null) return value;
+  const scope: Readonly<Record<string, string>> = {
+    plant_id: PARAMS.plant_id ?? '',
+    zone_id: PARAMS.zone_id ?? '',
+    organization_id: shellHierarchy().organization.organization_id,
+  };
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      if (key in scope && typeof item === 'string') return [key, scope[key]];
+      if (key === 'period' && typeof item === 'string' && period !== null) return [key, period];
+      return [key, inScope(item, period)];
+    }),
+  );
+}
+
+/**
+ * VIG-363: el resumen del gerente (SCR-13 `weekly`) se carga solo con la primera zona de la
+ * jerarquía; los ejemplos generados traen otra planta, otra zona y otro mes, y SCR-13 los rechaza
+ * por estar fuera de alcance. Se sirven con el alcance de la jerarquía y el mes pedido.
+ */
+const programInScope = [
+  '/accreditation/metrics',
+  '/accreditation/exposure',
+  '/accreditation/adoption',
+  '/loop/overdue',
+].map((path) =>
+  http.get(path, async ({ request }) => {
+    const response = await getResponse([...handlers], request);
+    if (response === undefined) return apiError('not_found', 404);
+    const period = new URL(request.url).searchParams.get('period');
+    const body = inScope(await response.json(), period) as Record<string, unknown>;
+    if (period !== null && 'period_from' in body) {
+      const timeZone = shellHierarchy().plants[0]?.timezone ?? 'UTC';
+      const [year = 0, month = 0] = period.split('-').map(Number);
+      const next =
+        month === 12
+          ? `${String(year + 1)}-01`
+          : `${String(year)}-${String(month + 1).padStart(2, '0')}`;
+      body.period_from = fromZonedTime(`${period}-01T00:00:00`, timeZone).toISOString();
+      body.period_to = fromZonedTime(`${next}-01T00:00:00`, timeZone).toISOString();
+    }
+    return HttpResponse.json(body as never, { status: response.status });
+  }),
+);
+
 /** Datos del recorrido por delante de los generados (rutas relativas, como ellos). */
 const TOUR_DATA: readonly HttpHandler[] = [
   http.get('/zones/:zone_id/catalog', () => HttpResponse.json(zoneCatalog())),
   loopFinding,
+  ...programInScope,
 ];
 
 /** Jerarquía sintética con la planta y la zona de los parámetros de ruta. */
