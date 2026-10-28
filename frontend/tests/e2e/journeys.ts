@@ -307,7 +307,14 @@ export async function expectOwnHome(page: Page, title: string, path: string): Pr
   const coordinator = title === 'Inicio del coordinador';
   // El inicio de cada rol se llama «Inicio» en el menú (VIG-364): solo el del coordinador lleva al
   // panel `/home`. En tableta el menú lateral está plegado y el inicio va en la barra inferior.
-  await expect(page.locator('nav a[href="/home"]:visible')).toHaveCount(coordinator ? 1 : 0);
+  await expect(
+    page.locator(
+      [
+        'nav[aria-label="Navegación principal"] a[href="/home"]:visible',
+        'nav[aria-label="Accesos rápidos"] a[href="/home"]:visible',
+      ].join(', '),
+    ),
+  ).toHaveCount(coordinator ? 1 : 0);
   if (coordinator) return;
   await page.goto('/home');
   await expect(page).toHaveURL(new RegExp(`${path}$`));
