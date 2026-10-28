@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  deferredTextFiles,
   hasText,
   loadScreenTexts,
   mergeTextModules,
@@ -135,6 +136,20 @@ describe('textos por ruta (VIG-364)', () => {
       .map((file) => `./${file}`)
       .sort();
     expect(screenTextFiles(screens)).toEqual(onDisk);
+  });
+
+  it('solo se difieren los archivos scrNN*: los del armazón (screen_state incluido) son iniciales', () => {
+    const onDisk = readdirSync(join(process.cwd(), 'src/texts')).filter((file) =>
+      file.endsWith('.json'),
+    );
+    const deferred = onDisk
+      .filter((file) => /^scr\d{2}(?:_[a-z0-9_]+)?\.json$/.test(file))
+      .filter((file) => file !== 'scr01.json' && file !== 'scr15.json')
+      .map((file) => `./${file}`)
+      .sort();
+    expect(deferredTextFiles()).toEqual(deferred);
+    expect(onDisk).toContain('screen_state.json');
+    expect(deferredTextFiles()).not.toContain('./screen_state.json');
   });
 
   it('cargar otra vez los textos de una pantalla no repite claves ni falla', async () => {

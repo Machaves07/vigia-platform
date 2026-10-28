@@ -86,16 +86,27 @@ function register(modules: Readonly<Record<string, unknown>>): void {
   for (const [key, value] of live) store[key] = value;
 }
 
+// Los de pantalla son `scrNN*.json` (dos cifras): `screen_state.json` también empieza por «scr» y
+// es del armazón.
 register(
-  import.meta.glob<unknown>(['./*.json', '!./scr*.json'], { eager: true, import: 'default' }),
+  import.meta.glob<unknown>(['./*.json', '!./scr[0-9][0-9]*.json'], {
+    eager: true,
+    import: 'default',
+  }),
 );
 register(
   import.meta.glob<unknown>(['./scr01.json', './scr15.json'], { eager: true, import: 'default' }),
 );
 
-const screenModules = import.meta.glob<unknown>(['./scr*.json', '!./scr01.json', '!./scr15.json'], {
-  import: 'default',
-});
+const screenModules = import.meta.glob<unknown>(
+  ['./scr[0-9][0-9]*.json', '!./scr01.json', '!./scr15.json'],
+  { import: 'default' },
+);
+
+/** Todos los archivos de textos que llegan con su ruta (los demás van en el paquete inicial). */
+export function deferredTextFiles(): string[] {
+  return Object.keys(screenModules).sort();
+}
 
 /** Prefijo de archivo de una pantalla: `SCR-08` → `scr08`. */
 function filePrefix(screenId: string): string {
