@@ -24,8 +24,9 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     const untouchedRow = within(untouched);
     const button = clickedRow.getByRole('button', { name: text('scr15.mark_read') });
     await screen.findByText(`${text('scr15.unread')}: 2`, {}, WAIT);
+    // Una sola actualización por página (VIG-364): la campana no repite «Actualizar» mientras
+    // tiene recuento; solo la lista lo ofrece.
     expect(screen.getAllByRole('button').map((node) => node.textContent)).toEqual([
-      text('components_status.refresh.button'),
       text('components_status.refresh.button'),
       text('scr15.mark_read'),
       text('scr15.mark_read'),

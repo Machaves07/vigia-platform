@@ -10,6 +10,7 @@ import {
   isViteOwnedPath,
   parseApiMode,
   screenChunkName,
+  screenTextsChunkName,
   vendorChunkName,
 } from '../../../config/build';
 import { NUM_RUNS, parseSeed, resolveProfile } from '../../../config/fastCheckProfile';
@@ -77,6 +78,19 @@ describe('porciones y modo de API', () => {
     ['/repo/frontend/src/pages/scr15/list/index.tsx', 'scr15'],
   ])('%s → %s', (id, chunk) => {
     expect(screenChunkName(id)).toBe(chunk);
+  });
+
+  it.each([
+    ['/repo/frontend/src/texts/scr08.json', 'texts-scr08'],
+    ['C:\\repo\\frontend\\src\\texts\\scr08_detail.json', 'texts-scr08_detail'],
+    ['/repo/frontend/src/texts/scr09_classify.json', 'texts-scr09_classify'],
+    // Los del armazón van en el paquete inicial; los que no son de pantalla, también.
+    ['/repo/frontend/src/texts/scr01.json', null],
+    ['/repo/frontend/src/texts/scr15.json', null],
+    ['/repo/frontend/src/texts/common.json', null],
+    ['/repo/frontend/src/pages/scr08/home/index.tsx', null],
+  ])('textos %s → porción %s', (id, chunk) => {
+    expect(screenTextsChunkName(id)).toBe(chunk);
   });
 
   it.each([

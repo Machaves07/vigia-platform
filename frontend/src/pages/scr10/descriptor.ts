@@ -16,6 +16,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/review-queue'],
       access: 'permission',
       required_permissions: ['findings.read', 'review_queue.resolve'],
+      menu: { title_text: 'navigation.menu.review_queue' },
       load: () => import('./queue'),
     },
   ],

@@ -17,7 +17,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/metrics'],
       access: 'permission',
       required_permissions: ['metrics.read', 'exposure.read'],
-      menu: { title_text: 'scr13.title' },
+      menu: { title_text: 'navigation.menu.metrics' },
       load: () => import('./metrics'),
     },
     {
@@ -26,7 +26,7 @@ export const descriptor: ScreenDescriptor = {
       access: 'permission',
       required_permissions: ['executive_summary.read'],
       linked_screens: ['SCR-03', 'SCR-14'],
-      menu: { title_text: 'scr13.weekly' },
+      menu: { title_text: 'navigation.menu.weekly' },
       load: () => import('./weekly'),
     },
   ],

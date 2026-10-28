@@ -157,7 +157,7 @@ function AppShell({
   const timeZone = availablePlants?.find((plant) => plant.plant_id === plantId)?.timezone ?? 'UTC';
   return (
     <div className={styles.shell}>
-      <Header scope={services.scope} />
+      <Header scope={services.scope} role={navigation.home?.role ?? null} />
       <div className={styles.notices}>
         <SessionNotice />
         <ConnectionNotice
@@ -170,7 +170,9 @@ function AppShell({
       </div>
       <div className={styles.body}>
         <NavMenu navigation={navigation} screens={screens} />
-        <div className={styles.content}>{children}</div>
+        <div className={styles.content}>
+          <div className={styles.contentInner}>{children}</div>
+        </div>
       </div>
     </div>
   );

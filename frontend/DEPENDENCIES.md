@@ -56,3 +56,15 @@ Columna «Presupuesto»:
 | `vite`                        | desarrollo | `8.3.5`                                                          | MIT                | §9          | Construcción estática con hash y servidor de desarrollo                                              |
 | `vitest`                      | desarrollo | `5.0.5`                                                          | MIT                | §9          | Ejecutor de pruebas (ESM nativo)                                                                     |
 | `vitest-axe`                  | desarrollo | `0.1.0`                                                          | MIT                | §9          | Comparador `toHaveNoViolations` de axe en las pruebas de componente                                  |
+
+## Recursos incluidos que no son paquetes de npm
+
+Tipografía del sistema visual v1 (VIG-364), servida desde la propia aplicación: la CSP es `self` y
+no admite Google Fonts. Los archivos están en `src/styles/fonts/` y Vite los publica con hash en
+`assets/` (lo único que sirve la API). Solo el subconjunto latino, que cubre el español.
+
+- **IBM Plex Sans** 400, 500, 600 y 700 (woff2), de `@fontsource/ibm-plex-sans` 5.3.0: SIL Open
+  Font License 1.1 (`src/styles/fonts/OFL-IBM-Plex-Sans.txt`), excepción de licencia para fuentes
+  pedida por el dueño el 28-10 en VIG-364.
+- **IBM Plex Mono** 400 (woff2), de `@fontsource/ibm-plex-mono` 5.3.0: SIL Open Font License 1.1
+  (`src/styles/fonts/OFL-IBM-Plex-Mono.txt`). Solo para códigos copiables.

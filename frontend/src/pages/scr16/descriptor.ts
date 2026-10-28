@@ -16,6 +16,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/transparency'],
       access: 'permission',
       required_permissions: ['transparency.read'],
+      menu: { title_text: 'navigation.menu.transparency' },
       load: () => import('./entry'),
     },
     {

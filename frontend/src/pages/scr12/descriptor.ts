@@ -17,6 +17,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/zones/monthly'],
       access: 'permission',
       required_permissions: ['review_package.read'],
+      menu: { title_text: 'navigation.menu.monthly' },
       load: () => import('./entry'),
     },
     {

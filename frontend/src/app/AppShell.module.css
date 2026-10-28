@@ -24,32 +24,50 @@
   min-height: 100vh;
 }
 
+/* Cabecera de una fila (60 px; 64 en tableta), con los elementos separados por `gap`. */
 .header {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-4);
   align-items: center;
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--color-border);
+  min-height: var(--header-height);
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--color-border-subtle);
   background: var(--color-surface);
 }
 
 .brand {
-  color: var(--color-text);
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-action);
   font-size: var(--font-size-large);
   font-weight: 700;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.headerScope {
+  min-width: 0;
 }
 
 .headerActions {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--space-3);
   align-items: center;
+  min-width: 0;
   margin-left: auto;
 }
 
 .account {
   position: relative;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.accountRole {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  white-space: nowrap;
 }
 
 .accountMenu {
@@ -72,19 +90,26 @@
   display: none;
 }
 
+/* Botón secundario (con borde) del sistema visual v1. */
 .button {
   min-height: var(--touch-target-min);
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.button:hover {
+  background: var(--color-action-subtle);
+}
+
 .link {
-  color: var(--color-observable);
+  color: var(--color-action);
 }
 
 .button:focus-visible,
@@ -121,17 +146,33 @@
   margin: 0;
 }
 
+/* Menú y contenido: con `flex-wrap`, en una ventana estrecha el menú pasa arriba. */
 .body {
   display: flex;
   flex: 1;
+  flex-wrap: wrap;
   min-height: 0;
 }
 
 .nav {
-  flex: 0 0 16rem;
-  padding: var(--space-4);
-  border-right: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
+  flex: 0 0 var(--nav-width);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+}
+
+.navSection + .navSection {
+  margin-top: var(--space-4);
+}
+
+.navHeading {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xsmall);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .navList {
@@ -144,21 +185,28 @@
 }
 
 .navLink {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
+  min-height: var(--touch-target-min);
   padding: var(--space-2) var(--space-3);
   border: 0;
   border-radius: var(--radius);
   background: none;
   color: var(--color-text);
   font: inherit;
+  font-weight: 500;
   text-align: left;
   text-decoration: none;
   cursor: pointer;
 }
 
+.navLink:hover {
+  background: var(--color-bg);
+}
+
 .navLink[aria-expanded='true'] {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .navSelect {
@@ -172,14 +220,128 @@
   display: none;
 }
 
+/* Entrada activa: fondo de acción suave, texto de acción y barra a la izquierda. */
 .navLink[aria-current='page'] {
-  font-weight: 700;
-  text-decoration: underline;
+  background: var(--color-action-subtle);
+  box-shadow: inset 3px 0 0 var(--color-action);
+  color: var(--color-action);
+  font-weight: 600;
 }
 
 .content {
   flex: 1;
   min-width: 0;
+}
+
+.contentInner {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-4);
+}
+
+/* Menú desplegable de la tableta: se abre con «Menú» sobre la barra inferior. */
+.navPanel {
+  position: fixed;
+  right: 0;
+  bottom: var(--tabbar-height);
+  left: 0;
+  z-index: 3;
+  max-height: calc(100vh - var(--tabbar-height) - var(--header-height-tablet));
+  overflow-y: auto;
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+  box-shadow: 0 -4px 16px rgb(22 32 43 / 16%);
+}
+
+.navPanel[hidden] {
+  display: none;
+}
+
+/* Barra inferior de pestañas de la tableta (64 px, controles de 48 px). */
+.tabbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  height: var(--tabbar-height);
+  border-top: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+}
+
+.tabList {
+  display: flex;
+  height: 100%;
+  margin: 0;
+  padding: 0 var(--space-2);
+  list-style: none;
+}
+
+.tabItem {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.tab {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--touch-target-tablet);
+  min-height: var(--touch-target-tablet);
+  margin: var(--space-2) var(--space-1);
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-small);
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab[aria-current='page'],
+.tab[aria-expanded='true'] {
+  background: var(--color-action-subtle);
+  color: var(--color-action);
+  font-weight: 600;
+}
+
+.tab:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: calc(-1 * var(--focus-ring-width));
+}
+
+@media (max-width: 960px) {
+  .header {
+    gap: var(--space-3);
+    min-height: var(--header-height-tablet);
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .accountRole {
+    display: none;
+  }
+
+  .nav {
+    display: none;
+  }
+
+  .content {
+    padding-bottom: var(--tabbar-height);
+  }
+
+  .contentInner {
+    padding: var(--space-2);
+  }
 }
 
 .lock {

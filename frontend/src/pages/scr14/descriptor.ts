@@ -12,6 +12,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/exports'],
       access: 'permission',
       required_permissions: ['export.create'],
+      menu: { title_text: 'navigation.menu.exports' },
       load: () => import('./exports'),
     },
   ],

@@ -1,4 +1,7 @@
-/* Hoja base de la aplicación (LC-APP-23): tipografía del sistema, foco visible y objetivos táctiles. */
+/*
+ * Hoja base de la aplicación (LC-APP-23): tipografía IBM Plex, foco visible y objetivos táctiles
+ * (sistema visual v1, VIG-364).
+ */
 @import './tokens.css';
 
 *,
@@ -12,13 +15,41 @@ html {
   font-size: 100%;
   line-height: var(--line-height);
   color: var(--color-text);
-  background: var(--color-surface);
+  background: var(--color-bg);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
+}
+
+h1 {
+  font-size: var(--font-size-title);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-heading);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+h3 {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+/* Tablas: cifras tabulares, para que las columnas de números se alineen. */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-family-mono);
 }
 
 /* El foco siempre se ve con teclado; nunca se quita sin reemplazo. */
@@ -43,6 +74,37 @@ input[type='radio'],
 select {
   min-height: var(--touch-target-min);
   min-width: var(--touch-target-min);
+}
+
+/* Campos de texto con la misma altura táctil que los botones (en tableta medían 30 px). */
+input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='range']) {
+  min-height: var(--touch-target-min);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+select,
+textarea {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+/*
+ * Tableta (hasta 960 px de ancho): controles de 48 px. Un enlace en línea no respeta su altura
+ * mínima; como caja en línea flexible la toma sin salir del texto (las migas medían 19 px).
+ */
+@media (max-width: 960px) {
+  :root {
+    --touch-target-min: var(--touch-target-tablet);
+  }
+
+  a {
+    display: inline-flex;
+    align-items: center;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

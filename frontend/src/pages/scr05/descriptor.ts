@@ -16,7 +16,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/gates', '/zones/:zone_id/gates'],
       access: 'permission',
       required_permissions: ['catalog.read', 'commissioning.run', 'agreements.sign'],
-      menu: { title_text: 'navigation.scr05', select: 'zone_id' },
+      menu: { title_text: 'navigation.menu.gates', select: 'zone_id' },
       load: () => import('./gates'),
     },
     {
@@ -24,7 +24,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/policy'],
       access: 'permission',
       required_permissions: ['catalog.read', 'agreements.sign'],
-      menu: { title_text: 'scr05.policy.title', select: 'plant_id' },
+      menu: { title_text: 'navigation.menu.policy', select: 'plant_id' },
       load: () => import('./policy'),
     },
   ],

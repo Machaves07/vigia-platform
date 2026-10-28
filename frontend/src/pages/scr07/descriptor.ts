@@ -17,6 +17,7 @@ export const descriptor: ScreenDescriptor = {
       access: 'permission',
       required_permissions: ['fleet.read', 'fleet.manage'],
       linked_screens: ['SCR-05'],
+      menu: { title_text: 'navigation.menu.fleet' },
       load: () => import('./inventory'),
     },
     {

@@ -31,7 +31,7 @@ const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/](?!descriptor\.ts$)
  * dentro de ella arrastrarían al paquete inicial la pantalla entera (la administración de SCR-01).
  */
 const SHELL_SCREEN_MODULE =
-  /[\\/]src[\\/]pages[\\/](?:scr01[\\/](?:SessionGate|PrivacyNoticeGate|privacyNotice|privacyNotices|session|scr01\.module|login[\\/]LoginForm)|scr15[\\/](?:Bell|shared))\.(?:tsx?|json|css)$/;
+  /[\\/]src[\\/]pages[\\/](?:scr01[\\/](?:SessionGate|PrivacyNoticeGate|privacyNotice|privacyNotices|session|scr01\.module|login[\\/]LoginForm)|scr15[\\/](?:Bell|Bell\.module|shared))\.(?:tsx?|json|css)$/;
 
 /**
  * Nombre de la porción de la pantalla a la que pertenece el módulo, o `null` si no es de una.
@@ -43,6 +43,19 @@ export function screenChunkName(moduleId: string): string | null {
   if (SHELL_SCREEN_MODULE.test(moduleId)) return null;
   const match = SCREEN_MODULE.exec(moduleId);
   return match?.[1] ?? null;
+}
+
+const SCREEN_TEXTS = /[\\/]src[\\/]texts[\\/](scr\d{2}(?:_[a-z0-9_]+)?)\.json$/;
+
+/**
+ * Porción de los textos diferidos de una pantalla (VIG-364): `texts-scr08_detail`, nunca
+ * `scr08`, que es el nombre de la porción de código de la pantalla. `scr01.json` y `scr15.json`
+ * van en el paquete inicial (los pinta el armazón) y no tienen porción propia.
+ */
+export function screenTextsChunkName(moduleId: string): string | null {
+  const name = SCREEN_TEXTS.exec(moduleId)?.[1];
+  if (name === undefined || name === 'scr01' || name === 'scr15') return null;
+  return `texts-${name}`;
 }
 
 /** Nombre de la porción de las dependencias del arranque (`vendorChunkName`). */

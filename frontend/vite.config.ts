@@ -33,6 +33,7 @@ import {
   parseApiProxy,
   resolveAppVersion,
   screenChunkName,
+  screenTextsChunkName,
   vendorChunkName,
 } from './config/build.ts';
 import { vigiaBootstrap } from './config/bootstrap.ts';
@@ -112,6 +113,7 @@ export default defineConfig(({ mode }) => {
             includeDependenciesRecursively: false,
             groups: [
               { name: screenChunkName, debugName: 'screens' },
+              { name: screenTextsChunkName, debugName: 'screen-texts' },
               { name: vendorChunkName, debugName: 'vendor' },
             ],
           },

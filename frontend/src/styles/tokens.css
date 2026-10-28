@@ -1,19 +1,75 @@
 /*
- * Variables del sistema de diseño (LC-APP-23, NFR-APP-19 y 50).
+ * Variables del sistema de diseño (LC-APP-23, NFR-APP-19 y 50), sistema visual Vigía v1 (VIG-364).
  *
  * Semáforo de observabilidad azul, ámbar y gris (P10: Observable, Degradada, No observable). Sin
- * verde ni rojo semánticos: ningún color dice «seguro» ni «peligro» (P2). Cada pareja texto y
- * fondo cumple contraste 4,5:1 o más (WCAG 2.1 AA); la cifra va en el comentario de cada una.
+ * verde ni rojo en la observabilidad ni en el armazón: ningún color dice que una zona está «segura»
+ * ni en «peligro» (P2). Los únicos rojo y verde son los de los estados del lazo de cierre
+ * (`--state-*`: vencida, cerrada y firmada), que hablan del plazo de una acción y nunca de una
+ * zona; los componentes de observabilidad no los usan. Cada pareja texto y fondo cumple contraste
+ * 4,5:1 o más (WCAG 2.1 AA); la cifra va en el comentario de cada una.
  * Los componentes usan módulos CSS con estas variables; no hay estilos en línea.
  */
+
+/* IBM Plex servida desde la aplicación (OFL 1.1, `fonts/OFL-*.txt`): la CSP es `self`. */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+
 :root {
-  /* Superficie y texto: #1f2328 sobre #ffffff, 15,8:1. */
+  /* Superficie y texto: #16202b sobre #ffffff, 16,5:1; sobre #f5f6f8, 15,2:1. */
+  --color-bg: #f5f6f8;
   --color-surface: #ffffff;
   --color-surface-muted: #f4f5f7;
-  --color-text: #1f2328;
-  /* #4a5260 sobre #ffffff, 7,9:1; sobre #f4f5f7, 7,2:1. */
-  --color-text-muted: #4a5260;
+  --color-text: #16202b;
+  /* #4a5563 sobre #ffffff, 7,6:1; sobre #f5f6f8, 7,0:1. */
+  --color-text-muted: #4a5563;
+  /* Bordes de campos (#8a919c, 3,2:1 sobre blanco, WCAG 1.4.11) y decorativos. */
   --color-border: #8a919c;
+  --color-border-subtle: #d5dae1;
+
+  /* Acción principal y menú activo: #ffffff sobre #0e5a63, 7,9:1; #0e5a63 sobre #e3f0f1, 6,8:1. */
+  --color-action: #0e5a63;
+  --color-action-hover: #0a464d;
+  --color-action-subtle: #e3f0f1;
+  --color-on-action: #ffffff;
+  /* Panel «Siguiente paso»: #16202b sobre #f2f8f8, 15,3:1. */
+  --color-next-step: #f2f8f8;
 
   /* Observable: #ffffff sobre #1d4f91, 8,5:1. */
   --color-observable: #1d4f91;
@@ -25,18 +81,44 @@
   --color-unobservable: #5b6270;
   --color-on-unobservable: #ffffff;
 
+  /* Estados del lazo (chip de estado único). Texto sobre fondo, todos ≥ 4,5:1. */
+  /* Vencida: #ffffff sobre #b42318, 6,6:1. */
+  --state-overdue-bg: #b42318;
+  --state-overdue-text: #ffffff;
+  /* Vence pronto: #6b4500 sobre #fff4d6, 7,7:1. */
+  --state-due-soon-bg: #fff4d6;
+  --state-due-soon-text: #6b4500;
+  /* Abierto o con acción: #163e73 sobre #e7eef8, 9,1:1. */
+  --state-open-bg: #e7eef8;
+  --state-open-text: #163e73;
+  /* Cerrado y firmado, en línea: #145a30 sobre #e5f3ea, 7,2:1. */
+  --state-closed-bg: #e5f3ea;
+  --state-closed-text: #145a30;
+  /* Sin alternativa segura: #4b2f8a sobre #efeaf8, 8,6:1. */
+  --state-unclosable-bg: #efeaf8;
+  --state-unclosable-text: #4b2f8a;
+  /* Recibido, en revisión, suspendido: #34404e sobre #eef0f3, 9,2:1. */
+  --state-neutral-bg: #eef0f3;
+  --state-neutral-text: #34404e;
+
   /* Foco visible: anillo de 3 px, #1d4f91 sobre #ffffff, 8,5:1 (WCAG 2.4.7). */
   --focus-ring-color: #1d4f91;
   --focus-ring-width: 3px;
   --focus-ring-offset: 2px;
 
-  /* Tipografía del sistema: sin fuentes web externas. */
-  --font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-family-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --font-size-small: 0.875rem;
-  --font-size-base: 1rem;
+  /* Tipografía: IBM Plex con la del sistema de respaldo. Cifras tabulares en tablas. */
+  --font-family:
+    'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-family-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  /* Escala 32 / 28 (h1) / 20 / 18 (h2) / 16 / 14 (tablas) / 12. */
+  --font-size-display: 2rem;
+  --font-size-title: 1.75rem;
   --font-size-large: 1.25rem;
-  --font-size-title: 1.5rem;
+  --font-size-heading: 1.125rem;
+  --font-size-base: 1rem;
+  --font-size-small: 0.875rem;
+  --font-size-xsmall: 0.75rem;
   --line-height: 1.5;
 
   /* Espaciado en múltiplos de 4 px. */
@@ -44,11 +126,24 @@
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
+  --space-5: 1.25rem;
   --space-6: 1.5rem;
+  --space-7: 1.75rem;
   --space-8: 2rem;
+  --space-9: 2.25rem;
 
-  /* Objetivo táctil mínimo para tableta (WCAG 2.5.5). */
+  /* Objetivo táctil mínimo (WCAG 2.5.5): 44 px; en tableta, 48 px. */
   --touch-target-min: 44px;
+  --touch-target-tablet: 48px;
 
-  --radius: 4px;
+  /* Armazón: cabecera, menú lateral, barra inferior de la tableta y ancho del contenido. */
+  --header-height: 60px;
+  --header-height-tablet: 64px;
+  --nav-width: 240px;
+  --tabbar-height: 64px;
+  --content-max-width: 1190px;
+
+  --radius: 6px;
+  --radius-card: 8px;
+  --radius-pill: 999px;
 }
