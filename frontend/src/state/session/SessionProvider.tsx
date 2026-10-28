@@ -55,6 +55,24 @@ export function useUiSession(): UiSession {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 }
 
+const NO_SESSION = {
+  subscribe: () => () => undefined,
+  getSnapshot: (): UiSession | null => null,
+};
+
+/**
+ * `UiSession` si hay `SessionProvider` encima; `null` si no (las pantallas uniformes de estado se
+ * pintan también fuera del armazón, VIG-363).
+ */
+export function useOptionalUiSession(): UiSession | null {
+  const store = useContext(SessionContext) ?? NO_SESSION;
+  return useSyncExternalStore<UiSession | null>(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+}
+
 /**
  * Borrador en memoria de un formulario: arranca con el que dejó el bloqueo (misma persona y misma
  * ruta) o vacío, y al desmontarse con la sesión perdida lo deja en el almacén.

@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 150 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 151 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -334,6 +334,10 @@ export const OPERATIONS = {
   start_loop_findings__finding_state_id__root_cause_analyses_post: {
     method: 'post',
     path: '/loop/findings/{finding_state_id}/root-cause-analyses',
+  },
+  in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get: {
+    method: 'get',
+    path: '/loop/findings/{finding_state_id}/root-cause-analyses/in-progress',
   },
   put_step_loop_root_cause_analyses__analysis_id__steps__step_index__put: {
     method: 'put',

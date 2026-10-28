@@ -34,6 +34,11 @@ export interface AssistantPoller {
   readonly subscribe: (listener: () => void) => () => void;
   /** Pide un borrador; sin efecto mientras haya una solicitud en curso. */
   readonly request: () => void;
+  /**
+   * Vuelve a consultar una solicitud ya creada (al retomar un análisis guardado, VIG-363): la
+   * consulta de inmediato y sigue como tras aceptarla, con el mismo tope desde ahora.
+   */
+  readonly resume: (requestId: string) => void;
   readonly dispose: () => void;
 }
 
@@ -136,6 +141,13 @@ export function createAssistantPoller(options: AssistantPollerOptions): Assistan
           afterResponse(run);
         },
       );
+    },
+    resume: (requestId) => {
+      stop();
+      generation += 1;
+      const run = generation;
+      dispatch({ type: 'resumed', requestId, now: clock.now() });
+      poll(run);
     },
     dispose: () => {
       generation += 1;

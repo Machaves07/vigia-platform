@@ -1,0 +1,17 @@
+.primary {
+  margin-block: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 2px solid var(--color-observable);
+  border-radius: var(--radius);
+  background: var(--color-surface-muted);
+  font-weight: 700;
+}
+
+.primary dl,
+.primary p {
+  font-weight: 400;
+}
+
+.secondary {
+  margin-block: var(--space-1);
+}

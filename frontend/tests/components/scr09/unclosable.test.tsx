@@ -273,3 +273,27 @@ describe('SCR-09 incerrable', { timeout: 40_000 }, () => {
     },
   );
 });
+
+describe('SCR-09 incerrable desde la revisión destacada del lazo (VIG-363)', () => {
+  function visible(name: string): boolean {
+    const region = screen.getByRole('region', { name, hidden: true });
+    return region.closest('[hidden]') === null;
+  }
+
+  it('con el estado de la navegación de la revisión, abre directamente la revisión', async () => {
+    await renderClosure('unclosable', { entryState: { review: true } });
+    await load();
+    expect(visible(text('scr09.unclosable.review'))).toBe(true);
+    expect(visible(text('scr09.unclosable.title'))).toBe(false);
+  });
+
+  it.each([null, { review: 'true' }, { review: false }, 'review'])(
+    'sin él (%j), abre la declaración como siempre',
+    async (entryState) => {
+      await renderClosure('unclosable', { entryState });
+      await load();
+      expect(visible(text('scr09.unclosable.review'))).toBe(false);
+      expect(visible(text('scr09.unclosable.title'))).toBe(true);
+    },
+  );
+});

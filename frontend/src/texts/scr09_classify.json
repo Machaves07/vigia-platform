@@ -46,7 +46,6 @@
   "scr09.loop.action_state.closed": "Cerrada",
   "scr09.loop.action_state.superseded": "Sustituida por una reasignación",
   "scr09.loop.next": "Siguientes registros del lazo",
-  "scr09.loop.classify": "Registrar una clasificación",
   "scr09.loop.closure": "Registrar evidencia y cierre",
   "scr09.loop.unclosable": "Declarar el hallazgo incerrable",
   "scr09.loop.reopening": "Registrar una reapertura",

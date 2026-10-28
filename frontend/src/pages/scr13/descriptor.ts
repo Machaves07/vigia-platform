@@ -1,7 +1,8 @@
 /**
  * SCR-13 · Métricas, exposición y resumen del gerente (U-04), VIG-316. Grupos: `metrics` y
  * `weekly` (resumen semanal, inicio del gerente de planta). Claves de §6: `executive_summary.read`,
- * `metrics.read` y `exposure.read`.
+ * `metrics.read` y `exposure.read`. Cada grupo tiene su entrada en el menú con el nombre de su
+ * página (VIG-363): el resumen del gerente deja de ser solo una dirección.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -16,6 +17,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/metrics'],
       access: 'permission',
       required_permissions: ['metrics.read', 'exposure.read'],
+      menu: { title_text: 'scr13.title' },
       load: () => import('./metrics'),
     },
     {
@@ -24,6 +26,7 @@ export const descriptor: ScreenDescriptor = {
       access: 'permission',
       required_permissions: ['executive_summary.read'],
       linked_screens: ['SCR-03', 'SCR-14'],
+      menu: { title_text: 'scr13.weekly' },
       load: () => import('./weekly'),
     },
   ],

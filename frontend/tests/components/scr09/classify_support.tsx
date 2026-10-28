@@ -183,5 +183,5 @@ export async function renderScreen(
       </ScreenQueryProvider>
     </SessionProvider>,
   );
-  return { ...view, cache, clock };
+  return { ...view, cache, clock, organizationId: me.organization.organization_id };
 }

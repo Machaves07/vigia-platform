@@ -13,6 +13,9 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { homeScreen } from '@/app/navigation';
+import { SCREENS } from '@/app/screens';
+import { useOptionalUiSession } from '@/state/session';
 import { text } from '@/texts';
 
 import styles from './ScreenState.module.css';
@@ -67,12 +70,33 @@ export function ScreenState(props: ScreenStateProps): ReactNode {
   }
 }
 
-/** Pantalla uniforme de BR-APP-03 y 77, también para la ruta que no existe. */
+/**
+ * Pantalla uniforme de BR-APP-03 y 77, también para la ruta que no existe. Orienta sin distinguir
+ * los dos casos (VIG-363): explica qué significa y lleva al inicio de la sesión con su nombre (el
+ * mando, a su paquete mensual), o a `/` si no hay sesión o inicio.
+ */
 export function NotAvailableInScope(): ReactNode {
+  const principal = useOptionalUiSession()?.principal ?? null;
+  const home =
+    principal === null
+      ? null
+      : homeScreen(principal.assignments, new Set(principal.effective_permissions), SCREENS);
+  const screen = SCREENS.find((candidate) => candidate.screen_id === home?.screen_id);
+  const group = screen?.route_groups.find((candidate) => candidate.id === home?.group);
+  const title = group?.menu?.title_text ?? screen?.title_text;
   return (
     <main className={styles.panel}>
       <h1 className={styles.title}>{text('errors.not_available_in_scope')}</h1>
-      <Link to="/">{text('screen_state.back_home')}</Link>
+      <p className={styles.message} data-part="scope_explanation">
+        {text('role_navigation.scope_explanation')}
+      </p>
+      {home === null || title === undefined ? (
+        <Link to="/">{text('screen_state.back_home')}</Link>
+      ) : (
+        <Link to={home.path} data-part="own_home">
+          {text('role_navigation.go_home')}: {text(title)}
+        </Link>
+      )}
     </main>
   );
 }

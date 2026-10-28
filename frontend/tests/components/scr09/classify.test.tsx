@@ -354,3 +354,111 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 });
+
+describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 40_000 }, () => {
+  const EVIDENCE = '0190a1b2-5555-7000-8000-000000000363';
+
+  function serveEvidence() {
+    const reads = { readUrl: 0 };
+    server.use(
+      http.get(`http://localhost/loop/findings/${FINDING}`, () =>
+        HttpResponse.json(
+          detail({
+            lifecycle_state: 'received',
+            classifications: [],
+            classification_count: 0,
+            records: [
+              {
+                record_id: '0190a1b2-6666-7000-8000-000000000363',
+                record_type: 'finding',
+                chain_sequence: 7,
+                content_hash: 'b'.repeat(64),
+                segment_index: 0,
+                received_at: INSTANT,
+                occurred_at: INSTANT,
+                signals: [],
+                clips: [
+                  {
+                    evidence_id: EVIDENCE,
+                    clip_id: '0190a1b2-5555-7000-8000-000000000364',
+                    camera_id: '0190a1b2-5555-7000-8000-000000000365',
+                    segment: 'full',
+                    media_kind: 'video',
+                    content_type: 'video/mp4',
+                    size_bytes: 1024,
+                    sha256: 'c'.repeat(64),
+                    duration_ms: 5000,
+                    starts_at: INSTANT,
+                    ends_at: INSTANT,
+                    read_url: null,
+                  },
+                ],
+              },
+            ],
+          }),
+        ),
+      ),
+      http.get(`http://localhost/loop/findings/${FINDING}/classifications`, () =>
+        HttpResponse.json(history([])),
+      ),
+      http.post('http://localhost/evidence/:id/read-url', () => {
+        reads.readUrl++;
+        return HttpResponse.json({
+          evidence_id: EVIDENCE,
+          url: 'https://evidencia.example/clip-sintetico.mp4',
+          expires_at: '2026-01-01T12:05:00.000Z',
+        });
+      }),
+    );
+    return reads;
+  }
+
+  async function consult(permissions: string[]) {
+    const reads = serveEvidence();
+    const rendered = await renderScreen('classify', { permissions });
+    expect(rendered.container.querySelector('[data-part="finding_evidence"]')).toBeNull();
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: text('scr09.classify.load') }, WAIT));
+    const summary = await screen.findByRole('region', { name: text('scr08.detail.summary') }, WAIT);
+    return { ...rendered, reads, summary };
+  }
+
+  it('el resumen y el clip aparecen con el hallazgo consultado; la URL solo al pulsar', async () => {
+    const { reads, summary, container } = await consult([
+      'findings.read',
+      'findings.classify',
+      'evidence.read',
+      'hierarchy.read',
+    ]);
+    expect([...summary.querySelectorAll('dt')].map((node) => node.textContent)).toEqual([
+      text('scr08.labels.zone'),
+      text('scr08.detail.family'),
+      text('scr08.detail.tier'),
+      text('scr08.detail.state'),
+      text('scr08.detail.occurred_at'),
+      text('scr08.detail.standard'),
+    ]);
+    const clips = within(summary).getByRole('list', { name: text('scr08.detail.clips') });
+    const play = within(clips).getByRole('button', { name: text('media.clip.play') });
+    // El resumen va antes del formulario de la clasificación.
+    const form = await screen.findByRole('form', { name: text('scr09.classify.form') }, WAIT);
+    expect(summary.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reads.readUrl).toBe(0);
+    await userEvent.setup().click(play);
+    await waitFor(() => {
+      expect(reads.readUrl).toBe(1);
+    }, WAIT);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('sin evidence.read, el resumen sin clips ni petición de URL', async () => {
+    const { reads, summary } = await consult([
+      'findings.read',
+      'findings.classify',
+      'hierarchy.read',
+    ]);
+    expect(within(summary).queryByRole('list', { name: text('scr08.detail.clips') })).toBeNull();
+    expect(reads.readUrl).toBe(0);
+  });
+});

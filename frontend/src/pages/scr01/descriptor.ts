@@ -1,6 +1,7 @@
 /**
  * SCR-01 · Inicio de sesión, cuenta y administración (U-02). Grupos: `login` e `invitation`
  * (públicos, VIG-321), `account` y `users` (VIG-305), `hierarchy` y `organization` (VIG-306).
+ * Cada grupo con sesión tiene su entrada en el menú con el nombre de su página (VIG-363).
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -35,6 +36,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/account'],
       access: 'authenticated',
       required_permissions: [],
+      menu: { title_text: 'scr01_admin.account.title' },
       load: () => import('./account'),
     },
     {
@@ -42,6 +44,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/users'],
       access: 'permission',
       required_permissions: ['users.manage', 'roles.manage'],
+      menu: { title_text: 'scr01_admin.users.title' },
       load: () => import('./users'),
     },
     {
@@ -49,6 +52,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/hierarchy'],
       access: 'permission',
       required_permissions: ['hierarchy.read', 'hierarchy.manage'],
+      menu: { title_text: 'scr01_hierarchy.title' },
       load: () => import('./hierarchy'),
     },
     {
@@ -56,6 +60,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/organization'],
       access: 'permission',
       required_permissions: ['organization.settings'],
+      menu: { title_text: 'scr01_hierarchy.organization' },
       load: () => import('./organization'),
     },
   ],

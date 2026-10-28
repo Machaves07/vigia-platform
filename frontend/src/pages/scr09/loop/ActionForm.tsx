@@ -11,7 +11,6 @@ import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
 import type { Notice } from '@/components/NoticeStack/notice';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { reasonLimits } from '@/components/ReasonField/limits';
-import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import {
   ACTION_TYPES,
   classifyPort,
@@ -43,13 +42,12 @@ function Anchored({ id, notice }: { readonly id: string; readonly notice: Notice
 export function ActionForm({
   context,
   plantId,
-  timeZone,
   onWritten,
 }: {
   readonly context: LoopContext;
   readonly plantId: string;
-  readonly timeZone: string;
-  readonly onWritten: () => void;
+  /** La acción registrada: la pantalla la confirma, porque el formulario deja de ofrecerse (T07). */
+  readonly onWritten: (saved: Action) => void;
 }) {
   // La construcción comparte el esquema con la entrada lazy de este grupo. Leerlo al
   // renderizar evita consumir su exportación antes de que termine el ciclo de módulos.
@@ -79,7 +77,6 @@ export function ActionForm({
   const [assignee, setAssignee] = useState(context.user?.id ?? '');
   const [deadline, setDeadline] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  const [saved, setSaved] = useState<Action | null>(null);
   const settings = configuration.data;
   const deadlineValue =
     deadline ?? (settings === undefined ? '' : String(settings.action_deadline_default_days));
@@ -92,7 +89,6 @@ export function ActionForm({
     <T,>(set: (value: T) => void) =>
     (value: T) => {
       mutation.reset();
-      setSaved(null);
       set(value);
     };
   return (
@@ -118,9 +114,8 @@ export function ActionForm({
             deadline_days: deadlineValue === '' ? null : Number(deadlineValue),
           })
           .then((result) => {
-            setSaved(result);
             setShowErrors(false);
-            onWritten();
+            onWritten(result);
           })
           .catch(() => undefined);
       }}
@@ -211,12 +206,6 @@ export function ActionForm({
       <button type="submit" disabled={mutation.status === 'pending'}>
         {text('scr09.loop.submit')}
       </button>
-      {saved !== null && (
-        <p role="status" data-part="action_saved">
-          {text('scr09.loop.action_saved')}:{' '}
-          <TimestampWithOffset instant={saved.due_at} timeZone={timeZone} />
-        </p>
-      )}
     </form>
   );
 }

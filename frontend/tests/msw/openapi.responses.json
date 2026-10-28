@@ -2398,6 +2398,23 @@
       }
     },
     {
+      "operationId": "in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get",
+      "method": "get",
+      "path": "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress",
+      "responses": {
+        "200": {
+          "application/json": {
+            "$ref": "#/components/schemas/AnalysisInProgressOut"
+          }
+        },
+        "default": {
+          "application/json": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          }
+        }
+      }
+    },
+    {
       "operationId": "put_step_loop_root_cause_analyses__analysis_id__steps__step_index__put",
       "method": "put",
       "path": "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}",
@@ -3466,6 +3483,36 @@
       "enum": [
         "active",
         "cleared"
+      ]
+    },
+    "AnalysisInProgressOut": {
+      "properties": {
+        "analysis": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "assistant_request_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object",
+      "required": [
+        "analysis",
+        "assistant_request_id"
       ]
     },
     "AnalysisSignatureBody": {

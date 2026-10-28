@@ -89,11 +89,14 @@ export async function renderClosure(
     records = [ledgerRecord()],
     now = START,
     license = LICENSE,
+    entryState = null,
   }: {
     permissions?: string[];
     records?: LedgerRecord[];
     now?: number;
     license?: string | null;
+    /** Estado de la navegación con que se llega (la revisión destacada del lazo, VIG-363). */
+    entryState?: unknown;
   } = {},
 ) {
   const clock = new FakeClock(now);
@@ -195,7 +198,7 @@ export async function renderClosure(
           ),
       },
     ],
-    { initialEntries: [path] },
+    { initialEntries: [{ pathname: path, state: entryState }] },
   );
   disposers.push(() => {
     router.dispose();

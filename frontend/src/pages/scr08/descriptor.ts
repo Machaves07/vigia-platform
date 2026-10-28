@@ -3,6 +3,9 @@
  * `inbox` (VIG-312), `detail` y `labels` (VIG-327). El detalle lleva `finding_state_id` (nota de
  * `frontend-components.md` §6). `home` es el panel de inicio del coordinador y compone solo las
  * secciones cuyo permiso tiene; la cola es visible con `findings.read` (diferencia 1 del PR #197).
+ * Solo como inicio (VIG-363): `/home` lleva a cualquier otro rol a su propio inicio; en el menú,
+ * «Inicio del coordinador» (solo el suyo) y «Bandeja de hallazgos», cada una con el nombre de su
+ * página.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -18,6 +21,8 @@ export const descriptor: ScreenDescriptor = {
       access: 'permission',
       required_permissions: ['findings.read', 'coverage.read'],
       linked_screens: ['SCR-09', 'SCR-10', 'SCR-11'],
+      home_only: true,
+      menu: { title_text: 'scr08.home.title' },
       load: () => import('./home'),
     },
     {
@@ -25,6 +30,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/findings'],
       access: 'permission',
       required_permissions: ['findings.read'],
+      menu: { title_text: 'scr08.inbox.title' },
       load: () => import('./inbox'),
     },
     {

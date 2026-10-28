@@ -172,14 +172,19 @@ type StatusStep = () => Response | Promise<Response>;
 export function fakeLoop() {
   const calls = {
     start: 0,
+    inProgress: 0,
     steps: [] as { index: number; body: Record<string, unknown> }[],
     signatures: [] as Record<string, unknown>[],
     assistantRequests: 0,
     statusAt: [] as number[],
   };
   let current = analysis();
+  /** Hay un análisis creado (por `start` o sembrado con `saved`) y su última solicitud. */
+  let started = false;
+  let lastRequest: string | null = null;
   const state = {
     startResponse: null as (() => Response) | null,
+    inProgressResponse: null as (() => Response) | null,
     stepResponse: null as ((index: number) => Response | null) | null,
     signatureResponse: null as (() => Response | null) | null,
     assistantResponse: null as (() => Response) | null,
@@ -191,11 +196,31 @@ export function fakeLoop() {
     get analysis() {
       return current;
     },
+    /** Siembra un análisis guardado sin terminar (VIG-363) y, si se da, su última solicitud. */
+    saved(value: Analysis, requestId: string | null = null) {
+      current = value;
+      started = true;
+      lastRequest = requestId;
+    },
     install(clock: FakeClock) {
       server.use(
         http.post('http://localhost/loop/findings/:id/root-cause-analyses', () => {
           calls.start += 1;
-          return state.startResponse?.() ?? HttpResponse.json(current, { status: 201 });
+          const scripted = state.startResponse?.();
+          if (scripted !== undefined) return scripted;
+          started = true;
+          lastRequest = null;
+          return HttpResponse.json(current, { status: 201 });
+        }),
+        http.get('http://localhost/loop/findings/:id/root-cause-analyses/in-progress', () => {
+          calls.inProgress += 1;
+          return (
+            state.inProgressResponse?.() ??
+            HttpResponse.json({
+              analysis: started && current.state !== 'signed' ? current : null,
+              assistant_request_id: started && current.state !== 'signed' ? lastRequest : null,
+            })
+          );
         }),
         http.put(
           'http://localhost/loop/root-cause-analyses/:id/steps/:index',
@@ -261,9 +286,10 @@ export function fakeLoop() {
         ),
         http.post('http://localhost/loop/root-cause-analyses/:id/assistant-requests', () => {
           calls.assistantRequests += 1;
-          return (
-            state.assistantResponse?.() ?? HttpResponse.json(assistantRequest(), { status: 202 })
-          );
+          const scripted = state.assistantResponse?.();
+          if (scripted !== undefined) return scripted;
+          lastRequest = assistantRequest().request_id;
+          return HttpResponse.json(assistantRequest(), { status: 202 });
         }),
         http.get('http://localhost/loop/assistant-requests/:id', () => {
           calls.statusAt.push(clock.now());

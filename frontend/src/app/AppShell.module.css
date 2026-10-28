@@ -145,10 +145,31 @@
 
 .navLink {
   display: block;
+  width: 100%;
   padding: var(--space-2) var(--space-3);
+  border: 0;
   border-radius: var(--radius);
+  background: none;
   color: var(--color-text);
+  font: inherit;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
+}
+
+.navLink[aria-expanded='true'] {
+  font-weight: 700;
+}
+
+.navSelect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3) var(--space-2);
+}
+
+.navSelect[hidden] {
+  display: none;
 }
 
 .navLink[aria-current='page'] {

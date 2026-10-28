@@ -72,5 +72,11 @@
   "scr11.context_closed_at": "cerrada el",
   "scr11.context_recurrence_after": "reincidencia tras días",
   "scr11.context_previous_causes": "Categorías de causa ya firmadas en la zona",
-  "scr11.context_none": "Sin datos en el periodo."
+  "scr11.context_none": "Sin datos en el periodo.",
+  "scr11.in_progress": "Análisis en curso",
+  "scr11.in_progress_intro": "Este hallazgo tiene un análisis guardado sin terminar. Continúe con él: lo guardado sigue en el servidor y no se crea otro análisis.",
+  "scr11.saved_at": "Guardado por última vez",
+  "scr11.in_progress_draft": "Tiene un borrador del asistente, marcado como borrador que requiere revisión: se muestra al continuar.",
+  "scr11.in_progress_no_draft": "Todavía no se pidió un borrador al asistente para este análisis.",
+  "scr11.continue": "Continuar el análisis"
 }

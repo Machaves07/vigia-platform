@@ -136,7 +136,7 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
     expect(stateOf(container)).toBe(text('common.unknown'));
   });
 
-  it('pide el detalle solo al pulsar; registros en orden, zona del escalamiento y enlaces por clave aunque el lazo esté cerrado', async () => {
+  it('pide el detalle solo al pulsar; registros en orden, zona del escalamiento y, cerrado, solo la reapertura (VIG-363)', async () => {
     const served = serveDetail('closed');
     const { container, cache } = await renderScreen('loop', { permissions: ALL });
     const button = await screen.findByRole('button', { name: text('scr09.loop.load') }, WAIT);
@@ -145,7 +145,8 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
     }, WAIT);
     expect(served.reads()).toBe(0);
     await userEvent.setup().click(button);
-    await screen.findByRole('form', { name: text('scr09.loop.action_form') }, WAIT);
+    await screen.findByRole('navigation', { name: text('scr09.loop.next') }, WAIT);
+    expect(screen.queryByRole('form', { name: text('scr09.loop.action_form') })).toBeNull();
     expect(served.reads()).toBe(1);
     expect(stateOf(container)).toBe(label('finding_lifecycle_state', 'closed'));
     expect(
@@ -158,12 +159,7 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
     const next = screen.getByRole('navigation', { name: text('scr09.loop.next') });
     expect(
       [...next.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')]),
-    ).toEqual([
-      [text('scr09.loop.classify'), `/findings/${FINDING}/classify`],
-      [text('scr09.loop.closure'), `/findings/${FINDING}/loop/closure`],
-      [text('scr09.loop.unclosable'), `/findings/${FINDING}/loop/unclosable`],
-      [text('scr09.loop.reopening'), `/findings/${FINDING}/loop/reopening`],
-    ]);
+    ).toEqual([[text('scr09.loop.reopening'), `/findings/${FINDING}/loop/reopening`]]);
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
