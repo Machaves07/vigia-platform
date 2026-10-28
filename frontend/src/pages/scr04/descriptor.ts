@@ -1,6 +1,8 @@
 /**
  * SCR-04 · Catálogo de estándares, admisión y configuración (U-03; vocabulario U-04). Grupos:
  * `catalog` y `standards` (VIG-308), `parameters`, `admissions` y `vocabulary` (VIG-309).
+ * En el menú (VIG-363): el catálogo con selector de zona, la admisión con selector de planta y el
+ * vocabulario; declarar un estándar y los parámetros se abren desde el catálogo de la zona.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -15,6 +17,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/zones/:zone_id/catalog', '/plants/:plant_id/catalog'],
       access: 'permission',
       required_permissions: ['catalog.read', 'catalog.manage'],
+      menu: { title_text: 'scr04.catalog.title', select: 'zone_id' },
       load: () => import('./catalog'),
     },
     {
@@ -36,6 +39,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/admissions'],
       access: 'permission',
       required_permissions: ['catalog.read', 'catalog.manage'],
+      menu: { title_text: 'scr04.admissions.title', select: 'plant_id' },
       load: () => import('./admissions'),
     },
     {
@@ -43,6 +47,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/vocabulary'],
       access: 'permission',
       required_permissions: ['vocabulary.manage'],
+      menu: { title_text: 'scr04.vocabulary.title' },
       load: () => import('./vocabulary'),
     },
   ],

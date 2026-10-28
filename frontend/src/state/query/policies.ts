@@ -107,6 +107,8 @@ export type ReadOperation = keyof typeof POLICY_KINDS;
 export const UNCACHED_READS: Readonly<Record<string, string>> = {
   'GET /health/live': 'sonda de state.connection (fetch propio, sin caché)',
   'GET /api/nodes/zones/{zone_id}/catalog': 'API del nodo (mTLS); la aplicación no la usa',
+  'GET /loop/findings/{finding_state_id}/root-cause-analyses/in-progress':
+    'SCR-11 la pide al entrar, sin caché: debe mostrar lo último guardado para retomarlo (VIG-363)',
   'GET /commissioning-records/{record_id}/document': 'descarga por navegación, nunca en caché',
   'GET /accreditation/exports/{export_id}/download': 'descarga por navegación, nunca en caché',
   'GET /accreditation/monthly-packages/{plant_id}/{period}/download':

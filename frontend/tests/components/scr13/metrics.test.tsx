@@ -10,6 +10,19 @@ import { text } from '@/texts';
 import { server } from '../../msw/server';
 import { API, OTHER, PLANT, WAIT, ZONE, fixture, snapshot, consult, adoptionData } from './support';
 describe('SCR-13 métricas', { timeout: 30_000 }, () => {
+  it('VIG-363: las métricas del programa no se cargan solas; solo el inicio del gerente', async () => {
+    const f = await fixture();
+    const requests: string[] = [];
+    server.events.on('request:start', ({ request }) => {
+      requests.push(new URL(request.url).pathname);
+    });
+    render(<Page />, { wrapper: f.Wrapper });
+    await screen.findByRole('option', { name: 'Planta sintética: Zona sintética 1' }, WAIT);
+    expect(screen.getByText(text('scr13.not_requested'), { exact: true })).toBeDefined();
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe('');
+    expect(requests).toEqual(['/hierarchy']);
+    server.events.removeAllListeners();
+  });
   it('periodo vacío permitido por el espejo no provoca una gráfica inválida', () => {
     const data = { ...snapshot('synthetic'), period: '' };
     render(<MetricView data={data} zoneName="Zona sintética" organizationId="synthetic" />);

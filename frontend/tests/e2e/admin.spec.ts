@@ -1,5 +1,14 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { acknowledgeSecret, installerRoute, nextStep, prepare, required } from './journeys';
+import {
+  acknowledgeSecret,
+  expectOwnHome,
+  installerRoute,
+  nextStep,
+  openMenu,
+  openMenuWith,
+  prepare,
+  required,
+} from './journeys';
 
 test.use({ role: 'administrator' });
 test.skip(({ hasTouch }) => hasTouch, 'Recorrido de escritorio del administrador.');
@@ -13,7 +22,11 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   const suffix = info.project.name;
   const zone = required(world.zone_ids.at(-1));
   const plant = required(world.plant_ids[0]);
-  await page.goto('/admin/users');
+  // VIG-363 (hallazgos 18 y 19): su inicio propio y cada pantalla solo con clics desde el menú,
+  // cuya entrada tiene el nombre de la página que abre.
+  await expectOwnHome(page, 'Inventario de flota', '/fleet');
+  await openMenu(page, 'Usuarios');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Usuarios');
   await page.getByRole('button', { name: 'Invitar a una persona' }).click();
   const invite = page.getByRole('form', { name: 'Invitación', exact: true });
   await invite.getByLabel('Correo', { exact: true }).fill(`${suffix}@journey.example.test`);
@@ -31,7 +44,8 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await roles.getByLabel('Alcance', { exact: true }).selectOption(plant);
   await roles.getByRole('button', { name: 'Asignar', exact: true }).click();
   await expect(page.getByText('Rol asignado.', { exact: true })).toBeVisible();
-  await page.goto('/admin/hierarchy');
+  await openMenu(page, 'Plantas y zonas');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Plantas y zonas');
   const zoneForm = page.getByRole('form', { name: 'Crear zona', exact: true }).first();
   await zoneForm.getByLabel('Código', { exact: true }).fill(`E2E-${suffix.toUpperCase()}`);
   await zoneForm.getByLabel('Nombre', { exact: true }).fill(`Zona sintética ${suffix}`);
@@ -43,7 +57,10 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(
     page.getByText(`E2E-${suffix.toUpperCase()} — Zona sintética ${suffix}`, { exact: true }),
   ).toBeVisible();
-  await page.goto(`/zones/${zone}/standards`);
+  await openMenuWith(page, 'Catálogo de estándares', zone);
+  await expect(page).toHaveURL(new RegExp(`/zones/${zone}/catalog$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Catálogo de estándares');
+  await page.getByRole('button', { name: 'Declarar estándar', exact: true }).click();
   await page.getByLabel('Familia admitida', { exact: true }).selectOption('coexistence');
   await page
     .getByLabel('Título del estándar', { exact: true })
@@ -66,7 +83,9 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
       exact: true,
     }),
   ).toBeVisible();
-  await page.goto(`/plants/${plant}/admissions`);
+  await openMenuWith(page, 'Admisión de familias', plant);
+  await expect(page).toHaveURL(new RegExp(`/plants/${plant}/admissions$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Admisión de familias');
   await page.getByRole('combobox', { name: 'Familia', exact: true }).selectOption('dwell');
   await page.getByRole('radio', { name: 'No', exact: true }).check();
   await nextStep(page);
@@ -80,7 +99,10 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(page.getByRole('table', { name: 'Historial de admisiones' })).toContainText(
     'rechazada',
   );
-  await page.goto('/admin/vocabulary');
+  await openMenu(page, 'Vocabulario bloqueado de la organización');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'Vocabulario bloqueado de la organización',
+  );
   await page
     .getByLabel('Término', { exact: true })
     .fill(`garantiasintetica${suffix.replaceAll('-', '')}`);
@@ -175,7 +197,9 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   } finally {
     await installer.close();
   }
-  await page.goto(`/zones/${zone}/gates`);
+  await openMenuWith(page, 'Actas, acuerdos y política', zone);
+  await expect(page).toHaveURL(new RegExp(`/zones/${zone}/gates$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Actas, acuerdos y política');
   const confirmation = page.waitForResponse(
     (response) =>
       response.url().includes('/confirmations') && response.request().method() === 'POST',

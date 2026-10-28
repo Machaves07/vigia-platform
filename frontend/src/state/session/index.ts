@@ -11,5 +11,11 @@ export {
   sessionReducer,
   type SessionNotice,
 } from './reducer';
-export { SessionProvider, useFormDraft, useSession, useUiSession } from './SessionProvider';
+export {
+  SessionProvider,
+  useFormDraft,
+  useOptionalUiSession,
+  useSession,
+  useUiSession,
+} from './SessionProvider';
 export { createSessionStore, LOGIN_ROUTE, type SessionStoreOptions } from './store';

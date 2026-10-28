@@ -5,6 +5,8 @@
  * - **Guarda** (BR-APP-03, 77; NFR-APP-23): un grupo sin permiso no carga su porción y pinta
  *   `NotAvailableInScope`, el mismo componente que la ruta que no existe; la interfaz no distingue
  *   «no existe» de «no es suyo». La guarda es comodidad: el servidor autoriza cada petición.
+ * - **Inicio propio** (VIG-363, BR-APP-04): un grupo `home_only` (el panel del coordinador) que no
+ *   es el inicio de la sesión lleva a su propio inicio; nadie ve el panel de otro rol.
  * - Las rutas se construyen para un `Principal`: si un `GET /me` (cambio de concesión, otra
  *   persona) cambia sus permisos o sus roles, `AppRouter` construye un enrutador nuevo. Sin
  *   `Principal` solo se abren las rutas públicas; `/` y las URL protegidas llevan al inicio de sesión.
@@ -16,7 +18,12 @@ import { type ComponentType, type ReactNode, useEffect, useMemo } from 'react';
 import { createBrowserRouter, Navigate, type RouteObject, RouterProvider } from 'react-router';
 
 import type { RouteGroup, ScreenDescriptor } from '@/app/descriptor';
-import { canEnterGroup, homeScreen, type NavigationPrincipal } from '@/app/navigation';
+import {
+  canEnterGroup,
+  homeScreen,
+  type HomeScreen,
+  type NavigationPrincipal,
+} from '@/app/navigation';
 import { SCREENS } from '@/app/screens';
 import { NotAvailableInScope, ScreenState } from '@/pages/shared/ScreenState';
 
@@ -38,12 +45,19 @@ function groupRoute(
   group: RouteGroup,
   open: boolean,
   anonymous: boolean,
+  ownHome: HomeScreen | null | 'this',
 ): RouteObject {
   // Tras logout, una URL protegida exige volver a iniciar sesión (TASK-450).
   // Una sesión activa sin permiso conserva la respuesta uniforme de alcance.
   if (anonymous && group.access !== 'public')
     return { path, element: <Navigate to={LOGIN_PATH} replace /> };
   if (!open) return { path, Component: NotAvailableInScope };
+  // El panel de inicio de otro rol lleva a la sesión a su propio inicio (VIG-363, BR-APP-04).
+  if (group.home_only === true && ownHome !== 'this') {
+    return ownHome === null
+      ? { path, Component: NotAvailableInScope }
+      : { path, element: <Navigate to={ownHome.path} replace /> };
+  }
   return {
     path,
     lazy: async () => {
@@ -71,12 +85,17 @@ export function createAppRoutes(
   { screens = SCREENS, fallback = ScreenLoading }: AppRoutesOptions = {},
 ): RouteObject[] {
   const permissions = permissionsOf(principal);
+  const home =
+    principal === null || permissions === null
+      ? null
+      : homeScreen(principal.assignments, permissions, screens);
   const children: RouteObject[] = [{ index: true, element: rootElement(principal, screens) }];
   for (const screen of screens) {
     for (const group of screen.route_groups) {
       const open = canEnterGroup(group, permissions);
+      const isHome = home?.screen_id === screen.screen_id && home.group === group.id;
       for (const path of group.paths)
-        children.push(groupRoute(path, group, open, principal === null));
+        children.push(groupRoute(path, group, open, principal === null, isHome ? 'this' : home));
     }
   }
   children.push({ path: '*', Component: NotAvailableInScope });

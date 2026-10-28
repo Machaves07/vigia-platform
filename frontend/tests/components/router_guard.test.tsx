@@ -170,9 +170,10 @@ describe('con permiso, cada grupo pinta su página', () => {
       ),
   ) as [string, (typeof SCREENS)[number], string][];
 
+  // Con el rol del coordinador: su panel de inicio (`home_only`, VIG-363) solo se pinta como inicio.
   const everything: NavigationPrincipal = {
     effective_permissions: [...new Set(SCREENS.flatMap((s) => s.required_permissions))],
-    assignments: [],
+    assignments: [{ role: 'coordinator_sst' }],
   };
 
   it.each(open)('%s', async (_name, _descriptor, path) => {
@@ -198,6 +199,48 @@ describe('inicio', () => {
     expect(router.state.location.pathname).toBe('/home');
     // El panel de inicio pinta el título de su propia página, no el nombre de navegación.
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text('scr08.home.title'));
+  });
+
+  // VIG-363 (hallazgo 18): cada rol llega a su propio inicio, y el panel del coordinador lleva a
+  // cualquier otro rol al suyo; nadie más ve «Inicio del coordinador».
+  const HOMES = [
+    ['plant_manager', '/metrics/weekly'],
+    ['administrator', '/fleet'],
+    ['line_manager', '/zones/monthly'],
+    ['copasst', '/transparency'],
+  ] as const;
+
+  it.each(HOMES)('%s: / y /home llevan a su propio inicio %s', async (role, home) => {
+    const principal: NavigationPrincipal = {
+      effective_permissions: effectivePermissions('customer_organization', [role]),
+      assignments: [{ role }],
+    };
+    const root = await renderAt(principal, '/');
+    expect(root.router.state.location.pathname).toBe(home);
+    root.unmount();
+    const coordinatorHome = await renderAt(principal, '/home');
+    expect(coordinatorHome.router.state.location.pathname).toBe(home);
+    expect(screen.queryByRole('heading', { level: 1, name: text('scr08.home.title') })).toBeNull();
+  });
+
+  it('el proveedor llega a sus concesiones y /home lo lleva allí', async () => {
+    const provider: NavigationPrincipal = {
+      effective_permissions: effectivePermissions('provider_organization', ['provider_installer']),
+      assignments: [{ role: 'provider_installer' }],
+    };
+    const { router } = await renderAt(provider, '/home');
+    expect(router.state.location.pathname).toBe('/provider/concessions');
+  });
+
+  it('sin panel de inicio, /home es «no disponible en su alcance» aunque tenga las claves', async () => {
+    const operator: NavigationPrincipal = {
+      effective_permissions: ['findings.read', 'coverage.read'],
+      assignments: [{ role: 'platform_operator' }],
+    };
+    const missing = await renderAt(operator, NOT_FOUND);
+    missing.unmount();
+    const home = await renderAt(operator, '/home');
+    expect(home.html).toBe(missing.html);
   });
 
   it('/ sin sesión lleva al inicio de sesión', async () => {

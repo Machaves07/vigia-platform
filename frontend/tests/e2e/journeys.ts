@@ -178,11 +178,46 @@ export async function pendingAgreement(page: Page, world: World, zoneId: string)
 }
 
 /** La navegación principal de la aplicación: el recorrido diario no escribe direcciones. */
-async function openMenu(page: Page, name: string): Promise<void> {
+export async function openMenu(page: Page, name: string): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Navegación principal' })
     .getByRole('link', { name, exact: true })
     .click();
+}
+
+/**
+ * Entrada del menú que necesita zona o planta (VIG-363): abre su selector del alcance, elige
+ * `value` y pulsa «Abrir». Solo clics: la dirección no se escribe.
+ */
+export async function openMenuWith(page: Page, name: string, value: string): Promise<void> {
+  const nav = page.getByRole('navigation', { name: 'Navegación principal' });
+  await nav.getByRole('button', { name, exact: true }).click();
+  const form = nav.getByRole('form', { name, exact: true });
+  await form.getByRole('combobox').selectOption(value);
+  await form.getByRole('button', { name: 'Abrir', exact: true }).click();
+}
+
+/**
+ * Inicio propio del rol (VIG-363, hallazgo 18): la marca de la cabecera lleva al inicio del rol,
+ * con su título, y el panel del coordinador (`/home`) lleva a cualquier otro rol a ese mismo
+ * inicio. Nadie salvo el coordinador ve «Inicio del coordinador» ni su entrada en el menú.
+ */
+export async function expectOwnHome(page: Page, title: string, path: string): Promise<void> {
+  // Desde una pantalla que toda sesión abre (su cuenta), con la cabecera del armazón.
+  await page.goto('/account');
+  await page.getByRole('link', { name: 'Vigía', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
+  const coordinator = title === 'Inicio del coordinador';
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Navegación principal' })
+      .getByRole('link', { name: 'Inicio del coordinador', exact: true }),
+  ).toHaveCount(coordinator ? 1 : 0);
+  if (coordinator) return;
+  await page.goto('/home');
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
 }
 
 /**
@@ -202,15 +237,10 @@ async function settled(page: Page, target: Locator): Promise<void> {
     .toBe(true);
 }
 
-/** La bandeja completa, desde el menú: «Hallazgos» abre el panel de inicio del coordinador. */
+/** La bandeja completa, desde su entrada del menú (VIG-363: cada entrada con el nombre de su página). */
 export async function openInbox(page: Page): Promise<void> {
-  await openMenu(page, 'Hallazgos');
-  const open = page
-    .getByRole('region', { name: 'Hallazgos nuevos', exact: true })
-    .getByRole('link', { name: 'Abrir la bandeja completa' });
-  await settled(page, open);
-  await open.click();
-  await expect(page.getByRole('heading', { name: 'Bandeja de hallazgos' })).toBeVisible();
+  await openMenu(page, 'Bandeja de hallazgos');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
   await settled(page, page.locator('tbody tr'));
 }
 

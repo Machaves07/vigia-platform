@@ -283,12 +283,14 @@ describe('UI-07 NavMenu: solo pantallas visibles, en orden fijo (BR-APP-01, 03)'
       assignments: me.assignments,
     };
     const items = navItems(buildNavigationMap(principal, APP_SCREENS), APP_SCREENS);
-    // SCR-01 lleva a la cuenta, nunca a su grupo público de inicio de sesión; SCR-03 solo tiene
-    // con `coverage.read` una ruta de detalle y no tiene entrada.
+    // SCR-01 da una entrada por grupo con sesión (VIG-363), nunca su grupo público de inicio de
+    // sesión; SCR-03 solo tiene con `coverage.read` una ruta de detalle y no tiene entrada.
     expect(items.map((item) => [item.screen_id, item.path])).toEqual([
       ['SCR-01', '/account'],
+      ['SCR-01', '/admin/users'],
       ['SCR-07', '/fleet'],
       ['SCR-08', '/home'],
+      ['SCR-08', '/findings'],
       ['SCR-10', '/review-queue'],
       ['SCR-13', '/metrics'],
       ['SCR-15', '/notifications'],

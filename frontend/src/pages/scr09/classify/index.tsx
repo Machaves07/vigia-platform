@@ -7,6 +7,9 @@
  * avisa de que se resuelve en la cola (con su enlace) y cualquier estado posterior a `received`
  * avisa de que es una reclasificación con motivo reforzado, y, en lazo abierto, de que lo
  * suspende (BR-LAZ-24). El formulario sigue disponible: el servidor decide (BR-APP-43).
+ *
+ * Con el hallazgo consultado, su resumen y sus clips van antes del formulario (VIG-363): se
+ * clasifica viendo la evidencia, y cada clip pide su URL solo al pulsar reproducir.
  */
 import { useId, useState } from 'react';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
@@ -34,8 +37,10 @@ import {
   Result,
   useAuditedRead,
   useLoopContext,
+  zoneName,
   type LoopContext,
 } from './common';
+import { FindingEvidence } from './Evidence';
 import { ClassificationHistory } from './History';
 
 const REASON_FIELDS: Readonly<Record<string, string>> = {
@@ -270,6 +275,14 @@ export default function Page() {
             roleInUse={receipt.classified_by.role_in_use}
           />
         ))}
+      {detail.data !== undefined && (
+        <FindingEvidence
+          detail={detail.data}
+          zone={zoneName(context, detail.data.zone_id)}
+          timeZone={timeZone}
+          canViewClips={context.permissions.includes('evidence.read')}
+        />
+      )}
       {history.requested && (
         <section aria-label={text('scr09.classify.history')}>
           <h2>{text('scr09.classify.history')}</h2>

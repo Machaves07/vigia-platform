@@ -1,7 +1,15 @@
 import { fileURLToPath } from 'node:url';
 
 import { authenticatedTest as test, expect } from './fixtures';
-import { confirmFinding, logout, nextSteps, openFromInbox, openInbox } from './journeys';
+import {
+  confirmFinding,
+  expectOwnHome,
+  logout,
+  nextSteps,
+  openFromInbox,
+  openInbox,
+  openMenu,
+} from './journeys';
 
 test.use({ role: 'coordinator_sst', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
@@ -20,7 +28,8 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
   );
 
   await test.step('TOTP del arnés, panel y bandeja con vencidos en cabecera', async () => {
-    await page.goto('/home');
+    // VIG-363: el inicio propio del coordinador es su panel, con su título y su entrada.
+    await expectOwnHome(page, 'Inicio del coordinador', '/home');
     await expect(page.getByRole('heading', { name: 'Inicio del coordinador' })).toBeVisible();
     await page.getByRole('button', { name: 'Consultar cobertura actual' }).click();
     const zones = page.getByRole('region', { name: 'Observabilidad por zona' });
@@ -83,11 +92,33 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
 
   await test.step('del detalle a clasificar y al lazo, solo con clics (VIG-359)', async () => {
     await nextSteps(page).getByRole('link', { name: 'Clasificar', exact: true }).click();
+    let grants = 0;
+    const countGrant = (request: { url(): string }) => {
+      if (/\/evidence\/[^/]+\/read-url$/.test(request.url())) grants += 1;
+    };
+    page.on('request', countGrant);
     await confirmFinding(
       page,
       selected.closure,
       'Coexistencia real observada junto al acceso de la zona sintética',
     );
+    // VIG-363 (hallazgo 29): se clasifica viendo el resumen y el clip; la URL, solo al pulsar.
+    const summary = page.getByRole('region', { name: 'Resumen del hallazgo', exact: true });
+    await expect(summary).toBeVisible();
+    const play = summary.getByRole('button', { name: 'Reproducir clip', exact: true }).first();
+    await expect(play).toBeVisible();
+    expect(grants).toBe(0);
+    const grant = page.waitForResponse(/\/evidence\/[^/]+\/read-url$/);
+    await play.click();
+    expect((await grant).status()).toBe(200);
+    expect(grants).toBe(1);
+    page.off('request', countGrant);
+    await page
+      .locator('video')
+      .first()
+      .evaluate((element: HTMLVideoElement) => {
+        element.pause();
+      });
     await page
       .getByRole('navigation', { name: 'Clasificación y lazo del hallazgo' })
       .getByRole('link', { name: 'Lazo de cierre del hallazgo', exact: true })
@@ -222,6 +253,22 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(
       page.getByRole('region', { name: 'Historial de evidencia, cierres y declaraciones' }),
     ).toContainText('Cierre firmado');
+    // VIG-363 (hallazgo 20): el lazo cerrado solo ofrece la reapertura y la acción figura cerrada.
+    await page.getByRole('link', { name: 'Volver al lazo', exact: true }).click();
+    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
+    await expect(page.locator('[data-part="lifecycle_state"]')).toHaveAttribute(
+      'data-value',
+      'closed',
+    );
+    const next = page.getByRole('navigation', { name: 'Siguientes registros del lazo' });
+    await expect(next.getByRole('link')).toHaveText(['Registrar una reapertura']);
+    await expect(
+      page.getByRole('form', { name: 'Comprometer una acción sobre la zona' }),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-part="action_state"]').first()).toHaveAttribute(
+      'data-value',
+      'closed',
+    );
   });
 
   await test.step('incerrable con política real y fecha de revisión', async () => {
@@ -284,14 +331,41 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(
       page.getByRole('region', { name: 'Historial de evidencia, cierres y declaraciones' }),
     ).toContainText('Declaración de hallazgo incerrable');
+    // VIG-363 (hallazgo 20): el incerrable destaca la revisión con su fecha y su medida y solo
+    // ofrece además la reapertura; la revisión abre su pestaña.
+    await page.getByRole('link', { name: 'Volver al lazo', exact: true }).click();
+    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
+    const next = page.getByRole('navigation', { name: 'Siguientes registros del lazo' });
+    await expect(next.getByRole('link')).toHaveText([
+      'Revisar la declaración en la fecha comprometida',
+      'Registrar una reapertura',
+    ]);
+    const primary = next.locator('li[data-primary="true"]');
+    await expect(primary.locator('dd').last()).toHaveText(
+      'Delimitar el acceso con una barrera física temporal en la zona',
+    );
+    await expect(primary.locator('dd time')).toHaveCount(1);
+    await expect(
+      page.getByRole('form', { name: 'Comprometer una acción sobre la zona' }),
+    ).toHaveCount(0);
+    await primary.getByRole('link').click();
+    await expect(page).toHaveURL(new RegExp(`/findings/${selected.unclosable}/loop/unclosable$`));
+    await page.getByRole('button', { name: 'Consultar el expediente de cierre' }).click();
+    await expect(
+      page.getByRole('region', { name: 'Revisar una declaración', exact: true }),
+    ).toBeVisible();
   });
 
   await test.step('causa raíz guardada en servidor y borrador del asistente marcado', async () => {
+    const why = 'El acceso de la zona no dispone de un resguardo fijo compatible';
     await page.goto(`/findings/${selected.unclosable}/root-cause`);
-    await page.getByRole('button', { name: 'Iniciar el análisis de causa raíz' }).click();
-    await page
-      .getByLabel('Respuesta 1', { exact: true })
-      .fill('El acceso de la zona no dispone de un resguardo fijo compatible');
+    // Sin análisis en curso se inicia; si otro recorrido de este mundo dejó uno (a11y.spec), se
+    // retoma: «Iniciar» solo aparece si no hay ninguno (VIG-363).
+    const start = page.getByRole('button', { name: 'Iniciar el análisis de causa raíz' });
+    const resume = page.getByRole('button', { name: 'Continuar el análisis', exact: true });
+    await expect(start.or(resume)).toBeVisible();
+    await ((await start.isVisible()) ? start : resume).click();
+    await page.getByLabel('Respuesta 1', { exact: true }).fill(why);
     await page.getByRole('button', { name: 'Guardar este porqué en el servidor' }).click();
     await expect(page.getByText('Porqué guardado en el servidor.', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Pedir un borrador al asistente' }).click();
@@ -321,6 +395,30 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     const leave = page.getByRole('button', { name: 'Salir sin guardar', exact: true });
     await expect(leave).toBeVisible();
     await leave.click();
+    await expect(page).toHaveURL(/\/notifications$/);
+    // VIG-363 (hallazgo 21): al volver, el análisis guardado se retoma; no se crea otro.
+    await page.goto(`/findings/${selected.unclosable}/root-cause`);
+    const saved = page.getByRole('region', { name: 'Análisis en curso', exact: true });
+    await expect(saved.locator('[data-part="summary-whys"] li')).toHaveText([why]);
+    await expect(saved.locator('[data-part="draft-notice"]')).toHaveText(
+      'Tiene un borrador del asistente para revisar: se muestra al continuar.',
+    );
+    await expect(start).toHaveCount(0);
+    const starts: string[] = [];
+    const countStart = (request: { method(): string; url(): string }) => {
+      if (request.method() === 'POST' && request.url().endsWith('/root-cause-analyses'))
+        starts.push(request.url());
+    };
+    page.on('request', countStart);
+    await saved.getByRole('button', { name: 'Continuar el análisis', exact: true }).click();
+    await expect(page.getByLabel('Respuesta 1', { exact: true })).toHaveValue(why);
+    await expect(
+      page.getByText('Borrador del asistente, requiere revisión', { exact: true }),
+    ).toBeVisible({ timeout: 120_000 });
+    page.off('request', countStart);
+    expect(starts).toEqual([]);
+    await openMenu(page, 'Notificaciones');
+    await expect(page).toHaveURL(/\/notifications$/);
   });
 
   await test.step('notificación leída y cierre de sesión sin almacenamiento residual', async () => {

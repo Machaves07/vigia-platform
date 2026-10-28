@@ -261,7 +261,14 @@ function missingAfter(analysis: Analysis, body: AnalysisSignatureBody): string[]
   return analysis.pending_information.filter((item) => sent[item] !== true);
 }
 
-export function Workspace({ initial }: { readonly initial: Analysis }) {
+export function Workspace({
+  initial,
+  resumeRequestId = null,
+}: {
+  readonly initial: Analysis;
+  /** La última solicitud al asistente del análisis retomado: su borrador se vuelve a mostrar. */
+  readonly resumeRequestId?: string | null;
+}) {
   const clock = rootCauseClock();
   const { principal } = useUiSession();
   const [signer] = useState<SignerProfile>(() => ({
@@ -292,6 +299,7 @@ export function Workspace({ initial }: { readonly initial: Analysis }) {
     status: (request_id, signal) =>
       rootCausePort.assistantStatus.read({ path: { request_id } }, signal),
     classify: assistantFailure,
+    resumeRequestId,
   });
 
   const putStep = useScreenMutation({

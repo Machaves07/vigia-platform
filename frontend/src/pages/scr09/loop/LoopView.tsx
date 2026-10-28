@@ -12,6 +12,18 @@ import { label } from '@/texts/labels';
 import { ClassificationHistory } from '../classify/History';
 
 const ACTION_STATES: readonly string[] = ['assigned', 'overdue', 'closed', 'superseded'];
+/** Estados de la fila de la acción vigente (no sustituida) mientras el lazo sigue abierto. */
+const LIVE_ACTION_STATES: readonly string[] = ['assigned', 'overdue'];
+
+/**
+ * El estado que se muestra de la acción. El cierre firmado (T09) cita la acción vigente y no
+ * reescribe su fila, que sigue `assigned` u `overdue` (U-04, VIG-233; diagnóstico de VIG-363): con
+ * el hallazgo `closed`, la acción vigente se presenta cerrada con el hallazgo.
+ */
+function shownActionState(action: ActionItem, lifecycleState: string): string {
+  if (lifecycleState === 'closed' && LIVE_ACTION_STATES.includes(action.state)) return 'closed';
+  return action.state;
+}
 
 function actionState(state: string): string {
   // El servidor declara el vencimiento; counts_as_overdue solo indica si entra en su cómputo.
@@ -23,17 +35,24 @@ function actionState(state: string): string {
 
 function ActionEntry({
   action,
+  lifecycleState,
   timeZone,
 }: {
   readonly action: ActionItem;
+  readonly lifecycleState: string;
   readonly timeZone: string;
 }) {
+  const shown = shownActionState(action, lifecycleState);
   return (
     <li data-part="action">
       <p>
         <strong>{label('action_type', action.action_type)}</strong>
         {' · '}
-        {text('scr09.loop.action_state')}: {actionState(action.state)}
+        {text('scr09.loop.action_state')}:{' '}
+        <span data-part="action_state" data-value={shown}>
+          {actionState(shown)}
+        </span>
+        {shown !== action.state && <> · {text('role_navigation.loop.closed_with_finding')}</>}
         {!action.counts_as_overdue && <> · {text('scr09.loop.overdue_count_suspended')}</>}
       </p>
       <p>{action.action_description}</p>
@@ -88,7 +107,12 @@ export function LoopView({
         ) : (
           <ol aria-label={text('scr09.loop.actions')}>
             {detail.actions.map((action) => (
-              <ActionEntry key={action.action_id} action={action} timeZone={timeZone} />
+              <ActionEntry
+                key={action.action_id}
+                action={action}
+                lifecycleState={detail.lifecycle_state}
+                timeZone={timeZone}
+              />
             ))}
           </ol>
         )}

@@ -1,5 +1,6 @@
+import { stat } from 'node:fs/promises';
 import { authenticatedTest as test, expect } from './fixtures';
-import { installerRoute, prepare, required } from './journeys';
+import { expectOwnHome, installerRoute, openMenu, prepare, required } from './journeys';
 import { systemClock } from '../../src/state/clock';
 
 test.use({ role: 'plant_manager' });
@@ -13,6 +14,18 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   test.setTimeout(360_000);
   const plant = required(world.plant_ids[0]);
   const zone = required(world.zone_ids[0]);
+  // VIG-363 (hallazgo 18): su inicio es su resumen semanal; su bandeja, con su nombre.
+  await expectOwnHome(page, 'Resumen semanal del gerente', '/metrics/weekly');
+  // Revisión 1: el resumen llega cargado (primera zona, mes de la semana anterior), sin «Consultar».
+  await expect(page.getByRole('table', { name: 'Días de vencimiento', exact: true })).toBeVisible();
+  await expect(page.getByText('Seleccione zona y periodo y pulse consultar.')).toHaveCount(0);
+  await openMenu(page, 'Bandeja de hallazgos');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Inicio y bandeja' })
+      .getByRole('link', { name: 'Inicio del coordinador' }),
+  ).toHaveCount(0);
   const provider = await (await roleSession('provider_installer')).newPage();
   try {
     // La carga prepara por servicios internos: esta consulta HTTP produce un provider_query real.
@@ -139,5 +152,8 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   await link.click();
   const volume = await download;
   expect((await volume.failure()) === null, 'Descarga real del volumen completada').toBe(true);
-  expect(await volume.path()).not.toBeNull();
+  // `saveAs` y no `path()`: con el navegador remoto de WebKit (run-server) no hay ruta local.
+  const saved = test.info().outputPath('volumen-1');
+  await volume.saveAs(saved);
+  expect((await stat(saved)).size).toBeGreaterThan(0);
 });

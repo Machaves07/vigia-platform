@@ -26,6 +26,7 @@ export function useLoopContext() {
   const plants: readonly Plant[] = hierarchy.data?.plants ?? [];
   return {
     findingId,
+    organizationId: principal?.organization.organization_id ?? '',
     scope,
     concession,
     plants,

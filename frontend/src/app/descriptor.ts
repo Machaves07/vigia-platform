@@ -70,7 +70,28 @@ export interface RouteGroup {
   readonly required_permissions: readonly string[];
   /** Pantallas enlazadas desde este grupo cuya porción se precarga si es el inicio. */
   readonly linked_screens?: readonly ScreenId[];
+  /**
+   * Solo como inicio (VIG-363, BR-APP-04): el grupo es el panel de inicio de unos roles y se abre
+   * únicamente cuando es el inicio de la sesión; a cualquier otra sesión su ruta la lleva a su
+   * propio inicio y el menú no lo ofrece. No es una barrera: el servidor autoriza cada lectura.
+   */
+  readonly home_only?: true;
+  /** Entrada propia del menú (VIG-363); ver `GroupMenu`. */
+  readonly menu?: GroupMenu;
   readonly load: () => Promise<ScreenModule>;
+}
+
+/**
+ * Entrada propia de un grupo en el menú (VIG-363): una pantalla con grupos así aparece en el menú
+ * como esas entradas, cada una con su nombre, en vez de una sola entrada con el nombre de la
+ * pantalla. Si la ruta del grupo lleva zona o planta, la entrada abre un selector de las zonas o
+ * plantas del alcance (`GET /hierarchy`) en lugar de una dirección.
+ */
+export interface GroupMenu {
+  /** Clave del catálogo de textos con el nombre de la entrada (el de la página que abre). */
+  readonly title_text: string;
+  /** Parámetro de la ruta que elige el selector; sin él, la primera ruta sin parámetros. */
+  readonly select?: 'zone_id' | 'plant_id';
 }
 
 /** Sección con permiso propio dentro de un grupo de rutas (visible si alguna clave está). */

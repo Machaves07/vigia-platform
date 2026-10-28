@@ -1,6 +1,7 @@
 /**
  * SCR-05 · Gestor de actas, acuerdos y política de incerrables (U-03), VIG-323. Grupos: `gates`
- * (por planta y por zona) y `policy`.
+ * (por planta y por zona) y `policy`. En el menú (VIG-363), las compuertas con selector de zona y
+ * la política con selector de planta.
  */
 import type { ScreenDescriptor } from '@/app/descriptor';
 
@@ -15,6 +16,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/gates', '/zones/:zone_id/gates'],
       access: 'permission',
       required_permissions: ['catalog.read', 'commissioning.run', 'agreements.sign'],
+      menu: { title_text: 'navigation.scr05', select: 'zone_id' },
       load: () => import('./gates'),
     },
     {
@@ -22,6 +24,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/policy'],
       access: 'permission',
       required_permissions: ['catalog.read', 'agreements.sign'],
+      menu: { title_text: 'scr05.policy.title', select: 'plant_id' },
       load: () => import('./policy'),
     },
   ],

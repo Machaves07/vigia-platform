@@ -1914,6 +1914,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/loop/findings/{finding_state_id}/root-cause-analyses/in-progress': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Lee el análisis de causa raíz sin firmar del hallazgo para retomarlo */
+    get: operations['in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/loop/root-cause-analyses/{analysis_id}/steps/{step_index}': {
     parameters: {
       query?: never;
@@ -2641,6 +2658,17 @@ export interface components {
      * @enum {string}
      */
     AlarmStatus: 'active' | 'cleared';
+    /**
+     * AnalysisInProgressOut
+     * @description El análisis en curso del sujeto para retomarlo (VIG-363).
+     */
+    AnalysisInProgressOut: {
+      analysis:
+        | components['schemas']['vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut']
+        | null;
+      /** Assistant Request Id */
+      assistant_request_id: string | null;
+    };
     /**
      * AnalysisSignatureBody
      * @description El texto final que el humano acepta y su licencia profesional.
@@ -13499,6 +13527,37 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut'];
+        };
+      };
+      /** @description Error genérico (ApiError) */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorBody'];
+        };
+      };
+    };
+  };
+  in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        finding_state_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AnalysisInProgressOut'];
         };
       };
       /** @description Error genérico (ApiError) */

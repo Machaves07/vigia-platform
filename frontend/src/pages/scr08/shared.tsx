@@ -1,6 +1,7 @@
 /** Contexto y estados de las dos vistas de proyección de SCR-08. */
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { homeScreen } from '@/app/navigation';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ScreenState } from '@/pages/shared/ScreenState';
@@ -8,6 +9,7 @@ import { findingsClock, findingsFailure, findingsPort, readOverdue } from '@/por
 import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
+import { descriptor } from './descriptor';
 
 export function useFindingsContext() {
   const { principal } = useUiSession();
@@ -32,12 +34,28 @@ export function useFindingsContext() {
   };
 }
 
+/**
+ * Miga del panel y la bandeja (VIG-363): «Inicio del coordinador» solo si ese panel es el inicio de
+ * la sesión (BR-APP-04) y la bandeja solo si la sesión la puede abrir; sin ninguna de las dos, nada.
+ */
 export function FindingsNav() {
+  const { principal } = useUiSession();
+  const permissions = new Set(principal?.effective_permissions ?? []);
+  const home =
+    principal === null ? null : homeScreen(principal.assignments, permissions, [descriptor]);
+  const links = [
+    ...(home?.group === 'home' ? [{ to: '/home', key: 'scr08.home.title' }] : []),
+    ...(permissions.has('findings.read') ? [{ to: '/findings', key: 'scr08.inbox.title' }] : []),
+  ];
+  if (links.length === 0) return null;
   return (
     <nav aria-label={text('scr08.home.navigation')}>
-      <Link to="/home">{text('scr08.home.title')}</Link>
-      {' · '}
-      <Link to="/findings">{text('scr08.inbox.title')}</Link>
+      {links.map((link, index) => (
+        <span key={link.to}>
+          {index > 0 && ' · '}
+          <Link to={link.to}>{text(link.key)}</Link>
+        </span>
+      ))}
     </nav>
   );
 }

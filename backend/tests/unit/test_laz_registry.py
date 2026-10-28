@@ -198,6 +198,8 @@ def test_the_u04_units_register_only_what_their_tasks_added() -> None:
                 ("POST", "/loop/findings/{finding_state_id}/closure"),
                 ("POST", "/loop/findings/{finding_state_id}/reopening"),
                 ("POST", "/loop/findings/{finding_state_id}/root-cause-analyses"),
+                # VIG-363: el análisis en curso, para retomarlo (segundo verbo de SUP-U05-16).
+                ("GET", "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress"),
                 ("PUT", "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}"),
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/signature"),
                 ("POST", "/loop/root-cause-analyses/{analysis_id}/assistant-requests"),

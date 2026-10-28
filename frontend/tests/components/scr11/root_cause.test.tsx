@@ -46,8 +46,13 @@ async function setup(options: Parameters<typeof providers>[0] = {}) {
   return { ...env, loop, view };
 }
 
+/** «Iniciar» aparece cuando la lectura del análisis en curso dice que no hay ninguno (VIG-363). */
+function startButton() {
+  return screen.findByRole('button', { name: text('scr11.start') }, WAIT);
+}
+
 async function start() {
-  fireEvent.click(screen.getByRole('button', { name: text('scr11.start') }));
+  fireEvent.click(await startButton());
   return screen.findByRole('region', { name: text('scr11.wizard_title') }, WAIT);
 }
 
@@ -110,7 +115,7 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     const { loop } = await setup();
     loop.state.startResponse = () =>
       apiError('temporarily_unavailable', 503, 'loop_standard_text_unavailable');
-    fireEvent.click(screen.getByRole('button', { name: text('scr11.start') }));
+    fireEvent.click(await startButton());
     const alert = await screen.findByRole('alert', {}, WAIT);
     expect(alert.textContent).toBe(text('scr11.standard_text_unavailable'));
     expect(screen.queryByRole('region', { name: text('scr11.wizard_title') })).toBeNull();
@@ -122,7 +127,7 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
   it('un hallazgo fuera del alcance muestra la pantalla uniforme', async () => {
     const { loop } = await setup();
     loop.state.startResponse = () => apiError('not_found', 404);
-    fireEvent.click(screen.getByRole('button', { name: text('scr11.start') }));
+    fireEvent.click(await startButton());
     await screen.findByText(text('errors.not_available_in_scope'), {}, WAIT);
   });
 
@@ -402,6 +407,120 @@ describe('SCR-11 causa raíz', { timeout: 60_000 }, () => {
     });
     fireEvent.click(screen.getByRole('button', { name: text('scr11.save_step') }));
     await screen.findByRole('alert', {}, WAIT);
+    expect(await axe(view.container)).toHaveNoViolations();
+  });
+});
+
+describe('SCR-11 retoma el análisis en curso (VIG-363)', { timeout: 60_000 }, () => {
+  const SAVED = [
+    'Primer porqué sintético guardado en el servidor.',
+    'Segundo porqué sintético guardado en el servidor.',
+  ];
+
+  function savedAnalysis() {
+    return analysis({
+      why_steps: SAVED.map((statement, offset) => ({
+        step_index: offset + 1,
+        question_es: question(offset + 1),
+        statement,
+        evidence_refs: [],
+        category: null,
+      })),
+      next_step_index: 3,
+      next_question_es: question(3),
+      pending_information: ['root_cause_category', 'root_cause_statement', 'conclusion'],
+    });
+  }
+
+  async function resumed(requestId: string | null) {
+    const env = await providers();
+    const loop = fakeLoop();
+    loop.saved(savedAnalysis(), requestId);
+    loop.install(env.clock);
+    const view = renderAt(<Page />, env.Providers);
+    const region = await screen.findByRole('region', { name: text('scr11.in_progress') }, WAIT);
+    return { ...env, loop, view, region };
+  }
+
+  it('sin análisis en curso solo ofrece iniciar, y lo pide una sola vez al entrar', async () => {
+    const { loop } = await setup();
+    await startButton();
+    expect(screen.queryByRole('button', { name: text('scr11.continue') })).toBeNull();
+    expect(screen.queryByRole('region', { name: text('scr11.in_progress') })).toBeNull();
+    expect(loop.calls.inProgress).toBe(1);
+    expect(loop.calls.start).toBe(0);
+  });
+
+  it('con uno guardado muestra sus porqués y su borrador, y no ofrece iniciar otro', async () => {
+    const { loop, region } = await resumed(readyRequest().request_id);
+    expect(
+      [...region.querySelectorAll('[data-part="summary-whys"] li')].map((li) => li.textContent),
+    ).toEqual(SAVED);
+    expect(region.querySelector('[data-part="analysis-state"]')?.textContent).toBe(
+      label('root_cause_analysis_state', 'draft'),
+    );
+    expect(region.querySelector('[data-part="draft-notice"]')?.textContent).toBe(
+      text('scr11.in_progress_draft'),
+    );
+    expect(screen.queryByRole('button', { name: text('scr11.start') })).toBeNull();
+    expect(screen.queryByText(text('scr11.start_new_notice'))).toBeNull();
+    expect(loop.calls.start).toBe(0);
+  });
+
+  it('«Continuar» retoma lo guardado y vuelve a mostrar el borrador marcado sin pedir otro', async () => {
+    const { loop } = await resumed(readyRequest().request_id);
+    loop.state.statusSteps = [() => HttpResponse.json(readyRequest())];
+    fireEvent.click(screen.getByRole('button', { name: text('scr11.continue') }));
+    await screen.findByRole('region', { name: text('scr11.wizard_title') }, WAIT);
+    expect((statement(1) as HTMLTextAreaElement).value).toBe(SAVED[0]);
+    const draft = await screen.findByRole(
+      'article',
+      { name: text('components_assistant.draft_mark') },
+      WAIT,
+    );
+    expect(draft.textContent).toContain(readyRequest().draft?.draft_text ?? '');
+    expect(loop.calls.assistantRequests).toBe(0);
+    expect(loop.calls.statusAt).toHaveLength(1);
+    expect(loop.calls.start).toBe(0);
+  });
+
+  it('sin solicitud al asistente lo dice y «Continuar» no consulta ninguna', async () => {
+    const { loop, region } = await resumed(null);
+    expect(region.querySelector('[data-part="draft-notice"]')?.textContent).toBe(
+      text('scr11.in_progress_no_draft'),
+    );
+    fireEvent.click(screen.getByRole('button', { name: text('scr11.continue') }));
+    await screen.findByRole('region', { name: text('scr11.wizard_title') }, WAIT);
+    expect(loop.calls.statusAt).toEqual([]);
+  });
+
+  it('una lectura fuera del alcance responde la pantalla uniforme y no ofrece iniciar', async () => {
+    const env = await providers();
+    const loop = fakeLoop();
+    loop.install(env.clock);
+    loop.state.inProgressResponse = () => apiError('not_found', 404);
+    renderAt(<Page />, env.Providers);
+    await screen.findByText(text('errors.not_available_in_scope'), {}, WAIT);
+    expect(screen.queryByRole('button', { name: text('scr11.start') })).toBeNull();
+  });
+
+  it('una lectura fallida se puede repetir y entonces muestra lo guardado', async () => {
+    const env = await providers();
+    const loop = fakeLoop();
+    loop.saved(savedAnalysis());
+    loop.install(env.clock);
+    loop.state.inProgressResponse = () => apiError('internal_error', 500);
+    renderAt(<Page />, env.Providers);
+    const retry = await screen.findByRole('button', { name: text('screen_state.retry') }, WAIT);
+    expect(screen.queryByRole('button', { name: text('scr11.start') })).toBeNull();
+    loop.state.inProgressResponse = null;
+    fireEvent.click(retry);
+    await screen.findByRole('region', { name: text('scr11.in_progress') }, WAIT);
+    expect(loop.calls.inProgress).toBe(2);
+  });
+
+  it('axe sin violaciones con el análisis en curso', async () => {
+    const { view } = await resumed(readyRequest().request_id);
     expect(await axe(view.container)).toHaveNoViolations();
   });
 });

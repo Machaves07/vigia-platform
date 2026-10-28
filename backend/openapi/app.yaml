@@ -4372,6 +4372,33 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ApiErrorBody"
+  "/loop/findings/{finding_state_id}/root-cause-analyses/in-progress":
+    "get":
+      "tags":
+        - "lazo"
+      "summary": "Lee el análisis de causa raíz sin firmar del hallazgo para retomarlo"
+      "operationId": "in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get"
+      "parameters":
+        - "name": "finding_state_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+            "title": "Finding State Id"
+      "responses":
+        "200":
+          "description": "Successful Response"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AnalysisInProgressOut"
+        "default":
+          "description": "Error genérico (ApiError)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorBody"
   "/loop/root-cause-analyses/{analysis_id}/steps/{step_index}":
     "put":
       "tags":
@@ -5877,6 +5904,24 @@
         - "cleared"
       "title": "AlarmStatus"
       "description": "Filtro de ``GET /fleet/alarms``: abiertas o ya cerradas."
+    "AnalysisInProgressOut":
+      "properties":
+        "analysis":
+          "anyOf":
+            - "$ref": "#/components/schemas/vigia_platform__loop__adapters__http__root_cause_routes__AnalysisOut"
+            - "type": "null"
+        "assistant_request_id":
+          "anyOf":
+            - "type": "string"
+              "format": "uuid"
+            - "type": "null"
+          "title": "Assistant Request Id"
+      "type": "object"
+      "required":
+        - "analysis"
+        - "assistant_request_id"
+      "title": "AnalysisInProgressOut"
+      "description": "El análisis en curso del sujeto para retomarlo (VIG-363)."
     "AnalysisSignatureBody":
       "properties":
         "professional_license":

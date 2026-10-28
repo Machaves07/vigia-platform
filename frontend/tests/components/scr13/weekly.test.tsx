@@ -6,7 +6,7 @@ import { axe } from 'vitest-axe';
 import Page from '@/pages/scr13/weekly';
 import { text } from '@/texts';
 import { server } from '../../msw/server';
-import { API, OTHER, WAIT, fixture, consult, overdueData, adoptionData } from './support';
+import { API, OTHER, WAIT, ZONE, fixture, consult, overdueData, adoptionData } from './support';
 
 describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
   it('mismas cifras, vencidos 30/31 días, adopción del servidor y objetivo propio', async () => {
@@ -32,6 +32,33 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
       }),
     ).toBeDefined();
     expect(await axe(view.container)).toHaveNoViolations();
+  });
+  it('VIG-363: el inicio del gerente llega cargado con la primera zona y el mes de la semana anterior', async () => {
+    const f = await fixture();
+    // 3 de febrero: la semana anterior empieza el 27 de enero, así que el periodo es enero.
+    f.clock.advance(19 * 86_400_000);
+    const requests: URL[] = [];
+    server.events.on('request:start', ({ request }) => {
+      requests.push(new URL(request.url));
+    });
+    render(<Page />, { wrapper: f.Wrapper });
+    const table = await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
+    expect(within(table).getAllByRole('row').slice(1)).toHaveLength(2);
+    expect(screen.queryByText(text('scr13.not_requested'), { exact: true })).toBeNull();
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe(ZONE);
+    expect(screen.getByLabelText<HTMLInputElement>(text('scr13.period')).value).toBe('2026-01');
+    const metrics = requests.filter((url) => url.pathname === '/accreditation/metrics');
+    expect(metrics.map((url) => url.searchParams.get('period'))).toEqual(['2026-01']);
+    expect(metrics.map((url) => url.searchParams.get('zone_id'))).toEqual([ZONE]);
+    server.events.removeAllListeners();
+  });
+  it('VIG-363: una elección del gerente sustituye a la carga inicial', async () => {
+    const f = await fixture();
+    render(<Page />, { wrapper: f.Wrapper });
+    await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
+    fireEvent.change(screen.getByLabelText(text('scr13.zone')), { target: { value: OTHER } });
+    expect(screen.getByText(text('scr13.not_requested'), { exact: true })).toBeDefined();
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe(OTHER);
   });
   it('respeta destacado y totales del servidor con umbral configurable, sin recalcular por días ni página', async () => {
     const f = await fixture(['executive_summary.read']);

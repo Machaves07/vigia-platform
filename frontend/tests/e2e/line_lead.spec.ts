@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { logout } from './journeys';
+import { expectOwnHome, logout } from './journeys';
 
 test.use({ role: 'line_manager', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
@@ -8,8 +8,9 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   authenticatedPage: page,
   world,
 }) => {
-  await page.goto('/zones/monthly');
-  const zone = page.getByLabel('Zona', { exact: true });
+  // VIG-363 (hallazgo 18): su inicio es su paquete mensual; nunca el panel del coordinador.
+  await expectOwnHome(page, 'Paquete de revisión mensual', '/zones/monthly');
+  const zone = page.getByRole('main').getByLabel('Zona', { exact: true });
   await expect(zone.locator('option[value]:not([value=""])')).toHaveCount(1);
   await zone.selectOption(world.zone_ids[0] ?? '');
   await page.getByLabel('Mes del paquete', { exact: true }).fill(world.journeys.period);
@@ -72,5 +73,14 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   await expect(
     page.getByRole('heading', { name: 'No disponible en su alcance.', exact: true }),
   ).toBeVisible();
+  // VIG-363 (hallazgo 22): el aviso explica y lleva a lo útil del rol, su paquete mensual.
+  await expect(page.locator('main [data-part="scope_explanation"]')).toHaveText(
+    'Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar está en el menú y en su inicio.',
+  );
+  await page
+    .getByRole('link', { name: 'Ir a su inicio: Paquete de revisión mensual', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/zones\/monthly$/);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Paquete de revisión mensual');
   await logout(page);
 });

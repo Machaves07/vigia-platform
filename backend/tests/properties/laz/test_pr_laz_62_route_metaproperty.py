@@ -1,7 +1,8 @@
 """PR-LAZ-62: el catálogo de las 41 operaciones de U-04 no deja rutas sin aislar.
 
 LC-LAZ §6 define 41 operaciones, aunque ``SUP-U05-35`` usa dos verbos sobre el mismo recurso de
-preferencias. Por ello hay 42 rutas y 42 casos de aislamiento. Esta metapropiedad mantiene ambas
+preferencias y ``SUP-U05-16`` lee además el análisis en curso para retomarlo (VIG-363). Por ello
+hay 43 rutas y 43 casos de aislamiento. Esta metapropiedad mantiene ambas
 fronteras sincronizadas: una ruta nueva, una operación sin caso, una ruta pública o una clave de
 instalador del proveedor rompe la prueba antes de llegar a producción.
 """
@@ -97,7 +98,8 @@ def test_pr_laz_62_every_operation_has_a_private_declared_route_and_case() -> No
     assert len(LAZ_OPERATION_CASES) == 41
     assert set(routes) == operation_case_keys()
     assert set(case_by_key) == set(routes)
-    assert len(case_by_key) == 42  # SUP-U05-35 tiene GET y PUT.
+    # SUP-U05-35 tiene GET y PUT; SUP-U05-16, POST y la lectura del análisis en curso (VIG-363).
+    assert len(case_by_key) == 43
     assert uncovered_operation_cases(routes) == []
     # La barrera CSRF por cada ruta (incluidos cuerpos y verbos) se ejecuta en PR-NUC-53:
     # tests/properties/test_csrf_barrier.py, no mediante pertenencia a una constante global.

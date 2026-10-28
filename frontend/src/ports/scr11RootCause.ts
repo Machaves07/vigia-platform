@@ -1,10 +1,12 @@
 /**
- * Puerto de SCR-11 (causa raíz con asistente, SUP-U05-16 a 20 de U-04). Las cinco operaciones
+ * Puerto de SCR-11 (causa raíz con asistente, SUP-U05-16 a 20 de U-04). Las seis operaciones
  * exigen `root_cause.analyze` sobre la zona del análisis; ninguna lectura es auditada.
  *
  * - `start` crea un análisis nuevo en cada llamada: la pantalla solo lo pide por una acción
  *   explícita de la persona. `503 loop_standard_text_unavailable` degrada la sección
  *   (diferencia 8 de VIG-251).
+ * - `inProgress` (VIG-363) lee el análisis sin firmar más reciente del hallazgo y su última
+ *   solicitud al asistente, para retomarlo en vez de iniciar otro.
  * - `sign` responde `409 loop_transition_not_allowed` si el análisis ya está firmado
  *   (diferencia 9).
  * - `requestAssistant` y `assistantStatus` son la solicitud asíncrona y su consulta; un rechazo
@@ -21,12 +23,19 @@ export type ZoneContext = components['schemas']['ZoneContextOut'];
 export type AnalysisStepBody = components['schemas']['AnalysisStepBody'];
 export type AnalysisSignatureBody = components['schemas']['AnalysisSignatureBody'];
 export type AssistantRequest = components['schemas']['AssistantRequestOut'];
+export type AnalysisInProgress = components['schemas']['AnalysisInProgressOut'];
 
 export const rootCausePort = defineScreenPort('SCR-11', {
   start: {
     kind: 'write',
     status: 'fixed',
     operationId: 'start_loop_findings__finding_state_id__root_cause_analyses_post',
+    permission: 'root_cause.analyze',
+  },
+  inProgress: {
+    kind: 'read',
+    status: 'fixed',
+    operationId: 'in_progress_loop_findings__finding_state_id__root_cause_analyses_in_progress_get',
     permission: 'root_cause.analyze',
   },
   putStep: {

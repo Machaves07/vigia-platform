@@ -77,6 +77,8 @@ export type AssistantEvent =
   | { readonly type: 'accepted'; readonly response: AssistantRequestView; readonly now: number }
   /** Respuesta 200 de una consulta de estado. */
   | { readonly type: 'status'; readonly response: AssistantRequestView; readonly now: number }
+  /** Una solicitud ya creada que se vuelve a consultar al retomar el análisis (VIG-363). */
+  | { readonly type: 'resumed'; readonly requestId: string; readonly now: number }
   | { readonly type: 'failed'; readonly failure: AssistantFailure }
   | { readonly type: 'tick'; readonly now: number };
 
@@ -153,6 +155,9 @@ export function assistantReducer(
       return canRequest(state) ? { status: 'requesting' } : state;
     case 'accepted':
       return state.status === 'requesting' ? fromResponse(event.response, event.now) : state;
+    case 'resumed':
+      // Retomar no crea otra solicitud: consulta la que hay, con el tope contado desde ahora.
+      return { status: 'polling', requestId: event.requestId, startedAt: event.now };
     case 'status': {
       if (state.status !== 'polling' || event.response.request_id !== state.requestId) return state;
       if (expired(state, event.now)) return { status: 'unavailable', cause: null, expired: true };

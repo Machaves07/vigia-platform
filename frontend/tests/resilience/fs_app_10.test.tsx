@@ -35,7 +35,7 @@ async function setup() {
   const loop = fakeLoop();
   loop.install(env.clock);
   renderAt(<Page />, env.Providers);
-  fireEvent.click(screen.getByRole('button', { name: text('scr11.start') }));
+  fireEvent.click(await screen.findByRole('button', { name: text('scr11.start') }, WAIT));
   await screen.findByRole('region', { name: text('scr11.wizard_title') }, WAIT);
   const panel = () => screen.getByRole('region', { name: text('components_assistant.title') });
   return { ...env, loop, panel };
