@@ -76,6 +76,13 @@ select {
   min-width: var(--touch-target-min);
 }
 
+/* El resumen de un `<details>` también se toca: misma altura, sin perder su marcador. */
+summary {
+  min-height: var(--touch-target-min);
+  padding-block: var(--space-2);
+  cursor: pointer;
+}
+
 /* Campos de texto con la misma altura táctil que los botones (en tableta medían 30 px). */
 input:not([type='checkbox'], [type='radio'], [type='hidden'], [type='range']) {
   min-height: var(--touch-target-min);

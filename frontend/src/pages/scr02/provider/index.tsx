@@ -123,6 +123,7 @@ export default function Page() {
         refreshPolicy="on_demand"
         emptyText={text('scr02.provider.empty')}
         fetchPage={(_request, signal) => readProviderConcessions(signal)}
+        cardsOnTablet
       />
     </main>
   );

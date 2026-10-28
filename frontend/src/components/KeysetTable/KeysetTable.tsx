@@ -70,6 +70,12 @@ export interface KeysetTableProps<Row> {
   readonly emptyText?: string;
   readonly onRowActivate?: (row: Row) => void;
   readonly onFiltersApplied?: (filters: KeysetFilters) => void;
+  /**
+   * En tableta (≤ 960 px), cada fila como una tarjeta con la cabecera de cada dato encima
+   * (sistema visual v1, VIG-364): las acciones quedan a la vista sin desplazar en horizontal. La
+   * tabla conserva su semántica (`role` explícito) aunque cambie su disposición.
+   */
+  readonly cardsOnTablet?: boolean;
 }
 
 const PAGE_RECEIVED = 'keyset_table.page_received';
@@ -161,6 +167,7 @@ export function KeysetTable<Row>({
   emptyText,
   onRowActivate,
   onFiltersApplied,
+  cardsOnTablet = false,
 }: KeysetTableProps<Row>) {
   const [state, dispatch] = useReducer(keysetReducer<Row>, undefined, () =>
     createKeysetState<Row>(pageSize, initialFilters),
@@ -303,39 +310,54 @@ export function KeysetTable<Row>({
       ) : rows.length === 0 ? (
         <p data-part="empty">{emptyText ?? text('components_structure.keyset.empty')}</p>
       ) : (
-        <table className={styles.grid} aria-labelledby={headingId}>
-          <thead>
-            <tr>
-              {columns.map((column) => (
-                <th key={column.id} scope="col">
-                  {column.header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr
-                key={rowKey(row)}
-                ref={(element) => {
-                  rowRefs.current[index] = element;
-                }}
-                className={styles.row}
-                tabIndex={index === activeIndex ? 0 : -1}
-                onFocus={() => {
-                  setFocusIndex(index);
-                }}
-                onKeyDown={(event) => {
-                  onRowKeyDown(event, index, row);
-                }}
-              >
+        // La tabla va en su propia caja con desplazamiento horizontal: nunca desborda la página.
+        <div className={styles.scroll} data-part="table_box">
+          <table
+            className={cardsOnTablet ? `${styles.grid ?? ''} ${styles.cards ?? ''}` : styles.grid}
+            aria-labelledby={headingId}
+            role={cardsOnTablet ? 'table' : undefined}
+          >
+            <thead role={cardsOnTablet ? 'rowgroup' : undefined}>
+              <tr role={cardsOnTablet ? 'row' : undefined}>
                 {columns.map((column) => (
-                  <td key={column.id}>{column.cell(row)}</td>
+                  <th key={column.id} scope="col" role={cardsOnTablet ? 'columnheader' : undefined}>
+                    {column.header}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody role={cardsOnTablet ? 'rowgroup' : undefined}>
+              {rows.map((row, index) => (
+                <tr
+                  key={rowKey(row)}
+                  ref={(element) => {
+                    rowRefs.current[index] = element;
+                  }}
+                  className={styles.row}
+                  role={cardsOnTablet ? 'row' : undefined}
+                  tabIndex={index === activeIndex ? 0 : -1}
+                  onFocus={() => {
+                    setFocusIndex(index);
+                  }}
+                  onKeyDown={(event) => {
+                    onRowKeyDown(event, index, row);
+                  }}
+                >
+                  {columns.map((column) => (
+                    <td
+                      key={column.id}
+                      role={cardsOnTablet ? 'cell' : undefined}
+                      data-label={cardsOnTablet ? column.header : undefined}
+                      data-column={column.id}
+                    >
+                      {column.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {!loadingFirst && rows.length > 0 && (
         <footer className={styles.footer}>

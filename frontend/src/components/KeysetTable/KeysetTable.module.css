@@ -43,16 +43,94 @@
   font: inherit;
 }
 
+/* Caja de la tabla (sistema visual v1): desplaza en horizontal dentro de sí, nunca la página. */
+.scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
 .grid {
   width: 100%;
   border-collapse: collapse;
+  font-size: var(--font-size-small);
 }
 
 .grid th,
 .grid td {
-  padding: var(--space-2);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
   text-align: start;
+}
+
+.grid th {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Tarjetas en tableta: cada fila es una tarjeta y cada dato lleva su cabecera encima. */
+@media (max-width: 960px) {
+  .scroll:has(.cards) {
+    border: 0;
+    background: none;
+  }
+
+  .cards,
+  .cards tbody {
+    display: block;
+  }
+
+  .cards thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .cards tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-3);
+    padding: var(--space-4);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-card);
+    background: var(--color-surface);
+  }
+
+  .cards td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .cards td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xsmall);
+    font-weight: 600;
+  }
+
+  /* Las acciones, a todo el ancho de la tarjeta. */
+  .cards td[data-column='actions'] {
+    grid-column: 1 / -1;
+  }
+
+  .cards td[data-column='actions']::before {
+    content: none;
+  }
+
+  .cards td[data-column='actions'] button {
+    width: 100%;
+  }
 }
 
 .row:focus-visible,
