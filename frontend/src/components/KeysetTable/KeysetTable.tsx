@@ -11,8 +11,17 @@
  * una página y `keyset_table.rows_committed` cuando sus filas están en el DOM, ambas con la hora
  * del `Clock` inyectado, y la medida `keyset_table.render` entre las dos.
  */
-import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactNode, SubmitEvent } from 'react';
+import {
+  memo,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
+import type { KeyboardEvent, RefObject, ReactNode, SubmitEvent } from 'react';
 
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { LoadingSkeleton } from '@/components/RefreshIndicator/LoadingSkeleton';
@@ -153,6 +162,70 @@ function FilterBar({
   );
 }
 
+interface KeysetRowsProps<Row> {
+  readonly rows: readonly Row[];
+  readonly columns: readonly KeysetColumn<Row>[];
+  readonly rowKey: (row: Row) => string;
+  readonly activeIndex: number;
+  readonly cardsOnTablet: boolean;
+  readonly rowRefs: RefObject<(HTMLTableRowElement | null)[]>;
+  readonly onRowFocus: (index: number) => void;
+  /** Manejador vigente del teclado; la referencia es estable para no romper la memorización. */
+  readonly keyDownRef: RefObject<
+    (event: KeyboardEvent<HTMLTableRowElement>, index: number, row: Row) => void
+  >;
+}
+
+/**
+ * Cuerpo de la tabla, memorizado: «Cargar más», el indicador de actualización o el estado de
+ * carga no vuelven a pintar las filas ya presentes (NFR-APP-03, respuesta visible ≤ 100 ms).
+ */
+function KeysetRowsInner<Row>({
+  rows,
+  columns,
+  rowKey,
+  activeIndex,
+  cardsOnTablet,
+  rowRefs,
+  onRowFocus,
+  keyDownRef,
+}: KeysetRowsProps<Row>) {
+  return (
+    <tbody role={cardsOnTablet ? 'rowgroup' : undefined}>
+      {rows.map((row, index) => (
+        <tr
+          key={rowKey(row)}
+          ref={(element) => {
+            rowRefs.current[index] = element;
+          }}
+          className={styles.row}
+          role={cardsOnTablet ? 'row' : undefined}
+          tabIndex={index === activeIndex ? 0 : -1}
+          onFocus={() => {
+            onRowFocus(index);
+          }}
+          onKeyDown={(event) => {
+            keyDownRef.current(event, index, row);
+          }}
+        >
+          {columns.map((column) => (
+            <td
+              key={column.id}
+              role={cardsOnTablet ? 'cell' : undefined}
+              data-label={cardsOnTablet ? column.header : undefined}
+              data-column={column.id}
+            >
+              {column.cell(row)}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  );
+}
+
+const KeysetRows = memo(KeysetRowsInner) as typeof KeysetRowsInner;
+
 export function KeysetTable<Row>({
   caption,
   columns,
@@ -258,6 +331,10 @@ export function KeysetTable<Row>({
     }
     event.preventDefault();
   };
+  const keyDownRef = useRef(onRowKeyDown);
+  useLayoutEffect(() => {
+    keyDownRef.current = onRowKeyDown;
+  });
 
   const applyFilters = (filters: KeysetFilters) => {
     setFocusIndex(0);
@@ -326,36 +403,16 @@ export function KeysetTable<Row>({
                 ))}
               </tr>
             </thead>
-            <tbody role={cardsOnTablet ? 'rowgroup' : undefined}>
-              {rows.map((row, index) => (
-                <tr
-                  key={rowKey(row)}
-                  ref={(element) => {
-                    rowRefs.current[index] = element;
-                  }}
-                  className={styles.row}
-                  role={cardsOnTablet ? 'row' : undefined}
-                  tabIndex={index === activeIndex ? 0 : -1}
-                  onFocus={() => {
-                    setFocusIndex(index);
-                  }}
-                  onKeyDown={(event) => {
-                    onRowKeyDown(event, index, row);
-                  }}
-                >
-                  {columns.map((column) => (
-                    <td
-                      key={column.id}
-                      role={cardsOnTablet ? 'cell' : undefined}
-                      data-label={cardsOnTablet ? column.header : undefined}
-                      data-column={column.id}
-                    >
-                      {column.cell(row)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
+            <KeysetRows<Row>
+              rows={rows}
+              columns={columns}
+              rowKey={rowKey}
+              activeIndex={activeIndex}
+              cardsOnTablet={cardsOnTablet}
+              rowRefs={rowRefs}
+              onRowFocus={setFocusIndex}
+              keyDownRef={keyDownRef}
+            />
           </table>
         </div>
       )}
