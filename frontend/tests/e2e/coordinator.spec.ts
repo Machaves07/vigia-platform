@@ -8,6 +8,7 @@ import {
   expectOneRefresh,
   expectOwnHome,
   fillDateTime,
+  spanishDate,
   logout,
   nextSteps,
   openFromInbox,
@@ -389,7 +390,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await declaration
       .getByLabel('Fecha de la decisión', { exact: true })
-      .fill(world.journeys.today);
+      .fill(spanishDate(world.journeys.today));
     await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await declaration
       .getByLabel('Medida compensatoria (Obligatorio)', { exact: true })
@@ -397,7 +398,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
     await declaration
       .getByLabel('Fecha de revisión en la planta', { exact: true })
-      .fill(world.journeys.review_date);
+      .fill(spanishDate(world.journeys.review_date));
     await declaration.getByRole('button', { name: 'Firmar', exact: true }).click();
     await declaration.getByRole('button', { name: 'Siguiente', exact: true }).click();
     const declared = page.waitForResponse(

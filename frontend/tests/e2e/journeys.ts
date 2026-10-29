@@ -8,6 +8,14 @@ export function required<T>(value: T | null | undefined): T {
   return value;
 }
 
+/** Un día `aaaa-mm-dd` como lo escribe la persona en los campos de fecha (VIG-366): `dd/mm/aaaa`. */
+export function spanishDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (match === null) throw new Error(`Día no válido: ${iso}`);
+  const [, year, month, day] = match;
+  return `${day ?? ''}/${month ?? ''}/${year ?? ''}`;
+}
+
 /**
  * Escribe un momento `aaaa-mm-ddThh:mm` como lo escribe la persona (VIG-366, sin
  * `datetime-local`): la fecha `dd/mm/aaaa` en el campo que lleva la etiqueta y la hora `hh:mm` en

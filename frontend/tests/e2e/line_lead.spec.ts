@@ -1,5 +1,5 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { expectOwnHome, logout } from './journeys';
+import { expectOwnHome, logout, spanishDate } from './journeys';
 
 test.use({ role: 'line_manager', actionTimeout: 30_000, reuseRoleSession: false });
 test.skip(({ hasTouch }) => hasTouch, 'Escritorio');
@@ -23,7 +23,7 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   const zone = page.getByRole('main').getByLabel('Zona', { exact: true });
   await expect(zone.locator('option[value]:not([value=""])')).toHaveCount(1);
   await zone.selectOption(world.zone_ids[0] ?? '');
-  await page.getByLabel('Mes del paquete', { exact: true }).fill(world.journeys.period);
+  await page.getByLabel('Mes del paquete', { exact: true }).selectOption(world.journeys.period);
   const commitmentsRead = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname === '/accreditation/commitments' &&
@@ -31,7 +31,7 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   );
   await page.getByRole('button', { name: 'Consultar paquete', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Hallazgos del periodo' })).toBeVisible();
-  await expect(page.getByText('Estado: sellado', { exact: true })).toBeVisible();
+  await expect(page.getByText('Estado: Sellado', { exact: true })).toBeVisible();
   await expect(
     page.getByRole('button', { name: /clasificar|firmar|cerrar hallazgo|auditar/i }),
   ).toHaveCount(0);
@@ -52,7 +52,7 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   await form
     .getByLabel('Responsable de ejecutar el compromiso (identificador de usuario)', { exact: true })
     .fill(world.users.line_manager.user_id);
-  await form.getByLabel('Plazo', { exact: true }).fill(world.journeys.review_date);
+  await form.getByLabel('Plazo', { exact: true }).fill(spanishDate(world.journeys.review_date));
   const written = page.waitForResponse(
     (response) => response.url().endsWith('/commitments') && response.request().method() === 'POST',
   );
