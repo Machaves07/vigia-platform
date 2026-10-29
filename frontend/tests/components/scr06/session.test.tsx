@@ -75,10 +75,12 @@ describe('sesión en curso', () => {
     expect(status).toBeTruthy();
     expect(reads).toHaveLength(1);
     expect(reads[0]?.url).toBe(`/zones/${ZONE_ID}/walk-tests/current`);
-    // Las marcas son las del servidor, tal cual: no se reinterpretan en otra zona horaria.
-    const instants = screen.getAllByText('2026-10-24T10:00:00.000Z', {
-      selector: '[data-part="server_instant"]',
-    });
+    // Las marcas son las del servidor (el instante exacto en `dateTime`), con la zona nombrada
+    // junto a la hora (VIG-366): fuera del armazón, UTC.
+    const instants = Array.from(
+      document.querySelectorAll('[data-part="server_instant"] time'),
+      (node) => node.getAttribute('dateTime'),
+    ).filter((instant) => instant === '2026-10-24T10:00:00.000Z');
     expect(instants.length).toBeGreaterThan(0);
     expect(screen.getByText(String(session().catalog_version))).toBeTruthy();
   });

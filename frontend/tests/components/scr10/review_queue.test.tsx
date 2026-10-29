@@ -284,11 +284,13 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
     await loaded();
     const rows = screen.getAllByRole('row').slice(1);
     expect(rows.map((row) => row.getAttribute('data-overdue'))).toEqual(['true', 'false']);
-    const confidence = rows[0]?.querySelector('dl');
-    expect(confidence?.querySelector('[data-field="max_confidence"]')?.textContent).toBe('0.65');
-    expect(confidence?.querySelector('[data-field="review_threshold"]')?.textContent).toBe('0.5');
-    expect(confidence?.querySelector('[data-field="publication_threshold"]')?.textContent).toBe(
-      '0.8',
+    // VIG-366: cada fila solo con su confianza; los umbrales, una vez, fuera de la tabla.
+    expect(rows[0]?.querySelector('[data-field="max_confidence"]')?.textContent).toBe('0.65');
+    expect(container.querySelectorAll('tbody [data-field="review_threshold"]')).toHaveLength(0);
+    const thresholds = container.querySelectorAll('[data-part="thresholds"]');
+    expect(thresholds).toHaveLength(1);
+    expect(thresholds[0]?.querySelector('p')?.textContent).toBe(
+      `${text('scr10.review_threshold')}: 0.5 · ${text('scr10.publication_threshold')}: 0.8`,
     );
     expect(rows[0]?.querySelector('time')?.dateTime).toBe(early.review_due_at);
     expect(within(required(rows[0])).getByText(text('scr10.overdue'))).toBeTruthy();
@@ -300,9 +302,9 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
       expect(calls.length).toBe(2);
     }, WAIT);
     expect(screen.getAllByRole('row')).toHaveLength(3);
-    expect(container.querySelector('[data-part="zone"]')?.textContent).toBe(
-      '(America/Bogota, UTC-05:00)',
-    );
+    // La zona horaria una sola vez, en la cabecera de la columna del plazo.
+    expect(container.querySelectorAll('tbody [data-part="zone"]')).toHaveLength(0);
+    expect(container.querySelectorAll('thead [data-part="zone_header"]')).toHaveLength(1);
   });
 
   it('recorre todos los textos sin equiparar puntuación del modelo a certeza', () => {
@@ -415,7 +417,7 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
     await mount();
     await loaded();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: text('scr10.more') }));
+    await user.click(screen.getByRole('button', { name: text('components_structure.pager.next') }));
     await waitFor(() => {
       expect(screen.getAllByRole('row')).toHaveLength(3);
     }, WAIT);
@@ -566,7 +568,9 @@ describe('SCR-10 cola de revisión', { timeout: 40_000 }, () => {
             .querySelectorAll('time'),
         ).toHaveLength(0);
       }
-      expect(screen.getAllByRole('figure', { name: text('media.clip.label') })).toHaveLength(1);
+      expect(screen.getAllByRole('figure', { name: `${text('media.clip.label')} 1` })).toHaveLength(
+        1,
+      );
       await user.click(screen.getByRole('button', { name: text('media.clip.play') }));
       await waitFor(() => {
         expect(urls).toBe(1);

@@ -20,6 +20,7 @@ import { ReasonField } from '@/components/ReasonField/ReasonField';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
 import type { HttpError } from '@/ports/errors/map';
 import { text } from '@/texts';
+import { capitalized } from '@/texts/labels';
 
 import concession from '../../openapi/bodies/grant_provider_concessions_post.json';
 
@@ -318,7 +319,7 @@ describe('BR-APP-08: acuse con el role_in_use del servidor', () => {
     const { container } = render(<WriteReceipt record="Concesión CON-0012" roleInUse={role} />);
     const status = screen.getByRole('status');
     expect(status.querySelector('[data-part="record"]')?.textContent).toBe('Concesión CON-0012');
-    expect(status.querySelector('[data-part="role_in_use"]')?.textContent).toBe(label);
+    expect(status.querySelector('[data-part="role_in_use"]')?.textContent).toBe(capitalized(label));
     expect(
       container.querySelectorAll('input, select, textarea, [role="combobox"], [role="radio"]'),
     ).toHaveLength(0);

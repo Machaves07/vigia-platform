@@ -127,11 +127,12 @@ describe('oclusión pending: plazo y nueva consulta de la sesión', { timeout: T
       WAIT,
     );
     expect(pending).toBeTruthy();
+    // VIG-366: el instante del servidor, con la zona nombrada (fuera del armazón, UTC).
     expect(
-      screen.getByText('2026-10-24T10:10:00.000Z', {
-        selector: '[data-part="deadline"] [data-part="server_instant"]',
-      }),
-    ).toBeTruthy();
+      document
+        .querySelector('[data-part="deadline"] [data-part="server_instant"] time')
+        ?.getAttribute('dateTime'),
+    ).toBe('2026-10-24T10:10:00.000Z');
     expect(requests).toEqual([CURRENT]);
     expect(sessionReads).toHaveBeenCalledTimes(1);
 
