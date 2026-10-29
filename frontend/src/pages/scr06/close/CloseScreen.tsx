@@ -36,7 +36,7 @@ import {
 } from '@/ports/scr06Commissioning';
 import type { Clock } from '@/state/clock';
 import { useScreenMutation } from '@/state/query';
-import { label } from '@/texts/labels';
+import { labelInline } from '@/texts/labels';
 import { text } from '@/texts';
 
 import {
@@ -128,7 +128,7 @@ function CloseForm({
   };
 
   const textToSign = fill(text('scr06.close.sign_text'), {
-    kind: label('walk_test_kind', session.kind),
+    kind: labelInline('walk_test_kind', session.kind),
     version: String(session.catalog_version),
   });
 

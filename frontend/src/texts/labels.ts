@@ -39,7 +39,12 @@ export function capitalized(value: string): string {
  * con mayúscula inicial (VIG-366): las etiquetas de las unidades dueñas van en minúscula.
  */
 export function label(enumName: string, value: string): string {
-  return capitalized(tables.get(enumName)?.get(value) ?? text('common.unknown'));
+  return capitalized(labelInline(enumName, value));
+}
+
+/** La etiqueta tal como la da la unidad dueña, para el medio de una frase («de la sesión …»). */
+export function labelInline(enumName: string, value: string): string {
+  return tables.get(enumName)?.get(value) ?? text('common.unknown');
 }
 
 /** Una tabla de etiquetas leída directamente, con mayúscula inicial como `label()`. */

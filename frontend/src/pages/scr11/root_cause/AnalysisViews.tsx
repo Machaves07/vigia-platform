@@ -6,7 +6,7 @@
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import type { Analysis } from '@/ports/scr11RootCause';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { label, labelInline } from '@/texts/labels';
 
 import styles from './root_cause.module.css';
 
@@ -21,7 +21,7 @@ export function SavedWhys({ analysis }: { readonly analysis: Analysis }) {
           {analysis.why_steps.map((step) => (
             <li key={step.step_index}>
               {step.statement}
-              {step.category === null ? null : ` (${label('cause_category', step.category)})`}
+              {step.category === null ? null : ` (${labelInline('cause_category', step.category)})`}
             </li>
           ))}
         </ol>

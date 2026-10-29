@@ -18,7 +18,9 @@ import { closeAnchor } from '@/pages/scr06/close/CloseRequirements';
 import { CloseScreen, type CloseSigner } from '@/pages/scr06/close/CloseScreen';
 import { behaviourFor } from '@/ports/errors/map';
 import { PortError } from '@/ports/shared';
+import { fill } from '@/pages/scr06/common/format';
 import { text } from '@/texts';
+import { label, labelInline } from '@/texts/labels';
 
 import { apiError, mswPath } from '../../msw/handlers';
 import { server } from '../../msw/server';
@@ -151,6 +153,19 @@ describe(
 describe('cuerpo del cierre', { timeout: TEST_TIMEOUT }, () => {
   beforeEach(() => {
     server.use(currentWalkTestHandler(currentWalkTest(session())));
+  });
+
+  it('VIG-366: el texto que se firma nombra la sesión en minúscula, a mitad de frase', async () => {
+    openScreen();
+    const signed = await screen.findByText(
+      (_, element) => element?.getAttribute('data-part') === 'text_to_sign',
+      {},
+      WAIT,
+    );
+    const kind = labelInline('walk_test_kind', 'initial');
+    // La mayúscula inicial de `label()` es para el valor suelto, no para el medio de la frase.
+    expect(kind).not.toBe(label('walk_test_kind', 'initial'));
+    expect(signed.textContent).toBe(fill(text('scr06.close.sign_text'), { kind, version: '12' }));
   });
 
   it('lleva cofirmantes, aceptación de falsas alarmas y líneas base con la zona de la sesión', async () => {

@@ -123,6 +123,27 @@ describe('/concessions', { timeout: 60_000 }, () => {
     expect(requests.concessionPlants).toEqual([PLANT]);
   });
 
+  it('VIG-366: si la jerarquía falla con alcance de planta, error con «Reintentar», no «cargando»', async () => {
+    let failing = true;
+    const user = userEvent.setup();
+    const fixture = await mountAt('/concessions', {
+      plantScoped: true,
+      hierarchyFails: () => failing,
+    });
+    // Los reintentos automáticos de la lectura corren con el reloj simulado.
+    const retry = await waitFor(() => {
+      advance(fixture.clock, 10_000);
+      return screen.getByRole('button', { name: text('screen_state.retry') });
+    }, WAIT);
+    expect(screen.getByText(text('screen_state.error'), { exact: true })).toBeDefined();
+    failing = false;
+    // La conexión deja de dar por caída la plataforma tras su espera; entonces se reintenta.
+    advance(fixture.clock, 120_000);
+    await user.click(retry);
+    await listTable();
+    expect(fixture.requests.concessionPlants).toEqual([PLANT]);
+  });
+
   it('con alcance de organización pide una sola vez, sin plant_id', async () => {
     const { requests } = await mountAt('/concessions');
     await listTable();

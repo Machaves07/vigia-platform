@@ -8,7 +8,7 @@
  * objeto libre, así que una forma desconocida se presenta como tal.
  */
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { label, labelInline } from '@/texts/labels';
 
 /** Una condición de señal de la fila, en texto. */
 function conditionText(condition: Readonly<Record<string, unknown>>): string {
@@ -16,7 +16,7 @@ function conditionText(condition: Readonly<Record<string, unknown>>): string {
   const role = condition.signal_role;
   const value = condition.value;
   if (typeof role === 'string' && typeof value === 'string') {
-    return `${label('condition_signal_role', role)} ${label('condition_signal_value', value)}`;
+    return `${label('condition_signal_role', role)} ${labelInline('condition_signal_value', value)}`;
   }
   return text('common.unknown');
 }

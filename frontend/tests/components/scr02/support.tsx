@@ -171,6 +171,8 @@ export async function mountAt(
      * responde `not_found` a quien no tiene alcance de organización.
      */
     readonly plantScoped?: boolean;
+    /** `GET /hierarchy` responde `temporarily_unavailable` mientras devuelva `true`. */
+    readonly hierarchyFails?: () => boolean;
   } = {},
 ) {
   const clock = new FakeClock(Date.parse(INSTANT));
@@ -229,6 +231,8 @@ export async function mountAt(
   server.use(
     http.get(`${ORIGIN}/hierarchy`, ({ request }) => {
       hierarchyHeaders.push(request.headers.get('X-Vigia-Concession'));
+      if (options.hierarchyFails?.() === true)
+        return apiError('temporarily_unavailable', 503, 'Servicio no disponible.');
       return HttpResponse.json(hierarchy());
     }),
     http.get(`${ORIGIN}/concessions`, ({ request }) => {

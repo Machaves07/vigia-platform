@@ -26,7 +26,7 @@ import { browserTimeZone } from '../shared';
 import { clientColumns, type ScopeDirectory } from './ClientView';
 import { ConcessionDetail } from './ConcessionDetail';
 
-function useDirectory(): ScopeDirectory {
+function useDirectory() {
   const { principal } = useUiSession();
   const hierarchy = useScreenQuery({
     key: screenKey({
@@ -38,12 +38,13 @@ function useDirectory(): ScopeDirectory {
     policy: policyFor('GET /hierarchy'),
     read: ({ signal }) => concessionsPort.hierarchy.read({}, signal),
   });
-  return hierarchy.data ?? null;
+  const directory: ScopeDirectory = hierarchy.data ?? null;
+  return { directory, hierarchy };
 }
 
 export default function Page() {
   const { principal } = useUiSession();
-  const directory = useDirectory();
+  const { directory, hierarchy } = useDirectory();
   const [listRun, setListRun] = useState(0);
   const [selected, setSelected] = useState<ClientConcession | null>(null);
   const timeZone = browserTimeZone();
@@ -59,7 +60,17 @@ export default function Page() {
       <h1>{text('scr02.client.title')}</h1>
       <p>{text('scr02.client.intro')}</p>
       {plantIds === undefined ? (
-        <ScreenState state="loading" />
+        // Sin la jerarquía no se sabe qué plantas pedir: su fallo se dice, con «Reintentar».
+        hierarchy.status === 'error' ? (
+          <ScreenState
+            state="error"
+            onRetry={() => {
+              void hierarchy.refresh();
+            }}
+          />
+        ) : (
+          <ScreenState state="loading" />
+        )
       ) : (
         <KeysetTable<ClientConcession>
           key={`list-${String(listRun)}`}
