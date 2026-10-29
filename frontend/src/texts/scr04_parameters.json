@@ -59,6 +59,7 @@
   "scr04.admissions.author": "Autor",
   "scr04.admissions.date": "Fecha de evaluación",
   "scr04.admissions.record": "Registro del expediente",
+  "scr04.admissions.technical_summary": "Autor y registro",
   "scr04.admissions.new": "Iniciar otra evaluación",
   "scr04.vocabulary.title": "Vocabulario bloqueado de la organización",
   "scr04.vocabulary.pattern_readable": "Patrón de texto",

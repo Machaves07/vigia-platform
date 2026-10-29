@@ -58,10 +58,12 @@ samp {
   outline-offset: var(--focus-ring-offset);
 }
 
-button,
-input,
-select,
-textarea {
+/*
+ * Con especificidad cero, como los estilos de botón del contenido (`:where`, más abajo): con
+ * `button` (0,0,1) este `color: inherit` ganaba y el texto de la principal salía en tinta sobre
+ * `--color-action` (contraste insuficiente, VIG-366).
+ */
+:where(button, input, select, textarea) {
   font: inherit;
   color: inherit;
 }

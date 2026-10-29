@@ -1,10 +1,13 @@
 /** Columnas y proyección RV-07: historial de solo lectura con autor y fecha del servidor. */
 import type { KeysetColumn } from '@/components/KeysetTable/KeysetTable';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { zoneName } from '@/components/TimestampWithOffset/format';
+import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
 import { screenLabel, type Admission } from '@/ports/scr04Parameters';
 import { text } from '@/texts';
 
-// La respuesta no publica la zona de la planta; se explicita la del navegador, como en SCR-01.
+// La respuesta no publica la zona de la planta; se explicita la del navegador, como en SCR-01, una
+// sola vez en la cabecera. El autor y el registro son identificadores: van plegados (VIG-366).
 export function admissionColumns(
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
 ): readonly KeysetColumn<Admission>[] {
@@ -27,14 +30,32 @@ export function admissionColumns(
           ? '—'
           : screenLabel('admission_criterion', row.failed_criterion),
     },
-    { id: 'author', header: text('scr04.admissions.author'), cell: (row) => row.evaluated_by },
     {
       id: 'date',
-      header: text('scr04.admissions.date'),
-      cell: (row) => <TimestampWithOffset instant={row.evaluated_at} timeZone={timeZone} />,
+      header: zoneLabel(text('scr04.admissions.date'), timeZone),
+      cell: (row) => (
+        <TimestampWithOffset instant={row.evaluated_at} timeZone={timeZone} zone="header" />
+      ),
     },
-    { id: 'record', header: text('scr04.admissions.record'), cell: (row) => row.ledger_record_id },
+    {
+      id: 'technical',
+      header: text('common.technical_details'),
+      cell: (row) => (
+        <TechnicalDetails
+          summary={text('scr04.admissions.technical_summary')}
+          items={[
+            { name: text('scr04.admissions.author'), value: row.evaluated_by },
+            { name: text('scr04.admissions.record'), value: row.ledger_record_id },
+          ]}
+        />
+      ),
+    },
   ];
+}
+
+function zoneLabel(header: string, timeZone: string): string {
+  const name = zoneName(timeZone);
+  return name === null ? header : `${header} (${name})`;
 }
 
 export function AdmissionView({
