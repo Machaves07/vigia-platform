@@ -1,17 +1,29 @@
-.primary {
-  margin-block: var(--space-2);
+/* Franja del lazo cerrado (sistema visual v1, «Lazo cerrado»): verde de «cerrado y firmado». */
+.closed {
+  margin-block: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 2px solid var(--color-observable);
-  border-radius: var(--radius);
-  background: var(--color-surface-muted);
-  font-weight: 700;
+  border-radius: var(--radius-card);
+  background-color: var(--state-closed-bg);
+  color: var(--state-closed-text);
 }
 
-.primary dl,
-.primary p {
-  font-weight: 400;
+.closed h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-heading);
 }
 
-.secondary {
-  margin-block: var(--space-1);
+.closed dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.closed dt {
+  font-weight: 600;
+}
+
+.closed dd,
+.closed p {
+  margin: 0;
 }

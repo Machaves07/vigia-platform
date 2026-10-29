@@ -97,7 +97,10 @@ afterEach(() => {
   installTransport(null);
 });
 
-export async function transparencyFixture(path = `/transparency/${ZONE}`) {
+export async function transparencyFixture(
+  path = `/transparency/${ZONE}`,
+  role?: Parameters<typeof meResponse>[0]['role'],
+) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
@@ -112,6 +115,7 @@ export async function transparencyFixture(path = `/transparency/${ZONE}`) {
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
     permissions: ['transparency.read', 'live_view.open'],
+    ...(role === undefined ? {} : { role }),
   });
   const session = createSessionStore({
     clock,

@@ -1,6 +1,9 @@
 /** RV-10: proyección explícita; nunca se recorre ni serializa un objeto recibido. */
 import { Link } from 'react-router';
-import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
+import {
+  ObservabilityBadge,
+  ObservabilityLegend,
+} from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import type { FleetNode, FleetWarning } from '@/ports/scr07Fleet';
 import { text } from '@/texts';
@@ -132,7 +135,7 @@ export function FleetView({
           {text('scr07.fps')}: {camera.measured_fps} / {camera.declared_min_fps}
         </>,
         <>{text(camera.connected ? 'scr07.connected' : 'scr07.disconnected')}</>,
-        <ObservabilityBadge state={camera.observability_state} />,
+        <ObservabilityBadge state={camera.observability_state} inTable />,
         null,
         null,
       ],
@@ -151,7 +154,7 @@ export function FleetView({
           </>,
           null,
           <>
-            <ObservabilityBadge state={zone?.observability_state ?? 'unknown'} />
+            <ObservabilityBadge state={zone?.observability_state ?? 'unknown'} inTable />
             {text(
               zone === undefined
                 ? 'scr07.unknown'
@@ -167,18 +170,27 @@ export function FleetView({
     });
     return [nodeRow, ...cameras, ...zones];
   });
+  // La leyenda del semáforo, una vez por tabla y solo si alguna fila es «Observable» (VIG-365).
+  const observable = nodes.some(
+    (node) =>
+      node.cameras.some((camera) => camera.observability_state === 'observable') ||
+      node.zone_states.some((zone) => zone.observability_state === 'observable'),
+  );
   return (
-    <VirtualFleetTable
-      rows={rows}
-      caption={text('scr07.title')}
-      headings={[
-        'scr07.resource',
-        'scr07.version_rate',
-        'scr07.communication',
-        'scr07.health',
-        'scr07.warning',
-        'scr07.live_url',
-      ].map(text)}
-    />
+    <>
+      <VirtualFleetTable
+        rows={rows}
+        caption={text('scr07.title')}
+        headings={[
+          'scr07.resource',
+          'scr07.version_rate',
+          'scr07.communication',
+          'scr07.health',
+          'scr07.warning',
+          'scr07.live_url',
+        ].map(text)}
+      />
+      {observable && <ObservabilityLegend />}
+    </>
   );
 }

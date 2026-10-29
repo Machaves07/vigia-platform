@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
+import { HomeCards } from '@/pages/shared/HomeCards';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   acceptsOrganization,
@@ -73,6 +74,44 @@ function Section({
       />
       {body}
     </div>
+  );
+}
+
+/**
+ * Los 4 indicadores del resumen del gerente (sistema visual v1, «Gerente · Inicio»; VIG-365): las
+ * cifras del servidor tal como llegan, en este orden y sin recalcular; «No calculable» si el
+ * servidor no la calcula (RF-PLA-19, nunca cero). El detalle de cada una sigue debajo.
+ */
+const WEEKLY_INDICATORS = [
+  'exposure',
+  'classified_in_time',
+  'primary_engineering_closures',
+  'overdue',
+] as const;
+
+function WeeklyIndicators({
+  values,
+}: {
+  readonly values: readonly { key: string; status: string; value?: number | null }[];
+}) {
+  return (
+    <section aria-label={text('scr13.home.indicators')}>
+      <h2>{text('scr13.home.indicators')}</h2>
+      <ul className={styles.indicators}>
+        {WEEKLY_INDICATORS.map((key) => {
+          const metric = values.find((value) => value.key === key);
+          const computable =
+            metric !== undefined && metric.status !== 'not_computable' && metric.value != null;
+          return (
+            <li key={key} className={styles.indicator} data-indicator={key}>
+              <h3>{text(`scr13.${key}`)}</h3>
+              <strong>{computable ? metric.value : text('scr13.not_computable')}</strong>
+              {metric?.status === 'partial' && <p>{text('scr13.partial')}</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -222,6 +261,9 @@ function Results({
   });
   return (
     <>
+      {weekly && canMetrics && metrics.data !== undefined && (
+        <WeeklyIndicators values={metrics.data.zones[0]?.values ?? []} />
+      )}
       {canMetrics && (
         <Section query={metrics}>
           {metrics.data?.zones.length === 0 ? (
@@ -377,6 +419,16 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
           <button type="submit">{text('scr13.consult')}</button>
         </form>
       </Section>
+      {weekly && (
+        <HomeCards
+          title="scr13.home.cards"
+          cards={[
+            { slot: 'SCR-03:integrity', hint: 'scr13.home.card.integrity' },
+            { slot: 'SCR-02:*', hint: 'scr13.home.card.providers' },
+            { slot: 'SCR-12:*', hint: 'scr13.home.card.monthly' },
+          ]}
+        />
+      )}
       {shown === null || plant === undefined ? (
         <p>{text('scr13.not_requested')}</p>
       ) : (

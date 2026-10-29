@@ -1,0 +1,14 @@
+{
+  "scr07.home.title": "Inicio",
+  "scr07.home.pending": "Pendiente de su parte",
+  "scr07.home.more_than": "Más de",
+  "scr07.home.pending.invitations": "Invitaciones sin aceptar",
+  "scr07.home.pending.invitations_action": "Ver usuarios y roles",
+  "scr07.home.pending.charters": "Zonas sin acta de alcance",
+  "scr07.home.pending.charters_action": "Revisar la compuerta de la primera",
+  "scr07.home.pending.silent_nodes": "Nodos sin comunicación",
+  "scr07.home.pending.silent_nodes_action": "Ver las alarmas de la flota",
+  "scr07.home.pending_unavailable": "Algún pendiente no se pudo consultar; use «Actualizar» para intentarlo de nuevo.",
+  "scr07.home.areas": "Áreas de configuración",
+  "scr07.home.fleet": "Vista de la flota"
+}

@@ -1,0 +1,55 @@
+/* Chip de estado del lazo (sistema visual v1): 26 px, radio completo, icono y texto. */
+.chip {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.chip[data-tone='overdue'] {
+  background-color: var(--state-overdue-bg);
+  color: var(--state-overdue-text);
+}
+
+.chip[data-tone='due_soon'] {
+  background-color: var(--state-due-soon-bg);
+  color: var(--state-due-soon-text);
+}
+
+.chip[data-tone='open'] {
+  background-color: var(--state-open-bg);
+  color: var(--state-open-text);
+}
+
+.chip[data-tone='closed'] {
+  background-color: var(--state-closed-bg);
+  color: var(--state-closed-text);
+}
+
+.chip[data-tone='unclosable'] {
+  background-color: var(--state-unclosable-bg);
+  color: var(--state-unclosable-text);
+}
+
+.chip[data-tone='neutral'] {
+  background-color: var(--state-neutral-bg);
+  color: var(--state-neutral-text);
+}
+
+.icon {
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+
+@media (max-width: 960px) {
+  .chip {
+    min-height: 28px;
+  }
+}

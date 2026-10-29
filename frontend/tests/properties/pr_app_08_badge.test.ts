@@ -86,8 +86,10 @@ describe('PR-APP-08: semáforo sin verde ni rojo, con texto, icono y leyenda', (
           expect(family).toBe(expected.family);
           expect(['blue', 'amber', 'grey']).toContain(family);
 
-          expect(part(container, 'legend')?.textContent).toBe(
-            catalog['components_status.observability.legend'],
+          // La leyenda va junto a «Observable», el estado que podría leerse «despejada», y no con
+          // los demás, donde contradecía lo que se ve (decisión del dueño en VIG-365, S3-07).
+          expect(part(container, 'legend')?.textContent ?? null).toBe(
+            value === 'observable' ? catalog['components_status.observability.legend'] : null,
           );
 
           const causeNode = part(container, 'cause');

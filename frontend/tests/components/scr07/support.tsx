@@ -21,6 +21,7 @@ export const plants = [
     name: 'Planta sintética',
     timezone: 'America/Bogota',
     country: 'CO',
+    zones: [],
   },
 ];
 export function node(index = 1): FleetNode {
@@ -101,6 +102,7 @@ export function hierarchyNode(index: number, status = 'enrolled') {
 export async function fleetFixture(
   path = '/fleet',
   hierarchy: { readonly plants: unknown[]; readonly nodes: unknown[] } = { plants, nodes: [] },
+  permissions: readonly string[] = ['fleet.read', 'fleet.manage', 'commissioning.run'],
 ) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
@@ -116,7 +118,7 @@ export async function fleetFixture(
   const me = meResponse({
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
-    permissions: ['fleet.read', 'fleet.manage', 'commissioning.run'],
+    permissions: [...permissions],
   });
   const session = createSessionStore({
     clock,

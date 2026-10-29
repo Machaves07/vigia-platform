@@ -9,7 +9,17 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   world,
 }) => {
   // VIG-363 (hallazgo 18): su inicio es su paquete mensual; nunca el panel del coordinador.
-  await expectOwnHome(page, 'Paquete de revisión mensual', '/zones/monthly');
+  await expectOwnHome(page, 'Inicio', '/zones/monthly');
+  // VIG-365: un inicio propio y corto, con lo que puede abrir (la transparencia de sus zonas).
+  await expect(
+    page.getByText('Su revisión mensual: elija la zona y el mes para abrir su paquete.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.locator('main [data-slot="SCR-16:*"] a')).toHaveAttribute(
+    'href',
+    '/transparency',
+  );
   const zone = page.getByRole('main').getByLabel('Zona', { exact: true });
   await expect(zone.locator('option[value]:not([value=""])')).toHaveCount(1);
   await zone.selectOption(world.zone_ids[0] ?? '');
@@ -79,6 +89,6 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   );
   await page.getByRole('link', { name: 'Ir a su inicio: Paquete mensual', exact: true }).click();
   await expect(page).toHaveURL(/\/zones\/monthly$/);
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Paquete de revisión mensual');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Inicio');
   await logout(page);
 });

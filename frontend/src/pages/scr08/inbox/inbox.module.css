@@ -1,3 +1,15 @@
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.header h1 {
+  margin: 0;
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -11,7 +23,37 @@
   gap: 0.3rem;
 }
 
+/* Avisos de planta y de zona (S3-09): con su título y su explicación, no como líneas sueltas. */
+.notices {
+  margin-block: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+}
+
+.notices h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-heading);
+}
+
+.notices summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notices p {
+  margin-block: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.notices ul {
+  margin: 0;
+}
+
+/* La tabla en su caja con desplazamiento; la columna «Siguiente paso» queda fija a la derecha. */
 .scroll {
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -21,4 +63,11 @@
   vertical-align: top;
   padding: 0.5rem;
   border-bottom: 1px solid currentColor;
+}
+
+.sticky {
+  position: sticky;
+  right: 0;
+  background-color: var(--color-surface);
+  box-shadow: -1px 0 0 var(--color-border-subtle);
 }

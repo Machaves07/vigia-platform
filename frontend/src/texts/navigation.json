@@ -31,6 +31,7 @@
   "navigation.menu.fleet": "Flota de nodos",
   "navigation.menu.coordinator_home": "Inicio del coordinador",
   "navigation.menu.findings": "Hallazgos",
+  "navigation.menu.loops": "Lazos de cierre",
   "navigation.menu.review_queue": "Cola de revisión",
   "navigation.menu.monthly": "Paquete mensual",
   "navigation.menu.metrics": "Métricas",

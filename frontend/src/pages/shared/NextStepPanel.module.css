@@ -1,0 +1,82 @@
+/* Panel «Siguiente paso» (sistema visual v1): borde de 2 px de acción y fondo #F2F8F8. */
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 2px solid var(--color-action);
+  border-radius: var(--radius-card);
+  background-color: #f2f8f8;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-heading);
+}
+
+.panel p,
+.panel dl {
+  margin: 0;
+}
+
+.panel dt {
+  font-weight: 600;
+}
+
+.panel dd {
+  margin: 0 0 var(--space-2);
+}
+
+.primary,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+}
+
+.primary {
+  border: 1px solid var(--color-action);
+  background-color: var(--color-action);
+  color: #ffffff;
+}
+
+.primary:hover {
+  background-color: var(--color-action-hover);
+}
+
+.secondary {
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-action);
+}
+
+.more {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-base);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+@media (max-width: 960px) {
+  .primary,
+  .secondary {
+    min-height: 48px;
+  }
+}

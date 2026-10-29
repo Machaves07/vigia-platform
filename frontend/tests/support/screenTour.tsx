@@ -326,8 +326,7 @@ const REVEAL: Readonly<Record<string, RevealStep>> = {
     fill: { from: '2025-12-01', to: '2026-01-01' },
     button: 'scr08.labels.submit',
   },
-  'SCR-09 classify': { button: 'scr09.classify.load' },
-  'SCR-09 loop': { button: 'scr09.loop.load' },
+  // Clasificar y el lazo abren cargados (VIG-365): sin consulta que pulsar.
   'SCR-09 loop/closure': { button: 'scr09.closure.load' },
   'SCR-09 loop/unclosable': { button: 'scr09.closure.load' },
   'SCR-09 loop/reopening': { button: 'scr09.closure.load' },

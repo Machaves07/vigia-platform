@@ -20,3 +20,29 @@
   gap: var(--space-3);
   min-width: 0;
 }
+/* Resumen del gerente (sistema visual v1, VIG-365): 4 indicadores del servidor. */
+.indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.indicator {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background-color: var(--color-surface);
+}
+.indicator h3,
+.indicator p {
+  margin: 0;
+  font-size: var(--font-size-base);
+}
+.indicator strong {
+  font-size: var(--font-size-display);
+  font-variant-numeric: tabular-nums;
+}

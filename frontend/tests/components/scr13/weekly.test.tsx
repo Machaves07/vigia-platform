@@ -25,7 +25,15 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     expect(screen.getByText(adoptionData().usage_notice_es, { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.goal'), { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.monthly_notice'), { exact: true })).toBeDefined();
-    expect(screen.getByText(text('scr13.not_computable'), { exact: true })).toBeDefined();
+    expect(
+      screen.getAllByText(text('scr13.not_computable'), { exact: true }).length,
+    ).toBeGreaterThan(0);
+    // VIG-365: el resumen abre con los 4 indicadores del servidor, en su orden, sin recalcular.
+    expect(
+      [...view.container.querySelectorAll('[data-indicator]')].map((node) =>
+        node.getAttribute('data-indicator'),
+      ),
+    ).toEqual(['exposure', 'classified_in_time', 'primary_engineering_closures', 'overdue']);
     expect(
       within(screen.getByRole('table', { name: text('scr13.activity_count') })).getByRole('cell', {
         name: '9',

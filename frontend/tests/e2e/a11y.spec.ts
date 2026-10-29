@@ -101,16 +101,17 @@ function routes(world: World, role: Role): readonly string[] {
 
 /**
  * Pantallas de consulta auditada del coordinador (SCR-09 y SCR-11) con los hallazgos del motor:
- * se pulsa la consulta y se espera su contenido antes de analizar. Solo lecturas, salvo el inicio
- * de la causa raíz si no hay ninguno en curso (VIG-363: si lo hay, se retoma); el recorrido del
- * coordinador retoma o inicia igual.
+ * se pulsa la consulta (si la pantalla no abre cargada, VIG-365) y se espera su contenido antes de
+ * analizar. Solo lecturas, salvo el inicio de la causa raíz si no hay ninguno en curso (VIG-363: si
+ * lo hay, se retoma); el recorrido del coordinador retoma o inicia igual.
  */
 function auditedRoutes(
   world: World,
   engine: string,
 ): readonly {
   readonly path: string;
-  readonly button: string | RegExp;
+  /** La consulta que se pulsa; `null` si la pantalla abre cargada. */
+  readonly button: string | RegExp | null;
   readonly content: string;
 }[] {
   const selected = required(world.journeys.findings[engine]);
@@ -118,14 +119,15 @@ function auditedRoutes(
   return [
     {
       path: `/findings/${selected.closure}/classify`,
-      button: 'Consultar el hallazgo y su historial',
+      // Clasificar y el lazo abren cargados (VIG-365): sin botón de consulta.
+      button: null,
       content: 'Historial de clasificaciones',
     },
     {
       path: `/findings/${selected.closure}/loop`,
-      button: 'Consultar el lazo',
-      // Lo que se ofrece depende del estado (VIG-363); la navegación del lazo está en todos.
-      content: 'Siguientes registros del lazo',
+      button: null,
+      // Lo que se ofrece depende del estado (VIG-365); el panel «Siguiente paso» está en todos.
+      content: 'Siguiente paso',
     },
     {
       path: `/findings/${selected.closure}/loop/closure`,
@@ -195,7 +197,9 @@ for (const role of [...DESKTOP, ...TABLET]) {
         if (role === 'coordinator_sst') {
           for (const { path, button, content } of auditedRoutes(world, browserName)) {
             await page.goto(path);
-            await page.getByRole('button', { name: button, exact: true }).click();
+            if (button !== null) {
+              await page.getByRole('button', { name: button, exact: true }).click();
+            }
             await expect(
               page.locator('main').getByText(content, { exact: true }).first(),
             ).toBeVisible({
@@ -203,7 +207,7 @@ for (const role of [...DESKTOP, ...TABLET]) {
             });
             await audit(
               page,
-              `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')} (tras «${String(button)}»)`,
+              `${role} ${path.replace(/[0-9a-f-]{36}/g, ':id')} (tras «${String(button ?? 'abrir')}»)`,
             );
           }
         }

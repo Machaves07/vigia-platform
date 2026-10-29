@@ -13,6 +13,7 @@
  */
 import {
   QueryClientProvider,
+  useIsFetching,
   useMutation,
   useQuery,
   type QueryObserverOptions,
@@ -21,7 +22,7 @@ import { createContext, createElement, useContext, type ReactNode } from 'react'
 
 import type { ScreenQueryCache } from '@/state/query/client';
 import type { Invalidation } from './invalidation';
-import type { ScreenQueryKey } from './keys';
+import type { Screen, ScreenQueryKey } from './keys';
 import type { QueryPolicy } from './policies';
 
 /** Lectura de pantalla: cancela con `signal` cuando la caché la aborta. */
@@ -102,6 +103,28 @@ export function useScreenQuery<T>(options: ScreenQueryOptions<T>): ScreenQueryRe
     refresh: async () => {
       await result.refetch({ cancelRefetch: false });
     },
+  };
+}
+
+export interface ScreenRefresh {
+  /** Alguna lectura de la pantalla está en curso. */
+  readonly isFetching: boolean;
+  /** Vuelve a pedir todas las lecturas activas de la pantalla: solo desde «Actualizar». */
+  readonly refresh: () => Promise<void>;
+}
+
+/**
+ * Una sola actualización por página (sistema visual v1, VIG-365): las lecturas activas de
+ * `screen`, también las de sus secciones. Las auditadas aún sin pedir no están activas y no se
+ * piden: solo se repite lo que la persona ya abrió (BR-APP-54).
+ */
+export function useScreenRefresh(screen: Screen): ScreenRefresh {
+  const cache = useCache();
+  const fetching = useIsFetching({ queryKey: [screen] }, cache.client);
+  return {
+    isFetching: fetching > 0,
+    refresh: () =>
+      cache.client.refetchQueries({ queryKey: [screen], type: 'active' }, { cancelRefetch: false }),
   };
 }
 

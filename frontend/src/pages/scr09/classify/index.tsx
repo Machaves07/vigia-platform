@@ -12,10 +12,16 @@
  * clasifica viendo la evidencia, y cada clip pide su URL solo al pulsar reproducir.
  */
 import { useId, useState } from 'react';
+import { Link, useLocation } from 'react-router';
+import { canEnterGroup } from '@/app/navigation';
 import { FieldNotice } from '@/components/NoticeStack/NoticeStack';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
 import { FindingActions, findingAccess, RESUMING_STATE } from '@/pages/shared/FindingActions';
+import layout from '@/pages/shared/findingLayout.module.css';
+import { openRequested } from '@/pages/shared/NextStepPanel';
+import panel from '@/pages/shared/NextStepPanel.module.css';
+import { PageRefresh } from '@/pages/shared/PageRefresh';
 import {
   CLASSIFICATION_REASON_LIMITS,
   classifyPort,
@@ -30,18 +36,22 @@ import {
 import { useScreenMutation } from '@/state/query';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
+import { descriptor } from '../descriptor';
 import {
   LoopNav,
   plantTimeZone,
-  Refresh,
   Result,
   useAuditedRead,
   useLoopContext,
+  useOpening,
   zoneName,
   type LoopContext,
 } from './common';
 import { FindingEvidence } from './Evidence';
 import { ClassificationHistory } from './History';
+
+const DETAIL = 'GET /loop/findings/{finding_state_id}';
+const HISTORY = 'GET /loop/findings/{finding_state_id}/classifications';
 
 const REASON_FIELDS: Readonly<Record<string, string>> = {
   loop_reason_required: 'reason_text',
@@ -235,46 +245,79 @@ function ClassifyForm({
   );
 }
 
+/** El acceso al lazo del recibo: solo si la sesión puede abrir su grupo de rutas (BR-APP-01). */
+function canOpenLoop(permissions: readonly string[]): boolean {
+  const group = descriptor.route_groups.find((candidate) => candidate.id === 'loop');
+  return group !== undefined && canEnterGroup(group, new Set(permissions));
+}
+
 export default function Page() {
   const context = useLoopContext();
+  const opening = useOpening();
+  const location = useLocation();
   const [written, setWritten] = useState<Written | null>(null);
+  // Reclasificar se abre a propósito (VIG-365, S3-20): con el botón o al llegar del panel
+  // «Siguiente paso» con ese paso; cada apertura monta un formulario nuevo, sin errores previos.
+  const [reclassifying, setReclassifying] = useState(() =>
+    openRequested(location.state, 'reclassify'),
+  );
+  const [formKey, setFormKey] = useState(0);
   const path = { finding_state_id: context.findingId };
-  const detail = useAuditedRead(context, 'GET /loop/findings/{finding_state_id}', (signal) =>
+  const detail = useAuditedRead(context, DETAIL, opening, (signal) =>
     classifyPort.detail.read({ path }, signal),
   );
-  const history = useAuditedRead(
-    context,
-    'GET /loop/findings/{finding_state_id}/classifications',
-    (signal) => classifyPort.history.read({ path }, signal),
+  const history = useAuditedRead(context, HISTORY, opening, (signal) =>
+    classifyPort.history.read({ path }, signal),
   );
   const timeZone = plantTimeZone(context, detail.data?.plant_id);
   const receipt = history.data?.classifications.find(
     (item) => item.classification_id === written?.classification_id,
   );
+  const state = detail.data?.lifecycle_state;
+  // Solo la primera clasificación (o la cola, en revisión) se ofrece abierta: todo lo demás es una
+  // reclasificación, que suspende o reanuda el lazo (BR-LAZ-24) y no se abre por descuido.
+  const intentional = state === undefined || findingAccess(state).includes('reclassify');
+  const formShown = state !== undefined && (reclassifying || (!intentional && written === null));
   return (
-    <main>
+    <main className={layout.page}>
       <LoopNav findingId={context.findingId} />
-      <h1>{text('scr09.classify.title')}</h1>
+      <header className={layout.header}>
+        <div className={layout.heading}>
+          <h1>{text('scr09.classify.title')}</h1>
+        </div>
+        <PageRefresh
+          screen="scr09"
+          reads={[
+            { fetchedAt: detail.fetchedAt, operation: DETAIL },
+            { fetchedAt: history.fetchedAt, operation: HISTORY },
+          ]}
+        />
+      </header>
       <p>{text('scr09.classify.audited')}</p>
-      <button
-        type="button"
-        disabled={detail.isFetching || history.isFetching}
-        onClick={() => {
-          detail.request();
-          history.request();
-        }}
-      >
-        {text('scr09.classify.load')}
-      </button>
-      {written !== null &&
-        (receipt === undefined ? (
-          <p role="status">{text('scr09.classify.receipt_pending')}</p>
-        ) : (
-          <WriteReceipt
-            record={`${text('scr09.classify.receipt')} ${String(written.sequence)}: ${label('classification_outcome', written.outcome)}`}
-            roleInUse={receipt.classified_by.role_in_use}
-          />
-        ))}
+      {written !== null && (
+        <div data-part="classification_receipt">
+          {receipt === undefined ? (
+            <p role="status">{text('scr09.classify.receipt_pending')}</p>
+          ) : (
+            <WriteReceipt
+              record={`${text('scr09.classify.receipt')} ${String(written.sequence)}: ${label('classification_outcome', written.outcome)}`}
+              roleInUse={receipt.classified_by.role_in_use}
+            />
+          )}
+          {canOpenLoop(context.permissions) && (
+            <>
+              <p>{text('scr09.classify.receipt_next')}</p>
+              <Link
+                to={`/findings/${context.findingId}/loop`}
+                className={panel.primary}
+                data-primary="true"
+              >
+                {text('scr09.classify.go_to_loop')}
+              </Link>
+            </>
+          )}
+        </div>
+      )}
       {detail.data !== undefined && (
         <FindingEvidence
           detail={detail.data}
@@ -283,23 +326,38 @@ export default function Page() {
           canViewClips={context.permissions.includes('evidence.read')}
         />
       )}
-      {history.requested && (
-        <section aria-label={text('scr09.classify.history')}>
-          <h2>{text('scr09.classify.history')}</h2>
-          <Refresh
-            query={history}
-            operation="GET /loop/findings/{finding_state_id}/classifications"
-          />
-          <Result query={history}>
-            {history.data !== undefined && (
-              <>
-                <ClassificationHistory
-                  classifications={history.data.classifications}
-                  reviewResolutions={history.data.review_resolutions}
-                  timeAggregated={history.data.time_aggregated}
-                  timeZone={timeZone}
-                />
+      <section aria-label={text('scr09.classify.history')}>
+        <h2>{text('scr09.classify.history')}</h2>
+        <Result query={history}>
+          {history.data !== undefined && (
+            <>
+              <ClassificationHistory
+                classifications={history.data.classifications}
+                reviewResolutions={history.data.review_resolutions}
+                timeAggregated={history.data.time_aggregated}
+                timeZone={timeZone}
+              />
+              {intentional && state !== undefined && (
+                <button
+                  type="button"
+                  className={panel.secondary}
+                  aria-expanded={reclassifying}
+                  data-part="reclassify_toggle"
+                  onClick={() => {
+                    setReclassifying((open) => !open);
+                    setFormKey((value) => value + 1);
+                  }}
+                >
+                  {text(
+                    reclassifying
+                      ? 'scr09.classify.close_reclassification'
+                      : 'scr09.classify.open_reclassification',
+                  )}
+                </button>
+              )}
+              {formShown && (
                 <ClassifyForm
+                  key={formKey}
                   context={context}
                   detail={detail.data}
                   previous={Math.max(
@@ -308,16 +366,19 @@ export default function Page() {
                   )}
                   onWritten={(value) => {
                     setWritten(value);
+                    // Registrada, el formulario se pliega: reclasificar exige volver a abrirlo.
+                    setReclassifying(false);
+                    setFormKey((current) => current + 1);
                     // La escritura confirmada es la acción explícita que vuelve a pedir lo auditado.
                     history.request();
                     detail.request();
                   }}
                 />
-              </>
-            )}
-          </Result>
-        </section>
-      )}
+              )}
+            </>
+          )}
+        </Result>
+      </section>
     </main>
   );
 }

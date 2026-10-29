@@ -1,22 +1,30 @@
-/** Trabajo acotado: la selección de 50 zonas es única para compuertas y cobertura. */
-import { useState } from 'react';
+/**
+ * Franja de cobertura del inicio (sistema visual v1; S3-04 y S3-07 de VIG-365): una tarjeta por
+ * zona, hasta 50, con su compuerta y, si es productiva, su semáforo. La cobertura llega cargada:
+ * abrir el inicio es la acción explícita que pide la lectura auditada, una vez por apertura y en el
+ * instante de abrir, como el detalle; después solo «Actualizar» de la cabecera la repite. Nunca se
+ * pinta «Desconocido» mientras llega: la tarjeta dice que se está consultando. La leyenda
+ * «Observable no significa zona despejada» va una vez, en la franja, si alguna zona es observable.
+ */
 import { GateStateChip } from '@/components/GateStateChip/GateStateChip';
-import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
+import {
+  ObservabilityBadge,
+  ObservabilityLegend,
+} from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
-  findingsClock,
-  findingsPort,
   gateDisplay,
-  readGates,
+  type Coverage,
   type Gate,
   type Plant,
-  type Coverage,
   type Zone,
 } from '@/ports/scr08Findings';
-import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
-import { Refresh, Result, useFindingsContext } from '../shared';
+import { Result } from '../shared';
 import styles from './home.module.css';
+
+/** Zonas con tarjeta en el inicio: la selección es única para compuertas y cobertura. */
+export const HOME_ZONES = 50;
 
 export function ZoneCard({
   zone,
@@ -24,133 +32,106 @@ export function ZoneCard({
   regression,
   coverage,
   timeZone,
+  loading = false,
 }: {
   readonly zone: Zone;
   readonly gate: Gate | null;
   readonly regression: string;
   readonly coverage: Coverage | null;
   readonly timeZone: string;
+  /** La cobertura de la zona está en camino. */
+  readonly loading?: boolean;
 }) {
   const display = gate === null ? { state: 'unknown' } : gateDisplay(gate, regression);
   return (
     <article aria-label={zone.name} className={styles.card}>
       <h3>{zone.name}</h3>
-      <GateStateChip gate={display} timeZone={timeZone} />
-      {display.state === 'productive' && (
-        <>
-          <ObservabilityBadge
-            state={coverage?.state ?? 'unknown'}
-            {...(coverage === null
-              ? {}
-              : { since: { instant: coverage.instant, timeZone }, cause: coverage.causes[0] })}
-          />
-          {coverage === null && <p>{text('scr08.home.coverage_unavailable')}</p>}
-        </>
+      {display.state !== 'productive' ? (
+        <GateStateChip gate={display} timeZone={timeZone} />
+      ) : coverage !== null ? (
+        <ObservabilityBadge
+          state={coverage.state}
+          since={{ instant: coverage.instant, timeZone }}
+          inTable
+          {...(coverage.causes[0] === undefined ? {} : { cause: coverage.causes[0] })}
+        />
+      ) : (
+        loading && <p data-part="coverage_loading">{text('scr08.home.coverage_loading')}</p>
       )}
     </article>
   );
 }
 
+export interface ZoneStatus {
+  readonly zone_id: string;
+  readonly gate: Gate;
+  readonly regression: string;
+}
+
 export function HomeZones({
-  context,
+  plants,
+  gates,
+  coverage,
 }: {
-  readonly context: ReturnType<typeof useFindingsContext>;
+  readonly plants: readonly Plant[];
+  /** Compuertas de las zonas con tarjeta. */
+  readonly gates: {
+    readonly data: readonly ZoneStatus[] | undefined;
+    readonly status: string;
+    readonly error: Error | null;
+    refresh(): Promise<void>;
+  };
+  /** Cobertura de las zonas con tarjeta; `null` sin `coverage.read`. */
+  readonly coverage: {
+    readonly data: readonly Coverage[] | undefined;
+    readonly status: string;
+    readonly error: Error | null;
+    readonly isFetching: boolean;
+    refresh(): Promise<void>;
+  } | null;
 }) {
-  const zones = context.plants.flatMap((plant) => plant.zones);
-  const visible = zones.slice(0, 50);
+  const zones = plants.flatMap((plant) => plant.zones);
+  const visible = zones.slice(0, HOME_ZONES);
   const rest = zones.slice(visible.length);
-  const ids = visible.map((zone) => zone.zone_id);
-  const coverageScope = `${context.scope}:${context.concession ?? ''}:${ids.join(',')}`;
-  const [intent, setIntent] = useState<{ scope: string; instant: string } | null>(null);
-  const instant = intent?.scope === coverageScope ? intent.instant : null;
-  const canReadGates = context.permissions.includes('catalog.read');
-  const gates = useScreenQuery({
-    key: screenKey({
-      screen: 'scr08',
-      operation: 'GET /zones/{zone_id}/gates',
-      scope: context.scope,
-      concession: context.concession,
-      params: { zones: ids },
-    }),
-    policy: policyFor('GET /zones/{zone_id}/gates'),
-    enabled: canReadGates && context.hierarchy.status === 'success',
-    read: ({ signal }) => readGates(ids, signal),
-  });
-  const coverage = useScreenQuery({
-    key: screenKey({
-      screen: 'scr08',
-      operation: 'GET /zones/{zone_id}/coverage/at',
-      scope: context.scope,
-      concession: context.concession,
-      params: { zones: ids, instant },
-    }),
-    policy: policyFor('GET /zones/{zone_id}/coverage/at'),
-    enabled: instant !== null,
-    read: ({ signal }) =>
-      Promise.all(
-        visible.map((zone) =>
-          findingsPort.coverage.read(
-            { path: { zone_id: zone.zone_id }, query: { instant: instant ?? '' } },
-            signal,
-          ),
-        ),
-      ),
-  });
+  const observable = coverage?.data?.some((value) => value.state === 'observable') ?? false;
   return (
-    <section aria-label={text('scr08.home.zones')}>
-      <h2>{text('scr08.home.zones')}</h2>
-      <Refresh query={context.hierarchy} operation="GET /hierarchy" />
-      <Result query={context.hierarchy} empty={zones.length === 0}>
-        {!canReadGates ? (
-          <ScreenState state="unavailable" />
-        ) : (
-          <>
-            <Refresh query={gates} operation="GET /zones/{zone_id}/gates" />
-            <Result query={gates}>
-              <button
-                type="button"
-                disabled={coverage.isFetching || !context.permissions.includes('coverage.read')}
-                onClick={() => {
-                  const now = new Date(findingsClock().now()).toISOString();
-                  if (now === instant) void coverage.refresh();
-                  else setIntent({ scope: coverageScope, instant: now });
-                }}
-              >
-                {text('scr08.home.load_coverage')}
-              </button>
-              {instant !== null && (
-                <>
-                  <Refresh query={coverage} operation="GET /zones/{zone_id}/coverage/at" />
-                  <Result query={coverage}>
-                    <p>{text('scr08.home.coverage_at')}</p>
-                  </Result>
-                </>
-              )}
-              <div className={styles.zones}>
-                {visible.map((zone) => {
-                  const status = gates.data?.find((value) => value.zone_id === zone.zone_id);
-                  return (
-                    <ZoneCard
-                      key={zone.zone_id}
-                      zone={zone}
-                      gate={status?.gate ?? null}
-                      regression={status?.regression ?? 'unknown'}
-                      coverage={
-                        coverage.data?.find((value) => value.zone_id === zone.zone_id) ?? null
-                      }
-                      timeZone={
-                        context.plants.find((plant) => plant.plant_id === zone.plant_id)
-                          ?.timezone ?? ''
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </Result>
-          </>
-        )}
-        <GroupedZones zones={rest} plants={context.plants} />
-      </Result>
+    <section aria-label={text('scr08.home.coverage')} className={styles.block}>
+      <h2>{text('scr08.home.coverage')}</h2>
+      <p className={styles.hint}>{text('scr08.home.coverage_hint')}</p>
+      {zones.length === 0 ? (
+        <ScreenState state="empty" message={text('scr08.inbox.empty')} />
+      ) : (
+        <Result query={gates}>
+          {coverage?.error != null && (
+            <ScreenState
+              state="error"
+              onRetry={() => {
+                void coverage.refresh();
+              }}
+            />
+          )}
+          <div className={styles.zones}>
+            {visible.map((zone) => {
+              const status = gates.data?.find((value) => value.zone_id === zone.zone_id);
+              return (
+                <ZoneCard
+                  key={zone.zone_id}
+                  zone={zone}
+                  gate={status?.gate ?? null}
+                  regression={status?.regression ?? 'unknown'}
+                  coverage={coverage?.data?.find((value) => value.zone_id === zone.zone_id) ?? null}
+                  loading={coverage !== null && coverage.error === null}
+                  timeZone={
+                    plants.find((plant) => plant.plant_id === zone.plant_id)?.timezone ?? ''
+                  }
+                />
+              );
+            })}
+          </div>
+          {observable && <ObservabilityLegend />}
+        </Result>
+      )}
+      <GroupedZones zones={rest} plants={plants} />
     </section>
   );
 }

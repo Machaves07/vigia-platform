@@ -17,6 +17,8 @@ export function meResponse(options: {
   readonly absoluteExpiresAt: number;
   readonly userId?: string;
   readonly permissions?: readonly string[];
+  /** Rol de la asignación (por omisión, administrador). */
+  readonly role?: MeResponse['assignments'][number]['role'];
 }): MeResponse {
   return {
     user: {
@@ -32,7 +34,7 @@ export function meResponse(options: {
     },
     assignments: [
       {
-        role: 'administrator',
+        role: options.role ?? 'administrator',
         scope_level: 'organization',
         scope_id: '0190a1b2-0000-7000-8000-0000000000f1',
       },

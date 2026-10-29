@@ -78,6 +78,20 @@ export const fleetPort = defineScreenPort('SCR-07', {
     operationId: 'put_plant_fleet_thresholds_plants__plant_id__fleet_thresholds_put',
     permission: 'fleet.manage',
   },
+  // «Pendiente de su parte» del inicio del administrador (VIG-365): invitaciones sin aceptar y
+  // zonas sin acta de alcance; cada una se pide solo con su clave.
+  users: {
+    kind: 'read',
+    status: 'fixed',
+    operationId: 'list_users_users_get',
+    permission: 'users.manage',
+  },
+  gates: {
+    kind: 'read',
+    status: 'fixed',
+    operationId: 'gate_state_zones__zone_id__gates_get',
+    permission: 'catalog.read',
+  },
   // GET /hierarchy no requiere clave de permiso: basta la sesión. Da las zonas horarias.
   hierarchy: {
     kind: 'read',

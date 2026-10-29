@@ -1,0 +1,43 @@
+/* Detalle y lazo (sistema visual v1): cabecera con el título humano y la actualización, columna
+   principal y columna derecha con «Siguiente paso». Con poco ancho, la columna derecha pasa arriba. */
+.page {
+  min-width: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.heading h1 {
+  margin: 0;
+}
+
+.columns {
+  display: flex;
+  flex-wrap: wrap-reverse;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.main {
+  flex: 1 1 36rem;
+  min-width: 0;
+}
+
+.aside {
+  display: grid;
+  flex: 0 1 20rem;
+  gap: var(--space-4);
+  min-width: 16rem;
+}

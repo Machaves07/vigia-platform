@@ -1,15 +1,11 @@
 /** Contexto y estados de las dos vistas de proyección de SCR-08. */
 import type { ReactNode } from 'react';
-import { Link } from 'react-router';
-import { homeScreen } from '@/app/navigation';
-import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ScreenState } from '@/pages/shared/ScreenState';
-import { findingsClock, findingsFailure, findingsPort, readOverdue } from '@/ports/scr08Findings';
-import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/state/query';
+import { findingsFailure, findingsPort, readOverdue } from '@/ports/scr08Findings';
+import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
-import { descriptor } from './descriptor';
 
 export function useFindingsContext() {
   const { principal } = useUiSession();
@@ -32,32 +28,6 @@ export function useFindingsContext() {
     plants: hierarchy.data?.plants ?? [],
     permissions: principal?.effective_permissions ?? [],
   };
-}
-
-/**
- * Miga del panel y la bandeja (VIG-363): «Inicio del coordinador» solo si ese panel es el inicio de
- * la sesión (BR-APP-04) y la bandeja solo si la sesión la puede abrir; sin ninguna de las dos, nada.
- */
-export function FindingsNav() {
-  const { principal } = useUiSession();
-  const permissions = new Set(principal?.effective_permissions ?? []);
-  const home =
-    principal === null ? null : homeScreen(principal.assignments, permissions, [descriptor]);
-  const links = [
-    ...(home?.group === 'home' ? [{ to: '/home', key: 'scr08.home.title' }] : []),
-    ...(permissions.has('findings.read') ? [{ to: '/findings', key: 'scr08.inbox.title' }] : []),
-  ];
-  if (links.length === 0) return null;
-  return (
-    <nav aria-label={text('scr08.home.navigation')}>
-      {links.map((link, index) => (
-        <span key={link.to}>
-          {index > 0 && ' · '}
-          <Link to={link.to}>{text(link.key)}</Link>
-        </span>
-      ))}
-    </nav>
-  );
 }
 
 export function Result({
@@ -85,26 +55,6 @@ export function Result({
   if (query.status === 'pending') return <ScreenState state="loading" />;
   if (empty) return <ScreenState state="empty" message={text('scr08.inbox.empty')} />;
   return <ScreenState state="ready">{children}</ScreenState>;
-}
-
-export function Refresh({
-  query,
-  operation,
-}: {
-  readonly query: { fetchedAt: number | null; isFetching: boolean; refresh(): Promise<void> };
-  readonly operation: ReadOperation;
-}) {
-  return (
-    <RefreshIndicator
-      clock={findingsClock()}
-      fetchedAt={query.fetchedAt}
-      isFetching={query.isFetching}
-      refreshPolicy={policyFor(operation).periodic ? 'periodic_60s' : 'on_demand'}
-      onRefresh={() => {
-        void query.refresh();
-      }}
-    />
-  );
 }
 
 export function FindingTime({
@@ -140,19 +90,16 @@ export function OverdueHeader({
   return (
     <section aria-label={text('scr08.inbox.overdue')}>
       <h2>{text('scr08.inbox.overdue')}</h2>
-      <>
-        <Refresh query={query} operation="GET /loop/overdue" />
-        <Result query={query}>
-          {query.data?.some((p) => p.notice !== null) ? (
-            <p role="status">{text('scr08.inbox.count_unavailable')}</p>
-          ) : (
-            <p data-part="overdue">
-              {text('scr08.inbox.overdue')}:{' '}
-              <strong>{query.data?.reduce((sum, p) => sum + p.count, 0)}</strong>
-            </p>
-          )}
-        </Result>
-      </>
+      <Result query={query}>
+        {query.data?.some((p) => p.notice !== null) ? (
+          <p role="status">{text('scr08.inbox.count_unavailable')}</p>
+        ) : (
+          <p data-part="overdue">
+            {text('scr08.inbox.overdue')}:{' '}
+            <strong>{query.data?.reduce((sum, p) => sum + p.count, 0)}</strong>
+          </p>
+        )}
+      </Result>
     </section>
   );
 }

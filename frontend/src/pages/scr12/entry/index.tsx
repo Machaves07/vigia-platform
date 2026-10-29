@@ -1,8 +1,14 @@
-/** Inicio del mando de línea: elegir zona y mes, aplicar en bloque, nunca por tecla. */
+/**
+ * Inicio del mando de línea: elegir zona y mes, aplicar en bloque, nunca por tecla. Como inicio de
+ * la sesión (VIG-365) se llama «Inicio», dice para qué sirve y ofrece la transparencia de sus zonas;
+ * desde el menú de otro rol es «Paquete mensual».
+ */
 import { useId, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { HomeCards, useIsHome } from '@/pages/shared/HomeCards';
 import { monthlyPort } from '@/ports/scr12Monthly';
 import { text } from '@/texts';
+import { descriptor } from '../descriptor';
 import styles from '../monthly.module.css';
 import { MonthlyRefresh, MonthlyResult, useMonthlyContext, useMonthlyRead } from '../common';
 
@@ -15,9 +21,11 @@ export default function Page() {
   const [zone, setZone] = useState('');
   const [period, setPeriod] = useState('');
   const navigate = useNavigate();
+  const isHome = useIsHome(descriptor, 'entry');
   return (
     <main className={styles.page}>
-      <h1>{text('navigation.scr12')}</h1>
+      <h1>{text(isHome ? 'scr12.home.title' : 'navigation.scr12')}</h1>
+      {isHome && <p>{text('scr12.home.lead')}</p>}
       <p>{text('scr12.intro')}</p>
       <MonthlyRefresh query={hierarchy} />
       <MonthlyResult query={hierarchy}>
@@ -63,6 +71,12 @@ export default function Page() {
           <button type="submit">{text('scr12.open')}</button>
         </form>
       </MonthlyResult>
+      {isHome && (
+        <HomeCards
+          title="scr12.home.cards"
+          cards={[{ slot: 'SCR-16:*', hint: 'scr12.home.card.transparency' }]}
+        />
+      )}
     </main>
   );
 }
