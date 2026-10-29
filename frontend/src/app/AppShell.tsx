@@ -84,22 +84,24 @@ const noPlants = () => null;
 /**
  * Zona horaria de la planta para pantallas que no son de una planta (notificaciones, integridad;
  * VIG-366): la de la planta elegida en el selector; con «todas», la que comparten las plantas del
- * alcance. Solo si difieren (o fuera del armazón), UTC, que la hora siempre nombra.
+ * alcance. Solo si difieren (o fuera del armazón), UTC, que la hora siempre nombra. Una pantalla
+ * de una planta (admisiones) pasa `plantId`: la de esa planta, si es del alcance.
  */
-export function usePlantTimeZone(): string {
+export function usePlantTimeZone(plantId?: string): string {
   const scope = useContext(ShellContext)?.services.scope ?? null;
   const snapshot = useSyncExternalStore(
     scope?.subscribe ?? noSubscription,
     scope?.getSnapshot ?? noPlants,
   );
-  return scopeTimeZone(snapshot);
+  return scopeTimeZone(snapshot, plantId);
 }
 
 function scopeTimeZone(
   snapshot: Pick<ScopeSnapshot, 'plantId' | 'availablePlants'> | null,
+  plantId?: string,
 ): string {
   const plants = snapshot?.availablePlants ?? [];
-  const chosen = plants.find((plant) => plant.plant_id === snapshot?.plantId);
+  const chosen = plants.find((plant) => plant.plant_id === (plantId ?? snapshot?.plantId));
   if (chosen !== undefined) return chosen.timezone;
   const zones = new Set(plants.map((plant) => plant.timezone));
   return zones.size === 1 ? (plants[0]?.timezone ?? 'UTC') : 'UTC';

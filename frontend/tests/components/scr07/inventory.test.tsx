@@ -377,10 +377,21 @@ describe('SCR-07 densidad de la flota (VIG-366)', () => {
       copy.querySelectorAll('details').forEach((element) => {
         element.remove();
       });
-      return copy.textContent;
+      return copy;
     });
-    expect(shown.some((cell) => cell.split(/\s+/).includes(value.node_id))).toBe(false);
-    expect(shown.at(-1)).toBe(text('scr07.live_available'));
+    // Cada nodo de texto a la vista (React pinta cada valor en el suyo): ninguno es el
+    // identificador ni la dirección local, solos o junto a otro texto.
+    const texts = shown.flatMap((cell) => {
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      const found: string[] = [];
+      for (let next = walker.nextNode(); next !== null; next = walker.nextNode()) {
+        found.push(...(next.textContent ?? '').split(/[\s()[\],;·—]+/));
+      }
+      return found;
+    });
+    expect(texts).not.toContain(value.node_id);
+    expect(texts).not.toContain(value.live_view_local_url);
+    expect(shown.at(-1)?.textContent).toBe(text('scr07.live_available'));
     expect(screen.getByRole('link', { name: value.code })).toBeDefined();
   });
 
