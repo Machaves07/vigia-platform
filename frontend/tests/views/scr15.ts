@@ -16,7 +16,10 @@ export default {
       createElement(
         MemoryRouter,
         {},
-        createElement(NotificationView, { item: data as unknown as Notification }),
+        createElement(NotificationView, {
+          item: data as unknown as Notification,
+          timeZone: 'America/Bogota',
+        }),
       ),
     allowedFields: ['title_es', 'urgency', 'deep_link_ref', 'kind', 'id', 'created_at', 'read_at'],
   },

@@ -6,7 +6,7 @@
  */
 import type { ReactNode } from 'react';
 import platform from '../../../../../backend/resources/labels.platform.es.json';
-import { BlurredClipPlayer } from '@/components/BlurredClipPlayer/BlurredClipPlayer';
+import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
 import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
@@ -22,14 +22,20 @@ import {
 } from '@/ports/scr08Detail';
 import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { capitalizedTable, hasLabel, label } from '@/texts/labels';
+import { formatDuration } from '@/texts/duration';
 
-const roles: Readonly<Record<string, string>> = platform.role;
+const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
 
 function roleLabel(role: string | null): string {
   return role !== null && Object.hasOwn(roles, role)
     ? (roles[role] ?? text('common.unknown'))
     : text('common.unknown');
+}
+
+/** Duración en segundos o minutos, nunca en milisegundos (VIG-366, S3-14). */
+function duration(ms: number): string {
+  return formatDuration(ms) ?? text('common.unknown');
 }
 
 export function reasonLabel(outcome: string, category: string): string {
@@ -235,10 +241,10 @@ function Summary({
         {detail.episode !== null && (
           <>
             <Field name={text('scr08.detail.episode_duration')}>
-              {detail.episode.total_episode_duration_ms}
+              {duration(detail.episode.total_episode_duration_ms)}
             </Field>
             <Field name={text('scr08.detail.condition_duration')}>
-              {detail.episode.total_condition_duration_ms}
+              {duration(detail.episode.total_condition_duration_ms)}
             </Field>
             <Field name={text('scr08.detail.segments')}>
               {detail.episode.segment_count} / {detail.episode.expected_segment_count}
@@ -311,8 +317,8 @@ export function ContractPart({
       <Field name={text('scr08.detail.observability')}>
         {label('observability_state', finding.observability_state)}
       </Field>
-      <Field name={text('scr08.detail.condition_duration')}>{finding.condition_duration_ms}</Field>
-      <Field name={text('scr08.detail.episode_duration')}>{finding.episode_duration_ms}</Field>
+      <Field name={text('scr08.detail.condition_duration')}>{duration(finding.condition_duration_ms)}</Field>
+      <Field name={text('scr08.detail.episode_duration')}>{duration(finding.episode_duration_ms)}</Field>
       <Field name={text('scr08.detail.cameras')}>
         <ul>
           {finding.cameras.map((camera, index) => (
@@ -346,19 +352,19 @@ function Clips({
 }) {
   if (clips.length === 0) return <p>{text('scr08.detail.no_clips')}</p>;
   return (
-    <ul aria-label={text('scr08.detail.clips')}>
-      {clips.map((clip, index) => {
+    <ClipGallery
+      clock={clock}
+      clips={clips.map((clip, index) => {
         const camera = cameraIndex(clip.camera_id);
-        const name = `${text('scr08.detail.clip')} ${String(index + 1)} · ${label('clip_segment', clip.segment)}${
-          camera === null ? '' : ` · ${text('scr08.detail.camera')} ${String(camera + 1)}`
-        }`;
-        return (
-          <li key={clip.clip_id} data-part="clip">
-            <BlurredClipPlayer evidenceId={clip.evidence_id} clock={clock} label={name} />
-          </li>
-        );
+        return {
+          key: clip.clip_id,
+          evidenceId: clip.evidence_id,
+          label: `${text('scr08.detail.clip')} ${String(index + 1)} · ${label('clip_segment', clip.segment)}${
+            camera === null ? '' : ` · ${text('scr08.detail.camera')} ${String(camera + 1)}`
+          }`,
+        };
       })}
-    </ul>
+    />
   );
 }
 
@@ -396,10 +402,16 @@ function Records({
           };
           return (
             <li key={record.record_id} data-part="record">
+              {/* «Tramo 2 · Hallazgo»; sin número ni tipo conocidos, solo «Tramo» (S3-17). */}
               <h3>
-                {text('scr08.detail.record')}{' '}
-                {record.segment_index === null ? '' : record.segment_index + 1} ·{' '}
-                {label('record_kind', record.record_type)}
+                {[
+                  record.segment_index === null
+                    ? text('scr08.detail.record')
+                    : `${text('scr08.detail.record')} ${String(record.segment_index + 1)}`,
+                  ...(hasLabel('record_kind', record.record_type)
+                    ? [label('record_kind', record.record_type)]
+                    : []),
+                ].join(' · ')}
               </h3>
               {contract === undefined && (
                 <p>

@@ -23,12 +23,12 @@ import {
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { capitalizedTable, label } from '@/texts/labels';
 import { reasonLabel } from '../detail/DetailView';
 import { dayEnd, dayStart, filterTimeZone } from '../shared';
 
 const FAMILIES: readonly string[] = Object.keys(contractLabels.predicate_family);
-const roles: Readonly<Record<string, string>> = platform.role;
+const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
 
 interface Applied {
   readonly run: number;

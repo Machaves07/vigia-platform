@@ -10,9 +10,9 @@ import { ReviewResolutions } from '@/pages/shared/ReviewResolutions';
 import { reasonCategories, type ClassificationItem } from '@/ports/scr09Classify';
 import type { ReviewResolutionItem } from '@/ports/shared';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { capitalizedTable, label } from '@/texts/labels';
 
-const roles: Readonly<Record<string, string>> = platform.role;
+const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
 
 function roleLabel(role: string): string {
   return Object.hasOwn(roles, role)

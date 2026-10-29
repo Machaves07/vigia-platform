@@ -6,7 +6,9 @@ import {
 } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import type { FleetNode, FleetWarning } from '@/ports/scr07Fleet';
+import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
 import { text } from '@/texts';
+import { formatDuration } from '@/texts/duration';
 import { VirtualFleetTable, type FleetRow } from './VirtualFleetTable';
 
 export const WARNINGS: readonly FleetWarning[] = [
@@ -48,6 +50,16 @@ export interface FleetPlant {
   readonly plant_id: string;
   readonly name: string;
   readonly timezone: string;
+  /** Zonas de la planta, para nombrarlas en vez de mostrar su identificador (VIG-366). */
+  readonly zones?: readonly { readonly zone_id: string; readonly name: string }[];
+}
+
+/** Desviación del reloj del nodo con signo, en segundos (VIG-366: nunca en «ms»). */
+function clockOffset(offsetMs: number | null | undefined): string {
+  if (offsetMs === null || offsetMs === undefined) return text('scr07.unknown');
+  const magnitude = formatDuration(Math.abs(offsetMs));
+  if (magnitude === null) return text('scr07.unknown');
+  return offsetMs === 0 ? magnitude : `${offsetMs < 0 ? '−' : '+'}${magnitude}`;
 }
 export function FleetView({
   nodes,
@@ -65,9 +77,16 @@ export function FleetView({
       cells: [
         <>
           <Link to={`/fleet/nodes/${node.node_id}`}>{node.code}</Link>
-          <p>{node.node_id}</p>
-          <p>{plant?.name ?? node.plant_id}</p>
+          <p>{plant?.name ?? text('scr07.unknown')}</p>
           <Link to={`/plants/${node.plant_id}/fleet-thresholds`}>{text('scr07.thresholds')}</Link>
+          <TechnicalDetails
+            items={[
+              { name: text('common.identifier'), value: node.node_id },
+              ...(node.live_view_local_url === null
+                ? []
+                : [{ name: text('scr07.live_url'), value: node.live_view_local_url }]),
+            ]}
+          />
         </>,
         <>
           {text('scr07.versions')}:{' '}
@@ -102,7 +121,7 @@ export function FleetView({
             {node.local_queue?.dead_letter.length ?? text('scr07.unknown')}
           </p>
           <p>
-            {text('scr07.clock')}: {node.clock?.offset_ms ?? text('scr07.unknown')}
+            {text('scr07.clock')}: {clockOffset(node.clock?.offset_ms)}
           </p>
         </>,
         <>
@@ -113,14 +132,8 @@ export function FleetView({
           </ul>
         </>,
         <>
-          {node.live_view_local_url === null ? (
-            text('scr07.live_unavailable')
-          ) : (
-            <>
-              <p>{text('scr07.live_url')}</p>
-              <code>{node.live_view_local_url}</code>
-            </>
-          )}
+          {/* La dirección local (IP interna) va plegada en los datos técnicos del nodo. */}
+          {text(node.live_view_local_url === null ? 'scr07.live_unavailable' : 'scr07.live_available')}
         </>,
       ],
     };
@@ -128,7 +141,7 @@ export function FleetView({
       id: `${node.node_id}:camera:${camera.camera_id}`,
       cells: [
         <>
-          {text('scr07.camera')}: {camera.code ?? camera.camera_id}
+          {text('scr07.camera')}: {camera.code ?? text('scr07.camera_without_code')}
           <p>{node.code}</p>
         </>,
         <>
@@ -146,7 +159,9 @@ export function FleetView({
         id: `${node.node_id}:zone:${zoneId}`,
         cells: [
           <>
-            {text('scr07.zone')}: {zoneId}
+            {text('scr07.zone')}:{' '}
+            {plant?.zones?.find((entry) => entry.zone_id === zoneId)?.name ??
+              text('scr07.unknown')}
             <p>{node.code}</p>
           </>,
           <>

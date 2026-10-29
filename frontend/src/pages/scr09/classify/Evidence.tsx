@@ -6,7 +6,7 @@
  * Selección explícita de campos (BR-APP-40): nada del objeto recibido se serializa.
  */
 import type { ReactNode } from 'react';
-import { BlurredClipPlayer } from '@/components/BlurredClipPlayer/BlurredClipPlayer';
+import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { classifyClock, type FindingDetail } from '@/ports/scr09Classify';
 import { text } from '@/texts';
@@ -60,21 +60,16 @@ export function FindingEvidence({
           {clips.length === 0 ? (
             <p>{text('scr08.detail.no_clips')}</p>
           ) : (
-            <ul aria-label={text('scr08.detail.clips')}>
-              {clips.map(({ clip, segment }, index) => (
-                <li key={clip.clip_id} data-part="clip">
-                  <BlurredClipPlayer
-                    evidenceId={clip.evidence_id}
-                    clock={classifyClock()}
-                    label={`${text('scr08.detail.clip')} ${String(index + 1)} · ${label('clip_segment', clip.segment)}${
-                      segment === null
-                        ? ''
-                        : ` · ${text('scr08.detail.record')} ${String(segment + 1)}`
-                    }`}
-                  />
-                </li>
-              ))}
-            </ul>
+            <ClipGallery
+              clock={classifyClock()}
+              clips={clips.map(({ clip, segment }, index) => ({
+                key: clip.clip_id,
+                evidenceId: clip.evidence_id,
+                label: `${text('scr08.detail.clip')} ${String(index + 1)} · ${label('clip_segment', clip.segment)}${
+                  segment === null ? '' : ` · ${text('scr08.detail.record')} ${String(segment + 1)}`
+                }`,
+              }))}
+            />
           )}
         </>
       )}

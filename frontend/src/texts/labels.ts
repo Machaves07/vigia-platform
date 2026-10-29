@@ -42,6 +42,15 @@ export function label(enumName: string, value: string): string {
   return capitalized(tables.get(enumName)?.get(value) ?? text('common.unknown'));
 }
 
+/** Una tabla de etiquetas leída directamente, con mayúscula inicial como `label()`. */
+export function capitalizedTable(
+  table: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(table).map(([value, caption]) => [value, capitalized(caption)]),
+  );
+}
+
 /** Si la lista tiene etiqueta para el valor (para omitir «Desconocido» donde sobra). */
 export function hasLabel(enumName: string, value: string): boolean {
   return tables.get(enumName)?.has(value) ?? false;

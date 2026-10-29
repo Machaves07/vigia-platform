@@ -11,5 +11,7 @@
   "common.updated_ago": "Actualizado hace {elapsed}",
   "common.goal": "Objetivo propio",
   "common.observability_legend": "Observable no significa zona despejada",
-  "common.unknown": "desconocido"
+  "common.unknown": "Desconocido",
+  "common.technical_details": "Datos técnicos",
+  "common.identifier": "Identificador"
 }

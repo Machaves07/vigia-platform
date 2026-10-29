@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { fleetPort, REVOKED_STATUS } from '@/ports/scr07Fleet';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
+import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
 import { text } from '@/texts';
 import { FleetTime } from '../inventory/FleetView';
 import { FleetNav, FleetRefresh, FleetResult, useFleetContext } from '../shared';
@@ -60,8 +61,9 @@ function NodeLifecycle({ nodeId }: { readonly nodeId: string }) {
         {node !== undefined && (
           <>
             <p>
-              {text('scr07.node')}: {node.code} · <code>{node.node_id}</code>
+              {text('scr07.node')}: {node.code}
             </p>
+            <TechnicalDetails items={[{ name: text('common.identifier'), value: node.node_id }]} />
             <Zones node={node} plant={plant} />
             <section aria-label={text('scr07.lifecycle.revoke')}>
               <ConfirmedReasonForm

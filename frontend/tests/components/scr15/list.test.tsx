@@ -11,7 +11,20 @@ import { settle } from '../../support/queryCache';
 import { CURSOR, ID, INSTANT, SECOND, WAIT, apiError, notification, setup } from './support';
 
 describe('SCR-15 lista', { timeout: 60_000 }, () => {
-  it('sin acción todas: un clic produce exactamente un POST y actualiza la campana', async () => {
+  it('«Marcar todas como leídas» marca una a una las sin leer cargadas, sin operación por lote', async () => {
+    const { calls } = await setup({ items: [notification(), notification(SECOND)] });
+    const all = await screen.findByRole(
+      'button',
+      { name: `${text('scr15.mark_all_read')} (2)` },
+      WAIT,
+    );
+    fireEvent.click(all);
+    await waitFor(() => {
+      expect(calls.marks).toEqual([ID, SECOND]);
+    }, WAIT);
+  });
+
+  it('una fila: un clic produce exactamente un POST y actualiza la campana', async () => {
     const { calls, view } = await setup({
       withBell: true,
       items: [notification(), notification(SECOND)],
@@ -28,6 +41,7 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     // tiene recuento; solo la lista lo ofrece.
     expect(screen.getAllByRole('button').map((node) => node.textContent)).toEqual([
       text('components_status.refresh.button'),
+      `${text('scr15.mark_all_read')} (2)`,
       text('scr15.mark_read'),
       text('scr15.mark_read'),
     ]);
@@ -80,12 +94,12 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
 
   it('cargar más usa next_after como after, acumula páginas y refresca sin duplicados', async () => {
     const { calls, clock } = await setup({ more: [notification(SECOND)] });
-    fireEvent.click(await screen.findByRole('button', { name: text('scr15.load_more') }, WAIT));
+    fireEvent.click(await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT));
     await waitFor(() => {
       expect(screen.getAllByRole('listitem')).toHaveLength(2);
     }, WAIT);
     expect(calls.reads.map((url) => url.searchParams.get('after'))).toEqual([null, null, CURSOR]);
-    expect(screen.queryByRole('button', { name: text('scr15.load_more') })).toBeNull();
+    expect(screen.queryByRole('button', { name: text('components_structure.pager.next') })).toBeNull();
     await act(async () => {
       clock.advance(60_000);
       await settle();
@@ -98,9 +112,9 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
 
   it('no duplica filas si las páginas se solapan por una llegada concurrente', async () => {
     await setup({ more: [notification()] });
-    fireEvent.click(await screen.findByRole('button', { name: text('scr15.load_more') }, WAIT));
+    fireEvent.click(await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: text('scr15.load_more') })).toBeNull();
+      expect(screen.queryByRole('button', { name: text('components_structure.pager.next') })).toBeNull();
       expect(screen.getAllByRole('listitem')).toHaveLength(1);
     }, WAIT);
   });
@@ -148,13 +162,20 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     expect(notificationDestination(item)).toBeNull();
     const view = render(
       <MemoryRouter>
-        <NotificationView item={item} />
+        <NotificationView item={item} timeZone="America/Bogota" />
       </MemoryRouter>,
     );
     expect(screen.queryByRole('link')).toBeNull();
-    expect(view.container.querySelectorAll('dd')[2]?.textContent).toBe(
-      text('scr15.zone_unavailable'),
-    );
+    // VIG-366: sin fila de zona; ningún dato muestra el identificador.
+    const values = Array.from(view.container.querySelectorAll('dd'), (dd) => dd.textContent);
+    expect(values).not.toContain(ID);
+    expect(Array.from(view.container.querySelectorAll('dt'), (dt) => dt.textContent)).toEqual([
+      text('scr15.type'),
+      text('scr15.level'),
+      text('scr15.moment'),
+      text('scr15.status'),
+      text('scr15.origin'),
+    ]);
     expect(screen.getByText(text('scr15.origin_unavailable'))).not.toBeNull();
   });
 
@@ -167,16 +188,14 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
     };
     const view = render(
       <MemoryRouter>
-        <NotificationView item={item} />
+        <NotificationView item={item} timeZone="America/Bogota" />
       </MemoryRouter>,
     );
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.queryByRole('img')).toBeNull();
     expect(screen.queryByText(item.body_es)).toBeNull();
     expect(screen.queryByText(item.person_name)).toBeNull();
-    expect(view.container.querySelectorAll('dd')[2]?.textContent).toBe(
-      text('scr15.zone_unavailable'),
-    );
+    expect(view.container.querySelectorAll('dd')).toHaveLength(5);
   });
 
   it('no ofrece marcar una notificación ya leída', async () => {

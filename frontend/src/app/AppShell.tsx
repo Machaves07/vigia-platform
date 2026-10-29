@@ -42,7 +42,7 @@ import { ConcessionBanner } from '@/components/ConcessionBanner/ConcessionBanner
 import { SessionGate } from '@/pages/scr01/SessionGate';
 import { ConcessionProvider } from '@/state/concession';
 import { ScreenQueryProvider } from '@/state/query';
-import { useScope } from '@/state/scope';
+import { useScope, type ScopeSnapshot } from '@/state/scope';
 import { isAuthenticated, needsReauth, SessionProvider, useUiSession } from '@/state/session';
 import type { Principal } from '@/state/session/principal';
 import { text } from '@/texts';
@@ -76,6 +76,33 @@ function useShell(): ShellContextValue {
   const value = useContext(ShellContext);
   if (value === null) throw new Error('Falta App por encima del armazón.');
   return value;
+}
+
+const noSubscription = () => () => undefined;
+const noPlants = () => null;
+
+/**
+ * Zona horaria de la planta para pantallas que no son de una planta (notificaciones, integridad;
+ * VIG-366): la de la planta elegida en el selector; con «todas», la que comparten las plantas del
+ * alcance. Solo si difieren (o fuera del armazón), UTC, que la hora siempre nombra.
+ */
+export function usePlantTimeZone(): string {
+  const scope = useContext(ShellContext)?.services.scope ?? null;
+  const snapshot = useSyncExternalStore(
+    scope?.subscribe ?? noSubscription,
+    scope?.getSnapshot ?? noPlants,
+  );
+  return scopeTimeZone(snapshot);
+}
+
+function scopeTimeZone(
+  snapshot: Pick<ScopeSnapshot, 'plantId' | 'availablePlants'> | null,
+): string {
+  const plants = snapshot?.availablePlants ?? [];
+  const chosen = plants.find((plant) => plant.plant_id === snapshot?.plantId);
+  if (chosen !== undefined) return chosen.timezone;
+  const zones = new Set(plants.map((plant) => plant.timezone));
+  return zones.size === 1 ? (plants[0]?.timezone ?? 'UTC') : 'UTC';
 }
 
 /** Esqueleto del armazón mientras llega `GET /me` o la porción de la primera ruta. */
@@ -153,8 +180,7 @@ function AppShell({
   readonly children?: ReactNode;
 }): ReactNode {
   const navigation = useMemo(() => shellNavigation(principal, screens), [principal, screens]);
-  const { plantId, availablePlants } = useScope(services.scope);
-  const timeZone = availablePlants?.find((plant) => plant.plant_id === plantId)?.timezone ?? 'UTC';
+  const timeZone = scopeTimeZone(useScope(services.scope));
   return (
     <div className={styles.shell}>
       <Header scope={services.scope} role={navigation.home?.role ?? null} />

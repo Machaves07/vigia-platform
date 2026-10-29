@@ -109,10 +109,17 @@ export default function Page() {
                 return (
                   <tr key={alarm.alarm_id}>
                     <td>
-                      <Link to={`/fleet/nodes/${alarm.node_id}`}>{alarm.node_id}</Link>
+                      {/* VIG-366: el código del nodo y el nombre de la zona, no sus UUID. */}
+                      <Link to={`/fleet/nodes/${alarm.node_id}`}>
+                        {context.nodes.find((node) => node.node_id === alarm.node_id)?.code ??
+                          text('scr07.node_without_code')}
+                      </Link>
                     </td>
-                    <td>{plant?.name ?? alarm.plant_id}</td>
-                    <td>{alarm.zone_id ?? text('scr07.unknown')}</td>
+                    <td>{plant?.name ?? text('scr07.unknown')}</td>
+                    <td>
+                      {plant?.zones.find((zone) => zone.zone_id === alarm.zone_id)?.name ??
+                        text('scr07.unknown')}
+                    </td>
                     <td>{warningLabel(alarm.alarm_kind)}</td>
                     <td>
                       <FleetTime instant={alarm.raised_at} timeZone={plant?.timezone ?? ''} />

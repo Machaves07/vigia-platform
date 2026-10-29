@@ -32,6 +32,7 @@ import {
   shellMe,
   type ShellFixture,
 } from './appShell';
+import { esDate } from './dateFields';
 import { settle } from './queryCache';
 
 const WAIT = { timeout: 10_000 };
@@ -449,10 +450,14 @@ export async function mountEntry(
   if (step !== undefined) {
     const label = text(step.button);
     for (const [name, value] of Object.entries(step.fill ?? {})) {
-      const field = document.querySelector<HTMLInputElement>(`main [name="${name}"]`);
+      // Los campos de fecha propios (VIG-366) se escriben `dd/mm/aaaa` en su campo visible; el
+      // nombre lo lleva un campo oculto.
+      const typed = document.querySelector<HTMLInputElement>(`main [data-field-name="${name}"]`);
+      const field =
+        typed ?? document.querySelector<HTMLInputElement>(`main [name="${name}"]`);
       if (field === null) throw new Error(`Sin el campo «${name}» de la consulta «${label}»`);
       act(() => {
-        fireEvent.change(field, { target: { value } });
+        fireEvent.change(field, { target: { value: typed === null ? value : esDate(value) } });
       });
     }
     const other = step.orButton === undefined ? null : text(step.orButton);

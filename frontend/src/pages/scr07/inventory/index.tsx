@@ -5,6 +5,7 @@
  */
 import { useState } from 'react';
 import { useParams } from 'react-router';
+import { Pager, usePaged } from '@/components/Pager/Pager';
 import { useIsHome } from '@/pages/shared/HomeCards';
 import { PageRefresh } from '@/pages/shared/PageRefresh';
 import { readFleet, type NodeFilters } from '@/ports/scr07Fleet';
@@ -17,6 +18,9 @@ import { COMMUNICATION, FleetView, WARNINGS, warningLabel } from './FleetView';
 import { NodeDetail } from './NodeDetail';
 import { Thresholds } from './Thresholds';
 import styles from './inventory.module.css';
+
+/** Nodos por página (VIG-366): cada nodo ocupa varias filas, con sus cámaras y zonas. */
+const FLEET_PAGE = 5;
 
 function Inventory() {
   const context = useFleetContext();
@@ -34,6 +38,7 @@ function Inventory() {
     policy: policyFor(operation),
     read: ({ signal }) => readFleet(filters, signal),
   });
+  const paged = usePaged(query.data ?? [], FLEET_PAGE);
   return (
     <main>
       {isHome ? (
@@ -106,7 +111,15 @@ function Inventory() {
       </form>
       {!isHome && <FleetRefresh query={query} operation={operation} />}
       <FleetResult query={query} empty={query.data?.length === 0}>
-        <FleetView nodes={query.data ?? []} plants={context.plants} />
+        {/* VIG-366: de 5 en 5 nodos (cada uno con sus cámaras y zonas), no toda la flota. */}
+        <FleetView nodes={paged.visible} plants={context.plants} />
+        <Pager
+          page={paged.page}
+          total={query.data?.length ?? 0}
+          size={FLEET_PAGE}
+          onPage={paged.setPage}
+          label={text('scr07.pages')}
+        />
       </FleetResult>
     </main>
   );
