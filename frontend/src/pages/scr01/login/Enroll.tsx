@@ -23,6 +23,7 @@ import { text } from '@/texts';
 
 import { QrCode, RecoveryCodes } from '../EnrollmentSecrets';
 import styles from '../scr01.module.css';
+import { AuthFrame } from './AuthFrame';
 import { completeSignIn, FailureNotice, TOTP, useThrottle } from '../session';
 
 type Start =
@@ -108,7 +109,7 @@ export function Enroll(): ReactNode {
   );
 
   return (
-    <main className={styles.page} aria-labelledby={`${id}-title`}>
+    <AuthFrame labelledBy={`${id}-title`}>
       <h1 id={`${id}-title`} className={styles.title}>
         {text('scr01.enroll.title')}
       </h1>
@@ -194,6 +195,6 @@ export function Enroll(): ReactNode {
           )}
         </>
       ) : null}
-    </main>
+    </AuthFrame>
   );
 }

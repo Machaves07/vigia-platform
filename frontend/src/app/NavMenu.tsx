@@ -278,6 +278,7 @@ function SelectEntry({
         {text(item.title_text)}
       </button>
       <form
+        noValidate
         id={`${id}-select`}
         className={styles.navSelect}
         aria-label={text(item.title_text)}

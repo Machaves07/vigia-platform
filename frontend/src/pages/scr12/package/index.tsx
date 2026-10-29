@@ -4,7 +4,13 @@ import { Link, useParams } from 'react-router';
 import { downloadZone, monthlyPort } from '@/ports/scr12Monthly';
 import { text } from '@/texts';
 import styles from '../monthly.module.css';
-import { MonthlyRefresh, MonthlyResult, useMonthlyContext, useMonthlyRead } from '../common';
+import {
+  CHOOSE_STATE,
+  MonthlyRefresh,
+  MonthlyResult,
+  useMonthlyContext,
+  useMonthlyRead,
+} from '../common';
 import { Commitments } from './Commitments';
 import { PackageView } from './PackageView';
 import { Sample } from './Sample';
@@ -40,7 +46,9 @@ function Workspace({
   const data = query.error === null ? query.data : undefined;
   return (
     <main className={styles.page}>
-      <Link to="/zones/monthly">{text('navigation.scr12')}</Link>
+      <Link to="/zones/monthly" state={CHOOSE_STATE}>
+        {text('scr12.choose_again')}
+      </Link>
       <h1>{text('navigation.scr12')}</h1>
       <p>{text('scr12.intro')}</p>
       <MonthlyRefresh query={query} />

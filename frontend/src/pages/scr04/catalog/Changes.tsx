@@ -1,4 +1,6 @@
 /** Retiro y unipersonal siempre publican una versión, con motivo obligatorio. */
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
+import { DateTimeInput } from '@/components/DateFields/DateFields';
 import { useId, useState } from 'react';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
@@ -26,6 +28,7 @@ export function Changes({
   readonly timeZone: string;
 }) {
   const id = useId();
+  const check = useFormCheck();
   const retirement = standardId !== undefined;
   const [reason, setReason] = useState('');
   const [showErrors, setShowErrors] = useState(false);
@@ -65,10 +68,13 @@ export function Changes({
   const formNotice = noticeForField(notices, 'form');
   return (
     <form
+      noValidate
       aria-label={text(retirement ? 'scr04.catalog.retire' : 'scr04.catalog.single_occupancy')}
       onSubmit={(event) => {
         event.preventDefault();
         setShowErrors(true);
+        // Las restricciones del número se dicen en español junto al campo (VIG-366).
+        if (!check.run(event.currentTarget)) return;
         if (
           reasonIssueKey(reason, LIMITS) !== null ||
           (!retirement && (!Number.isInteger(window) || window < 15 || window > 480)) ||
@@ -92,14 +98,11 @@ export function Changes({
       {retirement ? (
         <>
           <label htmlFor={`${id}-date`}>{text('scr04.catalog.retirement_date')}</label>
-          <input
+          <DateTimeInput
             id={`${id}-date`}
-            type="datetime-local"
             required
             value={date}
-            onChange={(event) => {
-              setDate(event.target.value);
-            }}
+            onChange={setDate}
             aria-invalid={dateNotice !== undefined || (showErrors && effectiveFrom === null)}
             aria-describedby={
               dateNotice !== undefined
@@ -133,16 +136,20 @@ export function Changes({
           <label htmlFor={`${id}-window`}>{text('scr04.catalog.window')}</label>
           <input
             id={`${id}-window`}
+            name="window"
             type="number"
             min="15"
             max="480"
             step="1"
             required
             value={window}
+            {...check.field('window')}
             onChange={(event) => {
               setWindow(event.target.valueAsNumber);
+              check.clear('window');
             }}
           />
+          {check.error('window')}
         </>
       )}
       <ReasonField

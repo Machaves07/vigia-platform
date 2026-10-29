@@ -22,6 +22,7 @@ export function PreferencesForm({ data }: { readonly data: Preferences }) {
   });
   return (
     <form
+      noValidate
       aria-label={text('scr15.preferences')}
       onSubmit={(event) => {
         event.preventDefault();

@@ -1,4 +1,5 @@
 /** Solicitud por planta: validación de forma, nunca autorización local. */
+import { DateTimeInput } from '@/components/DateFields/DateFields';
 import { fromZonedTime } from 'date-fns-tz';
 import { useId, useState } from 'react';
 import { FieldNotice, NoticeStack } from '@/components/NoticeStack/NoticeStack';
@@ -213,22 +214,20 @@ export function RequestForm({
         <legend>{text('scr14.period')}</legend>
         <label>
           {text('scr14.from')}
-          <input
-            type="datetime-local"
+          <DateTimeInput
             value={from}
-            onChange={(event) => {
-              setFrom(event.target.value);
+            onChange={(value) => {
+              setFrom(value);
               mutation.reset();
             }}
           />
         </label>
         <label>
           {text('scr14.to')}
-          <input
-            type="datetime-local"
+          <DateTimeInput
             value={to}
-            onChange={(event) => {
-              setTo(event.target.value);
+            onChange={(value) => {
+              setTo(value);
               mutation.reset();
             }}
           />

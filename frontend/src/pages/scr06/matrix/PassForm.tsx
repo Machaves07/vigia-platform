@@ -51,6 +51,7 @@ export function PassForm({ rowId, rows, clips, onSubmit, busy, errorKey = null }
   const row = index === -1 ? undefined : rows[index];
   return (
     <form
+      noValidate
       className={styles.form}
       aria-label={text('scr06.matrix.form.title')}
       onSubmit={(event) => {

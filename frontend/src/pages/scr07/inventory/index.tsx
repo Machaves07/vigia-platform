@@ -53,6 +53,7 @@ function Inventory() {
         </>
       )}
       <form
+        noValidate
         className={styles.filters}
         aria-label={text('scr07.filters')}
         onSubmit={(event) => {

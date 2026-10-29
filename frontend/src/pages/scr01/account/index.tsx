@@ -228,7 +228,14 @@ function Versions({ apiVersion }: { readonly apiVersion: string }) {
   }, []);
   const unavailable = text('scr01_admin.versions.unavailable');
   const rows: readonly { key: string; value: string }[] = [
-    { key: 'scr01_admin.versions.app', value: embeddedAppVersion() },
+    // Sin etiqueta de publicación la construcción se marca `dev` (`config/build.ts`): se dice en palabras.
+    {
+      key: 'scr01_admin.versions.app',
+      value:
+        embeddedAppVersion() === 'dev'
+          ? text('scr01_admin.versions.unreleased')
+          : embeddedAppVersion(),
+    },
     { key: 'scr01_admin.versions.api', value: apiVersion },
     { key: 'scr01_admin.versions.contract', value: release?.contract_tag ?? unavailable },
   ];

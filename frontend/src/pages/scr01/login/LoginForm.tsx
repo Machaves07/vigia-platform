@@ -13,6 +13,7 @@ import { useSession } from '@/state/session';
 import { text } from '@/texts';
 
 import styles from '../scr01.module.css';
+import { AuthFrame } from './AuthFrame';
 import { completeSignIn, EMAIL, FailureNotice, PASSWORD_MIN_LENGTH, useThrottle } from '../session';
 
 export function LoginForm(): ReactNode {
@@ -59,7 +60,7 @@ export function LoginForm(): ReactNode {
   };
 
   return (
-    <main className={styles.page} aria-labelledby={`${id}-title`}>
+    <AuthFrame labelledBy={`${id}-title`}>
       <h1 id={`${id}-title`} className={styles.title}>
         {text('scr01.login.title')}
       </h1>
@@ -128,6 +129,6 @@ export function LoginForm(): ReactNode {
           </button>
         </div>
       </form>
-    </main>
+    </AuthFrame>
   );
 }

@@ -11,6 +11,7 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
 import { assignmentText, type ScopeDirectory } from '../scopes';
+import { clientSummary } from './clientHint';
 
 export interface AccountData {
   readonly display_name: string;
@@ -63,6 +64,17 @@ export function AccountProfile({
   );
 }
 
+/** «Chrome en Windows» (VIG-366): nunca el agente de usuario completo. */
+function clientText(hint: string | null | undefined): string {
+  if (hint === null || hint === undefined || hint.trim() === '') {
+    return text('scr01_admin.sessions.no_hint');
+  }
+  const { browser, system } = clientSummary(hint);
+  return `${browser ?? text('scr01_admin.sessions.other_browser')} ${text('scr01_admin.sessions.on')} ${
+    system ?? text('scr01_admin.sessions.other_system')
+  }`;
+}
+
 function sessionState(session: AccountSession): string {
   if (session.current) return text('scr01_admin.sessions.current');
   return session.usable
@@ -91,7 +103,7 @@ export function SessionsList({
       <tbody>
         {sessions.map((session, index) => (
           <tr key={index} data-current={session.current}>
-            <td>{session.client_hint ?? text('scr01_admin.sessions.no_hint')}</td>
+            <td>{clientText(session.client_hint)}</td>
             <td>
               <TimestampWithOffset instant={session.created_at} timeZone={timeZone} />
             </td>

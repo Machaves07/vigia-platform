@@ -2,6 +2,8 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { MonthInput } from '@/components/DateFields/DateFields';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { HomeCards } from '@/pages/shared/HomeCards';
 import { ScreenState } from '@/pages/shared/ScreenState';
@@ -349,9 +351,13 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
     revision: number;
   } | null>(null);
   const [touched, setTouched] = useState(false);
-  // Su inicio llega cargado con la primera zona de su alcance hasta que elija otra cosa.
-  const firstZone = hierarchy.data?.plants[0]?.zones[0]?.zone_id;
-  const preset = weekly && !touched ? firstZone : undefined;
+  const check = useFormCheck();
+  const currentMonth = formatInTimeZone(metricsClock().now(), 'UTC', 'yyyy-MM');
+  // Su inicio llega cargado con la primera zona de su alcance hasta que elija otra cosa; las
+  // métricas mensuales, también si el alcance tiene una sola zona (VIG-366).
+  const allZones = hierarchy.data?.plants.flatMap((entry) => entry.zones) ?? [];
+  const firstZone = allZones[0]?.zone_id;
+  const preset = (weekly || allZones.length === 1) && !touched ? firstZone : undefined;
   const shownZone = preset ?? zoneId;
   const shown = applied ?? (preset === undefined ? null : { zoneId: preset, month, revision: 0 });
   const plant = hierarchy.data?.plants.find((entry) =>
@@ -372,8 +378,10 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
       <p>{text('scr13.goal')}</p>
       <Section query={hierarchy}>
         <form
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
+            if (!check.run(event.currentTarget)) return;
             if (shownZone !== '' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
               setTouched(true);
               setZoneId(shownZone);
@@ -384,12 +392,15 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
           <label>
             {text('scr13.zone')}
             <select
+              name="zone"
               required
               value={shownZone}
+              {...check.field('zone')}
               onChange={(event) => {
                 setTouched(true);
                 setZoneId(event.target.value);
                 setApplied(null);
+                check.clear('zone');
               }}
             >
               <option value="">{text('scr13.choose_zone')}</option>
@@ -401,20 +412,25 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
                 )),
               )}
             </select>
+            {check.error('zone')}
           </label>
           <label>
             {text('scr13.period')}
-            <input
+            <MonthInput
+              name="period"
               required
-              type="month"
+              latest={currentMonth}
               value={month}
-              onChange={(event) => {
+              {...check.field('period')}
+              onChange={(value) => {
                 setTouched(true);
                 setZoneId(shownZone);
-                setMonth(event.target.value);
+                setMonth(value);
                 setApplied(null);
+                check.clear('period');
               }}
             />
+            {check.error('period')}
           </label>
           <button type="submit">{text('scr13.consult')}</button>
         </form>

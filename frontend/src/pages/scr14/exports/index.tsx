@@ -1,5 +1,6 @@
 /** SCR-14 · IF-17: solicitar, consultar y descargar sin sondeos auditados. */
 import { useState } from 'react';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { exportsClock, exportsPort, type ExportJob } from '@/ports/scr14Exports';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
@@ -31,6 +32,7 @@ function Exports() {
   const [jobsAt, setJobsAt] = useState<number | null>(null);
   const [selected, setSelected] = useState<{ id: string; initial: ExportJob | null } | null>(null);
   const [exportId, setExportId] = useState('');
+  const check = useFormCheck();
   const plants = hierarchy.data?.plants ?? [];
   const listedJobs = useScreenQuery({
     key: screenKey({
@@ -98,8 +100,10 @@ function Exports() {
         )}
       </section>
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
+          if (!check.run(event.currentTarget)) return;
           if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(exportId))
             setSelected({ id: exportId, initial: null });
         }}
@@ -107,13 +111,17 @@ function Exports() {
         <label>
           {text('scr14.export_id')}
           <input
+            name="export_id"
             required
             value={exportId}
+            {...check.field('export_id')}
             onChange={(event) => {
               setExportId(event.target.value);
+              check.clear('export_id');
             }}
             pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
           />
+          {check.error('export_id')}
         </label>
         <button type="submit">{text('scr14.open')}</button>
       </form>

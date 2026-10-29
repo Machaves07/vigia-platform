@@ -2,7 +2,7 @@
   "scr08.detail.title": "Detalle del hallazgo",
   "scr08.detail.navigation": "Detalle y etiquetas de hallazgos",
   "scr08.detail.back": "Volver a la bandeja",
-  "scr08.detail.labels_link": "Etiquetas",
+  "scr08.detail.labels_link": "Todas las etiquetas de clasificación",
   "scr08.detail.audited": "Consulta auditada: abrir el detalle queda registrado en el expediente y no se actualiza solo.",
   "scr08.detail.reload": "Consultar de nuevo el hallazgo",
   "scr08.detail.summary": "Resumen del hallazgo",

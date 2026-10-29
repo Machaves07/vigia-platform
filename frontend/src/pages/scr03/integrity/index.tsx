@@ -55,6 +55,7 @@ function Integrity() {
       <h1>{text('scr03.integrity')}</h1>
       <p>{text('scr03.no_packages')}</p>
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           setAccepted(null);

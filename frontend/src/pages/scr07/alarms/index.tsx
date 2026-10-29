@@ -31,6 +31,7 @@ export default function Page() {
       <FleetNav />
       <h1>{text('scr07.alarms')}</h1>
       <form
+        noValidate
         className={styles.filters}
         aria-label={text('scr07.filters')}
         onSubmit={(event) => {

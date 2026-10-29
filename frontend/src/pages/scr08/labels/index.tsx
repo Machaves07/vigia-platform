@@ -6,6 +6,7 @@
  */
 import { useState, type SubmitEvent } from 'react';
 import { Link } from 'react-router';
+import { DateInput } from '@/components/DateFields/DateFields';
 import { KeysetTable, type KeysetColumn } from '@/components/KeysetTable/KeysetTable';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { labels as contractLabels } from '@/contracts';
@@ -24,16 +25,10 @@ import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { reasonLabel } from '../detail/DetailView';
+import { dayEnd, dayStart, filterTimeZone } from '../shared';
 
 const FAMILIES: readonly string[] = Object.keys(contractLabels.predicate_family);
 const roles: Readonly<Record<string, string>> = platform.role;
-
-/** Día local `AAAA-MM-DD` del campo de fecha → instante UTC de su comienzo, o `null`. */
-function dayStart(value: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const instant = Date.parse(`${value}T00:00:00.000Z`);
-  return Number.isFinite(instant) ? new Date(instant).toISOString() : null;
-}
 
 interface Applied {
   readonly run: number;
@@ -72,9 +67,10 @@ export default function Page() {
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const start = dayStart(from);
-    const endDay = dayStart(to);
-    const end = endDay === null ? null : new Date(Date.parse(endDay) + 86_400_000).toISOString();
+    // Los días se cuentan en la hora de la planta (VIG-366), no en UTC.
+    const timeZone = filterTimeZone(plants, zoneId === '' ? null : zoneId);
+    const start = from === '' ? null : (dayStart(from, timeZone)?.toISOString() ?? null);
+    const end = to === '' ? null : (dayEnd(to, timeZone)?.toISOString() ?? null);
     if (start === null || end === null || Date.parse(end) <= Date.parse(start)) {
       setInvalid(true);
       return;
@@ -144,29 +140,11 @@ export default function Page() {
       <form aria-label={text('scr08.labels.filters')} noValidate onSubmit={submit}>
         <label>
           {text('scr08.labels.from')}
-          <input
-            type="date"
-            name="from"
-            required
-            value={from}
-            aria-invalid={invalid}
-            onChange={(event) => {
-              setFrom(event.currentTarget.value);
-            }}
-          />
+          <DateInput name="from" required value={from} aria-invalid={invalid} onChange={setFrom} />
         </label>
         <label>
           {text('scr08.labels.to')}
-          <input
-            type="date"
-            name="to"
-            required
-            value={to}
-            aria-invalid={invalid}
-            onChange={(event) => {
-              setTo(event.currentTarget.value);
-            }}
-          />
+          <DateInput name="to" required value={to} aria-invalid={invalid} onChange={setTo} />
         </label>
         <label>
           {text('scr08.labels.zone')}

@@ -57,6 +57,7 @@ export function ConfirmSignature({
       <h2 id="scr05-confirm">{text('scr05.confirm.title')}</h2>
       <ConfirmSummary transparency={transparency} />
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           void mutation.run(agreementId).then(onConfirmed, () => undefined);
