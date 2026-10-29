@@ -114,10 +114,19 @@ describe('catálogo de textos', () => {
 
 describe('textos por ruta (VIG-364)', () => {
   it('cada pantalla diferida trae sus archivos y solo los suyos', () => {
-    expect(screenTextFiles(['SCR-08'])).toEqual(['./scr08.json', './scr08_detail.json']);
+    expect(screenTextFiles(['SCR-08'])).toEqual([
+      './scr08.json',
+      './scr08_detail.json',
+      './scr08_home.json',
+      './scr08_next_step.json',
+    ]);
     expect(screenTextFiles(['SCR-09'])).toEqual(['./scr09_classify.json', './scr09_closure.json']);
     expect(screenTextFiles(['SCR-04'])).toEqual(['./scr04.json', './scr04_parameters.json']);
-    expect(screenTextFiles(['SCR-10', 'SCR-16'])).toEqual(['./scr10.json', './scr16.json']);
+    expect(screenTextFiles(['SCR-10', 'SCR-16'])).toEqual([
+      './scr10.json',
+      './scr16.json',
+      './scr16_home.json',
+    ]);
   });
 
   it('los textos del armazón no son diferidos: SCR-01 solo difiere su administración', () => {

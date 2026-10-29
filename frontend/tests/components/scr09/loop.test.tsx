@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -22,6 +21,10 @@ function stateOf(container: HTMLElement): string | null {
 function serveDetail(lifecycle_state: string) {
   let reads = 0;
   server.use(
+    // Cerrado o incerrable, el lazo lee además su expediente (la firma del cierre, VIG-365).
+    http.get('http://localhost/ledger/records', () =>
+      HttpResponse.json({ items: [], next_cursor: null }),
+    ),
     http.get(`http://localhost/loop/findings/${FINDING}`, () => {
       reads++;
       return HttpResponse.json(
@@ -136,16 +139,11 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
     expect(stateOf(container)).toBe(text('common.unknown'));
   });
 
-  it('pide el detalle solo al pulsar; registros en orden, zona del escalamiento y, cerrado, solo la reapertura (VIG-363)', async () => {
+  it('abre cargado (VIG-365); registros en orden, zona del escalamiento y, cerrado, solo la reapertura', async () => {
     const served = serveDetail('closed');
     const { container, cache } = await renderScreen('loop', { permissions: ALL });
-    const button = await screen.findByRole('button', { name: text('scr09.loop.load') }, WAIT);
-    await waitFor(() => {
-      expect(cache.client.isFetching()).toBe(0);
-    }, WAIT);
-    expect(served.reads()).toBe(0);
-    await userEvent.setup().click(button);
-    await screen.findByRole('navigation', { name: text('scr09.loop.next') }, WAIT);
+    const panel = await screen.findByRole('region', { name: text('next_step.title') }, WAIT);
+    expect(screen.queryByRole('button', { name: text('scr09.loop.load') })).toBeNull();
     expect(screen.queryByRole('form', { name: text('scr09.loop.action_form') })).toBeNull();
     expect(served.reads()).toBe(1);
     expect(stateOf(container)).toBe(label('finding_lifecycle_state', 'closed'));
@@ -156,24 +154,20 @@ describe('SCR-09 lazo', { timeout: 40_000 }, () => {
     ).toEqual([classification(1).reason_text, classification(2).reason_text]);
     expect(container.querySelectorAll('[data-part="action"]')).toHaveLength(1);
     expect(screen.getByText(`${text('scr09.loop.zone')}: Zona sintética de prensas`)).toBeTruthy();
-    const next = screen.getByRole('navigation', { name: text('scr09.loop.next') });
     expect(
-      [...next.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')]),
-    ).toEqual([[text('scr09.loop.reopening'), `/findings/${FINDING}/loop/reopening`]]);
+      [...panel.querySelectorAll('a')].map((link) => [link.textContent, link.getAttribute('href')]),
+    ).toEqual([[text('next_step.access.reopening'), `/findings/${FINDING}/loop/reopening`]]);
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
     expect(await axe(container)).toHaveNoViolations();
   });
 
-  it('sin claves de gestión no hay enlaces ni formulario de acción', async () => {
+  it('sin claves de gestión no hay pasos ni formulario de acción', async () => {
     serveDetail('open');
     await renderScreen('loop', { permissions: ['findings.read'] });
-    await userEvent
-      .setup()
-      .click(await screen.findByRole('button', { name: text('scr09.loop.load') }, WAIT));
     await screen.findByRole('list', { name: text('scr09.loop.actions') }, WAIT);
-    expect(screen.queryByRole('navigation', { name: text('scr09.loop.next') })).toBeNull();
+    expect(screen.queryByRole('region', { name: text('next_step.title') })).toBeNull();
     expect(screen.queryByRole('form', { name: text('scr09.loop.action_form') })).toBeNull();
   });
 });

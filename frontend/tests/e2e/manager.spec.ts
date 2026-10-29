@@ -19,6 +19,17 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   // Revisión 1: el resumen llega cargado (primera zona, mes de la semana anterior), sin «Consultar».
   await expect(page.getByRole('table', { name: 'Días de vencimiento', exact: true })).toBeVisible();
   await expect(page.getByText('Seleccione zona y periodo y pulse consultar.')).toHaveCount(0);
+  // VIG-365: los 4 indicadores del servidor y las tarjetas de lo que puede abrir.
+  await expect(
+    page
+      .getByRole('region', { name: 'Resumen de la semana', exact: true })
+      .locator('[data-indicator]'),
+  ).toHaveCount(4);
+  await expect(
+    page
+      .getByRole('region', { name: 'También para su revisión', exact: true })
+      .locator('[data-slot]'),
+  ).toHaveCount(3);
   await openMenu(page, 'Hallazgos');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
   await expect(

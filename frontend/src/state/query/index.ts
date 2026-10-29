@@ -22,5 +22,6 @@ export {
   ScreenQueryProvider,
   useScreenMutation,
   useScreenQuery,
+  useScreenRefresh,
   type ScreenRead,
 } from './useScreenQuery';

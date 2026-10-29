@@ -1,7 +1,11 @@
 /** RV-11: selección explícita de campos; nunca serializa el objeto recibido. */
 import { Link } from 'react-router';
-import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
+import {
+  ObservabilityBadge,
+  ObservabilityLegend,
+} from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { GateStateChip } from '@/components/GateStateChip/GateStateChip';
+import { StatusChip } from '@/components/StatusChip/StatusChip';
 import { FindingActions } from '@/pages/shared/FindingActions';
 import {
   gateDisplay,
@@ -79,39 +83,65 @@ export function FindingsView({
   plants,
   gates,
   permissions = NO_PERMISSIONS,
+  now,
 }: {
   readonly page: InboxPage;
   readonly plants: readonly Plant[];
   readonly gates: readonly ZoneGate[];
   /** Claves de la sesión: cada fila ofrece el acceso de su estado que la sesión abre (VIG-359). */
   readonly permissions?: ReadonlySet<string>;
+  /** Instante de referencia (`Clock`) del chip «vence dentro de»; sin él, el texto del estado. */
+  readonly now?: number;
 }) {
   const zoneName = (id: string) =>
     plants.flatMap((p) => p.zones).find((z) => z.zone_id === id)?.name ?? id;
   return (
     <>
-      {page.partitions.map((partition) => (
-        <p role="status" key={partition.plant_id}>
-          {plants.find((p) => p.plant_id === partition.plant_id)?.name ?? partition.plant_id}
-          {': '}
-          {text(
-            (PARTITION_NOTICES as readonly string[]).includes(partition.notice)
-              ? `scr08.inbox.notice.${partition.notice}`
-              : 'scr08.inbox.unknown',
-          )}
-        </p>
-      ))}
-      {page.zones.map((zone) => (
-        <p role="status" key={zone.zone_id}>
-          {zoneName(zone.zone_id)}
-          {': '}
-          {text(
-            (ZONE_NOTICES as readonly string[]).includes(zone.notice)
-              ? `scr08.inbox.notice.${zone.notice}`
-              : 'scr08.inbox.unknown',
-          )}
-        </p>
-      ))}
+      {/* S3-09 (VIG-365): los avisos de planta y de zona, con su título y lo que significan. */}
+      {page.partitions.length > 0 && (
+        <section
+          aria-label={text('scr08.inbox.partition_notices')}
+          className={styles.notices}
+          data-part="partition_notices"
+        >
+          <h2>{text('scr08.inbox.partition_notices')}</h2>
+          <p>{text('scr08.inbox.partition_notices_hint')}</p>
+          <ul>
+            {page.partitions.map((partition) => (
+              <li key={partition.plant_id}>
+                {plants.find((p) => p.plant_id === partition.plant_id)?.name ?? partition.plant_id}
+                {': '}
+                {text(
+                  (PARTITION_NOTICES as readonly string[]).includes(partition.notice)
+                    ? `scr08.inbox.notice.${partition.notice}`
+                    : 'scr08.inbox.unknown',
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {page.zones.length > 0 && (
+        <details className={styles.notices} data-part="zone_notices">
+          <summary>
+            {text('scr08.inbox.zone_notices')} ({page.zones.length})
+          </summary>
+          <p>{text('scr08.inbox.zone_notices_hint')}</p>
+          <ul>
+            {page.zones.map((zone) => (
+              <li key={zone.zone_id}>
+                {zoneName(zone.zone_id)}
+                {': '}
+                {text(
+                  (ZONE_NOTICES as readonly string[]).includes(zone.notice)
+                    ? `scr08.inbox.notice.${zone.notice}`
+                    : 'scr08.inbox.unknown',
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {page.items.length > 0 && (
         <div className={styles.scroll}>
           <table>
@@ -135,7 +165,9 @@ export function FindingsView({
                     {text(`scr08.inbox.${key}`)}
                   </th>
                 ))}
-                <th scope="col">{text('finding_journey.navigation')}</th>
+                <th scope="col" className={styles.sticky}>
+                  {text('finding_journey.navigation')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -169,12 +201,19 @@ export function FindingsView({
                     </td>
                     <td>{findingLabel('family', finding.family)}</td>
                     <td>{findingLabel('tier', finding.tier)}</td>
-                    <td>{findingLabel('state', finding.lifecycle_state)}</td>
+                    <td>
+                      <StatusChip
+                        state={finding.lifecycle_state}
+                        overdueDays={finding.overdue_days}
+                        dueAt={finding.due_at}
+                        {...(now === undefined ? {} : { now })}
+                      />
+                    </td>
                     <td>
                       {finding.age_days} {text('scr08.inbox.days')}
                     </td>
                     <td>
-                      <ObservabilityBadge state={finding.observability_state_at_event} />
+                      <ObservabilityBadge state={finding.observability_state_at_event} inTable />
                     </td>
                     <td>
                       {text('scr08.inbox.version')} {finding.standard.version}
@@ -192,7 +231,7 @@ export function FindingsView({
                         <FindingTime instant={finding.due_at} timeZone={timeZone} />
                       )}
                     </td>
-                    <td>
+                    <td className={styles.sticky}>
                       <FindingActions
                         findingId={finding.finding_state_id}
                         state={finding.lifecycle_state}
@@ -205,6 +244,9 @@ export function FindingsView({
             </tbody>
           </table>
         </div>
+      )}
+      {page.items.some((finding) => finding.observability_state_at_event === 'observable') && (
+        <ObservabilityLegend />
       )}
     </>
   );

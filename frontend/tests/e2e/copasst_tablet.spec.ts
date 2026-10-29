@@ -21,7 +21,15 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   expect(page.viewportSize()).toEqual({ width: 768, height: 1024 });
   expect(info.project.use.hasTouch).toBe(true);
   // VIG-363 (hallazgo 18): su inicio es la transparencia de sus zonas.
-  await expectOwnHome(page, 'Transparencia', '/transparency');
+  await expectOwnHome(page, 'Inicio', '/transparency');
+  // VIG-365: un inicio propio y corto, con la nota de privacidad y el acceso a sus avisos.
+  await expect(page.locator('main [data-part="privacy"]')).toHaveText(
+    'Vigía observa zonas, nunca personas: no guarda rostros, nombres ni seguimiento de nadie.',
+  );
+  await expect(page.locator('main [data-slot="SCR-15:list"] a')).toHaveAttribute(
+    'href',
+    '/notifications',
+  );
   const zone = required(world.zone_ids[0]);
   const installer = await (await roleSession('provider_installer')).newPage();
   try {

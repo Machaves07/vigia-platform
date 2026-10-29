@@ -1,9 +1,8 @@
 /** Contexto, estados y lecturas auditadas compartidos por los grupos `classify` y `loop`. */
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { ScreenState } from '@/pages/shared/ScreenState';
-import { classifyClock, classifyPort, loopFailure, type Plant } from '@/ports/scr09Classify';
+import { classifyPort, loopFailure, type Plant } from '@/ports/scr09Classify';
 import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
@@ -48,34 +47,43 @@ export function zoneName(context: LoopContext, zoneId: string | undefined): stri
   return null;
 }
 
+/** Número de apertura: cada montaje de la pantalla es una apertura con su propia lectura. */
+let openings = 0;
+
+/** La apertura de la pantalla: abrirla es la acción explícita que pide lo auditado (VIG-365). */
+export function useOpening(): number {
+  const [opening] = useState(() => (openings += 1));
+  return opening;
+}
+
 /**
- * Lectura auditada (`on_demand`): nunca se pide al montar; solo la pide `request()` desde una
- * acción explícita de la persona (botón o escritura recién confirmada).
+ * Lectura auditada (`on_demand`), como en el detalle (VIG-365, S3-22): abrir la pantalla es la
+ * acción explícita que la pide, una vez por apertura (`opening` en la clave); después solo se
+ * repite desde «Actualizar» o tras una escritura confirmada (`request()`), nunca sola.
  */
 export function useAuditedRead<T>(
   context: LoopContext,
   operation: ReadOperation,
+  opening: number,
   read: (signal: AbortSignal) => Promise<T>,
 ) {
-  const [requested, setRequested] = useState(false);
   const query = useScreenQuery({
     key: screenKey({
       screen: 'scr09',
       operation,
       scope: context.scope,
       concession: context.concession,
-      params: { finding_state_id: context.findingId },
+      params: { finding_state_id: context.findingId, opening },
     }),
     policy: policyFor(operation),
-    enabled: requested,
+    // Abrir la pantalla es la acción explícita que pide lo auditado (como el detalle).
+    enabled: true,
     read: ({ signal }) => read(signal),
   });
   return {
     ...query,
-    requested,
     request: () => {
-      if (requested) void query.refresh();
-      else setRequested(true);
+      void query.refresh();
     },
   };
 }
@@ -112,24 +120,4 @@ export function Result({
   }
   if (query.status === 'pending') return <ScreenState state="loading" />;
   return <ScreenState state="ready">{children}</ScreenState>;
-}
-
-export function Refresh({
-  query,
-  operation,
-}: {
-  readonly query: { fetchedAt: number | null; isFetching: boolean; request(): void };
-  readonly operation: ReadOperation;
-}) {
-  return (
-    <RefreshIndicator
-      clock={classifyClock()}
-      fetchedAt={query.fetchedAt}
-      isFetching={query.isFetching}
-      refreshPolicy={policyFor(operation).periodic ? 'periodic_60s' : 'on_demand'}
-      onRefresh={() => {
-        query.request();
-      }}
-    />
-  );
 }

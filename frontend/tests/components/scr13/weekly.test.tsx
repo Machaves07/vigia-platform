@@ -25,7 +25,15 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     expect(screen.getByText(adoptionData().usage_notice_es, { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.goal'), { exact: true })).toBeDefined();
     expect(screen.getByText(text('scr13.monthly_notice'), { exact: true })).toBeDefined();
-    expect(screen.getByText(text('scr13.not_computable'), { exact: true })).toBeDefined();
+    expect(
+      screen.getAllByText(text('scr13.not_computable'), { exact: true }).length,
+    ).toBeGreaterThan(0);
+    // VIG-365: el resumen abre con los 4 indicadores del servidor, en su orden, sin recalcular.
+    expect(
+      [...view.container.querySelectorAll('[data-indicator]')].map((node) =>
+        node.getAttribute('data-indicator'),
+      ),
+    ).toEqual(['exposure', 'classified_in_time', 'primary_engineering_closures', 'overdue']);
     expect(
       within(screen.getByRole('table', { name: text('scr13.activity_count') })).getByRole('cell', {
         name: '9',
@@ -59,6 +67,34 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     fireEvent.change(screen.getByLabelText(text('scr13.zone')), { target: { value: OTHER } });
     expect(screen.getByText(text('scr13.not_requested'), { exact: true })).toBeDefined();
     expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe(OTHER);
+  });
+  it('VIG-365: las 3 tarjetas del gerente (integridad, proveedores, paquete) solo con su permiso', async () => {
+    const base = ['metrics.read', 'exposure.read', 'executive_summary.read', 'coverage.read'];
+    const cards = (container: HTMLElement) =>
+      [...container.querySelectorAll('[data-slot]')].map((card) => [
+        card.getAttribute('data-slot'),
+        card.querySelector('a')?.getAttribute('href'),
+      ]);
+    const full = await fixture([
+      ...base,
+      'integrity.verify',
+      'concessions.read',
+      'concessions.revoke',
+      'review_package.read',
+    ]);
+    const view = render(<Page />, { wrapper: full.Wrapper });
+    await screen.findByRole('region', { name: text('scr13.home.cards') }, WAIT);
+    expect(cards(view.container)).toEqual([
+      ['SCR-03:integrity', '/integrity'],
+      ['SCR-02:*', '/concessions'],
+      ['SCR-12:*', '/zones/monthly'],
+    ]);
+    expect(await axe(view.container)).toHaveNoViolations();
+    view.unmount();
+    const bare = await fixture(base);
+    const other = render(<Page />, { wrapper: bare.Wrapper });
+    await screen.findByRole('table', { name: text('scr13.overdue_days') }, WAIT);
+    expect(other.container.querySelector('[data-slot]')).toBeNull();
   });
   it('respeta destacado y totales del servidor con umbral configurable, sin recalcular por días ni página', async () => {
     const f = await fixture(['executive_summary.read']);

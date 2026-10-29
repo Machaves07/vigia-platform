@@ -26,7 +26,10 @@ async function openForm() {
   );
   const rendered = await renderScreen('loop');
   const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: text('scr09.loop.load') }, WAIT));
+  // El lazo abre cargado (VIG-365); «Comprometer una acción» del panel abre el formulario.
+  await user.click(
+    await screen.findByRole('button', { name: text('next_step.access.action') }, WAIT),
+  );
   const form = await screen.findByRole('form', { name: text('scr09.loop.action_form') }, WAIT);
   // El plazo por defecto llega de la configuración vigente de la planta.
   await waitFor(() => {

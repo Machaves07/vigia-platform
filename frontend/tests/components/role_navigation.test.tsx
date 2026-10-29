@@ -1,8 +1,8 @@
 /**
  * VIG-363 (hallazgos 18, 19 y 22 de VIG-338): navegación por rol.
  *
- * - Cada rol tiene su inicio y nadie más que el coordinador recibe su panel ni la miga «Bandeja
- *   de hallazgos» sin poder abrir la bandeja.
+ * - Cada rol tiene su inicio y nadie más que el coordinador recibe su panel; el menú agrupado sigue
+ *   los permisos reales (VIG-365: «Lazos de cierre» y «Más» solo con lectura).
  * - El menú del administrador tiene todas sus pantallas con el nombre de la página que abre; las
  *   que necesitan zona o planta abren un selector del alcance, sin consultas en la dirección.
  * - «No disponible en su alcance» explica y lleva al inicio del rol (el mando, a su paquete).
@@ -20,9 +20,8 @@ import { axe } from 'vitest-axe';
 
 import type { Role, ScreenDescriptor } from '@/app/descriptor';
 import { buildNavigationMap } from '@/app/navigation';
-import { navItems } from '@/app/NavMenu';
+import { menuSections, navItems } from '@/app/NavMenu';
 import { SCREENS } from '@/app/screens';
-import { FindingsNav } from '@/pages/scr08/shared';
 import { NotAvailableInScope } from '@/pages/shared/ScreenState';
 import { createSessionStore, SessionProvider } from '@/state/session';
 import { text } from '@/texts';
@@ -103,9 +102,16 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
       [
         ['navigation.menu.coordinator_home', '/home'],
         ['navigation.menu.findings', '/findings'],
+        ['navigation.menu.loops', '/findings/loops'],
       ],
     ],
-    ['plant_manager', [['navigation.menu.findings', '/findings']]],
+    [
+      'plant_manager',
+      [
+        ['navigation.menu.findings', '/findings'],
+        ['navigation.menu.loops', '/findings/loops'],
+      ],
+    ],
     ['administrator', []],
     ['line_manager', []],
     ['copasst', []],
@@ -313,35 +319,69 @@ describe('«No disponible en su alcance» orienta (BR-APP-03, 77)', () => {
   });
 });
 
-describe('miga del panel y la bandeja (hallazgo 18)', () => {
-  function crumbs(container: HTMLElement) {
-    return [...container.querySelectorAll('nav a')].map((link) => [
-      link.textContent,
-      link.getAttribute('href'),
+/**
+ * VIG-365 (S3-05): el menú agrupado del coordinador con sus permisos reales. «Mi trabajo» lleva
+ * «Lazos de cierre», y «Más» solo las pantallas que el servidor le deja leer: «Plantas y zonas»
+ * (`hierarchy.read`), «Catálogo de estándares» y «Admisión de familias» (`catalog.read`), y
+ * «Compuertas y acuerdos por zona» y la política de planta (`catalog.read` y `agreements.sign`).
+ */
+describe('menú agrupado por rol con la tabla real (VIG-365)', () => {
+  function sectionsOf(role: Role) {
+    const navigation = buildNavigationMap(principal(role), SCREENS);
+    return menuSections(navItems(navigation, SCREENS), navigation.home).map((section) => [
+      section.title_text,
+      section.items.map((item) => `${item.screen_id}:${item.group}`),
     ]);
   }
 
-  it('el coordinador: su inicio y la bandeja', async () => {
-    const { container, dispose } = await withSession('coordinator_sst', <FindingsNav />);
-    expect(crumbs(container)).toEqual([
-      [text('scr08.home.title'), '/home'],
-      [text('scr08.inbox.title'), '/findings'],
+  it('el coordinador: mi trabajo con «Lazos de cierre», planta, expediente y «Más» legible', () => {
+    expect(sectionsOf('coordinator_sst')).toEqual([
+      [
+        'navigation.menu.group.work',
+        ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue', 'SCR-08:loops'],
+      ],
+      [
+        'navigation.menu.group.plant',
+        ['SCR-03:coverage', 'SCR-12:entry', 'SCR-13:metrics', 'SCR-13:weekly'],
+      ],
+      ['navigation.menu.group.record', ['SCR-03:integrity', 'SCR-14:exports', 'SCR-16:entry']],
+      [
+        'navigation.menu.group.more',
+        [
+          'SCR-01:hierarchy',
+          'SCR-04:catalog',
+          'SCR-04:admissions',
+          'SCR-05:gates',
+          'SCR-05:policy',
+        ],
+      ],
     ]);
-    dispose();
   });
 
-  it('el gerente: solo la bandeja, nunca «Inicio del coordinador»', async () => {
-    const { container, dispose } = await withSession('plant_manager', <FindingsNav />);
-    expect(crumbs(container)).toEqual([[text('scr08.inbox.title'), '/findings']]);
-    dispose();
+  it('cada entrada de «Más» del coordinador se abre con una clave de lectura que tiene', () => {
+    const granted = new Set(principal('coordinator_sst').effective_permissions);
+    const read = new Map([
+      ['SCR-01:hierarchy', ['hierarchy.read']],
+      ['SCR-04:catalog', ['catalog.read']],
+      ['SCR-04:admissions', ['catalog.read']],
+      ['SCR-05:gates', ['catalog.read', 'agreements.sign']],
+      ['SCR-05:policy', ['catalog.read', 'agreements.sign']],
+    ]);
+    for (const [slot, keys] of read) {
+      const [screenId, groupId] = slot.split(':');
+      const group = SCREENS.find((entry) => entry.screen_id === screenId)?.route_groups.find(
+        (candidate) => candidate.id === groupId,
+      );
+      const opening = group?.required_permissions.filter((key) => granted.has(key)) ?? [];
+      expect(opening).toEqual(keys);
+    }
   });
 
-  it.each(['line_manager', 'copasst', 'administrator'] as const)(
-    '%s: ninguna miga (no tiene bandeja)',
-    async (role) => {
-      const { container, dispose } = await withSession(role, <FindingsNav />);
-      expect(container.querySelector('nav')).toBeNull();
-      dispose();
-    },
-  );
+  it('el gerente: «Lazos de cierre» en seguimiento, sin «Más»', () => {
+    const sections = sectionsOf('plant_manager');
+    expect(sections.find(([title]) => title === 'navigation.menu.group.tracking')).toEqual([
+      'navigation.menu.group.tracking',
+      ['SCR-08:inbox', 'SCR-08:loops', 'SCR-10:queue', 'SCR-03:coverage'],
+    ]);
+  });
 });

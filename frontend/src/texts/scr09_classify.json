@@ -58,5 +58,14 @@
   "scr09.loop.submit": "Registrar la acción",
   "scr09.loop.invalid": "La acción no cumple el formato que exige el servidor; revise los campos.",
   "scr09.loop.action_saved": "Acción registrada con plazo",
-  "scr09.loop.unknown": "Dato desconocido"
+  "scr09.loop.unknown": "Dato desconocido",
+  "scr09.loop.closed_banner": "Cerrado y firmado",
+  "scr09.loop.closed_by": "Firmó",
+  "scr09.loop.closed_at": "Fecha de la firma",
+  "scr09.loop.closed_license": "Credencial profesional",
+  "scr09.loop.closed_unread": "La firma del cierre no se pudo leer del expediente; el estado lo da el servidor.",
+  "scr09.classify.receipt_next": "Registrada. El siguiente paso es el lazo de cierre del hallazgo.",
+  "scr09.classify.go_to_loop": "Ir al lazo",
+  "scr09.classify.open_reclassification": "Reclasificar",
+  "scr09.classify.close_reclassification": "Cancelar la reclasificación"
 }

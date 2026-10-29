@@ -106,6 +106,7 @@ afterEach(() => {
 export async function setup(
   options: {
     permissions?: string[];
+    role?: Parameters<typeof meResponse>[0]['role'];
     entry?: boolean;
     packageResponse?: () => Response;
     createResponse?: () => Response;
@@ -122,6 +123,7 @@ export async function setup(
   const me = meResponse({
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 28_800_000,
+    ...(options.role === undefined ? {} : { role: options.role }),
     permissions: options.permissions ?? [
       'review_package.read',
       'commitments.write',

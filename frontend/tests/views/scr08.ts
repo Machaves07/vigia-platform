@@ -55,6 +55,8 @@ export default {
       'observability_state_at_event',
       'occurred_at',
       'due_at',
+      // El chip de estado dice el tiempo (VIG-365): «Vencida hace N días», del servidor.
+      'overdue_days',
       'time_aggregated',
       'notices',
       'code',

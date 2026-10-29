@@ -17,6 +17,10 @@ export function meResponse(options: {
   readonly absoluteExpiresAt: number;
   readonly userId?: string;
   readonly permissions?: readonly string[];
+  /** Rol de la asignación (por omisión, administrador). */
+  readonly role?: MeResponse['assignments'][number]['role'];
+  /** Varias asignaciones, una por rol, en lugar de `role`. */
+  readonly roles?: readonly MeResponse['assignments'][number]['role'][];
 }): MeResponse {
   return {
     user: {
@@ -30,13 +34,11 @@ export function meResponse(options: {
       name: 'Organización sintética',
       kind: 'client',
     },
-    assignments: [
-      {
-        role: 'administrator',
-        scope_level: 'organization',
-        scope_id: '0190a1b2-0000-7000-8000-0000000000f1',
-      },
-    ],
+    assignments: (options.roles ?? [options.role ?? 'administrator']).map((role) => ({
+      role,
+      scope_level: 'organization',
+      scope_id: '0190a1b2-0000-7000-8000-0000000000f1',
+    })),
     effective_permissions: [...(options.permissions ?? ['findings.read'])],
     concession_id: null,
     idle_expires_at: iso(options.idleExpiresAt),

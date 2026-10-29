@@ -304,7 +304,8 @@ export async function expectOwnHome(page: Page, title: string, path: string): Pr
   await page.getByRole('link', { name: 'Vigía', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${path}$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(title);
-  const coordinator = title === 'Inicio del coordinador';
+  // Todos los inicios se titulan «Inicio» (VIG-365): el del coordinador es el que vive en `/home`.
+  const coordinator = path === '/home';
   // El inicio de cada rol se llama «Inicio» en el menú (VIG-364): solo el del coordinador lleva al
   // panel `/home`. En tableta el menú lateral está plegado y el inicio va en la barra inferior.
   await expect(
@@ -365,9 +366,43 @@ export async function openFromInbox(page: Page, href: string): Promise<void> {
   await link.click();
 }
 
-/** Los accesos del estado del hallazgo en su detalle (VIG-359). */
+/** El panel «Siguiente paso» del detalle y del lazo (VIG-365): una sola acción principal. */
 export function nextSteps(page: Page): Locator {
-  return page.getByRole('navigation', { name: 'Siguiente paso con este hallazgo' });
+  return page.getByRole('region', { name: 'Siguiente paso', exact: true });
+}
+
+/**
+ * En escritorio, el panel va en la columna derecha a la altura del inicio de la columna principal,
+ * no al pie de ella (sistema visual v1).
+ */
+export async function expectNextStepBeside(page: Page): Promise<void> {
+  const offset = await nextSteps(page).evaluate((panel) => {
+    const aside = panel.closest('aside');
+    const main = aside?.previousElementSibling;
+    if (!aside || !main) return Number.NaN;
+    const side = aside.getBoundingClientRect();
+    const column = main.getBoundingClientRect();
+    return side.left >= column.right ? Math.abs(side.top - column.top) : Number.NaN;
+  });
+  expect(offset).toBeLessThanOrEqual(1);
+}
+
+/**
+ * Una sola actualización por página (VIG-365, S3-03): con la pantalla ya cargada, cuenta los
+ * botones «Actualizar» de la zona principal.
+ */
+export async function expectOneRefresh(page: Page): Promise<void> {
+  await expect(
+    page.getByRole('main').getByRole('button', { name: 'Actualizar', exact: true }),
+  ).toHaveCount(1);
+}
+
+/** Sin desborde horizontal de la página (S3-10): lo ancho va en su caja con desplazamiento. */
+export async function expectNoPageOverflow(page: Page): Promise<void> {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
 }
 
 /**
@@ -376,14 +411,12 @@ export function nextSteps(page: Page): Locator {
  */
 export async function confirmFinding(page: Page, findingId: string, reason: string) {
   await expect(page).toHaveURL(new RegExp(`/findings/${findingId}/classify$`));
-  await page.getByRole('button', { name: 'Consultar el hallazgo y su historial' }).click();
-  // El historial llega después y se pinta encima del formulario: con la cabecera de una fila
-  // (VIG-364) el botón empieza dentro de la vista y, sin esperar, el clic caía en el hueco que deja
-  // al bajar (Firefox, medido: de y=720 a y=2210).
+  // La pantalla abre cargada (VIG-365). El historial llega y se pinta encima del formulario: se
+  // espera a que termine para que el clic no caiga en el hueco que deja al bajar (VIG-364).
   const history = page.getByRole('region', { name: 'Historial de clasificaciones', exact: true });
   await expect(history).toBeVisible();
-  await settled(page, history);
   const form = page.getByRole('form', { name: 'Registrar una clasificación' });
+  await settled(page, form);
   await form.getByRole('radio', { name: 'confirmado', exact: true }).check();
   await form.getByLabel('Categoría del motivo').selectOption('real_coexistence');
   await form.getByLabel('Motivo de la clasificación (Obligatorio)', { exact: true }).fill(reason);
@@ -401,6 +434,10 @@ export async function confirmFinding(page: Page, findingId: string, reason: stri
     'coordinador SST',
   );
   await expect(history).toContainText('con el rol coordinador SST');
+  // VIG-365 (S3-20): registrada, el formulario se pliega sin errores y el recibo da el lazo.
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Ir al lazo', exact: true })).toBeVisible();
 }
 
 export async function logout(page: Page) {

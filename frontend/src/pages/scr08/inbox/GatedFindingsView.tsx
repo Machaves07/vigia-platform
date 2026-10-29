@@ -1,8 +1,8 @@
 /** La compuerta sustituye la fila completa; no convierte una zona no productiva en cero. */
 import { ScreenState } from '@/pages/shared/ScreenState';
-import { readGates, type InboxPage } from '@/ports/scr08Findings';
+import { findingsClock, readGates, type InboxPage } from '@/ports/scr08Findings';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
-import { Refresh, Result, useFindingsContext } from '../shared';
+import { Result, useFindingsContext } from '../shared';
 import { FindingsView } from './FindingsView';
 
 export function GatedFindingsView({
@@ -29,20 +29,25 @@ export function GatedFindingsView({
   const permissions = new Set(context.permissions);
   if (ids.length === 0)
     return (
-      <FindingsView page={page} plants={context.plants} gates={[]} permissions={permissions} />
+      <FindingsView
+        page={page}
+        plants={context.plants}
+        gates={[]}
+        permissions={permissions}
+        now={findingsClock().now()}
+      />
     );
   if (!allowed) return <ScreenState state="unavailable" />;
+  // Sin actualización propia: la de la cabecera de la página repite también estas compuertas.
   return (
-    <>
-      <Refresh query={query} operation="GET /zones/{zone_id}/gates" />
-      <Result query={query}>
-        <FindingsView
-          page={page}
-          plants={context.plants}
-          gates={query.data ?? []}
-          permissions={permissions}
-        />
-      </Result>
-    </>
+    <Result query={query}>
+      <FindingsView
+        page={page}
+        plants={context.plants}
+        gates={query.data ?? []}
+        permissions={permissions}
+        now={findingsClock().now()}
+      />
+    </Result>
   );
 }

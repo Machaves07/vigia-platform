@@ -1,10 +1,18 @@
-/** Inventario completo con filtros enviados en bloque y refresco gobernado por state.query. */
+/**
+ * Inventario completo con filtros enviados en bloque y refresco gobernado por state.query. Cuando
+ * es el inicio de la sesión (el administrador, BR-APP-04), va debajo de «Pendiente de su parte» y
+ * de las áreas de configuración (`AdminHome`, VIG-365), con una sola actualización en la cabecera.
+ */
 import { useState } from 'react';
 import { useParams } from 'react-router';
+import { useIsHome } from '@/pages/shared/HomeCards';
+import { PageRefresh } from '@/pages/shared/PageRefresh';
 import { readFleet, type NodeFilters } from '@/ports/scr07Fleet';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
+import { descriptor } from '../descriptor';
 import { FleetNav, FleetRefresh, FleetResult, useFleetContext } from '../shared';
+import { AdminHome } from './AdminHome';
 import { COMMUNICATION, FleetView, WARNINGS, warningLabel } from './FleetView';
 import { NodeDetail } from './NodeDetail';
 import { Thresholds } from './Thresholds';
@@ -12,6 +20,7 @@ import styles from './inventory.module.css';
 
 function Inventory() {
   const context = useFleetContext();
+  const isHome = useIsHome(descriptor, 'inventory');
   const [filters, setFilters] = useState<NodeFilters>({});
   const operation = 'GET /fleet/nodes';
   const query = useScreenQuery({
@@ -27,8 +36,22 @@ function Inventory() {
   });
   return (
     <main>
-      <FleetNav />
-      <h1>{text('scr07.title')}</h1>
+      {isHome ? (
+        <>
+          <header className={styles.header}>
+            <h1>{text('scr07.home.title')}</h1>
+            <PageRefresh screen="scr07" reads={[{ fetchedAt: query.fetchedAt, operation }]} />
+          </header>
+          <AdminHome context={context} />
+          <h2>{text('scr07.home.fleet')}</h2>
+          <FleetNav />
+        </>
+      ) : (
+        <>
+          <FleetNav />
+          <h1>{text('scr07.title')}</h1>
+        </>
+      )}
       <form
         className={styles.filters}
         aria-label={text('scr07.filters')}
@@ -80,7 +103,7 @@ function Inventory() {
         </label>
         <button type="submit">{text('scr07.apply')}</button>
       </form>
-      <FleetRefresh query={query} operation={operation} />
+      {!isHome && <FleetRefresh query={query} operation={operation} />}
       <FleetResult query={query} empty={query.data?.length === 0}>
         <FleetView nodes={query.data ?? []} plants={context.plants} />
       </FleetResult>

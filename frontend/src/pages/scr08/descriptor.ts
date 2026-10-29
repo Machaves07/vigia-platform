@@ -34,6 +34,14 @@ export const descriptor: ScreenDescriptor = {
       load: () => import('./inbox'),
     },
     {
+      id: 'loops',
+      paths: ['/findings/loops'],
+      access: 'permission',
+      required_permissions: ['findings.read'],
+      menu: { title_text: 'navigation.menu.loops' },
+      load: () => import('./loops'),
+    },
+    {
       id: 'labels',
       paths: ['/findings/labels'],
       access: 'permission',

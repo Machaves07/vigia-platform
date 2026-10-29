@@ -6,8 +6,10 @@
  * clasificaciones se pide con él y se muestra completo, porque reclasificar no borra (P4). El
  * `Finding` de cada tramo sale del expediente y se valida con Ajv antes de pintarse.
  *
- * Recorrido guiado (VIG-359): con el detalle cargado, el acceso que admite su estado (cola,
- * clasificar, reclasificar o lazo; `FindingActions`), y la resolución de la cola en el historial.
+ * Recorrido guiado (VIG-359): con el detalle cargado, el acceso que admite su estado, y la
+ * resolución de la cola en el historial. Sistema visual v1 (VIG-365, S3-13): título humano
+ * («<familia> en <zona>»), chip de estado, paso a paso del ciclo y, en la columna derecha, el panel
+ * «Siguiente paso» con una sola acción principal. Una sola actualización, en la cabecera.
  *
  * Degradación declarada: `503 loop_gate_state_unavailable` (fallo cerrado de U-04, el cuerpo no
  * trae el hallazgo) y `loop_standard_text_unavailable` degradan su sección con «reintentar», sin
@@ -15,8 +17,16 @@
  */
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
-import { FindingActions } from '@/pages/shared/FindingActions';
+import type { RouteGroup } from '@/app/descriptor';
+import { canEnterGroup } from '@/app/navigation';
+import { StatusChip } from '@/components/StatusChip/StatusChip';
+import { descriptor as scr09 } from '@/pages/scr09/descriptor';
+import { findingAccess } from '@/pages/shared/FindingActions';
+import styles from '@/pages/shared/findingLayout.module.css';
+import { findingTitle } from '@/pages/shared/findingTitle';
+import { LifecycleSteps } from '@/pages/shared/LifecycleSteps';
+import { NextStepPanel } from '@/pages/shared/NextStepPanel';
+import { PageRefresh } from '@/pages/shared/PageRefresh';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   detailClock,
@@ -30,6 +40,9 @@ import { policyFor, screenKey, useScreenQuery, type ReadOperation } from '@/stat
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
 import { DetailView, History, type NowState, type RecordsState } from './DetailView';
+
+/** El grupo del lazo de SCR-09: el enlace aparece solo si la sesión lo puede abrir. */
+const LOOP_GROUP: RouteGroup | undefined = scr09.route_groups.find((group) => group.id === 'loop');
 
 const DETAIL = 'GET /loop/findings/{finding_state_id}';
 const HISTORY = 'GET /loop/findings/{finding_state_id}/classifications';
@@ -129,7 +142,6 @@ function Finding({
   readonly detail: FindingDetail;
 }) {
   const clock = detailClock();
-  const [instant] = useState(() => new Date(clock.now()).toISOString());
   const withCoverage = context.permissions.has('coverage.read');
   const recordIds = detail.records.map((record) => record.record_id);
   const records = useAudited(context, RECORD, { records: recordIds }, true, (signal) =>
@@ -138,11 +150,15 @@ function Finding({
   const coverage = useAudited(
     context,
     COVERAGE,
-    { zone_id: detail.zone_id, instant },
+    { zone_id: detail.zone_id },
     withCoverage,
+    // El instante se toma en cada lectura: «Actualizar» pide la cobertura de ahora (P10).
     (signal) =>
       detailPort.coverageNow.read(
-        { path: { zone_id: detail.zone_id }, query: { instant } },
+        {
+          path: { zone_id: detail.zone_id },
+          query: { instant: new Date(clock.now()).toISOString() },
+        },
         signal,
       ),
   );
@@ -181,70 +197,104 @@ export default function Page() {
   const history = useAudited(context, HISTORY, {}, true, (signal) =>
     detailPort.history.read({ path }, signal),
   );
-  const reload = () => {
-    void detail.refresh();
-    void history.refresh();
-  };
   const timeZone = timeZoneOf(context, detail.data?.plant_id);
+  const data = detail.data;
   return (
-    <main>
+    <main className={styles.page}>
       <nav aria-label={text('scr08.detail.navigation')}>
         <Link to="/findings">{text('scr08.detail.back')}</Link>
         {' · '}
         <Link to="/findings/labels">{text('scr08.detail.labels_link')}</Link>
+        {/* El lazo, para consultarlo en cualquier estado que lo tenga (además del paso). */}
+        {data !== undefined &&
+          findingAccess(data.lifecycle_state).includes('loop') &&
+          LOOP_GROUP !== undefined &&
+          canEnterGroup(LOOP_GROUP, context.permissions) && (
+            <>
+              {' · '}
+              <Link to={`/findings/${context.findingId}/loop`} data-part="loop_link">
+                {text('finding_journey.loop')}
+              </Link>
+            </>
+          )}
       </nav>
-      <h1>{text('scr08.detail.title')}</h1>
+      <header className={styles.header}>
+        <div className={styles.heading}>
+          {/* Nombre humano (VIG-365, S3-13): «<familia> en <zona>», con el chip de su estado. */}
+          <h1>
+            {data === undefined
+              ? text('scr08.detail.title')
+              : findingTitle(data.family, zoneOf(context, data.zone_id))}
+          </h1>
+          {data !== undefined && (
+            <StatusChip
+              state={data.lifecycle_state}
+              overdueDays={data.overdue_days}
+              dueAt={data.due_at}
+              now={detailClock().now()}
+            />
+          )}
+        </div>
+        <PageRefresh
+          screen="scr08"
+          reads={[
+            { fetchedAt: detail.fetchedAt, operation: DETAIL },
+            { fetchedAt: history.fetchedAt, operation: HISTORY },
+          ]}
+        />
+      </header>
       <p>{text('scr08.detail.audited')}</p>
-      {detail.data !== undefined && (
-        <FindingActions
-          findingId={context.findingId}
-          state={detail.data.lifecycle_state}
-          detectionId={detail.data.subject_kind === 'detection' ? detail.data.subject_id : null}
-          permissions={context.permissions}
-          landmark
-        />
-      )}
-      <RefreshIndicator
-        clock={detailClock()}
-        fetchedAt={detail.fetchedAt}
-        isFetching={detail.isFetching || history.isFetching}
-        refreshPolicy="on_demand"
-        onRefresh={reload}
-      />
-      <section aria-label={text('scr08.detail.title')} data-section="finding">
-        {detail.error !== null ? (
-          <Failure
-            error={detail.error}
-            onRetry={() => {
-              void detail.refresh();
-            }}
-          />
-        ) : detail.data === undefined ? (
-          <ScreenState state="loading" />
-        ) : (
-          <Finding context={context} detail={detail.data} />
+      {data !== undefined && <LifecycleSteps state={data.lifecycle_state} />}
+      <div className={styles.columns}>
+        <div className={styles.main}>
+          <section aria-label={text('scr08.detail.title')} data-section="finding">
+            {detail.error !== null ? (
+              <Failure
+                error={detail.error}
+                onRetry={() => {
+                  void detail.refresh();
+                }}
+              />
+            ) : data === undefined ? (
+              <ScreenState state="loading" />
+            ) : (
+              <Finding context={context} detail={data} />
+            )}
+          </section>
+          {history.error !== null ? (
+            <section aria-label={text('scr08.detail.history')}>
+              <h2>{text('scr08.detail.history')}</h2>
+              <Failure
+                error={history.error}
+                onRetry={() => {
+                  void history.refresh();
+                }}
+              />
+            </section>
+          ) : history.data === undefined ? (
+            <ScreenState state="loading" />
+          ) : (
+            <History
+              classifications={history.data.classifications}
+              reviewResolutions={history.data.review_resolutions}
+              timeAggregated={history.data.time_aggregated}
+              timeZone={timeZone}
+            />
+          )}
+        </div>
+        {data !== undefined && (
+          <aside className={styles.aside}>
+            <NextStepPanel
+              findingId={context.findingId}
+              state={data.lifecycle_state}
+              permissions={context.permissions}
+              dueAt={data.due_at}
+              detectionId={data.subject_kind === 'detection' ? data.subject_id : null}
+              timeZone={timeZone}
+            />
+          </aside>
         )}
-      </section>
-      {history.error !== null ? (
-        <section aria-label={text('scr08.detail.history')}>
-          <h2>{text('scr08.detail.history')}</h2>
-          <Failure
-            error={history.error}
-            onRetry={() => {
-              void history.refresh();
-            }}
-          />
-        </section>
-      ) : history.data === undefined ? (
-        <ScreenState state="loading" />
-      ) : (
-        <History
-          classifications={history.data.classifications}
-          reviewResolutions={history.data.review_resolutions}
-          timeAggregated={history.data.time_aggregated}
-          timeZone={timeZone}
-        />
-      )}
+      </div>
     </main>
   );
 }

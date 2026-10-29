@@ -8,25 +8,17 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { HttpResponse, http } from 'msw';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { axe } from 'vitest-axe';
-import { LoopNext } from '@/pages/scr09/loop/LoopNext';
 import { LoopView } from '@/pages/scr09/loop/LoopView';
 import {
   LOOP_ACCESS,
-  LOOP_PRIMARY,
   loopAccess,
   unclosableCommitment,
   type LoopAccess,
 } from '@/pages/scr09/loop/loopAccess';
 import { text } from '@/texts';
-import { exampleFor } from '../../msw/handlers';
-import { server } from '../../msw/server';
-import { detail, FINDING, INSTANT, renderScreen, WAIT } from './classify_support';
+import { detail, INSTANT } from './classify_support';
 
 interface Transition {
   readonly id: string;
@@ -60,13 +52,6 @@ function statesWith(access: LoopAccess): Set<string> {
   );
 }
 
-const ALL = new Set([
-  'findings.read',
-  'findings.classify',
-  'actions.manage',
-  'closure_attachments.read',
-  'findings.close_and_sign',
-]);
 const DUE = '2026-12-08T17:00:00.000Z';
 const RENEWED = '2027-03-01T17:00:00.000Z';
 const MEASURE = 'Delimitar el acceso con una barrera física temporal en la zona';
@@ -118,194 +103,9 @@ describe('registros del lazo por estado contra la tabla del servidor (BR-APP-43)
     expect(offered).toEqual(withLoopRecord);
   });
 
-  it('el destacado es uno de los registros que el estado admite', () => {
-    for (const [state, primary] of Object.entries(LOOP_PRIMARY)) {
-      expect(loopAccess(state)).toContain(primary);
-    }
-    expect(LOOP_PRIMARY).toEqual({ unclosable: 'unclosable_review' });
-  });
-
   it('un estado fuera de la lista no ofrece nada', () => {
     expect(loopAccess('zone_cleared')).toEqual([]);
     expect(loopAccess('constructor')).toEqual([]);
-  });
-});
-
-function renderNext(
-  state: string,
-  permissions: ReadonlySet<string> = ALL,
-  commitment: Parameters<typeof LoopNext>[0]['commitment'] = null,
-) {
-  return render(
-    <MemoryRouter>
-      <LoopNext
-        findingId={FINDING}
-        state={state}
-        permissions={permissions}
-        commitment={commitment}
-        timeZone="America/Bogota"
-      />
-    </MemoryRouter>,
-  );
-}
-
-function offered(container: HTMLElement) {
-  return [...container.querySelectorAll('li[data-access]')].map((item) => [
-    item.getAttribute('data-access'),
-    item.querySelector('a')?.getAttribute('href'),
-    item.getAttribute('data-primary'),
-  ]);
-}
-
-describe('«Siguientes registros del lazo», un estado cada vez', () => {
-  it('cerrado: solo la reapertura', () => {
-    const { container } = renderNext('closed');
-    expect(offered(container)).toEqual([
-      ['reopening', `/findings/${FINDING}/loop/reopening`, null],
-    ]);
-  });
-
-  it('incerrable: la revisión destacada con fecha y medida, y la reapertura', async () => {
-    const { container } = renderNext('unclosable', ALL, {
-      reviewDueAt: DUE,
-      compensatoryMeasure: MEASURE,
-    });
-    expect(offered(container)).toEqual([
-      ['unclosable_review', `/findings/${FINDING}/loop/unclosable`, 'true'],
-      ['reopening', `/findings/${FINDING}/loop/reopening`, null],
-    ]);
-    const primary = container.querySelector('li[data-primary="true"]');
-    expect(primary?.querySelector('a')?.textContent).toBe(
-      text('role_navigation.loop.unclosable_review'),
-    );
-    const facts = [...(primary?.querySelectorAll('dt, dd') ?? [])].map((node) => node.textContent);
-    expect(facts[0]).toBe(text('role_navigation.loop.review_due_at'));
-    expect(primary?.querySelector('dd time')?.getAttribute('datetime')).toBe(DUE);
-    expect(facts.slice(2)).toEqual([text('scr09.unclosable.compensatory_measure'), MEASURE]);
-    expect(await axe(container)).toHaveNoViolations();
-  });
-
-  it('incerrable sin la declaración leída: la revisión sigue destacada y lo dice', () => {
-    const { container } = renderNext('unclosable');
-    const primary = container.querySelector('li[data-primary="true"]');
-    expect(primary?.getAttribute('data-access')).toBe('unclosable_review');
-    expect(primary?.querySelector('dl')).toBeNull();
-    expect(
-      [...(primary?.querySelectorAll('p') ?? [])].map((paragraph) => paragraph.textContent),
-    ).toEqual([
-      text('role_navigation.loop.unclosable_review_hint'),
-      text('role_navigation.loop.commitment_unknown'),
-    ]);
-  });
-
-  it('abierto: declarar incerrable (la acción se compromete con el formulario de la pantalla)', () => {
-    const { container } = renderNext('open');
-    expect(offered(container)).toEqual([
-      ['unclosable', `/findings/${FINDING}/loop/unclosable`, null],
-    ]);
-  });
-
-  it.each(['action_assigned', 'overdue'])('%s: evidencia y cierre, e incerrable', (state) => {
-    const { container } = renderNext(state);
-    expect(offered(container)).toEqual([
-      ['closure', `/findings/${FINDING}/loop/closure`, null],
-      ['unclosable', `/findings/${FINDING}/loop/unclosable`, null],
-    ]);
-  });
-
-  it.each(['received', 'in_review', 'discarded', 'suspended_by_reclassification'])(
-    '%s: ningún registro del lazo, con la explicación',
-    (state) => {
-      const { container } = renderNext(state);
-      expect(offered(container)).toEqual([]);
-      const nav = screen.getByRole('navigation', { name: text('scr09.loop.next') });
-      expect(nav.querySelector('[data-part="loop_next_none"]')?.textContent).toBe(
-        text('role_navigation.loop.none'),
-      );
-    },
-  );
-
-  it('solo con actions.manage: la reapertura sí, la revisión y el cierre firmado no', () => {
-    const manage = new Set(['findings.read', 'actions.manage']);
-    expect(offered(renderNext('unclosable', manage).container)).toEqual([
-      ['reopening', `/findings/${FINDING}/loop/reopening`, null],
-    ]);
-    cleanup();
-    expect(offered(renderNext('closed', manage).container)).toEqual([
-      ['reopening', `/findings/${FINDING}/loop/reopening`, null],
-    ]);
-  });
-
-  it('sin claves de gestión, en un estado con registros, no hay navegación', () => {
-    renderNext('closed', new Set(['findings.read']));
-    expect(screen.queryByRole('navigation', { name: text('scr09.loop.next') })).toBeNull();
-  });
-
-  it('la revisión pide su pestaña por el estado de la navegación, sin consulta en la URL', async () => {
-    function Probe() {
-      const location = useLocation();
-      return (
-        <p data-part="probe">
-          {JSON.stringify([location.pathname, location.search, location.state])}
-        </p>
-      );
-    }
-    const { container } = render(
-      <MemoryRouter initialEntries={['/lazo']}>
-        <Routes>
-          <Route
-            path="/lazo"
-            element={
-              <LoopNext
-                findingId={FINDING}
-                state="unclosable"
-                permissions={ALL}
-                commitment={null}
-                timeZone="UTC"
-              />
-            }
-          />
-          <Route path="/findings/:id/loop/unclosable" element={<Probe />} />
-          <Route path="/findings/:id/loop/reopening" element={<Probe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const link = container.querySelector('li[data-primary="true"] a');
-    if (link === null) throw new Error('Falta la revisión destacada');
-    await userEvent.setup().click(link);
-    expect(screen.getByText(/loop/u, { selector: '[data-part="probe"]' }).textContent).toBe(
-      JSON.stringify([`/findings/${FINDING}/loop/unclosable`, '', { review: true }]),
-    );
-  });
-
-  it('la reapertura no pide la pestaña de revisión', async () => {
-    function Probe() {
-      const location = useLocation();
-      return <p data-part="probe">{JSON.stringify(location.state)}</p>;
-    }
-    const { container } = render(
-      <MemoryRouter initialEntries={['/lazo']}>
-        <Routes>
-          <Route
-            path="/lazo"
-            element={
-              <LoopNext
-                findingId={FINDING}
-                state="unclosable"
-                permissions={ALL}
-                commitment={null}
-                timeZone="UTC"
-              />
-            }
-          />
-          <Route path="/findings/:id/loop/reopening" element={<Probe />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const link = container.querySelector('li[data-access="reopening"] a');
-    if (link === null) throw new Error('Falta la reapertura');
-    await userEvent.setup().click(link);
-    expect(container.querySelector('[data-part="probe"]')?.textContent).toBe('null');
   });
 });
 
@@ -425,76 +225,5 @@ describe('estado de la acción tras el cierre firmado (VIG-363, diagnóstico en 
       'assigned',
       text('scr09.loop.action_state.assigned'),
     ]);
-  });
-});
-
-describe('la pantalla del lazo según el estado del servidor', { timeout: 40_000 }, () => {
-  const PERMISSIONS = [...ALL, 'hierarchy.read'];
-
-  /** Los registros del expediente que sirve el servidor falso, de la organización de la sesión. */
-  type Records = (organizationId: string) => unknown[];
-
-  async function load(lifecycle_state: string, records: Records = () => []) {
-    let ledgerReads = 0;
-    let organization = '';
-    server.use(
-      http.get(`http://localhost/loop/findings/${FINDING}`, () =>
-        HttpResponse.json(detail({ lifecycle_state })),
-      ),
-      http.get('http://localhost/ledger/records', () => {
-        ledgerReads++;
-        return HttpResponse.json({ items: records(organization), next_cursor: null });
-      }),
-    );
-    const rendered = await renderScreen('loop', { permissions: PERMISSIONS });
-    organization = rendered.organizationId;
-    await userEvent
-      .setup()
-      .click(await screen.findByRole('button', { name: text('scr09.loop.load') }, WAIT));
-    const nav = await screen.findByRole('navigation', { name: text('scr09.loop.next') }, WAIT);
-    return { ...rendered, ledgerReads: () => ledgerReads, nav };
-  }
-
-  it('cerrado: solo la reapertura y ningún formulario de acción', async () => {
-    const { nav, ledgerReads } = await load('closed');
-    expect(offered(nav)).toEqual([['reopening', `/findings/${FINDING}/loop/reopening`, null]]);
-    expect(screen.queryByRole('form', { name: text('scr09.loop.action_form') })).toBeNull();
-    expect(ledgerReads()).toBe(0);
-  });
-
-  it('abierto: el formulario de la acción e incerrable, sin cierre ni reapertura', async () => {
-    const { nav } = await load('open');
-    expect(offered(nav)).toEqual([['unclosable', `/findings/${FINDING}/loop/unclosable`, null]]);
-    await screen.findByRole('form', { name: text('scr09.loop.action_form') }, WAIT);
-  });
-
-  it('incerrable: la revisión destacada con la fecha y la medida de su declaración', async () => {
-    const page = exampleFor('list_records_ledger_records_get') as {
-      items: Record<string, unknown>[];
-    };
-    const base = page.items[0] ?? {};
-    const findingDetail = detail();
-    const { nav, ledgerReads } = await load('unclosable', (organization_id) => [
-      {
-        ...base,
-        organization_id,
-        record_type: 'unclosable_state_declared',
-        chain_sequence: 7,
-        plant_id: findingDetail.plant_id,
-        scope: { plant_id: findingDetail.plant_id, zone_id: findingDetail.zone_id, node_id: null },
-        content: {
-          subject_id: findingDetail.subject_id,
-          declaration_id: DECLARATION,
-          review_due_at: DUE,
-          compensatory_measure: MEASURE,
-        },
-      },
-    ]);
-    await waitFor(() => {
-      expect(nav.querySelector('li[data-primary="true"] dl')).not.toBeNull();
-    }, WAIT);
-    expect(within(nav).getByText(MEASURE).tagName).toBe('DD');
-    expect(ledgerReads()).toBe(1);
-    expect(screen.queryByRole('form', { name: text('scr09.loop.action_form') })).toBeNull();
   });
 });

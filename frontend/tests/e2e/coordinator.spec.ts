@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { authenticatedTest as test, expect } from './fixtures';
 import {
   confirmFinding,
+  expectNextStepBeside,
+  expectNoPageOverflow,
+  expectOneRefresh,
   expectOwnHome,
   logout,
   nextSteps,
@@ -26,12 +29,14 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     `Perfil ${world.journeys.profile}; semilla ${String(world.journeys.seed)}\n`,
   );
 
-  await test.step('TOTP del arnés, panel y bandeja con vencidos en cabecera', async () => {
+  await test.step('TOTP del arnés, inicio con lo urgente primero y bandeja con vencidos', async () => {
     // VIG-363: el inicio propio del coordinador es su panel, con su título y su entrada.
-    await expectOwnHome(page, 'Inicio del coordinador', '/home');
-    await expect(page.getByRole('heading', { name: 'Inicio del coordinador' })).toBeVisible();
-    await page.getByRole('button', { name: 'Consultar cobertura actual' }).click();
-    const zones = page.getByRole('region', { name: 'Observabilidad por zona' });
+    await expectOwnHome(page, 'Inicio', '/home');
+    // VIG-365 (S3-02): lo urgente antes que la cobertura, y la cobertura llega cargada (S3-04).
+    const urgent = page.getByRole('region', { name: 'Exige acción hoy', exact: true });
+    const zones = page.getByRole('region', { name: 'Cobertura por zona', exact: true });
+    await expect(urgent.locator('[data-card]')).toHaveCount(3);
+    await expect(page.getByRole('button', { name: 'Consultar cobertura actual' })).toHaveCount(0);
     await expect(
       zones
         .getByRole('group', {
@@ -39,6 +44,20 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
         })
         .first(),
     ).toBeVisible();
+    await expect(
+      zones.getByRole('group', { name: 'Estado de observabilidad: Desconocido', exact: true }),
+    ).toHaveCount(0);
+    expect(
+      await urgent.evaluate(
+        (node, other) => node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING,
+        await zones.elementHandle(),
+      ),
+    ).toBeTruthy();
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
+    // S3-10: la tabla queda en su caja, sin desborde de la página a 1280 px.
+    expect(page.viewportSize()?.width).toBe(1280);
+    await expectNoPageOverflow(page);
     const nonProductive = zones.getByRole('article', { name: 'Zona no productiva' });
     await expect(nonProductive).toBeVisible();
     await expect(nonProductive.getByRole('group', { name: 'Estado de compuertas' })).toHaveText(
@@ -49,10 +68,33 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     ).toHaveCount(0);
     await expect(nonProductive).not.toContainText(/\d|hallazgos|personas/i);
     await page
-      .getByRole('region', { name: 'Hallazgos nuevos', exact: true })
-      .getByRole('link', { name: 'Abrir la bandeja completa' })
+      .getByRole('region', { name: 'Hallazgos nuevos: los 5 más recientes', exact: true })
+      .getByRole('link', { name: /^Abrir la bandeja completa \((Más de )?\d+\)$/ })
       .click();
     await expect(page.getByRole('heading', { name: 'Bandeja de hallazgos' })).toBeVisible();
+    await expect(page.locator('tbody tr').first()).toBeVisible();
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
+    await expectNoPageOverflow(page);
+    // S3-10: la columna «Siguiente paso» queda fija dentro de la caja, sin cortarse. Se mide en una
+    // fila de hallazgo: la de una zona no productiva es una sola celda con su estado de compuertas.
+    const next = await page
+      .locator('tbody tr')
+      .filter({ has: page.locator('td:nth-child(12)') })
+      .first()
+      .locator('td')
+      .last()
+      .evaluate((cell) => {
+        let box = cell.parentElement;
+        while (box && getComputedStyle(box).overflowX !== 'auto') box = box.parentElement;
+        return {
+          cell: cell.getBoundingClientRect().right,
+          box: box?.getBoundingClientRect().right ?? Number.NaN,
+          sticky: getComputedStyle(cell).position,
+        };
+      });
+    expect(next.sticky).toBe('sticky');
+    expect(next.cell).toBeLessThanOrEqual(Math.min(next.box, 1280) + 1);
     await expect(
       page.getByRole('heading', { name: 'Acciones vencidas en el alcance, sin filtros' }),
     ).toBeVisible();
@@ -69,9 +111,16 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       if (/\/evidence\/[^/]+\/read-url$/.test(request.url())) grants += 1;
     });
     await openFromInbox(page, `/findings/${selected.closure}`);
-    await expect(page.getByRole('heading', { name: 'Detalle del hallazgo' })).toBeVisible();
+    // VIG-365 (S3-13): título humano, chip de estado, paso a paso y el panel «Siguiente paso».
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(/ en /);
+    await expect(page.locator('main [data-part="status_chip"]').first()).toBeVisible();
+    await expect(page.getByRole('list', { name: 'Ciclo del hallazgo' })).toBeVisible();
+    await expect(nextSteps(page).locator('[data-primary="true"]')).toHaveCount(1);
+    await expectNextStepBeside(page);
     const play = page.getByRole('button', { name: 'Reproducir clip', exact: true }).first();
     await expect(play).toBeVisible();
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
     expect(grants).toBe(0);
     const grant = page.waitForResponse(/\/evidence\/[^/]+\/read-url$/);
     await play.click();
@@ -90,7 +139,9 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
   });
 
   await test.step('del detalle a clasificar y al lazo, solo con clics (VIG-359)', async () => {
-    await nextSteps(page).getByRole('link', { name: 'Clasificar', exact: true }).click();
+    await nextSteps(page)
+      .getByRole('link', { name: 'Clasificar el hallazgo', exact: true })
+      .click();
     let grants = 0;
     const countGrant = (request: { url(): string }) => {
       if (/\/evidence\/[^/]+\/read-url$/.test(request.url())) grants += 1;
@@ -118,12 +169,17 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       .evaluate((element: HTMLVideoElement) => {
         element.pause();
       });
-    await page
-      .getByRole('navigation', { name: 'Clasificación y lazo del hallazgo' })
-      .getByRole('link', { name: 'Lazo de cierre del hallazgo', exact: true })
-      .click();
+    // VIG-365 (S3-20): el recibo ofrece «Ir al lazo», y el lazo llega cargado (S3-22).
+    await page.getByRole('link', { name: 'Ir al lazo', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/findings/${selected.closure}/loop$`));
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
+    await expect(page.locator('[data-part="lifecycle_state"]')).toHaveAttribute(
+      'data-value',
+      'open',
+    );
+    await expect(page.getByRole('button', { name: 'Consultar el lazo' })).toHaveCount(0);
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
   });
 
   await test.step('clasificación conservada con motivo y rol efectivo', async () => {
@@ -132,8 +188,11 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     const history = page.getByRole('region', { name: 'Historial completo de clasificaciones' });
     await expect(history).toContainText('Coexistencia real observada junto al acceso');
     await expect(history).toContainText('coordinador SST');
-    // Ya clasificado, el detalle ofrece el lazo y reclasificar con su aviso (BR-LAZ-24).
-    await expect(nextSteps(page).getByRole('link', { name: 'Lazo de cierre' })).toBeVisible();
+    // Ya clasificado (abierto), el panel da comprometer la acción como principal y reclasificar
+    // como secundaria, con su aviso (BR-LAZ-24; VIG-365).
+    await expect(nextSteps(page).locator('[data-primary="true"]')).toHaveText(
+      'Comprometer una acción',
+    );
     await expect(nextSteps(page).getByRole('link', { name: 'Reclasificar' })).toBeVisible();
     await expect(nextSteps(page).getByRole('note')).toHaveText(
       'Reclasificar como operación autorizada o falso positivo suspende el lazo mientras se resuelve.',
@@ -150,7 +209,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       .locator('td a')
       .first()
       .click();
-    await expect(page.getByRole('heading', { name: 'Detalle del hallazgo' })).toBeVisible();
+    await expect(nextSteps(page)).toBeVisible();
     await nextSteps(page)
       .getByRole('link', { name: 'Revisar en la cola de revisión', exact: true })
       .click();
@@ -179,14 +238,14 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(page.getByText('Resolución registrada', { exact: true })).toBeVisible();
     // De vuelta al detalle: la resolución está en el historial y el hallazgo ya tiene lazo.
     await page.goBack();
-    await expect(page.getByRole('heading', { name: 'Detalle del hallazgo' })).toBeVisible();
+    await expect(nextSteps(page)).toBeVisible();
     const resolution = page
       .getByRole('region', { name: 'Historial completo de clasificaciones' })
       .getByRole('region', { name: 'Resolución de la cola de revisión' });
     await expect(resolution).toContainText(reason);
     await expect(resolution).toContainText('confirmado en revisión');
     await expect(resolution).toContainText('coordinador SST');
-    await nextSteps(page).getByRole('link', { name: 'Lazo de cierre', exact: true }).click();
+    await page.locator('main [data-part="loop_link"]').click();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
   });
 
@@ -195,7 +254,13 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await openInbox(page);
     await openFromInbox(page, `/findings/${selected.closure}/loop`);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
-    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
+    // VIG-365 (S3-24): el lazo llega cargado y «Comprometer una acción» es el siguiente paso.
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
+    await expectNextStepBeside(page);
+    await nextSteps(page)
+      .getByRole('button', { name: 'Comprometer una acción', exact: true })
+      .click();
     const action = page.getByRole('form', { name: 'Comprometer una acción sobre la zona' });
     await action.getByLabel('Tipo de acción').selectOption('engineering');
     await action
@@ -253,14 +318,19 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       page.getByRole('region', { name: 'Historial de evidencia, cierres y declaraciones' }),
     ).toContainText('Cierre firmado');
     // VIG-363 (hallazgo 20): el lazo cerrado solo ofrece la reapertura y la acción figura cerrada.
+    // VIG-365: llega cargado, con la franja «Cerrado y firmado» y solo la reapertura.
     await page.getByRole('link', { name: 'Volver al lazo', exact: true }).click();
-    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
     await expect(page.locator('[data-part="lifecycle_state"]')).toHaveAttribute(
       'data-value',
       'closed',
     );
-    const next = page.getByRole('navigation', { name: 'Siguientes registros del lazo' });
-    await expect(next.getByRole('link')).toHaveText(['Registrar una reapertura']);
+    const banner = page.getByRole('region', { name: 'Cerrado y firmado', exact: true });
+    await expect(banner).toContainText('SST-SINTETICA-E2E');
+    await expect(nextSteps(page).getByRole('link')).toHaveText(['Registrar una reapertura']);
+    await expect(nextSteps(page).getByRole('button')).toHaveCount(0);
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+    await expectOneRefresh(page);
+    await expectNextStepBeside(page);
     await expect(
       page.getByRole('form', { name: 'Comprometer una acción sobre la zona' }),
     ).toHaveCount(0);
@@ -279,13 +349,20 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       selected.unclosable,
       'Coexistencia real documentada en el acceso de la zona sintética',
     );
-    await page
-      .getByRole('navigation', { name: 'Clasificación y lazo del hallazgo' })
-      .getByRole('link', { name: 'Lazo de cierre del hallazgo', exact: true })
+    // VIG-365: abierto, el siguiente paso es comprometer la acción; con la acción comprometida
+    // el panel ofrece además declarar que no hay alternativa segura.
+    await page.getByRole('link', { name: 'Ir al lazo', exact: true }).click();
+    await nextSteps(page)
+      .getByRole('button', { name: 'Comprometer una acción', exact: true })
       .click();
-    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
-    await page
-      .getByRole('navigation', { name: 'Siguientes registros del lazo' })
+    const action = page.getByRole('form', { name: 'Comprometer una acción sobre la zona' });
+    await action.getByLabel('Tipo de acción').selectOption('engineering');
+    await action
+      .getByLabel('Descripción de la acción (Obligatorio)', { exact: true })
+      .fill('Evaluar un resguardo fijo para el acceso de la zona sintética');
+    await action.getByRole('button', { name: 'Registrar la acción', exact: true }).click();
+    await expect(page.getByText('Acción registrada con plazo', { exact: false })).toBeVisible();
+    await nextSteps(page)
       .getByRole('link', { name: 'Declarar el hallazgo incerrable', exact: true })
       .click();
     await expect(page).toHaveURL(new RegExp(`/findings/${selected.unclosable}/loop/unclosable$`));
@@ -330,24 +407,20 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(
       page.getByRole('region', { name: 'Historial de evidencia, cierres y declaraciones' }),
     ).toContainText('Declaración de hallazgo incerrable');
-    // VIG-363 (hallazgo 20): el incerrable destaca la revisión con su fecha y su medida y solo
-    // ofrece además la reapertura; la revisión abre su pestaña.
+    // VIG-365: el incerrable ofrece solo la revisión en la fecha comprometida, con su fecha y su
+    // medida; la revisión abre su pestaña.
     await page.getByRole('link', { name: 'Volver al lazo', exact: true }).click();
-    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
-    const next = page.getByRole('navigation', { name: 'Siguientes registros del lazo' });
-    await expect(next.getByRole('link')).toHaveText([
-      'Revisar la declaración en la fecha comprometida',
-      'Registrar una reapertura',
-    ]);
-    const primary = next.locator('li[data-primary="true"]');
-    await expect(primary.locator('dd').last()).toHaveText(
+    const next = nextSteps(page);
+    await expect(next.getByRole('link')).toHaveText(['Revisar en la fecha comprometida']);
+    const commitment = next.locator('[data-part="unclosable_commitment"]');
+    await expect(commitment.locator('dd').last()).toHaveText(
       'Delimitar el acceso con una barrera física temporal en la zona',
     );
-    await expect(primary.locator('dd time')).toHaveCount(1);
+    await expect(commitment.locator('dd time')).toHaveCount(1);
     await expect(
       page.getByRole('form', { name: 'Comprometer una acción sobre la zona' }),
     ).toHaveCount(0);
-    await primary.getByRole('link').click();
+    await next.locator('a[data-primary="true"]').click();
     await expect(page).toHaveURL(new RegExp(`/findings/${selected.unclosable}/loop/unclosable$`));
     await page.getByRole('button', { name: 'Consultar el expediente de cierre' }).click();
     await expect(

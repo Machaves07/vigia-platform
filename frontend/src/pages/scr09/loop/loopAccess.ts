@@ -28,21 +28,39 @@ export const LOOP_ACCESS: Readonly<Record<string, readonly LoopAccess[]>> = {
 };
 
 /**
- * El registro que el estado pide primero y la pantalla destaca: el incerrable se sostiene con la
- * revisión en la fecha comprometida y su medida compensatoria (respuesta 7 de U-04).
+ * Los registros que admite el estado; ninguno si el estado no está en la lista cerrada. Cuál es la
+ * acción principal de cada estado lo decide el panel «Siguiente paso» (`nextStep`, VIG-365).
  */
-export const LOOP_PRIMARY: Readonly<Record<string, LoopAccess>> = {
-  unclosable: 'unclosable_review',
-};
-
-/** Los registros que admite el estado; ninguno si el estado no está en la lista cerrada. */
 export function loopAccess(state: string): readonly LoopAccess[] {
   return Object.hasOwn(LOOP_ACCESS, state) ? (LOOP_ACCESS[state] ?? []) : [];
 }
 
-/** El registro destacado del estado, si lo hay. */
-export function loopPrimary(state: string): LoopAccess | null {
-  return Object.hasOwn(LOOP_PRIMARY, state) ? (LOOP_PRIMARY[state] ?? null) : null;
+/** El cierre firmado vigente: quién lo firmó, cuándo y con qué credencial (VIG-365). */
+export interface ClosureSignature {
+  readonly signedAt: string | null;
+  readonly signer: string | null;
+  readonly license: string | null;
+}
+
+/**
+ * El último cierre firmado del expediente del hallazgo, en el orden de la cadena; `null` sin
+ * cierre. Solo se eligen los campos que la franja muestra.
+ */
+export function closureSignature(records: readonly RecordLike[]): ClosureSignature | null {
+  const closures = [...records]
+    .filter((record) => record.record_type === 'closure')
+    .sort((a, b) => a.chain_sequence - b.chain_sequence);
+  const last = closures.at(-1);
+  if (last === undefined) return null;
+  const signer = field(last.content, 'signer');
+  const name = field(signer, 'display_name');
+  const license = field(signer, 'professional_license');
+  const signedAt = field(last.content, 'signed_at');
+  return {
+    signedAt: typeof signedAt === 'string' ? signedAt : null,
+    signer: typeof name === 'string' ? name : null,
+    license: typeof license === 'string' ? license : null,
+  };
 }
 
 /** La revisión comprometida de un incerrable: fecha vigente y medida compensatoria declarada. */

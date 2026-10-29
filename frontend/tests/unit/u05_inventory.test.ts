@@ -136,7 +136,7 @@ describe('hito U-05: pantallas', () => {
         (group) => `src/pages/scr${screen.screen_id.slice('SCR-'.length)}/${group.id}/index.tsx`,
       ),
     );
-    expect(groups).toHaveLength(47);
+    expect(groups).toHaveLength(48);
     const relays = groups.filter((file) => {
       const source = read(file);
       return /\bRelayPage\b/.test(source) || /\brelevo de VIG-290\b/.test(source);

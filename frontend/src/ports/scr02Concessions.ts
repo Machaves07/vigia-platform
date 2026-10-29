@@ -106,16 +106,19 @@ export async function readQueries(
   pageSize: number,
   signal: AbortSignal,
 ) {
+  // `KeysetTable` solo admite claves de cursor `cursor` o `after_*`: con `after` a secas, la
+  // primera página con continuación (más de 50 consultas) se rechazaba como «No se pudo cargar».
+  const after = cursor?.after_query;
   const page = await concessionsPort.queries.read(
     {
       path: { concession_id: concessionId },
-      query: { limit: pageSize, ...(cursor?.after === undefined ? {} : { after: cursor.after }) },
+      query: { limit: pageSize, ...(after === undefined ? {} : { after }) },
     },
     signal,
   );
   return {
     items: page.queries,
-    nextCursor: page.next_after === null ? null : { after: page.next_after },
+    nextCursor: page.next_after === null ? null : { after_query: page.next_after },
   };
 }
 

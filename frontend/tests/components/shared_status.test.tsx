@@ -11,7 +11,10 @@ import { axe } from 'vitest-axe';
 
 import { FakeClock } from '../support/fakeClock';
 import { GateStateChip } from '@/components/GateStateChip/GateStateChip';
-import { ObservabilityBadge } from '@/components/ObservabilityBadge/ObservabilityBadge';
+import {
+  ObservabilityBadge,
+  ObservabilityLegend,
+} from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { LoadingSkeleton } from '@/components/RefreshIndicator/LoadingSkeleton';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
@@ -95,7 +98,24 @@ describe('UI-10 ObservabilityBadge', () => {
     expect(group.getAttribute('data-state')).toBe(state === 'safe' ? 'unknown' : state);
     expect(container.querySelector('svg')?.getAttribute('data-icon')).toBe(icon);
     expect(container.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
-    expect(part(container, 'legend').textContent).toBe(t('components_status.observability.legend'));
+    // VIG-365 (S3-04, S3-07): la leyenda va solo con «Observable», donde podría leerse «despejada».
+    const legend = container.querySelector('[data-part="legend"]');
+    expect(legend?.textContent ?? null).toBe(
+      state === 'observable' ? t('components_status.observability.legend') : null,
+    );
+  });
+
+  it('en una tabla, la celda no repite la leyenda: va una vez con ObservabilityLegend', () => {
+    const { container } = render(
+      <>
+        <ObservabilityBadge state="observable" inTable />
+        <ObservabilityBadge state="observable" inTable />
+        <ObservabilityLegend />
+      </>,
+    );
+    expect(
+      [...container.querySelectorAll('[data-part="legend"]')].map((node) => node.textContent),
+    ).toEqual([t('components_status.observability.legend')]);
   });
 
   it('cada estado tiene un icono distinto', () => {

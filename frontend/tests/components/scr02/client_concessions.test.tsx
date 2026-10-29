@@ -156,6 +156,45 @@ describe('/concessions', { timeout: 60_000 }, () => {
     expect(seen).toEqual([CONCESSION, CONCESSION]);
   });
 
+  it('con más de una página, la primera se pinta y «Cargar más» pide la siguiente con su cursor', async () => {
+    // VIG-365: con `after` como clave del cursor, KeysetTable rechazaba la primera página con
+    // continuación y la lista entera quedaba en «No se pudo cargar».
+    const second = providerQuery({
+      record_id: '0190a1b2-0000-7000-8000-0000000000e3',
+      occurred_at: '2026-01-01T09:10:00.000Z',
+    });
+    const afters: (string | null)[] = [];
+    server.use(
+      http.get(`${ORIGIN}/concessions/:concessionId/queries`, ({ request }) => {
+        const after = new URL(request.url).searchParams.get('after');
+        afters.push(after);
+        return after === null
+          ? HttpResponse.json({ queries: [providerQuery()], next_after: 'c2lndWllbnRl' })
+          : HttpResponse.json({ queries: [second], next_after: null });
+      }),
+    );
+    const user = userEvent.setup();
+    await mountAt('/concessions');
+    await listTable();
+    const detail = await openDetail(user, PLANT_SCOPE);
+    const queries = await within(detail).findByRole(
+      'region',
+      { name: text('scr02.queries.list') },
+      WAIT,
+    );
+    await waitFor(() => {
+      expect(within(queries).getAllByRole('row')).toHaveLength(2);
+    }, WAIT);
+    expect(within(queries).queryByRole('alert')).toBeNull();
+    await user.click(
+      within(queries).getByRole('button', { name: text('components_structure.keyset.load_more') }),
+    );
+    await waitFor(() => {
+      expect(within(queries).getAllByRole('row')).toHaveLength(3);
+    }, WAIT);
+    expect(afters).toEqual([null, 'c2lndWllbnRl']);
+  });
+
   it('una consulta rechazada se etiqueta «acceso o intento», nunca como datos entregados', async () => {
     // El servidor escribe el provider_query antes de la ruta (A-48): la consulta rechazada llega
     // con los mismos campos que la atendida. Estos son exactamente los que devuelve.

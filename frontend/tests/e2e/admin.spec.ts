@@ -1,6 +1,8 @@
 import { authenticatedTest as test, expect } from './fixtures';
 import {
   acknowledgeSecret,
+  expectNoPageOverflow,
+  expectOneRefresh,
   expectOwnHome,
   installerRoute,
   nextStep,
@@ -24,7 +26,16 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   const plant = required(world.plant_ids[0]);
   // VIG-363 (hallazgos 18 y 19): su inicio propio y cada pantalla solo con clics desde el menú,
   // cuya entrada tiene el nombre de la página que abre.
-  await expectOwnHome(page, 'Inventario de flota', '/fleet');
+  await expectOwnHome(page, 'Inicio', '/fleet');
+  // VIG-365: «Pendiente de su parte» con sus tres pendientes, las áreas y una sola actualización.
+  const pendingWork = page.getByRole('region', { name: 'Pendiente de su parte', exact: true });
+  await expect(pendingWork.locator('[data-pending]')).toHaveCount(3);
+  await expect(
+    page.getByRole('region', { name: 'Áreas de configuración', exact: true }).locator('li'),
+  ).toHaveCount(8);
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await expectOneRefresh(page);
+  await expectNoPageOverflow(page);
   await openMenu(page, 'Usuarios y roles');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Usuarios');
   await page.getByRole('button', { name: 'Invitar a una persona' }).click();

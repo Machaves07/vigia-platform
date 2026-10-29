@@ -135,6 +135,18 @@ function serveApi(options: { readonly unreadPages?: number } = {}): void {
         affected_row_ids: null,
       }),
     ),
+    // El inicio del coordinador pide la cobertura al abrir, una vez por apertura (VIG-365).
+    http.get(`${ORIGIN}/zones/:zone_id/coverage/at`, ({ params }) =>
+      HttpResponse.json({
+        zone_id: params.zone_id,
+        instant: '2026-01-01T12:00:00.000Z',
+        state: 'observable',
+        causes: [],
+        layer: 'platform',
+        clock_basis: 'platform',
+        source_record_ids: [],
+      }),
+    ),
     http.get(`${ORIGIN}/loop/findings`, () => HttpResponse.json(page(findings))),
     http.get(`${ORIGIN}/loop/review-queue`, () =>
       HttpResponse.json({
@@ -226,13 +238,13 @@ function live(path: string): number {
 describe('NFR-APP-05: consumo de la API en reposo', { timeout: 120_000 }, () => {
   it.each([
     // Inicio del coordinador: bandeja y cola en el panel, campana y semáforo de observabilidad.
-    { path: '/home', screenRead: '/loop/review-queue', unreadPages: 1 },
+    { path: '/home', screenRead: '/loop/findings', unreadPages: 1 },
     { path: '/findings', screenRead: '/loop/findings', unreadPages: 1 },
     { path: '/review-queue', screenRead: '/loop/review-queue', unreadPages: 1 },
     // Panel de salud de la flota (SCR-07).
     { path: '/fleet', screenRead: '/fleet/nodes', unreadPages: 1 },
     // Peor caso de la campana: 1 000 no leídas, cinco páginas por sondeo (VIG-318).
-    { path: '/home', screenRead: '/loop/review-queue', unreadPages: 5 },
+    { path: '/home', screenRead: '/loop/findings', unreadPages: 5 },
   ])(
     '$path con $unreadPages página(s) de no leídas: ≤ 30 por minuto en 5 minutos',
     async ({ path, screenRead, unreadPages }) => {
@@ -259,7 +271,7 @@ describe('NFR-APP-05: consumo de la API en reposo', { timeout: 120_000 }, () => 
 
   it('con la pestaña oculta no sale ninguna petición en 5 minutos; al volver se reanuda', async () => {
     serveApi();
-    const fixture = await mount('/home', '/loop/review-queue');
+    const fixture = await mount('/home', '/loop/findings');
     const loaded = requests.length;
     expect(loaded).toBeGreaterThan(0);
 
@@ -270,7 +282,7 @@ describe('NFR-APP-05: consumo de la API en reposo', { timeout: 120_000 }, () => 
     setVisibility('visible');
     const resumed = await minute(fixture);
     expect(resumed.map((request) => request.path)).toContain('/notifications');
-    expect(resumed.map((request) => request.path)).toContain('/loop/review-queue');
+    expect(resumed.map((request) => request.path)).toContain('/loop/findings');
     expect(failures).toEqual([]);
   });
 

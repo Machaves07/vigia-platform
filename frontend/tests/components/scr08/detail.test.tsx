@@ -57,6 +57,27 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     expect(env.calls.readUrl).toBe(0);
   });
 
+  it('VIG-365: el único «Actualizar» vuelve a pedir las lecturas auditadas y «ahora» en el instante de pulsar', async () => {
+    const env = await fixture();
+    const { container } = await opened(env);
+    expect(
+      screen.getAllByRole('button', { name: text('components_status.refresh.button') }),
+    ).toHaveLength(1);
+    expect(container.querySelector('[data-policy]')?.getAttribute('data-policy')).toBe('on_demand');
+    const first = env.calls.coverage[0]?.searchParams.get('instant');
+    env.clock.advance(5_000);
+    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await waitFor(() => {
+      expect(env.calls.coverage).toHaveLength(2);
+      expect(env.cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    expect([env.calls.detail, env.calls.history, env.calls.record]).toEqual([2, 2, 2]);
+    expect(env.calls.coverage.map((url) => url.searchParams.get('instant'))).toEqual([
+      first,
+      new Date(Date.parse(first ?? '') + 5_000).toISOString(),
+    ]);
+  });
+
   it('una apertura nueva vuelve a pedir el detalle una vez', async () => {
     const env = await fixture();
     const first = await opened(env);
@@ -279,46 +300,95 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
 
   // --- VIG-359: recorrido guiado por el estado y resolución de la cola en el historial ---------
 
-  const COORDINATOR = ['findings.read', 'evidence.read', 'coverage.read', 'findings.classify'];
+  // VIG-365: las claves del coordinador (las del servidor para el rol) para abrir cada paso.
+  const COORDINATOR = [
+    'findings.read',
+    'evidence.read',
+    'coverage.read',
+    'findings.classify',
+    'review_queue.resolve',
+    'actions.manage',
+    'closure_attachments.read',
+    'findings.close_and_sign',
+  ];
 
-  function journeyLinks() {
-    const navigation = screen.getByRole('navigation', { name: text('finding_journey.navigation') });
-    return within(navigation)
-      .getAllByRole('link')
-      .map((link) => [link.textContent, link.getAttribute('href')]);
+  /** [acceso, href, principal] de cada control del panel «Siguiente paso», en orden. */
+  function panelControls() {
+    const panel = screen.getByRole('region', { name: text('next_step.title') });
+    return [...panel.querySelectorAll('[data-access]')].map((node) => [
+      node.getAttribute('data-access'),
+      node.getAttribute('href'),
+      node.getAttribute('data-primary'),
+    ]);
   }
 
   it.each([
-    {
-      state: 'in_review',
-      kind: 'detection',
-      expected: () => [[text('finding_journey.review_queue'), '/review-queue']],
-    },
+    { state: 'in_review', kind: 'detection', expected: () => [['review_queue', '/review-queue']] },
     {
       state: 'received',
       kind: 'finding',
-      expected: (id: string) => [[text('finding_journey.classify'), `/findings/${id}/classify`]],
+      expected: (id: string) => [['classify', `/findings/${id}/classify`]],
     },
-    ...['open', 'action_assigned', 'overdue', 'closed', 'unclosable', 'discarded'].map((state) => ({
+    {
+      state: 'open',
+      kind: 'finding',
+      expected: (id: string) => [
+        ['action', `/findings/${id}/loop`],
+        ['reclassify', `/findings/${id}/classify`],
+      ],
+    },
+    ...['action_assigned', 'overdue'].map((state) => ({
       state,
       kind: 'finding',
       expected: (id: string) => [
-        [text('finding_journey.loop'), `/findings/${id}/loop`],
-        [text('finding_journey.reclassify'), `/findings/${id}/classify`],
+        ['closure', `/findings/${id}/loop/closure`],
+        ['unclosable', `/findings/${id}/loop/unclosable`],
       ],
     })),
+    {
+      state: 'closed',
+      kind: 'finding',
+      expected: (id: string) => [['reopening', `/findings/${id}/loop/reopening`]],
+    },
+    {
+      state: 'unclosable',
+      kind: 'finding',
+      expected: (id: string) => [['unclosable_review', `/findings/${id}/loop/unclosable`]],
+    },
   ])(
-    'VIG-359: en $state ofrece el acceso de su estado, sin escribir la dirección',
+    'VIG-365: en $state, el panel da una sola acción principal, sin escribir la dirección',
     async ({ state, kind, expected }) => {
       const env = await fixture({ permissions: COORDINATOR });
       const value = { ...detail(), lifecycle_state: state, subject_kind: kind };
       env.responses.detail = () => HttpResponse.json(value);
       await opened(env);
-      expect(journeyLinks()).toEqual(expected(value.finding_state_id));
+      const controls = panelControls();
+      expect(controls.map(([access, href]) => [access, href])).toEqual(
+        expected(value.finding_state_id),
+      );
+      expect(controls.map(([, , primary]) => primary)).toEqual(
+        controls.map((_, index) => (index === 0 ? 'true' : null)),
+      );
       const suspends = document.querySelector('[data-part="suspends"]');
-      expect(suspends === null).toBe(!['open', 'action_assigned', 'overdue'].includes(state));
+      expect(suspends === null).toBe(state !== 'open');
     },
   );
+
+  it('VIG-365: título humano, chip del estado y paso a paso del ciclo', async () => {
+    const env = await fixture({ permissions: COORDINATOR });
+    const value = { ...detail(), lifecycle_state: 'action_assigned' };
+    env.responses.detail = () => HttpResponse.json(value);
+    await opened(env);
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(heading.textContent).not.toBe(text('scr08.detail.title'));
+    const chip = document.querySelector('[data-part="status_chip"]');
+    expect(chip?.getAttribute('data-state')).toBe('action_assigned');
+    const steps = screen.getByRole('list', { name: text('lifecycle_steps.label') });
+    expect(steps.querySelector('[aria-current="step"]')?.getAttribute('data-step')).toBe('action');
+    expect(
+      screen.getAllByRole('button', { name: text('components_status.refresh.button') }),
+    ).toHaveLength(1);
+  });
 
   it.each([
     { kind: 'detection', target: (subject: string) => subject },
@@ -331,9 +401,9 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
       env.responses.detail = () => HttpResponse.json(value);
       await opened(env);
       fireEvent.click(
-        within(
-          screen.getByRole('navigation', { name: text('finding_journey.navigation') }),
-        ).getByRole('link', { name: text('finding_journey.review_queue') }),
+        within(screen.getByRole('region', { name: text('next_step.title') })).getByRole('link', {
+          name: text('next_step.access.review_queue'),
+        }),
       );
       const queue = await screen.findByTestId('queue', {}, WAIT);
       expect(queue.textContent).toBe(target(value.subject_id));
@@ -345,9 +415,7 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     const env = await fixture();
     env.responses.detail = () => HttpResponse.json({ ...detail(), lifecycle_state: 'received' });
     await opened(env);
-    expect(screen.queryByRole('navigation', { name: text('finding_journey.navigation') })).toBe(
-      null,
-    );
+    expect(screen.queryByRole('region', { name: text('next_step.title') })).toBe(null);
   });
 
   it('VIG-359: el historial muestra la resolución de la cola aparte de las clasificaciones', async () => {

@@ -89,9 +89,20 @@ function loopServer(initial: ClassificationItem[], state = 'open') {
   return { items, bodies, reads };
 }
 
+/**
+ * La pantalla abre cargada (VIG-365). La primera clasificación (o la cola, en revisión) muestra el
+ * formulario; cualquier otro estado es una reclasificación, que se abre a propósito con su botón.
+ */
 async function load() {
   const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: text('scr09.classify.load') }, WAIT));
+  const toggle = text('scr09.classify.open_reclassification');
+  const ready = await waitFor(() => {
+    const form = screen.queryByRole('form', { name: text('scr09.classify.form') });
+    const button = screen.queryByRole('button', { name: toggle });
+    if (form === null && button === null) throw new Error('La pantalla sigue cargando.');
+    return button;
+  }, WAIT);
+  if (ready !== null) await user.click(ready);
   await screen.findByRole('form', { name: text('scr09.classify.form') }, WAIT);
   return user;
 }
@@ -114,16 +125,69 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     });
   });
 
-  it('no pide lo auditado al montar; solo al pulsar consultar', async () => {
+  it('abrir la pantalla pide lo auditado una sola vez, sin botón de consultar (VIG-365)', async () => {
     const { reads } = loopServer([classification(1)]);
     const { cache } = await renderScreen('classify');
-    await screen.findByRole('button', { name: text('scr09.classify.load') }, WAIT);
+    await screen.findByRole('list', { name: text('scr09.classify.history') }, WAIT);
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
-    expect(reads).toEqual({ detail: 0, history: 0 });
-    await load();
     expect(reads).toEqual({ detail: 1, history: 1 });
+    expect(screen.queryByRole('button', { name: text('scr09.classify.load') })).toBeNull();
+    expect(
+      screen.getAllByRole('button', { name: text('components_status.refresh.button') }),
+    ).toHaveLength(1);
+  });
+
+  it('VIG-365 (S3-20): tras clasificar, recibo con «Ir al lazo» y ningún formulario abierto', async () => {
+    const { bodies } = loopServer([], 'received');
+    const { container } = await renderScreen('classify', {
+      permissions: ['findings.read', 'findings.classify', 'actions.manage', 'hierarchy.read'],
+    });
+    const user = await load();
+    await user.click(
+      screen.getByRole('radio', { name: label('classification_outcome', 'confirmed') }),
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: text('scr09.classify.reason_category') }),
+      'procedure_gap',
+    );
+    await user.type(screen.getByRole('textbox', { name: REASON_NAME }), REASON);
+    await user.click(screen.getByRole('button', { name: text('scr09.classify.submit') }));
+    const go = await screen.findByRole('link', { name: text('scr09.classify.go_to_loop') }, WAIT);
+    expect(go.getAttribute('href')).toBe(`/findings/${FINDING}/loop`);
+    expect(go.getAttribute('data-primary')).toBe('true');
+    expect(bodies).toHaveLength(1);
+    // Registrada, el formulario se pliega: ningún error a la vista ni campo marcado.
+    expect(screen.queryByRole('form', { name: text('scr09.classify.form') })).toBeNull();
+    expect(container.querySelectorAll('[aria-invalid="true"]')).toHaveLength(0);
+    expect(screen.queryAllByRole('alert')).toHaveLength(0);
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('VIG-365: la reclasificación se abre a propósito, limpia y con su aviso (BR-LAZ-24)', async () => {
+    loopServer([classification(1)], 'open');
+    const { container } = await renderScreen('classify');
+    const toggle = await screen.findByRole(
+      'button',
+      { name: text('scr09.classify.open_reclassification') },
+      WAIT,
+    );
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('form', { name: text('scr09.classify.form') })).toBeNull();
+    await userEvent.setup().click(toggle);
+    const form = await screen.findByRole('form', { name: text('scr09.classify.form') }, WAIT);
+    expect(form.querySelector('[data-part="suspends"]')?.textContent).toBe(
+      text('scr09.classify.suspends'),
+    );
+    expect(form.querySelectorAll('[aria-invalid="true"]')).toHaveLength(0);
+    expect(within(form).queryAllByRole('alert')).toHaveLength(0);
+    expect(
+      screen.getByRole('button', { name: text('scr09.classify.close_reclassification') }),
+    ).toBeDefined();
+    expect(
+      container.querySelector('[data-part="reclassify_toggle"]')?.getAttribute('aria-expanded'),
+    ).toBe('true');
   });
 
   it('reclasificar con el lazo abierto avisa la suspensión, pide el motivo reforzado y registra uno nuevo sin borrar el anterior', async () => {
@@ -171,16 +235,22 @@ describe('SCR-09 clasificación', { timeout: 40_000 }, () => {
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
-    // BR-APP-24: los únicos controles son consultar, actualizar y registrar; ningún editar o borrar.
+    // Registrada, la reclasificación se pliega (VIG-365): volver a reclasificar exige abrirla.
+    expect(screen.queryByRole('form', { name: text('scr09.classify.form') })).toBeNull();
+    // BR-APP-24: los únicos controles son actualizar y abrir la reclasificación; ningún editar o
+    // borrar. Los enlaces, la navegación del hallazgo e «Ir al lazo».
     const allowed = new Set([
-      text('scr09.classify.load'),
-      text('scr09.classify.submit'),
+      text('scr09.classify.open_reclassification'),
       text('components_status.refresh.button'),
     ]);
     for (const button of screen.getAllByRole('button'))
       expect(allowed.has(button.textContent)).toBe(true);
     for (const link of screen.getAllByRole('link'))
-      expect([text('scr09.classify.title'), text('scr09.loop.title')]).toContain(link.textContent);
+      expect([
+        text('scr09.classify.title'),
+        text('scr09.loop.title'),
+        text('scr09.classify.go_to_loop'),
+      ]).toContain(link.textContent);
     expect(await axe(container)).toHaveNoViolations();
   });
 
@@ -416,10 +486,8 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
   async function consult(permissions: string[]) {
     const reads = serveEvidence();
     const rendered = await renderScreen('classify', { permissions });
-    expect(rendered.container.querySelector('[data-part="finding_evidence"]')).toBeNull();
-    await userEvent
-      .setup()
-      .click(await screen.findByRole('button', { name: text('scr09.classify.load') }, WAIT));
+    // La pantalla abre cargada (VIG-365): el resumen llega con la lectura de la apertura.
+    await load();
     const summary = await screen.findByRole('region', { name: text('scr08.detail.summary') }, WAIT);
     return { ...rendered, reads, summary };
   }

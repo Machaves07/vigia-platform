@@ -311,7 +311,28 @@ describe('SCR-07 inventario', { timeout: 30_000 }, () => {
     expect(
       screen.getByText(`${text('scr07.update')}: ${text('scr07.update.failed')}`),
     ).toBeDefined();
-    expect(container.querySelectorAll('[data-part="legend"]')).toHaveLength(2);
+    // VIG-365: la leyenda va solo con «Observable», y en la tabla una sola vez.
+    expect(container.querySelectorAll('[data-part="legend"]')).toHaveLength(0);
     expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('VIG-365: con cámaras observables, la leyenda va una sola vez en la tabla', () => {
+    const value = node();
+    value.cameras = ['CAM-SINT-1', 'CAM-SINT-2'].map((code) => ({
+      camera_id: `${code}-ID`,
+      code,
+      connected: true,
+      measured_fps: 12,
+      declared_min_fps: 10,
+      observability_state: 'observable',
+    }));
+    const { container } = render(
+      <MemoryRouter>
+        <FleetView nodes={[value]} plants={plants} />
+      </MemoryRouter>,
+    );
+    expect(
+      [...container.querySelectorAll('[data-part="legend"]')].map((legend) => legend.textContent),
+    ).toEqual([text('components_status.observability.legend')]);
   });
 });
