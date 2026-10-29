@@ -359,6 +359,31 @@ describe('SCR-07 densidad de la flota (VIG-366)', () => {
     expect(container.querySelector('[data-part="zone"]')).toBeNull();
   });
 
+  it('el identificador y la dirección local del nodo van plegados; a la vista, su código', () => {
+    const value = { ...node(1), live_view_local_url: 'http://192.0.2.10:8554/vista' };
+    const { container } = render(
+      <MemoryRouter>
+        <FleetView nodes={[value]} plants={plants} />
+      </MemoryRouter>,
+    );
+    const row = container.querySelector('tr[data-index="0"]');
+    const folded = row?.querySelector('details[data-part="technical"]');
+    expect(folded?.hasAttribute('open')).toBe(false);
+    expect(
+      [...(folded?.querySelectorAll('dd code') ?? [])].map((code) => code.textContent),
+    ).toEqual([value.node_id, value.live_view_local_url]);
+    const shown = [...(row?.querySelectorAll('td') ?? [])].map((cell) => {
+      const copy = cell.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('details').forEach((element) => {
+        element.remove();
+      });
+      return copy.textContent;
+    });
+    expect(shown.some((cell) => cell.split(/\s+/).includes(value.node_id))).toBe(false);
+    expect(shown.at(-1)).toBe(text('scr07.live_available'));
+    expect(screen.getByRole('link', { name: value.code })).toBeDefined();
+  });
+
   it('con plantas de zonas distintas la zona vuelve a cada hora', () => {
     const madrid = {
       plant_id: 'otra-planta',
