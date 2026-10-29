@@ -15,6 +15,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/notifications'],
       access: 'permission',
       required_permissions: ['notifications.read'],
+      menu: { title_text: 'navigation.menu.notifications' },
       load: () => import('./list'),
     },
     {

@@ -12,18 +12,27 @@
  *   (solo con rutas de detalle) no tiene entrada: no hay adónde llevar.
  * - El panel de inicio de otro rol (`home_only`, VIG-363) no es una entrada: el enrutador lleva a la
  *   persona a su propio inicio.
+ *
+ * Presentación (sistema visual v1, VIG-364): las mismas entradas, agrupadas por tarea según el rol
+ * del inicio (`MENU_PROFILES`: coordinación, gerencia y administración), con «Inicio» primero. El
+ * grupo es solo presentación: qué entradas hay lo deciden los permisos, y una entrada visible que
+ * no está en ningún grupo del perfil va en «Más». Los demás roles tienen un menú corto, sin grupos.
+ * «Mi cuenta» y «Notificaciones» están en la cabecera y no se repiten en el menú agrupado. En
+ * tableta (`useTabletLayout`) no hay menú lateral: una barra inferior lleva a «Inicio» y a los
+ * primeros destinos del rol, y «Menú» despliega el menú completo.
  */
-import { useId, useState, type ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 
-import type { GroupMenu, RouteGroup, ScreenDescriptor } from '@/app/descriptor';
-import type { NavigationMap } from '@/app/navigation';
+import type { GroupMenu, Role, RouteGroup, ScreenDescriptor } from '@/app/descriptor';
+import type { HomeScreen, NavigationMap } from '@/app/navigation';
 import { sessionPort } from '@/ports/shared';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
 
 import styles from './AppShell.module.css';
+import { useTabletLayout } from './useTabletLayout';
 
 export interface NavItem {
   readonly screen_id: string;
@@ -80,6 +89,151 @@ export function navItems(
     }
     return [];
   });
+}
+
+/** Grupo de un perfil: sus entradas como `pantalla:grupo` (`pantalla:*`, cualquier grupo). */
+interface SectionSpec {
+  readonly id: string;
+  readonly title_text: string;
+  readonly slots: readonly string[];
+}
+
+/**
+ * Menú agrupado por tarea de los roles con muchas pantallas (sistema visual v1, «Estructura»). El
+ * inicio del rol va primero aunque no esté aquí; lo que falta (por ejemplo «Lazos de cierre», que
+ * no tiene una lista propia) simplemente no aparece.
+ */
+export const MENU_PROFILES: Readonly<Partial<Record<Role, readonly SectionSpec[]>>> = {
+  coordinator_sst: [
+    {
+      id: 'work',
+      title_text: 'navigation.menu.group.work',
+      slots: ['SCR-08:home', 'SCR-08:inbox', 'SCR-10:queue'],
+    },
+    {
+      id: 'plant',
+      title_text: 'navigation.menu.group.plant',
+      slots: ['SCR-03:coverage', 'SCR-12:*', 'SCR-13:metrics', 'SCR-13:weekly'],
+    },
+    {
+      id: 'record',
+      title_text: 'navigation.menu.group.record',
+      slots: ['SCR-03:integrity', 'SCR-14:*', 'SCR-16:*'],
+    },
+  ],
+  plant_manager: [
+    {
+      id: 'summary',
+      title_text: 'navigation.menu.group.summary',
+      slots: ['SCR-13:weekly', 'SCR-13:metrics', 'SCR-12:*'],
+    },
+    {
+      id: 'tracking',
+      title_text: 'navigation.menu.group.tracking',
+      slots: ['SCR-08:inbox', 'SCR-10:queue', 'SCR-03:coverage'],
+    },
+    {
+      id: 'providers',
+      title_text: 'navigation.menu.group.providers',
+      slots: ['SCR-02:*', 'SCR-03:integrity', 'SCR-14:*', 'SCR-16:*'],
+    },
+  ],
+  administrator: [
+    {
+      id: 'people',
+      title_text: 'navigation.menu.group.people',
+      slots: ['SCR-01:users', 'SCR-01:hierarchy', 'SCR-01:organization', 'SCR-05:gates'],
+    },
+    {
+      id: 'equipment',
+      title_text: 'navigation.menu.group.equipment',
+      slots: ['SCR-07:*', 'SCR-04:admissions'],
+    },
+    {
+      id: 'rules',
+      title_text: 'navigation.menu.group.rules',
+      slots: ['SCR-04:catalog', 'SCR-04:vocabulary', 'SCR-05:policy'],
+    },
+    {
+      id: 'record',
+      title_text: 'navigation.menu.group.record',
+      slots: ['SCR-03:integrity', 'SCR-16:*'],
+    },
+  ],
+};
+
+/** Entradas que la cabecera ya ofrece (cuenta y campana): no se repiten en el menú agrupado. */
+const IN_HEADER: ReadonlySet<string> = new Set(['SCR-01:account', 'SCR-15:list']);
+
+const slotOf = (item: NavItem) => `${item.screen_id}:${item.group}`;
+
+function fills(slot: string, item: NavItem): boolean {
+  return slot === slotOf(item) || slot === `${item.screen_id}:*`;
+}
+
+/** `true` si `item` es el inicio de la sesión. */
+function isHomeItem(item: NavItem, home: HomeScreen | null): boolean {
+  return home !== null && home.screen_id === item.screen_id && home.group === item.group;
+}
+
+/** Nombre de la entrada en el menú: «Inicio» para el inicio de la sesión. */
+export function itemLabel(item: NavItem, home: HomeScreen | null): string {
+  return isHomeItem(item, home) ? 'navigation.menu.home' : item.title_text;
+}
+
+export interface MenuSection {
+  readonly id: string;
+  /** Encabezado del grupo; `null` en el menú corto, sin grupos. */
+  readonly title_text: string | null;
+  readonly items: readonly NavItem[];
+}
+
+/**
+ * Las entradas agrupadas para el rol del inicio, con el inicio primero. Ninguna entrada visible se
+ * pierde: la que no está en un grupo del perfil va en «Más», salvo las de la cabecera.
+ */
+export function menuSections(items: readonly NavItem[], home: HomeScreen | null): MenuSection[] {
+  const first = items.find((item) => isHomeItem(item, home));
+  const ordered = first === undefined ? items : [first, ...items.filter((item) => item !== first)];
+  const profile = home === null ? undefined : MENU_PROFILES[home.role];
+  if (profile === undefined) return [{ id: 'main', title_text: null, items: ordered }];
+  const used = new Set<NavItem>();
+  const sections: MenuSection[] = profile.map((spec, index) => {
+    const own = spec.slots.flatMap((slot) =>
+      ordered.filter((item) => !used.has(item) && fills(slot, item)),
+    );
+    const grouped =
+      index === 0 && first !== undefined && !own.includes(first) ? [first, ...own] : own;
+    for (const item of grouped) used.add(item);
+    return { id: spec.id, title_text: spec.title_text, items: grouped };
+  });
+  const rest = ordered.filter((item) => !used.has(item) && !IN_HEADER.has(slotOf(item)));
+  if (rest.length > 0) {
+    sections.push({ id: 'more', title_text: 'navigation.menu.group.more', items: rest });
+  }
+  return sections.filter((section) => section.items.length > 0);
+}
+
+/** Pestañas de la barra inferior de la tableta: cuatro destinos como máximo. */
+const MAX_TABS = 4;
+
+/**
+ * Pestañas de la tableta: el inicio, los primeros destinos del menú y las notificaciones, sin las
+ * entradas que piden zona o planta (esas se eligen en el menú). `more` si el menú tiene algo más.
+ */
+export function tabItems(
+  items: readonly NavItem[],
+  home: HomeScreen | null,
+): { readonly tabs: readonly NavItem[]; readonly more: boolean } {
+  const notifications = items.filter((item) => slotOf(item) === 'SCR-15:list');
+  const menu = menuSections(items, home).flatMap((section) => section.items);
+  const direct = menu.filter((item) => item.select === undefined);
+  const candidates = [...direct, ...notifications];
+  const tabs =
+    candidates.length <= MAX_TABS
+      ? candidates
+      : [...direct.slice(0, MAX_TABS - notifications.length), ...notifications].slice(0, MAX_TABS);
+  return { tabs, more: menu.some((item) => !tabs.includes(item)) };
 }
 
 /** Las zonas o plantas del alcance que el selector ofrece, agrupadas por planta. */
@@ -175,6 +329,68 @@ function SelectEntry({
   );
 }
 
+function Entry({ item, home }: { readonly item: NavItem; readonly home: HomeScreen | null }) {
+  if (item.select !== undefined) return <SelectEntry item={{ ...item, select: item.select }} />;
+  return (
+    <NavLink
+      className={() => styles.navLink}
+      to={item.path}
+      data-screen={item.screen_id}
+      data-group={item.group}
+    >
+      {text(itemLabel(item, home))}
+    </NavLink>
+  );
+}
+
+/** Barra inferior de la tableta: pestañas del rol y «Menú», que despliega el menú completo. */
+function TabBar({
+  items,
+  home,
+  menuId,
+  open,
+  onToggle,
+}: {
+  readonly items: readonly NavItem[];
+  readonly home: HomeScreen | null;
+  readonly menuId: string;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+}) {
+  const { tabs, more } = tabItems(items, home);
+  return (
+    <nav className={styles.tabbar} aria-label={text('navigation.menu.tabs')}>
+      <ul className={styles.tabList}>
+        {tabs.map((item) => (
+          <li key={slotOf(item)} className={styles.tabItem}>
+            <NavLink
+              className={() => styles.tab}
+              to={item.path}
+              data-screen={item.screen_id}
+              data-group={item.group}
+            >
+              {text(itemLabel(item, home))}
+            </NavLink>
+          </li>
+        ))}
+        {more ? (
+          <li className={styles.tabItem}>
+            <button
+              type="button"
+              className={styles.tab}
+              aria-expanded={open}
+              aria-controls={menuId}
+              onClick={onToggle}
+            >
+              {text(open ? 'navigation.menu.close' : 'navigation.menu.open')}
+            </button>
+          </li>
+        ) : null}
+      </ul>
+    </nav>
+  );
+}
+
 export function NavMenu({
   navigation,
   screens,
@@ -183,26 +399,65 @@ export function NavMenu({
   readonly screens: readonly ScreenDescriptor[];
 }): ReactNode {
   const items = navItems(navigation, screens);
-  return (
-    <nav className={styles.nav} aria-label={text('app_shell.nav.label')}>
-      <ul className={styles.navList}>
-        {items.map((item) => (
-          <li key={`${item.screen_id}:${item.group}`}>
-            {item.select === undefined ? (
-              <NavLink
-                className={() => styles.navLink}
-                to={item.path}
-                data-screen={item.screen_id}
-                data-group={item.group}
-              >
-                {text(item.title_text)}
-              </NavLink>
-            ) : (
-              <SelectEntry item={{ ...item, select: item.select }} />
-            )}
-          </li>
-        ))}
-      </ul>
+  const { home } = navigation;
+  const sections = menuSections(items, home);
+  const tablet = useTabletLayout();
+  const id = useId();
+  const { pathname } = useLocation();
+  // El menú desplegado en la tableta vale para la ruta en que se abrió: navegar lo pliega.
+  const [openAt, setOpenAt] = useState<string | null>(null);
+  const open = tablet && openAt === pathname;
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenAt(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const menu = (
+    <nav
+      id={`${id}-menu`}
+      className={tablet ? styles.navPanel : styles.nav}
+      aria-label={text('app_shell.nav.label')}
+      hidden={tablet && !open}
+    >
+      {sections.map((section) => (
+        <div key={section.id} className={styles.navSection} data-section={section.id}>
+          {section.title_text === null ? null : (
+            <p className={styles.navHeading} id={`${id}-${section.id}`}>
+              {text(section.title_text)}
+            </p>
+          )}
+          <ul
+            className={styles.navList}
+            aria-labelledby={section.title_text === null ? undefined : `${id}-${section.id}`}
+          >
+            {section.items.map((item) => (
+              <li key={slotOf(item)}>
+                <Entry item={item} home={home} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </nav>
+  );
+  if (!tablet) return menu;
+  return (
+    <>
+      {menu}
+      <TabBar
+        items={items}
+        home={home}
+        menuId={`${id}-menu`}
+        open={open}
+        onToggle={() => {
+          setOpenAt(open ? null : pathname);
+        }}
+      />
+    </>
   );
 }

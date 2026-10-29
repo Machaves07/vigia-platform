@@ -9,7 +9,16 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { mergeTextModules, TextCatalogError, text, texts } from '@/texts';
+import {
+  deferredTextFiles,
+  hasText,
+  loadScreenTexts,
+  mergeTextModules,
+  screenTextFiles,
+  TextCatalogError,
+  text,
+  texts,
+} from '@/texts';
 
 const directories: string[] = [];
 
@@ -87,7 +96,65 @@ describe('catálogo de textos', () => {
     expect(() => text('common.missing')).toThrow(TextCatalogError);
   });
 
-  it('el catálogo no se puede modificar', () => {
-    expect(Object.isFrozen(texts)).toBe(true);
+  it('el catálogo no se puede modificar desde fuera', () => {
+    const writable = texts as Record<string, string>;
+    expect(() => {
+      writable['common.app_name'] = 'Otra';
+    }).toThrow(TypeError);
+    expect(() => {
+      writable['common.injected'] = 'Otra';
+    }).toThrow(TypeError);
+    expect(() => {
+      delete writable['common.app_name'];
+    }).toThrow(TypeError);
+    expect(text('common.app_name')).toBe('Vigía');
+    expect(hasText('common.injected')).toBe(false);
+  });
+});
+
+describe('textos por ruta (VIG-364)', () => {
+  it('cada pantalla diferida trae sus archivos y solo los suyos', () => {
+    expect(screenTextFiles(['SCR-08'])).toEqual(['./scr08.json', './scr08_detail.json']);
+    expect(screenTextFiles(['SCR-09'])).toEqual(['./scr09_classify.json', './scr09_closure.json']);
+    expect(screenTextFiles(['SCR-04'])).toEqual(['./scr04.json', './scr04_parameters.json']);
+    expect(screenTextFiles(['SCR-10', 'SCR-16'])).toEqual(['./scr10.json', './scr16.json']);
+  });
+
+  it('los textos del armazón no son diferidos: SCR-01 solo difiere su administración', () => {
+    expect(screenTextFiles(['SCR-01'])).toEqual(['./scr01_admin.json', './scr01_hierarchy.json']);
+    expect(screenTextFiles(['SCR-15'])).toEqual([]);
+  });
+
+  it('todos los archivos de pantalla salvo scr01.json y scr15.json se cargan con su ruta', () => {
+    const screens = Array.from(
+      { length: 16 },
+      (_, index) => `SCR-${String(index + 1).padStart(2, '0')}`,
+    );
+    const onDisk = readdirSync(join(process.cwd(), 'src/texts'))
+      .filter((file) => /^scr\d{2}.*\.json$/.test(file))
+      .filter((file) => file !== 'scr01.json' && file !== 'scr15.json')
+      .map((file) => `./${file}`)
+      .sort();
+    expect(screenTextFiles(screens)).toEqual(onDisk);
+  });
+
+  it('solo se difieren los archivos scrNN*: los del armazón (screen_state incluido) son iniciales', () => {
+    const onDisk = readdirSync(join(process.cwd(), 'src/texts')).filter((file) =>
+      file.endsWith('.json'),
+    );
+    const deferred = onDisk
+      .filter((file) => /^scr\d{2}(?:_[a-z0-9_]+)?\.json$/.test(file))
+      .filter((file) => file !== 'scr01.json' && file !== 'scr15.json')
+      .map((file) => `./${file}`)
+      .sort();
+    expect(deferredTextFiles()).toEqual(deferred);
+    expect(onDisk).toContain('screen_state.json');
+    expect(deferredTextFiles()).not.toContain('./screen_state.json');
+  });
+
+  it('cargar otra vez los textos de una pantalla no repite claves ni falla', async () => {
+    await loadScreenTexts(['SCR-08', 'SCR-09']);
+    await loadScreenTexts(['SCR-08']);
+    expect(hasText('scr08.home.title')).toBe(true);
   });
 });

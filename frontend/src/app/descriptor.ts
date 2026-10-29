@@ -119,4 +119,9 @@ export interface ScreenDescriptor {
   /** Grupo de rutas que hace de inicio; `null` si y solo si `home_for_roles` está vacía. */
   readonly home_group: string | null;
   readonly device_classes: readonly [DeviceClass, ...DeviceClass[]];
+  /**
+   * Otras pantallas cuyos textos usa esta (VIG-364): el enrutador carga con la ruta los textos de
+   * la pantalla y los de estas, antes de pintarla.
+   */
+  readonly texts_from?: readonly ScreenId[];
 }

@@ -22,7 +22,7 @@ export const descriptor: ScreenDescriptor = {
       required_permissions: ['findings.read', 'coverage.read'],
       linked_screens: ['SCR-09', 'SCR-10', 'SCR-11'],
       home_only: true,
-      menu: { title_text: 'scr08.home.title' },
+      menu: { title_text: 'navigation.menu.coordinator_home' },
       load: () => import('./home'),
     },
     {
@@ -30,7 +30,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/findings'],
       access: 'permission',
       required_permissions: ['findings.read'],
-      menu: { title_text: 'scr08.inbox.title' },
+      menu: { title_text: 'navigation.menu.findings' },
       load: () => import('./inbox'),
     },
     {

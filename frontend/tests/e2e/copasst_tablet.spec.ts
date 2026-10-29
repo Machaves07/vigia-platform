@@ -1,5 +1,13 @@
 import { authenticatedTest as test, expect } from './fixtures';
-import { expectOwnHome, installerRoute, pendingAgreement, required, touchTarget } from './journeys';
+import {
+  auditTablet,
+  expectOwnHome,
+  installerRoute,
+  pendingAgreement,
+  required,
+  roleDestinations,
+  touchTarget,
+} from './journeys';
 
 test.use({ role: 'copasst' });
 test.skip(({ hasTouch }) => !hasTouch, 'Recorrido táctil de SCR-16.');
@@ -52,4 +60,22 @@ test('COPASST: transparencia y confirmación exclusivamente de mi firma en table
   await page.reload();
   await expect(view).toBeVisible();
   await expect(confirm).toHaveCount(0);
+});
+
+test('COPASST en tableta: todas sus pantallas con controles de 44 px y sin desborde', async ({
+  authenticatedPage: page,
+  world,
+}) => {
+  test.setTimeout(180_000);
+  const zone = required(world.zone_ids[0]);
+  await page.goto('/transparency');
+  // La cabecera cabe en una fila (64 px y el borde) y el menú lateral está plegado (VIG-364).
+  const header = await page.getByRole('banner').boundingBox();
+  expect(required(header).height).toBeLessThanOrEqual(65);
+  await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeHidden();
+  const destinations = await roleDestinations(page);
+  for (const path of [...destinations, `/transparency/${zone}`, '/notifications/preferences']) {
+    await page.goto(path);
+    await auditTablet(page, path);
+  }
 });

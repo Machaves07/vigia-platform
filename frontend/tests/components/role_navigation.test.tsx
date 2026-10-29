@@ -70,21 +70,22 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
         item.select ?? null,
       ]),
     ).toEqual([
-      ['SCR-01', 'scr01_admin.account.title', '/account', null],
-      ['SCR-01', 'scr01_admin.users.title', '/admin/users', null],
-      ['SCR-01', 'scr01_hierarchy.title', '/admin/hierarchy', null],
-      ['SCR-01', 'scr01_hierarchy.organization', '/admin/organization', null],
+      ['SCR-01', 'navigation.menu.account', '/account', null],
+      ['SCR-01', 'navigation.menu.users', '/admin/users', null],
+      ['SCR-01', 'navigation.menu.hierarchy', '/admin/hierarchy', null],
+      ['SCR-01', 'navigation.menu.organization', '/admin/organization', null],
       ['SCR-02', 'navigation.scr02', '/concessions', null],
-      ['SCR-03', 'navigation.scr03', '/integrity', null],
-      ['SCR-04', 'scr04.catalog.title', '/zones/:zone_id/catalog', 'zone_id'],
-      ['SCR-04', 'scr04.admissions.title', '/plants/:plant_id/admissions', 'plant_id'],
-      ['SCR-04', 'scr04.vocabulary.title', '/admin/vocabulary', null],
-      ['SCR-05', 'navigation.scr05', '/zones/:zone_id/gates', 'zone_id'],
-      ['SCR-05', 'scr05.policy.title', '/plants/:plant_id/policy', 'plant_id'],
-      ['SCR-07', 'navigation.scr07', '/fleet', null],
-      ['SCR-13', 'scr13.title', '/metrics', null],
-      ['SCR-15', 'navigation.scr15', '/notifications', null],
-      ['SCR-16', 'navigation.scr16', '/transparency', null],
+      ['SCR-03', 'navigation.menu.integrity', '/integrity', null],
+      ['SCR-03', 'navigation.menu.coverage', '/zones/:zone_id/coverage', 'zone_id'],
+      ['SCR-04', 'navigation.menu.catalog', '/zones/:zone_id/catalog', 'zone_id'],
+      ['SCR-04', 'navigation.menu.admissions', '/plants/:plant_id/admissions', 'plant_id'],
+      ['SCR-04', 'navigation.menu.vocabulary', '/admin/vocabulary', null],
+      ['SCR-05', 'navigation.menu.gates', '/zones/:zone_id/gates', 'zone_id'],
+      ['SCR-05', 'navigation.menu.policy', '/plants/:plant_id/policy', 'plant_id'],
+      ['SCR-07', 'navigation.menu.fleet', '/fleet', null],
+      ['SCR-13', 'navigation.menu.metrics', '/metrics', null],
+      ['SCR-15', 'navigation.menu.notifications', '/notifications', null],
+      ['SCR-16', 'navigation.menu.transparency', '/transparency', null],
     ]);
   });
 
@@ -92,7 +93,7 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
     const catalog = itemsOf('administrator').filter((item) => item.screen_id === 'SCR-04');
     expect(catalog.find((item) => item.title_text === 'navigation.scr04')).toBeUndefined();
     expect(catalog.find((item) => item.path === '/admin/vocabulary')?.title_text).toBe(
-      'scr04.vocabulary.title',
+      'navigation.menu.vocabulary',
     );
   });
 
@@ -100,11 +101,11 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
     [
       'coordinator_sst',
       [
-        ['scr08.home.title', '/home'],
-        ['scr08.inbox.title', '/findings'],
+        ['navigation.menu.coordinator_home', '/home'],
+        ['navigation.menu.findings', '/findings'],
       ],
     ],
-    ['plant_manager', [['scr08.inbox.title', '/findings']]],
+    ['plant_manager', [['navigation.menu.findings', '/findings']]],
     ['administrator', []],
     ['line_manager', []],
     ['copasst', []],
@@ -132,8 +133,8 @@ describe('menú por rol con la tabla real (BR-APP-01, 04)', () => {
         .filter((item) => item.screen_id === 'SCR-13')
         .map((item) => [item.title_text, item.path]),
     ).toEqual([
-      ['scr13.title', '/metrics'],
-      ['scr13.weekly', '/metrics/weekly'],
+      ['navigation.menu.metrics', '/metrics'],
+      ['navigation.menu.weekly', '/metrics/weekly'],
     ]);
   });
 });
@@ -281,7 +282,7 @@ describe('«No disponible en su alcance» orienta (BR-APP-03, 77)', () => {
       text('role_navigation.scope_explanation'),
     );
     const link = screen.getByRole('link', {
-      name: `${text('role_navigation.go_home')}: ${text('navigation.scr12')}`,
+      name: `${text('role_navigation.go_home')}: ${text('navigation.menu.monthly')}`,
     });
     expect(link.getAttribute('href')).toBe('/zones/monthly');
     expect(await axe(container)).toHaveNoViolations();
@@ -289,10 +290,10 @@ describe('«No disponible en su alcance» orienta (BR-APP-03, 77)', () => {
   });
 
   it.each([
-    ['plant_manager', 'scr13.weekly', '/metrics/weekly'],
-    ['copasst', 'navigation.scr16', '/transparency'],
-    ['administrator', 'navigation.scr07', '/fleet'],
-    ['coordinator_sst', 'scr08.home.title', '/home'],
+    ['plant_manager', 'navigation.menu.weekly', '/metrics/weekly'],
+    ['copasst', 'navigation.menu.transparency', '/transparency'],
+    ['administrator', 'navigation.menu.fleet', '/fleet'],
+    ['coordinator_sst', 'navigation.menu.coordinator_home', '/home'],
   ] as const)('%s: lleva a su inicio %s', async (role, title, path) => {
     const { container, dispose } = await withSession(role, <NotAvailableInScope />);
     const link = container.querySelector('a[data-part="own_home"]');

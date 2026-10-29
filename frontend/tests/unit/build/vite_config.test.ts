@@ -10,6 +10,7 @@ import {
   isViteOwnedPath,
   parseApiMode,
   screenChunkName,
+  screenTextsChunkName,
   vendorChunkName,
 } from '../../../config/build';
 import { NUM_RUNS, parseSeed, resolveProfile } from '../../../config/fastCheckProfile';
@@ -67,8 +68,29 @@ describe('porciones y modo de API', () => {
     ['/repo/frontend/src/components/Badge.tsx', null],
     ['/repo/frontend/src/pages/scr1/x.tsx', null],
     ['/repo/node_modules/react/index.js', null],
+    // Lo que importa el armazón va con él (VIG-364); el resto de la pantalla, en su porción.
+    ['/repo/frontend/src/pages/scr01/SessionGate.tsx', null],
+    ['C:\\repo\\frontend\\src\\pages\\scr01\\login\\LoginForm.tsx', null],
+    ['/repo/frontend/src/pages/scr01/scr01.module.css', null],
+    ['/repo/frontend/src/pages/scr15/Bell.tsx', null],
+    ['/repo/frontend/src/pages/scr01/login/index.tsx', 'scr01'],
+    ['/repo/frontend/src/pages/scr01/users/UsersView.tsx', 'scr01'],
+    ['/repo/frontend/src/pages/scr15/list/index.tsx', 'scr15'],
   ])('%s → %s', (id, chunk) => {
     expect(screenChunkName(id)).toBe(chunk);
+  });
+
+  it.each([
+    ['/repo/frontend/src/texts/scr08.json', 'texts-scr08'],
+    ['C:\\repo\\frontend\\src\\texts\\scr08_detail.json', 'texts-scr08_detail'],
+    ['/repo/frontend/src/texts/scr09_classify.json', 'texts-scr09_classify'],
+    // Los del armazón van en el paquete inicial; los que no son de pantalla, también.
+    ['/repo/frontend/src/texts/scr01.json', null],
+    ['/repo/frontend/src/texts/scr15.json', null],
+    ['/repo/frontend/src/texts/common.json', null],
+    ['/repo/frontend/src/pages/scr08/home/index.tsx', null],
+  ])('textos %s → porción %s', (id, chunk) => {
+    expect(screenTextsChunkName(id)).toBe(chunk);
   });
 
   it.each([

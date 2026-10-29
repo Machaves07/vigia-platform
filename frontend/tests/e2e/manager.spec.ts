@@ -19,7 +19,7 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   // Revisión 1: el resumen llega cargado (primera zona, mes de la semana anterior), sin «Consultar».
   await expect(page.getByRole('table', { name: 'Días de vencimiento', exact: true })).toBeVisible();
   await expect(page.getByText('Seleccione zona y periodo y pulse consultar.')).toHaveCount(0);
-  await openMenu(page, 'Bandeja de hallazgos');
+  await openMenu(page, 'Hallazgos');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bandeja de hallazgos');
   await expect(
     page

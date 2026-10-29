@@ -178,6 +178,38 @@ describe('UI-14 KeysetTable', { timeout: 30_000 }, () => {
     expect(screen.queryByRole('link')).toBeNull();
   });
 
+  it('«Cargar más» marca la carga sin volver a pintar las filas ya presentes (NFR-APP-03)', async () => {
+    serveFindings();
+    const user = userEvent.setup();
+    let cells = 0;
+    const counted: readonly KeysetColumn<Finding>[] = [
+      {
+        id: 'id',
+        header: 'Hallazgo',
+        cell: (row) => {
+          cells++;
+          return row.finding_state_id;
+        },
+      },
+    ];
+    // La página siguiente no llega nunca: solo se mira el render del clic.
+    let calls = 0;
+    renderTable({
+      columns: counted,
+      fetchPage: (request, signal) =>
+        calls++ === 0 ? fetchFindings(request, signal) : new Promise<never>(() => undefined),
+    });
+    await rowsShown(50);
+    const before = cells;
+    await user.click(
+      screen.getByRole('button', { name: t('components_structure.keyset.load_more') }),
+    );
+    expect(
+      screen.getByRole('button', { name: t('components_structure.keyset.loading_more') }),
+    ).toBeTruthy();
+    expect(cells).toBe(before);
+  });
+
   it('la página pedida nunca pasa de 200', async () => {
     serveFindings();
     renderTable({ pageSize: 500 });

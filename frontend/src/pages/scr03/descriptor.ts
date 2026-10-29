@@ -15,6 +15,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/integrity'],
       access: 'permission',
       required_permissions: ['integrity.verify'],
+      menu: { title_text: 'navigation.menu.integrity' },
       load: () => import('./integrity'),
     },
     {
@@ -22,6 +23,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/zones/:zone_id/coverage'],
       access: 'permission',
       required_permissions: ['coverage.read'],
+      menu: { title_text: 'navigation.menu.coverage', select: 'zone_id' },
       load: () => import('./coverage'),
     },
   ],

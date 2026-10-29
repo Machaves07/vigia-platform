@@ -25,7 +25,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   // VIG-363 (hallazgos 18 y 19): su inicio propio y cada pantalla solo con clics desde el menú,
   // cuya entrada tiene el nombre de la página que abre.
   await expectOwnHome(page, 'Inventario de flota', '/fleet');
-  await openMenu(page, 'Usuarios');
+  await openMenu(page, 'Usuarios y roles');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Usuarios');
   await page.getByRole('button', { name: 'Invitar a una persona' }).click();
   const invite = page.getByRole('form', { name: 'Invitación', exact: true });
@@ -99,7 +99,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await expect(page.getByRole('table', { name: 'Historial de admisiones' })).toContainText(
     'rechazada',
   );
-  await openMenu(page, 'Vocabulario bloqueado de la organización');
+  await openMenu(page, 'Vocabulario bloqueado');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(
     'Vocabulario bloqueado de la organización',
   );
@@ -197,7 +197,7 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   } finally {
     await installer.close();
   }
-  await openMenuWith(page, 'Actas, acuerdos y política', zone);
+  await openMenuWith(page, 'Compuertas y acuerdos por zona', zone);
   await expect(page).toHaveURL(new RegExp(`/zones/${zone}/gates$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Actas, acuerdos y política');
   const confirmation = page.waitForResponse(

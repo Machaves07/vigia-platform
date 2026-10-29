@@ -36,7 +36,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/account'],
       access: 'authenticated',
       required_permissions: [],
-      menu: { title_text: 'scr01_admin.account.title' },
+      menu: { title_text: 'navigation.menu.account' },
       load: () => import('./account'),
     },
     {
@@ -44,7 +44,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/users'],
       access: 'permission',
       required_permissions: ['users.manage', 'roles.manage'],
-      menu: { title_text: 'scr01_admin.users.title' },
+      menu: { title_text: 'navigation.menu.users' },
       load: () => import('./users'),
     },
     {
@@ -52,7 +52,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/hierarchy'],
       access: 'permission',
       required_permissions: ['hierarchy.read', 'hierarchy.manage'],
-      menu: { title_text: 'scr01_hierarchy.title' },
+      menu: { title_text: 'navigation.menu.hierarchy' },
       load: () => import('./hierarchy'),
     },
     {
@@ -60,7 +60,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/organization'],
       access: 'permission',
       required_permissions: ['organization.settings'],
-      menu: { title_text: 'scr01_hierarchy.organization' },
+      menu: { title_text: 'navigation.menu.organization' },
       load: () => import('./organization'),
     },
   ],

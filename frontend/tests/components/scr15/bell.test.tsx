@@ -145,15 +145,30 @@ describe('SCR-15 campana', { timeout: 60_000 }, () => {
   });
 
   it('si falla un refresco, deja de presentar el recuento anterior como vigente', async () => {
-    const { cache } = await setup({ page: 'bell' });
+    const { cache, clock } = await setup({ page: 'bell' });
     await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
+    // Con el recuento vigente la cabecera no ofrece «Actualizar» (VIG-364): lo hace el sondeo.
+    expect(
+      screen.queryByRole('button', { name: text('components_status.refresh.button') }),
+    ).toBeNull();
     server.use(http.get('http://localhost/notifications', () => apiError()));
-    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await act(async () => {
+      clock.advance(60_000);
+      await settle();
+    });
     await waitFor(() => {
       expect(cache.client.getQueryCache().getAll()[0]?.state.status).toBe('error');
     }, WAIT);
     await screen.findByText(text('scr15.count_unavailable'), {}, WAIT);
     expect(screen.queryByText(`${text('scr15.unread')}: 1`)).toBeNull();
+    // Sin recuento, «Actualizar» vuelve a pedirlo y, si responde, lo muestra.
+    server.use(
+      http.get('http://localhost/notifications', () =>
+        HttpResponse.json({ items: [notification()], next_after: null }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await screen.findByText(`${text('scr15.unread')}: 1`, {}, WAIT);
   });
 
   it('un cursor repetido falla cerrado en vez de mantener un bucle de sondeo', async () => {

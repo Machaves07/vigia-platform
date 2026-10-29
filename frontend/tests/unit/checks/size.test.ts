@@ -165,6 +165,25 @@ describe('size.mjs', () => {
     expect(result.stderr).toContain(message);
   });
 
+  it('exige un 10 % de margen en el paquete inicial sin cambiar su límite (VIG-364)', () => {
+    const directory = dist({ mainPad: 20_000 });
+    const measured = Number(row(run(directory).stdout, 'paquete inicial')[5]);
+    expect(measured).toBeGreaterThan(10);
+    // Con el 5 % libre: cabe en su límite, pero sin el margen; termina en 1 y lo explica.
+    const tight = String(Math.round((measured / 0.95) * 10) / 10);
+    const short = run(directory, '--initial-kb', tight);
+    expect(short.status).toBe(1);
+    expect(row(short.stdout, 'paquete inicial')[8]).toBe('cabe');
+    expect(short.stderr).toContain('sin margen');
+    // Con el margen desactivado pasa; con el 20 % libre pasa con el margen por omisión.
+    expect(run(directory, '--initial-kb', tight, '--initial-margin', '0').status).toBe(0);
+    const roomy = run(directory, '--initial-kb', String(Math.ceil(measured / 0.8)));
+    expect(roomy.status).toBe(0);
+    expect(roomy.stdout).toContain('(mínimo 10 %)');
+    expect(run(directory, '--initial-margin', '100').status).toBe(2);
+    expect(run(directory, '--initial-margin', '-1').status).toBe(2);
+  });
+
   it('rechaza una opción desconocida o un límite que no es positivo', () => {
     expect(run(dist(), '--chunk', '1').status).toBe(2);
     expect(run(dist(), '--chunk-kb', '0').status).toBe(2);

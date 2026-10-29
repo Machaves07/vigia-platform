@@ -7,7 +7,8 @@
  *   con Escape, al elegir una entrada o al volver a pulsar el botón.
  * - «Cerrar sesión» (`logout`) es `state.session`: `POST /auth/logout` y, aunque falle, borra la
  *   caché, `UiPreferences`, la selección de planta, la concesión y todo lo que hay en memoria.
- * - La cabecera no muestra el nombre ni el correo de la persona.
+ * - La cabecera no muestra el nombre ni el correo de la persona; sí el rol con el que trabaja.
+ * - Sistema visual v1 (VIG-364): una fila de 60 px (64 en tableta) con los elementos separados.
  */
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -17,6 +18,7 @@ import { Bell } from '@/pages/scr15/Bell';
 import type { ScopeStore } from '@/state/scope';
 import { useSession } from '@/state/session';
 import { text } from '@/texts';
+import { label } from '@/texts/labels';
 
 import styles from './AppShell.module.css';
 
@@ -27,7 +29,7 @@ const ACCOUNT_LINKS = [
   { section: 'second-factor', key: 'app_shell.account.second_factor' },
 ] as const;
 
-function AccountMenu(): ReactNode {
+function AccountMenu({ role }: { readonly role: string | null }): ReactNode {
   const session = useSession();
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -46,6 +48,11 @@ function AccountMenu(): ReactNode {
   }, [open]);
   return (
     <div className={styles.account}>
+      {role === null ? null : (
+        <span className={styles.accountRole} data-part="role">
+          {label('role', role)}
+        </span>
+      )}
       <button
         type="button"
         className={styles.button}
@@ -58,6 +65,11 @@ function AccountMenu(): ReactNode {
         {text('app_shell.account.menu')}
       </button>
       <ul id={`${id}-menu`} className={styles.accountMenu} hidden={!open}>
+        <li>
+          <Link className={styles.link} to="/account" onClick={close} data-section="account">
+            {text('navigation.menu.account')}
+          </Link>
+        </li>
         {ACCOUNT_LINKS.map((entry) => (
           <li key={entry.section}>
             <Link
@@ -87,16 +99,25 @@ function AccountMenu(): ReactNode {
   );
 }
 
-export function Header({ scope }: { readonly scope: ScopeStore }): ReactNode {
+export function Header({
+  scope,
+  role = null,
+}: {
+  readonly scope: ScopeStore;
+  /** Rol con el que la persona trabaja (el de su inicio), que se muestra junto a «Cuenta». */
+  readonly role?: string | null;
+}): ReactNode {
   return (
     <header className={styles.header}>
       <Link className={styles.brand} to="/">
         {text('common.app_name')}
       </Link>
-      <ScopeSelector store={scope} />
+      <div className={styles.headerScope}>
+        <ScopeSelector store={scope} />
+      </div>
       <div className={styles.headerActions}>
         <Bell />
-        <AccountMenu />
+        <AccountMenu role={role} />
       </div>
     </header>
   );

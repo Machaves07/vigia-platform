@@ -17,7 +17,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/zones/:zone_id/catalog', '/plants/:plant_id/catalog'],
       access: 'permission',
       required_permissions: ['catalog.read', 'catalog.manage'],
-      menu: { title_text: 'scr04.catalog.title', select: 'zone_id' },
+      menu: { title_text: 'navigation.menu.catalog', select: 'zone_id' },
       load: () => import('./catalog'),
     },
     {
@@ -39,7 +39,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/plants/:plant_id/admissions'],
       access: 'permission',
       required_permissions: ['catalog.read', 'catalog.manage'],
-      menu: { title_text: 'scr04.admissions.title', select: 'plant_id' },
+      menu: { title_text: 'navigation.menu.admissions', select: 'plant_id' },
       load: () => import('./admissions'),
     },
     {
@@ -47,7 +47,7 @@ export const descriptor: ScreenDescriptor = {
       paths: ['/admin/vocabulary'],
       access: 'permission',
       required_permissions: ['vocabulary.manage'],
-      menu: { title_text: 'scr04.vocabulary.title' },
+      menu: { title_text: 'navigation.menu.vocabulary' },
       load: () => import('./vocabulary'),
     },
   ],

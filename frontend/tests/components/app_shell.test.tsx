@@ -259,14 +259,17 @@ describe('UI-07 NavMenu: solo pantallas visibles, en orden fijo (BR-APP-01, 03)'
     serveSession(shellMe(PERMISSIONS));
     mountShell('/findings', SCREENS);
     await screen.findByRole('heading', { name: 'Formulario sintético' }, WAIT);
+    // El inicio de la sesión va primero y se llama «Inicio» (VIG-364); el resto, en el orden de la
+    // tabla (estos grupos sintéticos no están en el perfil del coordinador: van en «Más»).
     expect(navNames()).toEqual([
+      text('navigation.menu.home'),
       text('navigation.scr07'),
-      text('navigation.scr08'),
       text('navigation.scr10'),
       text('navigation.scr15'),
     ]);
-    const current = within(navigation()).getByRole('link', { name: text('navigation.scr08') });
+    const current = within(navigation()).getByRole('link', { name: text('navigation.menu.home') });
     expect(current.getAttribute('aria-current')).toBe('page');
+    expect(current.getAttribute('href')).toBe('/findings');
   });
 
   it('con la tabla real: orden fijo, sin pantallas sin permiso ni rutas públicas o de detalle', () => {
@@ -284,10 +287,12 @@ describe('UI-07 NavMenu: solo pantallas visibles, en orden fijo (BR-APP-01, 03)'
     };
     const items = navItems(buildNavigationMap(principal, APP_SCREENS), APP_SCREENS);
     // SCR-01 da una entrada por grupo con sesión (VIG-363), nunca su grupo público de inicio de
-    // sesión; SCR-03 solo tiene con `coverage.read` una ruta de detalle y no tiene entrada.
+    // sesión; SCR-03 con `coverage.read` da «Cobertura por zona», que abre el selector de zona
+    // (VIG-364), y sin `integrity.verify` no da «Integridad».
     expect(items.map((item) => [item.screen_id, item.path])).toEqual([
       ['SCR-01', '/account'],
       ['SCR-01', '/admin/users'],
+      ['SCR-03', '/zones/:zone_id/coverage'],
       ['SCR-07', '/fleet'],
       ['SCR-08', '/home'],
       ['SCR-08', '/findings'],
@@ -442,6 +447,7 @@ describe('UI-02 Header: cuenta y cierre de sesión (BR-APP-05, 17)', TEST, () =>
     if (menu === null) throw new Error('El botón de cuenta no controla ningún menú.');
     const entries = within(menu);
     expect(entries.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+      '/account',
       '/account#sessions',
       '/account#password',
       '/account#second-factor',

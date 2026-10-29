@@ -77,9 +77,7 @@ test('el mando consulta su paquete y compromete la zona sin poder clasificar (A-
   await expect(page.locator('main [data-part="scope_explanation"]')).toHaveText(
     'Esta dirección no está disponible con su rol y su alcance, o no existe. Lo que puede consultar está en el menú y en su inicio.',
   );
-  await page
-    .getByRole('link', { name: 'Ir a su inicio: Paquete de revisión mensual', exact: true })
-    .click();
+  await page.getByRole('link', { name: 'Ir a su inicio: Paquete mensual', exact: true }).click();
   await expect(page).toHaveURL(/\/zones\/monthly$/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Paquete de revisión mensual');
   await logout(page);
