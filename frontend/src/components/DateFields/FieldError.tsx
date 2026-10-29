@@ -1,6 +1,10 @@
 /**
  * Error propio de un campo (sistema visual v1, «Campo»): en rojo, con icono y el texto en español
  * del catálogo. El campo lo enlaza con `aria-describedby` y marca `aria-invalid`.
+ *
+ * Va con `aria-hidden`: suele quedar dentro de la `<label>` del campo y, sin él, su texto pasaría a
+ * formar parte del nombre accesible del campo. Como lo nombra `aria-describedby`, se sigue
+ * anunciando como descripción (cálculo de nombres accesibles, paso 2A).
  */
 import { text } from '@/texts';
 
@@ -17,7 +21,13 @@ export function FieldError({
   readonly detail?: string;
 }) {
   return (
-    <span id={id} className={styles.error} data-part="field_error" data-text-key={textKey}>
+    <span
+      id={id}
+      className={styles.error}
+      data-part="field_error"
+      data-text-key={textKey}
+      aria-hidden="true"
+    >
       <svg
         className={styles.icon}
         viewBox="0 0 16 16"

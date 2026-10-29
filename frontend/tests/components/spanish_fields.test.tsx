@@ -130,6 +130,23 @@ describe('campos de fecha en español (VIG-366)', () => {
     );
   });
 
+  it('dentro de su etiqueta, el error no cambia el nombre accesible del campo: es su descripción', () => {
+    render(
+      <label>
+        Desde
+        <DateInput name="from" />
+      </label>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Desde' });
+    fireEvent.change(input, { target: { value: '99/99/2026' } });
+    fireEvent.blur(input);
+    expect(screen.getByRole('textbox', { name: 'Desde' })).toBe(input);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(input.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      text('components_dates.date_format'),
+    );
+  });
+
   it('un valor controlado se muestra como dd/mm/aaaa y vaciarlo desde fuera vacía el campo', () => {
     function Reset() {
       const [value, setValue] = useState('2026-01-09');
