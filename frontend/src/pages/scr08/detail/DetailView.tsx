@@ -317,8 +317,12 @@ export function ContractPart({
       <Field name={text('scr08.detail.observability')}>
         {label('observability_state', finding.observability_state)}
       </Field>
-      <Field name={text('scr08.detail.condition_duration')}>{duration(finding.condition_duration_ms)}</Field>
-      <Field name={text('scr08.detail.episode_duration')}>{duration(finding.episode_duration_ms)}</Field>
+      <Field name={text('scr08.detail.condition_duration')}>
+        {duration(finding.condition_duration_ms)}
+      </Field>
+      <Field name={text('scr08.detail.episode_duration')}>
+        {duration(finding.episode_duration_ms)}
+      </Field>
       <Field name={text('scr08.detail.cameras')}>
         <ul>
           {finding.cameras.map((camera, index) => (

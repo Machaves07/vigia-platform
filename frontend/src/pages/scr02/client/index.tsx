@@ -50,8 +50,7 @@ export default function Page() {
   // Alcance de organización: una lectura. Alcance de planta (gerente): una por cada planta suya,
   // cuando la jerarquía ya dijo cuáles son (VIG-366).
   const organizationScope =
-    principal?.assignments.some((assignment) => assignment.scope_level === 'organization') ??
-    false;
+    principal?.assignments.some((assignment) => assignment.scope_level === 'organization') ?? false;
   const plantIds = organizationScope
     ? null
     : (directory?.plants.map((plant) => plant.plant_id) ?? undefined);

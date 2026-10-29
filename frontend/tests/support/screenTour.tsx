@@ -453,8 +453,7 @@ export async function mountEntry(
       // Los campos de fecha propios (VIG-366) se escriben `dd/mm/aaaa` en su campo visible; el
       // nombre lo lleva un campo oculto.
       const typed = document.querySelector<HTMLInputElement>(`main [data-field-name="${name}"]`);
-      const field =
-        typed ?? document.querySelector<HTMLInputElement>(`main [name="${name}"]`);
+      const field = typed ?? document.querySelector<HTMLInputElement>(`main [name="${name}"]`);
       if (field === null) throw new Error(`Sin el campo «${name}» de la consulta «${label}»`);
       act(() => {
         fireEvent.change(field, { target: { value: typed === null ? value : esDate(value) } });

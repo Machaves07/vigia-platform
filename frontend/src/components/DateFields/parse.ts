@@ -42,7 +42,7 @@ export function parseTimeText(value: string): string | null {
 }
 
 /** `aaaa-mm` válido (mes 01 a 12). */
-export function isMonth(value: string): boolean {
+function isMonth(value: string): boolean {
   const match = ISO_MONTH.exec(value);
   if (match === null) return false;
   const month = Number(match[2]);
