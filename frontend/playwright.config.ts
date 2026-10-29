@@ -24,6 +24,8 @@ export default defineConfig({
   reporter: 'list',
   use: {
     ignoreHTTPSErrors: true, // Solo la CA efímera local; no se desactiva CSP.
+    // VIG-366: el navegador en inglés; ningún texto ni formato del navegador llega a la interfaz.
+    locale: 'en-US',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',

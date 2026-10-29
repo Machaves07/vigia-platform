@@ -12,6 +12,7 @@ import registration from '../../views/scr04';
 import { assertNoPersonData, assertOrganizationIsolation } from '../../support/viewProperties';
 import { settle } from '../../support/queryCache';
 import { server } from '../../msw/server';
+import { changeDateTime } from '../../support/dateFields';
 import {
   CLIENT,
   detail,
@@ -267,7 +268,10 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
         wrapper: Wrapper,
       },
     );
-    fill('scr04.catalog.retirement_date', '2026-01-01T12:00');
+    changeDateTime(
+      screen.getByLabelText(text('scr04.catalog.retirement_date')),
+      '2026-01-01T12:00',
+    );
     fill('scr04.catalog.reason', 'Motivo sintético suficiente');
     fireEvent.click(screen.getByRole('button', { name: text('scr04.catalog.retire') }));
     expect(
@@ -294,7 +298,7 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
       { wrapper: Wrapper },
     );
     const write = vi.spyOn(catalogPort.retire, 'write');
-    fill('scr04.catalog.retirement_date', date);
+    changeDateTime(screen.getByLabelText(text('scr04.catalog.retirement_date')), date);
     fill('scr04.catalog.reason', 'Motivo sintético suficiente');
     await act(async () => {
       fireEvent.submit(screen.getByRole('form', { name: text('scr04.catalog.retire') }));
@@ -311,7 +315,10 @@ describe('SCR-04 catálogo', { timeout: 30_000 }, () => {
     const write = vi.spyOn(catalogPort.retire, 'write').mockResolvedValue(version(2));
     render(<Page />, { wrapper: Wrapper });
     await screen.findByRole('heading', { name: 'Estándar sintético 1' });
-    fill('scr04.catalog.retirement_date', '2026-01-01T07:00');
+    changeDateTime(
+      screen.getByLabelText(text('scr04.catalog.retirement_date')),
+      '2026-01-01T07:00',
+    );
     // El reloj inyectado marca 12:00Z; 07:00 en Bogotá es ese mismo instante.
     fireEvent.change(
       screen.getAllByLabelText(

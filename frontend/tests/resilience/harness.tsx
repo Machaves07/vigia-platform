@@ -29,6 +29,7 @@ import {
 import { server } from '../setup/msw';
 import { mountShell, ORIGIN, shellMe, WAIT, type ShellFixture } from '../support/appShell';
 import type { FakeClock } from '../support/fakeClock';
+import { changeDateTime } from '../support/dateFields';
 import { flush } from '../support/ports';
 
 import { SCENARIOS, type ScenarioId } from './scenarios';
@@ -173,8 +174,8 @@ export function fillExportRequest(draft: ExportDraft): void {
   const form = within(exportForm());
   fireEvent.change(form.getByLabelText(text('scr14.plant')), { target: { value: values.plant } });
   for (const zone of values.zones) fireEvent.click(form.getByRole('checkbox', { name: zone }));
-  fireEvent.change(form.getByLabelText(text('scr14.from')), { target: { value: values.from } });
-  fireEvent.change(form.getByLabelText(text('scr14.to')), { target: { value: values.to } });
+  changeDateTime(form.getByLabelText(text('scr14.from')), values.from);
+  changeDateTime(form.getByLabelText(text('scr14.to')), values.to);
   fireEvent.change(form.getByLabelText(text('scr14.package_form')), {
     target: { value: values.packageForm },
   });
@@ -182,6 +183,19 @@ export function fillExportRequest(draft: ExportDraft): void {
 
 export function exportForm(): HTMLElement {
   return screen.getByRole('form', { name: text('scr14.request') });
+}
+
+/**
+ * Lo que muestran el campo de fecha (`dd/mm/aaaa`) y su campo de hora, como `aaaa-mm-ddThh:mm`
+ * (VIG-366); lo escrito sin forma de fecha se devuelve tal cual para que la diferencia se vea.
+ */
+function dateTimeValue(date: HTMLInputElement): string {
+  const time = date
+    .closest('[data-part="date_time_input"]')
+    ?.querySelectorAll<HTMLInputElement>('input[type="text"]')[1];
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date.value);
+  const day = match === null ? date.value : `${match[3] ?? ''}-${match[2] ?? ''}-${match[1] ?? ''}`;
+  return `${day}T${time?.value ?? ''}`;
 }
 
 /** Lo que muestra ahora el formulario de SCR-14. */
@@ -194,8 +208,8 @@ export function exportFormValues(): ExportFormValues {
       .getAllByRole<HTMLInputElement>('checkbox')
       .filter((box) => box.checked)
       .map((box) => box.getAttribute('aria-label') ?? ''),
-    from: value('scr14.from'),
-    to: value('scr14.to'),
+    from: dateTimeValue(within(form).getByLabelText<HTMLInputElement>(text('scr14.from'))),
+    to: dateTimeValue(within(form).getByLabelText<HTMLInputElement>(text('scr14.to'))),
     packageForm: value('scr14.package_form'),
   };
 }

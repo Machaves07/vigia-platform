@@ -6,6 +6,7 @@ import { reviewInstant, validReviewDate } from '@/pages/scr09/loop/closure/dates
 import { text } from '@/texts';
 import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
+import { changeDate } from '../../support/dateFields';
 import { FakeClock } from '../../support/fakeClock';
 import {
   DECLARATION,
@@ -66,9 +67,7 @@ async function wizardToReview(user: Awaited<ReturnType<typeof load>>) {
   await user.click(
     within(wizard).getByRole('button', { name: text('components_structure.wizard.next') }),
   );
-  fireEvent.change(within(wizard).getByLabelText(text('scr09.unclosable.decision_date')), {
-    target: { value: '2026-10-24' },
-  });
+  changeDate(within(wizard).getByLabelText(text('scr09.unclosable.decision_date')), '2026-10-24');
   await user.click(
     within(wizard).getByRole('button', { name: text('components_structure.wizard.next') }),
   );
@@ -103,9 +102,7 @@ describe('SCR-09 incerrable', { timeout: 40_000 }, () => {
         }),
       );
       const wizard = await wizardToReview(user);
-      fireEvent.change(within(wizard).getByLabelText(text('scr09.unclosable.review_due_at')), {
-        target: { value: day },
-      });
+      changeDate(within(wizard).getByLabelText(text('scr09.unclosable.review_due_at')), day);
       await user.click(
         within(wizard).getByRole('button', { name: text('components_forms.signature.sign') }),
       );
@@ -189,9 +186,7 @@ describe('SCR-09 incerrable', { timeout: 40_000 }, () => {
       ),
     );
     const wizard = await wizardToReview(user);
-    fireEvent.change(within(wizard).getByLabelText(text('scr09.unclosable.review_due_at')), {
-      target: { value: '2026-10-25' },
-    });
+    changeDate(within(wizard).getByLabelText(text('scr09.unclosable.review_due_at')), '2026-10-25');
     await user.click(
       within(wizard).getByRole('button', { name: text('components_forms.signature.sign') }),
     );
@@ -249,9 +244,7 @@ describe('SCR-09 incerrable', { timeout: 40_000 }, () => {
         within(review).getByRole('textbox', { name: reasonName('scr09.unclosable.review_note') }),
         { target: { value: DESCRIPTION } },
       );
-      fireEvent.change(within(review).getByLabelText(text('scr09.unclosable.review_due_at')), {
-        target: { value: day },
-      });
+      changeDate(within(review).getByLabelText(text('scr09.unclosable.review_due_at')), day);
       await user.click(
         within(review).getByRole('button', { name: text('components_forms.signature.sign') }),
       );

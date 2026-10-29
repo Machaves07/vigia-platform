@@ -12,6 +12,7 @@ import type { ExportJob, LedgerPage, Plant } from '@/ports/scr14Exports';
 import { createScreenQueryCache, ScreenQueryProvider } from '@/state/query';
 import { createSessionStore, SessionProvider } from '@/state/session';
 import { text } from '@/texts';
+import { changeDateTime } from '../../support/dateFields';
 import { FakeClock } from '../../support/fakeClock';
 import { meResponse } from '../../support/session';
 import { server } from '../../msw/server';
@@ -207,10 +208,8 @@ export function fillRequest(count = 1, to = '2026-01-02T00:00') {
   fireEvent.change(screen.getByLabelText(text('scr14.plant')), { target: { value: PLANT } });
   for (const zone of zones.slice(0, count))
     fireEvent.click(screen.getByRole('checkbox', { name: zone.name }));
-  fireEvent.change(screen.getByLabelText(text('scr14.from')), {
-    target: { value: '2026-01-01T00:00' },
-  });
-  fireEvent.change(screen.getByLabelText(text('scr14.to')), { target: { value: to } });
+  changeDateTime(screen.getByLabelText(text('scr14.from')), '2026-01-01T00:00');
+  changeDateTime(screen.getByLabelText(text('scr14.to')), to);
 }
 
 export async function openJob() {

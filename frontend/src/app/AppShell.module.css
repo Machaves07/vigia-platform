@@ -233,11 +233,15 @@
   min-width: 0;
 }
 
+/*
+ * Contenedor único del contenido (sistema visual v1; VIG-366, S3-23): unos 1 190 px de ancho con
+ * relleno de 28 × 36 px en todas las pantallas; las pantallas ya no fijan su propio ancho ni margen.
+ */
 .contentInner {
   min-width: 0;
   max-width: var(--content-max-width);
   margin: 0 auto;
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-7) var(--space-9);
 }
 
 /* Menú desplegable de la tableta: se abre con «Menú» sobre la barra inferior. */
@@ -341,7 +345,7 @@
   }
 
   .contentInner {
-    padding: var(--space-2);
+    padding: var(--space-4);
   }
 }
 

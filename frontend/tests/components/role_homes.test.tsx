@@ -25,6 +25,8 @@ describe('inicio del mando de línea (SCR-12)', { timeout: 40_000 }, () => {
   it('como su inicio: «Inicio», para qué sirve y la transparencia de sus zonas', async () => {
     const { view } = await setup({
       entry: true,
+      // Con una sola zona la entrada abriría sola el paquete (VIG-366); aquí se mira la entrada.
+      twoZones: true,
       role: 'line_manager',
       permissions: ['review_package.read', 'commitments.write', 'transparency.read'],
     });
@@ -37,7 +39,7 @@ describe('inicio del mando de línea (SCR-12)', { timeout: 40_000 }, () => {
   });
 
   it('desde el menú de otro rol: «Paquete mensual» y sin tarjetas de inicio', async () => {
-    const { view } = await setup({ entry: true, role: 'coordinator_sst' });
+    const { view } = await setup({ entry: true, twoZones: true, role: 'coordinator_sst' });
     await screen.findByRole('heading', { level: 1, name: text('navigation.scr12') }, WAIT);
     expect(view.container.querySelector('[data-slot]')).toBeNull();
   });

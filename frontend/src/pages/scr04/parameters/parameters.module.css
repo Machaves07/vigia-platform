@@ -1,9 +1,6 @@
 .page {
   display: grid;
   gap: var(--space-4);
-  max-width: 70rem;
-  margin: auto;
-  padding: var(--space-4);
 }
 
 .form fieldset {

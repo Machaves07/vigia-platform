@@ -11,6 +11,7 @@ import Page from '@/pages/scr07/target_version';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { server } from '../../msw/server';
+import { changeDateTime } from '../../support/dateFields';
 import { openApiValidators, readAppYaml } from '../../support/openapiAjv';
 import { fleetFixture, hierarchyNode, hierarchyPlants, INSTANT, node, PLANT } from './support';
 
@@ -71,12 +72,8 @@ function fill(version = '1.2.0') {
   fireEvent.change(screen.getByRole('textbox', { name: text('scr07.target') }), {
     target: { value: version },
   });
-  fireEvent.change(screen.getByLabelText(text('scr07.target_version.from')), {
-    target: { value: '2026-02-01T08:00' },
-  });
-  fireEvent.change(screen.getByLabelText(text('scr07.target_version.to')), {
-    target: { value: '2026-02-01T10:30' },
-  });
+  changeDateTime(screen.getByLabelText(text('scr07.target_version.from')), '2026-02-01T08:00');
+  changeDateTime(screen.getByLabelText(text('scr07.target_version.to')), '2026-02-01T10:30');
 }
 
 function submit() {
@@ -146,12 +143,8 @@ describe('SCR-07 versión objetivo', { timeout: 30_000 }, () => {
     const { accepted } = publicationServer();
     await page();
     fill();
-    fireEvent.change(screen.getByLabelText(text('scr07.target_version.from')), {
-      target: { value: from },
-    });
-    fireEvent.change(screen.getByLabelText(text('scr07.target_version.to')), {
-      target: { value: to },
-    });
+    changeDateTime(screen.getByLabelText(text('scr07.target_version.from')), from);
+    changeDateTime(screen.getByLabelText(text('scr07.target_version.to')), to);
     submit();
     expect(screen.getByText(text('scr07.target_version.window_invalid'))).toBeDefined();
     expect(accepted).toEqual([]);

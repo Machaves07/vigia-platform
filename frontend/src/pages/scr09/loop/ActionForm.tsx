@@ -178,13 +178,16 @@ export function ActionForm({
         </select>
       </label>
       <label>
-        {text('scr09.loop.deadline_days')}
-        {settings !== undefined && (
-          <>
-            {' '}
-            ({text('scr09.loop.deadline_default')}: {settings.action_deadline_default_days})
-          </>
-        )}
+        {/* Una sola línea de etiqueta encima del campo (sistema visual v1, VIG-366). */}
+        <span>
+          {text('scr09.loop.deadline_days')}
+          {settings !== undefined && (
+            <>
+              {' '}
+              ({text('scr09.loop.deadline_default')}: {settings.action_deadline_default_days})
+            </>
+          )}
+        </span>
         <input
           type="number"
           name="deadline_days"

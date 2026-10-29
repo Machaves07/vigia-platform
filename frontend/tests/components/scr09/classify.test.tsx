@@ -507,7 +507,9 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
       text('scr08.detail.occurred_at'),
       text('scr08.detail.standard'),
     ]);
-    const clips = within(summary).getByRole('list', { name: text('scr08.detail.clips') });
+    // Los clips van en la galería (VIG-366, S3-16): un reproductor y, con uno solo, sin miniaturas.
+    const clips = summary.querySelector<HTMLElement>('[data-part="clip_gallery"]');
+    if (clips === null) throw new Error('El resumen no tiene clips.');
     const play = within(clips).getByRole('button', { name: text('media.clip.play') });
     // El resumen va antes del formulario de la clasificación.
     const form = await screen.findByRole('form', { name: text('scr09.classify.form') }, WAIT);
@@ -526,7 +528,8 @@ describe('SCR-09 clasificar con la evidencia a la vista (VIG-363)', { timeout: 4
       'findings.classify',
       'hierarchy.read',
     ]);
-    expect(within(summary).queryByRole('list', { name: text('scr08.detail.clips') })).toBeNull();
+    expect(summary.querySelector('[data-part="clip_gallery"]')).toBeNull();
+    expect(within(summary).queryByRole('button', { name: text('media.clip.play') })).toBeNull();
     expect(reads.readUrl).toBe(0);
   });
 });

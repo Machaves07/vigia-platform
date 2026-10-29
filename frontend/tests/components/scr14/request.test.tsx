@@ -7,6 +7,7 @@ import type { ExportRequest } from '@/ports/scr14Exports';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { server } from '../../msw/server';
+import { esDate } from '../../support/dateFields';
 import { API, EXPORT, WAIT, fillRequest, fixture, job } from './support';
 
 describe('SCR-14 solicitud', { timeout: 30_000 }, () => {
@@ -97,9 +98,12 @@ describe('SCR-14 solicitud', { timeout: 30_000 }, () => {
     const alert = await screen.findByRole('alert', {}, WAIT);
     expect(alert.dataset.code).toBe('invalid_request');
     expect(alert.parentElement?.getAttribute('aria-describedby')).toBe(alert.id);
-    expect(screen.getByLabelText<HTMLInputElement>(text('scr14.from')).value).toBe(
-      '2026-01-01T00:00',
-    );
+    const from = screen.getByLabelText<HTMLInputElement>(text('scr14.from'));
+    expect(from.value).toBe(esDate('2026-01-01'));
+    const fromTime = from
+      .closest('[data-part="date_time_input"]')
+      ?.querySelectorAll<HTMLInputElement>('input[type="text"]')[1];
+    expect(fromTime?.value).toBe('00:00');
     expect(
       screen.getByRole('option', { name: label('package_form', 'without_clips') }),
     ).toBeDefined();

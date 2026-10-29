@@ -9,14 +9,15 @@ import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
+import { changeDate } from '../../support/dateFields';
 import { settle } from '../../support/queryCache';
 import { EVIDENCE, fixture, labelRow, WAIT, ZONE, ZONE_NAME } from './detail_support';
 
 const PATH = '/findings/labels';
 
 function fill(from: string, to: string) {
-  fireEvent.change(screen.getByLabelText(text('scr08.labels.from')), { target: { value: from } });
-  fireEvent.change(screen.getByLabelText(text('scr08.labels.to')), { target: { value: to } });
+  changeDate(screen.getByLabelText(text('scr08.labels.from')), from);
+  changeDate(screen.getByLabelText(text('scr08.labels.to')), to);
 }
 
 function submit() {
@@ -53,8 +54,9 @@ describe('SCR-08 etiquetas', { timeout: 60_000 }, () => {
     await screen.findByRole('table', {}, WAIT);
     expect(env.calls.labels).toHaveLength(1);
     const query = env.calls.labels[0]?.searchParams;
-    expect(query?.get('from')).toBe('2026-01-01T00:00:00.000Z');
-    expect(query?.get('to')).toBe('2026-02-01T00:00:00.000Z');
+    // Los días se cuentan en la hora de la planta (America/Bogota, UTC−5), no en UTC (VIG-366).
+    expect(query?.get('from')).toBe('2026-01-01T05:00:00.000Z');
+    expect(query?.get('to')).toBe('2026-02-01T05:00:00.000Z');
     expect(query?.get('zone_id')).toBe(ZONE);
     expect(query?.get('family')).toBe('guard_bypass');
     expect(query?.get('reason_category')).toBe('reflection_or_glare');
@@ -128,7 +130,7 @@ describe('SCR-08 etiquetas', { timeout: 60_000 }, () => {
     const next = env.calls.labels[1]?.searchParams;
     expect(next?.get('after_label_id')).toBe(labelRow(1).label_id);
     expect(next?.get('after_labeled_at')).toBe('2026-01-01T12:00:00.000Z');
-    expect(next?.get('from')).toBe('2026-01-01T00:00:00.000Z');
+    expect(next?.get('from')).toBe('2026-01-01T05:00:00.000Z');
     await waitFor(() => {
       expect(screen.getAllByRole('row')).toHaveLength(3);
     }, WAIT);

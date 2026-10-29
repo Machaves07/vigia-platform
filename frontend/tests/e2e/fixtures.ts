@@ -95,6 +95,8 @@ export const authenticatedTest = test.extend<AuthFixtures, WorkerFixtures>({
         const context = await browser.newContext({
           baseURL: world.base_url,
           ignoreHTTPSErrors: true,
+          // VIG-366: navegador en inglés; la interfaz no debe mostrar ni un texto ni un formato suyo.
+          locale: 'en-US',
           ...(workerInfo.project.use.viewport !== undefined
             ? { viewport: workerInfo.project.use.viewport }
             : {}),

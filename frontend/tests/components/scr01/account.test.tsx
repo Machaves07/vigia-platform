@@ -26,6 +26,10 @@ import { expectNoSerious, seriousViolations } from './support';
 /** Valor sintético con forma de identificador de sesión que el servidor nunca debe mandar. */
 const LEAKED_SESSION_ID = '0190a1b2-5e55-7000-8000-00000000c0de';
 
+/** Agente de usuario sintético: la pantalla lo resume como «Chrome en Windows». */
+const SYNTHETIC_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
 function sessionsServer() {
   const calls = { closeOthers: 0 };
   let closed = false;
@@ -36,7 +40,7 @@ function sessionsServer() {
           {
             created_at: '2026-01-01T08:00:00.000Z',
             last_seen_at: '2026-01-01T11:59:00.000Z',
-            client_hint: 'Navegador sintético de escritorio',
+            client_hint: SYNTHETIC_AGENT,
             current: true,
             usable: true,
             session_id: LEAKED_SESSION_ID,
@@ -110,7 +114,11 @@ describe('/account', { timeout: 60_000 }, () => {
       expect(within(table).getAllByRole('row')).toHaveLength(3);
     }, WAIT);
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(within(nth(rows, 0)).getByText('Navegador sintético de escritorio')).toBeDefined();
+    // El agente de usuario se resume («Chrome en Windows»); la cadena cruda no se muestra.
+    expect(
+      within(nth(rows, 0)).getByText(`Chrome ${text('scr01_admin.sessions.on')} Windows`),
+    ).toBeDefined();
+    expect(fixture.container.textContent).not.toContain(SYNTHETIC_AGENT);
     expect(within(nth(rows, 0)).getByText(text('scr01_admin.sessions.current'))).toBeDefined();
     expect(within(nth(rows, 1)).getByText(text('scr01_admin.sessions.no_hint'))).toBeDefined();
     expect(
@@ -271,7 +279,11 @@ describe('/account', { timeout: 60_000 }, () => {
     };
     expect(row('scr01_admin.versions.app')).toEqual({
       label: text('scr01_admin.versions.app'),
-      value: import.meta.env.VITE_APP_VERSION,
+      // Sin etiqueta de publicación la construcción es `dev` y se dice en palabras.
+      value:
+        import.meta.env.VITE_APP_VERSION === 'dev'
+          ? text('scr01_admin.versions.unreleased')
+          : import.meta.env.VITE_APP_VERSION,
     });
     expect(row('scr01_admin.versions.api')).toEqual({
       label: text('scr01_admin.versions.api'),

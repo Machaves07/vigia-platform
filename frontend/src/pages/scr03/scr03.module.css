@@ -1,8 +1,6 @@
 .page {
   display: grid;
   gap: var(--space-4);
-  padding: var(--space-4);
-  max-width: 80rem;
 }
 
 .page form,

@@ -1,10 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { text } from '@/texts';
 import { apiError, exampleFor } from '../../msw/handlers';
 import { server } from '../../msw/server';
+import { changeDateTime } from '../../support/dateFields';
 import {
   ACTION,
   ATTACHMENT,
@@ -21,9 +22,7 @@ async function fill(user: Awaited<ReturnType<typeof load>>) {
     screen.getByRole('textbox', { name: reasonName('scr09.closure.description') }),
     DESCRIPTION,
   );
-  fireEvent.change(screen.getByLabelText(text('scr09.closure.performed_at')), {
-    target: { value: '2026-10-24T10:00' },
-  });
+  changeDateTime(screen.getByLabelText(text('scr09.closure.performed_at')), '2026-10-24T10:00');
   await user.type(screen.getByLabelText(text('scr09.closure.performed_by_role')), 'Mantenimiento');
 }
 function uploadFile() {

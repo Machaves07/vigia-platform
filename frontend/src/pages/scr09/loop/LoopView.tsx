@@ -56,13 +56,17 @@ function ActionEntry({
         {!action.counts_as_overdue && <> · {text('scr09.loop.overdue_count_suspended')}</>}
       </p>
       <p>{action.action_description}</p>
-      <p>{action.expected_outcome ?? text('scr09.loop.expected_none')}</p>
+      {/* VIG-366, S3-25: el resultado esperado con su etiqueta y el plazo solo con la fecha. */}
+      <p data-part="expected_outcome">
+        {text('scr09.loop.expected_label')}:{' '}
+        {action.expected_outcome ?? text('scr09.loop.expected_none')}
+      </p>
       <p>
         {text('scr09.loop.assigned_at')}:{' '}
         <TimestampWithOffset instant={action.assigned_at} timeZone={timeZone} />
         {' · '}
         {text('scr09.loop.due_at')}:{' '}
-        <TimestampWithOffset instant={action.due_at} timeZone={timeZone} />
+        <TimestampWithOffset instant={action.due_at} timeZone={timeZone} dateOnly />
       </p>
     </li>
   );

@@ -146,6 +146,28 @@ input[type='radio']:disabled {
   padding-right: var(--space-3);
 }
 
+/* La ayuda de una casilla va debajo, alineada con su texto y no con la marca (S3-21). */
+:where(main) :where(label):has(> input[type='checkbox']) + p {
+  margin: 0 0 var(--space-2) var(--touch-target-min);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+/*
+ * Un formulario sin maquetación propia (contraseña, acción, clasificación…): un campo debajo de
+ * otro, con aire entre ellos (VIG-366); antes iban todos en línea.
+ */
+:where(main) :where(form:not([class])) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+:where(main) :where(form:not([class])) > :where(fieldset, label, textarea, div) {
+  align-self: stretch;
+}
+
 /* Grupo de opciones: en rejilla, cada una con su borde. */
 :where(main) :where(fieldset):has(> label > input[type='radio']) {
   display: grid;
