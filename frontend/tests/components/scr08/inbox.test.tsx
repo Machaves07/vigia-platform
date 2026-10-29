@@ -234,6 +234,60 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     expect(requests).toHaveLength(3);
   });
 
+  it('VIG-365: el único «Actualizar» vuelve a pedir la bandeja con sus filtros, las vencidas y las compuertas', async () => {
+    const { Wrapper, cache } = await fixture({ path: '/findings' });
+    const requests: URL[] = [];
+    let overdue = 0;
+    let gates = 0;
+    server.use(
+      http.get('http://localhost/loop/findings', ({ request }) => {
+        requests.push(new URL(request.url));
+        return HttpResponse.json(page([finding()]));
+      }),
+      http.get('http://localhost/loop/overdue', () => {
+        overdue++;
+        return HttpResponse.json({
+          plant_id: PLANT,
+          highlight_threshold_days: 3,
+          items: [],
+          zones: [],
+          partition_notice: null,
+          next_cursor: null,
+        });
+      }),
+      http.get('http://localhost/zones/:zone_id/gates', ({ params }) => {
+        gates++;
+        return HttpResponse.json(gate(String(params.zone_id)));
+      }),
+    );
+    const { container } = render(<Inbox />, { wrapper: Wrapper });
+    await screen.findByRole('link', { name: zone().name }, WAIT);
+    fireEvent.change(screen.getByRole('combobox', { name: text('scr08.inbox.state') }), {
+      target: { value: 'overdue' },
+    });
+    fireEvent.submit(screen.getByRole('form', { name: text('scr08.inbox.filters') }));
+    await waitFor(() => {
+      expect(requests).toHaveLength(2);
+      expect(cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    const before = [overdue, gates];
+    expect(before.every((value) => value > 0)).toBe(true);
+    const refresh = screen.getAllByRole('button', {
+      name: text('components_status.refresh.button'),
+    });
+    expect(refresh).toHaveLength(1);
+    expect(container.querySelector('[data-policy]')?.getAttribute('data-policy')).toBe(
+      'periodic_60s',
+    );
+    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await waitFor(() => {
+      expect(requests).toHaveLength(3);
+      expect(cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    expect(requests[2]?.searchParams.getAll('lifecycle_state')).toEqual(['overdue']);
+    expect([overdue, gates]).toEqual(before.map((value) => value * 2));
+  });
+
   it('declara avisos y conserva la hora agregada recibida; no lee detalle ni inventa clips', async () => {
     const { Wrapper, cache } = await fixture({ path: '/findings' });
     const value = finding();

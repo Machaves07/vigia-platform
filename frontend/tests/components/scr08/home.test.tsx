@@ -8,7 +8,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http, type HttpHandler } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { axe } from 'vitest-axe';
 import Home from '@/pages/scr08/home';
 import Inbox from '@/pages/scr08/inbox';
@@ -192,6 +192,54 @@ describe('SCR-08 inicio del coordinador (VIG-365)', { timeout: 40_000 }, () => {
     expect(
       screen.getAllByRole('button', { name: text('components_status.refresh.button') }),
     ).toHaveLength(1);
+  });
+
+  it('«Actualizar» vuelve a pedir bandeja, compuertas y cobertura, esta en el instante de pulsar', async () => {
+    const instants: (string | null)[] = [];
+    let inboxReads = 0;
+    let gateReads = 0;
+    later(
+      http.get('http://localhost/zones/:zone_id/coverage/at', ({ params, request }) => {
+        const instant = new URL(request.url).searchParams.get('instant');
+        instants.push(instant);
+        return HttpResponse.json({
+          zone_id: params.zone_id,
+          instant,
+          state: 'observable',
+          causes: [],
+          layer: 'platform',
+          clock_basis: 'platform',
+          source_record_ids: [],
+        });
+      }),
+      http.get('http://localhost/zones/:zone_id/gates', ({ params }) => {
+        gateReads++;
+        return HttpResponse.json(gate(String(params.zone_id)));
+      }),
+    );
+    // `open` fija la bandeja; se cuentan sus peticiones sin taparla.
+    const onRequest = ({ request }: { request: Request }) => {
+      if (new URL(request.url).pathname === '/loop/findings') inboxReads++;
+    };
+    server.events.on('request:start', onRequest);
+    onTestFinished(() => {
+      server.events.removeListener('request:start', onRequest);
+    });
+    const { clock, cache, container } = await open();
+    expect([instants, inboxReads, gateReads]).toEqual([[INSTANT], 1, 1]);
+    // La cobertura es auditada: la marca de la página es «a demanda» (BR-APP-54).
+    expect(container.querySelector('[data-policy]')?.getAttribute('data-policy')).toBe('on_demand');
+    clock.advance(5_000);
+    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await waitFor(() => {
+      expect(instants).toHaveLength(2);
+      expect(cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    expect([instants, inboxReads, gateReads]).toEqual([
+      [INSTANT, new Date(Date.parse(INSTANT) + 5_000).toISOString()],
+      2,
+      2,
+    ]);
   });
 
   it('con zonas observables, la leyenda va una sola vez en la franja', async () => {

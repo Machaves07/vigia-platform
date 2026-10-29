@@ -57,6 +57,27 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     expect(env.calls.readUrl).toBe(0);
   });
 
+  it('VIG-365: el único «Actualizar» vuelve a pedir las lecturas auditadas y «ahora» en el instante de pulsar', async () => {
+    const env = await fixture();
+    const { container } = await opened(env);
+    expect(
+      screen.getAllByRole('button', { name: text('components_status.refresh.button') }),
+    ).toHaveLength(1);
+    expect(container.querySelector('[data-policy]')?.getAttribute('data-policy')).toBe('on_demand');
+    const first = env.calls.coverage[0]?.searchParams.get('instant');
+    env.clock.advance(5_000);
+    fireEvent.click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await waitFor(() => {
+      expect(env.calls.coverage).toHaveLength(2);
+      expect(env.cache.client.isFetching()).toBe(0);
+    }, WAIT);
+    expect([env.calls.detail, env.calls.history, env.calls.record]).toEqual([2, 2, 2]);
+    expect(env.calls.coverage.map((url) => url.searchParams.get('instant'))).toEqual([
+      first,
+      new Date(Date.parse(first ?? '') + 5_000).toISOString(),
+    ]);
+  });
+
   it('una apertura nueva vuelve a pedir el detalle una vez', async () => {
     const env = await fixture();
     const first = await opened(env);

@@ -142,7 +142,6 @@ function Finding({
   readonly detail: FindingDetail;
 }) {
   const clock = detailClock();
-  const [instant] = useState(() => new Date(clock.now()).toISOString());
   const withCoverage = context.permissions.has('coverage.read');
   const recordIds = detail.records.map((record) => record.record_id);
   const records = useAudited(context, RECORD, { records: recordIds }, true, (signal) =>
@@ -151,11 +150,15 @@ function Finding({
   const coverage = useAudited(
     context,
     COVERAGE,
-    { zone_id: detail.zone_id, instant },
+    { zone_id: detail.zone_id },
     withCoverage,
+    // El instante se toma en cada lectura: «Actualizar» pide la cobertura de ahora (P10).
     (signal) =>
       detailPort.coverageNow.read(
-        { path: { zone_id: detail.zone_id }, query: { instant } },
+        {
+          path: { zone_id: detail.zone_id },
+          query: { instant: new Date(clock.now()).toISOString() },
+        },
         signal,
       ),
   );

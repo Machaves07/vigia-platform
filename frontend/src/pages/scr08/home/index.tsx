@@ -174,6 +174,7 @@ function OverdueTable({
                     )}
                   </td>
                   <td className={styles.sticky}>
+                    {/* La tabla solo sale con findings.read, que ya abre el lazo (BR-APP-01). */}
                     <Link
                       to={`/findings/${finding.finding_state_id}/loop`}
                       className={styles.rowAction}
@@ -261,7 +262,6 @@ function RecentTable({
 
 function useHomeReads(context: Context) {
   const [opening] = useState(() => (openings += 1));
-  const [instant] = useState(() => new Date(findingsClock().now()).toISOString());
   const zones = context.plants.flatMap((plant) => plant.zones).slice(0, HOME_ZONES);
   const ids = zones.map((zone) => zone.zone_id);
   const canFindings = context.permissions.includes('findings.read');
@@ -289,18 +289,22 @@ function useHomeReads(context: Context) {
     read: ({ signal }) => readGates(ids, signal),
   });
   const coverage = useScreenQuery({
-    key: key(COVERAGE, { zones: ids, instant, opening }),
+    key: key(COVERAGE, { zones: ids, opening }),
     policy: policyFor(COVERAGE),
     enabled: canCoverage && ready && ids.length > 0,
-    read: ({ signal }) =>
-      Promise.all(
+    // El instante se toma en cada lectura, no al abrir: «Actualizar» pide la cobertura de ahora
+    // (P10); con la hora de apertura repetiría un estado viejo como si fuera fresco.
+    read: ({ signal }) => {
+      const instant = new Date(findingsClock().now()).toISOString();
+      return Promise.all(
         zones.map((zone) =>
           findingsPort.coverage.read(
             { path: { zone_id: zone.zone_id }, query: { instant } },
             signal,
           ),
         ),
-      ),
+      );
+    },
   });
   return { inbox, gates, coverage, canFindings, canGates, canCoverage };
 }

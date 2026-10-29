@@ -6,8 +6,10 @@
  *   más fresco de lo que está la parte más vieja.
  * - «Actualizar» vuelve a pedir todas las lecturas activas de la pantalla (`useScreenRefresh`),
  *   también las de sus secciones; las auditadas que la persona aún no abrió no se piden.
- * - La marca es «a demanda» si alguna lectura de la página lo es (BR-APP-54): lo auditado solo se
- *   renueva al pulsar, aunque lo demás se renueve solo cada 60 s.
+ * - La marca es «a demanda» si alguna lectura de la página es auditada (BR-APP-54): lo auditado
+ *   solo se renueva al pulsar, aunque lo demás se renueve solo cada 60 s. Sin auditadas, es «cada
+ *   60 s» si alguna lectura se renueva sola: la jerarquía o una referencia, que no se renuevan
+ *   solas, no vuelven «a demanda» una bandeja que sí lo hace.
  */
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { currentTransport } from '@/ports/base/http';
@@ -33,7 +35,9 @@ export function PageRefresh({
   readonly reads: readonly PageRead[];
 }) {
   const { isFetching, refresh } = useScreenRefresh(screen);
-  const onDemand = reads.some((read) => !policyFor(read.operation).periodic);
+  const policies = reads.map((read) => policyFor(read.operation));
+  const onDemand =
+    policies.some((policy) => policy.explicitOnly) || !policies.some((policy) => policy.periodic);
   return (
     <RefreshIndicator
       clock={currentTransport().clock}

@@ -1,8 +1,8 @@
 /**
  * Franja de cobertura del inicio (sistema visual v1; S3-04 y S3-07 de VIG-365): una tarjeta por
  * zona, hasta 50, con su compuerta y, si es productiva, su semáforo. La cobertura llega cargada:
- * abrir el inicio es la acción explícita que pide la lectura auditada, una vez por apertura y en el
- * instante de abrir, como el detalle; después solo «Actualizar» de la cabecera la repite. Nunca se
+ * abrir el inicio es la acción explícita que pide la lectura auditada, una vez por apertura, como el
+ * detalle; después solo «Actualizar» de la cabecera la repite, en el instante de pulsarlo. Nunca se
  * pinta «Desconocido» mientras llega: la tarjeta dice que se está consultando. La leyenda
  * «Observable no significa zona despejada» va una vez, en la franja, si alguna zona es observable.
  */

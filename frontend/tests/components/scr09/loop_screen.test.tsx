@@ -51,7 +51,7 @@ function ledgerRecord(
   };
 }
 
-async function load(lifecycle_state: string, records: Records = () => []) {
+async function load(lifecycle_state: string, records: Records | 'fail' = () => []) {
   let ledgerReads = 0;
   let detailReads = 0;
   let organization = '';
@@ -62,6 +62,11 @@ async function load(lifecycle_state: string, records: Records = () => []) {
     }),
     http.get('http://localhost/ledger/records', () => {
       ledgerReads++;
+      if (records === 'fail')
+        return HttpResponse.json(
+          { code: 'internal_error', message: 'fallo sintético', detail_code: null },
+          { status: 500 },
+        );
       return HttpResponse.json({ items: records(organization), next_cursor: null });
     }),
   );
@@ -137,6 +142,33 @@ describe('la pantalla del lazo según el estado del servidor (VIG-365)', { timeo
     expect(
       container.querySelector('[data-part="lifecycle_state"]')?.getAttribute('data-value'),
     ).toBe('closed');
+  });
+
+  it('el único «Actualizar» vuelve a pedir el lazo y el expediente ya abiertos, a demanda', async () => {
+    const { ledgerReads, detailReads, container } = await load('closed');
+    await waitFor(() => {
+      expect(ledgerReads()).toBe(1);
+    }, WAIT);
+    expect(container.querySelector('[data-policy]')?.getAttribute('data-policy')).toBe('on_demand');
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: text('components_status.refresh.button') }));
+    await waitFor(() => {
+      expect([detailReads(), ledgerReads()]).toEqual([2, 2]);
+    }, WAIT);
+  });
+
+  it('cerrado: si el expediente no se puede leer, la franja lo dice en vez de quedar en blanco', async () => {
+    await load('closed', 'fail');
+    const banner = await screen.findByRole(
+      'region',
+      { name: text('scr09.loop.closed_banner') },
+      WAIT,
+    );
+    await waitFor(() => {
+      expect(banner.querySelector('p')?.textContent).toBe(text('scr09.loop.closed_unread'));
+    }, WAIT);
+    expect(banner.querySelector('dl')).toBeNull();
   });
 
   it('incerrable: la revisión principal con la fecha y la medida de su declaración', async () => {

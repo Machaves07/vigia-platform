@@ -170,7 +170,12 @@ export default function Page() {
               {closed && (
                 <ClosedBanner
                   signature={
-                    records.data === undefined ? undefined : closureSignature(records.data)
+                    // Si el expediente no se pudo leer, la franja lo dice (no queda en blanco).
+                    records.data !== undefined
+                      ? closureSignature(records.data)
+                      : records.error !== null
+                        ? null
+                        : undefined
                   }
                   timeZone={timeZone}
                 />
