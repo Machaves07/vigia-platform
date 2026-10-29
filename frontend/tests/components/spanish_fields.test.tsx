@@ -130,10 +130,58 @@ describe('campos de fecha en español (VIG-366)', () => {
     );
   });
 
+  it('salir del campo con un clic no muestra el error hasta soltar: el botón no se mueve bajo el puntero', () => {
+    render(
+      <form
+        aria-label="Filtros"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+        }}
+      >
+        <label htmlFor="desde">Desde</label>
+        <DateInput id="desde" />
+        <button type="submit">Consultar</button>
+      </form>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Desde' });
+    const button = screen.getByRole('button', { name: 'Consultar' });
+    fireEvent.change(input, { target: { value: '31/02/2026' } });
+    fireEvent.pointerDown(button);
+    fireEvent.blur(input);
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    expect(input.getAttribute('aria-describedby')).toBeNull();
+    fireEvent.pointerUp(button);
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    const error = document.getElementById(input.getAttribute('aria-describedby') ?? '');
+    expect(error?.getAttribute('data-text-key')).toBe('components_dates.date_format');
+  });
+
+  it('enviar el formulario sin salir del campo (Intro) también muestra el error de formato', () => {
+    render(
+      <form
+        aria-label="Filtros"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+        }}
+      >
+        <label htmlFor="desde">Desde</label>
+        <DateInput id="desde" />
+        <button type="submit">Consultar</button>
+      </form>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Desde' });
+    fireEvent.change(input, { target: { value: '31/02/2026' } });
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    fireEvent.submit(screen.getByRole('form', { name: 'Filtros' }));
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
   it('dentro de su etiqueta, el error no cambia el nombre accesible del campo: es su descripción', () => {
     render(
       <label>
-        Desde
+        {'Desde'}
         <DateInput name="from" />
       </label>,
     );

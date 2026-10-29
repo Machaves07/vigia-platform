@@ -111,7 +111,7 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   // Otra concesión: la misma lectura debe volver a la red, no mostrar el inventario retenido.
   await operate(
     page.getByRole('button', {
-      name: `Operar bajo esta concesión: organización ${world.organization_id}`,
+      name: `Operar bajo esta concesión: Organización ${world.organization_id}`,
       exact: true,
     }),
     world.concession_id,
@@ -133,7 +133,7 @@ test('proveedor: solicitud, cabeceras por fase y cambio sin caché del cliente a
   await operate(
     page
       .getByRole('button', {
-        name: `Operar bajo esta concesión: planta ${required(world.plant_ids[0])}`,
+        name: `Operar bajo esta concesión: Planta ${required(world.plant_ids[0])}`,
         exact: true,
       })
       .first(),

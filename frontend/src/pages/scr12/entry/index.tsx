@@ -4,9 +4,9 @@
  * desde el menú de otro rol es «Paquete mensual».
  *
  * Valores por defecto (VIG-366): el mes es el anterior al actual en la hora de la planta (el
- * paquete es de un mes cerrado) y, si el alcance tiene una sola zona, esa zona; entonces el paquete
- * se abre solo, sin pantalla vacía. Volver desde el paquete («Elegir otro mes o zona») no lo
- * vuelve a abrir.
+ * paquete es de un mes cerrado) y, si el alcance tiene una sola zona, esa zona; entonces, desde el
+ * menú, el paquete se abre solo, sin pantalla vacía. Volver desde el paquete («Elegir otro mes o
+ * zona») no lo vuelve a abrir.
  */
 import { formatInTimeZone } from 'date-fns-tz';
 import { useEffect, useId, useState } from 'react';
@@ -47,11 +47,13 @@ export default function Page() {
   const shownPeriod = period ?? previous;
   const choosing =
     typeof location.state === 'object' && location.state !== null && 'choose' in location.state;
+  // Como inicio de la sesión no se abre solo: el inicio propio del mando (VIG-365) se conserva y
+  // la zona y el mes ya vienen elegidos.
   useEffect(() => {
-    if (only !== undefined && !choosing) {
+    if (only !== undefined && !choosing && !isHome) {
       void navigate(packagePath(only.zone_id, previous), { replace: true });
     }
-  }, [choosing, navigate, only, previous]);
+  }, [choosing, isHome, navigate, only, previous]);
   return (
     <main className={styles.page}>
       <h1>{text(isHome ? 'scr12.home.title' : 'navigation.scr12')}</h1>

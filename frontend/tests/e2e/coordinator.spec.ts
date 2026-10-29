@@ -7,6 +7,7 @@ import {
   expectNoPageOverflow,
   expectOneRefresh,
   expectOwnHome,
+  fillDateTime,
   logout,
   nextSteps,
   openFromInbox,
@@ -80,7 +81,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     // fila de hallazgo: la de una zona no productiva es una sola celda con su estado de compuertas.
     const next = await page
       .locator('tbody tr')
-      .filter({ has: page.locator('td:nth-child(12)') })
+      .filter({ has: page.locator('td:nth-child(2)') })
       .first()
       .locator('td')
       .last()
@@ -187,7 +188,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await openFromInbox(page, `/findings/${selected.closure}`);
     const history = page.getByRole('region', { name: 'Historial completo de clasificaciones' });
     await expect(history).toContainText('Coexistencia real observada junto al acceso');
-    await expect(history).toContainText('coordinador SST');
+    await expect(history).toContainText('Coordinador SST');
     // Ya clasificado (abierto), el panel da comprometer la acción como principal y reclasificar
     // como secundaria, con su aviso (BR-LAZ-24; VIG-365).
     await expect(nextSteps(page).locator('[data-primary="true"]')).toHaveText(
@@ -225,7 +226,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     const panel = page.locator('tbody tr[aria-current="true"] + tr [data-part="panel"]');
     await expect(panel.getByRole('heading', { level: 2 }).first()).toBeFocused();
     const form = panel.getByRole('form', { name: 'Registrar resolución individual' });
-    await form.getByRole('radio', { name: 'confirmado en revisión', exact: true }).check();
+    await form.getByRole('radio', { name: 'Confirmado en revisión', exact: true }).check();
     await form.getByLabel('Categoría del motivo').selectOption('real_coexistence');
     await form.getByLabel('Motivo de la decisión (Obligatorio)', { exact: true }).fill(reason);
     const written = page.waitForResponse(
@@ -243,8 +244,8 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
       .getByRole('region', { name: 'Historial completo de clasificaciones' })
       .getByRole('region', { name: 'Resolución de la cola de revisión' });
     await expect(resolution).toContainText(reason);
-    await expect(resolution).toContainText('confirmado en revisión');
-    await expect(resolution).toContainText('coordinador SST');
+    await expect(resolution).toContainText('Confirmado en revisión');
+    await expect(resolution).toContainText('Coordinador SST');
     await page.locator('main [data-part="loop_link"]').click();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
   });
@@ -277,11 +278,14 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await evidence
       .getByLabel('Descripción estructurada de lo ejecutado (Obligatorio)', { exact: true })
       .fill('Resguardo fijo instalado y anclado al piso del acceso de la zona');
-    await evidence
-      .getByLabel('Fecha y hora de ejecución en la planta')
-      .fill(
-        `${new Date(Date.parse(world.journeys.today) - 86_400_000).toISOString().slice(0, 10)}T08:00`,
-      );
+    // Fecha `dd/mm/aaaa` y hora `hh:mm` en sus dos campos (VIG-366: sin `datetime-local`).
+    await fillDateTime(
+      evidence.getByRole('textbox', {
+        name: 'Fecha y hora de ejecución en la planta',
+        exact: true,
+      }),
+      `${new Date(Date.parse(world.journeys.today) - 86_400_000).toISOString().slice(0, 10)}T08:00`,
+    );
     await evidence.getByLabel('Cargo responsable de la ejecución').fill('Mantenimiento');
     await evidence
       .locator('input[type="file"]')

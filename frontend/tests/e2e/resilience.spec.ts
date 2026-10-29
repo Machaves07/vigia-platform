@@ -43,6 +43,7 @@ const errors = texts('errors');
 const scr01 = texts('scr01');
 const scr14 = texts('scr14');
 const status = texts('components_status');
+const dates = texts('components_dates');
 
 const SEED = (() => {
   const raw = process.env.FC_SEED;
@@ -116,8 +117,29 @@ function field(form: Locator, key: string): Locator {
   return form.getByLabel(new RegExp(`^${label}`));
 }
 
-function day(value: number): string {
-  return `2026-01-${String(value).padStart(2, '0')}T08:00`;
+/** Un momento como lo escribe la persona (VIG-366): fecha `dd/mm/aaaa` y hora `hh:mm`. */
+function day(value: number): { readonly date: string; readonly time: string } {
+  return { date: `${String(value).padStart(2, '0')}/01/2026`, time: '08:00' };
+}
+
+/** Las dos partes de un campo de fecha y hora: la fecha lleva la etiqueta; la hora, «Hora». */
+function moment(form: Locator, key: string): { readonly date: Locator; readonly time: Locator } {
+  const date = field(form, key);
+  const time = date
+    .locator('xpath=ancestor::span[@data-part="date_time_input"][1]')
+    .getByRole('textbox', { name: catalogText(dates, 'components_dates.time_label'), exact: true });
+  return { date, time };
+}
+
+async function fillMoment(form: Locator, key: string, value: ReturnType<typeof day>) {
+  const { date, time } = moment(form, key);
+  await date.fill(value.date);
+  await time.fill(value.time);
+}
+
+async function momentValue(form: Locator, key: string) {
+  const { date, time } = moment(form, key);
+  return { date: await date.inputValue(), time: await time.inputValue() };
 }
 
 /**
@@ -141,8 +163,8 @@ async function openAndFill(
   const zones = form.getByRole('checkbox');
   await expect(zones.first()).toBeVisible();
   for (let index = 0; index < draft.zones; index += 1) await zones.nth(index).check();
-  await field(form, 'scr14.from').fill(day(draft.day));
-  await field(form, 'scr14.to').fill(day(draft.day + 1));
+  await fillMoment(form, 'scr14.from', day(draft.day));
+  await fillMoment(form, 'scr14.to', day(draft.day + 1));
   await field(form, 'scr14.package_form').selectOption(draft.packageForm);
   return { form, plantOption: plant.locator(`option[value="${plantId}"]`) };
 }
@@ -155,8 +177,8 @@ async function formValues(form: Locator) {
       .evaluateAll((boxes) =>
         boxes.map((box) => (box as HTMLInputElement).checked).filter(Boolean),
       ),
-    from: await field(form, 'scr14.from').inputValue(),
-    to: await field(form, 'scr14.to').inputValue(),
+    from: await momentValue(form, 'scr14.from'),
+    to: await momentValue(form, 'scr14.to'),
     packageForm: await field(form, 'scr14.package_form').inputValue(),
   };
 }

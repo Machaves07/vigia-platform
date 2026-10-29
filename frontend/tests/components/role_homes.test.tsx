@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import Copasst from '@/pages/scr16/entry';
 import { text } from '@/texts';
-import { setup } from './scr12/support';
+import { setup, ZONE } from './scr12/support';
 import { transparencyFixture } from './scr16/support';
 
 const WAIT = { timeout: 20_000 };
@@ -23,15 +23,20 @@ function cards(container: HTMLElement) {
 
 describe('inicio del mando de línea (SCR-12)', { timeout: 40_000 }, () => {
   it('como su inicio: «Inicio», para qué sirve y la transparencia de sus zonas', async () => {
-    const { view } = await setup({
+    // Con una sola zona: como inicio no abre solo el paquete (VIG-366), pero la zona ya va elegida.
+    const { view, router } = await setup({
       entry: true,
-      // Con una sola zona la entrada abriría sola el paquete (VIG-366); aquí se mira la entrada.
-      twoZones: true,
       role: 'line_manager',
       permissions: ['review_package.read', 'commitments.write', 'transparency.read'],
     });
     await screen.findByRole('heading', { level: 1, name: text('scr12.home.title') }, WAIT);
     expect(screen.getByText(text('scr12.home.lead'), { exact: true })).toBeDefined();
+    await waitFor(() => {
+      expect(
+        screen.getByRole<HTMLSelectElement>('combobox', { name: text('scr12.zone') }).value,
+      ).toBe(ZONE);
+    }, WAIT);
+    expect(router.state.location.pathname).toBe('/zones/monthly');
     await waitFor(() => {
       expect(cards(view.container)).toEqual([['SCR-16:*', '/transparency']]);
     }, WAIT);

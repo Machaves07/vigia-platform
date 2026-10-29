@@ -9,7 +9,8 @@
  * campo oculto lleva ese valor en `FormData`.
  *
  * Un texto que no es una fecha muestra su propio error en español (`aria-invalid`,
- * `aria-describedby`) al salir del campo o al comprobar el formulario (`invalid`), y deja el campo
+ * `aria-describedby`) al salir del campo (si se sale con un clic, al soltarlo), al enviar el
+ * formulario o al comprobarlo (`invalid`), y deja el campo
  * inválido para `useFormCheck`, que no repite el mensaje (`data-own-error`). Nunca aparece la
  * burbuja del navegador: los formularios llevan `noValidate`.
  */
@@ -29,6 +30,23 @@ interface CommonProps {
   readonly 'aria-invalid'?: boolean;
   readonly 'aria-describedby'?: string | undefined;
   readonly 'aria-label'?: string;
+}
+
+/** Si hay un botón del puntero pulsado; lo usa el `blur` de los campos para no mover el clic. */
+const pointer = { pressed: false };
+if (typeof window !== 'undefined') {
+  const release = () => {
+    pointer.pressed = false;
+  };
+  window.addEventListener(
+    'pointerdown',
+    () => {
+      pointer.pressed = true;
+    },
+    true,
+  );
+  window.addEventListener('pointerup', release, true);
+  window.addEventListener('pointercancel', release, true);
 }
 
 function describedBy(...ids: readonly (string | undefined | false)[]): string | undefined {
@@ -86,6 +104,18 @@ function TypedInput({
   useEffect(() => {
     input.current?.setCustomValidity(invalid ? message : '');
   }, [invalid, message]);
+  // Al enviar el formulario (con `noValidate` no hay evento `invalid`), el error de formato se ve.
+  useEffect(() => {
+    const form = input.current?.form;
+    if (form === null || form === undefined) return;
+    const onSubmit = () => {
+      setTouched(true);
+    };
+    form.addEventListener('submit', onSubmit, true);
+    return () => {
+      form.removeEventListener('submit', onSubmit, true);
+    };
+  }, []);
   const shown = invalid && touched;
   const errorId = `${id}-format`;
   return (
@@ -110,6 +140,19 @@ function TypedInput({
           onType(event.currentTarget.value);
         }}
         onBlur={() => {
+          // Con el puntero pulsado (el foco se va con un clic), el error espera a soltarlo:
+          // mostrarlo ahora desplazaría el botón entre `mousedown` y `mouseup` y el clic se
+          // perdería. Al soltar, el destino del clic ya está decidido.
+          if (pointer.pressed) {
+            window.addEventListener(
+              'pointerup',
+              () => {
+                setTouched(true);
+              },
+              { once: true, capture: true },
+            );
+            return;
+          }
           setTouched(true);
         }}
         onInvalid={() => {

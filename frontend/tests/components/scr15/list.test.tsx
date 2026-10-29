@@ -94,12 +94,16 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
 
   it('cargar más usa next_after como after, acumula páginas y refresca sin duplicados', async () => {
     const { calls, clock } = await setup({ more: [notification(SECOND)] });
-    fireEvent.click(await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT));
+    fireEvent.click(
+      await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT),
+    );
     await waitFor(() => {
       expect(screen.getAllByRole('listitem')).toHaveLength(2);
     }, WAIT);
     expect(calls.reads.map((url) => url.searchParams.get('after'))).toEqual([null, null, CURSOR]);
-    expect(screen.queryByRole('button', { name: text('components_structure.pager.next') })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: text('components_structure.pager.next') }),
+    ).toBeNull();
     await act(async () => {
       clock.advance(60_000);
       await settle();
@@ -112,9 +116,13 @@ describe('SCR-15 lista', { timeout: 60_000 }, () => {
 
   it('no duplica filas si las páginas se solapan por una llegada concurrente', async () => {
     await setup({ more: [notification()] });
-    fireEvent.click(await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT));
+    fireEvent.click(
+      await screen.findByRole('button', { name: text('components_structure.pager.next') }, WAIT),
+    );
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: text('components_structure.pager.next') })).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: text('components_structure.pager.next') }),
+      ).toBeNull();
       expect(screen.getAllByRole('listitem')).toHaveLength(1);
     }, WAIT);
   });

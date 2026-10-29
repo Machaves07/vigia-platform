@@ -1,6 +1,13 @@
 import { stat } from 'node:fs/promises';
 import { authenticatedTest as test, expect } from './fixtures';
-import { expectOwnHome, installerRoute, openMenu, prepare, required } from './journeys';
+import {
+  expectOwnHome,
+  fillDateTime,
+  installerRoute,
+  openMenu,
+  prepare,
+  required,
+} from './journeys';
 import { systemClock } from '../../src/state/clock';
 
 test.use({ role: 'plant_manager' });
@@ -129,8 +136,14 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   const now = new Date(systemClock.now());
   const from = new Date(now.getTime() - 86400_000).toISOString().slice(0, 16);
   const to = now.toISOString().slice(0, 16);
-  await form.getByLabel('Desde (hora de la planta)', { exact: true }).fill(from);
-  await form.getByLabel('Hasta, sin incluir (hora de la planta)', { exact: true }).fill(to);
+  await fillDateTime(
+    form.getByRole('textbox', { name: 'Desde (hora de la planta)', exact: true }),
+    from,
+  );
+  await fillDateTime(
+    form.getByRole('textbox', { name: 'Hasta, sin incluir (hora de la planta)', exact: true }),
+    to,
+  );
   await form.getByLabel('Forma del paquete').selectOption('without_clips');
   const requested = page.waitForResponse(
     (response) =>
@@ -152,7 +165,7 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   await test.step('Consultar hasta que la exportación sin clips esté lista', async () => {
     await expect(async () => {
       await job.getByRole('button', { name: 'Actualizar', exact: true }).first().click();
-      await expect(job.getByText('lista', { exact: true })).toBeVisible();
+      await expect(job.getByText('Lista', { exact: true })).toBeVisible();
     }).toPass({ timeout: 120_000, intervals: [2000, 5000] });
   });
   await page.getByRole('button', { name: 'Obtener descargas de los volúmenes' }).click();
