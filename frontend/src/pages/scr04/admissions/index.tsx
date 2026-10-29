@@ -1,6 +1,7 @@
 /** Tres preguntas; una negativa también se envía y queda registrada (BR-APP-46, A-56). */
 import { useState } from 'react';
 import { useParams } from 'react-router';
+import { usePlantTimeZone } from '@/app/AppShell';
 import { KeysetTable } from '@/components/KeysetTable/KeysetTable';
 import { parametersClock, readAdmissions, type Admission } from '@/ports/scr04Parameters';
 import { text } from '@/texts';
@@ -22,6 +23,8 @@ export default function Page() {
 
 function AdmissionPage({ plantId }: { readonly plantId: string }) {
   const [revision, setRevision] = useState(0);
+  // La hora de la planta de la ruta (VIG-366), con su zona en la cabecera.
+  const timeZone = usePlantTimeZone(plantId);
   return (
     <main className={styles.page}>
       <h1>{text('scr04.admissions.title')}</h1>
@@ -35,7 +38,7 @@ function AdmissionPage({ plantId }: { readonly plantId: string }) {
         key={revision}
         caption={text('scr04.admissions.history')}
         clock={parametersClock()}
-        columns={admissionColumns()}
+        columns={admissionColumns(timeZone)}
         rowKey={(row) => row.admission_id}
         fetchPage={(request, signal) =>
           readAdmissions(plantId, request.cursor, request.pageSize, signal)

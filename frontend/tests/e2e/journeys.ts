@@ -8,6 +8,30 @@ export function required<T>(value: T | null | undefined): T {
   return value;
 }
 
+/** Un día `aaaa-mm-dd` como lo escribe la persona en los campos de fecha (VIG-366): `dd/mm/aaaa`. */
+export function spanishDate(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (match === null) throw new Error(`Día no válido: ${iso}`);
+  const [, year, month, day] = match;
+  return `${day ?? ''}/${month ?? ''}/${year ?? ''}`;
+}
+
+/**
+ * Escribe un momento `aaaa-mm-ddThh:mm` como lo escribe la persona (VIG-366, sin
+ * `datetime-local`): la fecha `dd/mm/aaaa` en el campo que lleva la etiqueta y la hora `hh:mm` en
+ * el suyo, «Hora (hh:mm, 24 horas)», dentro del mismo grupo.
+ */
+export async function fillDateTime(date: Locator, value: string): Promise<void> {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})$/.exec(value);
+  if (match === null) throw new Error(`Momento no válido: ${value}`);
+  const [, year, month, day, time] = match;
+  await date.fill(`${day ?? ''}/${month ?? ''}/${year ?? ''}`);
+  await date
+    .locator('xpath=ancestor::span[@data-part="date_time_input"][1]')
+    .getByRole('textbox', { name: 'Hora (hh:mm, 24 horas)', exact: true })
+    .fill(time ?? '');
+}
+
 export function engineZone(world: World, project: string): string {
   const index = ['chromium', 'firefox', 'webkit'].indexOf(required(project.split('-')[0]));
   return required(world.zone_ids[index]);
@@ -50,7 +74,7 @@ export async function installerRoute(page: Page, world: World, path: string): Pr
   await expect(page).toHaveURL(/\/provider\/concessions$/);
   await page
     .getByRole('button', {
-      name: `Operar bajo esta concesión: organización ${world.organization_id}`,
+      name: `Operar bajo esta concesión: Organización ${world.organization_id}`,
       exact: true,
     })
     .click();
@@ -417,7 +441,7 @@ export async function confirmFinding(page: Page, findingId: string, reason: stri
   await expect(history).toBeVisible();
   const form = page.getByRole('form', { name: 'Registrar una clasificación' });
   await settled(page, form);
-  await form.getByRole('radio', { name: 'confirmado', exact: true }).check();
+  await form.getByRole('radio', { name: 'Confirmado', exact: true }).check();
   await form.getByLabel('Categoría del motivo').selectOption('real_coexistence');
   await form.getByLabel('Motivo de la clasificación (Obligatorio)', { exact: true }).fill(reason);
   const written = page.waitForResponse(
@@ -431,9 +455,9 @@ export async function confirmFinding(page: Page, findingId: string, reason: stri
   expect(await response.json()).toMatchObject({ outcome: 'confirmed', lifecycle_state: 'open' });
   await expect(history.getByText(reason, { exact: true })).toBeVisible();
   await expect(page.locator('[data-role-in-use="coordinator_sst"]')).toContainText(
-    'coordinador SST',
+    'Coordinador SST',
   );
-  await expect(history).toContainText('con el rol coordinador SST');
+  await expect(history).toContainText('con el rol Coordinador SST');
   // VIG-365 (S3-20): registrada, el formulario se pliega sin errores y el recibo da el lazo.
   await expect(form).toHaveCount(0);
   await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);

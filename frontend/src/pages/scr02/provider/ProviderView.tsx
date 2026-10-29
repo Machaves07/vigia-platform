@@ -12,6 +12,8 @@ import type { ProviderConcession } from '@/ports/scr02Concessions';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
+import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
+
 import { Moment, revokedByText, statusLabel } from '../shared';
 
 export function providerScopeText(row: Pick<ProviderConcession, 'scope_level'>): string {
@@ -23,17 +25,27 @@ export function providerColumns(
   actions?: (row: ProviderConcession) => ReactNode,
 ): readonly KeysetColumn<ProviderConcession>[] {
   const columns: KeysetColumn<ProviderConcession>[] = [
+    // VIG-366: sin nombres del cliente (el proveedor no ve su jerarquía), los identificadores van
+    // plegados en «Datos técnicos», no a la vista.
     {
       id: 'client',
       header: text('scr02.col.client'),
-      cell: (row) => <code>{row.client_organization_id}</code>,
+      cell: (row) => (
+        <>
+          {text('scr02.provider.client_organization')}
+          <TechnicalDetails
+            items={[{ name: text('common.identifier'), value: row.client_organization_id }]}
+          />
+        </>
+      ),
     },
     {
       id: 'scope',
       header: text('scr02.col.scope'),
       cell: (row) => (
         <>
-          {providerScopeText(row)}: <code>{row.scope_id}</code>
+          {providerScopeText(row)}
+          <TechnicalDetails items={[{ name: text('common.identifier'), value: row.scope_id }]} />
         </>
       ),
     },

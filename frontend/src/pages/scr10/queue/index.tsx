@@ -8,6 +8,7 @@
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
+import { PAGE_SIZE, Pager, usePaged } from '@/components/Pager/Pager';
 import { RefreshIndicator } from '@/components/RefreshIndicator/RefreshIndicator';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { WriteReceipt } from '@/components/WriteReceipt/WriteReceipt';
@@ -29,7 +30,7 @@ import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { descriptor } from '../descriptor';
 import { EvidenceView } from './EvidenceView';
-import { panelId, QueueView, type PanelKind } from './QueueView';
+import { panelId, QueueThresholds, QueueView, type PanelKind } from './QueueView';
 import { Resolution } from './Resolution';
 import styles from './queue.module.css';
 
@@ -230,14 +231,24 @@ export default function Page() {
   });
   const failure = query.error === null ? null : queueFailure(query.error);
   const plants = hierarchy.data?.plants ?? [];
+  const paged = usePaged(query.data?.items ?? []);
+  const visibleItems = paged.visible;
+  // La detección señalada desde el hallazgo se ve aunque no esté en la primera página.
+  const targetIndex = query.data?.items.findIndex((item) => item.detection_id === target) ?? -1;
+  const targetPage = targetIndex < 0 ? null : Math.floor(targetIndex / PAGE_SIZE);
+  const { setPage } = paged;
+  useEffect(() => {
+    if (targetPage !== null && !focusedTarget.current) setPage(targetPage);
+  }, [setPage, targetPage]);
   const targetListed = query.data?.items.some((item) => item.detection_id === target) ?? false;
+  const targetVisible = visibleItems.some((item) => item.detection_id === target);
   useEffect(() => {
     // La detección señalada recibe el foco una sola vez, al aparecer en la cola.
-    if (targetListed && !focusedTarget.current) {
+    if (targetVisible && !focusedTarget.current) {
       focusedTarget.current = true;
       targetCell.current?.focus();
     }
-  }, [targetListed]);
+  }, [targetVisible]);
   useEffect(() => {
     if (written !== null) receipt.current?.focus();
   }, [written]);
@@ -282,7 +293,7 @@ export default function Page() {
     <main>
       <h1>{text('scr10.title')}</h1>
       <p>{text('scr10.explanation')}</p>
-      <p>{text('scr10.confidence_context')}</p>
+      {query.data !== undefined && <QueueThresholds items={query.data.items} plants={plants} />}
       {written !== null && (
         <div ref={receipt} tabIndex={-1} data-part="receipt">
           <Receipt result={written} scope={scope} concession={concession} />
@@ -323,7 +334,7 @@ export default function Page() {
       ) : (
         <ScreenState state="ready">
           <QueueView
-            items={query.data.items}
+            items={visibleItems}
             plants={plants}
             now={queueClock().now()}
             canResolve={canResolve}
@@ -344,16 +355,19 @@ export default function Page() {
           />
         </ScreenState>
       )}
-      {query.data?.next_cursor != null && (
-        <button
-          type="button"
-          disabled={query.isFetching}
-          onClick={() => {
+      {/* VIG-366: de 20 en 20; en la última página, «Siguiente» pide la página del servidor. */}
+      {query.data !== undefined && query.data.items.length > 0 && (
+        <Pager
+          page={paged.page}
+          total={query.data.items.length}
+          onPage={paged.setPage}
+          more={query.data.next_cursor != null}
+          loading={query.isFetching}
+          onLoadMore={() => {
             setPages((n) => n + 1);
           }}
-        >
-          {text('scr10.more')}
-        </button>
+          label={text('scr10.pages')}
+        />
       )}
     </main>
   );

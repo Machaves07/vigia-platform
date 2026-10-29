@@ -82,7 +82,7 @@ describe('SCR-14 estado y descargas', { timeout: 30_000 }, () => {
       ['requested', 'in_progress', 'ready', 'failed', 'expired'].map((state) =>
         label('export_state', state),
       ),
-    ).toEqual(['solicitada', 'en curso', 'lista', 'fallida', 'caducada para descarga']);
+    ).toEqual(['Solicitada', 'En curso', 'Lista', 'Fallida', 'Caducada para descarga']);
   });
 
   it.each(['requested', 'in_progress', 'ready', 'failed', 'expired'] as const)(
@@ -123,7 +123,7 @@ describe('SCR-14 estado y descargas', { timeout: 30_000 }, () => {
       fireEvent.click(screen.getByRole('button', { name: text(`scr14.${kind}`) }));
       expect(
         (await screen.findByText(label('export_state', 'expired'), {}, WAIT)).textContent,
-      ).toBe('caducada para descarga');
+      ).toBe('Caducada para descarga');
       expect(screen.queryByRole('link', { name: text('scr14.download_document') })).toBeNull();
       expect(screen.queryByRole('alert')).toBeNull();
     },

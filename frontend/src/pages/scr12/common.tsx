@@ -24,6 +24,9 @@ export function useMonthlyContext() {
 }
 export type MonthlyContext = ReturnType<typeof useMonthlyContext>;
 
+/** Estado de la navegación con el que el paquete vuelve a la elección sin abrirse de nuevo. */
+export const CHOOSE_STATE = { choose: true } as const;
+
 export function useMonthlyRead<T>(
   context: MonthlyContext,
   operation: ReadOperation,

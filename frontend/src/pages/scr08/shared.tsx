@@ -1,4 +1,5 @@
 /** Contexto y estados de las dos vistas de proyección de SCR-08. */
+import { fromZonedTime } from 'date-fns-tz';
 import type { ReactNode } from 'react';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ScreenState } from '@/pages/shared/ScreenState';
@@ -28,6 +29,37 @@ export function useFindingsContext() {
     plants: hierarchy.data?.plants ?? [],
     permissions: principal?.effective_permissions ?? [],
   };
+}
+
+/**
+ * Zona horaria de los filtros por día (VIG-366, S3-11): la de la planta de la zona elegida; sin
+ * zona, la de las plantas del alcance si todas comparten una. Solo si difieren, UTC (y la
+ * etiqueta lo dice).
+ */
+export function filterTimeZone(
+  plants: readonly {
+    readonly timezone: string;
+    readonly zones: readonly { readonly zone_id: string }[];
+  }[],
+  zoneId: string | null,
+): string {
+  const chosen = plants.find((plant) => plant.zones.some((zone) => zone.zone_id === zoneId));
+  if (chosen !== undefined) return chosen.timezone;
+  const zones = new Set(plants.map((plant) => plant.timezone));
+  return zones.size === 1 ? (plants[0]?.timezone ?? 'UTC') : 'UTC';
+}
+
+/** Instante en que empieza el día `aaaa-mm-dd` en `timeZone`; `null` si no es válido. */
+export function dayStart(day: string, timeZone: string): Date | null {
+  const start = fromZonedTime(`${day}T00:00:00`, timeZone);
+  return Number.isFinite(start.getTime()) ? start : null;
+}
+
+/** Instante en que termina el día `aaaa-mm-dd` en `timeZone` (inicio del siguiente). */
+export function dayEnd(day: string, timeZone: string): Date | null {
+  const next = new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000);
+  if (!Number.isFinite(next.getTime())) return null;
+  return dayStart(next.toISOString().slice(0, 10), timeZone);
 }
 
 export function Result({
@@ -60,11 +92,20 @@ export function Result({
 export function FindingTime({
   instant,
   timeZone,
+  zone = 'inline',
 }: {
   readonly instant: string;
   readonly timeZone: string;
+  /** `'header'` cuando la tabla nombra la zona en su cabecera (VIG-366). */
+  readonly zone?: 'inline' | 'header';
 }) {
-  return <TimestampWithOffset instant={instant} timeZone={timeZone} />;
+  return <TimestampWithOffset instant={instant} timeZone={timeZone} zone={zone} />;
+}
+
+/** La zona común de las filas, si todas comparten una (para nombrarla en la cabecera). */
+export function sharedTimeZone(timeZones: readonly string[]): string | null {
+  const zones = new Set(timeZones);
+  return zones.size === 1 ? (timeZones[0] ?? null) : null;
 }
 
 export function OverdueHeader({

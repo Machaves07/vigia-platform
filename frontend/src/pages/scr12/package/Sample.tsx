@@ -1,5 +1,6 @@
 /** La auditoría de la muestra solo añade un resultado, jamás una clasificación. */
 import { useId, useState } from 'react';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { monthlyPort, type SampleItem, type SampleResult } from '@/ports/scr12Monthly';
@@ -55,6 +56,7 @@ function ResultForm({
 }) {
   const id = useId();
   const [outcome, setOutcome] = useState('');
+  const check = useFormCheck();
   const [comment, setComment] = useState('');
   const mutation = useScreenMutation({
     write: (body: SampleResult) =>
@@ -63,9 +65,11 @@ function ResultForm({
   });
   return (
     <form
+      noValidate
       aria-label={text('scr12.submit_result')}
       onSubmit={(event) => {
         event.preventDefault();
+        if (!check.run(event.currentTarget)) return;
         void mutation
           .run({ outcome, comment: comment === '' ? null : comment })
           .then(onSaved)
@@ -79,8 +83,10 @@ function ResultForm({
         name="outcome"
         required
         value={outcome}
+        {...check.field('outcome')}
         onChange={(event) => {
           setOutcome(event.target.value);
+          check.clear('outcome');
           mutation.reset();
         }}
       >
@@ -91,6 +97,7 @@ function ResultForm({
           </option>
         ))}
       </select>
+      {check.error('outcome')}
       <label htmlFor={`${id}-comment`}>{text('scr12.comment')}</label>
       <textarea
         id={`${id}-comment`}

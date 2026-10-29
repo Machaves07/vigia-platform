@@ -34,5 +34,9 @@
   "components_structure.metrics.period": "Periodo",
   "components_structure.metrics.hour_of_day": "Hora del día",
   "components_structure.metrics.value": "Valor",
-  "components_structure.metrics.empty": "Sin datos para el periodo seleccionado."
+  "components_structure.metrics.empty": "Sin datos para el periodo seleccionado.",
+  "components_structure.pager.of": "de",
+  "components_structure.pager.or_more": "o más",
+  "components_structure.pager.previous": "Anterior",
+  "components_structure.pager.next": "Siguiente"
 }

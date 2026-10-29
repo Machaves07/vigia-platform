@@ -58,10 +58,12 @@ samp {
   outline-offset: var(--focus-ring-offset);
 }
 
-button,
-input,
-select,
-textarea {
+/*
+ * Con especificidad cero, como los estilos de botón del contenido (`:where`, más abajo): con
+ * `button` (0,0,1) este `color: inherit` ganaba y el texto de la principal salía en tinta sobre
+ * `--color-action` (contraste insuficiente, VIG-366).
+ */
+:where(button, input, select, textarea) {
   font: inherit;
   color: inherit;
 }
@@ -69,11 +71,162 @@ textarea {
 button,
 [role='button'],
 a,
-input[type='checkbox'],
-input[type='radio'],
 select {
   min-height: var(--touch-target-min);
   min-width: var(--touch-target-min);
+}
+
+/*
+ * Casillas y opciones (VIG-366, S3-18 y S3-21): el objetivo táctil sigue siendo de 44 px (48 en
+ * tableta), pero la marca que se ve mide 20 px, centrada; el control nativo a 44 px pintaba
+ * círculos y casillas enormes y desalineados. Seleccionada se distingue por el relleno, no solo
+ * por el color.
+ */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  display: inline-grid;
+  flex: none;
+  place-content: center;
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='checkbox']::before,
+input[type='radio']::before {
+  content: '';
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+}
+
+input[type='radio']::before {
+  border-radius: 50%;
+}
+
+input[type='checkbox']:checked::before,
+input[type='radio']:checked::before {
+  border-color: var(--color-action);
+  background: var(--color-action);
+  box-shadow: inset 0 0 0 3px var(--color-surface);
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/*
+ * Formularios del contenido (sistema visual v1, «Campo»; VIG-366): la etiqueta encima del campo,
+ * no a su lado. `:where` deja la especificidad en cero: el módulo CSS de una pantalla manda.
+ */
+:where(main) :where(label):not(:has(> input[type='checkbox'], > input[type='radio'])) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 40rem;
+  font-weight: 500;
+}
+
+:where(main) :where(label) :where(input, select, textarea) {
+  font-weight: 400;
+}
+
+/* Una opción (casilla o radio) es una fila de 44 px: marca y texto alineados. */
+:where(main) :where(label):has(> input[type='checkbox'], > input[type='radio']) {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-height: var(--touch-target-min);
+  padding-right: var(--space-3);
+}
+
+/* La ayuda de una casilla va debajo, alineada con su texto y no con la marca (S3-21). */
+:where(main) :where(label):has(> input[type='checkbox']) + p {
+  margin: 0 0 var(--space-2) var(--touch-target-min);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+/*
+ * Un formulario sin maquetación propia (contraseña, acción, clasificación…): un campo debajo de
+ * otro, con aire entre ellos (VIG-366); antes iban todos en línea.
+ */
+:where(main) :where(form:not([class])) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+:where(main) :where(form:not([class])) > :where(fieldset, label, textarea, div) {
+  align-self: stretch;
+}
+
+/* Grupo de opciones: en rejilla, cada una con su borde. */
+:where(main) :where(fieldset):has(> label > input[type='radio']) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+}
+
+:where(main) :where(fieldset):has(> label > input[type='radio']) > legend {
+  padding: 0 var(--space-1);
+  font-weight: 600;
+}
+
+:where(main) :where(fieldset) > :where(label):has(> input[type='radio']) {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+:where(main) :where(fieldset) > :where(label):has(> input[type='radio']:checked) {
+  border-color: var(--color-action);
+  background: var(--color-action-subtle);
+}
+
+:where(main) :where(textarea) {
+  padding: var(--space-2);
+}
+
+/*
+ * Botones del contenido (sistema visual v1, «Botones»): secundaria con borde por omisión y la
+ * principal del formulario (su envío) en `--color-action`. Antes, sin clase, salían grises.
+ */
+:where(main) :where(button) {
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-action);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+:where(main) :where(form) :where(button[type='submit']) {
+  border-color: var(--color-action);
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+:where(main) :where(form) :where(button[type='submit']):hover:not(:disabled) {
+  background: var(--color-action-hover);
+}
+
+:where(main) :where(button):disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* El resumen de un `<details>` también se toca: misma altura, sin perder su marcador. */

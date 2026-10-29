@@ -27,7 +27,7 @@ import {
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { label, labelInline } from '@/texts/labels';
 
 import { Workspace } from './Workspace';
 
@@ -113,7 +113,7 @@ function InProgress({
           {analysis.why_steps.map((step) => (
             <li key={step.step_index}>
               {step.statement}
-              {step.category === null ? null : ` (${label('cause_category', step.category)})`}
+              {step.category === null ? null : ` (${labelInline('cause_category', step.category)})`}
             </li>
           ))}
         </ol>

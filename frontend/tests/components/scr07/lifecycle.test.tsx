@@ -12,6 +12,7 @@ import { Route, Routes } from 'react-router';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { server } from '../../msw/server';
+import { changeDateTime } from '../../support/dateFields';
 import { openApiValidators, readAppYaml } from '../../support/openapiAjv';
 import {
   CAMERA,
@@ -391,9 +392,10 @@ describe('SCR-07 recaptura del encuadre (A-55)', { timeout: 30_000 }, () => {
     fireEvent.change(within(recapture).getByRole('combobox', { name: text('scr07.camera') }), {
       target: { value: CAMERA },
     });
-    fireEvent.change(within(recapture).getByLabelText(text('scr07.framing.captured_at')), {
-      target: { value: '2026-01-01T06:30' },
-    });
+    changeDateTime(
+      within(recapture).getByLabelText(text('scr07.framing.captured_at')),
+      '2026-01-01T06:30',
+    );
     writeReason(recapture);
     fireEvent.click(within(recapture).getByRole('button', { name: text('scr07.framing.submit') }));
     const status = await screen.findByText(

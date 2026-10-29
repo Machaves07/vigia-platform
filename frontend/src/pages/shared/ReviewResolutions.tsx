@@ -8,9 +8,9 @@ import platform from '../../../../backend/resources/labels.platform.es.json';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { reviewReasonCategories, type ReviewResolutionItem } from '@/ports/shared';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { capitalizedTable, label } from '@/texts/labels';
 
-const roles: Readonly<Record<string, string>> = platform.role;
+const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
 
 function roleLabel(role: string): string {
   return Object.hasOwn(roles, role)

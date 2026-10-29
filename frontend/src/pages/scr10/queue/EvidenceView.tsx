@@ -1,5 +1,5 @@
 /** RV-14: solo señales etiquetadas y clips difuminados, sin campos de persona. */
-import { BlurredClipPlayer } from '@/components/BlurredClipPlayer/BlurredClipPlayer';
+import { ClipGallery } from '@/components/BlurredClipPlayer/ClipGallery';
 import { reviewQueuePort, type DetectionEvidence } from '@/ports/scr10ReviewQueue';
 import type { Clock } from '@/state/clock';
 import { text } from '@/texts';
@@ -28,15 +28,17 @@ export function EvidenceView({
         ))}
       </ul>
       {data.clips.length === 0 && <p>{text('scr10.no_clips')}</p>}
-      {canViewClips &&
-        data.clips.map((clip) => (
-          <BlurredClipPlayer
-            key={clip.evidence_id}
-            evidenceId={clip.evidence_id}
-            clock={clock}
-            requestUrl={(evidence_id) => reviewQueuePort.clip.write({ path: { evidence_id } })}
-          />
-        ))}
+      {canViewClips && (
+        <ClipGallery
+          clock={clock}
+          clips={data.clips.map((clip, index) => ({
+            key: clip.evidence_id,
+            evidenceId: clip.evidence_id,
+            label: `${text('media.clip.label')} ${String(index + 1)}`,
+          }))}
+          requestUrl={(evidence_id) => reviewQueuePort.clip.write({ path: { evidence_id } })}
+        />
+      )}
     </>
   );
 }

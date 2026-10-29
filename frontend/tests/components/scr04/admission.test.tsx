@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { axe } from 'vitest-axe';
 import Page from '@/pages/scr04/admissions';
+import { zoneName } from '@/components/TimestampWithOffset/format';
 import { AdmissionView } from '@/pages/scr04/admissions/AdmissionView';
 import { CRITERIA, isRecordedRejection, screenLabel } from '@/ports/scr04Parameters';
 import { PortError } from '@/ports/base';
@@ -28,14 +29,25 @@ async function answer(negative: string | null) {
 
 describe('SCR-04 admisión', { timeout: 60_000 }, () => {
   it.each([
-    ['America/Bogota', '02/03/2026, 07:00:00', '(America/Bogota, UTC-05:00)'],
-    ['Europe/Madrid', '02/03/2026, 13:00:00', '(Europe/Madrid, UTC+01:00)'],
-  ])('presenta la evaluación en %s con zona y desplazamiento visibles', (timeZone, local, zone) => {
+    ['America/Bogota', '02/03/2026, 07:00:00'],
+    ['Europe/Madrid', '02/03/2026, 13:00:00'],
+  ])('presenta la evaluación en %s con la zona una vez, en la cabecera', (timeZone, local) => {
     const { container } = render(<AdmissionView data={admission()} timeZone={timeZone} />);
     const instant = container.querySelector('time');
     expect(instant?.getAttribute('datetime')).toBe(INSTANT);
     expect(instant?.textContent).toBe(local);
-    expect(screen.getByText(zone)).toBeTruthy();
+    // VIG-366: la zona va en el nombre de la columna, no en cada celda.
+    expect(screen.getByText(`Fecha de evaluación (${zoneName(timeZone) ?? ''})`)).toBeTruthy();
+    expect(container.querySelector('[data-part="zone"]')).toBeNull();
+  });
+
+  it('pliega el autor y el registro en «Datos técnicos» (VIG-366)', () => {
+    const { container } = render(<AdmissionView data={admission()} />);
+    const technical = container.querySelector('details[data-part="technical"]');
+    expect(technical).not.toBeNull();
+    expect(technical?.hasAttribute('open')).toBe(false);
+    const values = [...(technical?.querySelectorAll('dd code') ?? [])].map((n) => n.textContent);
+    expect(values).toEqual([admission().evaluated_by, admission().ledger_record_id]);
   });
 
   it.each([

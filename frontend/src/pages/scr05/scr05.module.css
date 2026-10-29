@@ -1,8 +1,5 @@
 /* SCR-05 en escritorio: una sola columna legible; formularios y secciones apilados. */
 .page {
-  max-width: 64rem;
-  margin: 0 auto;
-  padding: var(--space-4);
   display: grid;
   gap: var(--space-6);
 }

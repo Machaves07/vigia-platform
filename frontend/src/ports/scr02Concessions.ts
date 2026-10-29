@@ -122,10 +122,29 @@ export async function readQueries(
   };
 }
 
-/** Las concesiones del cliente (`GET /concessions` no pagina: una sola página). */
-export async function readClientConcessions(signal: AbortSignal) {
-  const view = await concessionsPort.concessions.read({}, signal);
-  return { items: view.concessions, nextCursor: null };
+/**
+ * Las concesiones del cliente (`GET /concessions` no pagina: una sola página).
+ *
+ * Sin `plant_id` el servidor exige un alcance de organización; una persona con alcance de planta
+ * (el gerente de planta) recibía `not_found` y la lista decía «No se pudo cargar» (VIG-366). Con
+ * `plantIds` se pide una vez por cada planta de su alcance y se juntan, sin repetir.
+ */
+export async function readClientConcessions(
+  signal: AbortSignal,
+  plantIds: readonly string[] | null = null,
+) {
+  if (plantIds === null) {
+    const view = await concessionsPort.concessions.read({}, signal);
+    return { items: view.concessions, nextCursor: null };
+  }
+  const views = await Promise.all(
+    plantIds.map((plant_id) => concessionsPort.concessions.read({ query: { plant_id } }, signal)),
+  );
+  const seen = new Set<string>();
+  const items = views
+    .flatMap((view) => view.concessions)
+    .filter((item) => !seen.has(item.concession_id) && Boolean(seen.add(item.concession_id)));
+  return { items, nextCursor: null };
 }
 
 /** Las concesiones que la persona del proveedor se concedió (una sola página). */

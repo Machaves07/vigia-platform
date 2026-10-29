@@ -20,7 +20,7 @@ import { PassForm } from '@/pages/scr06/matrix/PassForm';
 import { PassMatrixTable } from '@/pages/scr06/matrix/PassMatrixTable';
 import { MatrixScreen } from '@/pages/scr06/matrix/MatrixScreen';
 import { text } from '@/texts';
-import { label } from '@/texts/labels';
+import { label, labelInline } from '@/texts/labels';
 
 import { server } from '../../msw/server';
 import {
@@ -64,7 +64,7 @@ const NOT_A_UUID = 'no-es-un-uuid';
 /** Las condiciones de la fila por omisión, con las etiquetas del catálogo del contrato. */
 const ROW_CONDITIONS = [
   text('scr06.matrix.condition.presence'),
-  `${label('condition_signal_role', 'energy')} ${label('condition_signal_value', 'asserted')}`,
+  `${label('condition_signal_role', 'energy')} ${labelInline('condition_signal_value', 'asserted')}`,
 ].join(' · ');
 
 let mounted: TestSession | null = null;

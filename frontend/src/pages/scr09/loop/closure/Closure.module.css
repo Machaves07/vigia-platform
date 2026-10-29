@@ -1,9 +1,6 @@
 .page {
   display: grid;
   gap: 1rem;
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 1.5rem;
 }
 
 .page form,

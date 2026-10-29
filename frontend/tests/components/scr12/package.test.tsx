@@ -108,14 +108,43 @@ describe('SCR-12 paquete mensual', { timeout: 60_000 }, () => {
   });
 
   it('la entrada aplica zona y mes solo al enviar el formulario', async () => {
-    const { calls } = await setup({ entry: true });
+    // Con dos zonas la entrada no abre sola el paquete: espera a que se envíe el formulario.
+    const { calls } = await setup({ entry: true, twoZones: true });
     const zone = await screen.findByRole('combobox', { name: text('scr12.zone') }, WAIT);
     fireEvent.change(zone, { target: { value: ZONE } });
-    fireEvent.change(screen.getByLabelText(text('scr12.period')), { target: { value: PERIOD } });
+    const period = screen.getByLabelText(text('scr12.period'));
+    expect(period.tagName).toBe('SELECT');
+    fireEvent.change(period, { target: { value: PERIOD } });
     expect(calls.reads).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: text('scr12.open') }));
     await screen.findByRole('region', { name: text('scr12.summary') }, WAIT);
     expect(calls.reads).toEqual([`?zone_id=${ZONE}&period=${PERIOD}`]);
+  });
+
+  it('con una sola zona la entrada abre sola el paquete del mes anterior en la hora de la planta', async () => {
+    // Reloj en 2026-03-02T12:00Z: el mes anterior en Bogotá es PERIOD (2026-02).
+    const { calls, router } = await setup({ entry: true });
+    await screen.findByRole('region', { name: text('scr12.summary') }, WAIT);
+    expect(calls.reads).toEqual([`?zone_id=${ZONE}&period=${PERIOD}`]);
+    expect(router.state.location.pathname).toBe(`/zones/${ZONE}/monthly/${PERIOD}`);
+    expect(router.state.historyAction).toBe('REPLACE');
+  });
+
+  it('«Elegir otro mes o zona» vuelve a la entrada sin abrir de nuevo el paquete', async () => {
+    const { calls, router } = await setup({ entry: true });
+    await screen.findByRole('region', { name: text('scr12.summary') }, WAIT);
+    fireEvent.click(screen.getByRole('link', { name: text('scr12.choose_again') }));
+    const zone = await screen.findByRole<HTMLSelectElement>(
+      'combobox',
+      { name: text('scr12.zone') },
+      WAIT,
+    );
+    expect(router.state.location.pathname).toBe('/zones/monthly');
+    expect(router.state.location.state).toEqual({ choose: true });
+    // La única zona y el mes anterior quedan elegidos, pero nada se pide hasta enviar.
+    expect(zone.value).toBe(ZONE);
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr12.period')).value).toBe(PERIOD);
+    expect(calls.reads).toHaveLength(1);
   });
 
   it('axe sin violaciones serias o críticas en paquete y formularios', async () => {

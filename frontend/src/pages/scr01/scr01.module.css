@@ -56,6 +56,69 @@
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+  font-weight: 600;
+}
+
+/* El envío del formulario es la acción principal (sistema visual v1). */
+.button[type='submit'] {
+  border-color: var(--color-action);
+  background: var(--color-action);
+  color: var(--color-on-action);
+}
+
+.button[type='submit']:hover:not(:disabled) {
+  background: var(--color-action-hover);
+}
+
+/*
+ * Pantallas de acceso (VIG-366, S3-01): tarjeta centrada con la marca encima, sobre el fondo de la
+ * aplicación; antes iba pegada a la izquierda y sin marca.
+ */
+.auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-6) var(--space-4);
+}
+
+.authBrand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  text-align: center;
+}
+
+.authName {
+  color: var(--color-action);
+  font-size: var(--font-size-display);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.authTagline {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+}
+
+.authCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 26rem;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.authCard .button[type='submit'] {
+  width: 100%;
 }
 
 .qr {

@@ -183,7 +183,7 @@ export default function Page() {
               {saved !== null && (
                 <p role="status" data-part="action_saved">
                   {text('scr09.loop.action_saved')}:{' '}
-                  <TimestampWithOffset instant={saved.due_at} timeZone={timeZone} />
+                  <TimestampWithOffset instant={saved.due_at} timeZone={timeZone} dateOnly />
                 </p>
               )}
               {showForm && (

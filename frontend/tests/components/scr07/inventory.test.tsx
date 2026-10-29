@@ -9,6 +9,8 @@ import Page from '@/pages/scr07/inventory';
 import Alarms from '@/pages/scr07/alarms';
 import { FleetView, WARNINGS, warningLabel } from '@/pages/scr07/inventory/FleetView';
 import { VirtualFleetTable } from '@/pages/scr07/inventory/VirtualFleetTable';
+import { zoneName } from '@/components/TimestampWithOffset/format';
+import styles from '@/pages/scr07/inventory/inventory.module.css';
 import { fleetPort, readFleet } from '@/ports/scr07Fleet';
 import { text } from '@/texts';
 import catalog from '@/texts/scr07.json';
@@ -334,5 +336,98 @@ describe('SCR-07 inventario', { timeout: 30_000 }, () => {
     expect(
       [...container.querySelectorAll('[data-part="legend"]')].map((legend) => legend.textContent),
     ).toEqual([text('components_status.observability.legend')]);
+  });
+});
+
+describe('SCR-07 densidad de la flota (VIG-366)', () => {
+  it('con una sola zona horaria la nombra una vez, en la cabecera, y no en cada hora', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <FleetView nodes={[node(1), node(2)]} plants={plants} />
+      </MemoryRouter>,
+    );
+    const zone = zoneName('America/Bogota') ?? '';
+    expect(screen.getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual([
+      text('scr07.resource'),
+      text('scr07.version_rate'),
+      `${text('scr07.communication')} (${zone})`,
+      `${text('scr07.health')} (${zone})`,
+      text('scr07.warning'),
+      text('scr07.live_url'),
+    ]);
+    expect(container.querySelectorAll('time').length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-part="zone"]')).toBeNull();
+  });
+
+  it('el identificador y la dirección local del nodo van plegados; a la vista, su código', () => {
+    const value = { ...node(1), live_view_local_url: 'http://192.0.2.10:8554/vista' };
+    const { container } = render(
+      <MemoryRouter>
+        <FleetView nodes={[value]} plants={plants} />
+      </MemoryRouter>,
+    );
+    const row = container.querySelector('tr[data-index="0"]');
+    const folded = row?.querySelector('details[data-part="technical"]');
+    expect(folded?.hasAttribute('open')).toBe(false);
+    expect(
+      [...(folded?.querySelectorAll('dd code') ?? [])].map((code) => code.textContent),
+    ).toEqual([value.node_id, value.live_view_local_url]);
+    const shown = [...(row?.querySelectorAll('td') ?? [])].map((cell) => {
+      const copy = cell.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('details').forEach((element) => {
+        element.remove();
+      });
+      return copy;
+    });
+    // Cada nodo de texto a la vista (React pinta cada valor en el suyo): ninguno es el
+    // identificador ni la dirección local, solos o junto a otro texto.
+    const texts = shown.flatMap((cell) => {
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      const found: string[] = [];
+      for (let next = walker.nextNode(); next !== null; next = walker.nextNode()) {
+        found.push(...(next.textContent ?? '').split(/[\s()[\],;·—]+/));
+      }
+      return found;
+    });
+    expect(texts).not.toContain(value.node_id);
+    expect(texts).not.toContain(value.live_view_local_url);
+    expect(shown.at(-1)?.textContent).toBe(text('scr07.live_available'));
+    expect(screen.getByRole('link', { name: value.code })).toBeDefined();
+  });
+
+  it('con plantas de zonas distintas la zona vuelve a cada hora', () => {
+    const madrid = {
+      plant_id: 'otra-planta',
+      name: 'Planta sintética 2',
+      timezone: 'Europe/Madrid',
+    };
+    const { container } = render(
+      <MemoryRouter>
+        <FleetView
+          nodes={[node(1), { ...node(2), plant_id: madrid.plant_id }]}
+          plants={[...plants, madrid]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getAllByRole('columnheader')[2]?.textContent).toBe(text('scr07.communication'));
+    expect(container.querySelectorAll('[data-part="zone"]').length).toBeGreaterThan(0);
+  });
+
+  it('la altura fija de 208 px es solo de la ventana virtual, no de la tabla paginada', () => {
+    const rows = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({ id: String(index), cells: ['x'] }));
+    const fixed = (root: HTMLElement) =>
+      [...root.querySelectorAll('tr[data-index]')].filter((row) =>
+        row.classList.contains(styles.virtualRow ?? 'virtualRow'),
+      ).length;
+    const short = render(
+      <VirtualFleetTable rows={rows(5)} headings={['h']} caption={text('scr07.title')} />,
+    );
+    expect(fixed(short.container)).toBe(0);
+    short.unmount();
+    const long = render(
+      <VirtualFleetTable rows={rows(301)} headings={['h']} caption={text('scr07.title')} />,
+    );
+    expect(fixed(long.container)).toBe(long.container.querySelectorAll('tr[data-index]').length);
   });
 });

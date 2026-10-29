@@ -8,12 +8,22 @@
  * ellos. No es una regla propia: son los estados del servidor con un registro del lazo pendiente.
  */
 import { useState } from 'react';
+import { DateInput } from '@/components/DateFields/DateFields';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
+import { ZoneHeader } from '@/components/TimestampWithOffset/TimestampWithOffset';
 import { PageRefresh } from '@/pages/shared/PageRefresh';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import { readInbox, type InboxFilters } from '@/ports/scr08Findings';
 import { policyFor, screenKey, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
-import { OverdueHeader, Result, useFindingsContext } from '../shared';
+import {
+  dayEnd,
+  dayStart,
+  filterTimeZone,
+  OverdueHeader,
+  Result,
+  useFindingsContext,
+} from '../shared';
 import { FAMILIES, TIERS, STATES, findingLabel } from './FindingsView';
 import { GatedFindingsView } from './GatedFindingsView';
 import styles from './inbox.module.css';
@@ -36,7 +46,10 @@ export function InboxScreen({
   readonly states?: readonly string[];
 }) {
   const context = useFindingsContext();
+  const check = useFormCheck();
   const [invalidPeriod, setInvalidPeriod] = useState(false);
+  const [zoneId, setZoneId] = useState('');
+  const timeZone = filterTimeZone(context.plants, zoneId === '' ? null : zoneId);
   const base: InboxFilters = states === undefined ? {} : { lifecycle_state: [...states] };
   const [selection, setSelection] = useState<{ filters: InboxFilters; pages: number }>({
     filters: base,
@@ -72,8 +85,10 @@ export function InboxScreen({
       <form
         className={styles.filters}
         aria-label={text('scr08.inbox.filters')}
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
+          if (!check.run(event.currentTarget)) return;
           const data = new FormData(event.currentTarget);
           const family = FAMILIES.find((value) => value === data.get('family'));
           const tier = TIERS.find((value) => value === data.get('tier'));
@@ -81,11 +96,13 @@ export function InboxScreen({
           const zone = data.get('zone');
           const from = data.get('from');
           const to = data.get('to');
-          const end =
-            typeof to === 'string' && to !== ''
-              ? new Date(Date.parse(`${to}T00:00:00.000Z`) + 86_400_000)
-              : null;
-          if (end !== null && !Number.isFinite(end.getTime())) {
+          // Los días se cuentan en la hora de la planta, no en UTC (S3-11).
+          const start = typeof from === 'string' && from !== '' ? dayStart(from, timeZone) : null;
+          const end = typeof to === 'string' && to !== '' ? dayEnd(to, timeZone) : null;
+          if (
+            (typeof from === 'string' && from !== '' && start === null) ||
+            (typeof to === 'string' && to !== '' && end === null)
+          ) {
             setInvalidPeriod(true);
             return;
           }
@@ -97,15 +114,21 @@ export function InboxScreen({
               ...(tier === undefined ? {} : { tier }),
               ...(state === undefined ? base : { lifecycle_state: [state] }),
               ...(typeof zone === 'string' && zone !== '' ? { zone_id: [zone] } : {}),
-              ...(typeof from === 'string' && from !== '' ? { from: `${from}T00:00:00.000Z` } : {}),
-              ...(typeof to === 'string' && to !== '' ? { to: end?.toISOString() ?? null } : {}),
+              ...(start === null ? {} : { from: start.toISOString() }),
+              ...(end === null ? {} : { to: end.toISOString() }),
             },
           });
         }}
       >
         <label>
           {text('scr08.inbox.zone')}
-          <select name="zone">
+          <select
+            name="zone"
+            value={zoneId}
+            onChange={(event) => {
+              setZoneId(event.currentTarget.value);
+            }}
+          >
             <option value="">{text('scr08.inbox.all')}</option>
             {context.plants
               .flatMap((p) => p.zones)
@@ -130,17 +153,22 @@ export function InboxScreen({
           </label>
         ))}
         <label>
-          {text('scr08.inbox.from')}
-          <input type="date" name="from" />
+          <span>
+            {text('scr08.inbox.from')}
+            <ZoneHeader timeZone={timeZone} />
+          </span>
+          <DateInput name="from" />
         </label>
         <label>
-          {text('scr08.inbox.to')}
-          <input type="date" name="to" />
+          <span>
+            {text('scr08.inbox.to')}
+            <ZoneHeader timeZone={timeZone} />
+          </span>
+          <DateInput name="to" />
         </label>
         <button type="submit">{text('scr08.inbox.apply')}</button>
       </form>
       {invalidPeriod && <p role="alert">{text('scr08.inbox.invalid_period')}</p>}
-      <p>{text('scr08.inbox.projection')}</p>
       <Result query={query}>
         {query.data !== undefined && <GatedFindingsView page={query.data} context={context} />}
         {query.data?.items.length === 0 && (

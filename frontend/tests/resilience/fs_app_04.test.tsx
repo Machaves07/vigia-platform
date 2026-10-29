@@ -26,6 +26,7 @@ import {
   renderClosure,
 } from '../components/scr09/closure_support';
 import { exampleFor } from '../msw/handlers';
+import { changeDateTime } from '../support/dateFields';
 import { scenario } from '../msw/scenario';
 import { faults } from '../msw/scenarios/fs_app';
 import { server } from '../setup/msw';
@@ -63,7 +64,7 @@ describe('FS-APP-04 · almacén de evidencias caído', { timeout: 120_000 }, () 
     const log = traffic();
     env.view();
     const summary = await screen.findByRole('region', { name: text('scr08.detail.summary') }, WAIT);
-    const player = document.querySelector<HTMLElement>('[data-part="clip"] figure');
+    const player = document.querySelector<HTMLElement>('[data-part="clip_gallery"] figure');
     const video = player?.querySelector('video');
     if (player == null || video == null) throw new Error('El detalle no tiene reproductor.');
 
@@ -135,9 +136,7 @@ describe('FS-APP-04 · almacén de evidencias caído', { timeout: 120_000 }, () 
       screen.getByRole('textbox', { name: reasonName('scr09.closure.description') }),
       DESCRIPTION,
     );
-    fireEvent.change(screen.getByLabelText(text('scr09.closure.performed_at')), {
-      target: { value: '2026-10-24T10:00' },
-    });
+    changeDateTime(screen.getByLabelText(text('scr09.closure.performed_at')), '2026-10-24T10:00');
     await user.type(
       screen.getByLabelText(text('scr09.closure.performed_by_role')),
       'Mantenimiento',

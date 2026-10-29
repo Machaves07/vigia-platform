@@ -80,6 +80,25 @@ export function plantTime(instant: string, timeZone: string): PlantTime | null {
   return { iso: date.toISOString(), local: formatter.format(date), offset: offsetLabel(offsetMs) };
 }
 
+/**
+ * Nombre de la zona para una cabecera de tabla (VIG-366, «la zona una sola vez por tabla»):
+ * «hora de Colombia» con el nombre genérico de `Intl` en español; si el motor no lo da, el
+ * identificador IANA con espacios. `null` si la zona no es válida.
+ */
+export function zoneName(timeZone: string): string | null {
+  try {
+    const parts = new Intl.DateTimeFormat('es-CO', {
+      timeZone,
+      timeZoneName: 'longGeneric',
+    }).formatToParts(0);
+    const name = parts.find((part) => part.type === 'timeZoneName')?.value;
+    if (name !== undefined && name !== '' && !/^GMT|^UTC[+−-]/.test(name)) return name;
+    return timeZone.replaceAll('_', ' ');
+  } catch {
+    return null;
+  }
+}
+
 const offsetFormat = new Intl.NumberFormat('es-CO', {
   signDisplay: 'exceptZero',
   minimumFractionDigits: 0,

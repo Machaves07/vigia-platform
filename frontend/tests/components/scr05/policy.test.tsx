@@ -18,6 +18,7 @@ import Policy from '@/pages/scr05/policy';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 import { apiError } from '../../msw/handlers';
+import { changeDate } from '../../support/dateFields';
 import { server } from '../../msw/server';
 import {
   gatesFixture,
@@ -81,9 +82,7 @@ describe('SCR-05 política de incerrables', { timeout: 60_000 }, () => {
     expect(within(current).getByText('CONCEPTO-SINT-002')).toBeDefined();
     expect(within(current).getByText('Gerencia sintética')).toBeDefined();
     expect(form.querySelector('[data-part="next_version"]')?.textContent).toBe('3');
-    fireEvent.change(within(form).getByLabelText(text('scr05.policy.signed_at')), {
-      target: { value: '2026-01-15' },
-    });
+    changeDate(within(form).getByLabelText(text('scr05.policy.signed_at')), '2026-01-15');
     fireEvent.change(within(form).getByLabelText(text('scr05.policy.signed_by')), {
       target: { value: 'Gerencia sintética' },
     });
@@ -121,9 +120,7 @@ describe('SCR-05 política de incerrables', { timeout: 60_000 }, () => {
     server.use(http.post(`${ORIGIN}/plants/:plant_id/policy`, () => apiError('conflict', 409)));
     const user = userEvent.setup();
     const { form } = await renderPolicy(true);
-    fireEvent.change(within(form).getByLabelText(text('scr05.policy.signed_at')), {
-      target: { value: '2026-01-15' },
-    });
+    changeDate(within(form).getByLabelText(text('scr05.policy.signed_at')), '2026-01-15');
     for (const [key, value] of [
       ['scr05.policy.signed_by', 'Gerencia sintética'],
       ['scr05.policy.legal_opinion', 'CONCEPTO-SINT-003'],

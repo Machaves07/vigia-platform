@@ -108,6 +108,10 @@ export async function setup(
     permissions?: string[];
     role?: Parameters<typeof meResponse>[0]['role'];
     entry?: boolean;
+    /** Estado de la navegación al abrir la entrada (p. ej. `{ choose: true }` al volver). */
+    entryState?: unknown;
+    /** Con dos zonas la entrada no abre sola el paquete (VIG-366). */
+    twoZones?: boolean;
     packageResponse?: () => Response;
     createResponse?: () => Response;
     resultResponse?: () => Response;
@@ -180,6 +184,17 @@ export async function setup(
                 name: 'Zona sintética',
                 node_id: null,
               },
+              ...(options.twoZones === true
+                ? [
+                    {
+                      zone_id: OTHER_ZONE,
+                      plant_id: PLANT,
+                      code: 'Z-SINT-2',
+                      name: 'Otra zona sintética',
+                      node_id: null,
+                    },
+                  ]
+                : []),
             ],
           },
         ],
@@ -282,7 +297,11 @@ export async function setup(
       { path: '/zones/monthly', element: <Entry /> },
       { path: '/zones/:zone_id/monthly/:period', element: <Page navigate={navigate} /> },
     ],
-    { initialEntries: [options.entry ? '/zones/monthly' : ROUTE] },
+    {
+      initialEntries: [
+        options.entry ? { pathname: '/zones/monthly', state: options.entryState ?? null } : ROUTE,
+      ],
+    },
   );
   const view = render(
     <Providers>

@@ -1,0 +1,23 @@
+/* Datos técnicos plegados (VIG-366). */
+.details {
+  font-size: var(--font-size-small);
+}
+
+.details summary {
+  color: var(--color-text-muted);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.list dt {
+  color: var(--color-text-muted);
+}
+
+.list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

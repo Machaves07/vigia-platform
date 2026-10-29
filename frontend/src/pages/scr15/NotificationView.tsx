@@ -33,7 +33,17 @@ export function notificationDestination(item: Notification): string | null {
   }
 }
 
-export function NotificationView({ item }: { readonly item: Notification }) {
+/**
+ * Un aviso en pocas líneas (VIG-366): sin la fila «Zona no facilitada» (el aviso no la trae) y la
+ * hora en la zona de la planta del alcance, no en UTC.
+ */
+export function NotificationView({
+  item,
+  timeZone,
+}: {
+  readonly item: Notification;
+  readonly timeZone: string;
+}) {
   const destination = notificationDestination(item);
   return (
     <dl className={styles.facts}>
@@ -41,11 +51,9 @@ export function NotificationView({ item }: { readonly item: Notification }) {
       <dd>{item.title_es}</dd>
       <dt>{text('scr15.level')}</dt>
       <dd>{label('notification_urgency', item.urgency)}</dd>
-      <dt>{text('scr15.zone')}</dt>
-      <dd>{text('scr15.zone_unavailable')}</dd>
       <dt>{text('scr15.moment')}</dt>
       <dd>
-        <TimestampWithOffset instant={item.created_at} timeZone="UTC" />
+        <TimestampWithOffset instant={item.created_at} timeZone={timeZone} />
       </dd>
       <dt>{text('scr15.status')}</dt>
       <dd>{text(item.read_at === null ? 'scr15.unread' : 'scr15.read')}</dd>

@@ -83,6 +83,7 @@ function SelectArea({ item, context }: { readonly item: NavItem; readonly contex
   const zone = item.select === 'zone_id';
   return (
     <form
+      noValidate
       aria-label={text(item.title_text)}
       onSubmit={(event) => {
         event.preventDefault();

@@ -6,6 +6,7 @@
 import platform from '../../../../backend/resources/labels.platform.es.json';
 
 import { text } from '@/texts';
+import { capitalizedTable } from '@/texts/labels';
 
 import styles from './WriteReceipt.module.css';
 
@@ -16,7 +17,7 @@ export interface WriteReceiptProps {
   readonly roleInUse: string | null;
 }
 
-const roles: Readonly<Record<string, string>> = platform.role;
+const roles: Readonly<Record<string, string>> = capitalizedTable(platform.role);
 
 function roleLabel(role: string | null): string {
   if (role === null) return text('components_forms.receipt.role_none');

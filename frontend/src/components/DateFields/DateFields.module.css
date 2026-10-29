@@ -1,0 +1,36 @@
+/* Campos de fecha, hora y mes en español, y error propio de campo (VIG-366). */
+.group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.input {
+  width: 9.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.select {
+  min-height: var(--touch-target-min);
+  padding: var(--space-2) var(--space-3);
+}
+
+.error {
+  display: flex;
+  flex-basis: 100%;
+  gap: var(--space-1);
+  align-items: flex-start;
+  margin: 0;
+  /* El rojo de «vencida» (#b42318, 6,6:1 sobre blanco): un error del campo, nunca de una zona. */
+  color: var(--state-overdue-bg);
+  font-size: var(--font-size-small);
+  font-weight: 500;
+}
+
+.icon {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+}

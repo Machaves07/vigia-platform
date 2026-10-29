@@ -186,11 +186,15 @@ export function BlurredClipPlayer({
   return (
     <figure className={styles.player} aria-label={name}>
       <div className={styles.frame}>
+        {/*
+         * Una sola forma de reproducir (VIG-366, S3-16): hasta que llega la URL solo está el botón
+         * «Reproducir»; los controles nativos aparecen después, para pausar y moverse.
+         */}
         <video
           ref={videoRef}
           className={styles.video}
           aria-label={name}
-          controls
+          controls={phase.kind === 'ready'}
           controlsList="nodownload noremoteplayback noplaybackrate"
           disablePictureInPicture
           disableRemotePlayback

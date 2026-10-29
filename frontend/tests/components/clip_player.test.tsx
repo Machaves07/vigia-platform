@@ -107,7 +107,11 @@ describe('atributos del reproductor (BR-APP-58)', () => {
     expect(video.getAttribute('controlslist')?.split(/\s+/)).toContain('nodownload');
     expect(video.hasAttribute('disablepictureinpicture')).toBe(true);
     expect(video.hasAttribute('disableremoteplayback')).toBe(true);
-    expect(video.hasAttribute('controls')).toBe(true);
+    // VIG-366 (S3-16): una sola forma de reproducir; sin URL no hay controles nativos, solo el botón.
+    expect(video.hasAttribute('controls')).toBe(false);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      t('media.clip.play'),
+    ]);
     expect(video.hasAttribute('download')).toBe(false);
     expect(video.hasAttribute('loop')).toBe(false);
     expect(video.hasAttribute('src')).toBe(false);
@@ -138,6 +142,16 @@ describe('atributos del reproductor (BR-APP-58)', () => {
 });
 
 describe('URL de evidencia (BR-APP-58, PR-APP-17)', () => {
+  it('con la URL llegan los controles nativos y desaparece el botón «Reproducir»', async () => {
+    serveReadUrl();
+    const { video } = renderPlayer();
+    fireEvent.click(screen.getByRole('button', { name: t('media.clip.play') }));
+    await waitFor(() => {
+      expect(video.hasAttribute('controls')).toBe(true);
+    }, WAIT);
+    expect(screen.queryByRole('button', { name: t('media.clip.play') })).toBeNull();
+  });
+
   it('no pide la URL al montar; la pide al pulsar reproducir y la pone solo en el src', async () => {
     serveReadUrl();
     const { video, container, onReadUrlRequested } = renderPlayer();

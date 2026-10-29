@@ -1,8 +1,5 @@
 /* SCR-15: lectura en una columna, controles grandes y texto largo sin desbordamiento. */
 .page {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: var(--space-4);
   overflow-wrap: anywhere;
 }
 .list {

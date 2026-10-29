@@ -15,8 +15,21 @@ import {
   type ZoneGate,
 } from '@/ports/scr08Findings';
 import { text } from '@/texts';
-import { FindingTime } from '../shared';
+import { ZoneHeader } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { FindingTime, sharedTimeZone } from '../shared';
 import styles from './inbox.module.css';
+
+const COLUMNS = [
+  'zone',
+  'family',
+  'tier',
+  'state',
+  'age',
+  'observability',
+  'standard',
+  'occurred',
+  'due',
+] as const;
 
 export const FAMILIES = ['coexistence', 'guard_bypass', 'dwell', 'startup_transition'] as const;
 export const TIERS = ['tier_1', 'tier_2'] as const;
@@ -94,7 +107,15 @@ export function FindingsView({
   readonly now?: number;
 }) {
   const zoneName = (id: string) =>
-    plants.flatMap((p) => p.zones).find((z) => z.zone_id === id)?.name ?? id;
+    plants.flatMap((p) => p.zones).find((z) => z.zone_id === id)?.name ??
+    text('scr08.inbox.unknown');
+  // La zona horaria va una sola vez, en la cabecera, si todas las filas son de la misma.
+  const tableZone = sharedTimeZone(
+    page.items.map(
+      (finding) => plants.find((p) => p.plant_id === finding.plant_id)?.timezone ?? '',
+    ),
+  );
+  const zone = tableZone === null || tableZone === '' ? 'inline' : 'header';
   return (
     <>
       {/* S3-09 (VIG-365): los avisos de planta y de zona, con su título y lo que significan. */}
@@ -148,21 +169,13 @@ export function FindingsView({
             <caption>{text('scr08.inbox.episodes')}</caption>
             <thead>
               <tr>
-                {[
-                  'zone',
-                  'family',
-                  'tier',
-                  'state',
-                  'age',
-                  'observability',
-                  'standard',
-                  'duration',
-                  'clips',
-                  'occurred',
-                  'due',
-                ].map((key) => (
+                {/* VIG-366: sin columnas que la proyección no trae (duración y clips). */}
+                {COLUMNS.map((key) => (
                   <th scope="col" key={key}>
                     {text(`scr08.inbox.${key}`)}
+                    {(key === 'occurred' || key === 'due') && tableZone !== null && (
+                      <ZoneHeader timeZone={tableZone} />
+                    )}
                   </th>
                 ))}
                 <th scope="col" className={styles.sticky}>
@@ -185,7 +198,7 @@ export function FindingsView({
                 if (display.state !== 'productive' && !revoked)
                   return (
                     <tr key={finding.finding_state_id}>
-                      <td colSpan={12}>
+                      <td colSpan={COLUMNS.length + 1}>
                         {zoneName(finding.zone_id)}{' '}
                         <GateStateChip gate={display} timeZone={timeZone} />
                       </td>
@@ -218,17 +231,15 @@ export function FindingsView({
                     <td>
                       {text('scr08.inbox.version')} {finding.standard.version}
                     </td>
-                    <td>{text('scr08.inbox.data_unavailable')}</td>
-                    <td>{text('scr08.inbox.data_unavailable')}</td>
                     <td>
-                      <FindingTime instant={finding.occurred_at} timeZone={timeZone} />
+                      <FindingTime instant={finding.occurred_at} timeZone={timeZone} zone={zone} />
                       {finding.time_aggregated && <p>{text('scr08.inbox.aggregated')}</p>}
                     </td>
                     <td>
                       {finding.due_at === null ? (
                         text('scr08.inbox.no_due')
                       ) : (
-                        <FindingTime instant={finding.due_at} timeZone={timeZone} />
+                        <FindingTime instant={finding.due_at} timeZone={timeZone} zone={zone} />
                       )}
                     </td>
                     <td className={styles.sticky}>

@@ -38,6 +38,7 @@
   "scr02.provider.list": "Concesiones que usted solicitó",
   "scr02.provider.empty": "Todavía no ha solicitado ninguna concesión.",
   "scr02.provider.operate": "Operar bajo esta concesión",
+  "scr02.provider.client_organization": "Organización cliente",
   "scr02.provider.operating": "Opera bajo una concesión: cada consulta queda registrada y el cliente la ve. Para dejar de operar, solicitar otra o elegir otra, pulse «Cambiar de concesión» en el aviso.",
   "scr02.provider.operate_refused": "No se pudo operar bajo esta concesión: ya no está vigente. Actualice la lista.",
   "scr02.request.open": "Solicitar una concesión",

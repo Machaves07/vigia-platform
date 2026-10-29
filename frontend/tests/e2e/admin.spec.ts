@@ -107,9 +107,13 @@ test('administrador: usuarios, jerarquía, catálogo, rechazo registrado, vocabu
   await page.getByRole('button', { name: 'Enviar', exact: true }).click();
   await expect(page.locator('[data-failed-criterion="standard"]')).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('table', { name: 'Historial de admisiones' })).toContainText(
-    'rechazada',
-  );
+  await expect(
+    page
+      .getByRole('table', { name: 'Historial de admisiones' })
+      .getByRole('cell', { name: 'Rechazada', exact: true })
+      // El mundo es compartido: cada motor deja la suya.
+      .first(),
+  ).toBeVisible();
   await openMenu(page, 'Vocabulario bloqueado');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(
     'Vocabulario bloqueado de la organización',

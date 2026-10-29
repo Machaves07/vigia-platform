@@ -121,10 +121,10 @@ test('NFR-APP-07: montón ≤ 200 MB con la bandeja de 200 filas', async ({
 
   for (let refresh = 1; refresh <= REFRESHES; refresh++) {
     const before = served();
-    // El indicador de la bandeja va justo después de sus filtros (los vencidos y las zonas
-    // tienen el suyo); `served` confirma que se volvió a pedir la bandeja.
+    // Una sola actualización por página, en su cabecera (sistema visual v1); `served` confirma
+    // que se volvió a pedir la bandeja.
     await page
-      .locator('main form[aria-label="Filtros de la bandeja"] + *')
+      .locator('main > header')
       .getByRole('button', { name: 'Actualizar', exact: true })
       .click();
     await expect.poll(served).toBe(before + MAX_ROWS);

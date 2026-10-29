@@ -8,9 +8,15 @@ import { readInbox } from '@/ports/scr08Findings';
 import { text } from '@/texts';
 import { server } from '../../msw/server';
 import { settle } from '../../support/queryCache';
+import { changeDate } from '../../support/dateFields';
 import { finding, fixture, gate, INSTANT, page, PLANT, zone } from './support';
 
 const WAIT = { timeout: 10_000 };
+
+/** Campo de día del filtro: su etiqueta lleva además la zona horaria de la planta. */
+function dayField(key: string): HTMLElement {
+  return screen.getByLabelText(new RegExp(`^${text(key)}`, 'u'));
+}
 
 describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
   it('una fecha fuera del rango de Date no lanza RangeError ni consulta el servidor', async () => {
@@ -27,11 +33,12 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
-    fireEvent.change(screen.getByLabelText(text('scr08.inbox.to')), {
-      target: { value: '999999-12-31' },
-    });
+    // VIG-366: el año fuera de rango ya no llega a convertirse; el campo lo rechaza en español.
+    const to = dayField('scr08.inbox.to');
+    changeDate(to, '31/12/999999');
     fireEvent.submit(screen.getByRole('form', { name: text('scr08.inbox.filters') }));
-    expect(screen.getByRole('alert').textContent).toBe(text('scr08.inbox.invalid_period'));
+    expect(to.getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByText(text('components_dates.date_format'))).toBeDefined();
     expect(calls).toBe(1);
   });
   it('propaga el cursor opaco del servidor sin fabricar desplazamiento y acota limit a 50', async () => {
@@ -72,7 +79,7 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
     // Toda la fila, también la columna del siguiente paso (VIG-359): ningún acceso al hallazgo.
-    expect(container.querySelector('tbody td')?.getAttribute('colspan')).toBe('12');
+    expect(container.querySelector('tbody td')?.getAttribute('colspan')).toBe('10');
     expect(container.querySelector('[data-part="finding_actions"]')).toBeNull();
     expect(container.querySelector('tbody td')?.textContent).toBe(
       `${zone().name} ${text('components_status.gate.no_scope_record')}`,
@@ -123,12 +130,8 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
       screen.getByRole('combobox', { name: text('scr08.inbox.state') }),
       'closed',
     );
-    fireEvent.change(screen.getByLabelText(text('scr08.inbox.from')), {
-      target: { value: '2025-12-01' },
-    });
-    fireEvent.change(screen.getByLabelText(text('scr08.inbox.to')), {
-      target: { value: '2025-12-31' },
-    });
+    changeDate(dayField('scr08.inbox.from'), '2025-12-01');
+    changeDate(dayField('scr08.inbox.to'), '2025-12-31');
     expect(requests).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: text('scr08.inbox.apply') }));
     await screen.findByText(text('scr08.inbox.empty'), {}, WAIT);
@@ -141,8 +144,9 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     expect(query?.get('family')).toBe('dwell');
     expect(query?.get('tier')).toBe('tier_2');
     expect(query?.getAll('lifecycle_state')).toEqual(['closed']);
-    expect(query?.get('from')).toBe('2025-12-01T00:00:00.000Z');
-    expect(query?.get('to')).toBe(INSTANT.replace('T12:00', 'T00:00'));
+    // Los días se cuentan en la hora de la planta (America/Bogota, UTC−5), no en UTC (S3-11).
+    expect(query?.get('from')).toBe('2025-12-01T05:00:00.000Z');
+    expect(query?.get('to')).toBe(INSTANT.replace('T12:00', 'T05:00'));
     expect(container.querySelector('[data-part="overdue"] strong')?.textContent).toBe('7');
     expect(overdue).toHaveLength(1);
     expect(overdue[0]?.searchParams.get('plant_id')).toBe(PLANT);
@@ -329,10 +333,14 @@ describe('SCR-08 bandeja', { timeout: 40_000 }, () => {
     await waitFor(() => {
       expect(cache.client.isFetching()).toBe(0);
     }, WAIT);
-    expect(container.querySelector('tbody td:nth-child(10) time')?.getAttribute('datetime')).toBe(
+    expect(container.querySelector('tbody td:nth-child(8) time')?.getAttribute('datetime')).toBe(
       INSTANT,
     );
-    expect(screen.getAllByText(text('scr08.inbox.data_unavailable'))).toHaveLength(2);
+    // VIG-366 (S3-12): sin columnas de duración ni clips que la proyección no trae.
+    expect(screen.queryByText('Dato no disponible en la proyección')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Duración total' })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Clips' })).toBeNull();
+    expect(container.textContent).not.toContain('Proyección no auditada');
     expect(screen.getByText(text('scr08.inbox.notice.agreement_revoked'))).toBeDefined();
     expect(screen.getByText(text('scr08.inbox.notice.walk_test_regression_pending'))).toBeDefined();
     expect(

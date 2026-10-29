@@ -1,5 +1,6 @@
 /** A-54: dos lecturas individuales; la diferencia se calcula localmente sobre campos permitidos. */
 import { useCallback, useId, useState } from 'react';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { KeysetTable } from '@/components/KeysetTable/KeysetTable';
 import type { KeysetRequest } from '@/components/KeysetTable/keyset';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
@@ -77,6 +78,7 @@ export function Versions({
   readonly concessionOrganizationId?: string | null;
 }) {
   const id = useId();
+  const check = useFormCheck();
   const [pair, setPair] = useState<readonly [number, number] | null>(null);
   const fetchPage = useCallback(
     async (request: KeysetRequest, signal: AbortSignal) => {
@@ -124,9 +126,11 @@ export function Versions({
         ]}
       />
       <form
+        noValidate
         aria-label={text('scr04.catalog.compare')}
         onSubmit={(event) => {
           event.preventDefault();
+          if (!check.run(event.currentTarget)) return;
           const data = new FormData(event.currentTarget);
           const from = Number(data.get('from'));
           const to = Number(data.get('to'));
@@ -141,9 +145,33 @@ export function Versions({
         }}
       >
         <label htmlFor={`${id}-from`}>{text('scr04.catalog.from')}</label>
-        <input id={`${id}-from`} name="from" type="number" min="1" step="1" required />
+        <input
+          id={`${id}-from`}
+          name="from"
+          type="number"
+          min="1"
+          step="1"
+          required
+          {...check.field('from')}
+          onChange={() => {
+            check.clear('from');
+          }}
+        />
+        {check.error('from')}
         <label htmlFor={`${id}-to`}>{text('scr04.catalog.to')}</label>
-        <input id={`${id}-to`} name="to" type="number" min="1" step="1" required />
+        <input
+          id={`${id}-to`}
+          name="to"
+          type="number"
+          min="1"
+          step="1"
+          required
+          {...check.field('to')}
+          onChange={() => {
+            check.clear('to');
+          }}
+        />
+        {check.error('to')}
         <button type="submit">{text('scr04.catalog.compare')}</button>
       </form>
       {pair === null ? null : (

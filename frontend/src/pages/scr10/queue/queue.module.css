@@ -31,3 +31,41 @@
 .context dd {
   margin: 0 0 var(--space-2);
 }
+
+/* Filas compactas de una línea (sistema visual v1, «Tabla compacta»; VIG-366). */
+.scroll {
+  overflow-x: auto;
+}
+
+.table td,
+.table th {
+  white-space: nowrap;
+}
+
+.table td[colspan] {
+  white-space: normal;
+}
+
+.confidence {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--state-neutral-bg);
+  color: var(--state-neutral-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.thresholds {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.thresholds h2,
+.thresholds p,
+.thresholds ul {
+  margin: 0 0 var(--space-1);
+}

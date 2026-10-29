@@ -6,6 +6,7 @@
  * abogado y resumen de criterios. La versión la fija el servidor (la anterior más uno): otra
  * responde `conflict`; la anterior permanece.
  */
+import { DateInput } from '@/components/DateFields/DateFields';
 import { fromZonedTime } from 'date-fns-tz';
 import { useId, useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -93,17 +94,13 @@ function PolicyForm({
       >
         <div className={styles.field}>
           <label htmlFor={`${id}-signed_at`}>{text('scr05.policy.signed_at')}</label>
-          <input
+          <DateInput
             id={`${id}-signed_at`}
-            type="date"
             value={signedAt}
             required
-            aria-required="true"
             aria-invalid={error('signed_at')}
             aria-describedby={describedBy('signed_at')}
-            onChange={(event) => {
-              setSignedAt(event.target.value);
-            }}
+            onChange={setSignedAt}
           />
           {required('signed_at')}
         </div>

@@ -1,8 +1,6 @@
 .page {
   display: grid;
   gap: 1.5rem;
-  padding: 1.5rem;
-  max-width: 80rem;
 }
 .page form,
 .page section,

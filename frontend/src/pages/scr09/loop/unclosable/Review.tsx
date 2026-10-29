@@ -1,4 +1,5 @@
 /** La revisión renueva con fecha o convierte en una acción nueva completa (T11/T12). */
+import { DateInput } from '@/components/DateFields/DateFields';
 import { useState } from 'react';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { SignatureBlock } from '@/components/SignatureBlock/SignatureBlock';
@@ -100,13 +101,7 @@ export function Review({
       {outcome === 'renewed' ? (
         <label>
           {text('scr09.unclosable.review_due_at')}
-          <input
-            type="date"
-            value={day}
-            onChange={(e) => {
-              setDay(e.target.value);
-            }}
-          />
+          <DateInput value={day} onChange={setDay} />
         </label>
       ) : (
         <ActionFields

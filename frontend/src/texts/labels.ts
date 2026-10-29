@@ -29,7 +29,34 @@ for (const [key, caption] of Object.entries(app)) {
   tables.set(name, table);
 }
 
-/** `enumName` es el nombre canónico snake_case de la lista de la unidad dueña. */
+/** Primera letra en mayúscula (VIG-366): «Coexistencia», no «coexistencia». */
+export function capitalized(value: string): string {
+  return value.charAt(0).toLocaleUpperCase('es-CO') + value.slice(1);
+}
+
+/**
+ * `enumName` es el nombre canónico snake_case de la lista de la unidad dueña. El valor se muestra
+ * con mayúscula inicial (VIG-366): las etiquetas de las unidades dueñas van en minúscula.
+ */
 export function label(enumName: string, value: string): string {
+  return capitalized(labelInline(enumName, value));
+}
+
+/** La etiqueta tal como la da la unidad dueña, para el medio de una frase («de la sesión …»). */
+export function labelInline(enumName: string, value: string): string {
   return tables.get(enumName)?.get(value) ?? text('common.unknown');
+}
+
+/** Una tabla de etiquetas leída directamente, con mayúscula inicial como `label()`. */
+export function capitalizedTable(
+  table: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(table).map(([value, caption]) => [value, capitalized(caption)]),
+  );
+}
+
+/** Si la lista tiene etiqueta para el valor (para omitir «Desconocido» donde sobra). */
+export function hasLabel(enumName: string, value: string): boolean {
+  return tables.get(enumName)?.has(value) ?? false;
 }

@@ -4,6 +4,7 @@
   "scr12.period": "Mes del paquete",
   "scr12.open": "Consultar paquete",
   "scr12.choose_zone": "Seleccione una zona",
+  "scr12.choose_again": "Elegir otro mes o zona",
   "scr12.unsealed": "El paquete del periodo aún no está sellado. No se pueden registrar compromisos.",
   "scr12.summary": "Hallazgos del periodo",
   "scr12.received": "Recibidos",

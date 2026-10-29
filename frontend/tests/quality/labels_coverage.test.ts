@@ -70,9 +70,9 @@ describe('cobertura de etiquetas por conjuntos (NFR-APP-52)', () => {
     expect(mergeLabels([{ shared: { one: 'Uno' } }, { shared: { two: 'Dos' } }])).toEqual({
       shared: { one: 'Uno', two: 'Dos' },
     });
-    expect(label('verification_result', 'passed')).toBe('superada');
-    expect(label('verification_result', 'intact')).toBe('íntegra');
-    expect(label('circuit_state', 'half_open')).toBe('a prueba');
+    expect(label('verification_result', 'passed')).toBe('Superada');
+    expect(label('verification_result', 'intact')).toBe('Íntegra');
+    expect(label('circuit_state', 'half_open')).toBe('A prueba');
   });
 
   it('quitar una etiqueta de labels.loop.es.json en una copia pone el comando en rojo', () => {
@@ -105,10 +105,10 @@ describe('cobertura de etiquetas por conjuntos (NFR-APP-52)', () => {
 
 describe('label: nunca valor crudo', () => {
   it('resuelve U-01, U-02, U-03, U-04 y los enums inline de la aplicación', () => {
-    expect(label('observability_state', 'observable')).toBe('observable');
-    expect(label('role', 'coordinator_sst')).toBe('coordinador SST');
-    expect(label('admission_result', 'admitted')).toBe('admitida');
-    expect(label('finding_lifecycle_state', 'received')).toBe('recibido, sin clasificar');
+    expect(label('observability_state', 'observable')).toBe('Observable');
+    expect(label('role', 'coordinator_sst')).toBe('Coordinador SST');
+    expect(label('admission_result', 'admitted')).toBe('Admitida');
+    expect(label('finding_lifecycle_state', 'received')).toBe('Recibido, sin clasificar');
     expect(label('alarm_status', 'cleared')).toBe('Alarma resuelta');
   });
 

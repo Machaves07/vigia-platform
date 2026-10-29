@@ -11,6 +11,7 @@
  * una página y `keyset_table.rows_committed` cuando sus filas están en el DOM, ambas con la hora
  * del `Clock` inyectado, y la medida `keyset_table.render` entre las dos.
  */
+import { DateInput } from '@/components/DateFields/DateFields';
 import {
   memo,
   useEffect,
@@ -118,6 +119,7 @@ function FilterBar({
     <form
       className={styles.filters}
       role="search"
+      noValidate
       aria-label={text('components_structure.keyset.filters_label')}
       onSubmit={submit}
     >
@@ -142,6 +144,15 @@ function FilterBar({
                   </option>
                 ))}
               </select>
+            ) : field.kind === 'date' ? (
+              // VIG-366: `dd/mm/aaaa` en español, no el formato del idioma del navegador.
+              <DateInput
+                id={id}
+                value={value}
+                onChange={(next) => {
+                  set(field.name, next);
+                }}
+              />
             ) : (
               <input
                 id={id}

@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { text } from '@/texts';
 import loopLabels from '../../../../backend/resources/labels.loop.es.json';
+import { changeDate } from '../../support/dateFields';
 import { USER_A } from '../../support/session';
 import { apiError, ITEM, PACKAGE, setup, WAIT } from './support';
 
@@ -14,9 +15,7 @@ async function fill() {
   fireEvent.change(within(form).getByRole('textbox', { name: text('scr12.responsible') }), {
     target: { value: USER_A },
   });
-  fireEvent.change(within(form).getByLabelText(text('scr12.due')), {
-    target: { value: '2026-03-20' },
-  });
+  changeDate(within(form).getByLabelText(text('scr12.due')), '2026-03-20');
   return form;
 }
 

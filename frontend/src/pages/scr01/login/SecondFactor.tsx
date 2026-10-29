@@ -12,6 +12,7 @@ import { useSession } from '@/state/session';
 import { text } from '@/texts';
 
 import styles from '../scr01.module.css';
+import { AuthFrame } from './AuthFrame';
 import { completeSignIn, FailureNotice, isSecondFactorCode, useThrottle } from '../session';
 
 export function SecondFactor(): ReactNode {
@@ -47,7 +48,7 @@ export function SecondFactor(): ReactNode {
   };
 
   return (
-    <main className={styles.page} aria-labelledby={`${id}-title`}>
+    <AuthFrame labelledBy={`${id}-title`}>
       <h1 id={`${id}-title`} className={styles.title}>
         {text('scr01.second_factor.title')}
       </h1>
@@ -106,6 +107,6 @@ export function SecondFactor(): ReactNode {
           </button>
         </div>
       </form>
-    </main>
+    </AuthFrame>
   );
 }

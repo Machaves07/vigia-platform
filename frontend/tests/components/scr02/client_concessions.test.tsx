@@ -29,6 +29,7 @@ import {
   ORGANIZATION,
   ORIGIN,
   OTHER_CONCESSION,
+  PLANT,
   providerQuery,
   seriousViolations,
   WAIT,
@@ -113,6 +114,40 @@ describe('/concessions', { timeout: 60_000 }, () => {
     expect(within(revoked).getByText(text('scr02.reason.none'))).toBeDefined();
     expect(within(revoked).getByText(label('concession_status', 'revoked'))).toBeDefined();
     expect(within(revoked).getByText(text('scr02.revoked_by.client'))).toBeDefined();
+  });
+
+  it('VIG-366: el gerente con alcance de planta pide por su planta y ve la lista, no un error', async () => {
+    const { requests } = await mountAt('/concessions', { plantScoped: true });
+    await listTable();
+    expect(screen.queryByText(text('components_structure.keyset.error'))).toBeNull();
+    expect(requests.concessionPlants).toEqual([PLANT]);
+  });
+
+  it('VIG-366: si la jerarquía falla con alcance de planta, error con «Reintentar», no «cargando»', async () => {
+    let failing = true;
+    const user = userEvent.setup();
+    const fixture = await mountAt('/concessions', {
+      plantScoped: true,
+      hierarchyFails: () => failing,
+    });
+    // Los reintentos automáticos de la lectura corren con el reloj simulado.
+    const retry = await waitFor(() => {
+      advance(fixture.clock, 10_000);
+      return screen.getByRole('button', { name: text('screen_state.retry') });
+    }, WAIT);
+    expect(screen.getByText(text('screen_state.error'), { exact: true })).toBeDefined();
+    failing = false;
+    // La conexión deja de dar por caída la plataforma tras su espera; entonces se reintenta.
+    advance(fixture.clock, 120_000);
+    await user.click(retry);
+    await listTable();
+    expect(fixture.requests.concessionPlants).toEqual([PLANT]);
+  });
+
+  it('con alcance de organización pide una sola vez, sin plant_id', async () => {
+    const { requests } = await mountAt('/concessions');
+    await listTable();
+    expect(requests.concessionPlants).toEqual([null]);
   });
 
   it('sin concesiones muestra el texto propio', async () => {

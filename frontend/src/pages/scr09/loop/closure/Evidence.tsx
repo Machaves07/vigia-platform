@@ -1,4 +1,5 @@
 /** Evidencia estructurada y composición de un máximo de cinco adjuntos declarados. */
+import { DateTimeInput } from '@/components/DateFields/DateFields';
 import { useState } from 'react';
 import {
   DirectUploadField,
@@ -130,15 +131,7 @@ export function Evidence({
       </label>
       <label>
         {text('scr09.closure.performed_at')}
-        <input
-          name="performed_at"
-          type="datetime-local"
-          value={performed}
-          onChange={(e) => {
-            setPerformed(e.target.value);
-          }}
-          required
-        />
+        <DateTimeInput name="performed_at" value={performed} onChange={setPerformed} required />
       </label>
       <label>
         {text('scr09.closure.performed_by_role')}

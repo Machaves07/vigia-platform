@@ -166,6 +166,13 @@ export async function mountAt(
   options: {
     readonly concessions?: readonly ClientConcession[];
     readonly providerConcessions?: readonly ProviderConcession[];
+    /**
+     * Gerente con alcance de planta (VIG-366): como el servidor, `GET /concessions` sin `plant_id`
+     * responde `not_found` a quien no tiene alcance de organización.
+     */
+    readonly plantScoped?: boolean;
+    /** `GET /hierarchy` responde `temporarily_unavailable` mientras devuelva `true`. */
+    readonly hierarchyFails?: () => boolean;
   } = {},
 ) {
   const clock = new FakeClock(Date.parse(INSTANT));
@@ -178,7 +185,14 @@ export async function mountAt(
       isActive: () => true,
     },
   });
-  const me = path === '/concessions' ? clientMe(clock) : providerMe(clock);
+  const base = path === '/concessions' ? clientMe(clock) : providerMe(clock);
+  const me: MeResponse =
+    options.plantScoped === true
+      ? {
+          ...base,
+          assignments: [{ role: 'plant_manager', scope_level: 'plant', scope_id: PLANT }],
+        }
+      : base;
   const meHeaders: (string | null)[] = [];
   const session = createSessionStore({
     clock,
@@ -206,16 +220,27 @@ export async function mountAt(
   installTransport(
     createTransport({ clock, connection, origin: ORIGIN, ...transportOptions(concession) }),
   );
-  const requests = { concessions: 0, providerConcessions: 0 };
+  const requests = {
+    concessions: 0,
+    providerConcessions: 0,
+    /** `plant_id` de cada `GET /concessions` (`null` sin él). */
+    concessionPlants: [] as (string | null)[],
+  };
   /** `X-Vigia-Concession` de cada `GET /hierarchy` (`null` sin cabecera). */
   const hierarchyHeaders: (string | null)[] = [];
   server.use(
     http.get(`${ORIGIN}/hierarchy`, ({ request }) => {
       hierarchyHeaders.push(request.headers.get('X-Vigia-Concession'));
+      if (options.hierarchyFails?.() === true)
+        return apiError('temporarily_unavailable', 503, 'Servicio no disponible.');
       return HttpResponse.json(hierarchy());
     }),
-    http.get(`${ORIGIN}/concessions`, () => {
+    http.get(`${ORIGIN}/concessions`, ({ request }) => {
       requests.concessions += 1;
+      const plant = new URL(request.url).searchParams.get('plant_id');
+      requests.concessionPlants.push(plant);
+      if (options.plantScoped === true && plant === null)
+        return apiError('not_found', 404, 'Recurso no encontrado.');
       return HttpResponse.json({ concessions: options.concessions ?? [clientConcession()] });
     }),
     http.get(`${ORIGIN}/provider/concessions`, () => {

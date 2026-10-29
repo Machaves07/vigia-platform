@@ -26,7 +26,7 @@ it('A-5 · BR-APP-21, 22, 28, 33, 59: filtros cerrados sin persona y exportació
     [...filters.querySelectorAll('input, select, textarea')].map(
       (e) => e.getAttribute('type') ?? e.tagName,
     ),
-  ).toEqual(['SELECT', 'month']);
+  ).toEqual(['SELECT', 'SELECT']);
   expect(within(filters).getByLabelText(text('scr13.zone'))).toBeDefined();
   expect(within(filters).getByLabelText(text('scr13.period'))).toBeDefined();
   expect(view.container.querySelector('[data-person-count], [data-tracking-id]')).toBeNull();

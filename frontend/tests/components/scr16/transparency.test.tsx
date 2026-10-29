@@ -87,7 +87,9 @@ describe('SCR-16 vista de transparencia', { timeout: 30_000 }, () => {
     );
     expect(screen.getByRole('heading', { name: 'Estándar sintético de resguardo' })).toBeDefined();
     expect(screen.getByText('Texto declarado sintético del estándar')).toBeDefined();
-    expect(screen.getByText(label('agreement_status', 'approved'))).toBeDefined();
+    // El estado va en su `dd`: con mayúscula inicial coincide con el título «Aprobado» de la fecha.
+    const status = screen.getByText(label('agreement_status', 'approved'), { selector: 'dd' });
+    expect(status.previousElementSibling?.textContent).toBe(text('scr16.agreement.status'));
     const signatories = screen.getByRole('table', { name: text('scr16.agreement.signatories') });
     const [, confirmed, pending, ...rest] = within(signatories).getAllByRole('row');
     expect(rest).toEqual([]);

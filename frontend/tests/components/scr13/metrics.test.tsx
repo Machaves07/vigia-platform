@@ -1,5 +1,5 @@
 /** RV-17: estados honestos, filtros cerrados, consulta real y accesibilidad. */
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
@@ -22,6 +22,36 @@ describe('SCR-13 métricas', { timeout: 30_000 }, () => {
     expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe('');
     expect(requests).toEqual(['/hierarchy']);
     server.events.removeAllListeners();
+  });
+  it('VIG-366: con una sola zona en el alcance, las métricas llegan con esa zona elegida', async () => {
+    const f = await fixture();
+    server.use(
+      http.get(`${API}/hierarchy`, () =>
+        HttpResponse.json({
+          organization: { organization_id: 'synthetic', name: 'Organización sintética' },
+          plants: [
+            {
+              plant_id: PLANT,
+              code: 'P-SINT',
+              name: 'Planta sintética',
+              timezone: 'UTC',
+              country: 'CO',
+              status: 'active',
+              data_region: 'co',
+              zones: [
+                { zone_id: ZONE, plant_id: PLANT, code: 'Z-0', name: 'Zona única', node_id: null },
+              ],
+            },
+          ],
+          nodes: [],
+        }),
+      ),
+    );
+    render(<Page />, { wrapper: f.Wrapper });
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.zone')).value).toBe(ZONE);
+    }, WAIT);
+    expect(screen.queryByText(text('scr13.not_requested'), { exact: true })).toBeNull();
   });
   it('periodo vacío permitido por el espejo no provoca una gráfica inválida', () => {
     const data = { ...snapshot('synthetic'), period: '' };
@@ -94,11 +124,15 @@ describe('SCR-13 métricas', { timeout: 30_000 }, () => {
     expect(requests).toHaveLength(0);
     const form = screen.getByRole('button', { name: text('scr13.consult') }).closest('form');
     if (form === null) throw new Error('Falta el formulario.');
+    // Zona y periodo; el periodo es una lista de meses en español (VIG-366).
     expect([...form.querySelectorAll('input,select')].map((element) => element.tagName)).toEqual([
       'SELECT',
-      'INPUT',
+      'SELECT',
     ]);
-    expect(within(form).getAllByRole('combobox')).toHaveLength(1);
+    expect(within(form).getAllByRole('combobox')).toEqual([
+      screen.getByLabelText(text('scr13.zone')),
+      screen.getByLabelText(text('scr13.period')),
+    ]);
     await consult();
     await screen.findByText(text('scr13.not_computable'), {}, WAIT);
     expect(requests).toHaveLength(1);

@@ -82,6 +82,7 @@ function ClassifyForm({
   const [category, setCategory] = useState('');
   const [reason, setReason] = useState('');
   const [reinforced, setReinforced] = useState(false);
+  const reinforcedId = useId();
   const [showErrors, setShowErrors] = useState(false);
   const mutation = useScreenMutation({
     write: (body: ClassificationBody) =>
@@ -225,18 +226,25 @@ function ClassifyForm({
         }}
       />
       {reclassification && (
-        <label>
-          <input
-            type="checkbox"
-            name="reinforced_reason"
-            checked={reinforced}
-            onChange={(event) => {
-              mutation.reset();
-              setReinforced(event.currentTarget.checked);
-            }}
-          />
-          {text('scr09.classify.reinforced')}
-        </label>
+        <div>
+          <label>
+            <input
+              type="checkbox"
+              name="reinforced_reason"
+              checked={reinforced}
+              aria-describedby={`${reinforcedId}-help`}
+              onChange={(event) => {
+                mutation.reset();
+                setReinforced(event.currentTarget.checked);
+              }}
+            />
+            {text('scr09.classify.reinforced')}
+          </label>
+          {/* S3-21: qué declara la casilla, debajo y alineado con la marca. */}
+          <p id={`${reinforcedId}-help`} data-part="reinforced_help">
+            {text('scr09.classify.reinforced_help')}
+          </p>
+        </div>
       )}
       <button type="submit" disabled={mutation.status === 'pending'}>
         {text('scr09.classify.submit')}

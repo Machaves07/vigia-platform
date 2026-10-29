@@ -1,4 +1,5 @@
 /** Cinco campos y fecha civil de revisión; el servidor decide la transición y la política. */
+import { DateInput } from '@/components/DateFields/DateFields';
 import { useState } from 'react';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import { SignatureBlock, type SignerProfile } from '@/components/SignatureBlock/SignatureBlock';
@@ -132,12 +133,11 @@ export function Declaration({
             content: (
               <label>
                 {text('scr09.unclosable.decision_date')}
-                <input
-                  type="date"
+                <DateInput
                   name="decision_date"
                   value={draft.decision_date}
-                  onChange={(e) => {
-                    change('decision_date', e.target.value);
+                  onChange={(value) => {
+                    change('decision_date', value);
                   }}
                 />
               </label>
@@ -152,14 +152,13 @@ export function Declaration({
               <>
                 <label>
                   {text('scr09.unclosable.review_due_at')}
-                  <input
-                    type="date"
+                  <DateInput
                     name="review_due_at"
                     value={draft.review_due_at}
                     aria-invalid={draft.review_due_at !== '' && !dateValid}
                     aria-describedby="review-range"
-                    onChange={(e) => {
-                      change('review_due_at', e.target.value);
+                    onChange={(value) => {
+                      change('review_due_at', value);
                     }}
                   />
                 </label>

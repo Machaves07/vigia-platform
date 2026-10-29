@@ -8,6 +8,7 @@ import { HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import { text } from '@/texts';
+import { formatDuration } from '@/texts/duration';
 import { label } from '@/texts/labels';
 import { settle } from '../../support/queryCache';
 import {
@@ -98,9 +99,13 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     const list = contract.closest('dl');
     expect(list).not.toBeNull();
     const finding = validFinding();
+    // La duración se muestra en segundos o minutos, nunca en milisegundos (VIG-366).
+    expect(contract.nextElementSibling?.textContent).toBe(
+      formatDuration(finding.condition_duration_ms),
+    );
     expect(
-      within(list as HTMLElement).getByText(String(finding.condition_duration_ms)),
-    ).toBeDefined();
+      within(list as HTMLElement).queryByText(String(finding.condition_duration_ms)),
+    ).toBeNull();
     const timestamp = (list as HTMLElement).querySelector('[data-part="timestamp"]');
     expect(timestamp?.querySelector('[data-part="node"]')).not.toBeNull();
     expect(timestamp?.querySelector('[data-part="offset"]')).not.toBeNull();
@@ -116,7 +121,11 @@ describe('SCR-08 detalle del hallazgo', { timeout: 60_000 }, () => {
     expect(signal?.textContent).toBe(
       `${label('signal_role', 'energy')}: ${label('signal_value', 'asserted')}`,
     );
-    expect(document.querySelectorAll('[data-part="clip"]')).toHaveLength(1);
+    // Un solo clip: la galería muestra su reproductor y ninguna miniatura (VIG-366, S3-16).
+    const galleries = document.querySelectorAll('[data-part="clip_gallery"]');
+    expect(galleries).toHaveLength(1);
+    expect(galleries[0]?.querySelectorAll('figure')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-part="clip"]')).toHaveLength(0);
   });
 
   it('un Finding con un campo inyectado no se pinta y la sección muestra el error de contrato', async () => {

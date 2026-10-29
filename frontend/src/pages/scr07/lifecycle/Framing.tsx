@@ -3,6 +3,7 @@
  * momento de la captura en la hora de la planta y el motivo. El servidor marca la regresión con
  * `framing_recaptured` y la matriz completa; la pantalla muestra la causa que devuelve.
  */
+import { DateTimeInput } from '@/components/DateFields/DateFields';
 import { useId, useState } from 'react';
 import { ReasonField, reasonIssueKey } from '@/components/ReasonField/ReasonField';
 import {
@@ -120,15 +121,12 @@ export function FramingRecapture({
         </label>
         <label>
           {text('scr07.framing.captured_at')}
-          <input
-            type="datetime-local"
+          <DateTimeInput
             name="captured_at"
             required
             value={capturedAt}
             aria-invalid={attempted && instant === null}
-            onChange={(event) => {
-              edit(setCapturedAt)(event.currentTarget.value);
-            }}
+            onChange={edit(setCapturedAt)}
           />
         </label>
         <ReasonField

@@ -7,7 +7,7 @@
  */
 import { text } from '@/texts';
 
-import { nodeOffset, plantTime } from './format';
+import { nodeOffset, plantTime, zoneName } from './format';
 import styles from './TimestampWithOffset.module.css';
 
 export interface TimestampWithOffsetProps {
@@ -19,9 +19,26 @@ export interface TimestampWithOffsetProps {
   readonly nodeTime?: string;
   /** Nombre de la planta, cuando la vista muestra todas las plantas. */
   readonly plantName?: string;
+  /**
+   * En una tabla la zona va una sola vez, en la cabecera (`ZoneHeader`; VIG-366): `'header'` la
+   * quita de la celda. Solo cuando todas las filas son de la misma zona.
+   */
+  readonly zone?: 'inline' | 'header';
+  /** Solo la fecha, sin la hora (un plazo que vence en un día; VIG-366, S3-25). */
+  readonly dateOnly?: boolean;
 }
 
-function ZonedTime({ instant, timeZone }: { instant: string; timeZone: string }) {
+function ZonedTime({
+  instant,
+  timeZone,
+  inlineZone,
+  dateOnly,
+}: {
+  instant: string;
+  timeZone: string;
+  inlineZone: boolean;
+  dateOnly: boolean;
+}) {
   const value = plantTime(instant, timeZone);
   if (value === null) {
     return (
@@ -30,11 +47,31 @@ function ZonedTime({ instant, timeZone }: { instant: string; timeZone: string })
   }
   return (
     <>
-      <time dateTime={value.iso}>{value.local}</time>{' '}
-      <span className={styles.zone} data-part="zone">
-        ({timeZone}, {value.offset})
-      </span>
+      <time dateTime={value.iso}>{dateOnly ? value.local.slice(0, 10) : value.local}</time>
+      {inlineZone && (
+        <>
+          {' '}
+          <span className={styles.zone} data-part="zone">
+            ({timeZone}, {value.offset})
+          </span>
+        </>
+      )}
     </>
+  );
+}
+
+/**
+ * La zona de una columna de horas, una sola vez (VIG-366): «(hora de Colombia)». Las celdas usan
+ * `zone="header"`. Una zona no válida no se nombra.
+ */
+export function ZoneHeader({ timeZone }: { readonly timeZone: string }) {
+  const name = zoneName(timeZone);
+  if (name === null) return null;
+  return (
+    <span className={styles.zone} data-part="zone_header">
+      {' '}
+      ({name})
+    </span>
   );
 }
 
@@ -43,7 +80,10 @@ export function TimestampWithOffset({
   timeZone,
   nodeTime,
   plantName,
+  zone = 'inline',
+  dateOnly = false,
 }: TimestampWithOffsetProps) {
+  const inlineZone = zone === 'inline';
   const offset = nodeTime === undefined ? null : nodeOffset(instant, nodeTime);
   return (
     <span className={styles.timestamp} data-part="timestamp">
@@ -53,12 +93,22 @@ export function TimestampWithOffset({
         </span>
       )}
       <span data-part="platform">
-        <ZonedTime instant={instant} timeZone={timeZone} />
+        <ZonedTime
+          instant={instant}
+          timeZone={timeZone}
+          inlineZone={inlineZone}
+          dateOnly={dateOnly}
+        />
       </span>
       {nodeTime !== undefined && (
         <span className={styles.node} data-part="node">
           {text('components_status.timestamp.node_time')}:{' '}
-          <ZonedTime instant={nodeTime} timeZone={timeZone} />
+          <ZonedTime
+            instant={nodeTime}
+            timeZone={timeZone}
+            inlineZone={inlineZone}
+            dateOnly={false}
+          />
           {offset !== null && (
             <span data-part="offset">
               {' '}

@@ -7,6 +7,7 @@ import {
   type VerifyRequest,
 } from '@/ports/scr03Integrity';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
+import { usePlantTimeZone } from '@/app/AppShell';
 import { text } from '@/texts';
 import { CheckpointsView, ResultDate, VerifierView } from '../IntegrityViews';
 import { useUiSession } from '@/state/session';
@@ -16,6 +17,8 @@ import styles from '../scr03.module.css';
 
 function Integrity() {
   const context = useIntegrityContext();
+  // VIG-366: la hora en la zona de la planta del alcance, no en UTC.
+  const scopeZone = usePlantTimeZone();
   const [chain, setChain] = useState('ledger');
   const [accepted, setAccepted] = useState<VerificationAccepted | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -49,12 +52,14 @@ function Integrity() {
     invalidates: { screen: 'scr03', resources: ['integrity'] },
   });
   const timeZone =
-    context.plants.find((plant) => plant.plant_id === accepted?.chain.plant_id)?.timezone ?? 'UTC';
+    context.plants.find((plant) => plant.plant_id === accepted?.chain.plant_id)?.timezone ??
+    scopeZone;
   return (
     <main className={styles.page}>
       <h1>{text('scr03.integrity')}</h1>
       <p>{text('scr03.no_packages')}</p>
       <form
+        noValidate
         onSubmit={(event) => {
           event.preventDefault();
           setAccepted(null);
@@ -135,7 +140,7 @@ function Integrity() {
             <CheckpointsView
               {...checkpoints.data}
               plants={context.plants}
-              timeZone="UTC"
+              timeZone={scopeZone}
               organizationId={context.organizationId}
               concessionOrganizationId={context.concessionOrganizationId}
             />

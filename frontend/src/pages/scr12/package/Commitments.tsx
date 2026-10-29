@@ -1,5 +1,8 @@
 /** Compromisos: el responsable ejecuta una acción sobre la zona, nunca es una persona observada. */
 import { useId, useState } from 'react';
+import { DateInput } from '@/components/DateFields/DateFields';
+import { dateText } from '@/components/DateFields/parse';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { ScreenState } from '@/pages/shared/ScreenState';
 import {
   monthlyPort,
@@ -28,7 +31,7 @@ export function CommitmentView({ item }: { readonly item: Commitment }) {
         <dt>{text('scr12.responsible')}</dt>
         <dd>{item.responsible_user_id}</dd>
         <dt>{text('scr12.due')}</dt>
-        <dd>{item.due_date}</dd>
+        <dd>{dateText(item.due_date) || item.due_date}</dd>
         <dt>{text('scr12.state')}</dt>
         <dd>{label('commitment_state', item.state)}</dd>
       </dl>
@@ -55,6 +58,7 @@ function UpdateCommitment({
   return (
     <form
       aria-label={text('scr12.update')}
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         void mutation
@@ -110,6 +114,7 @@ function CreateCommitment({
   const [value, setValue] = useState('');
   const [responsible, setResponsible] = useState('');
   const [due, setDue] = useState('');
+  const check = useFormCheck();
   const mutation = useScreenMutation({
     write: (commitment: CommitmentInput) =>
       monthlyPort.recordCommitments.write({
@@ -121,8 +126,10 @@ function CreateCommitment({
   return (
     <form
       aria-label={text('scr12.create')}
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
+        if (!check.run(event.currentTarget)) return;
         void mutation
           .run({ text: value, responsible_user_id: responsible, due_date: due })
           .then(() => {
@@ -144,37 +151,47 @@ function CreateCommitment({
         minLength={20}
         maxLength={1000}
         value={value}
+        {...check.field('text')}
         onChange={(event) => {
           setValue(event.target.value);
+          check.clear('text');
           mutation.reset();
         }}
       />
+      {check.error('text')}
       <label htmlFor={`${id}-responsible`}>{text('scr12.responsible')}</label>
       <input
         id={`${id}-responsible`}
         name="responsible_user_id"
         required
         pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-        aria-describedby={`${id}-help`}
         value={responsible}
+        aria-invalid={check.field('responsible_user_id')['aria-invalid']}
+        aria-describedby={[`${id}-help`, check.field('responsible_user_id')['aria-describedby']]
+          .filter(Boolean)
+          .join(' ')}
         onChange={(event) => {
           setResponsible(event.target.value);
+          check.clear('responsible_user_id');
           mutation.reset();
         }}
       />
+      {check.error('responsible_user_id')}
       <p id={`${id}-help`}>{text('scr12.responsible_help')}</p>
       <label htmlFor={`${id}-due`}>{text('scr12.due')}</label>
-      <input
+      <DateInput
         id={`${id}-due`}
         name="due_date"
-        type="date"
         required
         value={due}
-        onChange={(event) => {
-          setDue(event.target.value);
+        {...check.field('due_date')}
+        onChange={(value) => {
+          setDue(value);
+          check.clear('due_date');
           mutation.reset();
         }}
       />
+      {check.error('due_date')}
       <button type="submit" disabled={mutation.status === 'pending'}>
         {text('scr12.create')}
       </button>

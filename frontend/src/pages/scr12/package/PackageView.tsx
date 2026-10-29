@@ -1,5 +1,6 @@
 /** RV-16: proyección explícita de los campos disponibles; ningún objeto abierto se expande. */
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
 import type { MonthlyPackage } from '@/ports/scr12Monthly';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
@@ -68,7 +69,11 @@ export function PackageView({
           <ul>
             {data.commitments_from_previous_period.map((entry) => (
               <li key={entry.commitment_id}>
-                <code>{entry.commitment_id}</code>: {label('commitment_state', entry.state)}
+                {/* VIG-366: el estado a la vista; el identificador, plegado. */}
+                {label('commitment_state', entry.state)}
+                <TechnicalDetails
+                  items={[{ name: text('common.identifier'), value: entry.commitment_id }]}
+                />
               </li>
             ))}
           </ul>
@@ -82,9 +87,7 @@ export function PackageView({
         <h2>{text('scr12.checkpoint')}</h2>
         <p>{text('scr12.checkpoint_unavailable')}</p>
         {data.record_id !== null && (
-          <p>
-            {text('scr12.record')}: <code>{data.record_id}</code>
-          </p>
+          <TechnicalDetails items={[{ name: text('scr12.record'), value: data.record_id }]} />
         )}
       </section>
       <p>{text('scr12.sample_metadata_unavailable')}</p>

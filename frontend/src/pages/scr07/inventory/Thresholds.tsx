@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useFormCheck } from '@/components/DateFields/useFormCheck';
 import { fleetFailure, fleetPort, type FleetThresholds } from '@/ports/scr07Fleet';
 import { policyFor, screenKey, useScreenMutation, useScreenQuery } from '@/state/query';
 import { text } from '@/texts';
@@ -17,6 +18,7 @@ function ThresholdForm({
       fleetPort.saveThresholds.write({ path: { plant_id: plantId }, body }),
     invalidates: { screen: 'scr07', resources: ['fleet_thresholds', 'nodes', 'fleet_alarms'] },
   });
+  const check = useFormCheck();
   const [values, setValues] = useState({
     queue_pending_threshold: String(initial.queue_pending_threshold),
     queue_age_threshold_minutes: String(initial.queue_age_threshold_minutes),
@@ -30,9 +32,11 @@ function ThresholdForm({
   const labels = ['scr07.queue_threshold', 'scr07.age_threshold', 'scr07.drift_threshold'];
   return (
     <form
+      noValidate
       className={styles.fields}
       onSubmit={(event) => {
         event.preventDefault();
+        if (!check.run(event.currentTarget)) return;
         void mutation
           .run({
             queue_pending_threshold: Number(values.queue_pending_threshold),
@@ -54,11 +58,14 @@ function ThresholdForm({
             step={1}
             disabled={mutation.status === 'pending'}
             value={values[field]}
+            {...check.field(field)}
             onChange={(event) => {
               mutation.reset();
+              check.clear(field);
               setValues({ ...values, [field]: event.currentTarget.value });
             }}
           />
+          {check.error(field)}
         </label>
       ))}
       <button type="submit" disabled={mutation.status === 'pending'}>

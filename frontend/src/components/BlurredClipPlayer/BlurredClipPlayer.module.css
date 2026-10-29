@@ -6,11 +6,15 @@
   color: var(--color-text);
 }
 
+/*
+ * 16:9 con el fondo de tinta (VIG-366, S3-19): un vídeo de otra proporción deja bandas oscuras
+ * y no franjas blancas.
+ */
 .frame {
   position: relative;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background-color: var(--color-surface-muted);
+  background-color: var(--color-text);
   overflow: hidden;
 }
 
@@ -18,7 +22,8 @@
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
-  background-color: var(--color-surface-muted);
+  object-fit: contain;
+  background-color: var(--color-text);
 }
 
 .overlay {
@@ -37,6 +42,7 @@
   position: absolute;
   inset: 50% auto auto 50%;
   transform: translate(-50%, -50%);
+  font-weight: 600;
 }
 
 .play,

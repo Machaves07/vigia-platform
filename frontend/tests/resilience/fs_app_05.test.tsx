@@ -51,7 +51,7 @@ describe('FS-APP-05 · URL prefirmada vencida a mitad de reproducción', { timeo
     const log = traffic();
     env.view();
     await screen.findByRole('region', { name: text('scr08.detail.summary') }, WAIT);
-    const player = document.querySelector<HTMLElement>('[data-part="clip"] figure');
+    const player = document.querySelector<HTMLElement>('[data-part="clip_gallery"] figure');
     if (player === null) throw new Error('El detalle no tiene reproductor.');
     const video = player.querySelector('video');
     if (video === null) throw new Error('El detalle no tiene <video>.');

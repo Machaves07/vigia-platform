@@ -3,6 +3,7 @@
   "scr01.login.email": "Correo",
   "scr01.login.password": "Contraseña",
   "scr01.login.submit": "Entrar",
+  "scr01.login.tagline": "Verificación de los estándares de seguridad de la planta",
   "scr01.login.email_invalid": "Escriba un correo con la forma nombre@dominio.",
   "scr01.login.password_short": "La contraseña tiene al menos 8 caracteres.",
   "scr01.invalid_credentials": "Credenciales inválidas.",

@@ -1,4 +1,6 @@
 {
+  "labels.evidence_tier.tier_1": "Evidencia de nivel uno (señal dura válida)",
+  "labels.evidence_tier.tier_2": "Evidencia de nivel dos (solo visión)",
   "labels.activation_response_status.pending": "Pendiente de activación",
   "labels.activation_response_status.activated": "Cuenta activada",
   "labels.alarm_status.active": "Alarma activa",

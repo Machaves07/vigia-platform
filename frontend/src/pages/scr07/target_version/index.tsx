@@ -5,6 +5,7 @@
  * `plant_id` en el cuerpo. `fleet_version_outside_contract_window` se ancla a la versión; el
  * resultado de la actualización (aplicada o revertida) se lee del inventario.
  */
+import { DateTimeInput } from '@/components/DateFields/DateFields';
 import { useId, useState } from 'react';
 import { Link } from 'react-router';
 import {
@@ -180,27 +181,11 @@ export default function Page() {
           <p>{text('scr07.target_version.window_guide')}</p>
           <label>
             {text('scr07.target_version.from')}
-            <input
-              type="datetime-local"
-              name="from"
-              required
-              value={from}
-              onChange={(event) => {
-                edit(setFrom)(event.currentTarget.value);
-              }}
-            />
+            <DateTimeInput name="from" required value={from} onChange={edit(setFrom)} />
           </label>
           <label>
             {text('scr07.target_version.to')}
-            <input
-              type="datetime-local"
-              name="to"
-              required
-              value={to}
-              onChange={(event) => {
-                edit(setTo)(event.currentTarget.value);
-              }}
-            />
+            <DateTimeInput name="to" required value={to} onChange={edit(setTo)} />
           </label>
           {attempted && windowInvalid && (
             <p role="alert">{text('scr07.target_version.window_invalid')}</p>

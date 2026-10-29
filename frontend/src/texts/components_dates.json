@@ -1,0 +1,13 @@
+{
+  "components_dates.date_placeholder": "dd/mm/aaaa",
+  "components_dates.time_placeholder": "hh:mm",
+  "components_dates.time_label": "Hora (hh:mm, 24 horas)",
+  "components_dates.date_format": "Escriba la fecha como dd/mm/aaaa, por ejemplo 05/10/2026.",
+  "components_dates.time_format": "Escriba la hora como hh:mm en 24 horas, por ejemplo 14:30.",
+  "components_dates.month_choose": "Elija un mes",
+  "components_dates.plant_time": "hora de la planta",
+  "components_dates.min": "El valor mínimo es",
+  "components_dates.max": "El valor máximo es",
+  "components_dates.step": "Escriba un número entero.",
+  "components_dates.error_icon": "Error"
+}

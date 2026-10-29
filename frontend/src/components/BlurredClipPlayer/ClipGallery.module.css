@@ -1,0 +1,48 @@
+/* Un clip a la vez y miniaturas de los demás (VIG-366, S3-16). */
+.gallery {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 44rem;
+}
+
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thumb {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.thumb[aria-pressed='true'] {
+  border-color: var(--color-action);
+  background: var(--color-action-subtle);
+}
+
+.frame {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: var(--color-text);
+  color: var(--color-surface);
+}
+
+.frame svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}

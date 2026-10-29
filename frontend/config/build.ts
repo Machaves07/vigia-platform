@@ -27,11 +27,12 @@ const SCREEN_MODULE = /[\\/]src[\\/]pages[\\/](scr\d{2})[\\/](?!descriptor\.ts$)
 
 /**
  * Módulos de pantalla que importa el armazón (VIG-364): la puerta de sesión y el formulario de
- * acceso de SCR-01 y la campana de SCR-15. Van con el armazón, no en la porción de su pantalla:
- * dentro de ella arrastrarían al paquete inicial la pantalla entera (la administración de SCR-01).
+ * acceso de SCR-01 (con su marco, `AuthFrame`, VIG-366) y la campana de SCR-15. Van con el
+ * armazón, no en la porción de su pantalla: dentro de ella arrastrarían al paquete inicial la
+ * pantalla entera (la administración de SCR-01).
  */
 const SHELL_SCREEN_MODULE =
-  /[\\/]src[\\/]pages[\\/](?:scr01[\\/](?:SessionGate|PrivacyNoticeGate|privacyNotice|privacyNotices|session|scr01\.module|login[\\/]LoginForm)|scr15[\\/](?:Bell|Bell\.module|shared))\.(?:tsx?|json|css)$/;
+  /[\\/]src[\\/]pages[\\/](?:scr01[\\/](?:SessionGate|PrivacyNoticeGate|privacyNotice|privacyNotices|session|scr01\.module|login[\\/](?:LoginForm|AuthFrame))|scr15[\\/](?:Bell|Bell\.module|shared))\.(?:tsx?|json|css)$/;
 
 /**
  * Nombre de la porción de la pantalla a la que pertenece el módulo, o `null` si no es de una.

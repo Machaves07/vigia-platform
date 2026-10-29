@@ -5,11 +5,15 @@
 .tableWrap {
   overflow-x: auto;
 }
+/* Tabla compacta del sistema visual (14 px, cifras tabulares; VIG-366): más ancha que la caja
+   si hace falta, con desplazamiento horizontal, para que cada celda ocupe menos líneas. */
 .table {
   border-collapse: collapse;
   table-layout: fixed;
   width: 100%;
-  min-width: 1000px;
+  min-width: 1160px;
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
 }
 .table thead {
   position: sticky;
@@ -22,11 +26,19 @@
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid #888;
-  padding: 8px;
+  padding: 6px 8px;
   overflow-wrap: anywhere;
 }
-.row {
+/* La altura fija solo en la ventana virtual (VIG-366): fuera de ella cada fila mide lo que
+   ocupa, y la flota del mundo de prueba cabe en unas 3 pantallas. */
+.virtualRow {
   height: 208px;
+}
+.table td p {
+  margin: 0;
+}
+.row {
+  height: auto;
 }
 .row:focus {
   outline: 3px solid #175cd3;
