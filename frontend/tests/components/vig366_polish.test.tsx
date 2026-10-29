@@ -8,6 +8,7 @@ import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { AuthFrame } from '@/pages/scr01/login/AuthFrame';
+import { providerColumns, providerScopeText } from '@/pages/scr02/provider/ProviderView';
 import { DetailView } from '@/pages/scr08/detail/DetailView';
 import { VocabularyView } from '@/pages/scr04/vocabulary/VocabularyView';
 import type { FindingDetail } from '@/ports/scr08Detail';
@@ -15,6 +16,7 @@ import type { Vocabulary } from '@/ports/scr04Parameters';
 import { text } from '@/texts';
 import { label } from '@/texts/labels';
 
+import { providerConcession } from './scr02/support';
 import { detail } from './scr08/detail_support';
 
 const PATTERN = String.raw`\bsin\s+riesgo\b`;
@@ -97,6 +99,36 @@ describe('VIG-366: sin datos técnicos crudos', () => {
       `${text('scr08.detail.record')} 1 · ${label('record_kind', record.record_type)}`,
       text('scr08.detail.record'),
     ]);
+  });
+
+  it('las concesiones del proveedor pliegan los identificadores del cliente y del alcance', () => {
+    const row = providerConcession();
+    const columns = providerColumns('America/Bogota').filter((column) =>
+      ['client', 'scope'].includes(column.id),
+    );
+    const { container } = render(
+      <dl>
+        {columns.map((column) => (
+          <div key={column.id} data-column={column.id}>
+            <dt>{column.header}</dt>
+            <dd>{column.cell(row)}</dd>
+          </div>
+        ))}
+      </dl>,
+    );
+    for (const [id, value] of [
+      ['client', row.client_organization_id],
+      ['scope', row.scope_id],
+    ] as const) {
+      const cell = container.querySelector(`[data-column="${id}"] > dd`);
+      const folded = cell?.querySelector('details[data-part="technical"]');
+      expect(folded?.hasAttribute('open')).toBe(false);
+      expect(folded?.querySelector('dd code')?.textContent).toBe(value);
+      // A la vista solo queda el texto del catálogo, sin el identificador.
+      expect(cell?.firstChild?.textContent).toBe(
+        id === 'client' ? text('scr02.provider.client_organization') : providerScopeText(row),
+      );
+    }
   });
 
   it('el nivel de evidencia se dice en español, con mayúscula, nunca «tier 2»', () => {
