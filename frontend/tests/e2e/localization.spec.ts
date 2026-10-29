@@ -111,10 +111,11 @@ test('los filtros por día de la bandeja dicen la hora de la planta, no UTC', as
   const from = filters.getByRole('textbox', { name: /^Desde el día/ });
   await expect(from).toBeVisible();
   await expect(from).toHaveAttribute('placeholder', 'dd/mm/aaaa');
-  // Cada etiqueta entera, anclada: el texto del catálogo y la zona de la planta, nunca «(UTC)».
+  // Cada etiqueta entera, anclada: el texto del catálogo y el nombre de la zona de la planta
+  // («hora estándar de Colombia»; el nombre exacto depende del motor), nunca «(UTC)».
   const day = (caption: string) =>
     filters.locator('label > span').filter({
-      hasText: new RegExp(`^${caption} \\(hora de [^()]+\\)$`),
+      hasText: new RegExp(`^${caption} \\((?!UTC\\))[^()]*hora[^()]*\\)$`),
     });
   await expect(day('Desde el día')).toHaveCount(1);
   await expect(day('Hasta el día')).toHaveCount(1);
