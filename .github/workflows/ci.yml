@@ -88,7 +88,7 @@ jobs:
     name: rutas del cambio (frontend o backend)
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     outputs:
       backend: ${{ steps.rutas.outputs.backend }}
     steps:
@@ -114,6 +114,36 @@ jobs:
             backend=false
           fi
           echo "backend=$backend" | tee -a "$GITHUB_OUTPUT"
+          # Los textos de la app pasan el vocabulario bloqueado real de U-04 (prueba de backend). Con el
+          # backend saltado, esa prueba corre aquí (VIG-312 metió «ausencia» sin que nada la corriera).
+          if printf '%s\n' "$cambiados" | grep -qE '^frontend/src/texts/'; then
+            echo "textos=true" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "textos=false" | tee -a "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        if: steps.rutas.outputs.backend == 'false' && steps.rutas.outputs.textos == 'true'
+        with:
+          enable-cache: false
+      - name: clave de despliegue de vigia-contracts (solo lectura)
+        if: steps.rutas.outputs.backend == 'false' && steps.rutas.outputs.textos == 'true'
+        env:
+          CLAVE: ${{ secrets.VIGIA_CONTRACTS_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLAVE" > ~/.ssh/vigia_contracts
+          chmod 600 ~/.ssh/vigia_contracts
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/vigia_contracts -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+      - name: textos de la app frente al vocabulario bloqueado
+        if: steps.rutas.outputs.backend == 'false' && steps.rutas.outputs.textos == 'true'
+        working-directory: backend
+        run: |
+          uv sync --frozen
+          uv run pytest -q -p no:cacheprovider tests/unit/test_u05_texts_vocabulary.py
+      - name: borrar la clave (ya no hace falta)
+        if: always()
+        run: rm -f ~/.ssh/vigia_contracts
 
   secretos:
     name: escaneo de secretos
