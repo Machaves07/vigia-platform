@@ -5,6 +5,7 @@ import {
   ObservabilityLegend,
 } from '@/components/ObservabilityBadge/ObservabilityBadge';
 import { TimestampWithOffset } from '@/components/TimestampWithOffset/TimestampWithOffset';
+import { zoneName } from '@/components/TimestampWithOffset/format';
 import type { FleetNode, FleetWarning } from '@/ports/scr07Fleet';
 import { TechnicalDetails } from '@/pages/shared/TechnicalDetails';
 import { text } from '@/texts';
@@ -35,15 +36,32 @@ function updateLabel(value: string | null): string {
 export function FleetTime({
   instant,
   timeZone,
+  zone = 'inline',
 }: {
   readonly instant: string | null | undefined;
   readonly timeZone: string;
+  /** `'header'` cuando la tabla nombra la zona una sola vez, en la cabecera (VIG-366). */
+  readonly zone?: 'inline' | 'header';
 }) {
   return instant == null ? (
     text('scr07.unknown')
   ) : (
-    <TimestampWithOffset instant={instant} timeZone={timeZone} />
+    <TimestampWithOffset instant={instant} timeZone={timeZone} zone={zone} />
   );
+}
+
+/** Columnas con horas: con una sola zona horaria, la nombran en su cabecera. */
+const TIMED_HEADINGS: ReadonlySet<string> = new Set(['scr07.communication', 'scr07.health']);
+
+/** La zona común a todas las plantas de la tabla, o `null` si hay más de una o falta alguna. */
+function sharedZone(nodes: readonly FleetNode[], plants: readonly FleetPlant[]): string | null {
+  const zones = new Set(
+    nodes.map((node) => plants.find((plant) => plant.plant_id === node.plant_id)?.timezone ?? ''),
+  );
+  const [only] = zones;
+  return zones.size === 1 && only !== undefined && only !== '' && zoneName(only) !== null
+    ? only
+    : null;
 }
 
 export interface FleetPlant {
@@ -68,6 +86,9 @@ export function FleetView({
   readonly nodes: readonly FleetNode[];
   readonly plants: readonly FleetPlant[];
 }) {
+  // Con una sola zona horaria, la zona va una vez en la cabecera y no en cada hora (VIG-366).
+  const tableZone = sharedZone(nodes, plants);
+  const zone = tableZone === null ? 'inline' : 'header';
   const rows: FleetRow[] = nodes.flatMap((node) => {
     const plant = plants.find((entry) => entry.plant_id === node.plant_id);
     // No se inventa una zona horaria mientras la jerarquía no esté disponible.
@@ -103,18 +124,23 @@ export function FleetView({
         <>
           {text(`scr07.communication.${node.communication_state}`)}
           <p>
-            {text('scr07.since')}: <FleetTime instant={node.since} timeZone={timeZone} />
+            {text('scr07.since')}:{' '}
+            <FleetTime instant={node.since} timeZone={timeZone} zone={zone} />
           </p>
           <p>
             {text('scr07.heartbeat')}:{' '}
-            <FleetTime instant={node.last_heartbeat_at} timeZone={timeZone} />
+            <FleetTime instant={node.last_heartbeat_at} timeZone={timeZone} zone={zone} />
           </p>
         </>,
         <>
           {text('scr07.queue')}: {node.local_queue?.pending ?? text('scr07.unknown')}
           <p>
             {text('scr07.oldest')}:{' '}
-            <FleetTime instant={node.local_queue?.oldest_pending_at} timeZone={timeZone} />
+            <FleetTime
+              instant={node.local_queue?.oldest_pending_at}
+              timeZone={timeZone}
+              zone={zone}
+            />
           </p>
           <p>
             {text('scr07.dead_letter')}:{' '}
@@ -133,7 +159,9 @@ export function FleetView({
         </>,
         <>
           {/* La dirección local (IP interna) va plegada en los datos técnicos del nodo. */}
-          {text(node.live_view_local_url === null ? 'scr07.live_unavailable' : 'scr07.live_available')}
+          {text(
+            node.live_view_local_url === null ? 'scr07.live_unavailable' : 'scr07.live_available',
+          )}
         </>,
       ],
     };
@@ -160,8 +188,7 @@ export function FleetView({
         cells: [
           <>
             {text('scr07.zone')}:{' '}
-            {plant?.zones?.find((entry) => entry.zone_id === zoneId)?.name ??
-              text('scr07.unknown')}
+            {plant?.zones?.find((entry) => entry.zone_id === zoneId)?.name ?? text('scr07.unknown')}
             <p>{node.code}</p>
           </>,
           <>
@@ -203,7 +230,11 @@ export function FleetView({
           'scr07.health',
           'scr07.warning',
           'scr07.live_url',
-        ].map(text)}
+        ].map((heading) =>
+          tableZone !== null && TIMED_HEADINGS.has(heading)
+            ? `${text(heading)} (${zoneName(tableZone) ?? ''})`
+            : text(heading),
+        )}
       />
       {observable && <ObservabilityLegend />}
     </>

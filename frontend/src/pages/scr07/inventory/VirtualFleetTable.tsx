@@ -97,7 +97,9 @@ export function VirtualFleetTable({
                     event.preventDefault();
                     move(target);
                   }}
-                  className={styles.row}
+                  className={[styles.row, virtual ? styles.virtualRow : undefined]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {row.cells.map((cell, column) => (
                     <td key={column}>

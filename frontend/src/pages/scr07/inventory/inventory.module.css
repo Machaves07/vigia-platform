@@ -25,8 +25,16 @@
   padding: 8px;
   overflow-wrap: anywhere;
 }
-.row {
+/* La altura fija solo en la ventana virtual (VIG-366): fuera de ella cada fila mide lo que
+   ocupa, y la flota del mundo de prueba cabe en unas 3 pantallas. */
+.virtualRow {
   height: 208px;
+}
+.table td p {
+  margin: 0;
+}
+.row {
+  height: auto;
 }
 .row:focus {
   outline: 3px solid #175cd3;
