@@ -75,6 +75,23 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     await expectOneRefresh(page);
     await expectNoPageOverflow(page);
+    // S3-10: la columna «Siguiente paso» queda fija dentro de la caja, sin cortarse.
+    const next = await page
+      .locator('tbody tr')
+      .first()
+      .locator('td')
+      .last()
+      .evaluate((cell) => {
+        let box = cell.parentElement;
+        while (box && getComputedStyle(box).overflowX !== 'auto') box = box.parentElement;
+        return {
+          cell: cell.getBoundingClientRect().right,
+          box: box?.getBoundingClientRect().right ?? Number.NaN,
+          sticky: getComputedStyle(cell).position,
+        };
+      });
+    expect(next.sticky).toBe('sticky');
+    expect(next.cell).toBeLessThanOrEqual(Math.min(next.box, 1280) + 1);
     await expect(
       page.getByRole('heading', { name: 'Acciones vencidas en el alcance, sin filtros' }),
     ).toBeVisible();
@@ -232,12 +249,13 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     // De la bandeja al lazo con el acceso de la fila (VIG-359).
     await openInbox(page);
     await openFromInbox(page, `/findings/${selected.closure}/loop`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Lazo de cierre del hallazgo');
     // VIG-365 (S3-24): el lazo llega cargado y «Comprometer una acción» es el siguiente paso.
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     await expectOneRefresh(page);
     await nextSteps(page)
       .getByRole('button', { name: 'Comprometer una acción', exact: true })
       .click();
-    await page.getByRole('button', { name: 'Consultar el lazo', exact: true }).click();
     const action = page.getByRole('form', { name: 'Comprometer una acción sobre la zona' });
     await action.getByLabel('Tipo de acción').selectOption('engineering');
     await action
