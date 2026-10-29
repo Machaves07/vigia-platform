@@ -138,6 +138,25 @@ describe('SCR-07 inicio del administrador (VIG-365)', { timeout: 40_000 }, () =>
     expect(pending(container).map(([id]) => id)).toEqual(['silent_nodes']);
   });
 
+  it('con coordinador y administrador, el inicio es el del coordinador: /fleet es el inventario', async () => {
+    // BR-APP-04: el inicio es el del primer rol de HOME_ROLE_ORDER, entre todas las pantallas.
+    const env = await fleetFixture(
+      '/fleet',
+      { plants: hierarchyPlants(), nodes: [] },
+      effectivePermissions('customer_organization', ['coordinator_sst', 'administrator']),
+      ['administrator', 'coordinator_sst'],
+    );
+    server.use(
+      http.get('http://localhost/fleet/nodes', () =>
+        HttpResponse.json({ nodes: [node(1)], next_after: null }),
+      ),
+    );
+    const view = render(<Page />, { wrapper: env.Wrapper });
+    await screen.findByRole('link', { name: 'NODO-SINT-1' }, WAIT);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(text('scr07.title'));
+    expect(view.container.querySelector('[data-pending]')).toBeNull();
+  });
+
   it('con solo las claves de la flota, el único pendiente es el de los nodos', async () => {
     const env = await fleetFixture('/fleet', { plants: hierarchyPlants(), nodes: [] });
     server.use(

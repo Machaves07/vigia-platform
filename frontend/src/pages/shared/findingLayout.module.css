@@ -23,11 +23,13 @@
   margin: 0;
 }
 
+/* `wrap-reverse` invierte el eje transversal: su inicio queda abajo, así que el panel se alinea
+   arriba con `flex-end` (con `flex-start` quedaba al pie de la columna principal). */
 .columns {
   display: flex;
   flex-wrap: wrap-reverse;
   gap: var(--space-6);
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
 .main {

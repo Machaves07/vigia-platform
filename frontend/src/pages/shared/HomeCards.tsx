@@ -20,14 +20,15 @@ export interface HomeCard {
   readonly hint: string;
 }
 
-/** `true` si el grupo `group` de `screen` es el inicio de la sesión (BR-APP-04). */
+/**
+ * `true` si el grupo `group` de `screen` es el inicio de la sesión (BR-APP-04). Se calcula entre
+ * todas las pantallas: con varios roles manda el primero de `HOME_ROLE_ORDER`.
+ */
 export function useIsHome(screen: ScreenDescriptor, group: string): boolean {
   const { principal } = useUiSession();
   if (principal === null) return false;
-  const home = homeScreen(principal.assignments, new Set(principal.effective_permissions), [
-    screen,
-  ]);
-  return home?.group === group;
+  const home = homeScreen(principal.assignments, new Set(principal.effective_permissions), SCREENS);
+  return home?.screen_id === screen.screen_id && home.group === group;
 }
 
 function fills(slot: string, item: NavItem): boolean {

@@ -103,6 +103,7 @@ export async function fleetFixture(
   path = '/fleet',
   hierarchy: { readonly plants: unknown[]; readonly nodes: unknown[] } = { plants, nodes: [] },
   permissions: readonly string[] = ['fleet.read', 'fleet.manage', 'commissioning.run'],
+  roles?: Parameters<typeof meResponse>[0]['roles'],
 ) {
   const clock = new FakeClock(Date.parse(INSTANT));
   const connection = createPortConnection(clock);
@@ -119,6 +120,7 @@ export async function fleetFixture(
     idleExpiresAt: clock.now() + 1_800_000,
     absoluteExpiresAt: clock.now() + 8 * 3_600_000,
     permissions: [...permissions],
+    ...(roles === undefined ? {} : { roles }),
   });
   const session = createSessionStore({
     clock,

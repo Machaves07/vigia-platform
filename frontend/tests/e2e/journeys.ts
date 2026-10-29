@@ -372,6 +372,22 @@ export function nextSteps(page: Page): Locator {
 }
 
 /**
+ * En escritorio, el panel va en la columna derecha a la altura del inicio de la columna principal,
+ * no al pie de ella (sistema visual v1).
+ */
+export async function expectNextStepBeside(page: Page): Promise<void> {
+  const offset = await nextSteps(page).evaluate((panel) => {
+    const aside = panel.closest('aside');
+    const main = aside?.previousElementSibling;
+    if (!aside || !main) return Number.NaN;
+    const side = aside.getBoundingClientRect();
+    const column = main.getBoundingClientRect();
+    return side.left >= column.right ? Math.abs(side.top - column.top) : Number.NaN;
+  });
+  expect(offset).toBeLessThanOrEqual(1);
+}
+
+/**
  * Una sola actualización por página (VIG-365, S3-03): con la pantalla ya cargada, cuenta los
  * botones «Actualizar» de la zona principal.
  */

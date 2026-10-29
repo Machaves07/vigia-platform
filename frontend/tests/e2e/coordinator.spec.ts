@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { authenticatedTest as test, expect } from './fixtures';
 import {
   confirmFinding,
+  expectNextStepBeside,
   expectNoPageOverflow,
   expectOneRefresh,
   expectOwnHome,
@@ -75,9 +76,11 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     await expectOneRefresh(page);
     await expectNoPageOverflow(page);
-    // S3-10: la columna «Siguiente paso» queda fija dentro de la caja, sin cortarse.
+    // S3-10: la columna «Siguiente paso» queda fija dentro de la caja, sin cortarse. Se mide en una
+    // fila de hallazgo: la de una zona no productiva es una sola celda con su estado de compuertas.
     const next = await page
       .locator('tbody tr')
+      .filter({ has: page.locator('td:nth-child(12)') })
       .first()
       .locator('td')
       .last()
@@ -113,6 +116,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(page.locator('main [data-part="status_chip"]').first()).toBeVisible();
     await expect(page.getByRole('list', { name: 'Ciclo del hallazgo' })).toBeVisible();
     await expect(nextSteps(page).locator('[data-primary="true"]')).toHaveCount(1);
+    await expectNextStepBeside(page);
     const play = page.getByRole('button', { name: 'Reproducir clip', exact: true }).first();
     await expect(play).toBeVisible();
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
@@ -253,6 +257,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     // VIG-365 (S3-24): el lazo llega cargado y «Comprometer una acción» es el siguiente paso.
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     await expectOneRefresh(page);
+    await expectNextStepBeside(page);
     await nextSteps(page)
       .getByRole('button', { name: 'Comprometer una acción', exact: true })
       .click();
@@ -325,6 +330,7 @@ test('el coordinador recorre el lazo real con evidencia, firma y revisión human
     await expect(nextSteps(page).getByRole('button')).toHaveCount(0);
     await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
     await expectOneRefresh(page);
+    await expectNextStepBeside(page);
     await expect(
       page.getByRole('form', { name: 'Comprometer una acción sobre la zona' }),
     ).toHaveCount(0);
