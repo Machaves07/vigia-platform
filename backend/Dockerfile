@@ -33,7 +33,8 @@
 #   solo lectura y `/tmp` montado aparte (infrastructure-design.md §5.3 y su nota de 2026-09-23:
 #   el usuario sin privilegios sustituye a `no-new-privileges`, que Fargate no admite).
 
-ARG PYTHON_IMAGE=python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+# python:3.12-slim → Python 3.12.16 al fijar el digest (CVE-2026-115557, crítica en 3.12.15).
+ARG PYTHON_IMAGE=python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424
 # node:22-bookworm-slim → Node 22.23.4 y npm 10.9.9 al fijar el digest.
 ARG NODE_IMAGE=node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
