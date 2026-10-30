@@ -24,6 +24,16 @@ import {
   openJob,
 } from './support';
 
+/** Pulsa el botón cuando está habilitado: un clic sobre un botón deshabilitado no hace nada. */
+async function clickEnabled(find: () => HTMLElement) {
+  const button = await vi.waitFor(() => {
+    const element = find();
+    expect((element as HTMLButtonElement).disabled).toBe(false);
+    return element;
+  }, WAIT);
+  fireEvent.click(button);
+}
+
 describe('SCR-14 estado y descargas', { timeout: 30_000 }, () => {
   it('no consulta estado ni descargas al montar ni en cinco minutos; solo por acción explícita', async () => {
     const { clock } = await fixture(true);
@@ -132,39 +142,61 @@ describe('SCR-14 estado y descargas', { timeout: 30_000 }, () => {
   it('emite URLs al pulsar, presenta hashes distintos, puntos de control y caducidad de 15 minutos; axe', async () => {
     const { clock, view } = await fixture();
     await openJob();
-    fireEvent.click(screen.getByRole('button', { name: text('scr14.document') }));
+    // La escritura sigue pendiente, con los dos botones deshabilitados, hasta que termina la
+    // invalidación (que vuelve a pedir la jerarquía), aunque el enlace ya esté en pantalla: un clic
+    // en ese hueco se pierde (VIG-367). Cada clic espera a que su botón esté habilitado.
+    await clickEnabled(() => screen.getByRole('button', { name: text('scr14.document') }));
     const document = await screen.findByRole(
       'link',
       { name: text('scr14.download_document') },
       WAIT,
     );
     expect(document.getAttribute('href')).toBe('https://downloads.example.test/document.pdf');
-    fireEvent.click(screen.getByRole('button', { name: text('scr14.volumes') }));
+    await clickEnabled(() => screen.getByRole('button', { name: text('scr14.volumes') }));
     const volume = await screen.findByRole(
       'link',
       { name: `${text('scr14.download_volume')} 2` },
       WAIT,
     );
     expect(volume.getAttribute('href')).toBe('https://downloads.example.test/vol-02.zip');
+    expect(screen.queryByRole('link', { name: text('scr14.download_document') })).toBeNull();
     const verifier = screen.getByRole('region', { name: text('scr14.verifier') });
-    fireEvent.click(
+    await clickEnabled(() =>
       within(verifier).getByRole('button', { name: text('components_status.refresh.button') }),
     );
     await within(verifier).findByText('d'.repeat(64), {}, WAIT);
     const checkpoints = screen.getByRole('region', { name: text('scr14.checkpoints') });
-    fireEvent.click(
+    await clickEnabled(() =>
       within(checkpoints).getByRole('button', { name: text('components_status.refresh.button') }),
     );
     await within(checkpoints).findByRole('table', { name: text('scr14.checkpoints') }, WAIT);
-    fireEvent.click(screen.getByRole('button', { name: text('scr14.manifest_hash') }));
+    await clickEnabled(() => screen.getByRole('button', { name: text('scr14.manifest_hash') }));
     const proof = await screen.findByText(MANIFEST_HASH, {}, WAIT);
     expect(proof.textContent).toBe(MANIFEST_HASH);
     const manifest = screen.getByRole('region', { name: text('scr14.manifest') });
     expect(within(manifest).getByText(DOCUMENT_HASH).textContent).toBe(DOCUMENT_HASH);
     expect(within(manifest).getByText(HASH).textContent).toBe(HASH);
+    // axe sobre el DOM ya estable: los dos enlaces de volumen presentes y ninguna lectura ni
+    // escritura en curso (todos los botones de la pantalla habilitados).
+    await vi.waitFor(() => {
+      for (const volumeNumber of [1, 2])
+        screen.getByRole('link', {
+          name: `${text('scr14.download_volume')} ${String(volumeNumber)}`,
+        });
+      expect(
+        screen.getAllByRole<HTMLButtonElement>('button').filter((button) => button.disabled),
+      ).toEqual([]);
+    }, WAIT);
     expect(await axe(view.container)).toHaveNoViolations();
+    // Caducidad con el reloj inyectado: vigentes un milisegundo antes de los 15 minutos,
+    // caducadas justo a los 15 minutos.
     act(() => {
-      clock.advance(900_000);
+      clock.advance(899_999);
+    });
+    expect(screen.getByRole('link', { name: `${text('scr14.download_volume')} 2` })).toBeDefined();
+    expect(view.container.querySelectorAll('[data-download-expired="true"]')).toHaveLength(0);
+    act(() => {
+      clock.advance(1);
     });
     expect(screen.queryByRole('link', { name: `${text('scr14.download_volume')} 2` })).toBeNull();
     expect(view.container.querySelectorAll('[data-download-expired="true"]')).toHaveLength(2);
