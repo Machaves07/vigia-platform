@@ -205,23 +205,31 @@ test.describe('gerente: el día 1 del mes en la hora de la planta', () => {
       `${formatInTimeZone(now, timeZone, 'yyyy-MM')}-01T00:00:00`,
       timeZone,
     );
+    const current = formatInTimeZone(start, timeZone, 'yyyy-MM');
     const previous = formatInTimeZone(start.getTime() - 1, timeZone, 'yyyy-MM');
     await page.clock.setFixedTime(Math.min(now, start.getTime() + 12 * 3600_000));
-    const metrics = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === '/accreditation/metrics',
-      { timeout: 60_000 },
-    );
+    const answers: { period: string | null; status: number }[] = [];
+    page.on('response', (response) => {
+      const url = new URL(response.url());
+      if (url.pathname === '/accreditation/metrics')
+        answers.push({ period: url.searchParams.get('period'), status: response.status() });
+    });
     await page.goto('/metrics/weekly');
-    const response = await metrics;
-    expect(new URL(response.url()).searchParams.get('period')).toBe(previous);
-    expect(response.ok()).toBe(true);
-    await expect(page.getByRole('combobox', { name: 'Periodo mensual', exact: true })).toHaveValue(
-      previous,
-    );
     await expect(
       page
         .getByRole('region', { name: 'Resumen de la semana', exact: true })
         .locator('[data-indicator]'),
     ).toHaveCount(4);
+    // Primero el mes de la semana anterior. Si la zona precargada aún no existía ese mes (otro
+    // recorrido la creó hoy: `E2E-…` va antes que `ZN-…`), el servidor lo rechaza y la carga
+    // inicial cae al mes en curso; nunca otro mes ni un rechazo sin salida.
+    const [first, ...rest] = answers;
+    expect(first?.period).toBe(previous);
+    const fallback = first?.status === 400;
+    if (!fallback) expect(first?.status).toBe(200);
+    expect(rest).toEqual(fallback ? [{ period: current, status: 200 }] : []);
+    await expect(page.getByRole('combobox', { name: 'Periodo mensual', exact: true })).toHaveValue(
+      fallback ? current : previous,
+    );
   });
 });
