@@ -215,7 +215,9 @@ test.describe('gerente: el día 1 del mes en la hora de la planta', () => {
     const response = await metrics;
     expect(new URL(response.url()).searchParams.get('period')).toBe(previous);
     expect(response.ok()).toBe(true);
-    await expect(page.getByLabel('Periodo mensual', { exact: true })).toHaveValue(previous);
+    await expect(page.getByRole('combobox', { name: 'Periodo mensual', exact: true })).toHaveValue(
+      previous,
+    );
     await expect(
       page
         .getByRole('region', { name: 'Resumen de la semana', exact: true })
