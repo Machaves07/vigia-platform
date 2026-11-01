@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { authenticatedTest as test, expect } from './fixtures';
 import {
   expectOwnHome,
@@ -180,4 +181,45 @@ test('gerente: consultas del proveedor, cadena, 31 días, exposición y exportac
   const saved = test.info().outputPath('volumen-1');
   await volume.saveAs(saved);
   expect((await stat(saved)).size).toBeGreaterThan(0);
+});
+
+test.describe('gerente: el día 1 del mes en la hora de la planta', () => {
+  // Contexto propio: el reloj fijado del navegador no pasa a la sesión que comparten los recorridos.
+  test.use({ reuseRoleSession: false });
+
+  test('VIG-369: el inicio carga el mes de la semana anterior con los 4 indicadores', async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto('/account');
+    const hierarchy = await prepare<{ plants: { timezone: string; zones: unknown[] }[] }>(
+      page,
+      '/hierarchy',
+      undefined,
+      'GET',
+    );
+    const timeZone = required(hierarchy.plants.find((entry) => entry.zones.length > 0)).timezone;
+    // El día 1 de este mes a mediodía de la planta, sin pasar de la hora real del servidor: la
+    // semana anterior empieza en el mes anterior, ya vencido, sea cual sea la fecha del nightly.
+    const now = systemClock.now();
+    const start = fromZonedTime(
+      `${formatInTimeZone(now, timeZone, 'yyyy-MM')}-01T00:00:00`,
+      timeZone,
+    );
+    const previous = formatInTimeZone(start.getTime() - 1, timeZone, 'yyyy-MM');
+    await page.clock.setFixedTime(Math.min(now, start.getTime() + 12 * 3600_000));
+    const metrics = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/accreditation/metrics',
+      { timeout: 60_000 },
+    );
+    await page.goto('/metrics/weekly');
+    const response = await metrics;
+    expect(new URL(response.url()).searchParams.get('period')).toBe(previous);
+    expect(response.ok()).toBe(true);
+    await expect(page.getByLabel('Periodo mensual', { exact: true })).toHaveValue(previous);
+    await expect(
+      page
+        .getByRole('region', { name: 'Resumen de la semana', exact: true })
+        .locator('[data-indicator]'),
+    ).toHaveCount(4);
+  });
 });

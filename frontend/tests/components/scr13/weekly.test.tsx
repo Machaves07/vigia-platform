@@ -1,12 +1,25 @@
 /** El resumen usa las mismas cifras y no convierte el programa en evaluación de personas. */
 import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
+import { fromZonedTime } from 'date-fns-tz';
 import { describe, expect, it } from 'vitest';
 import { axe } from 'vitest-axe';
 import Page from '@/pages/scr13/weekly';
 import { text } from '@/texts';
+import { apiError } from '../../msw/handlers';
 import { server } from '../../msw/server';
-import { API, OTHER, WAIT, ZONE, fixture, consult, overdueData, adoptionData } from './support';
+import {
+  API,
+  OTHER,
+  PLANT,
+  WAIT,
+  ZONE,
+  fixture,
+  consult,
+  overdueData,
+  adoptionData,
+  snapshot,
+} from './support';
 
 describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
   it('mismas cifras, vencidos 30/31 días, adopción del servidor y objetivo propio', async () => {
@@ -59,6 +72,71 @@ describe('SCR-13 resumen semanal', { timeout: 30_000 }, () => {
     expect(metrics.map((url) => url.searchParams.get('period'))).toEqual(['2026-01']);
     expect(metrics.map((url) => url.searchParams.get('zone_id'))).toEqual([ZONE]);
     server.events.removeAllListeners();
+  });
+  // VIG-369: el nightly del 01-11-2026 (domingo) cargaba un mes que el servidor rechazaba.
+  const BOGOTA = 'America/Bogota';
+  const NIGHTLY = fromZonedTime('2026-11-01T00:30:00', BOGOTA).getTime();
+  function monthlyServer(organizationId: string, rejected: readonly string[] = []) {
+    const periods: (string | null)[] = [];
+    server.use(
+      http.get(`${API}/accreditation/metrics`, ({ request }) => {
+        const period = new URL(request.url).searchParams.get('period') ?? '';
+        periods.push(period);
+        // Como el servidor: un mes que terminó antes de crear la zona es invalid_request.
+        if (rejected.includes(period)) return apiError('invalid_request', 400);
+        return HttpResponse.json({
+          plant_id: PLANT,
+          period,
+          zones: [{ ...snapshot(organizationId), period }],
+        });
+      }),
+    );
+    return periods;
+  }
+  const indicators = (container: HTMLElement) => container.querySelectorAll('[data-indicator]');
+  it.each([
+    ['01-11 a las 00:30 de la planta', NIGHTLY],
+    // 21:00 del 07-11 en Bogotá ya es 08-11 en UTC: la semana anterior empieza el 31-10.
+    ['07-11 a las 21:00 de la planta', Date.parse('2026-11-08T02:00:00.000Z')],
+  ])(
+    'VIG-369: %s carga octubre, el mes de la semana anterior en la hora de la planta',
+    async (_, now) => {
+      const f = await fixture(undefined, { timeZone: BOGOTA, now });
+      const periods = monthlyServer(f.organizationId);
+      const view = render(<Page />, { wrapper: f.Wrapper });
+      await waitFor(() => {
+        expect(indicators(view.container)).toHaveLength(4);
+      }, WAIT);
+      expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.period')).value).toBe('2026-10');
+      expect(periods).toEqual(['2026-10']);
+    },
+  );
+  it('VIG-369: si la zona no existía ese mes, la carga inicial cae al mes en curso de la planta', async () => {
+    const f = await fixture(undefined, { timeZone: BOGOTA, now: NIGHTLY });
+    const periods = monthlyServer(f.organizationId, ['2026-10']);
+    const view = render(<Page />, { wrapper: f.Wrapper });
+    await waitFor(() => {
+      expect(indicators(view.container)).toHaveLength(4);
+    }, WAIT);
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.period')).value).toBe('2026-11');
+    expect(periods).toEqual(['2026-10', '2026-11']);
+    expect(screen.queryByText(text('scr13.not_requested'), { exact: true })).toBeNull();
+  });
+  it('VIG-369: un mes que el gerente elige no se sustituye aunque el servidor lo rechace', async () => {
+    const f = await fixture(undefined, { timeZone: BOGOTA, now: NIGHTLY });
+    const periods = monthlyServer(f.organizationId, ['2026-10']);
+    const view = render(<Page />, { wrapper: f.Wrapper });
+    await waitFor(() => {
+      expect(indicators(view.container)).toHaveLength(4);
+    }, WAIT);
+    fireEvent.change(screen.getByLabelText(text('scr13.period')), {
+      target: { value: '2026-10' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: text('scr13.consult') }));
+    await screen.findAllByRole('alert', {}, WAIT);
+    expect(screen.getByLabelText<HTMLSelectElement>(text('scr13.period')).value).toBe('2026-10');
+    expect(periods).toEqual(['2026-10', '2026-11', '2026-10']);
+    expect(indicators(view.container)).toHaveLength(0);
   });
   it('VIG-363: una elección del gerente sustituye a la carga inicial', async () => {
     const f = await fixture();

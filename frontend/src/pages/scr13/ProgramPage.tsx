@@ -1,5 +1,5 @@
 /** IF-15: selección explícita, caché por alcance y secciones independientes ante fallos. */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { MonthInput } from '@/components/DateFields/DateFields';
@@ -12,6 +12,7 @@ import {
   metricsClock,
   metricsFailure,
   metricsPort,
+  rejectsRequest,
   type Plant,
   type MetricsContext,
   type Overdue,
@@ -22,9 +23,8 @@ import type { ReadOperation } from '@/state/query/policies';
 import { useUiSession } from '@/state/session';
 import { text } from '@/texts';
 import { AdoptionView, ExposureView, MetricView, OverdueView } from './Views';
+import { defaultPeriod, plantMonth } from './period';
 import styles from './scr13.module.css';
-
-const WEEK_MS = 7 * 86_400_000;
 
 /** El mes de negocio usa la zona horaria de la planta, no la del navegador. */
 function monthRange(month: string, timeZone: string) {
@@ -125,6 +125,7 @@ function Results({
   weekly,
   permissions,
   concession,
+  onRejected,
 }: {
   readonly plant: Plant;
   readonly zoneId: string;
@@ -133,6 +134,7 @@ function Results({
   readonly weekly: boolean;
   readonly permissions: readonly string[];
   readonly concession: string | null;
+  readonly onRejected: () => void;
 }) {
   const period = monthRange(month, plant.timezone);
   const zoneName = plant.zones.find((zone) => zone.zone_id === zoneId)?.name ?? text('scr13.zone');
@@ -171,6 +173,10 @@ function Results({
       return data;
     },
   });
+  const rejected = rejectsRequest(metrics.error);
+  useEffect(() => {
+    if (rejected) onRejected();
+  }, [rejected, onRejected]);
   const exposure = useScreenQuery({
     key: key('GET /accreditation/exposure'),
     policy: policyFor('GET /accreditation/exposure'),
@@ -341,10 +347,11 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
     read: ({ signal }) => metricsPort.hierarchy.read({}, signal),
   });
   const [zoneId, setZoneId] = useState('');
-  // VIG-363: el resumen del gerente parte del mes de la semana anterior (las cifras son mensuales).
-  const [month, setMonth] = useState(() =>
-    formatInTimeZone(metricsClock().now() - (weekly ? WEEK_MS : 0), 'UTC', 'yyyy-MM'),
-  );
+  const [openedAt] = useState(() => metricsClock().now());
+  // `null` mientras no elija mes: vale el periodo por defecto, en la hora de la planta.
+  const [month, setMonth] = useState<string | null>(null);
+  // El mes por defecto que el servidor rechazó para esta zona (aún no existía; VIG-369).
+  const [rejected, setRejected] = useState<string | null>(null);
   const [applied, setApplied] = useState<{
     zoneId: string;
     month: string;
@@ -352,14 +359,24 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
   } | null>(null);
   const [touched, setTouched] = useState(false);
   const check = useFormCheck();
-  const currentMonth = formatInTimeZone(metricsClock().now(), 'UTC', 'yyyy-MM');
+  const plants = hierarchy.data?.plants ?? [];
   // Su inicio llega cargado con la primera zona de su alcance hasta que elija otra cosa; las
-  // métricas mensuales, también si el alcance tiene una sola zona (VIG-366).
-  const allZones = hierarchy.data?.plants.flatMap((entry) => entry.zones) ?? [];
-  const firstZone = allZones[0]?.zone_id;
-  const preset = (weekly || allZones.length === 1) && !touched ? firstZone : undefined;
+  // métricas mensuales, también si el alcance tiene una sola zona (VIG-366). VIG-363: el
+  // resumen del gerente parte del mes de la semana anterior (las cifras son mensuales).
+  const initial = defaultPeriod(plants, openedAt, weekly);
+  const allZones = plants.flatMap((entry) => entry.zones);
+  const preset = (weekly || allZones.length === 1) && !touched ? initial?.zoneId : undefined;
   const shownZone = preset ?? zoneId;
-  const shown = applied ?? (preset === undefined ? null : { zoneId: preset, month, revision: 0 });
+  const timeZone =
+    plants.find((entry) => entry.zones.some((zone) => zone.zone_id === shownZone))?.timezone ??
+    plants[0]?.timezone ??
+    'UTC';
+  const currentMonth = plantMonth(metricsClock().now(), timeZone);
+  const openedMonth = plantMonth(openedAt, timeZone);
+  const shownMonth =
+    month ?? (initial === null || initial.month === rejected ? openedMonth : initial.month);
+  const shown =
+    applied ?? (preset === undefined ? null : { zoneId: preset, month: shownMonth, revision: 0 });
   const plant = hierarchy.data?.plants.find((entry) =>
     entry.zones.some((zone) => zone.zone_id === shown?.zoneId),
   );
@@ -382,10 +399,15 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
           onSubmit={(event) => {
             event.preventDefault();
             if (!check.run(event.currentTarget)) return;
-            if (shownZone !== '' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(month)) {
+            if (shownZone !== '' && /^[0-9]{4}-(0[1-9]|1[0-2])$/.test(shownMonth)) {
               setTouched(true);
               setZoneId(shownZone);
-              setApplied({ zoneId: shownZone, month, revision: (shown?.revision ?? 0) + 1 });
+              setMonth(shownMonth);
+              setApplied({
+                zoneId: shownZone,
+                month: shownMonth,
+                revision: (shown?.revision ?? 0) + 1,
+              });
             }
           }}
         >
@@ -399,6 +421,7 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
               onChange={(event) => {
                 setTouched(true);
                 setZoneId(event.target.value);
+                setMonth(shownMonth);
                 setApplied(null);
                 check.clear('zone');
               }}
@@ -420,7 +443,7 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
               name="period"
               required
               latest={currentMonth}
-              value={month}
+              value={shownMonth}
               {...check.field('period')}
               onChange={(value) => {
                 setTouched(true);
@@ -457,6 +480,10 @@ function Selection({ weekly }: { readonly weekly: boolean }) {
           weekly={weekly}
           permissions={principal?.effective_permissions ?? []}
           concession={concession}
+          // Solo cambia el mes por defecto (`month === null`): una elección del usuario se queda.
+          onRejected={() => {
+            setRejected(shown.month);
+          }}
         />
       )}
     </main>

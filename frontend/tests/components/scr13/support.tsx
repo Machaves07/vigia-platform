@@ -163,8 +163,9 @@ afterEach(() => {
 });
 export async function fixture(
   permissions = ['metrics.read', 'exposure.read', 'executive_summary.read', 'coverage.read'],
+  { timeZone = 'UTC', now = Date.parse('2026-01-15T12:00:00.000Z') } = {},
 ) {
-  const clock = new FakeClock(Date.parse('2026-01-15T12:00:00.000Z'));
+  const clock = new FakeClock(now);
   const connection = createPortConnection(clock);
   const cache = createScreenQueryCache({
     clock,
@@ -195,7 +196,7 @@ export async function fixture(
             plant_id: PLANT,
             code: 'P-SINT',
             name: 'Planta sintética',
-            timezone: 'UTC',
+            timezone: timeZone,
             country: 'CO',
             status: 'active',
             data_region: 'co',
