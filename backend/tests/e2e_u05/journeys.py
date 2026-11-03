@@ -81,15 +81,15 @@ def prepare_journeys(
     period = previous_month.strftime("%Y-%m")
     # Precondición histórica sintética, como en test_metrics_routes: la zona ya existía
     # durante el mes. Solo metadatos de identidad; no se reescribe ningún registro del lazo.
+    # Todas las zonas de la flota (VIG-369): el inicio del gerente carga la primera zona por
+    # código, que es aleatorio, y del 1 al 7 de cada mes consulta el mes anterior.
     target.stack.admin(
         [
             (
                 "UPDATE identity.zone SET created_at = $2 WHERE zone_id = $1",
-                (
-                    fleet.zone_ids[0],
-                    dt.datetime.combine(previous_month, dt.time(), tzinfo=now.tzinfo),
-                ),
+                (zone, dt.datetime.combine(previous_month, dt.time(), tzinfo=now.tzinfo)),
             )
+            for zone in fleet.zone_ids
         ]
     )
 

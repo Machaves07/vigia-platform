@@ -72,6 +72,16 @@ export function metricsFailure(
   return 'error';
 }
 
+/** El servidor rechaza la consulta: por ejemplo, un mes en que la zona aún no existía. */
+export function rejectsRequest(error: Error | null): boolean {
+  return (
+    error !== null &&
+    isPortError(error) &&
+    error.failure.kind === 'http' &&
+    error.failure.error.code === 'invalid_request'
+  );
+}
+
 /** La organización de la concesión procede solo de la jerarquía autorizada. */
 export interface MetricsContext {
   readonly organizationId: string;
