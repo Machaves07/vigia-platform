@@ -42,6 +42,7 @@ __all__ = [
     "BootstrapZone",
     "ConfigurationUnavailable",
     "NodeConfiguration",
+    "NodeConfigurationInvalid",
     "StoredCamera",
     "initial_configuration",
 ]
@@ -63,6 +64,14 @@ class ConfigurationUnavailable(Exception):
     **no** consume el código."""
 
 
+class NodeConfigurationInvalid(ValueError):
+    """Un valor fuera de la regla (A-04, A-09, D-11). ``field`` es el campo, de lista cerrada."""
+
+    def __init__(self, field_name: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field_name
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class NodeConfiguration:
     """``NodeConfiguration`` 🔒 de un nodo (o los valores por defecto de D-11)."""
@@ -79,7 +88,9 @@ class NodeConfiguration:
             or not 1 <= len(sources) <= 8
             or not all(isinstance(s, str) and _TIME_SOURCE.fullmatch(s) for s in sources)
         ):
-            raise ValueError("time_sources son de 1 a 8 anfitriones o direcciones")
+            raise NodeConfigurationInvalid(
+                "time_sources", "time_sources son de 1 a 8 anfitriones o direcciones"
+            )
         _bounded(self.sent_records_retention_days, 1, 90, "sent_records_retention_days")
         # Nunca menos que la vigencia del token de vista de U-02 (600 s): el nodo rechazaría
         # tokens legítimos.
@@ -94,7 +105,7 @@ class NodeConfiguration:
 
 def _bounded(value: object, low: int, high: int, name: str) -> None:
     if type(value) is not int or not low <= value <= high:
-        raise ValueError(f"{name} debe estar entre {low} y {high}")
+        raise NodeConfigurationInvalid(name, f"{name} debe estar entre {low} y {high}")
 
 
 @dataclass(frozen=True, slots=True)
