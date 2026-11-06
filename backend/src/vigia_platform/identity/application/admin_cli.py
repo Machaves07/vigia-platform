@@ -106,6 +106,7 @@ from vigia_platform.ledger.application.audit_writer import (
     AuditOperation,
     AuditOutcome,
     AuditReceipt,
+    ResourceRef,
 )
 from vigia_platform.shared.archive.audit_archive import (
     ArchiveVerificationFailed,
@@ -286,6 +287,8 @@ class AdminContexts(Protocol):
         self, operator_id: uuid.UUID, *, correlation_id: uuid.UUID | None = None
     ) -> ScopeContext: ...
 
+    def context_for_organization(self, task: Any, organization_id: uuid.UUID) -> ScopeContext: ...
+
 
 class AdminAuthorizer(Protocol):
     async def authorize(
@@ -384,6 +387,7 @@ class AdminAudit(Protocol):
         operation: AuditOperation,
         *,
         outcome: AuditOutcome = ...,
+        resource: ResourceRef | None = None,
         filters: Mapping[str, JsonValue] | None = None,
     ) -> AuditReceipt: ...
 
@@ -503,10 +507,18 @@ def resolve_runtime_builder(reference: str | None) -> RuntimeBuilder:
 class AdminError(Exception):
     """Rechazo propio de la orden: ``code`` cerrado y mensaje en español sin datos."""
 
-    def __init__(self, code: str, message: str, exit_code: ExitCode = ExitCode.REJECTED) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        exit_code: ExitCode = ExitCode.REJECTED,
+        *,
+        field_path: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.exit_code = exit_code
+        self.field_path = field_path
 
 
 @dataclass(slots=True)
@@ -931,6 +943,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_operator(publish)
     _add_common(publish)
+    _node_configuration_module().add_parser(commands)
     return parser
 
 
@@ -1716,6 +1729,19 @@ async def _declare_unrecoverable_attachment(
     )
 
 
+def _node_configuration_module() -> Any:
+    """``fleet.application.admin_node_configuration``: importa este módulo, así que va al usarlo."""
+    from vigia_platform.fleet.application import admin_node_configuration
+
+    return admin_node_configuration
+
+
+async def _node_configuration(
+    args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
+) -> None:
+    await _node_configuration_module().run(args, config, runtime, streams)
+
+
 type Command = Callable[[argparse.Namespace, AdminConfig, AdminRuntime, Streams], Awaitable[None]]
 
 COMMANDS: Final[Mapping[str, Command]] = {
@@ -1730,6 +1756,7 @@ COMMANDS: Final[Mapping[str, Command]] = {
     "restore-audit-partition": _restore_audit_partition,
     "record-restore-drill": _record_restore_drill,
     "set-node-rate-brake": _set_node_rate_brake,
+    "node-configuration": _node_configuration,
     "regenerate-revocation-list": _regenerate_revocation_list,
     "revocation-list": _regenerate_revocation_list,
 }
@@ -1763,7 +1790,7 @@ async def execute(
         await COMMANDS[args.command](args, config, runtime, streams)
         return ExitCode.OK
     except AdminError as error:
-        _fail(streams, error.code, str(error))
+        _fail(streams, error.code, str(error), error.field_path)
         return error.exit_code
     except IdentityRejected as error:
         _fail(streams, error.code.value, error.message_es, error.field)
