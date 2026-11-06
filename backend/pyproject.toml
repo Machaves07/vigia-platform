@@ -57,6 +57,10 @@ vigia-api = "vigia_platform.shared.api.main:main"
 vigia-worker = "vigia_platform.shared.worker.main:main"
 # Órdenes administrativas del operador del proveedor (LC-NUC-07, TASK-132; infra: ADMIN_COMMAND).
 vigia-admin = "vigia_platform.identity.application.admin_cli:main"
+# Balanceador del entorno de integración (TASK-542; nunca en producción, donde termina TLS el ALB).
+# `tools/` no entra en la rueda: la orden necesita `backend/` en PYTHONPATH, que pone la imagen de
+# `local/mtls-edge/Dockerfile`; en desarrollo, `uv run python -m tools.mtls_edge` desde `backend/`.
+vigia-mtls-edge = "tools.mtls_edge:main"
 
 [dependency-groups]
 dev = [
