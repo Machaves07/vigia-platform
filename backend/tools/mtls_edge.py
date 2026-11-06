@@ -63,6 +63,7 @@ import threading
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, MutableSequence, Sequence
 from dataclasses import dataclass, field
+from http.cookiejar import DefaultCookiePolicy
 from pathlib import Path
 from typing import Final, TextIO
 from urllib.parse import quote
@@ -235,6 +236,8 @@ class MtlsProxy:
     host: str = "127.0.0.1"
     listen_port: int = 0
     on_exchange: Callable[[Exchange], None] | None = None
+    upstream_verify: ssl.SSLContext | bool = True
+    """Cómo se verifica un backend ``https``; sin el entorno del proceso (``trust_env=False``)."""
     exchanges: MutableSequence[Exchange] = field(default_factory=list)
     _loop: asyncio.AbstractEventLoop = field(default_factory=asyncio.new_event_loop)
     _thread: threading.Thread | None = None
@@ -284,7 +287,12 @@ class MtlsProxy:
         future.result(timeout=START_TIMEOUT_SECONDS)
 
     async def _open(self) -> None:
-        self._client = httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT_SECONDS)
+        # Sin el entorno: un ``HTTP_PROXY`` vería pasar las cookies y las cabeceras de identidad.
+        self._client = httpx.AsyncClient(
+            timeout=UPSTREAM_TIMEOUT_SECONDS, trust_env=False, verify=self.upstream_verify
+        )
+        # Un solo cliente atiende a todos: un tarro de cookies daría la sesión de uno al siguiente.
+        self._client.cookies.jar.set_policy(DefaultCookiePolicy(allowed_domains=[]))
         self._tls_context = self._context()
         self._server = await asyncio.start_server(
             self._serve, host=self.host, port=self.listen_port
@@ -463,7 +471,13 @@ class MtlsProxy:
         self, base: str, method: str, target: str, headers: list[tuple[str, str]], body: bytes
     ) -> tuple[int, list[tuple[str, str]], bytes]:
         assert self._client is not None  # noqa: S101 - lo pone ``_open`` antes de escuchar
-        upstream = self._client.build_request(method, base + target, headers=headers, content=body)
+        try:
+            upstream = self._client.build_request(
+                method, base + target, headers=headers, content=body
+            )
+        except UnicodeEncodeError:
+            # Una cabecera con bytes no ASCII: un 400, no una traza por cada cliente de ``app.``.
+            return 400, [], b""
         try:
             response = await self._client.send(upstream, stream=True)
         except httpx.HTTPError as error:
@@ -635,7 +649,7 @@ def init_server_certificate(
     key = ec.generate_private_key(ec.SECP256R1())
     leaf = (
         x509.CertificateBuilder()
-        .subject_name(_name(names[0]))
+        .subject_name(_name("Vigia mtls-edge servidor"))
         .issuer_name(authority_name)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
@@ -699,7 +713,9 @@ def validated_roots(data: bytes) -> bytes:
 def read_client_roots(source: str) -> bytes:
     """La raíz de nodos de ``source`` (ruta o URL ``http(s)``), validada."""
     if source.startswith(("http://", "https://")):
-        response = httpx.get(source, timeout=ROOT_FETCH_TIMEOUT_SECONDS, trust_env=False)
+        response = httpx.get(
+            source, timeout=ROOT_FETCH_TIMEOUT_SECONDS, trust_env=False, follow_redirects=False
+        )
         response.raise_for_status()
         return validated_roots(response.content)
     return validated_roots(Path(source).read_bytes())

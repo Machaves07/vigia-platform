@@ -37,13 +37,14 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from starlette.types import Receive, Scope, Send
 
+from tests.conformance.mtls_proxy import server_tls
 from tests.conformance.test_mtls_proxy import FORGED, _authority, _leaf, echo_backend
 from tests.node_api_support import DAY, VERSION, NodeWorld, node_world, zone_of
 from tests.resilience.harness import WALL, free_port
 from tools.mtls_edge import (
     EXCHANGES_KEPT,
-    MAX_ROOTS,
     EdgeConfig,
     EdgeError,
     Exchange,
@@ -194,7 +195,10 @@ def test_the_app_listener_never_forwards_a_client_certificate(directory: Path) -
     assert [name for name in _names(received) if name.startswith("x-amzn-mtls-")] == []
 
 
-def test_forwarded_headers_come_from_the_edge_not_from_the_client(directory: Path) -> None:
+@pytest.mark.parametrize("listener", ["app", "nodes"])
+def test_forwarded_headers_come_from_the_edge_not_from_the_client(
+    directory: Path, listener: str
+) -> None:
     _write_root(directory / "root.pem", Pki(directory, "propia"))
     with (
         echo_backend() as backend,
@@ -202,11 +206,142 @@ def test_forwarded_headers_come_from_the_edge_not_from_the_client(directory: Pat
         _client(directory) as client,
     ):
         received = client.get(
-            edge.app.url + "/api/x",
-            headers={"X-Forwarded-For": "203.0.113.9", "X-Forwarded-Proto": "http"},
+            (edge.nodes if listener == "nodes" else edge.app).url + "/api/x",
+            headers={
+                "X-Forwarded-For": "203.0.113.9",
+                "X-Forwarded-Proto": "http",
+                "X-Forwarded-Port": "81",
+                "X-Forwarded-Host": "otra.invalid",
+            },
         ).json()
-    assert [value for name, value in received if name == "x-forwarded-for"] == [LOOPBACK]
-    assert [value for name, value in received if name == "x-forwarded-proto"] == ["https"]
+    forwarded = sorted((name, value) for name, value in received if name.startswith("x-forwarded-"))
+    assert forwarded == [("x-forwarded-for", LOOPBACK), ("x-forwarded-proto", "https")]
+
+
+async def _cookie_app(scope: Scope, receive: Receive, send: Send) -> None:
+    """``/login`` da una cookie, con ``Secure`` por ``https`` como la de sesión real; lo demás,
+    un eco de las cabeceras recibidas."""
+    if scope["type"] != "http":
+        return
+    headers = [(b"content-type", b"application/json")]
+    if scope["path"] == "/login":
+        cookie = (
+            b"__Host-sesion=sintetica; Secure; HttpOnly; SameSite=Strict; Path=/"
+            if scope["scheme"] == "https"
+            else b"sesion=sintetica; Path=/"
+        )
+        headers.append((b"set-cookie", cookie))
+    received = [
+        [name.decode("latin-1"), value.decode("latin-1")] for name, value in scope["headers"]
+    ]
+    body = httpx.Response(200, json=received).content
+    headers.append((b"content-length", str(len(body)).encode()))
+    await send({"type": "http.response.start", "status": 200, "headers": headers})
+    await send({"type": "http.response.body", "body": body})
+
+
+@contextlib.contextmanager
+def cookie_backend(directory: Path, scheme: str) -> Iterator[tuple[str, ssl.SSLContext | bool]]:
+    """La aplicación de cookies por ``scheme``, y cómo debe verificarla el balanceador."""
+    options: dict[str, Any] = {}
+    verify: ssl.SSLContext | bool = True
+    if scheme == "https":
+        tls = server_tls(directory, WALL.now())
+        options = {"ssl_certfile": str(tls.certificate_file), "ssl_keyfile": str(tls.key_file)}
+        verify = ssl.create_default_context(cafile=str(tls.ca_file))
+    port = free_port()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            _cookie_app, host=LOOPBACK, port=port, log_level="warning", lifespan="off", **options
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = WALL.monotonic() + WAIT_SECONDS
+    while not server.started:
+        assert WALL.monotonic() < deadline, "la aplicación de cookies no arrancó"
+        time.sleep(0.05)
+    try:
+        yield f"{scheme}://{LOOPBACK}:{port}", verify
+    finally:
+        server.should_exit = True
+        thread.join(timeout=WAIT_SECONDS)
+
+
+@pytest.mark.parametrize("listener", ["app", "nodes"])
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_a_cookie_of_one_client_never_reaches_another(
+    directory: Path, scheme: str, listener: str
+) -> None:
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    with cookie_backend(directory, scheme) as (backend, verify):
+        edge = MtlsEdge(_config(directory, (backend,)))
+        edge.app.upstream_verify = verify
+        edge.nodes.upstream_verify = verify
+        edge.start()
+        try:
+            url = (edge.nodes if listener == "nodes" else edge.app).url
+            with _client(directory) as victim, _client(directory) as other:
+                login = victim.get(url + "/login")
+                assert login.status_code == 200, login.text
+                assert "set-cookie" in login.headers  # la respuesta le llega a quien la pidió
+                received = other.get(url + "/api/x").json()
+                own = other.get(url + "/api/x", headers={"Cookie": "propia=1"}).json()
+        finally:
+            edge.close()
+    assert [value for name, value in received if name == "cookie"] == []
+    # El balanceador no guarda cookies, pero sigue reenviando la que trae cada cliente.
+    assert [value for name, value in own if name == "cookie"] == ["propia=1"]
+
+
+def _status_of_raw_request(directory: Path, port: int, request: bytes) -> bytes:
+    context = ssl.create_default_context(cafile=str(directory / "edge-ca.pem"))
+    with (
+        socket.create_connection((LOOPBACK, port), timeout=30) as raw,
+        context.wrap_socket(raw, server_hostname=LOOPBACK) as connection,
+        connection.makefile("rb") as response,
+    ):
+        connection.sendall(request)
+        status: bytes = response.readline().split()[1]
+    return status
+
+
+def test_a_header_that_is_not_ascii_gets_a_400_not_a_traceback(
+    directory: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    with echo_backend() as backend, running(_config(directory, (backend,))) as edge:
+        capsys.readouterr()
+        request = b"GET /api/x HTTP/1.1\r\nHost: x\r\nX-Prueba: \xe9\r\n\r\n"
+        status = _status_of_raw_request(directory, edge.app.port, request)
+    assert status == b"400"
+    (exchange,) = edge.app.exchanges
+    assert exchange.status == 400
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_the_502_line_carries_no_query(directory: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    closed = f"http://{LOOPBACK}:{free_port()}"
+    with running(_config(directory, (closed,))) as edge, _client(directory) as client:
+        capsys.readouterr()
+        response = client.get(edge.app.url + "/api/x?token=" + SECRET_MARKER)
+    assert response.status_code == 502
+    assert SECRET_MARKER not in capsys.readouterr().err
+
+
+def test_the_forwarding_ignores_a_proxy_of_the_environment(
+    directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un ``HTTP_PROXY`` del proceso vería pasar las cookies y las cabeceras de identidad."""
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    hits: list[str] = []
+    with root_server({}, hits=hits) as proxy, echo_backend() as backend:
+        _point_the_environment_at(monkeypatch, proxy)
+        with running(_config(directory, (backend,))) as edge, _client(directory) as client:
+            response = client.get(edge.app.url + "/api/x")
+    assert response.status_code == 200
+    assert hits == []
 
 
 def test_requests_alternate_between_the_backends_of_the_edge(directory: Path) -> None:
@@ -344,7 +479,8 @@ def _missing(path: Path, directory: Path) -> None:
 
 
 def _three_roots(path: Path, directory: Path) -> None:
-    _write_root(path, *(Pki(directory, f"raiz-{index}") for index in range(MAX_ROOTS + 1)))
+    """Tres: D-6 admite la vigente y la nueva, nunca más (el número no sale de la constante)."""
+    _write_root(path, *(Pki(directory, f"raiz-{index}") for index in range(3)))
 
 
 def _not_self_signed(path: Path, directory: Path) -> None:
@@ -410,11 +546,23 @@ def test_an_unchanged_root_is_not_reloaded(directory: Path) -> None:
 
 
 @contextlib.contextmanager
-def root_server(files: dict[str, bytes]) -> Iterator[str]:
+def root_server(
+    files: dict[str, bytes],
+    *,
+    statuses: dict[str, int] | None = None,
+    locations: dict[str, str] | None = None,
+    hits: list[str] | None = None,
+) -> Iterator[str]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if hits is not None:
+                hits.append(self.path)
             content = files.get(self.path)
-            self.send_response(200 if content is not None else 404)
+            default = 200 if content is not None else 404
+            self.send_response((statuses or {}).get(self.path, default))
+            location = (locations or {}).get(self.path)
+            if location is not None:
+                self.send_header("location", location)
             self.send_header("content-length", str(len(content or b"")))
             self.end_headers()
             self.wfile.write(content or b"")
@@ -447,6 +595,92 @@ def test_the_root_can_come_from_the_local_deposit_by_url(directory: Path) -> Non
             assert _completes(e, directory, pki.cert)
 
 
+ROOT_PATH: Final = "/vigia-edge/ca/root.pem"
+
+
+def _point_the_environment_at(monkeypatch: pytest.MonkeyPatch, proxy: str) -> None:
+    """Solo ``http``: el cliente de la prueba habla ``https`` con el balanceador."""
+    for name in ("HTTP_PROXY", "http_proxy"):
+        monkeypatch.setenv(name, proxy)
+    for name in ("NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(
+    "spoil", [_garbage, _empty, _three_roots, _not_self_signed, _forged_self_signed]
+)
+def test_a_bad_root_served_by_url_keeps_the_previous_root(
+    directory: Path, spoil: Callable[[Path, Path], None]
+) -> None:
+    pki = Pki(directory, "propia")
+    files = {ROOT_PATH: pki.root}
+    with root_server(files) as store, echo_backend() as backend:
+        config = _config(directory, (backend,), client_ca=store + ROOT_PATH)
+        with running(config) as edge:
+            assert _completes(edge, directory, pki.cert)
+            spoil(directory / "servida.pem", directory)
+            files[ROOT_PATH] = (directory / "servida.pem").read_bytes()
+            assert edge.reload_client_roots() is False
+            assert _completes(edge, directory, pki.cert)
+
+
+def test_the_three_root_bundle_and_the_leaf_are_refused_by_url_on_their_own(
+    directory: Path,
+) -> None:
+    """Sin ``validated_roots`` en la vía URL, ``read_client_roots`` los daría por buenos."""
+    files: dict[str, bytes] = {}
+    with root_server(files) as store:
+        for spoil in (_three_roots, _not_self_signed, _forged_self_signed):
+            spoil(directory / "servida.pem", directory)
+            files[ROOT_PATH] = (directory / "servida.pem").read_bytes()
+            with pytest.raises(ValueError):
+                read_client_roots(store + ROOT_PATH)
+
+
+@pytest.mark.parametrize("status", [500, 404, 403])
+def test_an_error_response_with_a_valid_root_is_not_loaded(directory: Path, status: int) -> None:
+    old, other = Pki(directory, "vieja"), Pki(directory, "otra")
+    files = {ROOT_PATH: old.root}
+    statuses: dict[str, int] = {}
+    with root_server(files, statuses=statuses) as store, echo_backend() as backend:
+        config = _config(directory, (backend,), client_ca=store + ROOT_PATH)
+        with running(config) as edge:
+            files[ROOT_PATH] = other.root
+            statuses[ROOT_PATH] = status
+            assert edge.reload_client_roots() is False
+            assert _completes(edge, directory, old.cert)
+            assert not _completes(edge, directory, other.cert)
+
+
+def test_a_redirect_is_not_followed_to_another_root(directory: Path) -> None:
+    old, other = Pki(directory, "vieja"), Pki(directory, "otra")
+    files = {ROOT_PATH: old.root, "/otra.pem": other.root}
+    statuses: dict[str, int] = {}
+    locations: dict[str, str] = {}
+    with (
+        root_server(files, statuses=statuses, locations=locations) as store,
+        echo_backend() as backend,
+    ):
+        config = _config(directory, (backend,), client_ca=store + ROOT_PATH)
+        with running(config) as edge:
+            statuses[ROOT_PATH] = 302
+            locations[ROOT_PATH] = "/otra.pem"
+            assert edge.reload_client_roots() is False
+            assert not _completes(edge, directory, other.cert)
+
+
+def test_the_root_ignores_a_proxy_of_the_environment(
+    directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un ``HTTP_PROXY`` del proceso podría servir otra raíz, en la que se confiaría."""
+    good, other = Pki(directory, "buena"), Pki(directory, "otra")
+    with root_server({ROOT_PATH: good.root}) as store:
+        url = store + ROOT_PATH
+        with root_server({url: other.root}) as proxy:
+            _point_the_environment_at(monkeypatch, proxy)
+            assert read_client_roots(url) == good.root
+
+
 def test_validated_roots_returns_what_it_read(directory: Path) -> None:
     pki = Pki(directory, "propia")
     assert validated_roots(pki.root) == pki.root
@@ -461,6 +695,13 @@ def _init(directory: Path, **changes: Any) -> Any:
     return init_server_certificate(
         directory / "edge.crt", directory / "edge.key", directory / "edge-ca.pem", **values
     )
+
+
+def test_a_long_first_name_fits_in_the_certificate(tmp_path: Path) -> None:
+    """El nombre común es fijo: el primer ``--san`` puede pasar de los 64 caracteres del CN."""
+    long_name = "app." + "a" * 60 + "." + DOMAIN
+    result = _init(tmp_path, dns_names=(long_name, DNS_NAMES[1]))
+    assert result.created
 
 
 def test_the_server_certificate_persists_and_has_the_expected_names(tmp_path: Path) -> None:
