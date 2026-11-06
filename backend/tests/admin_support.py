@@ -28,6 +28,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Final, cast
 
 from cryptography import x509
@@ -39,6 +40,7 @@ from sqlalchemy import text
 from vigia_contracts.clock import SimulatedClock
 from vigia_contracts.signing import public_key_base64
 
+from vigia_platform.fleet.adapters.ca.file_signer import FileNodeCaSigner
 from vigia_platform.identity.adapters.authz_store import (
     PostgresAuthorizationAudit,
     PostgresContextStore,
@@ -152,6 +154,36 @@ class FakeKms:
 
     async def get_public_key(self, key_id: str) -> bytes:
         return public_der(self.keys[key_id].public_key())
+
+
+class FileBackedFakeKms(FakeKms):
+    """``FakeKms`` con cada clave en su archivo ``0600``: las mismas pruebas con ``file``."""
+
+    def __init__(self, directory: Path) -> None:
+        super().__init__()
+        self._directory = directory / uuid.uuid4().hex
+        self._directory.mkdir()
+        self._signer = FileNodeCaSigner(self._directory / "node-ca.pem")
+
+    def add(self, key_id: str, curve: ec.EllipticCurve | None = None) -> str:
+        super().add(key_id, curve)
+        path = self._directory / f"{key_id}.pem"
+        path.write_bytes(
+            self.keys[key_id].private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        path.chmod(0o600)
+        return key_id
+
+    async def sign(self, key_id: str, message: bytes) -> bytes:
+        self.signed.append(key_id)
+        return await self._signer.sign(f"file:{self.sign_with.get(key_id, key_id)}", message)
+
+    async def get_public_key(self, key_id: str) -> bytes:
+        return await self._signer.get_public_key(f"file:{key_id}")
 
 
 def public_der(public: Any) -> bytes:
@@ -756,6 +788,8 @@ class IntegrationWorld:
     clock: OffsetClock = field(default_factory=OffsetClock)
     built: list[BuiltRuntime] = field(default_factory=list)
     on_build: Callable[[BuiltRuntime], Awaitable[None]] | None = None
+    kms_factory: Callable[[AwsSettings], KmsAdapter] = KmsAdapter
+    """El adaptador de la autoridad: ``FileBackedKms`` en las pruebas del backend ``file``."""
 
     def aws_settings(self) -> AwsSettings:
         return AwsSettings(
@@ -820,7 +854,7 @@ class IntegrationWorld:
         )
         aws = self.aws_settings()
         secrets_adapter = SecretsManagerAdapter(aws, clock, kms_key_id=self.secrets_key_id)
-        kms = KmsAdapter(aws)
+        kms = self.kms_factory(aws)
         signing = SigningService(
             provider_organization_id=provider_id,
             store=SqlSigningKeyStore(

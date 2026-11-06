@@ -173,7 +173,7 @@ _log = get_logger("identity.admin")
 RUNTIME_VARIABLE: Final = "VIGIA_ADMIN_RUNTIME"
 _RUNTIME_REFERENCE: Final = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
 """Solo un constructor del propio paquete: la variable no puede nombrar cualquier función."""
-_ENVIRONMENT: Final = r"^(local|test|pilot|staging-[1-9][0-9]{0,2})$"
+_ENVIRONMENT: Final = r"^(local|test|integration|pilot|staging-[1-9][0-9]{0,2})$"
 _SECRET_NAME: Final = r"^[A-Za-z0-9][A-Za-z0-9/_+=.@-]{0,511}$"  # noqa: S105 - patrón del nombre
 _KMS_KEY_ID: Final = r"^[A-Za-z0-9][A-Za-z0-9:/_-]{0,2047}$"
 _BUCKET: Final = r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
@@ -1797,7 +1797,7 @@ async def execute(
     except RuntimeConfigInvalid as error:
         # Variable ausente o secreto de la base que no existe: nombra la variable, sin valores.
         _log.error("configuración de vigia-admin no válida: revisa las variables VIGIA_*")
-        _fail(streams, "config_invalid", str(error))
+        _fail(streams, error.code, str(error))
         return ExitCode.FAILURE
     except (TransientDatabaseError, SecretsUnavailable, StorageUnavailable):
         _fail(streams, "temporarily_unavailable", "dependencia no disponible: reintenta")

@@ -173,7 +173,7 @@ datos del arranque nunca descifra un secreto de otro propósito."""
 STARTUP_CHECK_TIMEOUT_SECONDS: Final = 10.0
 """Tope de cada comprobación de arranque; no supera el tope del intento de la base (16 s)."""
 
-_ENVIRONMENT: Final = r"^(local|test|pilot|staging-[1-9][0-9]{0,2})$"
+_ENVIRONMENT: Final = r"^(local|test|integration|pilot|staging-[1-9][0-9]{0,2})$"
 _DOCS_ENVIRONMENTS: Final = frozenset({"local", "test"})
 _SENTINEL_KEY: Final = r"^[A-Za-z0-9][A-Za-z0-9!_.*'()/=-]{0,511}$"
 _KMS_KEY_ID: Final = r"^[A-Za-z0-9][A-Za-z0-9:/_-]{0,2047}$"
@@ -197,7 +197,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
 
     environment: str = Field(pattern=_ENVIRONMENT)
-    """``local``, ``test``, ``staging-<n>`` o ``pilot`` (producción del piloto)."""
+    """``local``, ``test``, ``integration``, ``staging-<n>`` o ``pilot`` (producción del piloto)."""
     data_key_id: str = Field(pattern=_KMS_KEY_ID)
     """Clave KMS ``vigia-secrets`` del cifrado de sobre (``VIGIA_SECRETS_KEY_ARN``)."""
     health_sentinel_key: str = Field(default="health/ready-sentinel", pattern=_SENTINEL_KEY)
