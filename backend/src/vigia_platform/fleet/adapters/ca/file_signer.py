@@ -17,11 +17,16 @@ sobre de ``vigia-secrets``) sigue en KMS.
 ``VIGIA_NODE_CA_KEY_FILE``, sin rutas: ``file:node-ca`` para ``/ca/node-ca.pem``, y
 ``--new-key-id file:node-ca-2`` en una rotación (D-6).
 
-**Creación**: solo ``vigia-admin`` (``can_create``), y solo al firmar por primera vez. La clave
+**Creación** (A-89): solo las claves de ``creatable``, y solo al firmar por primera vez.
+``vigia-admin`` las nombra: la configurada con ``bootstrap --first-install`` y la de
+``--new-key-id`` en ``rotate-node-ca``. Sin eso, una clave que no existe es un error, también con
+el depósito vacío: un volumen mal montado no crea otra autoridad. La clave
 pública de una clave aún por crear sale de una clave en memoria: ``--dry-run`` y ``check_key`` no
 escriben nada. Se publica por ``os.link`` desde un temporal ``0600``: el archivo aparece entero o no
-aparece, y entre dos procesos a la vez gana uno y el otro usa la del ganador. Un ``vigia-api`` o un
-``vigia-worker`` sin archivo no crean ninguno: su comprobación de arranque falla (NFR-GOB-20).
+aparece. Entre dos procesos a la vez queda una sola clave: el perdedor firma con la del ganador, así
+que su raíz no verifica con la pública que leyó (``NodeCaError``, fallo cerrado) y basta repetir. Un
+``vigia-api`` o un ``vigia-worker`` sin archivo no crean ninguno: su comprobación de arranque falla
+(NFR-GOB-20).
 
 La clave se lee en cada operación, sin caché. Ningún mensaje, ``repr`` ni registro lleva el PEM ni
 la ruta. El archivo debe ser regular (``O_NOFOLLOW``) y sin permisos para el grupo ni para otros.
@@ -46,15 +51,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from vigia_platform.shared.node_ca import NodeCaError
 from vigia_platform.shared.secrets import AwsSettings, KmsAdapter
 
-__all__ = ["FileBackedKms", "FileNodeCaSigner", "file_key_id"]
+__all__ = ["FileBackedKms", "FileNodeCaSigner"]
 
 _KEY_ID: Final = re.compile(r"file:([a-z0-9][a-z0-9-]{0,62})")
 _OPEN_FLAGS: Final = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-
-
-def file_key_id(key_file: Path) -> str:
-    """El identificador de clave de ``key_file``: ``file:node-ca`` para ``/ca/node-ca.pem``."""
-    return f"file:{key_file.stem}"
 
 
 def _read_key(path: Path) -> ec.EllipticCurvePrivateKey | None:
@@ -85,10 +85,10 @@ def _read_key(path: Path) -> ec.EllipticCurvePrivateKey | None:
 class FileNodeCaSigner:
     """``NodeCaSigner`` sobre claves EC en archivos ``0600`` (ver el módulo)."""
 
-    def __init__(self, key_file: Path, *, can_create: bool = False) -> None:
+    def __init__(self, key_file: Path, *, creatable: frozenset[str] = frozenset()) -> None:
         self._directory = key_file.parent
         self._suffix = key_file.suffix
-        self._can_create = can_create
+        self._creatable = creatable
         self._pending: dict[Path, ec.EllipticCurvePrivateKey] = {}
         self._lock = threading.Lock()
 
@@ -107,9 +107,12 @@ class FileNodeCaSigner:
             raise NodeCaError("con el backend file la clave es file:<nombre>, sin rutas")
         return self._directory / f"{match.group(1)}{self._suffix}"
 
-    def _pending_key(self, path: Path) -> ec.EllipticCurvePrivateKey:
-        if not self._can_create:
-            raise NodeCaError("la clave de la autoridad no existe: la crea vigia-admin bootstrap")
+    def _pending_key(self, key_id: str, path: Path) -> ec.EllipticCurvePrivateKey:
+        if key_id not in self._creatable:
+            raise NodeCaError(
+                "la clave de la autoridad no existe. En una primera instalación usa "
+                "bootstrap --first-install; si ya había nodos, comprueba el volumen de la clave"
+            )
         key = self._pending.get(path)
         if key is None:
             key = ec.generate_private_key(ec.SECP256R1())
@@ -121,7 +124,7 @@ class FileNodeCaSigner:
         with self._lock:
             key = _read_key(path)
             if key is None:
-                key = self._pending_key(path)
+                key = self._pending_key(key_id, path)
         return key.public_key().public_bytes(
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
         )
@@ -131,12 +134,12 @@ class FileNodeCaSigner:
         with self._lock:
             key = _read_key(path)
             if key is None:
-                key = self._persist(path)
+                key = self._persist(key_id, path)
         return key.sign(message, ec.ECDSA(hashes.SHA256()))
 
-    def _persist(self, path: Path) -> ec.EllipticCurvePrivateKey:
+    def _persist(self, key_id: str, path: Path) -> ec.EllipticCurvePrivateKey:
         """Publica la clave pendiente, o la que otro proceso publicó antes."""
-        pending = self._pending_key(path)
+        pending = self._pending_key(key_id, path)
         pem = pending.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,

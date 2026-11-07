@@ -223,6 +223,9 @@ class AdminConfig(BaseModel):
     """``VIGIA_PUBLIC_ORIGIN`` (``https://app.<dominio>``): base del enlace de invitación."""
     node_ca_key_id: str | None = Field(default=None, pattern=_KMS_KEY_ID)
     """``VIGIA_NODE_CA_KEY_ARN``: solo con ``first_deploy=true`` o ``ca_rotation=true``."""
+    node_ca_creatable_keys: frozenset[str] = frozenset()
+    """Las claves de la autoridad por archivo que esta orden puede crear (A-89). No sale del
+    entorno: la fija ``execute`` según la orden (``_creatable_node_ca_keys``)."""
     edge_bucket: str | None = Field(default=None, pattern=_BUCKET)
     root_certificate_key: str = Field(default=ROOT_CERTIFICATE_KEY, pattern=_OBJECT_KEY)
     archive_bucket: str | None = Field(default=None, pattern=_BUCKET)
@@ -709,6 +712,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--publish-root",
         action="store_true",
         help="con --resume: vuelve a emitir y publicar ca/root.pem",
+    )
+    bootstrap.add_argument(
+        "--first-install",
+        action="store_true",
+        help=(
+            "con VIGIA_NODE_CA_BACKEND=file: primera instalación, crea la clave de la autoridad "
+            "si no existe y nunca la sobrescribe (A-89)"
+        ),
     )
     _add_common(bootstrap, confirm=True)
 
@@ -1747,6 +1758,19 @@ def _provider_for(
     return _require_provider(config)
 
 
+def _creatable_node_ca_keys(args: argparse.Namespace, config: AdminConfig) -> frozenset[str]:
+    """Qué clave de la autoridad por archivo puede crear esta orden (A-89).
+
+    La configurada solo con ``bootstrap --first-install``; en ``rotate-node-ca``, solo la que nombra
+    ``--new-key-id``. Ninguna en cualquier otro caso: un volumen vacío nunca crea otra autoridad.
+    """
+    if args.command == "rotate-node-ca":
+        return frozenset({args.new_key_id})
+    if args.command == "bootstrap" and args.first_install and config.node_ca_key_id is not None:
+        return frozenset({config.node_ca_key_id})
+    return frozenset()
+
+
 async def execute(
     args: argparse.Namespace,
     config: AdminConfig,
@@ -1759,6 +1783,9 @@ async def execute(
     runtime: AdminRuntime | None = None
     try:
         provider_id = _provider_for(args, config, random_bytes)
+        config = config.model_copy(
+            update={"node_ca_creatable_keys": _creatable_node_ca_keys(args, config)}
+        )
         runtime = await builder(config, provider_id)
         await COMMANDS[args.command](args, config, runtime, streams)
         return ExitCode.OK

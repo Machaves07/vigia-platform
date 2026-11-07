@@ -124,7 +124,7 @@ async def compose_admin_runtime(
         provider_organization_id=provider,
         units=selected,
         archive=archive,
-        node_ca_key_creation=True,
+        node_ca_creatable_keys=config.node_ca_creatable_keys,
     )
     services = core.services
     deps = IdentityDependencies(

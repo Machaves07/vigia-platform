@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import datetime as dt
+import io
 import ipaddress
 import logging
 import os
@@ -28,13 +30,11 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 from tests.admin_support import MemoryStorage, issue_node_certificate, validates
+from vigia_platform.fleet.adapters.ca import file_signer as file_signer_module
 from vigia_platform.fleet.adapters.ca.certificate_profiles import NodeCaIssuer
-from vigia_platform.fleet.adapters.ca.file_signer import (
-    FileBackedKms,
-    FileNodeCaSigner,
-    file_key_id,
-)
+from vigia_platform.fleet.adapters.ca.file_signer import FileBackedKms, FileNodeCaSigner
 from vigia_platform.identity.application.admin_cli import AdminConfig
+from vigia_platform.identity.application.admin_cli import run as admin_run
 from vigia_platform.node_api.certificate_profile import NodeSubject
 from vigia_platform.shared.api.app import AppConfig
 from vigia_platform.shared.clock import SystemClock
@@ -55,8 +55,13 @@ from vigia_platform.shared.worker.main import WorkerConfig
 
 NOW: Final = dt.datetime(2026, 11, 6, 9, 30, tzinfo=dt.UTC)
 KEY_ID: Final = "file:node-ca"
+CREATABLE: Final = frozenset({KEY_ID, "file:node-ca-2"})
 WORKERS: Final = 8
 WAIT_SECONDS: Final = 60.0
+FIFO_SECONDS: Final = 15.0
+"""Tope para ver que abrir una tubería no se cuelga: solo se agota si la guarda falta."""
+OVERLAP_SECONDS: Final = 5.0
+"""Cuánto retiene la lectura a un hilo esperando a otro: solo decide con el candado quitado."""
 DB_SECRET_NAME: Final = "/".join(("vigia", "integracion", "db", "app"))
 """El nombre de un secreto, no un valor: gitleaks lo confundiría si fuera un literal."""
 
@@ -95,7 +100,7 @@ def key_file(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def signer(key_file: Path) -> FileNodeCaSigner:
-    return FileNodeCaSigner(key_file, can_create=True)
+    return FileNodeCaSigner(key_file, creatable=CREATABLE)
 
 
 # --- Firma: certificado, lista y raíz ------------------------------------------------------------
@@ -129,7 +134,7 @@ def test_a_revocation_list_signed_with_the_file_key_verifies(signer: FileNodeCaS
 
 def test_an_enrollment_issues_both_certificates_with_the_file_key(key_file: Path) -> None:
     """La emisión real del alta (``NodeCaIssuer``) con el firmante por archivo."""
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     storage = MemoryStorage()
     publisher = NodeCaPublisher(
         storage=storage, kms=signer, environment="integration", random_bytes=os.urandom
@@ -157,7 +162,7 @@ def test_the_root_of_the_same_key_keeps_its_name_so_old_leaves_keep_validating(
     key_file: Path,
 ) -> None:
     """Tras perder ``ca/root.pem`` (LocalStack), otra raíz de la misma clave valida lo emitido."""
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     first = _root(signer)
     leaf = asyncio.run(issue_node_certificate(signer, KEY_ID, first, NOW))
     again = _root(FileNodeCaSigner(key_file))
@@ -167,7 +172,7 @@ def test_the_root_of_the_same_key_keeps_its_name_so_old_leaves_keep_validating(
 
 
 def test_bootstrap_and_rotation_publish_the_two_root_bundle(key_file: Path) -> None:
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     storage = MemoryStorage()
     publisher = NodeCaPublisher(
         storage=storage, kms=signer, environment="integration", random_bytes=os.urandom
@@ -232,8 +237,46 @@ def test_only_a_plain_file_key_id_is_accepted(signer: FileNodeCaSigner, key_id: 
         _sync_public(signer, key_id)
 
 
-def test_a_key_others_can_read_is_refused(key_file: Path) -> None:
-    _write_key(key_file, ec.generate_private_key(ec.SECP256R1()), mode=0o640)
+@pytest.mark.parametrize("mode", [0o604, 0o640, 0o644, 0o660])
+def test_a_key_others_can_read_is_refused(key_file: Path, mode: int) -> None:
+    _write_key(key_file, ec.generate_private_key(ec.SECP256R1()), mode=mode)
+    with pytest.raises(NodeCaError):
+        _sync_public(FileNodeCaSigner(key_file))
+
+
+def test_a_fifo_is_refused_without_hanging(key_file: Path) -> None:
+    """Sin ``O_NONBLOCK``, abrir una tubería sin escritor bloquearía el proceso para siempre."""
+    os.mkfifo(key_file, 0o600)
+    outcome: list[object] = []
+
+    def read() -> None:
+        try:
+            outcome.append(FileNodeCaSigner(key_file)._public_der(KEY_ID))
+        except NodeCaError as error:
+            outcome.append(error)
+
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    worker.join(timeout=FIFO_SECONDS)
+    try:
+        assert not worker.is_alive(), "abrir el archivo de la clave se quedó colgado"
+    finally:
+        if worker.is_alive():  # suelta el hilo: un lector bloqueado admite un escritor
+            with contextlib.suppress(OSError):
+                os.close(os.open(key_file, os.O_WRONLY | os.O_NONBLOCK))
+    assert isinstance(outcome[0], NodeCaError)
+
+
+def test_an_encrypted_key_is_refused(key_file: Path) -> None:
+    """``load_pem_private_key`` responde ``TypeError`` si el PEM pide una contraseña."""
+    key_file.write_bytes(
+        ec.generate_private_key(ec.SECP256R1()).private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(b"no-es-secreta"),
+        )
+    )
+    key_file.chmod(0o600)
     with pytest.raises(NodeCaError):
         _sync_public(FileNodeCaSigner(key_file))
 
@@ -265,8 +308,30 @@ def test_a_key_that_is_not_elliptic_is_refused(key_file: Path) -> None:
         _sync_public(FileNodeCaSigner(key_file))
 
 
+def test_a_signer_only_creates_the_keys_it_was_told(key_file: Path) -> None:
+    signer = FileNodeCaSigner(key_file, creatable=frozenset({"file:otra"}))
+    with pytest.raises(NodeCaError):
+        _sync_sign(signer, b"mensaje")
+    assert list(key_file.parent.iterdir()) == []
+    _sync_sign(signer, b"mensaje", "file:otra")
+    assert [path.name for path in key_file.parent.iterdir()] == ["otra.pem"]
+
+
+def test_a_creatable_key_that_exists_is_used_and_never_replaced(key_file: Path) -> None:
+    """Con la marca y una clave existente (A-89): la misma clave, los mismos bytes en disco."""
+    existing = ec.generate_private_key(ec.SECP256R1())
+    _write_key(key_file, existing)
+    before = key_file.read_bytes()
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
+    public = serialization.load_der_public_key(_sync_public(signer))
+    assert public == existing.public_key()
+    signature = _sync_sign(signer, b"mensaje")
+    existing.public_key().verify(signature, b"mensaje", ec.ECDSA(hashes.SHA256()))
+    assert key_file.read_bytes() == before
+
+
 def test_a_directory_that_does_not_exist_is_a_node_ca_error(tmp_path: Path) -> None:
-    missing = FileNodeCaSigner(tmp_path / "no-existe" / "node-ca.pem", can_create=True)
+    missing = FileNodeCaSigner(tmp_path / "no-existe" / "node-ca.pem", creatable=CREATABLE)
     with pytest.raises(NodeCaError):
         _sync_sign(missing, b"mensaje")
 
@@ -279,6 +344,53 @@ def test_a_key_that_vanishes_after_being_written_is_a_node_ca_error(
     with pytest.raises(NodeCaError):
         _sync_sign(signer, b"mensaje")
     assert list(key_file.parent.iterdir()) == []
+
+
+@pytest.mark.parametrize("operation", ["public", "sign"])
+def test_one_signer_serves_its_threads_one_at_a_time(
+    key_file: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    """El candado protege la clave pendiente: sin él, dos hilos de un mismo firmante generarían dos
+    claves y la pública leída no sería la de la firma. La lectura retiene a cada hilo hasta que
+    llega otro: con el candado no llega ninguno, y sin él se encuentran siempre."""
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
+    meeting = threading.Barrier(2, timeout=OVERLAP_SECONDS)
+    counter = threading.Lock()
+    inside = {"active": 0, "peak": 0}
+    real_read = file_signer_module._read_key
+
+    def watched(path: Path) -> Any:
+        with counter:
+            inside["active"] += 1
+            inside["peak"] = max(inside["peak"], inside["active"])
+        with contextlib.suppress(threading.BrokenBarrierError):
+            meeting.wait()
+        try:
+            return real_read(path)
+        finally:
+            with counter:
+                inside["active"] -= 1
+
+    monkeypatch.setattr(file_signer_module, "_read_key", watched)
+    start = threading.Barrier(2, timeout=WAIT_SECONDS)
+    results: list[bytes] = []
+
+    def call() -> None:
+        start.wait()
+        if operation == "public":
+            results.append(signer._public_der(KEY_ID))
+        else:
+            results.append(signer._sign(KEY_ID, b"mensaje"))
+
+    threads = [threading.Thread(target=call) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=WAIT_SECONDS)
+    assert inside["peak"] == 1
+    assert len(results) == 2
+    if operation == "public":
+        assert results[0] == results[1]
 
 
 def test_concurrent_creators_converge_on_one_key(tmp_path: Path) -> None:
@@ -295,7 +407,7 @@ def test_concurrent_creators_converge_on_one_key(tmp_path: Path) -> None:
             key_file: Path = key_file,
             signatures: list[bytes] = signatures,
         ) -> None:
-            signer = FileNodeCaSigner(key_file, can_create=True)
+            signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
             _sync_public(signer)
             barrier.wait(timeout=WAIT_SECONDS)
             signatures.append(_sync_sign(signer, b"mensaje"))
@@ -324,7 +436,7 @@ def test_the_key_never_appears_in_logs_or_errors(
     key_file: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     root = _root(signer)
     asyncio.run(issue_node_certificate(signer, KEY_ID, root, NOW))
     key_file.chmod(0o640)
@@ -340,10 +452,6 @@ def test_the_key_never_appears_in_logs_or_errors(
     assert str(key_file) not in str(refused.value)
     body = base64.b64encode(base64.b64decode("".join(lines))).decode()
     assert not any(body in sink for sink in sinks)
-
-
-def test_file_key_id_names_the_configured_file() -> None:
-    assert file_key_id(Path("/ca/node-ca.pem")) == KEY_ID
 
 
 # --- El adaptador de KMS -------------------------------------------------------------------------
@@ -432,6 +540,15 @@ def test_the_file_backend_needs_its_key_file() -> None:
     assert invalid.value.code == "config_invalid"
 
 
+@pytest.mark.parametrize(
+    "value", ["clave.pem", "ca/clave.pem", "/ca/clave con espacio.pem", "/ca/$(clave).pem"]
+)
+def test_the_key_file_must_be_a_plain_absolute_path(value: str) -> None:
+    with pytest.raises(RuntimeConfigInvalid) as invalid:
+        RuntimeConfig.from_environ(_environ(VIGIA_NODE_CA_KEY_FILE=value))
+    assert invalid.value.variable == "VIGIA_NODE_CA_KEY_FILE"
+
+
 @pytest.mark.parametrize("value", ["hsm", "FILE", "file ", "kms,file"])
 def test_an_unknown_backend_stops_the_process(value: str) -> None:
     with pytest.raises(RuntimeConfigInvalid) as invalid:
@@ -461,8 +578,52 @@ def test_every_process_accepts_the_integration_environment() -> None:
     assert admin.environment == "integration"
 
 
+OPERATOR: Final = "0192f0c4-0000-7000-8000-000000000001"
+NEW_KEY_ID: Final = "file:node-ca-2"
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (("bootstrap", "--first-install", "--dry-run"), frozenset({KEY_ID})),
+        (("bootstrap", "--dry-run"), frozenset()),
+        (("bootstrap", "--resume", "--publish-root", "--dry-run"), frozenset()),
+        (("bootstrap", "--resume", "--publish-root", "--first-install"), frozenset({KEY_ID})),
+        (
+            ("rotate-node-ca", "--new-key-id", NEW_KEY_ID, "--operator", OPERATOR, "--dry-run"),
+            frozenset({NEW_KEY_ID}),
+        ),
+        (("set-node-rate-brake", "--off", "--operator", OPERATOR), frozenset()),
+    ],
+    ids=["marca", "sin-marca", "reanudar", "reanudar-con-marca", "rotacion", "otra-orden"],
+)
+def test_only_the_mark_and_the_rotation_name_a_creatable_key(
+    argv: tuple[str, ...], expected: frozenset[str]
+) -> None:
+    """A-89: lo que ``vigia-admin`` entrega a la composición, orden por orden."""
+    seen: list[frozenset[str]] = []
+
+    async def builder(config: AdminConfig, _provider: uuid.UUID) -> Any:
+        seen.append(config.node_ca_creatable_keys)
+        raise RuntimeConfigInvalid("VIGIA_ENVIRONMENT")
+
+    admin_run(
+        list(argv),
+        environ={
+            "VIGIA_ENVIRONMENT": "integration",
+            "VIGIA_NODE_CA_KEY_ARN": KEY_ID,
+            "VIGIA_PROVIDER_ORGANIZATION_ID": OPERATOR,
+        },
+        builder=builder,
+        stdin=io.StringIO(),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+    )
+    assert seen == [expected]
+
+
 def test_a_two_root_bundle_read_from_the_file_rotation_parses(key_file: Path) -> None:
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     storage = MemoryStorage()
     publisher = NodeCaPublisher(
         storage=storage, kms=signer, environment="integration", random_bytes=os.urandom

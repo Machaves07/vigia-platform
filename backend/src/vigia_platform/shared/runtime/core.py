@@ -237,11 +237,13 @@ class Core:
     synchronizers: tuple[Synchronizer, ...]
 
 
-def _node_ca_kms(config: RuntimeConfig, aws: AwsSettings, *, can_create: bool) -> KmsAdapter:
+def _node_ca_kms(
+    config: RuntimeConfig, aws: AwsSettings, *, creatable: frozenset[str]
+) -> KmsAdapter:
     """El adaptador de KMS del proceso, con la firma de ``vigia-node-ca`` en su backend."""
     if config.node_ca_backend == NODE_CA_BACKEND_FILE:
         _log.info("firmante de la autoridad de nodos", code=NODE_CA_BACKEND_FILE)
-        signer = FileNodeCaSigner(Path(config.require("node_ca_key_file")), can_create=can_create)
+        signer = FileNodeCaSigner(Path(config.require("node_ca_key_file")), creatable=creatable)
         return FileBackedKms(aws, signer)
     _log.info("firmante de la autoridad de nodos", code=NODE_CA_BACKEND_KMS)
     return KmsAdapter(aws)
@@ -259,15 +261,16 @@ def build_core(
     archive: S3Storage | None = None,
     cpu_pool: CpuPool | None = None,
     verifier_path: Path = DEFAULT_VERIFIER_PATH,
-    node_ca_key_creation: bool = False,
+    node_ca_creatable_keys: frozenset[str] = frozenset(),
 ) -> Core:
     """Compone la infraestructura común sin abrir conexiones (solo construye clientes).
 
-    ``node_ca_key_creation``: solo ``vigia-admin`` crea la clave de la autoridad por archivo.
+    ``node_ca_creatable_keys``: las claves de la autoridad por archivo que este proceso puede
+    crear (A-89). Solo ``vigia-admin`` nombra alguna, y solo si la orden lo pide.
     """
     provider = provider_organization_id
     aws = aws_settings(config)
-    kms = _node_ca_kms(config, aws, can_create=node_ca_key_creation)
+    kms = _node_ca_kms(config, aws, creatable=node_ca_creatable_keys)
     secrets = SecretsManagerAdapter(aws, clock, kms_key_id=config.secrets_key_arn, metrics=metrics)
     contexts = ScopeContexts(
         store=PostgresContextStore(database),

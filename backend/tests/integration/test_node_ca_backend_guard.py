@@ -83,7 +83,10 @@ pytestmark = pytest.mark.integration
 
 _CLOCK: Final = SystemClock()
 KEY_ID: Final = "file:node-ca"
-ENVIRONMENT: Final = "local"
+CREATABLE: Final = frozenset({KEY_ID, "file:node-ca-2"})
+FIRST_INSTALL: Final = "--first-install"
+RESUME_PUBLISH: Final = ("bootstrap", "--resume", "--publish-root", "--yes")
+ENVIRONMENT: Final = "integration"
 RESTART_SECONDS: Final = 60
 PROCESS_SECONDS: Final = 600.0
 """Tope de la prueba para ver el arranque o el final de un proceso: nunca decide el resultado (bajo
@@ -226,7 +229,7 @@ def test_the_certificate_keeps_validating_after_a_localstack_restart_with_the_fi
     restartable: RestartableLocalStack, tmp_path: Path
 ) -> None:
     key_file = tmp_path / "node-ca.pem"
-    signer = FileNodeCaSigner(key_file, can_create=True)
+    signer = FileNodeCaSigner(key_file, creatable=CREATABLE)
     bucket = _new_edge_bucket(_endpoint(restartable))
     now = _CLOCK.now()
     published = asyncio.run(
@@ -367,7 +370,7 @@ def file_stack(
                 password=migrated.app_password,
             ),
         )
-        bootstrap = built.run("vigia-admin", *BOOTSTRAP)
+        bootstrap = built.run("vigia-admin", *BOOTSTRAP, FIRST_INSTALL)
         assert bootstrap.code == 0, bootstrap.output
         result = _json_line(bootstrap.output)
         built.environ["VIGIA_PROVIDER_ORGANIZATION_ID"] = result["provider_organization_id"]
@@ -407,6 +410,51 @@ def test_bootstrap_creates_the_key_and_publishes_its_root(
     assert public_der(root.public_key()) == public
     assert isinstance(root.public_key(), ec.EllipticCurvePublicKey)
     assert _logged_backend(output) == {"file"}
+
+
+@pytest.mark.parametrize("order", [BOOTSTRAP, RESUME_PUBLISH], ids=["bootstrap", "resume"])
+def test_without_the_mark_an_empty_volume_creates_no_authority(
+    file_stack: tuple[Stack, Path, str], tmp_path: Path, order: tuple[str, ...]
+) -> None:
+    """A-89: el volumen vacío y el depósito sin ``root.pem``, justo el caso de un reinicio de
+    LocalStack con el volumen mal montado. Falla, con su código, sin escribir nada."""
+    stack, _, _ = file_stack
+    s3 = stack.localstack.aws_client("s3")
+    audited = "SELECT count(*) AS n FROM shared.audit_entry"
+    (before,) = stack.fetch(audited)
+    with versioned_bucket(s3, "vigia-edge") as empty:
+        finished = stack.run(
+            "vigia-admin",
+            *order,
+            VIGIA_EDGE_BUCKET=empty,
+            VIGIA_NODE_CA_KEY_FILE=str(tmp_path / "node-ca.pem"),
+        )
+        objects = s3.list_objects_v2(Bucket=empty).get("Contents", [])
+    assert finished.code != 0, finished.output
+    assert _json_line(finished.output)["error"] == "node_ca_invalid"
+    assert list(tmp_path.iterdir()) == []
+    assert objects == []
+    (after,) = stack.fetch(audited)
+    assert after["n"] == before["n"]
+
+
+@pytest.mark.parametrize("extra", [(), (FIRST_INSTALL,)], ids=["sin-marca", "con-marca"])
+def test_resume_publish_root_with_an_existing_key_keeps_it(
+    file_stack: tuple[Stack, Path, str], extra: tuple[str, ...]
+) -> None:
+    """La receta tras un reinicio sigue valiendo; con la marca, la clave tampoco cambia."""
+    stack, key_file, _ = file_stack
+    before = key_file.read_bytes()
+    s3 = stack.localstack.aws_client("s3")
+    with versioned_bucket(s3, "vigia-edge") as empty:
+        finished = stack.run("vigia-admin", *RESUME_PUBLISH, *extra, VIGIA_EDGE_BUCKET=empty)
+        assert finished.code == 0, finished.output
+        body = s3.get_object(Bucket=empty, Key=ROOT_CERTIFICATE_KEY)["Body"].read()
+    assert key_file.read_bytes() == before
+    (root,) = read_bundle(body)
+    assert public_der(root.public_key()) == asyncio.run(
+        FileNodeCaSigner(key_file).get_public_key(KEY_ID)
+    )
 
 
 def test_the_private_key_reaches_no_sink(file_stack: tuple[Stack, Path, str]) -> None:
@@ -536,4 +584,4 @@ def test_rotate_node_ca_publishes_two_roots_with_the_file_backend(
 
 
 def _file_kms(aws: AwsSettings, directory: Path) -> KmsAdapter:
-    return FileBackedKms(aws, FileNodeCaSigner(directory / "node-ca.pem", can_create=True))
+    return FileBackedKms(aws, FileNodeCaSigner(directory / "node-ca.pem", creatable=CREATABLE))
