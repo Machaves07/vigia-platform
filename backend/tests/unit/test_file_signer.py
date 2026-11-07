@@ -232,7 +232,9 @@ def test_a_process_that_cannot_create_never_creates_the_key(key_file: Path, oper
         "file:a/b",
     ],
 )
-def test_only_a_plain_file_key_id_is_accepted(signer: FileNodeCaSigner, key_id: str) -> None:
+def test_only_a_plain_file_key_id_is_accepted(key_file: Path, key_id: str) -> None:
+    """Aunque se nombre como creable: solo el patrón lo rechaza (sin rutas fuera del directorio)."""
+    signer = FileNodeCaSigner(key_file, creatable=frozenset({key_id}))
     with pytest.raises(NodeCaError):
         _sync_public(signer, key_id)
 
