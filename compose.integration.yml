@@ -1,0 +1,334 @@
+# Plataforma de integración persistente (TASK-545, VIG-393; A-76 D3; A-89).
+#
+# Es el destino de la sombra del nodo y de la alta real por SCR-07 en server-casa. No es el piloto
+# (A-47: sin AWS) ni el entorno de pruebas (`docker-compose.yml`, efímero y en 127.0.0.1).
+# Guía: `local/integration/README.md`. Arranque en dos pasos, porque la API necesita el
+# identificador de la organización proveedora, que solo existe tras el primer `bootstrap`:
+#
+#   docker compose -f compose.integration.yml up -d --wait          # infraestructura
+#   local/integration/bootstrap.sh --first-install                  # la primera vez; sin la marca después
+#
+# `bootstrap.sh` termina levantando el perfil `app` (vigia-api ×2, vigia-worker y vigia-mtls-edge).
+#
+# SUPERFICIE EXPUESTA (la fija una prueba sobre este archivo, `test_compose_integration_file.py`):
+#
+#   - Solo `vigia-mtls-edge` publica puertos, y solo en la IP de VIGIA_EDGE_BIND (la IP de la
+#     tailnet; la de `lo` en la prueba). Sin ella el archivo no se interpreta (`:?`), y el contenedor
+#     se niega a arrancar si es 0.0.0.0, `::` o no es una IP (`edge_guard.py`).
+#   - Ningún otro servicio lleva `ports`, ni `network_mode: host`. `vigia-api`, PostgreSQL y
+#     LocalStack viven en la red `interna` (`internal: true`): sin salida ni entrada de la máquina.
+#     Esto no es un detalle: `AlbCertificateHeaders` confía en las cabeceras `X-Amzn-Mtls-*` sin
+#     verificar la cadena (la verificación la hace quien termina TLS, aquí `vigia-mtls-edge`), así
+#     que una petición directa a `vigia-api` con las cabeceras públicas de un nodo se aceptaría
+#     (probado con 200 en la revisión de VIG-381).
+#   - Quien escribe en `ca/root.pem` (depósito `vigia-edge` de LocalStack, que se sirve por http sin
+#     autenticar y que LocalStack no protege con ninguna credencial) decide en qué autoridad confía
+#     `nodes.`. Ese acceso es el de la red `interna` (los contenedores de esta composición) y el del
+#     socket de Docker del anfitrión: quien pertenezca al grupo `docker` de server-casa lo tiene.
+#
+# Imágenes: PostgreSQL y LocalStack son las de `docker-compose.yml` (mismos digests; una prueba lo
+# comprueba). `vigia-platform` se construye con `backend/Dockerfile` y la clave de despliegue de
+# vigia-contracts en el agente SSH (ver el README); `vigia-mtls-edge` se construye aquí, sin clave.
+#
+# Los secretos (contraseñas de la base, material de la clave KMS, clave del hash de origen) los
+# genera `init` la primera vez en el volumen `estado` (0600) y nunca llegan a una variable de
+# entorno, a este archivo ni a un registro. Las credenciales `test`/`test` de AWS son las fijas de
+# LocalStack, no un secreto.
+
+name: vigia-integration
+
+x-platform: &platform
+  image: ${VIGIA_PLATFORM_IMAGE:-vigia-platform:integration}
+  # Se construye en la propia máquina (necesita la clave SSH): nunca se intenta descargar.
+  pull_policy: never
+
+x-database: &database-environment
+  PGHOST: postgres
+  PGPORT: "5432"
+  PGUSER: vigia
+  PGDATABASE: vigia
+  PGSSLMODE: disable # la red interna no lleva TLS; el servicio no tiene salida
+
+x-runtime: &runtime-environment
+  VIGIA_ENVIRONMENT: integration
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  VIGIA_AWS_ENDPOINT_URL: http://localstack:4566
+  PGSSLMODE: disable
+  VIGIA_DB_APP_SECRET: vigia/integration/database/app
+  VIGIA_ENROLLMENT_SOURCE_KEY_SECRET: vigia/integration/enrollment/source-key
+  VIGIA_SIGNING_SECRET_PREFIX: vigia/integration/signing/
+  VIGIA_BOOTSTRAP_INVITATION_SECRET: vigia/integration/bootstrap/invitation
+  VIGIA_SECRETS_KEY_ARN: alias/vigia-secrets
+  # Firmante por archivo (A-89, VIG-382): la clave vive en el volumen `autoridad` y sobrevive a
+  # LocalStack. Solo se admite en `local` e `integration`.
+  VIGIA_NODE_CA_BACKEND: file
+  VIGIA_NODE_CA_KEY_FILE: /ca/node-ca.pem
+  VIGIA_NODE_CA_KEY_ARN: file:node-ca
+  VIGIA_EVIDENCE_BUCKET: vigia-evidence
+  VIGIA_ARCHIVE_BUCKET: vigia-archive
+  VIGIA_EDGE_BUCKET: vigia-edge
+  VIGIA_PUBLIC_ORIGIN: https://app.${VIGIA_DOMAIN:-vigia.test}
+  VIGIA_NODES_BASE_URL: https://nodes.${VIGIA_DOMAIN:-vigia.test}/api/nodes
+  # `vigia-mtls-edge` reenvía con X-Forwarded-For: solo se cree a la red interna.
+  # El respaldo local de contraseñas filtradas lo deja `init` en `proveedora` (ver `init_state.py`).
+  VIGIA_BREACH_LIST_PATH: /shared/breach.txt
+  VIGIA_FORWARDED_ALLOW_IPS: ${VIGIA_INTERNAL_SUBNET:-172.29.93.0/24}
+  VIGIA_API_RUNTIME: vigia_platform.shared.runtime.api:build_api_runtime
+  VIGIA_WORKER_RUNTIME: vigia_platform.shared.runtime.worker:build_worker_runtime
+  VIGIA_ADMIN_RUNTIME: vigia_platform.shared.runtime.admin:build_admin_runtime
+
+x-app-service: &app-service
+  <<: *platform
+  profiles: ["app"]
+  restart: unless-stopped
+  networks: [interna]
+  entrypoint: ["/integration/with-state.sh"]
+  volumes:
+    - ./local/integration:/integration:ro
+    - proveedora:/shared:ro
+    - autoridad:/ca:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    localstack:
+      condition: service_healthy
+
+services:
+  # --- Infraestructura (perfil por omisión) -------------------------------------------------
+
+  init:
+    # Genera una vez los secretos y prepara los volúmenes (propietario 10001). Corre como root
+    # solo para eso; no repite nada que ya exista. Después se queda dormido y sano: `up --wait` de
+    # Compose 2.27 falla con un servicio que termina, aunque termine bien.
+    <<: *platform
+    user: "0"
+    restart: "no"
+    networks: [interna]
+    entrypoint: ["python", "/integration/init_state.py", "--hold"]
+    volumes:
+      - ./local/integration:/integration:ro
+      - estado:/state
+      - autoridad:/ca
+      - proveedora:/shared
+      - borde:/edge
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/init-done"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+      start_period: 2s
+
+  postgres:
+    # postgres:16 → PostgreSQL 16.15 (Debian 13) al fijar el digest; el de `docker-compose.yml`.
+    image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+    restart: unless-stopped
+    networks: [interna]
+    environment:
+      POSTGRES_USER: vigia
+      POSTGRES_PASSWORD_FILE: /state/postgres.pw
+      POSTGRES_DB: vigia
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - datos:/var/lib/postgresql/data
+      - estado:/state:ro
+    depends_on:
+      init:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=vigia --dbname=vigia --host=127.0.0.1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  localstack:
+    # La 4.14.0 comunitaria (Apache-2.0) y su digest, los de `docker-compose.yml`. Ningún puerto.
+    # No persiste nada por sí sola: `localstack/state.py` recrea la clave KMS (mismo id y material),
+    # los depósitos, los secretos y `ca/root.pem` desde `estado` en cada arranque.
+    image: localstack/localstack:4.14.0@sha256:3ebc37595918b8accb852f8048fef2aff047d465167edd655528065b07bc364a
+    restart: unless-stopped
+    networks: [interna]
+    environment:
+      SERVICES: s3,kms,secretsmanager,sqs,ses
+      EAGER_SERVICE_LOADING: "1"
+      AWS_DEFAULT_REGION: us-east-1
+      DISABLE_EVENTS: "1"
+      SKIP_SSL_CERT_DOWNLOAD: "1"
+      S3_SKIP_SIGNATURE_VALIDATION: "0"
+      VIGIA_BUCKETS: vigia-evidence vigia-edge vigia-archive
+      VIGIA_EVIDENCE_BUCKET: vigia-evidence
+      VIGIA_EDGE_BUCKET: vigia-edge
+      VIGIA_KMS_KEY_ALIAS: alias/vigia-secrets
+      VIGIA_DB_SECRET_NAME: vigia/integration/database/app
+      VIGIA_ENROLLMENT_SECRET_NAME: vigia/integration/enrollment/source-key
+      VIGIA_SAVE_SECONDS: "10"
+    volumes:
+      - estado:/state
+      - ./local/integration/localstack/state.py:/opt/vigia/state.py:ro
+      - ./local/integration/localstack/boot.d:/etc/localstack/init/boot.d:ro
+      - ./local/integration/localstack/ready.d:/etc/localstack/init/ready.d:ro
+    depends_on:
+      init:
+        condition: service_healthy
+    healthcheck:
+      # Sano solo con los cinco servicios en marcha **y** `state.py restore` terminado.
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import json, os, sys, urllib.request;
+          s = json.load(urllib.request.urlopen('http://127.0.0.1:4566/_localstack/health', timeout=3))['services'];
+          sys.exit(0 if os.path.exists('/tmp/vigia-restored') and all(s.get(n) == 'running' for n in ('s3', 'kms', 'secretsmanager', 'sqs', 'ses')) else 1)
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+
+  # --- Aplicación (perfil `app`: lo levanta bootstrap.sh) -----------------------------------
+
+  vigia-api-1: &api
+    <<: *app-service
+    command: ["vigia-api"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: vigia-api
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  vigia-api-2:
+    <<: *api
+
+  vigia-worker:
+    <<: *app-service
+    command: ["vigia-worker"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: vigia-worker
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/live', timeout=3)
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  vigia-mtls-edge:
+    # El certificado de servidor de `app.` y `nodes.` lo crea `edge_guard.py` la primera vez
+    # (`vigia-mtls-edge init-cert`, idempotente) y persiste en el volumen `borde`.
+    # Lo único que escucha en la máquina: `app.` (8443) y `nodes.` (8444), en la IP de la tailnet.
+    # Dentro del contenedor escucha en todas sus interfaces (su propio espacio de red); la
+    # publicación al anfitrión es solo en VIGIA_EDGE_BIND.
+    build:
+      context: ./backend/tools
+      dockerfile: ../../local/mtls-edge/Dockerfile
+    image: vigia-local/mtls-edge:1.0.0
+    profiles: ["app"]
+    restart: unless-stopped
+    networks: [interna, publica]
+    entrypoint: ["python", "/integration/edge_guard.py"]
+    ports:
+      - "${VIGIA_EDGE_BIND:?VIGIA_EDGE_BIND es la IP de la tailnet de server-casa (la de lo en una prueba)}:${VIGIA_EDGE_APP_PORT:-8443}:8443"
+      - "${VIGIA_EDGE_BIND:?VIGIA_EDGE_BIND es la IP de la tailnet de server-casa (la de lo en una prueba)}:${VIGIA_EDGE_NODES_PORT:-8444}:8444"
+    environment:
+      VIGIA_EDGE_PUBLISH_IP: ${VIGIA_EDGE_BIND:?VIGIA_EDGE_BIND es la IP de la tailnet de server-casa}
+      VIGIA_DOMAIN: ${VIGIA_DOMAIN:-vigia.test}
+      VIGIA_EDGE_BIND: 0.0.0.0
+      VIGIA_EDGE_BACKENDS: http://vigia-api-1:8000,http://vigia-api-2:8000
+      VIGIA_EDGE_SERVER_CERT: /edge/server.pem
+      VIGIA_EDGE_SERVER_KEY: /edge/server.key
+      VIGIA_EDGE_CLIENT_CA: http://localstack:4566/vigia-edge/ca/root.pem
+    volumes:
+      - ./local/integration:/integration:ro
+      - borde:/edge
+    depends_on:
+      init:
+        condition: service_healthy
+      vigia-api-1:
+        condition: service_healthy
+      vigia-api-2:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; socket.create_connection(('127.0.0.1', 8443), timeout=3).close()
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  # --- Tareas puntuales (perfil `tools`: `docker compose run --rm ...`) --------------------
+
+  vigia-migrate:
+    <<: *platform
+    profiles: ["tools"]
+    restart: "no"
+    networks: [interna]
+    entrypoint: ["/integration/with-state.sh"]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *database-environment
+      PGPASSFILE: /state/pgpass
+    volumes:
+      - ./local/integration:/integration:ro
+      - estado:/state:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  vigia-admin:
+    # `vigia-admin` y los guiones de siembra (`seed.py`): el entorno de `vigia-api` más la base
+    # como superusuario (solo aquí) y la clave de la autoridad en escritura.
+    <<: *platform
+    profiles: ["tools"]
+    restart: "no"
+    networks: [interna]
+    entrypoint: ["/integration/with-state.sh"]
+    command: ["vigia-admin", "--help"]
+    environment:
+      <<: [*runtime-environment, *database-environment]
+      PGPASSFILE: /state/pgpass
+    volumes:
+      - ./local/integration:/integration:ro
+      - estado:/state
+      - proveedora:/shared
+      - autoridad:/ca
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+networks:
+  # Sin salida ni entrada: ningún contenedor de esta red es alcanzable desde fuera, publique lo que
+  # publique. PostgreSQL, LocalStack y `vigia-api` no están en ninguna otra.
+  interna:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${VIGIA_INTERNAL_SUBNET:-172.29.93.0/24}
+  # Solo `vigia-mtls-edge`: la red por la que Docker publica sus dos puertos.
+  publica: {}
+
+volumes:
+  datos: # PostgreSQL
+  estado: # secretos generados, copia de LocalStack (0600)
+  autoridad: # clave de vigia-node-ca por archivo (VIG-382)
+  proveedora: # identificador de la organización proveedora (no es secreto)
+  borde: # certificado de servidor de vigia-mtls-edge
