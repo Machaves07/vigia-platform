@@ -44,5 +44,5 @@ Una línea JSON por intercambio en la salida de errores: escucha, método, ruta 
 - No comprueba la lista de revocación: la revocación la decide la aplicación por credencial.
 - Mantiene cada petición y cada respuesta en memoria mientras las reenvía, sin tope propio.
 - Una conexión ya saludada conserva su identidad aunque se retire su raíz, y no hay tope de inactividad. La revocación sigue decidiéndola la aplicación por credencial.
-- Reenvía sin cookies propias y sin el entorno del proceso: no obedece `HTTP_PROXY`. Un backend `https` debe tener un certificado que verifique con las raíces públicas.
+- Reenvía sin cookies propias y sin el entorno del proceso: no obedece `HTTP_PROXY`. Un backend `https` siempre se verifica contra las raíces públicas: con otra autoridad, responde 502 sin reenviar nada.
 - La composición del entorno es de TASK-545; el despliegue en `server-casa`, de TASK-546.

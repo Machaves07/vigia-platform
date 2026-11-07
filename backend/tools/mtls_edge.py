@@ -236,8 +236,9 @@ class MtlsProxy:
     host: str = "127.0.0.1"
     listen_port: int = 0
     on_exchange: Callable[[Exchange], None] | None = None
-    upstream_verify: ssl.SSLContext | bool = True
-    """Cómo se verifica un backend ``https``; sin el entorno del proceso (``trust_env=False``)."""
+    upstream_verify: ssl.SSLContext | None = None
+    """El contexto que verifica un backend ``https``; sin él, las raíces públicas y nunca el entorno
+    del proceso (``trust_env=False``). No admite ``False``: el backend siempre se verifica."""
     exchanges: MutableSequence[Exchange] = field(default_factory=list)
     _loop: asyncio.AbstractEventLoop = field(default_factory=asyncio.new_event_loop)
     _thread: threading.Thread | None = None
@@ -289,7 +290,7 @@ class MtlsProxy:
     async def _open(self) -> None:
         # Sin el entorno: un ``HTTP_PROXY`` vería pasar las cookies y las cabeceras de identidad.
         self._client = httpx.AsyncClient(
-            timeout=UPSTREAM_TIMEOUT_SECONDS, trust_env=False, verify=self.upstream_verify
+            timeout=UPSTREAM_TIMEOUT_SECONDS, trust_env=False, verify=self.upstream_verify or True
         )
         # Un solo cliente atiende a todos: un tarro de cookies daría la sesión de uno al siguiente.
         self._client.cookies.jar.set_policy(DefaultCookiePolicy(allowed_domains=[]))
@@ -423,6 +424,16 @@ class MtlsProxy:
         if certificate is not None and self._verifies_clients:
             forwarded = [(name.lower(), value) for name, value in alb_headers(certificate).items()]
             headers.extend(forwarded)
+        try:
+            httpx.Headers(headers)
+        except UnicodeEncodeError:
+            # Bytes no ASCII en una cabecera o en la hoja: un 400, no una traza por cada cliente.
+            # Antes del reparto: no llega a ningún proceso ni gasta su turno.
+            path = target.split("?", 1)[0]
+            has_certificate = certificate is not None
+            self._record(Exchange(self.name, method, path, -1, 400, has_certificate, (), ()))
+            await self._respond(connection, writer, request, 400, [], b"")
+            return
         forwarded_mtls = tuple(
             (name, value) for name, value in headers if name.startswith(MTLS_HEADER_PREFIX)
         )
@@ -471,13 +482,7 @@ class MtlsProxy:
         self, base: str, method: str, target: str, headers: list[tuple[str, str]], body: bytes
     ) -> tuple[int, list[tuple[str, str]], bytes]:
         assert self._client is not None  # noqa: S101 - lo pone ``_open`` antes de escuchar
-        try:
-            upstream = self._client.build_request(
-                method, base + target, headers=headers, content=body
-            )
-        except UnicodeEncodeError:
-            # Una cabecera con bytes no ASCII: un 400, no una traza por cada cliente de ``app.``.
-            return 400, [], b""
+        upstream = self._client.build_request(method, base + target, headers=headers, content=body)
         try:
             response = await self._client.send(upstream, stream=True)
         except httpx.HTTPError as error:

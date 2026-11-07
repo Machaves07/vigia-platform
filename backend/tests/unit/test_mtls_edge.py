@@ -45,6 +45,7 @@ from tests.node_api_support import DAY, VERSION, NodeWorld, node_world, zone_of
 from tests.resilience.harness import WALL, free_port
 from tools.mtls_edge import (
     EXCHANGES_KEPT,
+    UPSTREAM_ERROR_HEADER,
     EdgeConfig,
     EdgeError,
     Exchange,
@@ -73,6 +74,8 @@ FIVE_HEADERS: Final = (
     "x-amzn-mtls-clientcert-validity",
 )
 WAIT_SECONDS: Final = 60.0
+SILENT_CLIENT_SECONDS: Final = 90.0
+"""Plazo de ``recv`` frente al tope de saludo de 30 s: solo se agota si ese tope falta o crece."""
 """Tope de las esperas por sondeo: nunca decide la prueba, que acaba en cuanto se cumple."""
 SECRET_MARKER: Final = "marcador-que-no-debe-registrarse"  # noqa: S105
 HEARTBEATS: Final = "/api/nodes/heartbeats"
@@ -241,10 +244,19 @@ async def _cookie_app(scope: Scope, receive: Receive, send: Send) -> None:
 
 
 @contextlib.contextmanager
-def cookie_backend(directory: Path, scheme: str) -> Iterator[tuple[str, ssl.SSLContext | bool]]:
-    """La aplicación de cookies por ``scheme``, y cómo debe verificarla el balanceador."""
+def cookie_backend(
+    directory: Path, scheme: str, seen: list[str] | None = None
+) -> Iterator[tuple[str, ssl.SSLContext | None]]:
+    """La aplicación de cookies por ``scheme``, con su autoridad privada si es ``https``, y el
+    contexto que la verifica. ``seen`` recoge las rutas de las peticiones que le llegan."""
+
+    async def counted(scope: Scope, receive: Receive, send: Send) -> None:
+        if seen is not None and scope["type"] == "http":
+            seen.append(scope["path"])
+        await _cookie_app(scope, receive, send)
+
     options: dict[str, Any] = {}
-    verify: ssl.SSLContext | bool = True
+    verify: ssl.SSLContext | None = None
     if scheme == "https":
         tls = server_tls(directory, WALL.now())
         options = {"ssl_certfile": str(tls.certificate_file), "ssl_keyfile": str(tls.key_file)}
@@ -252,7 +264,7 @@ def cookie_backend(directory: Path, scheme: str) -> Iterator[tuple[str, ssl.SSLC
     port = free_port()
     server = uvicorn.Server(
         uvicorn.Config(
-            _cookie_app, host=LOOPBACK, port=port, log_level="warning", lifespan="off", **options
+            counted, host=LOOPBACK, port=port, log_level="warning", lifespan="off", **options
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)
@@ -294,6 +306,35 @@ def test_a_cookie_of_one_client_never_reaches_another(
     assert [value for name, value in own if name == "cookie"] == ["propia=1"]
 
 
+@pytest.mark.parametrize("listener", ["app", "nodes"])
+def test_a_backend_of_a_private_authority_is_never_reached(directory: Path, listener: str) -> None:
+    """Sin tocar ``upstream_verify``: el balanceador verifica el backend, no le manda nada."""
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    seen: list[str] = []
+    with (
+        cookie_backend(directory, "https", seen) as (backend, _),
+        running(_config(directory, (backend,))) as edge,
+        _client(directory) as client,
+    ):
+        response = client.get((edge.nodes if listener == "nodes" else edge.app).url + "/api/x")
+    assert response.status_code == 502
+    assert response.headers[UPSTREAM_ERROR_HEADER] == "ConnectError"
+    assert seen == []
+
+
+def test_a_client_that_never_greets_is_closed_at_the_handshake_limit(directory: Path) -> None:
+    """Mide tiempo de verdad: el tope son 30 s y esta prueba los espera. Si el tope creciera o
+    faltara, ``recv`` agotaría su propio plazo. Una conexión muda no ocupa el balanceador."""
+    _write_root(directory / "root.pem", Pki(directory, "propia"))
+    with (
+        echo_backend() as backend,
+        running(_config(directory, (backend,))) as edge,
+        socket.create_connection((LOOPBACK, edge.app.port), timeout=SILENT_CLIENT_SECONDS) as mute,
+        contextlib.suppress(ConnectionResetError),
+    ):
+        assert mute.recv(1) == b""
+
+
 def _status_of_raw_request(directory: Path, port: int, request: bytes) -> bytes:
     context = ssl.create_default_context(cafile=str(directory / "edge-ca.pem"))
     with (
@@ -310,14 +351,66 @@ def test_a_header_that_is_not_ascii_gets_a_400_not_a_traceback(
     directory: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_root(directory / "root.pem", Pki(directory, "propia"))
-    with echo_backend() as backend, running(_config(directory, (backend,))) as edge:
+    with (
+        echo_backend() as first,
+        echo_backend() as second,
+        running(_config(directory, (first, second))) as edge,
+    ):
         capsys.readouterr()
         request = b"GET /api/x HTTP/1.1\r\nHost: x\r\nX-Prueba: \xe9\r\n\r\n"
         status = _status_of_raw_request(directory, edge.app.port, request)
-    assert status == b"400"
-    (exchange,) = edge.app.exchanges
-    assert exchange.status == 400
+        good = _status_of_raw_request(
+            directory, edge.app.port, b"GET /api/x HTTP/1.1\r\nHost: x\r\n\r\n"
+        )
+    assert (status, good) == (b"400", b"200")
+    refused, forwarded = edge.app.exchanges
+    # No llegó a ningún proceso ni gastó su turno: el siguiente va al primero.
+    assert (refused.backend, refused.status, refused.forwarded_mtls) == (-1, 400, ())
+    assert forwarded.backend == 0
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_a_leaf_with_a_subject_that_is_not_ascii_is_not_forwarded(directory: Path) -> None:
+    """La hoja verifica, pero sus cabeceras no se pueden enviar: nada llega a la aplicación."""
+    pki = Pki(directory, "propia")
+    _write_root(directory / "root.pem", pki)
+    key = ec.generate_private_key(ec.SECP256R1())
+    moment = WALL.now()
+    leaf = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Ñandú")]))
+        .issuer_name(pki.authority[1].subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(moment - DAY)
+        .not_valid_after(moment + DAY)
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        .sign(pki.authority[0], hashes.SHA256())
+    )
+    certificate_file, key_file = directory / "ajena.crt", directory / "ajena.key"
+    certificate_file.write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
+    key_file.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    cert = (str(certificate_file), str(key_file))
+    with (
+        echo_backend() as backend,
+        running(_config(directory, (backend,))) as edge,
+        _client(directory, cert) as client,
+    ):
+        response = client.get(edge.nodes.url + HEARTBEATS)
+    assert response.status_code == 400
+    (exchange,) = edge.nodes.exchanges
+    assert (exchange.backend, exchange.client_certificate, exchange.forwarded_mtls) == (
+        -1,
+        True,
+        (),
+    )
 
 
 def test_the_502_line_carries_no_query(directory: Path, capsys: pytest.CaptureFixture[str]) -> None:
