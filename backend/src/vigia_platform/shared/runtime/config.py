@@ -44,7 +44,11 @@ Variables (``infra/stacks/compute.py``; las de tamaño, pendiente nº 17 de U-03
   ``claude-sonnet-5``, sin sufijo de fecha). La clave del proveedor no es de esta lista: la
   inyecta Secrets Manager solo en ``vigia-worker`` (NFR-LAZ-26) y la lee ``loop.registration``;
 - ``VIGIA_AWS_ENDPOINT_URL``: punto de conexión único de S3, KMS y Secrets Manager. **Solo** en
-  ``local`` y ``test`` (LocalStack); en cualquier otro entorno detiene el arranque.
+  ``local``, ``test`` e ``integration`` (LocalStack); en cualquier otro entorno detiene el arranque;
+- ``VIGIA_NODE_CA_BACKEND`` (``kms`` por defecto, o ``file``) y ``VIGIA_NODE_CA_KEY_FILE``: firmante
+  de ``vigia-node-ca`` (TASK-543). ``file`` **solo** en ``local`` e ``integration``; en cualquier
+  otro entorno el arranque termina con ``node_ca_backend_forbidden`` (fallo cerrado; U-02 §7.1 sigue
+  valiendo en producción: la clave privada nunca existe fuera de KMS).
 
 Un valor ausente o no válido produce ``RuntimeConfigInvalid``: el mensaje, en español, nombra la
 variable y **nunca** su valor (ERR-019). Por eso cada variable se valida aquí antes de llegar a
@@ -75,17 +79,26 @@ __all__ = [
     "EGRESS_HOST",
     "ENDPOINT_ENVIRONMENTS",
     "KNOWN_VARIABLES",
+    "NODE_CA_BACKEND_FILE",
+    "NODE_CA_BACKEND_KMS",
+    "NODE_CA_FILE_ENVIRONMENTS",
     "VARIABLES",
+    "NodeCaBackendForbidden",
     "RegistrationIncomplete",
     "RuntimeConfig",
     "RuntimeConfigInvalid",
     "report_invalid",
 ]
 
-ENDPOINT_ENVIRONMENTS: Final = frozenset({"local", "test"})
+ENDPOINT_ENVIRONMENTS: Final = frozenset({"local", "test", "integration"})
 """Entornos que admiten ``VIGIA_AWS_ENDPOINT_URL`` (LocalStack)."""
+NODE_CA_BACKEND_KMS: Final = "kms"
+NODE_CA_BACKEND_FILE: Final = "file"
+NODE_CA_FILE_ENVIRONMENTS: Final = frozenset({"local", "integration"})
+"""Entornos que admiten ``VIGIA_NODE_CA_BACKEND=file`` (TASK-543, Q6)."""
 
-_ENVIRONMENT: Final = re.compile(r"(local|test|pilot|staging-[1-9][0-9]{0,2})")
+_ENVIRONMENT: Final = re.compile(r"(local|test|integration|pilot|staging-[1-9][0-9]{0,2})")
+_NODE_CA_BACKEND: Final = re.compile(rf"{NODE_CA_BACKEND_KMS}|{NODE_CA_BACKEND_FILE}")
 _REGION: Final = re.compile(r"[a-z]{2}(-[a-z]+)+-[1-9]")
 _SECRET_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9/_+=.@-]{0,511}")
 _SIGNING_PREFIX: Final = re.compile(r"vigia/([a-z0-9][a-z0-9-]{0,62})/signing/")
@@ -121,9 +134,20 @@ _ASSISTANT_MODEL: Final = re.compile(r"claude-opus-5|claude-sonnet-5")
 class RuntimeConfigInvalid(ValueError):
     """Variable de entorno ausente o no válida. Nombra la variable, nunca su valor (ERR-019)."""
 
+    code: ClassVar[str] = "config_invalid"
+
     def __init__(self, variable: str, reason: str = "ausente o no válida") -> None:
         super().__init__(f"configuración no válida: {variable} {reason}")
         self.variable = variable
+
+
+class NodeCaBackendForbidden(RuntimeConfigInvalid):
+    """``VIGIA_NODE_CA_BACKEND=file`` fuera de ``local`` e ``integration``: no arranca."""
+
+    code: ClassVar[str] = "node_ca_backend_forbidden"
+
+    def __init__(self) -> None:
+        super().__init__("VIGIA_NODE_CA_BACKEND", "file solo se admite en local e integration")
 
 
 class RegistrationIncomplete(Exception):
@@ -165,7 +189,7 @@ def report_invalid(error: BaseException, stream: TextIO | None = None) -> bool:
     if not isinstance(error, RuntimeConfigInvalid):
         return False
     variable = error.variable if error.variable in KNOWN_VARIABLES else "?"
-    line = {"error": "config_invalid", "variable": variable, "mensaje": str(error)}
+    line = {"error": error.code, "variable": variable, "mensaje": str(error)}
     target.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
     target.flush()
     return True
@@ -240,6 +264,8 @@ VARIABLES: Final[tuple[_Variable, ...]] = (
     ),
     _Variable("secrets_key_arn", "VIGIA_SECRETS_KEY_ARN", _text(_KMS_KEY_ID), required=True),
     _Variable("node_ca_key_arn", "VIGIA_NODE_CA_KEY_ARN", _text(_KMS_KEY_ID)),
+    _Variable("node_ca_backend", "VIGIA_NODE_CA_BACKEND", _text(_NODE_CA_BACKEND)),
+    _Variable("node_ca_key_file", "VIGIA_NODE_CA_KEY_FILE", _text(_PATH)),
     _Variable("evidence_bucket", "VIGIA_EVIDENCE_BUCKET", _text(_BUCKET)),
     _Variable("archive_bucket", "VIGIA_ARCHIVE_BUCKET", _text(_BUCKET)),
     _Variable("edge_bucket", "VIGIA_EDGE_BUCKET", _text(_BUCKET)),
@@ -295,6 +321,10 @@ class RuntimeConfig(BaseModel):
     signing_secret_prefix: str
     secrets_key_arn: str
     node_ca_key_arn: str | None = None
+    node_ca_backend: str = NODE_CA_BACKEND_KMS
+    """``file`` solo en integración: ``from_environ`` lo impide en cualquier otro entorno."""
+    node_ca_key_file: str | None = None
+    """El archivo ``0600`` de la clave con el backend ``file``; sin él, ese backend no arranca."""
     evidence_bucket: str | None = None
     archive_bucket: str | None = None
     edge_bucket: str | None = None
@@ -383,8 +413,15 @@ class RuntimeConfig(BaseModel):
         environment = values["environment"]
         if "aws_endpoint_url" in values and environment not in ENDPOINT_ENVIRONMENTS:
             raise RuntimeConfigInvalid(
-                "VIGIA_AWS_ENDPOINT_URL", "solo se admite en los entornos local y test"
+                "VIGIA_AWS_ENDPOINT_URL", "solo se admite en los entornos local, test e integration"
             )
+        if values.get("node_ca_backend") == NODE_CA_BACKEND_FILE:
+            if environment not in NODE_CA_FILE_ENVIRONMENTS:
+                raise NodeCaBackendForbidden()
+            if "node_ca_key_file" not in values:
+                raise RuntimeConfigInvalid(
+                    "VIGIA_NODE_CA_KEY_FILE", "ausente: el backend file la exige"
+                )
         fields = cls.model_fields
         node = values.get("bulkhead_node", fields["bulkhead_node"].default)
         person = values.get("bulkhead_person", fields["bulkhead_person"].default)

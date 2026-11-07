@@ -174,7 +174,7 @@ _log = get_logger("identity.admin")
 RUNTIME_VARIABLE: Final = "VIGIA_ADMIN_RUNTIME"
 _RUNTIME_REFERENCE: Final = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
 """Solo un constructor del propio paquete: la variable no puede nombrar cualquier función."""
-_ENVIRONMENT: Final = r"^(local|test|pilot|staging-[1-9][0-9]{0,2})$"
+_ENVIRONMENT: Final = r"^(local|test|integration|pilot|staging-[1-9][0-9]{0,2})$"
 _SECRET_NAME: Final = r"^[A-Za-z0-9][A-Za-z0-9/_+=.@-]{0,511}$"  # noqa: S105 - patrón del nombre
 _KMS_KEY_ID: Final = r"^[A-Za-z0-9][A-Za-z0-9:/_-]{0,2047}$"
 _BUCKET: Final = r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
@@ -224,6 +224,9 @@ class AdminConfig(BaseModel):
     """``VIGIA_PUBLIC_ORIGIN`` (``https://app.<dominio>``): base del enlace de invitación."""
     node_ca_key_id: str | None = Field(default=None, pattern=_KMS_KEY_ID)
     """``VIGIA_NODE_CA_KEY_ARN``: solo con ``first_deploy=true`` o ``ca_rotation=true``."""
+    node_ca_creatable_keys: frozenset[str] = frozenset()
+    """Las claves de la autoridad por archivo que esta orden puede crear (A-89). No sale del
+    entorno: la fija ``execute`` según la orden (``_creatable_node_ca_keys``)."""
     edge_bucket: str | None = Field(default=None, pattern=_BUCKET)
     root_certificate_key: str = Field(default=ROOT_CERTIFICATE_KEY, pattern=_OBJECT_KEY)
     archive_bucket: str | None = Field(default=None, pattern=_BUCKET)
@@ -721,6 +724,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--publish-root",
         action="store_true",
         help="con --resume: vuelve a emitir y publicar ca/root.pem",
+    )
+    bootstrap.add_argument(
+        "--first-install",
+        action="store_true",
+        help=(
+            "con VIGIA_NODE_CA_BACKEND=file: primera instalación, crea la clave de la autoridad "
+            "si no existe y nunca la sobrescribe (A-89)"
+        ),
     )
     _add_common(bootstrap, confirm=True)
 
@@ -1363,6 +1374,10 @@ async def _rotate_key(
     )
 
 
+_FILE_KEY_PREFIX: Final = "file:"
+"""Los identificadores de clave del firmante por archivo (``fleet.adapters.ca.file_signer``)."""
+
+
 async def _rotate_node_ca(
     args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
 ) -> None:
@@ -1372,6 +1387,10 @@ async def _rotate_node_ca(
         raise AdminError("invalid_value", "--new-key-id no es un identificador de clave KMS")
     if new_key_id == config.node_ca_key_id:
         raise AdminError("invalid_value", "la clave nueva debe ser distinta de la vigente")
+    if new_key_id.startswith(_FILE_KEY_PREFIX) and config.node_ca_key_id is not None:
+        # A-89, firmante por archivo: la clave vigente existe antes de crear nada. Con el volumen
+        # vacío, la orden falla sin escribir. Con KMS no cambia nada: producción no pasa por aquí.
+        await node_ca.check_key(config.node_ca_key_id)
     await node_ca.check_key(new_key_id)
     operator = await _operator_context(args, runtime)
     if args.dry_run:
@@ -1774,6 +1793,19 @@ def _provider_for(
     return _require_provider(config)
 
 
+def _creatable_node_ca_keys(args: argparse.Namespace, config: AdminConfig) -> frozenset[str]:
+    """Qué clave de la autoridad por archivo puede crear esta orden (A-89).
+
+    La configurada solo con ``bootstrap --first-install``; en ``rotate-node-ca``, solo la que nombra
+    ``--new-key-id``. Ninguna en cualquier otro caso: un volumen vacío nunca crea otra autoridad.
+    """
+    if args.command == "rotate-node-ca":
+        return frozenset({args.new_key_id})
+    if args.command == "bootstrap" and args.first_install and config.node_ca_key_id is not None:
+        return frozenset({config.node_ca_key_id})
+    return frozenset()
+
+
 async def execute(
     args: argparse.Namespace,
     config: AdminConfig,
@@ -1786,6 +1818,9 @@ async def execute(
     runtime: AdminRuntime | None = None
     try:
         provider_id = _provider_for(args, config, random_bytes)
+        config = config.model_copy(
+            update={"node_ca_creatable_keys": _creatable_node_ca_keys(args, config)}
+        )
         runtime = await builder(config, provider_id)
         await COMMANDS[args.command](args, config, runtime, streams)
         return ExitCode.OK
@@ -1824,7 +1859,7 @@ async def execute(
     except RuntimeConfigInvalid as error:
         # Variable ausente o secreto de la base que no existe: nombra la variable, sin valores.
         _log.error("configuración de vigia-admin no válida: revisa las variables VIGIA_*")
-        _fail(streams, "config_invalid", str(error))
+        _fail(streams, error.code, str(error))
         return ExitCode.FAILURE
     except (TransientDatabaseError, SecretsUnavailable, StorageUnavailable):
         _fail(streams, "temporarily_unavailable", "dependencia no disponible: reintenta")

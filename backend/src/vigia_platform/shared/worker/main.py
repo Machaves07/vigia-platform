@@ -117,7 +117,7 @@ RUNTIME_VARIABLE: Final = "VIGIA_WORKER_RUNTIME"
 _RUNTIME_REFERENCE: Final = re.compile(r"vigia_platform(?:\.[a-z_][a-z0-9_]*)+:[a-z_][a-z0-9_]*")
 """Solo un constructor del propio paquete: la variable no puede nombrar cualquier función."""
 
-_ENVIRONMENT: Final = r"^(local|test|pilot|staging-[1-9][0-9]{0,2})$"
+_ENVIRONMENT: Final = r"^(local|test|integration|pilot|staging-[1-9][0-9]{0,2})$"
 _SENTINEL_KEY: Final = r"^[A-Za-z0-9][A-Za-z0-9!_.*'()/=-]{0,511}$"
 _KMS_KEY_ID: Final = r"^[A-Za-z0-9][A-Za-z0-9:/_-]{0,2047}$"
 _OLDEST_PENDING: Final = text("SELECT shared.vigia_outbox_oldest_pending(:consumer) AS oldest")

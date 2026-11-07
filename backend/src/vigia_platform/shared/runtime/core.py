@@ -26,12 +26,14 @@ También abre la base de ``vigia_app`` con la credencial de ``VIGIA_DB_APP_SECRE
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from vigia_platform.fleet.adapters.ca.file_signer import FileBackedKms, FileNodeCaSigner
 from vigia_platform.identity.adapters.authz_store import (
     PostgresAuthorizationAudit,
     PostgresContextStore,
@@ -52,11 +54,18 @@ from vigia_platform.shared.cpu_pool import CpuPool
 from vigia_platform.shared.db import Database, DatabaseSettings, ProcessKind
 from vigia_platform.shared.key_rotation import LedgerKeyEventWriter, LedgerRotationRecorder
 from vigia_platform.shared.node_ca import NodeCaSigner, kms_public_key
+from vigia_platform.shared.observability import redaction
+from vigia_platform.shared.observability.logging import get_logger
 from vigia_platform.shared.observability.metrics import PlatformMetrics
 from vigia_platform.shared.outbox.publish import Outbox
 from vigia_platform.shared.outbox.registries import OutboxCatalog
 from vigia_platform.shared.outbox.store import SqlOutboxCatalogStore
-from vigia_platform.shared.runtime.config import RuntimeConfig, RuntimeConfigInvalid
+from vigia_platform.shared.runtime.config import (
+    NODE_CA_BACKEND_FILE,
+    NODE_CA_BACKEND_KMS,
+    RuntimeConfig,
+    RuntimeConfigInvalid,
+)
 from vigia_platform.shared.runtime.db_credentials import (
     AwsSecretStringReader,
     DatabaseCredentials,
@@ -107,6 +116,13 @@ NODE_CA_CHECK_TIMEOUT_SECONDS: Final = 5.0
 """Tope de la comprobación de ``vigia-node-ca`` en el arranque (PAT-GOB-RES-03; el de KMS)."""
 
 type Synchronizer = Callable[[], Awaitable[None]]
+
+
+_log = get_logger("shared.runtime.core")
+
+# El backend va al registro como ``code``: solo valores de esta lista cerrada (NFR-NUC-41).
+with contextlib.suppress(ValueError):
+    redaction.DEFAULT_POLICY.register("code", [NODE_CA_BACKEND_KMS, NODE_CA_BACKEND_FILE])
 
 
 def aws_settings(config: RuntimeConfig) -> AwsSettings:
@@ -216,8 +232,21 @@ class Core:
     catalog: OutboxCatalog
     secrets: SecretsManagerAdapter
     kms: KmsAdapter
+    """``FileBackedKms`` con ``VIGIA_NODE_CA_BACKEND=file`` (TASK-543): el mismo puerto."""
     authorization_audit: PostgresAuthorizationAudit
     synchronizers: tuple[Synchronizer, ...]
+
+
+def _node_ca_kms(
+    config: RuntimeConfig, aws: AwsSettings, *, creatable: frozenset[str]
+) -> KmsAdapter:
+    """El adaptador de KMS del proceso, con la firma de ``vigia-node-ca`` en su backend."""
+    if config.node_ca_backend == NODE_CA_BACKEND_FILE:
+        _log.info("firmante de la autoridad de nodos", code=NODE_CA_BACKEND_FILE)
+        signer = FileNodeCaSigner(Path(config.require("node_ca_key_file")), creatable=creatable)
+        return FileBackedKms(aws, signer)
+    _log.info("firmante de la autoridad de nodos", code=NODE_CA_BACKEND_KMS)
+    return KmsAdapter(aws)
 
 
 def build_core(
@@ -232,11 +261,16 @@ def build_core(
     archive: S3Storage | None = None,
     cpu_pool: CpuPool | None = None,
     verifier_path: Path = DEFAULT_VERIFIER_PATH,
+    node_ca_creatable_keys: frozenset[str] = frozenset(),
 ) -> Core:
-    """Compone la infraestructura común sin abrir conexiones (solo construye clientes)."""
+    """Compone la infraestructura común sin abrir conexiones (solo construye clientes).
+
+    ``node_ca_creatable_keys``: las claves de la autoridad por archivo que este proceso puede
+    crear (A-89). Solo ``vigia-admin`` nombra alguna, y solo si la orden lo pide.
+    """
     provider = provider_organization_id
     aws = aws_settings(config)
-    kms = KmsAdapter(aws)
+    kms = _node_ca_kms(config, aws, creatable=node_ca_creatable_keys)
     secrets = SecretsManagerAdapter(aws, clock, kms_key_id=config.secrets_key_arn, metrics=metrics)
     contexts = ScopeContexts(
         store=PostgresContextStore(database),

@@ -74,3 +74,13 @@ python .github/scripts/staging.py run-task --environment pilot --task migrate   
   - la imagen no trae `resources/pwned-top100k.txt`: la API no arranca sin ese respaldo (`VIGIA_BREACH_LIST_PATH`);
   - la imagen no trae el certificado raíz de RDS. Con `PGSSLMODE=verify-full`, que es el valor por defecto, hace falta `PGSSLROOTCERT`.
 - `staging.py run-task` acepta `--environment pilot` o `staging-<n>`. Una instancia dedicada (`instance=<cliente>`) todavía no tiene entrada en el guion.
+
+## Firmante de `vigia-node-ca` por archivo (solo integración)
+
+El entorno de integración (A-76 D3) no tiene KMS persistente: LocalStack comunitario recrea sus claves en cada reinicio. Allí la clave de la autoridad vive en un archivo `0600`, con `VIGIA_NODE_CA_BACKEND=file`, `VIGIA_NODE_CA_KEY_FILE=/ruta/node-ca.pem` y `VIGIA_NODE_CA_KEY_ARN=file:node-ca` (TASK-543). Fuera de `VIGIA_ENVIRONMENT` `local` o `integration` el proceso no arranca: `node_ca_backend_forbidden`. En producción sigue valiendo que la clave privada nunca existe fuera de KMS.
+
+- **Primera instalación (A-89):** `vigia-admin bootstrap --first-install` crea la clave si no existe, al firmar la raíz, y nunca sobrescribe una existente; `--dry-run` no escribe. Sin la marca, si la clave no existe, la orden falla con `node_ca_invalid` y no escribe nada, también con el depósito vacío. `vigia-api` y `vigia-worker` nunca la crean: sin archivo no quedan listos.
+- Rotación (D-6): `vigia-admin rotate-node-ca --new-key-id file:node-ca-2` crea `node-ca-2.pem` junto a la vigente y publica el paquete de dos raíces, como [6.4](6.4-key-rotation.md). La clave vigente tiene que existir: con el volumen vacío la orden falla con `node_ca_invalid` y no escribe nada. Monta el volumen antes de rotar.
+- La copia de la clave es responsabilidad del dueño del entorno: es el archivo de un solo punto. Sin él hay que dar de alta de nuevo todos los nodos.
+- **Tras reiniciar LocalStack,** el depósito pierde `ca/root.pem`. Repite `vigia-admin bootstrap --resume --publish-root`, **sin** `--first-install`: publica una raíz de la misma clave y con el mismo nombre, así que los certificados ya emitidos siguen validando. Si falla con `node_ca_invalid`, el volumen de la clave no está montado: arréglalo, no uses la marca. Un reinicio también pierde los secretos y la clave de `vigia-secrets`, que hay que recrear antes.
+- **Si se pierde la clave,** volver a crearla con la marca es una decisión deliberada: es otra autoridad y hay que registrar de nuevo todos los nodos.

@@ -930,7 +930,9 @@ U03_VARIABLES = {
 """Variables de U-03 por definición de tarea."""
 
 RUNTIME_VARIABLES_OUTSIDE_TASKS = {
-    "VIGIA_AWS_ENDPOINT_URL": "solo local y test (LocalStack)",
+    "VIGIA_AWS_ENDPOINT_URL": "solo local, test e integration (LocalStack)",
+    "VIGIA_NODE_CA_BACKEND": "solo local e integration (TASK-543): en pilot el arranque aborta",
+    "VIGIA_NODE_CA_KEY_FILE": "solo con el backend file (TASK-543): en pilot el arranque aborta",
     "PGSSLMODE": "por defecto verify-full",
     "PGSSLROOTCERT": "por defecto el paquete de la imagen",
     "VIGIA_BREACH_LIST_PATH": "por defecto el respaldo de la imagen",

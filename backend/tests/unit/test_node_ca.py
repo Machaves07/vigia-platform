@@ -2,7 +2,8 @@
 
 ``FakeKms`` hace de KMS con claves P-256 reales en memoria: la plataforma nunca recibe la clave
 privada, solo la firma (``kms:Sign``) y la pública (``kms:GetPublicKey``). Contra LocalStack lo
-repite ``tests/integration/test_admin_bootstrap.py``.
+repite ``tests/integration/test_admin_bootstrap.py``. Cada prueba corre también con el firmante por
+archivo (``FileBackedFakeKms``, TASK-543): el mismo puerto, las mismas garantías.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from cryptography import x509
@@ -17,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from tests.admin_support import (
     FakeKms,
+    FileBackedFakeKms,
     MemoryStorage,
     issue_node_certificate,
     public_der,
@@ -35,6 +38,19 @@ from vigia_platform.shared.node_ca import (
 )
 
 NOW = datetime(2026, 10, 2, 9, 30, 15, 123456, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True, params=["kms", "file"])
+def node_ca_backend(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``FakeKms()`` en cada prueba es el firmante del backend de esta pasada."""
+    if request.param == "file":
+
+        def file_backed() -> FakeKms:
+            return FileBackedFakeKms(tmp_path)
+
+        monkeypatch.setitem(globals(), "FakeKms", file_backed)
 
 
 def _root(kms: FakeKms, key_id: str, now: datetime = NOW) -> x509.Certificate:
