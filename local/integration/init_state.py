@@ -34,15 +34,25 @@ import uuid
 from pathlib import Path
 from typing import Final
 
-__all__ = ["OWNER", "ensure_breach_list", "ensure_directory", "ensure_state", "main"]
+__all__ = [
+    "OWNER",
+    "ensure_breach_list",
+    "ensure_directory",
+    "ensure_state",
+    "main",
+    "prepare_directories",
+]
 
 OWNER: Final = 10001
 _SECRET_FILES: Final = ("postgres.pw", "app.pw", "migrate.pw")
-_KEY_FILES: Final = ("kms-secrets.material", "enrollment-source.key")
+MATERIAL_FILE: Final = "kms-secrets.material"
+ENROLLMENT_KEY_FILE: Final = "enrollment-source.key"
+SNAPSHOT_FILE: Final = "localstack-snapshot.json"
 _ID_FILE: Final = "kms-secrets.id"
 _SHA1_LINE: Final = re.compile(r"[0-9A-F]{40}")
 _FALLBACK_WORDS: Final = ("password", "123456", "qwerty")
 BREACH_LIST_NAME: Final = "pwned-top100k.txt"
+BREACH_KIND_FILE: Final = "breach_kind"
 
 
 def _chown(path: Path, owner: int | None) -> None:
@@ -94,21 +104,46 @@ def _random_key() -> str:
 
 
 def ensure_state(state: Path, *, owner: int | None = OWNER) -> list[str]:
-    """Crea los secretos que falten en ``state``; devuelve los nombres de los creados."""
+    """Crea los secretos que falten en ``state``; devuelve los nombres de los creados.
+
+    El material de la clave KMS se crea **primero** y solo en una primera instalación: si ya hay
+    otros archivos de ``state`` (contraseñas, identificador de la clave, copia de LocalStack) y
+    falta ``kms-secrets.material``, se pierde ese material y crear otro dejaría la clave con el
+    mismo identificador y otro material: todo texto cifrado antes (el segundo factor de las
+    personas) daría ``InvalidCiphertextException`` sin ningún error de arranque. Se detiene.
+    """
     ensure_directory(state, 0o700, owner)
+    material = state / MATERIAL_FILE
+    established = [
+        name for name in (*_SECRET_FILES, _ID_FILE, SNAPSHOT_FILE) if (state / name).exists()
+    ]
+    if established and not material.exists():
+        raise SystemExit(
+            f"init: kms_material_missing: falta {MATERIAL_FILE} y ya hay {', '.join(established)}. "
+            "Crear otro material dejaría ilegible el segundo factor de las personas: restaura el "
+            "volumen estado o, si es una primera instalación deliberada, vacíalo entero"
+        )
     created: list[str] = []
+    if _create_private(material, _random_key(), owner):
+        created.append(MATERIAL_FILE)
+    if _create_private(state / _ID_FILE, str(uuid.uuid4()), owner):
+        created.append(_ID_FILE)
     for name in _SECRET_FILES:
         if _create_private(state / name, secrets.token_urlsafe(32), owner):
             created.append(name)
-    for name in _KEY_FILES:
-        if _create_private(state / name, _random_key(), owner):
-            created.append(name)
-    if _create_private(state / _ID_FILE, str(uuid.uuid4()), owner):
-        created.append(_ID_FILE)
+    if _create_private(state / ENROLLMENT_KEY_FILE, _random_key(), owner):
+        created.append(ENROLLMENT_KEY_FILE)
     # El archivo de libpq se rehace siempre a partir de postgres.pw: es derivado, no un original.
     password = (state / "postgres.pw").read_text(encoding="ascii").strip()
     _replace_private(state / "pgpass", f"postgres:5432:vigia:vigia:{password}", owner)
     return created
+
+
+def prepare_directories(root: Path, owner: int | None = OWNER) -> None:
+    """``/ca`` y ``/edge`` (0700, del usuario 10001) y ``/shared`` (0755), bajo ``root``."""
+    ensure_directory(root / "ca", 0o700, owner)
+    ensure_directory(root / "edge", 0o700, owner)
+    ensure_directory(root / "shared", 0o755, owner)
 
 
 def ensure_breach_list(shared: Path, source: Path, *, owner: int | None = OWNER) -> str:
@@ -140,15 +175,16 @@ def ensure_breach_list(shared: Path, source: Path, *, owner: int | None = OWNER)
     os.chmod(temporary, 0o644)
     _chown(temporary, owner)
     os.replace(temporary, target)
+    # Lo que `seed.py provider-id` y `bootstrap.sh` muestran: una lista sintética no se oculta.
+    _replace_private(shared / BREACH_KIND_FILE, kind, owner)
+    os.chmod(shared / BREACH_KIND_FILE, 0o644)
     return kind
 
 
 def main(argv: list[str] | None = None) -> int:
     hold = "--hold" in (sys.argv[1:] if argv is None else argv)
     created = ensure_state(Path("/state"))
-    ensure_directory(Path("/ca"), 0o700, OWNER)
-    ensure_directory(Path("/edge"), 0o700, OWNER)
-    ensure_directory(Path("/shared"), 0o755, OWNER)
+    prepare_directories(Path("/"))
     kind = ensure_breach_list(Path("/shared"), Path("/integration") / BREACH_LIST_NAME)
     print("init: " + (", ".join(created) if created else "nada que crear"))
     print(f"init: lista de contraseñas filtradas {kind}", flush=True)

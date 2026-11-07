@@ -67,6 +67,9 @@ class FakeConnection:
     def transaction(self) -> Transaction:
         return Transaction()
 
+    async def close(self) -> None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_the_provider_must_exist(seed: types.ModuleType) -> None:
@@ -284,3 +287,39 @@ def test_main_dispatches_each_command_and_refuses_the_unknown(
     assert seed.main(["borrar-todo"]) == 2
     printed = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
     assert printed[0] == {"command": "provider-id"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["sintetica", "real"])
+async def test_provider_id_publishes_the_id_and_reports_the_breach_list_kind(
+    seed: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    provider = uuid.UUID(int=12)
+
+    async def connect() -> FakeConnection:
+        return FakeConnection(rows=[{"organization_id": provider}])
+
+    monkeypatch.setattr(seed, "connect", connect)
+    monkeypatch.setattr(seed, "PROVIDER_FILE", tmp_path / "provider")
+    monkeypatch.setattr(seed, "BREACH_KIND_FILE", tmp_path / "kind")
+    (tmp_path / "kind").write_text(kind + chr(10))
+    result = await seed.provider_id()
+    assert result == {
+        "command": "provider-id",
+        "provider_organization_id": str(provider),
+        "breach_list": kind,
+    }
+    assert (tmp_path / "provider").read_text().strip() == str(provider)
+
+
+@pytest.mark.asyncio
+async def test_provider_id_does_not_hide_a_missing_breach_list_kind(
+    seed: types.ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def connect() -> FakeConnection:
+        return FakeConnection(rows=[{"organization_id": uuid.UUID(int=12)}])
+
+    monkeypatch.setattr(seed, "connect", connect)
+    monkeypatch.setattr(seed, "PROVIDER_FILE", tmp_path / "provider")
+    monkeypatch.setattr(seed, "BREACH_KIND_FILE", tmp_path / "no-hay")
+    assert (await seed.provider_id())["breach_list"] == "desconocida"

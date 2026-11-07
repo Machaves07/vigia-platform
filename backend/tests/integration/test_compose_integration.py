@@ -21,7 +21,9 @@ que muestra SCR-07).
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import hmac
 import json
 import os
 import re
@@ -61,6 +63,7 @@ COMMAND_SECONDS: Final = 900.0
 HTTP_SECONDS: Final = 30.0
 SETTLE_SECONDS: Final = 90.0
 EDGE: Final = "vigia-mtls-edge"
+NEWLINE: Final = chr(10)
 SESSION_COOKIE: Final = "__Host-vigia_session"
 DOCKER: Final = shutil.which("docker") or "docker"
 
@@ -264,6 +267,8 @@ class Node:
     organization_id: uuid.UUID
     plant_id: uuid.UUID
     zone_id: uuid.UUID
+    ingest_base_url: str
+    """``initial_configuration.endpoints.ingest_base_url``: la URL en la que el nodo debe latir."""
     certificate: Path
     key: Path
 
@@ -359,13 +364,18 @@ def enroll_node(deployment: Deployment) -> Node:
         uuid.UUID(str(issued["organization_id"])),
         uuid.UUID(str(issued["plant_id"])),
         uuid.UUID(str(issued["zone_id"])),
+        str(response.json()["initial_configuration"]["endpoints"]["ingest_base_url"]),
         certificate_file,
         key_file,
     )
 
 
 def heartbeat(deployment: Deployment, node: Node) -> httpx.Response:
-    """``POST /api/nodes/heartbeats`` por ``nodes.`` con el certificado de cliente del nodo."""
+    """``POST <ingest_base_url>/heartbeats`` con el certificado de cliente del nodo.
+
+    La URL es **exactamente la que entregó la alta**, no una armada por la prueba: así se vio que
+    la plataforma entregaba una URL sin puerto y un nodo real no podía latir.
+    """
     assert deployment.edge_ca is not None
     version = str(CONTRACT_VERSION)
     body = {
@@ -405,10 +415,25 @@ def heartbeat(deployment: Deployment, node: Node) -> httpx.Response:
     }
     with httpx.Client(verify=tls_context(deployment, node), timeout=HTTP_SECONDS) as client:
         return client.post(
-            nodes_url(deployment, "/api/nodes/heartbeats"),
+            f"{node.ingest_base_url}/heartbeats",
             json=body,
             headers={"X-Vigia-Contract-Version": version},
         )
+
+
+def error_code(result: subprocess.CompletedProcess[str]) -> str | None:
+    """El código cerrado de ``error[<código>]`` de los guiones de ``local/integration``."""
+    found = re.findall(r"error\[([a-z_]+)\]", result.stderr)
+    return found[-1] if found else None
+
+
+def admin_error_codes(stderr: str) -> list[str]:
+    """Los códigos de error de ``vigia-admin`` (líneas JSON ``{"error": …}`` de su salida)."""
+    codes: list[str] = []
+    for line in stderr.splitlines():
+        if line.startswith('{"error"'):
+            codes.append(str(json.loads(line)["error"]))
+    return codes
 
 
 def eventually(check: Callable[[], bool], message: str) -> None:
@@ -504,6 +529,115 @@ def test_a_node_enrolls_through_app_and_beats_through_nodes(
     assert response.status_code == 200, response.text
     nodes = {str(item["node_id"]): item for item in person_inventory(deployment)}
     assert nodes[str(enrolled.node_id)]["communication_state"] == "reachable"
+
+
+def test_the_enrollment_hands_the_node_the_url_it_must_beat_on(
+    deployment: Deployment, enrolled: Node
+) -> None:
+    """La alta entrega `https://nodes.<zona>:<puerto>/api/nodes`, con el puerto publicado."""
+    assert enrolled.ingest_base_url == nodes_url(deployment, "/api/nodes")
+    assert f":{deployment.nodes_port}/" in enrolled.ingest_base_url
+
+
+def totp(secret_base32: str) -> str:
+    """El código TOTP (RFC 6238: SHA-1, 30 s, 6 dígitos) del segundo factor de prueba."""
+    padded = secret_base32 + "=" * (-len(secret_base32) % 8)
+    key = base64.b32decode(padded)
+    counter = int(CLOCK.now().timestamp()) // 30
+    digest = hmac.new(key, counter.to_bytes(8, "big"), "sha1").digest()
+    offset = digest[-1] & 0x0F
+    value = int.from_bytes(digest[offset : offset + 4], "big") & 0x7FFFFFFF
+    return f"{value % 1_000_000:06d}"
+
+
+def test_people_sign_in_from_the_browser_origin_and_read_the_fleet(
+    deployment: Deployment, installed: tuple[str, str], resolved_names: None
+) -> None:
+    """`POST /auth/login` con el `Origin` y `Sec-Fetch-Site` de un navegador en `app.`: el origen
+    exacto lleva el puerto (CSRF); sin él, 403. Luego el segundo factor y la lectura de la flota."""
+    credentials = json.loads(
+        Path(deployment.environment["VIGIA_INTEGRATION_CREDENTIALS"]).read_text(encoding="utf-8")
+    )["administrator"]
+    browser = {"Origin": app_url(deployment), "Sec-Fetch-Site": "same-origin"}
+    with httpx.Client(verify=tls_context(deployment), timeout=HTTP_SECONDS) as client:
+        credentials_body = {"email": credentials["email"], "password": credentials["password"]}
+        wrong_origin = client.post(
+            app_url(deployment, "/auth/login"),
+            json=credentials_body,
+            headers={**browser, "Origin": f"https://app.{DOMAIN}"},
+        )
+        assert wrong_origin.status_code == 403, "el origen sin puerto no es el de la aplicación"
+        first = client.post(
+            app_url(deployment, "/auth/login"), json=credentials_body, headers=browser
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "second_factor_required"
+        second = client.post(
+            app_url(deployment, "/auth/second-factor"),
+            json={"code": totp(credentials["totp_base32"])},
+            headers=browser,
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["status"] == "authenticated"
+        fleet = client.get(app_url(deployment, "/fleet/nodes"))
+        assert fleet.status_code == 200, fleet.text
+
+
+def container_address(deployment: Deployment, service: str) -> str:
+    network = f"{deployment.project}_interna"
+    template = "{{(index .NetworkSettings.Networks " + chr(34) + network + chr(34) + ").IPAddress}}"
+    done = _docker("inspect", f"{deployment.project}-{service}-1", "--format", template)
+    return done.stdout.strip()
+
+
+SERVICE_PORTS: Final = (("vigia-api-1", 8000), ("localstack", 4566), ("postgres", 5432))
+
+
+def test_nothing_but_the_edge_is_reachable_from_the_host(
+    deployment: Deployment, installed: tuple[str, str]
+) -> None:
+    """Un proceso local del servidor (sin el grupo `docker`) no llega a la API, a LocalStack ni a
+    PostgreSQL: con `internal: true` solo, el puente tenía IP en el anfitrión: un latido forjado
+    con las cabeceras públicas del nodo daba 200, un PUT en `ca/` de LocalStack daba 200 y
+    PostgreSQL conectaba. `inhibit_ipv4` lo cierra; se comprueba con la composición entera, de dos
+    maneras."""
+    targets = [(container_address(deployment, name), port) for name, port in SERVICE_PORTS]
+    assert all(address for address, _ in targets)
+    for address, port in targets:
+        with pytest.raises(OSError):
+            socket.create_connection((address, port), timeout=3).close()
+    program = (
+        "import socket,sys"
+        + NEWLINE
+        + "for target in sys.argv[1:]:"
+        + NEWLINE
+        + "    host, port = target.rsplit(':', 1)"
+        + NEWLINE
+        + "    try:"
+        + NEWLINE
+        + "        socket.create_connection((host, int(port)), timeout=3).close()"
+        + NEWLINE
+        + "        print('ABIERTO ' + target)"
+        + NEWLINE
+        + "    except OSError:"
+        + NEWLINE
+        + "        print('cerrado ' + target)"
+        + NEWLINE
+    )
+    probe = _docker(
+        "run", "--rm", "--network", "host", "--entrypoint", "python", IMAGE, "-c", program,
+        *[f"{address}:{port}" for address, port in targets],
+    )  # fmt: skip
+    assert "ABIERTO" not in probe.stdout, probe.stdout
+    assert probe.stdout.count("cerrado") == len(targets)
+    # Y entre ellos se hablan: el balanceador llega a las dos instancias de la API.
+    reachable = deployment.compose(
+        "exec", "-T", EDGE, "python", "-c",
+        "import urllib.request as u;"
+        "[u.urlopen('http://vigia-api-%d:8000/health/live' % n, timeout=5) for n in (1, 2)];"
+        "print('ok')",
+    )  # fmt: skip
+    assert reachable.stdout.strip() == "ok"
 
 
 def test_a_call_without_a_node_certificate_is_not_a_node(
@@ -605,11 +739,20 @@ def test_backup_and_restore_keep_the_fleet_inventory(
     deployment.seed("issue-code")  # un nodo más después de la copia
     assert deployment.inventory_counts()[0] == before[0] + 1
     refused = deployment.script("restore.sh", str(dump))
-    assert refused.returncode != 0, "restaurar sin --yes no debe hacer nada"
+    assert error_code(refused) == "restore_needs_yes", "restaurar sin --yes no debe hacer nada"
     assert deployment.inventory_counts()[0] == before[0] + 1
+    # Una copia truncada por el final: `pg_restore --list` da 0, pero la restauración borraría la
+    # base viva y fallaría a la mitad. Se rechaza antes de parar nada, y la base viva sigue.
+    truncated = deployment.directory / "truncada.dump"
+    truncated.write_bytes(dump.read_bytes()[:-4096])
+    broken = deployment.script("restore.sh", "--yes", str(truncated))
+    assert error_code(broken) == "dump_unreadable", broken.stderr[-1500:]
+    assert deployment.inventory_counts()[0] == before[0] + 1, "la base viva se tocó"
+    assert heartbeat(deployment, enrolled).status_code == 200, "la aplicación se paró"
     restored = deployment.script("restore.sh", "--yes", str(dump))
     assert restored.returncode == 0, restored.stderr[-4000:]
     assert deployment.inventory_counts() == before
+    assert len(list(dump.parent.glob("previa-*.dump"))) == 1, "se guardó la base anterior"
     # El nodo dado de alta antes de la copia sigue latiendo con su credencial.
     eventually(
         lambda: heartbeat(deployment, enrolled).status_code == 200,
@@ -630,8 +773,8 @@ def test_without_the_authority_key_the_restart_recipe_fails_and_publishes_nothin
     deployment.compose("run", "--rm", "-T", "vigia-admin", "rm", "-f", "/ca/node-ca.pem")
     failed = deployment.script("bootstrap.sh")
     assert failed.returncode != 0
-    assert "BOOTSTRAP_OK" not in failed.stdout
-    assert "first-install" in failed.stderr
+    assert failed.stdout.splitlines()[-1:] != ["BOOTSTRAP_OK"]
+    assert admin_error_codes(failed.stderr) == ["node_ca_invalid"], failed.stderr[-1500:]
     assert deployment.root_sha256() == root_before, "publicó otra autoridad"
     absent = deployment.compose(
         "run", "--rm", "-T", "vigia-admin", "sh", "-c", "test ! -e /ca/node-ca.pem && echo ausente"

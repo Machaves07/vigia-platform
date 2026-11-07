@@ -69,8 +69,11 @@ x-runtime: &runtime-environment
   VIGIA_EVIDENCE_BUCKET: vigia-evidence
   VIGIA_ARCHIVE_BUCKET: vigia-archive
   VIGIA_EDGE_BUCKET: vigia-edge
-  VIGIA_PUBLIC_ORIGIN: https://app.${VIGIA_DOMAIN:-vigia.test}
-  VIGIA_NODES_BASE_URL: https://nodes.${VIGIA_DOMAIN:-vigia.test}/api/nodes
+  # Con el puerto de publicación: el origen de las personas se compara exacto (CSRF) y la alta
+  # entrega esta URL al nodo, que late en ella. `app.` y `nodes.` comparten IP y no pueden
+  # compartir el 443.
+  VIGIA_PUBLIC_ORIGIN: https://app.${VIGIA_DOMAIN:-vigia.test}:${VIGIA_EDGE_APP_PORT:-8443}
+  VIGIA_NODES_BASE_URL: https://nodes.${VIGIA_DOMAIN:-vigia.test}:${VIGIA_EDGE_NODES_PORT:-8444}/api/nodes
   # `vigia-mtls-edge` reenvía con X-Forwarded-For: solo se cree a la red interna.
   # El respaldo local de contraseñas filtradas lo deja `init` en `proveedora` (ver `init_state.py`).
   VIGIA_BREACH_LIST_PATH: /shared/breach.txt
@@ -317,9 +320,15 @@ services:
 
 networks:
   # Sin salida ni entrada: ningún contenedor de esta red es alcanzable desde fuera, publique lo que
-  # publique. PostgreSQL, LocalStack y `vigia-api` no están en ninguna otra.
+  # publique. PostgreSQL, LocalStack y `vigia-api` no están en ninguna otra. `internal: true` solo
+  # quita la salida; sin `inhibit_ipv4` el puente tiene una IP en el anfitrión y cualquier proceso
+  # local llega a `vigia-api` (un latido forjado con las cabeceras públicas del nodo dio 200), a
+  # LocalStack (un PUT en `ca/` dio 200) y a PostgreSQL. Con él, el anfitrión no tiene IP en el
+  # puente ni ruta a los contenedores: solo se hablan entre sí y con el balanceador.
   interna:
     internal: true
+    driver_opts:
+      com.docker.network.bridge.inhibit_ipv4: "true"
     ipam:
       config:
         - subnet: ${VIGIA_INTERNAL_SUBNET:-172.29.93.0/24}

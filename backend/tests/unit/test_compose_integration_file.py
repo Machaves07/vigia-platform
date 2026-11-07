@@ -219,8 +219,22 @@ def guard() -> types.ModuleType:
     return load_module("vigia_edge_guard", INTEGRATION / "edge_guard.py")
 
 
-@pytest.mark.parametrize("address", ["127.0.0.1", "100.64.12.7", "192.168.20.69", "fd7a:115c::1"])
-def test_the_edge_guard_accepts_a_concrete_address(guard: types.ModuleType, address: str) -> None:
+@pytest.mark.parametrize(
+    "address",
+    [
+        "127.0.0.1",
+        "127.0.0.2",
+        "::1",
+        "100.64.0.1",
+        "100.127.255.254",
+        "fd7a:115c:a1e0::1",
+        "::ffff:100.64.0.1",
+        "::ffff:127.0.0.1",
+    ],
+)
+def test_the_edge_guard_accepts_loopback_and_the_tailnet(
+    guard: types.ModuleType, address: str
+) -> None:
     assert guard.check_publish_ip({"VIGIA_EDGE_PUBLISH_IP": address}) is None
 
 
@@ -235,9 +249,19 @@ def test_the_edge_guard_accepts_a_concrete_address(guard: types.ModuleType, addr
         "tailscale0",
         "999.1.1.1",
         "224.0.0.1",
+        "::ffff:0.0.0.0",
+        "::ffff:192.168.20.69",
+        "192.168.20.69",  # la LAN de server-casa
+        "10.0.0.5",
+        "8.8.8.8",
+        "100.63.255.255",
+        "100.128.0.1",
+        "fd7a:115c::1",
+        "2001:db8::1",
+        "fe80::1%eth0",
     ],
 )
-def test_the_edge_guard_refuses_a_wide_or_invalid_address(
+def test_the_edge_guard_refuses_anything_but_loopback_and_the_tailnet(
     guard: types.ModuleType, address: str
 ) -> None:
     assert guard.check_publish_ip({"VIGIA_EDGE_PUBLISH_IP": address}) is not None
@@ -316,6 +340,7 @@ def test_init_never_replaces_an_existing_password_even_if_it_is_empty_of_neighbo
     state.mkdir()
     (state / "postgres.pw").write_text("la-de-siempre\n")
     (state / "postgres.pw").chmod(0o600)
+    (state / "kms-secrets.material").write_text("m" * 44 + "\n")
     init_state.ensure_state(state, owner=None)
     assert (state / "postgres.pw").read_text() == "la-de-siempre\n"
 
@@ -553,3 +578,181 @@ def test_concurrent_snapshots_are_never_torn(
     assert target.read_text() in contents
     assert [path.name for path in tmp_path.iterdir()] == ["copia.json"], "quedó un temporal"
     assert target.stat().st_mode & 0o777 == 0o600
+
+
+# --- La composición no tiene vías de escape (lo único que corre en el CI) ----------------------
+
+
+ESCAPE_KEYS: Final = (
+    "extends",
+    "pid",
+    "ipc",
+    "cap_add",
+    "devices",
+    "privileged",
+    "network_mode",
+    "expose",
+    "userns_mode",
+    "uts",
+    "cgroup",
+    "security_opt",
+    "sysctls",
+    "group_add",
+)
+
+
+def raw_compose() -> dict[str, Any]:
+    return dict(COMPOSE)
+
+
+def violations(compose: dict[str, Any]) -> list[str]:
+    """Todo lo que, en un archivo de composición, abre una vía hacia el anfitrión o a la red."""
+    found: list[str] = []
+    services: dict[str, dict[str, Any]] = compose.get("services", {})
+    for forbidden in ("include", "extends"):
+        if forbidden in compose:
+            found.append(f"{forbidden} de nivel superior")
+    for name, service in services.items():
+        for key in ESCAPE_KEYS:
+            if service.get(key):
+                found.append(f"{name}: {key}")
+        for volume in service.get("volumes", []):
+            host = str(volume).split(":", 1)[0]
+            if "docker.sock" in str(volume) or host.startswith("/") or host.startswith(".."):
+                found.append(f"{name}: volumen del anfitrión {volume}")
+    for name, network in (compose.get("networks") or {}).items():
+        if (network or {}).get("external"):
+            found.append(f"red externa {name}")
+    for name, volume in (compose.get("volumes") or {}).items():
+        if (volume or {}).get("external") or (volume or {}).get("driver_opts"):
+            found.append(f"volumen externo {name}")
+    return found
+
+
+def test_the_compose_file_has_no_escape_routes() -> None:
+    assert violations(raw_compose()) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda c: c["services"]["postgres"].update(
+            extends={"file": "docker-compose.yml", "service": "postgres"}
+        ),
+        lambda c: c.update(include=["docker-compose.yml"]),
+        lambda c: c["services"]["vigia-api-1"].update(
+            volumes=["/var/run/docker.sock:/var/run/docker.sock"]
+        ),
+        lambda c: c["services"]["vigia-api-1"].update(pid="host"),
+        lambda c: c["services"]["vigia-api-1"].update(ipc="host"),
+        lambda c: c["services"]["vigia-api-1"].update(cap_add=["NET_ADMIN"]),
+        lambda c: c["services"]["vigia-api-1"].update(privileged=True),
+        lambda c: c["services"]["localstack"].update(network_mode="host"),
+        lambda c: c["services"]["localstack"].update(devices=["/dev/sda"]),
+        lambda c: c["networks"]["interna"].update(external=True),
+        lambda c: c["networks"]["publica"].update(external=True),
+        lambda c: (
+            c["volumes"]["autoridad"].update(external=True)
+            if c["volumes"]["autoridad"]
+            else c["volumes"].update(autoridad={"external": True})
+        ),
+        lambda c: c["services"]["postgres"]["volumes"].append("/etc:/host-etc:ro"),
+    ],
+)
+def test_every_escape_route_is_detected(mutation: Any) -> None:
+    """La detección tiene que caer con cada vía, no solo con la que ya usó alguien."""
+    import copy
+
+    mutated = copy.deepcopy(raw_compose())
+    mutation(mutated)
+    assert violations(mutated) != []
+
+
+def test_the_edge_entrypoint_is_the_guard_and_cannot_be_dropped() -> None:
+    edge = SERVICES[EDGE]
+    assert edge["entrypoint"] == ["python", "/integration/edge_guard.py"]
+    assert "./local/integration:/integration:ro" in edge["volumes"]
+    # Nada más arranca el balanceador: sin el guarda, `VIGIA_EDGE_BIND` ya no se valida dentro.
+    assert "command" not in edge
+
+
+def test_the_internal_network_gives_the_host_no_address() -> None:
+    """Sin `inhibit_ipv4` el puente tiene IP en el anfitrión y cualquier proceso local llega a los
+    servicios (latido forjado, escritura en `ca/` de LocalStack, PostgreSQL)."""
+    interna = COMPOSE["networks"]["interna"]
+    assert interna["internal"] is True
+    assert interna["driver_opts"]["com.docker.network.bridge.inhibit_ipv4"] == "true"
+    assert COMPOSE["networks"]["publica"].get("driver_opts") is None
+
+
+def test_the_urls_given_to_people_and_nodes_carry_the_published_ports() -> None:
+    """La alta entrega `VIGIA_NODES_BASE_URL` al nodo y el origen de las personas se compara exacto
+    (CSRF): sin el puerto de publicación, el nodo no late y el navegador recibe 403."""
+    environment = SERVICES["vigia-api-1"]["environment"]
+    edge_ports = SERVICES[EDGE]["ports"]
+    app_default, nodes_default = (resolve(port).rsplit(":", 2)[-2] for port in edge_ports)
+    assert resolve(environment["VIGIA_PUBLIC_ORIGIN"]) == f"https://app.vigia.test:{app_default}"
+    assert (
+        resolve(environment["VIGIA_NODES_BASE_URL"])
+        == f"https://nodes.vigia.test:{nodes_default}/api/nodes"
+    )
+    assert "${VIGIA_EDGE_APP_PORT" in environment["VIGIA_PUBLIC_ORIGIN"]
+    assert "${VIGIA_EDGE_NODES_PORT" in environment["VIGIA_NODES_BASE_URL"]
+    config = RuntimeConfig.from_environ(runtime_environment())
+    assert config.nodes_base_url is not None and config.nodes_base_url.endswith(":8444/api/nodes")
+
+
+# --- init_state: pérdida del material de la clave, permisos y lista ------------------------------
+
+
+def test_init_stops_if_the_kms_material_is_lost_and_never_makes_another(
+    init_state: types.ModuleType, tmp_path: Path
+) -> None:
+    state = tmp_path / "state"
+    init_state.ensure_state(state, owner=None)
+    lost = (state / "kms-secrets.material").read_bytes()
+    (state / "kms-secrets.material").unlink()
+    with pytest.raises(SystemExit, match="kms_material_missing"):
+        init_state.ensure_state(state, owner=None)
+    assert not (state / "kms-secrets.material").exists(), "no se crea otro material"
+    (state / "kms-secrets.material").write_bytes(lost)
+    assert init_state.ensure_state(state, owner=None) == []
+
+
+def test_init_with_only_a_snapshot_left_also_stops(
+    init_state: types.ModuleType, tmp_path: Path
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "localstack-snapshot.json").write_text("{}")
+    with pytest.raises(SystemExit, match="kms_material_missing"):
+        init_state.ensure_state(state, owner=None)
+
+
+def test_init_creates_the_kms_material_first_on_a_first_install(
+    init_state: types.ModuleType, tmp_path: Path
+) -> None:
+    created = init_state.ensure_state(tmp_path / "fresco", owner=None)
+    assert created[:2] == ["kms-secrets.material", "kms-secrets.id"]
+
+
+def test_init_prepares_the_volumes_with_private_modes(
+    init_state: types.ModuleType, tmp_path: Path
+) -> None:
+    init_state.prepare_directories(tmp_path, owner=None)
+    modes = {name: (tmp_path / name).stat().st_mode & 0o777 for name in ("ca", "edge", "shared")}
+    assert modes == {"ca": 0o700, "edge": 0o700, "shared": 0o755}
+
+
+def test_init_records_whether_the_breach_list_is_synthetic(
+    init_state: types.ModuleType, tmp_path: Path
+) -> None:
+    init_state.ensure_breach_list(tmp_path, tmp_path / "ausente.txt", owner=None)
+    assert (tmp_path / "breach_kind").read_text().strip() == "sintetica"
+    digests = sorted(
+        hashlib.sha1(w.encode(), usedforsecurity=False).hexdigest().upper() for w in "xyz"
+    )
+    source = tmp_path / "real.txt"
+    source.write_text(chr(10).join(digests) + chr(10))
+    init_state.ensure_breach_list(tmp_path, source, owner=None)
+    assert (tmp_path / "breach_kind").read_text().strip() == "real"

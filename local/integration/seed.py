@@ -86,6 +86,8 @@ THRESHOLDS: Final = {
 """Los valores de diseño de ``fleet.domain.fleet_thresholds``, escritos de forma explícita."""
 CONCESSION_DAYS: Final = 7
 PROVIDER_FILE: Final = Path("/shared/provider_organization_id")
+BREACH_KIND_FILE: Final = Path("/shared/breach_kind")
+"""``sintetica`` o ``real``: lo que dejó ``init_state.py`` (``bootstrap.sh`` lo muestra)."""
 CREDENTIALS_FILE: Final = Path("/state/credentials.json")
 CLOCK: Final = SystemClock()
 MAX_SEGMENT_MS: Final = 60_000
@@ -133,7 +135,14 @@ async def provider_id() -> dict[str, Any]:
     finally:
         await connection.close()
     PROVIDER_FILE.write_text(f"{provider}\n", encoding="ascii")
-    return {"command": "provider-id", "provider_organization_id": str(provider)}
+    kind = "desconocida"
+    if BREACH_KIND_FILE.exists():
+        kind = BREACH_KIND_FILE.read_text(encoding="ascii").strip()
+    return {
+        "command": "provider-id",
+        "provider_organization_id": str(provider),
+        "breach_list": kind,
+    }
 
 
 # --- Personas -----------------------------------------------------------------------------------

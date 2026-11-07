@@ -22,7 +22,7 @@ first_install=0
 for argument in "$@"; do
     case "$argument" in
         --first-install) first_install=1 ;;
-        *) fail "argumento desconocido: $argument (solo --first-install)" ;;
+        *) fail unknown_argument "argumento desconocido: $argument (solo --first-install)" ;;
     esac
 done
 require_edge_bind
@@ -32,6 +32,7 @@ CREDENTIALS_FILE="${VIGIA_INTEGRATION_CREDENTIALS:-${XDG_STATE_HOME:-$HOME/.loca
 # Corre una orden en el servicio vigia-admin y deja su última línea JSON en $RESULT.
 run_admin() {
     local out err
+    RESULT=""
     err="$(mktemp)"
     out="$("${COMPOSE[@]}" run --rm -T vigia-admin "$@" 2>"$err")" || {
         cat "$err" >&2
@@ -71,6 +72,7 @@ fi
 bootstrap_result="$RESULT"
 run_admin python /integration/seed.py provider-id
 provider="$(json_field provider_organization_id)"
+breach_list="$(json_field breach_list)"
 
 run_admin python /integration/seed.py site
 
@@ -90,6 +92,7 @@ quiet "${COMPOSE[@]}" --profile app up -d --wait
 RESULT="$bootstrap_result"
 echo "proveedora: $provider"
 echo "raiz_de_nodos: $(json_field root_sha256)"
+echo "lista_contrasenas: $breach_list"
 echo "organizacion: INT-CLI"
 echo "planta: INT-PLANTA"
 echo "credenciales_de_prueba: $CREDENTIALS_FILE"
