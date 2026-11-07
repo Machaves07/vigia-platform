@@ -188,6 +188,11 @@ class AuditOperation(enum.StrEnum):
     la auditoría inalterable, con nodo (``resource`` ``node``), planta, zona, ``correlation_id`` y
     ``filters`` ``{alert_kind, alarm_id}``; hoy ``alert_kind`` es
     ``simulated_adapter_in_productive``, escrita en la transacción que levanta su alarma."""
+    NODE_CONFIGURATION_CHANGED = "node_configuration_changed"
+    """U-06 (TASK-544, D-11, Q7): ``vigia-admin node-configuration set``. La configuración del nodo
+    es una proyección sin tipo de registro: esta entrada es su rastro, con ``resource`` ``node`` y
+    ``filters`` de identificadores y enteros, nunca las fuentes de tiempo. Mismo criterio que
+    ``fleet_thresholds_changed`` (A-58)."""
     REVOCATION_LIST_REGENERATED = "revocation_list_regenerated"
     """U-03 (TASK-220, NFR-GOB-21): ``vigia-admin regenerate-revocation-list`` (y
     ``revocation-list publish``) regeneró y publicó ``ca/crl.pem`` desde el estado de la base,
