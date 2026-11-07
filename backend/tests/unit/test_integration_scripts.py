@@ -30,7 +30,14 @@ def load_module(name: str, path: Path) -> types.ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
-    spec.loader.exec_module(module)
+    # Sin bytecode: un `__pycache__` en `local/integration/` rompería `test_no_minio_anywhere`, que
+    # lee como texto todo lo que hay bajo `local/`.
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
