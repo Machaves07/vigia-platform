@@ -19,33 +19,31 @@ Cada intercambio queda en ``exchanges`` (ruta, proceso, estado y las cabeceras `
 enviadas a la aplicación), nunca el cuerpo. ``server_tls`` crea la autoridad efímera del
 certificado de servidor (``127.0.0.1``), nunca versionada (NFR-CTR-14).
 
+El balanceador vive en ``tools/mtls_edge.py`` (TASK-542), que el entorno de integración ejecuta con
+un certificado persistente; aquí queda lo que solo usan las pruebas: la autoridad efímera.
+
 Solo datos generados.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import datetime as dt
-import itertools
-import ssl
-import sys
-import threading
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from pathlib import Path
-from typing import Final
 
-import h11
-import httpx
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from tests.node_api_support import alb_headers
-from vigia_platform.shared.clock import SystemClock
+from tools.mtls_edge import (
+    MTLS_HEADER_PREFIX,
+    UPSTREAM_ERROR_HEADER,
+    Exchange,
+    MtlsProxy,
+    ServerTls,
+    mtls_proxy,
+)
 
 __all__ = [
     "MTLS_HEADER_PREFIX",
@@ -56,39 +54,6 @@ __all__ = [
     "mtls_proxy",
     "server_tls",
 ]
-
-MTLS_HEADER_PREFIX: Final = "x-amzn-mtls-"
-UPSTREAM_TIMEOUT_SECONDS: Final = 120.0
-"""Tope de la petición a la aplicación: nunca decide una prueba (retro 15)."""
-UPSTREAM_ERROR_HEADER: Final = "x-vigia-balancer-error"
-"""En el ``502`` propio del balanceador: la clase del ``httpx.HTTPError`` hacia el proceso
-(``ConnectError``, ``RemoteProtocolError``, ``ReadTimeout``…), para el informe de carga."""
-START_TIMEOUT_SECONDS: Final = 30.0
-_WALL: Final = SystemClock()
-_READ_CHUNK: Final = 65_536
-_HOP_BY_HOP: Final = frozenset(
-    {
-        "connection",
-        "keep-alive",
-        "proxy-authenticate",
-        "proxy-authorization",
-        "te",
-        "trailer",
-        "transfer-encoding",
-        "upgrade",
-        "host",
-        "content-length",
-    }
-)
-
-
-@dataclass(frozen=True)
-class ServerTls:
-    """Certificado de servidor del balanceador local y su raíz (rutas en un directorio temporal)."""
-
-    ca_file: Path
-    certificate_file: Path
-    key_file: Path
 
 
 def _name(common_name: str) -> x509.Name:
@@ -150,268 +115,3 @@ def server_tls(directory: Path, now: dt.datetime) -> ServerTls:
     )
     tls.key_file.chmod(0o600)
     return tls
-
-
-@dataclass(frozen=True)
-class Exchange:
-    """Un intercambio que pasó por el balanceador (sin cuerpos)."""
-
-    listener: str
-    method: str
-    path: str
-    backend: int
-    """Índice en ``backends`` del proceso que lo atendió."""
-    status: int
-    client_certificate: bool
-    forwarded_mtls: tuple[tuple[str, str], ...]
-    """Las cabeceras ``X-Amzn-Mtls-*`` que llegaron a la aplicación (nombre en minúsculas)."""
-    dropped_mtls: tuple[str, ...]
-    """Los nombres de las ``X-Amzn-Mtls-*`` que traía el cliente y se descartaron."""
-    upstream_error: str | None = None
-    """En un ``502`` del balanceador, la clase del ``httpx.HTTPError`` hacia el proceso."""
-
-
-@dataclass
-class MtlsProxy:
-    """Proxy inverso TLS con reparto por petición (ver el módulo)."""
-
-    name: str
-    backends: Sequence[str]
-    tls: ServerTls
-    client_ca: Path | None = None
-    strip_client_mtls: bool = True
-    """Solo las sondas de la prueba del balanceador lo apagan (mutación)."""
-    preserve_host: bool = False
-    """Reenvía ``Host`` tal cual: lo exige la firma SigV4 del almacén (el ``https`` de S3)."""
-    exchanges: list[Exchange] = field(default_factory=list)
-    _loop: asyncio.AbstractEventLoop = field(default_factory=asyncio.new_event_loop)
-    _thread: threading.Thread | None = None
-    _server: asyncio.Server | None = None
-    _client: httpx.AsyncClient | None = None
-    _turn: Iterator[int] = field(default_factory=itertools.count)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    _connections: dict[asyncio.Task[None], asyncio.StreamWriter] = field(default_factory=dict)
-    """Las conexiones abiertas: al cerrar se abortan (una persistente ociosa no acaba sola, y el
-    cierre ordenado de TLS esperaría al cliente)."""
-    port: int = 0
-
-    @property
-    def url(self) -> str:
-        return f"https://127.0.0.1:{self.port}"
-
-    def _context(self) -> ssl.SSLContext:
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.load_cert_chain(self.tls.certificate_file, self.tls.key_file)
-        if self.client_ca is not None:
-            context.load_verify_locations(cafile=str(self.client_ca))
-            context.verify_mode = ssl.CERT_OPTIONAL
-        else:
-            context.verify_mode = ssl.CERT_NONE
-        return context
-
-    def start(self) -> None:
-        self._thread = threading.Thread(
-            target=self._loop.run_forever, name=f"balanceador-{self.name}", daemon=True
-        )
-        self._thread.start()
-        future = asyncio.run_coroutine_threadsafe(self._open(), self._loop)
-        future.result(timeout=START_TIMEOUT_SECONDS)
-
-    async def _open(self) -> None:
-        self._client = httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT_SECONDS)
-        self._server = await asyncio.start_server(
-            self._serve, host="127.0.0.1", port=0, ssl=self._context()
-        )
-        self.port = int(self._server.sockets[0].getsockname()[1])
-
-    def close(self) -> None:
-        if self._thread is None:
-            return
-
-        async def shut() -> None:
-            if self._server is not None:
-                self._server.close()
-                for task, writer in tuple(self._connections.items()):
-                    writer.transport.abort()
-                    task.cancel()
-                await asyncio.gather(*self._connections, return_exceptions=True)
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(self._server.wait_closed(), timeout=10)
-            if self._client is not None:
-                await self._client.aclose()
-
-        with contextlib.suppress(Exception):
-            asyncio.run_coroutine_threadsafe(shut(), self._loop).result(timeout=30)
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=30)
-        self._thread = None
-        self._loop.close()
-
-    def served(self, path_prefix: str = "") -> list[Exchange]:
-        with self._lock:
-            return [item for item in self.exchanges if item.path.startswith(path_prefix)]
-
-    # --- Una conexión -------------------------------------------------------------------------
-
-    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        task = asyncio.current_task()
-        if task is not None:
-            self._connections[task] = writer
-            task.add_done_callback(lambda done: self._connections.pop(done, None))
-        ssl_object = writer.get_extra_info("ssl_object")
-        der = ssl_object.getpeercert(binary_form=True) if ssl_object is not None else None
-        certificate = x509.load_der_x509_certificate(der) if der else None
-        connection = h11.Connection(h11.SERVER)
-        request: h11.Request | None = None
-        body = bytearray()
-        try:
-            while True:
-                event = connection.next_event()
-                if event is h11.NEED_DATA:
-                    connection.receive_data(await reader.read(_READ_CHUNK))
-                    continue
-                if isinstance(event, h11.Request):
-                    request, body = event, bytearray()
-                    if connection.they_are_waiting_for_100_continue:
-                        # El cliente S3 espera este acuse antes de enviar el paquete. Sin él,
-                        # el proxy espera el cuerpo y boto3 espera al proxy hasta agotar el tope.
-                        writer.write(
-                            connection.send(h11.InformationalResponse(status_code=100, headers=[]))
-                        )
-                        await writer.drain()
-                elif isinstance(event, h11.Data):
-                    body += event.data
-                elif isinstance(event, h11.EndOfMessage) and request is not None:
-                    await self._answer(connection, writer, request, bytes(body), certificate)
-                    request = None
-                    if connection.our_state is not h11.DONE:
-                        break
-                    connection.start_next_cycle()
-                elif isinstance(event, (h11.ConnectionClosed, h11.PAUSED)):
-                    break
-        except (h11.RemoteProtocolError, ConnectionError, ssl.SSLError):
-            pass
-        finally:
-            with contextlib.suppress(Exception):
-                writer.close()
-                await writer.wait_closed()
-
-    async def _answer(
-        self,
-        connection: h11.Connection,
-        writer: asyncio.StreamWriter,
-        request: h11.Request,
-        body: bytes,
-        certificate: x509.Certificate | None,
-    ) -> None:
-        headers: list[tuple[str, str]] = []
-        dropped: list[str] = []
-        for raw_name, raw_value in request.headers:
-            name = raw_name.decode("latin-1").lower()
-            if name == "host" and self.preserve_host:
-                headers.append((name, raw_value.decode("latin-1")))
-                continue
-            if name in _HOP_BY_HOP:
-                continue
-            if name.startswith(MTLS_HEADER_PREFIX) and self.strip_client_mtls:
-                dropped.append(name)
-                continue
-            headers.append((name, raw_value.decode("latin-1")))
-        forwarded: list[tuple[str, str]] = []
-        if certificate is not None and self.client_ca is not None:
-            forwarded = [(name.lower(), value) for name, value in alb_headers(certificate).items()]
-            headers.extend(forwarded)
-        forwarded_mtls = tuple(
-            (name, value) for name, value in headers if name.startswith(MTLS_HEADER_PREFIX)
-        )
-        with self._lock:
-            index = next(self._turn) % len(self.backends)
-        target = request.target.decode("latin-1")
-        status, response_headers, content = await self._upstream(
-            self.backends[index], request.method.decode("ascii"), target, headers, body
-        )
-        upstream_error = next(
-            (value for name, value in response_headers if name == UPSTREAM_ERROR_HEADER), None
-        )
-        with self._lock:
-            self.exchanges.append(
-                Exchange(
-                    listener=self.name,
-                    method=request.method.decode("ascii"),
-                    path=target.split("?", 1)[0],
-                    backend=index,
-                    status=status,
-                    client_certificate=certificate is not None,
-                    forwarded_mtls=forwarded_mtls,
-                    dropped_mtls=tuple(dropped),
-                    upstream_error=upstream_error,
-                )
-            )
-        if request.method != b"HEAD":
-            # A un HEAD se le deja el Content-Length de la aplicación: es el tamaño del objeto.
-            response_headers.append(("content-length", str(len(content))))
-        writer.write(connection.send(h11.Response(status_code=status, headers=response_headers)))
-        if content:
-            writer.write(connection.send(h11.Data(data=content)))
-        writer.write(connection.send(h11.EndOfMessage()))
-        await writer.drain()
-
-    async def _upstream(
-        self, base: str, method: str, target: str, headers: list[tuple[str, str]], body: bytes
-    ) -> tuple[int, list[tuple[str, str]], bytes]:
-        assert self._client is not None
-        upstream = self._client.build_request(method, base + target, headers=headers, content=body)
-        try:
-            response = await self._client.send(upstream, stream=True)
-        except httpx.HTTPError as error:
-            # Como el balanceador real (``HTTPCode_ELB_502_Count``), un 502; además, qué error de
-            # transporte fue, en la respuesta y en la salida del proceso (sin cuerpos ni consultas).
-            kind = type(error).__name__
-            print(
-                f"{_WALL.now().isoformat()} balanceador {self.name}: 502 {method} "
-                f"{target.split('?', 1)[0]} ({base}): {kind}",
-                file=sys.stderr,
-                flush=True,
-            )
-            return (
-                502,
-                [("content-type", "text/plain"), (UPSTREAM_ERROR_HEADER, kind)],
-                f"balanceador: proceso sin respuesta ({kind})".encode(),
-            )
-        try:
-            # Los bytes tal cual (sin descomprimir): el cliente recibe lo que envió la aplicación.
-            content = b"".join([chunk async for chunk in response.aiter_raw()])
-        finally:
-            await response.aclose()
-        kept = [
-            (name, value)
-            for name, value in response.headers.multi_items()
-            if name.lower() not in _HOP_BY_HOP
-            or (method == "HEAD" and name.lower() == "content-length")
-        ]
-        return response.status_code, kept, content
-
-
-@contextlib.contextmanager
-def mtls_proxy(
-    name: str,
-    backends: Sequence[str],
-    tls: ServerTls,
-    *,
-    client_ca: Path | None = None,
-    strip_client_mtls: bool = True,
-    preserve_host: bool = False,
-) -> Iterator[MtlsProxy]:
-    proxy = MtlsProxy(
-        name=name,
-        backends=list(backends),
-        tls=tls,
-        client_ca=client_ca,
-        strip_client_mtls=strip_client_mtls,
-        preserve_host=preserve_host,
-    )
-    proxy.start()
-    try:
-        yield proxy
-    finally:
-        proxy.close()

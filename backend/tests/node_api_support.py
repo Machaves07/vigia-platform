@@ -24,15 +24,15 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from vigia_contracts.versioning import CONTRACT_VERSION
 
 from tests.api_support import World
+from tools.mtls_edge import alb_headers
 from vigia_platform.identity.authz.context import (
     EnrollmentRow,
     NodeAssignment,
@@ -129,22 +129,6 @@ class TestAuthority:
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
         )
         return builder.sign(self.key, hashes.SHA256())
-
-
-def alb_headers(certificate: x509.Certificate) -> dict[str, str]:
-    """Las cabeceras ``X-Amzn-Mtls-Clientcert-*`` que el balanceador entrega con ``certificate``."""
-    pem = certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
-    stamp = "%Y-%m-%dT%H:%M:%SZ"
-    return {
-        "X-Amzn-Mtls-Clientcert-Leaf": quote(pem, safe=""),
-        "X-Amzn-Mtls-Clientcert-Serial-Number": format(certificate.serial_number, "X"),
-        "X-Amzn-Mtls-Clientcert-Subject": certificate.subject.rfc4514_string(),
-        "X-Amzn-Mtls-Clientcert-Issuer": certificate.issuer.rfc4514_string(),
-        "X-Amzn-Mtls-Clientcert-Validity": (
-            f"NotBefore={certificate.not_valid_before_utc.strftime(stamp)};"
-            f"NotAfter={certificate.not_valid_after_utc.strftime(stamp)}"
-        ),
-    }
 
 
 def gzip_bomb(limit: int) -> bytes:
