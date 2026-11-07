@@ -1374,6 +1374,10 @@ async def _rotate_key(
     )
 
 
+_FILE_KEY_PREFIX: Final = "file:"
+"""Los identificadores de clave del firmante por archivo (``fleet.adapters.ca.file_signer``)."""
+
+
 async def _rotate_node_ca(
     args: argparse.Namespace, config: AdminConfig, runtime: AdminRuntime, streams: Streams
 ) -> None:
@@ -1383,6 +1387,10 @@ async def _rotate_node_ca(
         raise AdminError("invalid_value", "--new-key-id no es un identificador de clave KMS")
     if new_key_id == config.node_ca_key_id:
         raise AdminError("invalid_value", "la clave nueva debe ser distinta de la vigente")
+    if new_key_id.startswith(_FILE_KEY_PREFIX) and config.node_ca_key_id is not None:
+        # A-89, firmante por archivo: la clave vigente existe antes de crear nada. Con el volumen
+        # vacío, la orden falla sin escribir. Con KMS no cambia nada: producción no pasa por aquí.
+        await node_ca.check_key(config.node_ca_key_id)
     await node_ca.check_key(new_key_id)
     operator = await _operator_context(args, runtime)
     if args.dry_run:

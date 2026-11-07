@@ -71,6 +71,9 @@ ROOT_CONTENT_TYPE: Final = "application/x-pem-file"
 MAX_BUNDLE_ROOTS: Final = 2
 """La vigente y la nueva, durante una sustitución (D-6)."""
 _SERIAL_BYTES: Final = 20
+_TWO_ROOTS_PUBLISHED: Final = (
+    "ya hay dos raíces publicadas: retira la antigua antes de otra sustitución"
+)
 _COMMON_NAME: Final = "Vigia Node CA"
 _ORGANIZATION: Final = "Vigia"
 
@@ -371,9 +374,7 @@ def two_root_bundle(current: bytes, new_root: x509.Certificate) -> bytes:
     """``root.pem`` con la raíz vigente y la nueva, en ese orden (D-6)."""
     roots = read_bundle(current)
     if len(roots) != 1:
-        raise NodeCaError(
-            "ya hay dos raíces publicadas: retira la antigua antes de otra sustitución"
-        )
+        raise NodeCaError(_TWO_ROOTS_PUBLISHED)
     (vigente,) = roots
     if _same_key(vigente, new_root.public_key()):
         raise NodeCaError("la raíz nueva debe usar una clave KMS distinta de la vigente")
@@ -474,7 +475,9 @@ class NodeCaPublisher:
                 "ca/root.pem no tiene un ETag para publicar la rotación con seguridad"
             )
         current = await self._storage.get_object(self._object_key)
-        read_bundle(current)  # antes de firmar nada: un paquete inválido no se amplía
+        # Antes de firmar nada: un paquete inválido o completo no se amplía ni crea una clave.
+        if len(read_bundle(current)) != 1:
+            raise NodeCaError(_TWO_ROOTS_PUBLISHED)
         root = await self._build(new_key_id, now)
         bundle = two_root_bundle(current, root)
         return PreparedRoot(root, read_bundle(bundle), self._object_key, etag=head.etag)

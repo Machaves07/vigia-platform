@@ -788,8 +788,9 @@ class IntegrationWorld:
     clock: OffsetClock = field(default_factory=OffsetClock)
     built: list[BuiltRuntime] = field(default_factory=list)
     on_build: Callable[[BuiltRuntime], Awaitable[None]] | None = None
-    kms_factory: Callable[[AwsSettings], KmsAdapter] = KmsAdapter
-    """El adaptador de la autoridad: ``FileBackedKms`` en las pruebas del backend ``file``."""
+    kms_factory: Callable[[AwsSettings, AdminConfig], KmsAdapter] = lambda aws, _: KmsAdapter(aws)
+    """El adaptador de la autoridad: ``FileBackedKms`` en las pruebas del backend ``file``, con lo
+    que la orden pudo nombrar como creable (``AdminConfig.node_ca_creatable_keys``)."""
 
     def aws_settings(self) -> AwsSettings:
         return AwsSettings(
@@ -854,7 +855,7 @@ class IntegrationWorld:
         )
         aws = self.aws_settings()
         secrets_adapter = SecretsManagerAdapter(aws, clock, kms_key_id=self.secrets_key_id)
-        kms = self.kms_factory(aws)
+        kms = self.kms_factory(aws, config)
         signing = SigningService(
             provider_organization_id=provider_id,
             store=SqlSigningKeyStore(

@@ -60,7 +60,7 @@ WORKERS: Final = 8
 WAIT_SECONDS: Final = 60.0
 FIFO_SECONDS: Final = 15.0
 """Tope para ver que abrir una tubería no se cuelga: solo se agota si la guarda falta."""
-OVERLAP_SECONDS: Final = 5.0
+OVERLAP_SECONDS: Final = 10.0
 """Cuánto retiene la lectura a un hilo esperando a otro: solo decide con el candado quitado."""
 DB_SECRET_NAME: Final = "/".join(("vigia", "integracion", "db", "app"))
 """El nombre de un secreto, no un valor: gitleaks lo confundiría si fuera un literal."""
@@ -239,7 +239,7 @@ def test_only_a_plain_file_key_id_is_accepted(key_file: Path, key_id: str) -> No
         _sync_public(signer, key_id)
 
 
-@pytest.mark.parametrize("mode", [0o604, 0o640, 0o644, 0o660])
+@pytest.mark.parametrize("mode", [0o602, 0o604, 0o620, 0o640, 0o644, 0o660])
 def test_a_key_others_can_read_is_refused(key_file: Path, mode: int) -> None:
     _write_key(key_file, ec.generate_private_key(ec.SECP256R1()), mode=mode)
     with pytest.raises(NodeCaError):
@@ -308,6 +308,19 @@ def test_a_key_that_is_not_elliptic_is_refused(key_file: Path) -> None:
     _write_key(key_file, rsa.generate_private_key(public_exponent=65_537, key_size=2_048))
     with pytest.raises(NodeCaError):
         _sync_public(FileNodeCaSigner(key_file))
+
+
+def test_a_rotation_refused_with_two_roots_writes_no_key(key_file: Path) -> None:
+    """El paquete completo se comprueba antes de firmar: la clave nueva no llega a existir."""
+    signer = FileNodeCaSigner(key_file, creatable=frozenset({*CREATABLE, "file:node-ca-3"}))
+    publisher = NodeCaPublisher(
+        storage=MemoryStorage(), kms=signer, environment="integration", random_bytes=os.urandom
+    )
+    asyncio.run(publisher.publish_root(KEY_ID, now=NOW))
+    asyncio.run(publisher.rotate_root("file:node-ca-2", now=NOW))
+    with pytest.raises(NodeCaError):
+        asyncio.run(publisher.rotate_root("file:node-ca-3", now=NOW))
+    assert not (key_file.parent / "node-ca-3.pem").exists()
 
 
 def test_a_signer_only_creates_the_keys_it_was_told(key_file: Path) -> None:

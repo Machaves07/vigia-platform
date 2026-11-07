@@ -34,7 +34,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from testcontainers.core.container import DockerContainer
 
-from tests.admin_support import issue_node_certificate, public_der, validates
+from tests.admin_support import issue_node_certificate, output, public_der, validates
 from tests.identity_db import migrated_database
 from tests.integration.conftest import (
     LOCALSTACK_ACCESS_KEY_ID,
@@ -52,7 +52,6 @@ from tests.integration.conftest import (
 )
 from tests.integration.test_admin_bootstrap import (
     Env,
-    _bootstrap,
     _secret_name,
     env,  # noqa: F401 - fixture
 )
@@ -65,6 +64,7 @@ from tests.integration.test_production_runtime_boot import (
 )
 from tests.runtime_support import breach_list, database_secret
 from vigia_platform.fleet.adapters.ca.file_signer import FileBackedKms, FileNodeCaSigner
+from vigia_platform.identity.application.admin_cli import AdminConfig
 from vigia_platform.shared.clock import SystemClock
 from vigia_platform.shared.node_ca import (
     ROOT_CERTIFICATE_KEY,
@@ -553,20 +553,32 @@ def test_the_api_without_the_key_file_does_not_become_ready_nor_creates_it(
 # --- rotate-node-ca real -------------------------------------------------------------------------
 
 
+def _file_kms(aws: AwsSettings, config: AdminConfig, directory: Path) -> KmsAdapter:
+    """El firmante con lo que la orden nombra de verdad (``_creatable_node_ca_keys``)."""
+    signer = FileNodeCaSigner(directory / "node-ca.pem", creatable=config.node_ca_creatable_keys)
+    return FileBackedKms(aws, signer)
+
+
+def _first_install(world: Env, directory: Path) -> tuple[uuid.UUID, uuid.UUID]:
+    """``bootstrap --first-install`` con la clave en ``directory``; la proveedora y su operador."""
+    world.world.kms_factory = lambda aws, config: _file_kms(aws, config, directory)
+    world.world.node_ca_key_id = KEY_ID
+    code, out, err = world.world.run(*BOOTSTRAP, FIRST_INSTALL, environ=world.world.environ())
+    assert code == 0, err
+    provider_id = uuid.UUID(output(out)["provider_organization_id"])
+    return provider_id, world.activate(provider_id, world.secret(_secret_name(world))["link"])
+
+
 def test_rotate_node_ca_publishes_two_roots_with_the_file_backend(
     env: Env,  # noqa: F811 - la fixture de ``test_admin_bootstrap``
     tmp_path: Path,
 ) -> None:
-    env.world.kms_factory = lambda aws: _file_kms(aws, tmp_path)
-    env.world.node_ca_key_id = KEY_ID
-    document = _bootstrap(env)
-    provider_id = uuid.UUID(document["provider_organization_id"])
+    provider_id, operator_id = _first_install(env, tmp_path)
     (old_root,) = read_bundle(env.object(ROOT_CERTIFICATE_KEY))
     signer = FileNodeCaSigner(tmp_path / "node-ca.pem")
     now = env.world.clock.now()
     old_node = asyncio.run(issue_node_certificate(signer, KEY_ID, old_root, now))
     environ = env.world.environ(provider_id)
-    operator_id = env.activate(provider_id, env.secret(_secret_name(env))["link"])
     rotate = ("rotate-node-ca", "--new-key-id", "file:node-ca-2", "--operator", str(operator_id))
     code, _, err = env.world.run(*rotate, "--dry-run", environ=environ)
     assert code == 0, err
@@ -583,5 +595,36 @@ def test_rotate_node_ca_publishes_two_roots_with_the_file_backend(
     assert not validates(old_node, (bundle[1],), at)
 
 
-def _file_kms(aws: AwsSettings, directory: Path) -> KmsAdapter:
-    return FileBackedKms(aws, FileNodeCaSigner(directory / "node-ca.pem", creatable=CREATABLE))
+@pytest.mark.parametrize(
+    ("arn", "new_key"),
+    [("file:node-ca-2", KEY_ID), (KEY_ID, "file:node-ca-2")],
+    ids=["clave-de-la-raiz-publicada", "clave-nueva"],
+)
+def test_rotate_with_an_empty_volume_writes_nothing(
+    env: Env,  # noqa: F811 - la fixture de ``test_admin_bootstrap``
+    tmp_path: Path,
+    arn: str,
+    new_key: str,
+) -> None:
+    """A-89: la clave vigente tiene que existir. El primer caso es el contraejemplo de la revisión:
+    el ARN nombra otra clave y ``--new-key-id``, la de la raíz publicada."""
+    installed, empty = tmp_path / "instalada", tmp_path / "vacio"
+    installed.mkdir()
+    empty.mkdir()
+    provider_id, operator_id = _first_install(env, installed)
+    published = env.object(ROOT_CERTIFICATE_KEY)
+    env.world.kms_factory = lambda aws, config: _file_kms(aws, config, empty)
+    env.world.node_ca_key_id = arn
+    code, _, err = env.world.run(
+        "rotate-node-ca",
+        "--new-key-id",
+        new_key,
+        "--operator",
+        str(operator_id),
+        "--yes",
+        environ=env.world.environ(provider_id),
+    )
+    assert code != 0
+    assert json.loads(err.splitlines()[-1])["error"] == "node_ca_invalid"
+    assert list(empty.iterdir()) == []
+    assert env.object(ROOT_CERTIFICATE_KEY) == published
