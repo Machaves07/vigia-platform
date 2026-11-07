@@ -45,3 +45,8 @@ frontend/test-results/
 frontend/playwright-report/
 *.pem
 *.key
+
+# Entorno de integración persistente (VIG-393): configuración local y respaldo de contraseñas filtradas.
+local/integration/.env
+local/integration/pwned-top100k.txt
+!local/integration/.env.example
