@@ -1,5 +1,95 @@
 # VIG-408 / TASK-548 · Evidencia local
 
+## Revisión R4/R5 sobre `3f2aca9` · 2026-11-09
+
+Corrección en **`b2259c2`**, con commits locales nuevos, sin reescribir ni empujar.
+Esta sección actualiza la evidencia original conservada debajo. Los criterios 1 y 3
+aceptados no se amplían; el **criterio 2 sigue pendiente del dueño**. No se tocó el
+almacén, la composición, dependencias, archivos prohibidos ni la semilla de VIG-394.
+
+- **R4:** un retorno `None` o `halted_reason` presente termina con salida 1,
+  `heartbeat_rejected`, sin incrementar el contador. Las variantes `[none]` y `[blocked]`
+  de `test_missing_or_blocked_heartbeat_is_not_success` fuerzan esos estados incluso con
+  un evento `success` recién emitido por el intercambio real: así no se confunde éxito
+  de transporte con aceptación. Se conserva además la guarda del evento rechazado (M03).
+- **R5:** `follow_redirects=False` **ya estaba explícito en `3f2aca9`** para el cliente
+  de alta; se conserva y se documenta junto al POST. Se contrastó también que los clientes
+  de ingesta/mTLS, subida y rotación de `SyncClient` fijan `False` en la dependencia
+  instalada, sin modificarla. La prueba nueva usa dos servidores TLS reales con la misma
+  CA confiable y puertos distintos (orígenes distintos), sin sustituir el transporte:
+  el primero recibe el código y devuelve 307/308; el humo sale no cero, el alta queda
+  `not_run` y el segundo no recibe ninguna petición. Cambiar a `True` hace fallar ambos
+  casos por reenvío, aunque el segundo servidor rechace el alta y el humo también falle.
+- **Runbook:** errata corregida, SCR-07 citado para la alarma
+  `simulated_adapter_in_productive` y exposición de `--code` en `/proc/<pid>/cmdline`
+  documentada. El humo exige argv y no tiene entrada oculta alternativa; se distingue
+  del instalador de vigia-nodo, que sí pregunta sin eco. No se añadió otra interfaz.
+
+### Comprobaciones de esta revisión
+
+Desde `backend/`, salvo git/gitleaks y el generador. Pruebas con
+`DOCKER_CONFIG=/home/manu/vigia/docker-sin-credenciales` y
+`VIGIA_NODO_SRC=/home/manu/vigia/nodo-ref394`, sin adaptador `port_retry`.
+
+| Orden | Salida real |
+|---|---|
+| `uv run ruff check .` | `All checks passed!` |
+| `uv run ruff format --check .` | `1375 files already formatted` |
+| `uv run python tools/lint_rules.py` | `lint_rules: sin violaciones en src, tests, tools, migrations` |
+| `uv run mypy --follow-imports=silent tools/node_enrollment_smoke.py tests/integration/test_node_enrollment_smoke.py` | `Success: no issues found in 2 source files` |
+| `uv run pytest tests/integration/test_node_enrollment_smoke.py tests/integration/test_seed_pope.py -q -m integration --basetemp=/tmp/t408b` | Tras restaurar las mutaciones: **49 passed, 1 skipped, 1 warning in 102.62s**. Antes de mutar: mismo resultado en 99.18s. |
+| `uv run python tools/check_links.py --root .. ../docs/runbooks/u06-alta-nodo-integracion.md` | `check_links: 1 archivos, 23 enlaces relativos, 0 rotos` |
+| Mismo comprobador incluyendo este EVIDENCE.md | `check_links: 2 archivos, 30 enlaces relativos, 0 rotos` |
+| `git diff --check` | Sin salida, código 0. |
+| `git diff -- <cuatro archivos de la corrección> \| gitleaks stdin --redact` | `no leaks found` antes del commit. |
+| `gitleaks git --log-opts=3f2aca9..HEAD --redact` | Sobre `b2259c2`, antes del commit de esta adenda: `1 commits scanned`, `no leaks found`. Se repite al cierre para incluir la evidencia. |
+
+El único omitido es `test_compose_runbook_with_simulated_node`, optativo: **no se
+relanzó Compose ni se intervino en el bloqueo del almacén**. La advertencia es la previa
+de WeasyPrint/HarfBuzz-Subset. Los servidores de redirección ejecutan `shutdown`,
+recogen su hilo y cierran sus sockets; los fixtures liberaron sus contenedores.
+`docker ps` al terminar solo mostró los dos `vigia-deploy-*` y `openclaw` ajenos.
+La comprobación de procesos no mostró pytest, API ni mutador de esta sesión persistentes.
+
+### Mutaciones nuevas (ejecutadas, no supuestas)
+
+El generador oficial ejecutó **solo G17–G19** del manifiesto, con línea base verde,
+restauración byte a byte verificada y `TABLA_GUARDAS_OK 3`. Las 16 anteriores conservan
+su evidencia histórica, no se presentan como repetidas en esta revisión.
+
+| Guarda | Mutación | Prueba en rojo | Salida real |
+|---|---|---|---|
+| G17 / R4 | Quitar `outcome is None` | `test_missing_or_blocked_heartbeat_is_not_success[none]` | `1 failed, 1 warning in 32.39s` |
+| G18 / R4 | Quitar `client.halted_reason is not None` | `test_missing_or_blocked_heartbeat_is_not_success[blocked]` | `1 failed, 1 warning in 29.61s` |
+| G19 / R5 | `follow_redirects=False` → `True` | `test_enrollment_redirect_never_sends_code_to_another_origin[307/308]` | `2 failed, 1 warning in 6.10s` |
+
+Salida generada añadida a [MUTATIONS.txt](MUTATIONS.txt); filas permanentes en
+[guardas.toml](guardas.toml). Para acotar la ronda se extrajeron sus tres filas nuevas
+y las exenciones a `/tmp/opencode/vig408-r1-guardas.toml`, cambiando solo la base a
+`3f2aca9` y el comando a
+`uv run --project backend pytest -q --tb=short -m integration --basetemp=/tmp/t408b-mut`.
+Se ejecutó desde la raíz:
+
+```bash
+DOCKER_CONFIG=/home/manu/vigia/docker-sin-credenciales \
+VIGIA_NODO_SRC=/home/manu/vigia/nodo-ref394 \
+uv run --project backend python \
+  '/mnt/c/Users/manu_/Documents/MChaves/8.0_Proyecto_Vigia_OpenCode/Vigia/.agents/skills/vigia-calidad-antes-del-pr/tabla_guardas.py' \
+  /tmp/opencode/vig408-r1-guardas.toml
+```
+
+```text
+== cobertura frente a 3f2aca9: 2 condiciones nuevas, 2 cubiertas
+TABLA_GUARDAS_OK 3
+```
+
+Se validaron además los 19 selectores del manifiesto permanente (una coincidencia por
+fila) y su cobertura completa mediante la función `cobertura` del generador:
+`== cobertura frente a e9660a4: 21 condiciones nuevas, 21 cubiertas`.
+Esto no equivale a repetir las 16 mutaciones históricas.
+
+## Evidencia original (conservada)
+
 Base `e9660a4`, rama `vig-408-guia-alta-nodo`, 2026-11-09. Implementación en el commit
 local **`31d1bf4`**. Solo datos sintéticos; sin Linear, GitHub, push, PR, server-casa ni
 nodo de planta. Sin cambios en dependencias, migraciones, `.github/`, archivos calientes

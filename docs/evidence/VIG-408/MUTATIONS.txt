@@ -38,3 +38,19 @@
 == cobertura frente a e9660a4: 19 condiciones nuevas, 19 cubiertas
 
 TABLA_GUARDAS_OK 16
+
+== Revisión R4/R5 sobre 3f2aca9 (2026-11-09): solo G17–G19; lo anterior es histórico
+== línea base (sin mutar)
+== G17 R4 aceptar un retorno de latido ausente (backend/tools/node_enrollment_smoke.py:157)
+== G18 R4 contar un latido con el nodo bloqueado (backend/tools/node_enrollment_smoke.py:157)
+== G19 R5 reenviar el código tras 307 o 308 (backend/tools/node_enrollment_smoke.py:132)
+
+| Guarda | Archivo:línea | Mutación | Prueba en rojo | Salida (pegada) |
+|---|---|---|---|---|
+| G17 R4 aceptar un retorno de latido ausente | `backend/tools/node_enrollment_smoke.py:157` | `if outcome is None or client.halted_reason is not None:` → `if client.halted_reason is not None:` | `backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[none]` · **rojo** | FAILED backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[none] / 1 failed, 1 warning in 32.39s |
+| G18 R4 contar un latido con el nodo bloqueado | `backend/tools/node_enrollment_smoke.py:157` | `if outcome is None or client.halted_reason is not None:` → `if outcome is None:` | `backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[blocked]` · **rojo** | FAILED backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[blocked] / 1 failed, 1 warning in 29.61s |
+| G19 R5 reenviar el código tras 307 o 308 | `backend/tools/node_enrollment_smoke.py:132` | `with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=False) as http:` → `with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=True) as http:` | `backend/tests/integration/test_node_enrollment_smoke.py::test_enrollment_redirect_never_sends_code_to_another_origin` · **rojo** | FAILED backend/tests/integration/test_node_enrollment_smoke.py::test_enrollment_redirect_never_sends_code_to_another_origin[308] / 2 failed, 1 warning in 6.10s |
+
+== cobertura frente a 3f2aca9: 2 condiciones nuevas, 2 cubiertas
+
+TABLA_GUARDAS_OK 3
