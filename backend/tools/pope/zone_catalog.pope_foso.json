@@ -1,0 +1,76 @@
+{
+  "zone_id": "812a292c-53b6-5272-a8aa-ef48693736eb",
+  "zone_code": "POPE-FOSO",
+  "plant_id": "cddcac2a-f7ea-5fa9-a1ba-de2d47c14c14",
+  "organization_id": "3a59f5f2-1fd3-5aa6-8633-58be2179f7cb",
+  "version": 1,
+  "issued_at": "2026-11-04T00:00:00.000Z",
+  "cameras": [
+    {
+      "camera_id": "816513d0-7041-5028-b3e0-f6f52dd84e68",
+      "code": "CAM102",
+      "role_in_zone": "primary",
+      "declared_min_fps": 10.0
+    }
+  ],
+  "minimum_coverage": {
+    "required_count": 1,
+    "required_camera_ids": [
+      "816513d0-7041-5028-b3e0-f6f52dd84e68"
+    ]
+  },
+  "signals": [
+    {
+      "signal_id": "e3e25010-bcc9-52fd-8467-78bbf65d7f81",
+      "code": "MACHINE-RUNNING",
+      "role": "energy",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu.ai",
+        "channel": 0
+      },
+      "description_es": "Pope en marcha: velocidad de línea mayor que 5 m/min (entrada analógica 4-20 mA)"
+    }
+  ],
+  "standards": [
+    {
+      "standard_id": "1a619dfe-eef5-547b-abbd-a6d3d3cf2bc7",
+      "version": 1,
+      "family": "coexistence",
+      "title_es": "Persona en la sub-zona crítica del foso con la máquina en marcha",
+      "declared_text": "No debe haber personas en la sub-zona crítica (roja) del foso mientras la máquina anda (velocidad mayor que 5 m/min).",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "energy",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 0
+      }
+    }
+  ],
+  "thresholds": {
+    "review": 0.35,
+    "publication": 0.6
+  },
+  "clip_window": {
+    "pre_seconds": 10,
+    "post_seconds": 10
+  },
+  "episode": {
+    "grouping_window_ms": 3000,
+    "max_segment_ms": 900000
+  },
+  "commissioning_watermark": true
+}

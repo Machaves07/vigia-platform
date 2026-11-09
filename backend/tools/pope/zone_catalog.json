@@ -1,0 +1,280 @@
+{
+  "zone_id": "032952a8-f543-5a13-b9b6-224c090d6efd",
+  "zone_code": "POPE",
+  "plant_id": "cddcac2a-f7ea-5fa9-a1ba-de2d47c14c14",
+  "organization_id": "3a59f5f2-1fd3-5aa6-8633-58be2179f7cb",
+  "version": 1,
+  "issued_at": "2026-11-04T00:00:00.000Z",
+  "cameras": [
+    {
+      "camera_id": "0e05a081-a207-538f-86c1-304218f20f6d",
+      "code": "CAM100",
+      "role_in_zone": "primary",
+      "declared_min_fps": 8.0
+    },
+    {
+      "camera_id": "afd12a24-2558-598f-b6e1-a2916085de1b",
+      "code": "CAM101",
+      "role_in_zone": "primary",
+      "declared_min_fps": 8.0
+    },
+    {
+      "camera_id": "816513d0-7041-5028-b3e0-f6f52dd84e68",
+      "code": "CAM102",
+      "role_in_zone": "primary",
+      "declared_min_fps": 10.0
+    }
+  ],
+  "minimum_coverage": {
+    "required_count": 2,
+    "required_camera_ids": [
+      "816513d0-7041-5028-b3e0-f6f52dd84e68"
+    ]
+  },
+  "signals": [
+    {
+      "signal_id": "c81ee25d-82ce-5ab2-8e26-1c781b4004ce",
+      "code": "MACHINE-RUNNING",
+      "role": "energy",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu.ai",
+        "channel": 0
+      },
+      "description_es": "Pope en marcha: velocidad de línea mayor que 5 m/min (entrada analógica 4-20 mA)"
+    },
+    {
+      "signal_id": "3cf86d40-6c7e-5110-b043-b0fdc42aaa74",
+      "code": "MACHINE-START",
+      "role": "start_command",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu.ai",
+        "channel": 0
+      },
+      "description_es": "Mando de arranque: la misma lectura de velocidad mayor que 5 m/min (arranque desde reposo)"
+    },
+    {
+      "signal_id": "9d585e41-8956-57f4-aebd-1cc3744d183e",
+      "code": "JUMBO-IN-POSITION",
+      "role": "guard",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 4
+      },
+      "description_es": "Jumbo en posición (DI5, antirrebote de 3 s en el lector)"
+    },
+    {
+      "signal_id": "7357f0ba-d5a1-5a1e-9d3e-8a65b76f46be",
+      "code": "EXTRACTOR-HOME",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 6
+      },
+      "description_es": "Extractor de barras en posición 0 (DI7)"
+    },
+    {
+      "signal_id": "0f0cc71f-460f-5692-b2c5-9f343de90a44",
+      "code": "P1-CLOSED",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 0
+      },
+      "description_es": "Puerta P1 cerrada (DI1; hoy sin dato)"
+    },
+    {
+      "signal_id": "d274c5a0-6e8c-5022-91ef-bc9ffad8e9a0",
+      "code": "P2-CLOSED",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 1
+      },
+      "description_es": "Puerta P2 cerrada (DI2; hoy sin dato)"
+    },
+    {
+      "signal_id": "ea0181e9-6aa8-53a8-8439-2edb8a288612",
+      "code": "P3-CLOSED",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 2
+      },
+      "description_es": "Puerta P3 cerrada (DI3; hoy sin dato)"
+    },
+    {
+      "signal_id": "def12b13-acbc-5c94-8bd4-fd079646369d",
+      "code": "P4-CLOSED",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 3
+      },
+      "description_es": "Puerta P4 cerrada (DI4; hoy sin dato)"
+    },
+    {
+      "signal_id": "d232cd1b-e6d1-52d0-a1d0-c838cc9ea010",
+      "code": "CRANE-AT-REST",
+      "role": "auxiliary",
+      "asserted_level": "high",
+      "source": {
+        "reader": "modbus_rtu",
+        "channel": 5
+      },
+      "description_es": "Puente grúa en reposo (DI6; hoy sin dato)"
+    }
+  ],
+  "standards": [
+    {
+      "standard_id": "30abe8b7-1308-50d4-b47b-cbede67eb3c9",
+      "version": 1,
+      "family": "coexistence",
+      "title_es": "Uso indebido en el foso con el jumbo en posición",
+      "declared_text": "No debe haber personas en la zona del Pope vista por la cámara del foso (cam102) mientras la máquina anda (velocidad mayor que 5 m/min) y el jumbo está en posición.",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "energy",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 0
+      }
+    },
+    {
+      "standard_id": "186e8946-725e-5a1f-978f-c927ebd89fae",
+      "version": 1,
+      "family": "coexistence",
+      "title_es": "Uso indebido en la plataforma con el jumbo fuera de posición",
+      "declared_text": "No debe haber personas en la plataforma del Pope vista por cam100 y cam101 mientras la máquina anda (velocidad mayor que 5 m/min) y el jumbo está fuera de posición.",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "energy",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 0
+      }
+    },
+    {
+      "standard_id": "46086e9b-0bd8-5b40-afd1-5e0efb31dd82",
+      "version": 1,
+      "family": "dwell",
+      "title_es": "Permanencia prolongada con la máquina en marcha",
+      "declared_text": "Ninguna persona debe permanecer 15 minutos o más en la zona del Pope con la máquina en marcha.",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "energy",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 900000
+      }
+    },
+    {
+      "standard_id": "7e76f2ba-d955-541f-9b8b-faae7c78b4b3",
+      "version": 1,
+      "family": "guard_bypass",
+      "title_es": "Persona dentro con el resguardo declarado cerrado",
+      "declared_text": "Con el encerramiento declarado cerrado no debe observarse a ninguna persona dentro de la zona del Pope.",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "guard",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 0
+      }
+    },
+    {
+      "standard_id": "c8caf9ee-c7a0-5fe2-b07a-3da5a03a9c3e",
+      "version": 1,
+      "family": "startup_transition",
+      "title_es": "Arranque de la máquina con personas en la zona",
+      "declared_text": "La máquina no debe arrancar mientras haya personas en la zona del Pope.",
+      "declared_by": {
+        "user_id": "e59de8d4-f85b-5978-ad30-2d3b306fa3aa",
+        "display_name": "Coordinación SST (datos de prueba)",
+        "role": "coordinator_sst"
+      },
+      "effective_from": "2026-11-04T00:00:00.000Z",
+      "tier_policy": "tier_1_when_signal_valid",
+      "predicate": {
+        "all_of": [
+          {
+            "presence": true
+          },
+          {
+            "signal_role": "start_command",
+            "value": "asserted"
+          }
+        ],
+        "min_duration_ms": 0
+      }
+    }
+  ],
+  "thresholds": {
+    "review": 0.35,
+    "publication": 0.6
+  },
+  "clip_window": {
+    "pre_seconds": 10,
+    "post_seconds": 10
+  },
+  "episode": {
+    "grouping_window_ms": 3000,
+    "max_segment_ms": 900000
+  },
+  "commissioning_watermark": true
+}
