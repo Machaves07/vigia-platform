@@ -1,0 +1,350 @@
+# Reproducir desde la raíz; el adaptador port_retry solo es necesario en este Docker Desktop.
+# Su código y la orden exacta constan en EVIDENCE.md. Sin él, quitar «-p port_retry».
+base = "3f738f5"
+comando = "uv run --project backend pytest -q -p port_retry --tb=short --basetemp=/tmp/t394-mut"
+
+[[guarda]]
+nombre = "M01 omitir cam102 de pope_foso"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'parameters["cameras"] = cameras'
+reemplazar = 'parameters["cameras"] = cameras if source["zone_code"] != "POPE-FOSO" else []'
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[guarda]]
+nombre = "M02 publicar stream_reference en el catálogo"
+archivo = "backend/src/vigia_platform/catalog/domain/zone_camera.py"
+buscar = '"declared_min_fps": self.declared_min_fps,'
+reemplazar = '"declared_min_fps": self.declared_min_fps, "stream_reference": self.stream_reference,'
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[guarda]]
+nombre = "M03 omitir búsqueda de zona por code"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'zone = next((z for z in target["zones"] if z["code"] == source["zone_code"]), None)'
+reemplazar = 'zone = None'
+prueba = "backend/tests/integration/test_seed_pope.py::test_second_execution_creates_nothing_and_does_not_disclose_a_code"
+
+[[guarda]]
+nombre = "M04 escribir el código de alta en un archivo"
+archivo = "backend/tools/seed_pope.py"
+buscar = '''            print(
+                json.dumps({"event": "enrollment_code", **issued}, ensure_ascii=False),'''
+reemplazar = '''            Path("enrollment-code.txt").write_text(issued["code"])
+            print(
+                json.dumps({"event": "enrollment_code", **issued}, ensure_ascii=False),'''
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[guarda]]
+nombre = "M05 seguir sembrando tras unsatisfiable_coverage"
+archivo = "backend/tools/seed_pope.py"
+buscar = '            self.publish(zone_id, source)'
+reemplazar = '''            try:
+                self.publish(zone_id, source)
+            except SeedError:
+                pass'''
+prueba = "backend/tests/integration/test_seed_pope.py::test_unsatisfiable_coverage_stops_before_the_next_zone_and_node"
+
+[[guarda]]
+nombre = "M06 comparar sin canonicalizar"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'return rfc8785.dumps(document)'
+reemplazar = 'return json.dumps(document).encode()'
+prueba = "backend/tests/integration/test_seed_pope.py::test_comparison_is_rfc8785_not_serialization_and_preserves_content"
+
+[[guarda]]
+nombre = "G01 par de catálogos equivocado"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if tuple(catalog["zone_code"] for catalog in catalogs) != ("POPE", "POPE-FOSO"):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_wrong_catalog_pair_is_refused_before_network"
+
+[[guarda]]
+nombre = "G02 catálogo aún inexistente"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if optional and response.status_code == 404:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[guarda]]
+nombre = "G03 rechazo HTTP y redacción del cuerpo"
+archivo = "backend/tools/seed_pope.py"
+buscar = '''        if response.is_error:
+            # Nunca interpolar response.text, request, cabeceras ni la excepción de httpx.'''
+reemplazar = '''        if False:
+            # Nunca interpolar response.text, request, cabeceras ni la excepción de httpx.'''
+prueba = "backend/tests/integration/test_seed_pope.py::test_cli_does_not_echo_transport_errors_or_response_bodies"
+
+[[guarda]]
+nombre = "G04 conservar el rechazo nombrado de A-03"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if detail == "catalog_unsatisfiable_coverage":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_unsatisfiable_coverage_stops_before_the_next_zone_and_node"
+
+[[guarda]]
+nombre = "G05 respuesta requerida nula"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if result is None:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_required_response_cannot_be_null"
+
+[[guarda]]
+nombre = "G06 una evaluación rechazada no admite la familia"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if a["result"] == "admitted"'
+reemplazar = 'if True'
+prueba = "backend/tests/integration/test_seed_pope.py::test_admission_pagination_does_not_treat_rejections_as_admitted"
+
+[[guarda]]
+nombre = "G07 recorrer las páginas de admisión"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if page["next_after"] is None:'
+reemplazar = 'if True:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_admission_pagination_does_not_treat_rejections_as_admitted"
+
+[[guarda]]
+nombre = "G08 no reevaluar familias ya admitidas"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if family not in admitted:'
+reemplazar = 'if True:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_admission_pagination_does_not_treat_rejections_as_admitted"
+
+[[guarda]]
+nombre = "G09 no sobrescribir un estándar cambiado"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if rfc8785.dumps(draft) != rfc8785.dumps({key: found[key] for key in fields}):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_existing_content_is_checked_without_silently_overwriting[standard]"
+
+[[guarda]]
+nombre = "G10 parámetros que cambiaron usan PUT"
+archivo = "backend/tools/seed_pope.py"
+buscar = '''if current is not None and any(
+                rfc8785.dumps(current["catalog"][key]) != rfc8785.dumps(source[key]) for key in keys
+            ):'''
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_parameter_changes_use_the_normal_put_routes[thresholds]"
+
+[[guarda]]
+nombre = "G11 comparación final no descarta campos desconocidos"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if current is None or comparable_catalog(current["catalog"]) != comparable_catalog(source):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_existing_content_is_checked_without_silently_overwriting[unknown_field]"
+
+[[guarda]]
+nombre = "G12 no alterar un uso ya decidido"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if state["usage"]["status"] != "pending":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_decided_gates_require_human_review[pending-approved]"
+
+[[guarda]]
+nombre = "G13 no repetir el acta aprobada"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if state["mounting"]["status"] == "approved":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_second_execution_creates_nothing_and_does_not_disclose_a_code"
+
+[[guarda]]
+nombre = "G14 no reaprueba montaje revocado"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if state["mounting"]["status"] != "pending":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_decided_gates_require_human_review[revoked-pending]"
+
+[[guarda]]
+nombre = "G15 subida fallida no registra el acta"
+archivo = "backend/tools/seed_pope.py"
+buscar = '''        if response.is_error:
+            raise SeedError("No se pudo subir la captura sintética de integración")'''
+reemplazar = '''        if False:
+            raise SeedError("No se pudo subir la captura sintética de integración")'''
+prueba = "backend/tests/integration/test_seed_pope.py::test_failed_upload_does_not_file_the_scope_record"
+
+[[guarda]]
+nombre = "G16 subidas sin sesiones de consola"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'response = self.uploads.put('
+reemplazar = 'response = self.installer.put('
+prueba = "backend/tests/integration/test_seed_pope.py::test_upload_does_not_forward_console_sessions"
+
+[[guarda]]
+nombre = "G17 buscar la planta solicitada, no la primera"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'target = next((p for p in hierarchy["plants"] if p["plant_id"] == plant), None)'
+reemplazar = 'target = next(iter(hierarchy["plants"]), None)'
+prueba = "backend/tests/integration/test_seed_pope.py::test_unknown_plant_does_not_write"
+
+[[guarda]]
+nombre = "G18 detener si la planta no está al alcance"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if target is None:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_unknown_plant_does_not_write"
+
+[[guarda]]
+nombre = "G19 no reutilizar el nodo de otra planta"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if n["plant_id"] == plant and n["code"] == NODE_CODE'
+reemplazar = 'if n["code"] == NODE_CODE'
+prueba = "backend/tests/integration/test_seed_pope.py::test_same_node_code_in_another_plant_is_not_reused"
+
+[[guarda]]
+nombre = "G20 comprobar las zonas del nodo existente"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if set(inventory["zones"]) != set(zones):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_existing_node_with_different_zones_is_not_modified"
+
+[[guarda]]
+nombre = "G21 no reemitir el código del nodo existente"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if new_node:'
+reemplazar = 'if True:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_second_execution_creates_nothing_and_does_not_disclose_a_code"
+
+[[guarda]]
+nombre = "G22 dry-run no abre la red ni escribe"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if args.dry_run:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_dry_run_has_no_network_or_writes"
+
+[[guarda]]
+nombre = "G23 argumentos de operación obligatorios"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if not all((args.base_url, args.plant, args.concession)):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_cli_requires_arguments_and_both_sessions[arguments]"
+
+[[guarda]]
+nombre = "G24 ambas sesiones obligatorias"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if not os.environ.get(ADMIN_SESSION) or not os.environ.get(INSTALLER_SESSION):'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_cli_requires_arguments_and_both_sessions[admin]"
+
+[[guarda]]
+nombre = "G25 no duplicar estándares existentes"
+archivo = "backend/tools/seed_pope.py"
+buscar = 'if found is not None:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_second_execution_creates_nothing_and_does_not_disclose_a_code"
+
+[[guarda]]
+nombre = "G26 primera versión con parámetros iniciales"
+archivo = "backend/tools/seed_pope.py"
+buscar = '            if current is None:'
+reemplazar = '            if False:'
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 66
+motivo = "Salida de G01; la mutación del rechazo es la de su condición."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 123
+motivo = "Salida de G04; el rechazo cerrado tiene prueba HTTP real A-03."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 124
+motivo = "Salida de G03; la redacción del cuerpo se comprueba con un valor sintético."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 125
+motivo = "Contador informativo de operaciones HTTP, no una autorización ni una garantía atómica."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 141
+motivo = "Salida de G05, respuesta requerida nula."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 148
+motivo = "Bucle estructural de paginación; la condición de terminación se muta en G07."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 176
+motivo = "Inicialización de la búsqueda de estándares; G25 protege la decisión y G26 la creación inicial."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 182
+motivo = "Salida de G09; la prueba exige su mensaje exacto para no confundirla con G11."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 206
+motivo = "Salida de G11, comprobación final canónica con un campo desconocido."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 212
+motivo = "Salida de G12: no alterar la compuerta de uso."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 216
+motivo = "Salida de G14: no reaprueba montaje revocado."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 265
+motivo = "Salida de G18, planta fuera del alcance."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 270
+motivo = "Rama de creación tras la búsqueda por code que se muta en M03; unicidad de la API preexistente."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 286
+motivo = "Rama de creación o lectura del nodo; G19 protege la planta, G20 sus zonas y G21 la emisión."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 298
+motivo = "Salida de G20, asignaciones distintas en el nodo existente."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 312
+motivo = "Etiqueta de salida informativa; la reejecución contrasta recuentos persistidos, no solo el texto."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 313
+motivo = "Traducción del resultado informativo anterior; no modifica el estado ni los permisos."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 368
+motivo = "Salida de G23, argumentos obligatorios."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 370
+motivo = "Salida de G24, ambas sesiones obligatorias; la prueba compara el mensaje completo."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 397
+motivo = "Adaptación de SeedError al stderr y salida 1; G01, G03, G04 y G23 comprueban ese borde."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 399
+motivo = "Adaptación segura de errores de transporte/insumos: test_cli_does_not_echo_transport_errors_or_response_bodies."
+
+[[exenta]]
+archivo = "backend/tools/seed_pope.py"
+linea = 404
+motivo = "Entrada estándar de módulo; comprobación real con python -m tools.seed_pope --dry-run."
