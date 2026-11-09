@@ -124,6 +124,27 @@ buscar = '        self.exit(2, "Argumentos inválidos; consulte --help\n")'
 reemplazar = '        super().error(message)'
 prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_transport_failure_and_parser_do_not_echo_secrets"
 
+[[guarda]]
+nombre = "G17 R4 aceptar un retorno de latido ausente"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if outcome is None or client.halted_reason is not None:'
+reemplazar = 'if client.halted_reason is not None:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[none]"
+
+[[guarda]]
+nombre = "G18 R4 contar un latido con el nodo bloqueado"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if outcome is None or client.halted_reason is not None:'
+reemplazar = 'if outcome is None:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[blocked]"
+
+[[guarda]]
+nombre = "G19 R5 reenviar el código tras 307 o 308"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=False) as http:'
+reemplazar = 'with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=True) as http:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_enrollment_redirect_never_sends_code_to_another_origin"
+
 [[exenta]]
 archivo = "backend/tools/node_enrollment_smoke.py"
 texto = 'raise SmokeFailure("invalid_base_url")'
@@ -142,7 +163,13 @@ motivo = "Selección de eventos del intercambio actual; M03 comprueba el rechazo
 [[exenta]]
 archivo = "backend/tools/node_enrollment_smoke.py"
 texto = 'raise SmokeFailure("heartbeat_rejected")'
-motivo = "Salida del rechazo mutado en M03."
+motivo = "Salida del rechazo mutado en G17 y G18."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = '''if len(beats) != 1 or beats[0].result != "success":
+                raise SmokeFailure("heartbeat_rejected")'''
+motivo = "Salida del rechazo mutado en M03, posterior a las guardas R4."
 
 [[exenta]]
 archivo = "backend/tools/node_enrollment_smoke.py"

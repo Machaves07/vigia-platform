@@ -128,6 +128,7 @@ def exercise(
     )
     tls = ssl.create_default_context(cafile=args.ca_file)
     base = args.base_url.rstrip("/") + "/api/nodes"
+    # El POST lleva el código: ni 307/308 pueden reenviarlo a otro origen.
     with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=False) as http:
         transport = TransportClient(base, base, timeout=httpx.Timeout(TIMEOUT))
         transport.set_enrollment_httpx_client(http)
@@ -151,7 +152,10 @@ def exercise(
         client.seed(configuration)
         for _ in range(3):
             before = len(client.events)
-            client.heartbeat_now()
+            outcome = client.heartbeat_now()
+            # Un evento de transporte exitoso no acredita que el nodo pueda seguir enviando.
+            if outcome is None or client.halted_reason is not None:
+                raise SmokeFailure("heartbeat_rejected")
             beats = [e for e in client.events[before:] if e.operation == "heartbeat"]
             if len(beats) != 1 or beats[0].result != "success":
                 raise SmokeFailure("heartbeat_rejected")

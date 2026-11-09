@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import ssl
 import uuid
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from typing import Any
 
 import httpx
@@ -200,6 +204,104 @@ def test_rejected_heartbeat_is_not_success(
     assert report["code"] == "heartbeat_rejected"
     assert report["heartbeats_accepted"] == 0
     assert report["verification_clip"] == "not_run"
+
+
+@pytest.mark.parametrize("failure", ("none", "blocked"))
+def test_missing_or_blocked_heartbeat_is_not_success(
+    failure: str,
+    site: SeedSite,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args, _, _ = issued_args(site, capsys)
+    real = SyncClient.heartbeat_now
+
+    def heartbeat(client: SyncClient) -> Any:
+        outcome = real(client)
+        # Aísla las guardas nuevas: incluso con un evento success recién emitido,
+        # ni un retorno ausente ni un nodo bloqueado acreditan un latido aceptado.
+        assert client.events[-1].result == "success"
+        if failure == "none":
+            return None
+        client.state.revoke()
+        assert client.halted_reason is not None
+        return outcome
+
+    monkeypatch.setattr(SyncClient, "heartbeat_now", heartbeat)
+    assert smoke.main(args, clock=WALL) == 1
+    report = output(capsys)
+    assert report["code"] == "heartbeat_rejected"
+    assert report["heartbeats_accepted"] == 0
+    assert report["observability_event"] == "not_run"
+    assert report["verification_clip"] == "not_run"
+
+
+@contextmanager
+def enrollment_server(tls: ServerTls, handler: type[BaseHTTPRequestHandler]) -> Iterator[str]:
+    """Servidor TLS real efímero; siempre cierra conexiones y recoge su hilo."""
+    with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(tls.certificate_file, tls.key_file)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        worker = Thread(target=server.serve_forever)
+        worker.start()
+        try:
+            yield f"https://127.0.0.1:{server.server_port}"
+        finally:
+            server.shutdown()
+            worker.join(timeout=60)
+            assert not worker.is_alive()
+
+
+@pytest.mark.parametrize("status", (307, 308))
+def test_enrollment_redirect_never_sends_code_to_another_origin(
+    status: int, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tls = server_tls(tmp_path, WALL.now())
+    first_requests: list[tuple[str, bytes]] = []
+    second_requests: list[bytes] = []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:
+            pass  # No registrar cuerpos ni argumentos del alta.
+
+        def do_POST(self) -> None:
+            second_requests.append(self.rfile.read(int(self.headers["Content-Length"])))
+            self.send_response(400)
+            self.end_headers()
+
+    with enrollment_server(tls, Receiver) as second:
+
+        class Redirector(Receiver):
+            def do_POST(self) -> None:
+                first_requests.append(
+                    (self.path, self.rfile.read(int(self.headers["Content-Length"])))
+                )
+                self.send_response(status)
+                self.send_header("Location", second + "/enrollment")
+                self.end_headers()
+
+        with enrollment_server(tls, Redirector) as first:
+            identifier = str(uuid.uuid4())
+            code = "A" * 12
+            args = [
+                "--base-url", first,
+                "--code", code,
+                "--node-id", identifier,
+                "--organization-id", identifier,
+                "--plant-id", identifier,
+                "--ca-file", str(tls.ca_file),
+            ]  # fmt: skip
+            assert smoke.main(args, clock=WALL) != 0
+            report = output(capsys)
+    assert report["enrollment"] == "not_run"
+    assert report["heartbeats_accepted"] == 0
+    assert len(first_requests) == 1
+    assert first_requests[0][0] == "/api/nodes/enrollment"
+    assert code.encode() in first_requests[0][1]
+    # Aun si el segundo origen rechaza el alta y el humo falla, NO debe recibir nada.
+    if second_requests:
+        pytest.fail("El humo siguió la redirección y reenvió el código", pytrace=False)
 
 
 @pytest.mark.parametrize("failure", ("grant_503", "confirmation", "receipt"))

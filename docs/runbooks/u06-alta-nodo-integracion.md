@@ -103,7 +103,7 @@ no inventarlo ni usar el código legible como UUID. La identidad la crea la plat
 [EnrollmentCode y AttemptsTable](../../frontend/src/pages/scr07/enrollment/EnrollmentCode.tsx):
 usar el código reservado de la semilla o emitir uno nuevo explícitamente si se perdió.
 Se muestra una sola vez; vence a las 24 h y tiene un solo uso. Conservar por canal
-reservado el código y las **todas** las `node_ca_root_sha256[]` (una o dos en rotación).
+reservado el código y **todas** las `node_ca_root_sha256[]` (una o dos en rotación).
 Revisar intentos: instante, resultado, huella de hardware y versiones. No emitir códigos
 repetidamente para diagnosticar red. Uno nuevo sustituye al anterior activo.
 
@@ -151,6 +151,13 @@ uv run python -m tools.node_enrollment_smoke --base-url "$APP_ORIGIN" --code "$C
   --node-id "$NODE_ID" --organization-id "$ORGANIZATION_ID" --plant-id "$PLANT_ID" \
   --ca-file "$EDGE_CA"
 ```
+
+**Exposición local del código:** el humo exige `--code`; no ofrece lectura por stdin,
+archivo ni petición interactiva sin eco. Mientras corre, el código expandido está en argv,
+visible mediante `/proc/<pid>/cmdline` para quien tenga permiso de lectura, aunque se use
+`"$CODE"` y se evite el historial. Ejecutarlo solo en un PC y una sesión de confianza,
+sin capturas de procesos ni `set -x`; no hay una alternativa de entrada oculta en este humo.
+El instalador de **vigia-nodo**, distinto del humo, sí lo pide sin eco (véase abajo).
 
 Se usan **NodeCredentials + SyncClient de vigia_contracts** contra la API real, siguiendo
 el nodo propio de VIG-393; **no** `vigia_contracts.conformance.simulated_node`, cuyo
@@ -263,7 +270,7 @@ persistente ni parar contenedores ajenos. Resultado del ensayo: [Evidence](../ev
 | Síntoma | Dónde mirar / acción conservadora |
 |---|---|
 | Latido mudo | SCR-07 detalle/alarma, DNS y puerto de nodes., certificado vigente, reloj, red/Tailscale, `vigia-nodo status`; mudo = cinco intervalos. No generar código a ciegas. |
-| `simulated_adapter_in_productive` | SCR-05 compuerta de uso y modo; `status` y configuración del adaptador. Volver a commissioning por el procedimiento autorizado, no mentir sobre señales ni activar uso con simulación. |
+| `simulated_adapter_in_productive` | SCR-07 alarma del nodo; SCR-05 compuerta de uso y modo; `status` y configuración del adaptador. Volver a commissioning por el procedimiento autorizado, no mentir sobre señales ni activar uso con simulación. |
 | `orphan_clips_growing` | SCR-07 alarmas/cola, `status`, almacén y confirmaciones; buscar interrupción entre PUT, confirmación y referencia. No borrar registros para silenciarla. |
 | 503 `temporarily_unavailable` en clip-uploads; humo 3 / `clip_storage_unpublished` | Limitación conocida de compose.integration.yml: almacén sin HTTPS público para el nodo. VIG-407 / TASK-562, decisión del dueño; sin bucle de reintentos ni aprobación de SCR-06. |
 | Semilla Pope incompleta, `PUT` de documento a `localstack` no alcanzable | Mismo aislamiento del almacén: URL interna de documentos no alcanzable desde el PC. Parar el recorrido Pope y revisar publicación con el dueño; no fingir montaje aprobado. |
