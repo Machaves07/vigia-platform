@@ -234,6 +234,7 @@ def test_catalogs_and_simulated_enrollment_match_the_source(
     events = _events(capsys)
     assert [event["event"] for event in events] == ["enrollment_code", "seeded"]
     issued, seeded = events
+    assert set(seeded) == {"event", "message_es", "writes", "node_id", "zone_ids"}
     node = seeded["node_id"]
     sources = seed_pope.load_catalogs(CATALOGS / "zone_catalog.json")
     zones = site.zones()

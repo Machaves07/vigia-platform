@@ -1,0 +1,217 @@
+# Desde la raíz. Solo integration, sin suite completa y con datos sintéticos.
+# port_retry es el adaptador temporal documentado en Evidence (solo mapeo de puertos).
+# PYTHONPATH=/tmp/opencode/vig394:<repositorio>/backend; omitir -p port_retry sin esa carrera.
+base = "e9660a4"
+comando = "uv run --project backend pytest -q -p port_retry --tb=short -m integration --basetemp=/tmp/t408-mut"
+
+[[guarda]]
+nombre = "M01 filtrar el código de alta en el informe"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '    print(json.dumps(result, ensure_ascii=False, sort_keys=True))'
+reemplazar = '''    result["enrollment_code"] = args.code
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))'''
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_real_enrollment_heartbeats_event_clip_and_used_code"
+
+[[guarda]]
+nombre = "M02 perder enrollment_code_used"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '        result["code"] = error.code.value'
+reemplazar = '        result["code"] = "enrollment_code_invalid"'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_real_enrollment_heartbeats_event_clip_and_used_code"
+
+[[guarda]]
+nombre = "M03 aceptar un latido rechazado"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if len(beats) != 1 or beats[0].result != "success":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_rejected_heartbeat_is_not_success"
+
+[[guarda]]
+nombre = "M04 no confirmar el clip de verificación"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'receipt = client.upload_verification_clip(clip, request)'
+reemplazar = 'receipt = request'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_real_enrollment_heartbeats_event_clip_and_used_code"
+
+[[guarda]]
+nombre = "M05 reintentar sin fin el 503 de clips"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '        receipt = client.upload_verification_clip(clip, request)'
+reemplazar = '''        while True:
+            try:
+                receipt = client.upload_verification_clip(clip, request)
+                break
+            except ClipUploadError:
+                continue'''
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_clip_failures_are_bounded_and_never_confirmed[grant_503]"
+
+[[guarda]]
+nombre = "M06 admitir una clave extra en seeded"
+archivo = "backend/tools/seed_pope.py"
+buscar = '                    "zone_ids": zones,'
+reemplazar = '                    "zone_ids": zones, "enrollment_code": issued["code"],'
+prueba = "backend/tests/integration/test_seed_pope.py::test_catalogs_and_simulated_enrollment_match_the_source"
+
+[[guarda]]
+nombre = "G07 aceptar un recibo con hash distinto"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if receipt.clip_id != request.clip_id or receipt.sha256 != request.sha256:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_clip_failures_are_bounded_and_never_confirmed[receipt]"
+
+[[guarda]]
+nombre = "G08 aceptar un evento rechazado"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if client.submit_record(event.event_id).result != "success":'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_rejected_event_is_not_success"
+
+[[guarda]]
+nombre = "G09 omitir GET de la vista anunciada"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '    if args.live_view_url:'
+reemplazar = '    if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_live_view_get_matches_announced_url_without_credentials[200]"
+
+[[guarda]]
+nombre = "G10 aceptar GET rechazado"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if response.status_code != 200:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_live_view_get_matches_announced_url_without_credentials[503]"
+
+[[guarda]]
+nombre = "G11 registrar URL prefirmadas"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '    logging.disable(logging.CRITICAL)'
+reemplazar = '    logging.disable(previous)'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_real_enrollment_heartbeats_event_clip_and_used_code"
+
+[[guarda]]
+nombre = "G12 enviar el código sin TLS"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '''    if (
+        origin.scheme != "https"'''
+reemplazar = '''    if False and (
+        origin.scheme != "https"'''
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_invalid_origin_never_sends_the_code[http]"
+
+[[guarda]]
+nombre = "G13 divulgar el texto de una excepción"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '        result["code"] = "smoke_failed"'
+reemplazar = '        result["code"] = str(__import__("sys").exception())'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_transport_failure_and_parser_do_not_echo_secrets"
+
+[[guarda]]
+nombre = "G14 perder el diagnóstico propio del almacén"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if error.code == RejectionCode.TEMPORARILY_UNAVAILABLE:'
+reemplazar = 'if False:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_clip_failures_are_bounded_and_never_confirmed[grant_503]"
+
+[[guarda]]
+nombre = "G15 aceptar una raíz TLS ajena"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '    tls = ssl.create_default_context(cafile=args.ca_file)'
+reemplazar = '    tls = ssl._create_unverified_context()'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_untrusted_platform_certificate_does_not_consume_code"
+
+[[guarda]]
+nombre = "G16 repetir secretos en errores de argumentos"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = '        self.exit(2, "Argumentos inválidos; consulte --help\n")'
+reemplazar = '        super().error(message)'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_transport_failure_and_parser_do_not_echo_secrets"
+
+[[guarda]]
+nombre = "G17 R4 aceptar un retorno de latido ausente"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if outcome is None or client.halted_reason is not None:'
+reemplazar = 'if client.halted_reason is not None:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[none]"
+
+[[guarda]]
+nombre = "G18 R4 contar un latido con el nodo bloqueado"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'if outcome is None or client.halted_reason is not None:'
+reemplazar = 'if outcome is None:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_missing_or_blocked_heartbeat_is_not_success[blocked]"
+
+[[guarda]]
+nombre = "G19 R5 reenviar el código tras 307 o 308"
+archivo = "backend/tools/node_enrollment_smoke.py"
+buscar = 'with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=False) as http:'
+reemplazar = 'with httpx.Client(base_url=base, verify=tls, timeout=TIMEOUT, follow_redirects=True) as http:'
+prueba = "backend/tests/integration/test_node_enrollment_smoke.py::test_enrollment_redirect_never_sends_code_to_another_origin"
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SmokeFailure("invalid_base_url")'
+motivo = "Salida del rechazo que muta G12; las variantes path/query/fragment/userinfo también tienen pruebas."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'host = urlsplit(args.live_view_url).hostname if args.live_view_url else "192.168.1.10"'
+motivo = "Selección de SAN sintético: los dos casos con vista y sin vista recorren alta real; no es una autorización."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'beats = [e for e in client.events[before:] if e.operation == "heartbeat"]'
+motivo = "Selección de eventos del intercambio actual; M03 comprueba el rechazo y la prueba feliz exige tres aceptados."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SmokeFailure("heartbeat_rejected")'
+motivo = "Salida del rechazo mutado en G17 y G18."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = '''if len(beats) != 1 or beats[0].result != "success":
+                raise SmokeFailure("heartbeat_rejected")'''
+motivo = "Salida del rechazo mutado en M03, posterior a las guardas R4."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SmokeFailure("observability_event_rejected")'
+motivo = "Salida del rechazo mutado en G08."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SmokeFailure("verification_clip_unconfirmed")'
+motivo = "Salida del rechazo mutado en G07; M04 verifica además la persistencia real del clip."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SmokeFailure("live_view_unavailable")'
+motivo = "Salida del rechazo mutado en G10."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'except CredentialRejectedError as error:'
+motivo = "M02 cambia la traducción del rechazo, comprobado con código consumido ante la API real."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'except ClipUploadError as error:'
+motivo = "La prueba parametrizada aísla concesión 503 y confirmación 503; M05 comprueba intento único."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'except SmokeFailure as error:'
+motivo = "Adaptación de códigos locales cerrados: M03, G07, G08, G10 y G12 la recorren."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'except Exception:'
+motivo = "G13 muta la redacción genérica; la prueba usa una excepción real con un secreto sintético."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'if __name__ == "__main__":'
+motivo = "Entrada estándar de CLI, sin decisión de seguridad; el analizador y los intercambios se prueban en main."
+
+[[exenta]]
+archivo = "backend/tools/node_enrollment_smoke.py"
+texto = 'raise SystemExit(main())'
+motivo = "Propaga el resultado de main; no transforma códigos ni material sensible."
