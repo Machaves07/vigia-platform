@@ -62,7 +62,7 @@
     "@vitest/coverage-v8": "5.0.5",
     "axe-core": "4.14.0",
     "browserslist": "4.29.4",
-    "eslint": "9.39.5",
+    "eslint": "10.13.0",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "7.1.1",
     "fast-check": "3.23.2",
