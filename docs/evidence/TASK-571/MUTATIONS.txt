@@ -1,0 +1,21 @@
+== base backend/tests/integration/test_contract_v1_4_catalog.py::test_guard_conditions_citing_a_non_guard_signal_is_refused_by_rule_6: salida 0: 2 passed, 1 warning in 48.05s
+== m_catalogo_sin_regla6: la plataforma valida el catálogo sin la regla (6) de ZoneCatalog (backend/.venv/lib/python3.12/site-packages/vigia_contracts/models/_validators.py:808): salida 1 ROJA: 1 failed, 1 warning in 34.55s
+== base backend/tests/integration/test_contract_v1_4_catalog.py::test_a_v1_1_0_node_still_enrolls_beats_and_fetches_the_catalog: salida 0: 1 passed, 1 warning in 38.10s
+== m_ventana_minima: la plataforma vuelve a la ventana de dos menores y retira la 1.0 y la 1.1 sin aviso (backend/src/vigia_platform/node_api/versioning.py:91): salida 1 ROJA: 1 failed, 1 warning in 33.64s
+== base backend/tests/unit/fleet/test_fleet_versions.py::test_br_gob_101_the_default_platform_policy_keeps_every_minor_it_accepted: salida 0: 1 passed in 1.35s
+== m_ventana_minima (unidad): la política por defecto no conserva la 1.0 ni la 1.1 (backend/src/vigia_platform/node_api/versioning.py:91): salida 1 ROJA: 1 failed in 1.60s
+== base backend/tests/integration/test_contract_v1_4_catalog.py::test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node: salida 0: 1 passed, 1 warning in 36.86s
+== m_publicar_sin_guard_conditions: el estándar se publica sin la condición del jumbo (backend/src/vigia_platform/catalog/domain/predicates.py:137): salida 1 ROJA: 1 failed, 1 warning in 42.91s
+== m_senales_sin_no_data: las señales se publican sin la marca no_data (backend/src/vigia_platform/catalog/domain/catalog_version.py:545): salida 1 ROJA: 1 failed, 1 warning in 37.68s
+== base backend/tests/unit/test_contract_pin.py::test_pyproject_pins_the_release_tag: salida 0: 1 passed in 0.07s
+== m_contrato_v1_1: pyproject vuelve a pedir la etiqueta v1.1.0 (backend/pyproject.toml:22): salida 1 ROJA: 1 failed in 0.11s
+
+| Mutación | Archivo:línea | Prueba en rojo | Salida |
+|---|---|---|---|
+| m_catalogo_sin_regla6 | `backend/.venv/lib/python3.12/site-packages/vigia_contracts/models/_validators.py:808` | `test_guard_conditions_citing_a_non_guard_signal_is_refused_by_rule_6` | `1 failed, 1 warning in 34.55s` |
+| m_ventana_minima | `backend/src/vigia_platform/node_api/versioning.py:91` | `test_a_v1_1_0_node_still_enrolls_beats_and_fetches_the_catalog` | `1 failed, 1 warning in 33.64s` |
+| m_ventana_minima (unidad) | `backend/src/vigia_platform/node_api/versioning.py:91` | `test_br_gob_101_the_default_platform_policy_keeps_every_minor_it_accepted` | `1 failed in 1.60s` |
+| m_publicar_sin_guard_conditions | `backend/src/vigia_platform/catalog/domain/predicates.py:137` | `test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node` | `1 failed, 1 warning in 42.91s` |
+| m_senales_sin_no_data | `backend/src/vigia_platform/catalog/domain/catalog_version.py:545` | `test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node` | `1 failed, 1 warning in 37.68s` |
+| m_contrato_v1_1 | `backend/pyproject.toml:22` | `test_pyproject_pins_the_release_tag` | `1 failed in 0.11s` |
+MUTACIONES_OK 6

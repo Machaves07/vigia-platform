@@ -44,6 +44,7 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from vigia_contracts.versioning import CONTRACT_VERSION
 
 from tests.authz_support import Site
 from tests.fleet_alarm_support import alarm_tasks, run_in
@@ -77,7 +78,9 @@ from vigia_platform.shared.signing.keys import format_timestamp, to_millisecond
 pytestmark = pytest.mark.integration
 
 IN_WINDOW: Final = "1.0.4"
-"""La plataforma implementa la 1.0.0 del contrato: la serie 1.0 está en ventana."""
+"""La serie 1.0 sigue en la ventana de la plataforma (``OLDEST_ACCEPTED_MINOR``, TASK-571)."""
+NEWER: Final = f"{CONTRACT_VERSION.major}.{CONTRACT_VERSION.minor + 1}.0"
+"""Una menor más nueva que la que implementa la plataforma (``rejected_newer``, BR-CTR-20)."""
 HOLD_SECONDS: Final = 3.0
 """Cuánto retiene la primera operación sus candados para que la otra arranque. No es un tope de
 «llegó a tiempo»: con el orden bueno el resultado no depende de él."""
@@ -279,7 +282,7 @@ def test_br_gob_101_102_inside_the_window_everything_is_written_with_one_event_p
     }
 
 
-@pytest.mark.parametrize("version", ["1.2.0", "2.0.0", "0.9.9", "1.2.0-rc.1"])
+@pytest.mark.parametrize("version", [NEWER, "2.0.0", "0.9.9", f"{NEWER}-rc.1"])
 def test_br_gob_101_outside_the_window_answers_its_detail_code_and_writes_nothing(
     stack: FleetStack, version: str
 ) -> None:

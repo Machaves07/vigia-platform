@@ -5426,6 +5426,21 @@
           "type": "integer",
           "maximum": 0,
           "minimum": 0
+        },
+        "guard_conditions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/components/schemas/GuardSignalCondition"
+              },
+              "type": "array",
+              "maxItems": 1,
+              "minItems": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -5969,6 +5984,13 @@
       "type": "object",
       "required": [
         "concessions"
+      ]
+    },
+    "ConditionSignalValue": {
+      "type": "string",
+      "enum": [
+        "asserted",
+        "deasserted"
       ]
     },
     "ConfigurationChangeBody": {
@@ -9279,6 +9301,22 @@
       "required": [
         "all_of",
         "min_duration_ms"
+      ]
+    },
+    "GuardSignalCondition": {
+      "properties": {
+        "signal_id": {
+          "$ref": "#/components/schemas/UUID"
+        },
+        "value": {
+          "$ref": "#/components/schemas/ConditionSignalValue"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "signal_id",
+        "value"
       ]
     },
     "HeartbeatConfiguration": {
@@ -14601,6 +14639,17 @@
         "source": {
           "$ref": "#/components/schemas/SignalSource"
         },
+        "no_data": {
+          "anyOf": [
+            {
+              "type": "boolean",
+              "const": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "description_es": {
           "type": "string",
           "maxLength": 120,
@@ -15170,6 +15219,21 @@
           "type": "integer",
           "maximum": 60000,
           "minimum": 0
+        },
+        "guard_conditions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/components/schemas/GuardSignalCondition"
+              },
+              "type": "array",
+              "maxItems": 1,
+              "minItems": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,

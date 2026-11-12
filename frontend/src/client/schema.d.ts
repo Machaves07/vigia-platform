@@ -3577,7 +3577,7 @@ export interface components {
     Code: string;
     /**
      * CoexistencePredicate
-     * @description Plantilla `coexistence`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms = 0`.
+     * @description Plantilla `coexistence`: `all_of` es exactamente presencia y energía afirmada, en cualquier orden; `min_duration_ms = 0`; desde v1.2.0, `guard_conditions` opcional exige además una señal `guard` concreta afirmada o no afirmada (por ejemplo, uso indebido con el jumbo en posición o fuera de ella).
      */
     CoexistencePredicate: {
       /** All Of */
@@ -3586,6 +3586,8 @@ export interface components {
       )[];
       /** Min Duration Ms */
       min_duration_ms: number;
+      /** Guard Conditions */
+      guard_conditions?: components['schemas']['GuardSignalCondition'][] | null;
     };
     /**
      * CommissioningClipOut
@@ -3857,6 +3859,12 @@ export interface components {
       /** Concessions */
       concessions: components['schemas']['ConcessionView'][];
     };
+    /**
+     * ConditionSignalValue
+     * @description Valor de señal que exige una condición de la gramática de predicados (`SignalCondition.value`): subconjunto de `signal_value` sin `unknown` (A-42).
+     * @enum {string}
+     */
+    ConditionSignalValue: 'asserted' | 'deasserted';
     /**
      * ConfigurationChangeBody
      * @description Solo los parámetros que cambian, y el motivo.
@@ -5383,6 +5391,14 @@ export interface components {
       )[];
       /** Min Duration Ms */
       min_duration_ms: number;
+    };
+    /**
+     * GuardSignalCondition
+     * @description Condición de resguardo sobre **una** señal declarada (v1.2.0, entrada A-77 de la adenda): exige que la señal `signal_id` del catálogo de la zona valga `value`. A diferencia de `SignalCondition`, no mira el valor agregado del rol `guard` (BR-BOR-13), sino solo esa señal, así que las demás señales `guard` de la zona no la afectan. `signal_id` debe ser una señal del mismo `ZoneCatalog` con rol `guard` (regla (6) del catálogo, verificada en el modelo). Si esa señal es inválida en el instante evaluado, o se declaró `no_data`, la condición es desconocida y el predicado es `undeterminable` (BR-BOR-29), nunca `true` ni `false`.
+     */
+    GuardSignalCondition: {
+      signal_id: components['schemas']['UUID'];
+      value: components['schemas']['ConditionSignalValue'];
     };
     /**
      * HeartbeatConfiguration
@@ -7665,7 +7681,7 @@ export interface components {
     Sha256Hex: string;
     /**
      * SignalDeclaration
-     * @description Señal declarada de la zona. El nodo convierte el nivel físico leído en `asserted` o `deasserted` comparándolo con `asserted_level`.
+     * @description Señal declarada de la zona. El nodo convierte el nivel físico leído en `asserted` o `deasserted` comparándolo con `asserted_level`. Desde v1.2.0, `no_data: true` declara una señal sin dato (sin cableado o sin canal útil todavía): el nodo no la lee y la trata siempre como `valid = false`, `value = unknown` (BR-BOR-12).
      */
     SignalDeclaration: {
       signal_id: components['schemas']['UUID'];
@@ -7673,6 +7689,8 @@ export interface components {
       role: components['schemas']['SignalRole'];
       asserted_level: components['schemas']['SignalLevel'];
       source: components['schemas']['SignalSource'];
+      /** No Data */
+      no_data?: true | null;
       /** Description Es */
       description_es: string;
     };
@@ -7908,7 +7926,7 @@ export interface components {
     };
     /**
      * StartupTransitionPredicate
-     * @description Plantilla `startup_transition`: `all_of` contiene presencia y mando de arranque afirmado y, opcionalmente, energía no afirmada (arranque desde reposo); en cualquier orden y sin repetir; `min_duration_ms` entre 0 y 60 000.
+     * @description Plantilla `startup_transition`: `all_of` contiene presencia y mando de arranque afirmado y, opcionalmente, energía no afirmada (arranque desde reposo); en cualquier orden y sin repetir; `min_duration_ms` entre 0 y 60 000; desde v1.2.0, `guard_conditions` opcional exige además una señal `guard` concreta afirmada o no afirmada (por ejemplo, arranque con el jumbo en posición).
      */
     StartupTransitionPredicate: {
       /** All Of */
@@ -7919,6 +7937,8 @@ export interface components {
       )[];
       /** Min Duration Ms */
       min_duration_ms: number;
+      /** Guard Conditions */
+      guard_conditions?: components['schemas']['GuardSignalCondition'][] | null;
     };
     /** StepBody */
     StepBody: {
@@ -8773,7 +8793,7 @@ export interface components {
     };
     /**
      * ZoneCatalog
-     * @description Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen.
+     * @description Catálogo de una zona: cámaras, cobertura mínima, señales, estándares declarados y parámetros de detección (domain-entities.md §3.1). Siempre viaja firmado, como `SignedEnvelope<ZoneCatalog>` (`#/$defs/SignedZoneCatalog`), con una clave de propósito `catalog`. `version` es monótona por zona y cualquier cambio la incrementa. Reglas entre campos que JSON Schema 2020-12 no expresa y que verifican los modelos (VIG-29), la plataforma al publicar y la suite de conformidad: (1) `thresholds.review < thresholds.publication`; (2) `minimum_coverage.required_count ≤ len(cameras)`; (3) `minimum_coverage.required_count ≥ len(minimum_coverage.required_camera_ids)` (pendiente nº 34, entrada A-03 de la adenda); (4) toda cámara de `required_camera_ids` está en `cameras`; (5) `camera_id` y `code` únicos en `cameras`, `signal_id` y `code` únicos en `signals`, y un solo `standard_id` por catálogo en `standards` (una sola versión vigente); (6) desde v1.2.0, todo `signal_id` de `guard_conditions` en los predicados de `standards` es una señal de `signals` con rol `guard` (entrada A-77 de la adenda). Un catálogo que viole (2) a (4) no es satisfacible: U-03 lo rechaza con `unsatisfiable_coverage` y los generadores del kit nunca lo producen.
      */
     vigia_contracts__models__zone_catalog__Payload: {
       zone_id: components['schemas']['UUID'];

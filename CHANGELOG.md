@@ -101,6 +101,10 @@ Mientras U-02 se cierra sin cuenta de AWS (adenda A-47), no hay ninguna etiqueta
 - **Despliegue**: comprobaciones nº 8 (recorrido de Playwright en `staging-<n>`) y nº 9 (índice, `version.json`, paquete inicial `immutable` y `vigia-app-index`) en `deploy_checks.py` (VIG-319), y su ensayo local contra el mundo de U-05 (VIG-352).
 - **Documentación**: [`frontend/README.md`](frontend/README.md) con instalación, modo de la API, órdenes, política de navegadores (con su prueba contra `browserslist`), presupuesto de dependencias y cómo añadir una pantalla; runbooks [U-05 6.1 a 6.4](docs/runbooks/README.md) (la aplicación no carga, la versión nueva no aparece, el cortafuegos bloquea a una planta, la política de contenido bloquea un recurso); [manual de soporte del código de correlación](docs/runbooks/u05-soporte-correlation-id.md); sección de U-05 del `README.md` (VIG-331, TASK-458).
 
+### Cambiado
+
+- **Contrato `vigia-contracts` v1.4.0 en el backend** (VIG-449, TASK-571; A-77, A-112): la etiqueta fijada pasa de `v1.1.0` a `v1.4.0`, con el paquete y el extra `conformance`, solo por adición (BR-CTR-23). Trae la gramática v1.2.0 del catálogo (`guard_conditions`, `no_data` y la regla (6) de `ZoneCatalog`), la API de la bandeja de salida del nodo (VIG-439) y las credenciales de v1.3.0 (A-93) y v1.4.0 (A-95), que la plataforma no usa. La ventana de versiones llega ahora hasta la `1.0`, así que la `1.0.x` y la `1.1.x`, que ya se aceptaban, no se retiran sin aviso (BR-CTR-19 y 21). No cambia ninguna ruta ni ningún comportamiento. El frontend sigue con `@vigia/contracts` v1.1.0.
+
 ### Corregido
 
 - Cancelación en cola determinista del pool de CPU (VIG-130) y prueba del servidor colgado en tiempo virtual (VIG-134).
