@@ -13,6 +13,11 @@ nodos):
   ``rejected_newer`` **nunca** es un ``code``) y su mensaje, que nombra la versión presentada y
   las aceptadas (BR-CTR-22).
 
+La ventana de la plataforma (``PLATFORM_CONTRACT_WINDOW``) llega hasta la menor más antigua que
+sigue aceptando (``OLDEST_ACCEPTED_MINOR``), y nunca baja de las dos de BR-CTR-19. Así, adoptar
+una etiqueta nueva no retira ninguna menor: un retiro exige su aviso de 90 días (BR-CTR-21) y
+mover esa constante a propósito.
+
 El instante de la decisión sale del ``Clock`` de la verificación, nunca de la hora del sistema.
 """
 
@@ -44,7 +49,9 @@ from vigia_platform.node_api.rejections import NodeRejection
 
 __all__ = [
     "CONTRACT_VERSION_HEADER",
+    "OLDEST_ACCEPTED_MINOR",
     "PLATFORM_CONTRACT_VERSION",
+    "PLATFORM_CONTRACT_WINDOW",
     "RetiringMinor",
     "VersionPolicy",
     "check_version",
@@ -53,6 +60,18 @@ __all__ = [
 PLATFORM_CONTRACT_VERSION: Final = str(CONTRACT_VERSION)
 """La versión del contrato que implementa la plataforma: va en ``X-Vigia-Contract-Version`` de
 toda respuesta a un nodo (BR-CTR-18)."""
+
+OLDEST_ACCEPTED_MINOR: Final = 0
+"""La menor más antigua de la mayor vigente que la plataforma acepta. Con ``v1.1.0`` (A-63) la
+ventana de dos menores aceptaba ``1.0.x`` y ``1.1.x``; al adoptar ``v1.4.0`` (TASK-571) siguen
+aceptándose: ninguna se anunció para retiro (BR-CTR-21) y la ventana puede ampliarse, nunca
+reducirse (NFR-CTR-40)."""
+
+PLATFORM_CONTRACT_WINDOW: Final = max(
+    DEFAULT_WINDOW, CONTRACT_VERSION.minor - OLDEST_ACCEPTED_MINOR
+)
+"""Menores anteriores a la vigente que se aceptan: de ``OLDEST_ACCEPTED_MINOR`` a la vigente, y al
+menos las dos de BR-CTR-19 (4 con ``v1.4.0``: de ``1.0.x`` a ``1.4.x``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +88,7 @@ class VersionPolicy:
     """La política de versiones de la plataforma (BR-CTR-19 y 20)."""
 
     current: Version = CONTRACT_VERSION
-    window: int = DEFAULT_WINDOW
+    window: int = PLATFORM_CONTRACT_WINDOW
     retiring: tuple[RetiringMinor, ...] = ()
     latest_minors: Mapping[int, int] = field(default_factory=dict)
     major_published_at: Mapping[int, str] = field(default_factory=dict)

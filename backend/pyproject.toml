@@ -1,6 +1,7 @@
 # Backend de vigia-platform (U-02, TASK-101). Paquete `vigia_platform` en `src/`.
-# Consume `vigia-contracts` por `git+ssh` (ADR-004) por la etiqueta `v1.1.0` (TASK-153; v1.1.0 por A-63), con el
-# hash de su commit fijado en `uv.lock` (NFR-NUC-24; lo exige `tests/unit/test_contract_pin.py`).
+# Consume `vigia-contracts` por `git+ssh` (ADR-004) por la etiqueta `v1.4.0` (TASK-153; v1.1.0 por A-63,
+# v1.4.0 por A-77 y A-112, TASK-571), con el hash de su commit fijado en `uv.lock` (NFR-NUC-24; lo
+# exige `tests/unit/test_contract_pin.py`).
 
 [build-system]
 requires = ["hatchling>=1.25"]
@@ -18,7 +19,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.1.0#subdirectory=generated/python",
+  "vigia-contracts @ git+ssh://git@github.com/Machaves07/vigia-contracts.git@v1.4.0#subdirectory=generated/python",
   "fastapi>=0.115",
   "uvicorn>=0.30",
   "pydantic>=2,<3",

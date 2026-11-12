@@ -1,0 +1,48 @@
+# Mutaciones con nombre de TASK-571 (adopción de vigia-contracts v1.4.0). Rutas desde la raíz del repo.
+# Formato de tabla_guardas.py (skill vigia-calidad-antes-del-pr). Las pruebas de integración necesitan
+# Docker; en Docker Desktop con la carrera del mapeo de puertos, añadir el adaptador port_retry de
+# docs/evidence/VIG-394/EVIDENCE.md («-p port_retry» con su PYTHONPATH).
+base = "origin/main"
+comando = "uv run --frozen --project backend pytest -q -p no:cacheprovider -x"
+
+[[guarda]]
+nombre = "m_catalogo_sin_regla6: la plataforma valida el catálogo sin la regla (6) de ZoneCatalog"
+archivo = "backend/.venv/lib/python3.12/site-packages/vigia_contracts/models/_validators.py"
+buscar = "    _guard_conditions(catalog)\n"
+reemplazar = "    pass  # mutación: sin la regla (6)\n"
+prueba = "backend/tests/integration/test_contract_v1_4_catalog.py::test_guard_conditions_citing_a_non_guard_signal_is_refused_by_rule_6"
+
+[[guarda]]
+nombre = "m_ventana_minima: la plataforma vuelve a la ventana de dos menores y retira la 1.0 y la 1.1 sin aviso"
+archivo = "backend/src/vigia_platform/node_api/versioning.py"
+buscar = "    window: int = PLATFORM_CONTRACT_WINDOW\n"
+reemplazar = "    window: int = DEFAULT_WINDOW\n"
+prueba = "backend/tests/integration/test_contract_v1_4_catalog.py::test_a_v1_1_0_node_still_enrolls_beats_and_fetches_the_catalog"
+
+[[guarda]]
+nombre = "m_ventana_minima (unidad): la política por defecto no conserva la 1.0 ni la 1.1"
+archivo = "backend/src/vigia_platform/node_api/versioning.py"
+buscar = "    window: int = PLATFORM_CONTRACT_WINDOW\n"
+reemplazar = "    window: int = DEFAULT_WINDOW\n"
+prueba = "backend/tests/unit/fleet/test_fleet_versions.py::test_br_gob_101_the_default_platform_policy_keeps_every_minor_it_accepted"
+
+[[guarda]]
+nombre = "m_publicar_sin_guard_conditions: el estándar se publica sin la condición del jumbo"
+archivo = "backend/src/vigia_platform/catalog/domain/predicates.py"
+buscar = "    return dict(document)\n"
+reemplazar = "    return {k: v for k, v in document.items() if k != \"guard_conditions\"}\n"
+prueba = "backend/tests/integration/test_contract_v1_4_catalog.py::test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node"
+
+[[guarda]]
+nombre = "m_senales_sin_no_data: las señales se publican sin la marca no_data"
+archivo = "backend/src/vigia_platform/catalog/domain/catalog_version.py"
+buscar = "            base[\"signals\"] = [_mapping(s) for s in signals]\n"
+reemplazar = "            base[\"signals\"] = [{k: v for k, v in _mapping(s).items() if k != \"no_data\"} for s in signals]\n"
+prueba = "backend/tests/integration/test_contract_v1_4_catalog.py::test_a_v1_2_catalog_with_guard_conditions_and_no_data_reaches_the_v1_4_node"
+
+[[guarda]]
+nombre = "m_contrato_v1_1: pyproject vuelve a pedir la etiqueta v1.1.0"
+archivo = "backend/pyproject.toml"
+buscar = "vigia-contracts.git@v1.4.0#subdirectory"
+reemplazar = "vigia-contracts.git@v1.1.0#subdirectory"
+prueba = "backend/tests/unit/test_contract_pin.py::test_pyproject_pins_the_release_tag"

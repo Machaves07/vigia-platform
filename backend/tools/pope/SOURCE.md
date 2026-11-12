@@ -16,7 +16,7 @@ La gramática es v1.1.0: Q5 no distingue el estado del jumbo, el arranque no pue
 por resguardo y las puertas sin dato no se pueden representar como señales sin canal. Esta
 semilla no corrige ni traduce esas reglas y no autoriza su comparación con el prototipo.
 
-Cuando el catálogo Pope pase a la gramática v1.2.0 (A-77), se vuelve a copiar y se actualiza el hash; la plataforma debe aceptar antes v1.2.0
+Cuando el catálogo Pope pase a la gramática v1.2.0 (A-77), se vuelve a copiar y se actualiza el hash. La plataforma ya acepta esa gramática: consume `vigia-contracts` v1.4.0 desde TASK-571.
 
 ## Operación
 

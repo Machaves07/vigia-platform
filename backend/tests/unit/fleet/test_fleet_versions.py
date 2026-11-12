@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 from vigia_contracts.models.enumerations import RejectionCode, UpdateOutcome
-from vigia_contracts.versioning import Version, is_accepted, is_compatible
+from vigia_contracts.versioning import DEFAULT_WINDOW, Version, is_accepted, is_compatible
 
 from tests.factories import uuid7
 from vigia_platform.fleet.adapters.http.target_versions import TargetVersionBody
@@ -49,7 +49,13 @@ from vigia_platform.fleet.events import TargetVersionPublished
 from vigia_platform.fleet.events import UpdateResultReceived as UpdateResultEvent
 from vigia_platform.fleet.record_types import NodeTargetVersionPublished
 from vigia_platform.fleet.record_types import UpdateResultReceived as UpdateResultRecord
-from vigia_platform.node_api.versioning import RetiringMinor, VersionPolicy
+from vigia_platform.node_api.versioning import (
+    OLDEST_ACCEPTED_MINOR,
+    PLATFORM_CONTRACT_VERSION,
+    PLATFORM_CONTRACT_WINDOW,
+    RetiringMinor,
+    VersionPolicy,
+)
 from vigia_platform.shared.signing.keys import format_timestamp
 
 NOW = datetime(2026, 10, 5, 12, 0, 0, 123000, tzinfo=UTC)
@@ -72,7 +78,8 @@ def _oracle(version: str, policy: VersionPolicy, today: datetime) -> bool:
 
 # --- BR-GOB-101: ventana del contrato en el instante de publicar --------------------------------
 
-CURRENT = VersionPolicy(current=Version.parse("1.3.0"))
+# Ventana mínima explícita (BR-CTR-19): los bordes son los de dos menores, no los de la plataforma.
+CURRENT = VersionPolicy(current=Version.parse("1.3.0"), window=DEFAULT_WINDOW)
 
 
 @pytest.mark.parametrize(
@@ -97,6 +104,7 @@ def test_br_gob_101_a_retiring_minor_publishes_until_its_date_and_not_from_it() 
     retires_at = NOW + timedelta(days=3)
     policy = VersionPolicy(
         current=Version.parse("1.3.0"),
+        window=DEFAULT_WINDOW,
         retiring=(RetiringMinor("1.1.0", format_timestamp(retires_at)),),
     )
     before = retires_at - timedelta(milliseconds=1)
@@ -105,18 +113,25 @@ def test_br_gob_101_a_retiring_minor_publishes_until_its_date_and_not_from_it() 
     assert _oracle("1.1.5", policy, before) and not _oracle("1.1.5", policy, retires_at)
 
 
-def test_br_gob_101_the_default_platform_policy_accepts_its_minor_and_the_previous_one() -> None:
-    # La plataforma implementa la 1.1.0 del contrato (A-63): con la ventana de dos menores, las
-    # series 1.1 y 1.0 están en ventana; una menor más nueva, otra mayor o la 0.x, no.
+def test_br_gob_101_the_default_platform_policy_keeps_every_minor_it_accepted() -> None:
+    # La plataforma implementa la 1.4.0 del contrato (TASK-571). Con la 1.1.0 (A-63) aceptaba las
+    # series 1.0 y 1.1; al adoptar la 1.4.0 ninguna sale de la ventana sin aviso de retiro
+    # (BR-CTR-21): se aceptan de la 1.0 a la 1.4. Una menor más nueva, otra mayor o la 0.x, no.
     policy = VersionPolicy()
-    assert str(policy.current) == "1.1.0"
-    assert within_contract_window("1.1.0", policy, NOW)
-    assert within_contract_window("1.1.12", policy, NOW)
-    assert within_contract_window("1.0.0", policy, NOW)
-    assert within_contract_window("1.0.12", policy, NOW)
-    assert not within_contract_window("1.2.0", policy, NOW)
+    assert str(policy.current) == "1.4.0"
+    assert policy.window == PLATFORM_CONTRACT_WINDOW == 4
+    for version in ("1.0.0", "1.0.12", "1.1.0", "1.1.12", "1.2.0", "1.3.7", "1.4.0", "1.4.12"):
+        assert within_contract_window(version, policy, NOW), version
+        assert _oracle(version, policy, NOW), version
+    assert not within_contract_window("1.5.0", policy, NOW)
     assert not within_contract_window("2.0.0", policy, NOW)
     assert not within_contract_window("0.9.0", policy, NOW)
+
+
+def test_br_ctr_19_the_platform_window_reaches_the_oldest_minor_and_never_less_than_two() -> None:
+    assert PLATFORM_CONTRACT_WINDOW >= DEFAULT_WINDOW
+    oldest = Version.parse(PLATFORM_CONTRACT_VERSION).minor - PLATFORM_CONTRACT_WINDOW
+    assert oldest == OLDEST_ACCEPTED_MINOR
 
 
 @pytest.mark.parametrize("version", ["", "1.0", "v1.0.0", "1.0.0.0", "01.0.0", "1.0.0-"])
