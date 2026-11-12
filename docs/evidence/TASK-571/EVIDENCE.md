@@ -12,6 +12,7 @@ nuevas. No se tocó Linear, el nodo de planta ni otros repositorios.
 | `backend/tests/unit/test_contract_pin.py` | Etiqueta, commit y versión de la v1.4.0 (la prueba exige cambiarlos a la vez). |
 | `backend/src/vigia_platform/node_api/versioning.py` | Ventana de la plataforma `PLATFORM_CONTRACT_WINDOW` hasta `OLDEST_ACCEPTED_MINOR = 0` (4 con la 1.4.0). Ver «Desvíos». |
 | `backend/tests/unit/fleet/test_fleet_versions.py` | Bordes de BR-GOB-101 con la ventana mínima explícita; política por defecto de la 1.0 a la 1.4. |
+| `backend/tests/integration/test_fleet_target_versions.py` | La versión objetivo «más nueva que la plataforma» deja de ser el literal `1.2.0` (ya en ventana con la 1.4.0) y se deriva de `CONTRACT_VERSION` (`1.5.0` y `1.5.0-rc.1`): misma intención, `rejected_newer`. |
 | `backend/openapi/app.yaml`, `frontend/src/client/schema.d.ts`, `frontend/tests/msw/openapi.responses.json` | Regenerados: el `app.yaml` incluye los modelos del contrato (`guard_conditions`, `GuardSignalCondition`, `ConditionSignalValue`, `no_data` y el texto de la regla (6)). Solo campos opcionales y descripciones; ninguna ruta. |
 | `backend/tests/integration/test_contract_v1_4_catalog.py` | Prueba nueva de los criterios 2 y 3 (cuatro casos). |
 | `CHANGELOG.md`, `backend/tools/pope/SOURCE.md` | Versión adoptada y nota de que la plataforma ya acepta la gramática v1.2.0. |
