@@ -5,7 +5,7 @@ Uso (desde ``backend/``)::
     uv run python -m vigia_platform.shared.api.export_u05_fixtures          # escribe el archivo
     uv run python -m vigia_platform.shared.api.export_u05_fixtures --check  # 0 si no hay diferencia
 
-El archivo tiene tres secciones, que ``frontend/`` consume por igualdad y no por heurística:
+El archivo tiene cuatro secciones, que ``frontend/`` consume por igualdad y no por heurística:
 
 - ``permissions`` (BR-APP-02, PR-APP-01, PAT-APP-SEG-06): el registro consolidado de claves de
   ``PermissionKey`` (U-02 §2.6 con las notas fechadas de U-03 y U-04, A-13), la columna de cada uno
@@ -27,6 +27,12 @@ El archivo tiene tres secciones, que ``frontend/`` consume por igualdad y no por
   aplica ``loop.domain.lifecycle`` (estados de origen, destino, claves y registros de cada
   transición). La interfaz ofrece en cada estado el acceso que esta tabla admite (revisar en la
   cola, clasificar, reclasificar, lazo), y una prueba suya lo contrasta por igualdad.
+- ``episode_photos`` (TASK-573, A-112; para TASK-574): un ejemplo **sintético** de las dos rutas
+  de los episodios de la sombra: una página de ``GET /zones/{zone_id}/episode-photos`` con un
+  episodio con imagen y otro sin ella (cada motivo cerrado de ausencia, en ``absent_reasons``), y
+  la respuesta de ``GET /episode-photos/{photo_id}/image``: sus cabeceras y el JPEG en base64. La
+  imagen la **genera** ``synthetic_episode_jpeg`` (gris uniforme de 64 x 64, decodificable, con la
+  marca ``vigia_anonymized=1``): nunca una foto real (NFR-CTR-43).
 
 ``--check`` compara byte a byte con el archivo versionado y termina en 1 si difiere o falta;
 entonces imprime cada diferencia con su clave, rol, ruta o caso, y el principio del diff. El JSON
@@ -37,16 +43,29 @@ se escribe con ``ensure_ascii``: todo carácter invisible o de control queda esc
 from __future__ import annotations
 
 import argparse
+import base64
 import difflib
 import enum
+import hashlib
 import json
 import random
+import struct
 import sys
+import uuid
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from vigia_contracts.models.enumerations import ImageAbsentReason
+
+from vigia_platform.fleet.adapters.http.episode_photos import (
+    SERVED_HEADERS,
+    EpisodePhotoImageOut,
+    EpisodePhotoOut,
+    EpisodePhotosOut,
+    EpisodePhotoStandardOut,
+)
 from vigia_platform.identity.authz.matrix import MATRIX, PLATFORM_PREFIX, PermissionKey
 from vigia_platform.ledger.free_text import (
     FreeTextField,
@@ -71,6 +90,7 @@ __all__ = [
     "base_policy",
     "build_document",
     "differences",
+    "episode_photos_section",
     "evaluate",
     "free_text_routes",
     "free_text_section",
@@ -79,13 +99,14 @@ __all__ = [
     "permission_differences",
     "permissions_section",
     "render",
+    "synthetic_episode_jpeg",
 ]
 
 DEFAULT_OUTPUT: Final = Path(__file__).resolve().parents[4] / "openapi/u05-fixtures.json"
 """``backend/openapi/u05-fixtures.json``."""
 FORMAT: Final = "vigia-platform/u05-fixtures"
-SCHEMA_VERSION: Final = 2
-"""2: la sección ``lifecycle`` (VIG-359)."""
+SCHEMA_VERSION: Final = 3
+"""2: la sección ``lifecycle`` (VIG-359); 3: la sección ``episode_photos`` (TASK-573)."""
 """Versión del formato del archivo: sube si cambia la forma, no si cambian los datos."""
 CORPUS_SEED: Final = 462
 """Semilla del corpus (TASK-462): elige rutas y relleno; el mismo código da el mismo archivo."""
@@ -499,6 +520,121 @@ def lifecycle_section(transitions: Mapping[str, Transition]) -> dict[str, Any]:
     }
 
 
+# --- Episodios de la sombra (TASK-573) ----------------------------------------------------------
+
+_EXAMPLE_ZONE: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000a112")
+"""Identificadores fijos del ejemplo (uuid7 de forma válida, sin significado)."""
+_EXAMPLE_PHOTO: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000f001")
+_EXAMPLE_ABSENT: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000f002")
+_EXAMPLE_NODE: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000c001")
+_EXAMPLE_CAMERA: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000c002")
+_EXAMPLE_STANDARD: Final = uuid.UUID("0196a0a0-0000-7000-8000-00000000d001")
+_EXAMPLE_SIDE: Final = 64
+_ANONYMIZED_MARK: Final = b"vigia_anonymized=1"
+_COMMISSIONING_RUN: Final = PermissionKey.COMMISSIONING_RUN.value
+"""La clave de las dos rutas, fijada al importar (las pruebas sustituyen ``PermissionKey``)."""
+
+
+def _segment(marker: int, payload: bytes) -> bytes:
+    return bytes((0xFF, marker)) + struct.pack(">H", 2 + len(payload)) + payload
+
+
+def synthetic_episode_jpeg(width: int = _EXAMPLE_SIDE, height: int = _EXAMPLE_SIDE) -> bytes:
+    """Un JPEG de base **decodificable**, gris uniforme, generado aquí (nunca una foto real).
+
+    Escala de grises de 8 bits con una tabla de cuantificación de unos y dos tablas de Huffman de
+    un único código de un bit (DC de categoría 0 y fin de bloque): cada bloque de 8 x 8 son dos
+    bits a cero. Lleva el comentario ``vigia_anonymized=1`` y ningún ``APPn``, como exige A-112.
+    """
+    if width % 8 or height % 8 or not 8 <= width <= 1280 or not 8 <= height <= 1280:
+        raise ValueError("lado múltiplo de 8, de 8 a 1280")
+    single_code = bytes([1] + [0] * 15) + b"\x00"
+    blocks = (width // 8) * (height // 8)
+    bits = 2 * blocks
+    scan = bytes(bits // 8) + (bytes([0xFF >> (bits % 8)]) if bits % 8 else b"")
+    return b"".join(
+        (
+            b"\xff\xd8",
+            _segment(0xFE, _ANONYMIZED_MARK),
+            _segment(0xDB, b"\x00" + b"\x01" * 64),
+            _segment(0xC0, struct.pack(">BHHB", 8, height, width, 1) + b"\x01\x11\x00"),
+            _segment(0xC4, b"\x00" + single_code),
+            _segment(0xC4, b"\x10" + single_code),
+            _segment(0xDA, b"\x01\x01\x00\x00\x3f\x00"),
+            scan,
+            b"\xff\xd9",
+        )
+    )
+
+
+def episode_photos_section() -> dict[str, Any]:
+    """Un ejemplo sintético de las rutas de los episodios de la sombra, con la forma exacta de
+    sus modelos de respuesta (``fleet.adapters.http.episode_photos``)."""
+    data = synthetic_episode_jpeg()
+    common: dict[str, Any] = {
+        "zone_id": _EXAMPLE_ZONE,
+        "node_id": _EXAMPLE_NODE,
+        "segment_index": 0,
+        "classified_as": "finding",
+        "family": "coexistence",
+        "standard": EpisodePhotoStandardOut(standard_id=_EXAMPLE_STANDARD, version=1),
+        "max_confidence": 0.91,
+    }
+    page = EpisodePhotosOut(
+        photos=(
+            EpisodePhotoOut(
+                photo_id=_EXAMPLE_PHOTO,
+                episode_id=uuid.UUID("0196a0a0-0000-7000-8000-00000000e001"),
+                started_at="2026-11-12T14:03:10.000Z",
+                ended_at="2026-11-12T14:03:14.000Z",
+                received_at="2026-11-12T14:03:15.250Z",
+                expires_at="2026-12-12T14:03:15.250Z",
+                camera_id=_EXAMPLE_CAMERA,
+                frame_at="2026-11-12T14:03:11.000Z",
+                image=EpisodePhotoImageOut(
+                    width=_EXAMPLE_SIDE,
+                    height=_EXAMPLE_SIDE,
+                    size_bytes=len(data),
+                    blur_params_version="blur-v1",
+                ),
+                image_absent_reason=None,
+                **common,
+            ),
+            EpisodePhotoOut(
+                photo_id=_EXAMPLE_ABSENT,
+                episode_id=uuid.UUID("0196a0a0-0000-7000-8000-00000000e002"),
+                started_at="2026-11-12T13:40:02.000Z",
+                ended_at="2026-11-12T13:40:06.000Z",
+                received_at="2026-11-12T13:40:07.100Z",
+                expires_at="2026-12-12T13:40:07.100Z",
+                camera_id=None,
+                frame_at=None,
+                image=None,
+                image_absent_reason=ImageAbsentReason.PENDING_CAP.value,
+                **common,
+            ),
+        ),
+        next_after=None,
+    )
+    return {
+        "list": {
+            "path": "/zones/{zone_id}/episode-photos",
+            "permission": _COMMISSIONING_RUN,
+            "response": page.model_dump(mode="json"),
+        },
+        "image": {
+            "path": "/episode-photos/{photo_id}/image",
+            "permission": _COMMISSIONING_RUN,
+            "photo_id": str(_EXAMPLE_PHOTO),
+            "headers": dict(SERVED_HEADERS),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "data_base64": base64.b64encode(data).decode("ascii"),
+        },
+        "absent_reasons": [reason.value for reason in ImageAbsentReason],
+        "audit_operation": "episode_photo_read",
+    }
+
+
 # --- Documento --------------------------------------------------------------------------------
 
 
@@ -523,12 +659,14 @@ def build_document(
                 "'accepted' o el motivo de rechazo de la política base, y normalized, el texto "
                 "NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres "
                 "Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del "
-                "ciclo de vida del hallazgo que aplica el servidor."
+                "ciclo de vida del hallazgo que aplica el servidor. episode_photos es un ejemplo "
+                "sintético de los episodios de la sombra (la imagen es un JPEG gris generado)."
             ),
         },
         "permissions": permissions_section(keys, matrix),
         "free_text": free_text_section(routes, policy),
         "lifecycle": lifecycle_section(transitions),
+        "episode_photos": episode_photos_section(),
     }
 
 
@@ -544,7 +682,7 @@ def differences(committed: object, current: Mapping[str, Any]) -> list[tuple[str
         return [("invalid_file",)]
     found: list[tuple[str, ...]] = [
         ("field_differs", name)
-        for name in ("format", "schema_version", "generated", "lifecycle")
+        for name in ("format", "schema_version", "generated", "lifecycle", "episode_photos")
         if committed.get(name) != current[name]
     ]
     permissions = committed.get("permissions")

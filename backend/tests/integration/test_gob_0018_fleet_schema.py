@@ -358,6 +358,23 @@ async def test_upgrade_head_applies_gob_0018(superuser: Any) -> None:
             "DELETE": False,
             "TRUNCATE": False,
         }, table
+    # La foto del episodio (gob_0042) no es de solo anexar: su purga (gob_0043, TASK-573) borra.
+    # Nunca UPDATE ni TRUNCATE.
+    episode_photo = {
+        privilege: await superuser.fetchval(
+            "SELECT has_table_privilege('vigia_app', $1, $2)",
+            f"fleet.{EPISODE_PHOTO_TABLE}",
+            privilege,
+        )
+        for privilege in ("SELECT", "INSERT", "DELETE", "UPDATE", "TRUNCATE")
+    }
+    assert episode_photo == {
+        "SELECT": True,
+        "INSERT": True,
+        "DELETE": True,
+        "UPDATE": False,
+        "TRUNCATE": False,
+    }
 
 
 @pytest.mark.asyncio

@@ -202,6 +202,15 @@ class AuditOperation(enum.StrEnum):
     """U-03 (LC-GOB-06, VIG-150): ``POST /walk-tests/{session_id}/reopen``. La reapertura no
     tiene tipo de registro (nota de TASK-214): esta entrada es su rastro, con ``resource``
     ``walk_test_session`` y ``filters`` ``{reason_es}``; cada reapertura deja la suya."""
+    EPISODE_PHOTO_READ = "episode_photo_read"
+    """U-03 (TASK-573, A-112, QF10): **cada** petición de ``GET
+    /episode-photos/{photo_id}/image``, con ``resource`` ``episode_photo`` y la zona cuando la foto
+    está al alcance. ``success`` (concedida: la entrada se confirma antes de servir los bytes; si
+    no se escribe, no sale nada), ``denied`` (sin ``commissioning.run``, fuera de alcance, vencida,
+    sin imagen o con la zona en ``productive``: ``not_found``) o ``error`` (la ``sha256`` de la
+    fila no coincide con sus bytes: no se sirve). Nunca lleva bytes ni la suma de la imagen. Sin
+    migración (A-88): la columna solo exige ``snake_case``. Mismo criterio que
+    ``evidence_read_granted``."""
 
 
 class AuditOutcome(enum.StrEnum):

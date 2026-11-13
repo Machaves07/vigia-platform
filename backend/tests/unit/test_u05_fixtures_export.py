@@ -10,10 +10,15 @@
   hay al menos un vector rechazado por cada regla de la política.
 - La sección ``lifecycle`` es exactamente ``TRANSITIONS`` y una transición cambiada sin regenerar
   se nombra en la diferencia (VIG-359).
+- La sección ``episode_photos`` (TASK-573) tiene la forma de las respuestas de sus rutas y su
+  imagen es un JPEG **generado** que se decodifica y que la ingesta aceptaría (A-112).
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -22,8 +27,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from tests.factories import session_hash, uuid7
+from vigia_platform.fleet.adapters.http.episode_photos import EpisodePhotosOut
+from vigia_platform.fleet.domain.episode_photo import image_violation
 from vigia_platform.identity.authz.authorize import route_role
 from vigia_platform.identity.authz.matrix import MATRIX, PermissionKey
 from vigia_platform.ledger.free_text import FreeTextRejection, apply_base_policy
@@ -46,6 +54,7 @@ from vigia_platform.shared.api.export_u05_fixtures import (
     permission_differences,
     permissions_section,
     render,
+    synthetic_episode_jpeg,
 )
 from vigia_platform.shared.context import (
     Actor,
@@ -110,7 +119,72 @@ def test_the_file_is_ascii_with_its_header(committed: dict[str, Any]) -> None:
         "permissions",
         "free_text",
         "lifecycle",
+        "episode_photos",
     ]
+
+
+# --- Episodios de la sombra (TASK-573) ----------------------------------------------------------
+
+
+def test_the_episode_photos_example_has_the_shape_of_the_routes(committed: dict[str, Any]) -> None:
+    section = committed["episode_photos"]
+    page = EpisodePhotosOut.model_validate(section["list"]["response"])
+    with_image, without = page.photos
+    assert with_image.image is not None and with_image.image_absent_reason is None
+    assert without.image is None and without.image_absent_reason in section["absent_reasons"]
+    assert section["absent_reasons"] == [
+        "frame_unavailable",
+        "too_large",
+        "disk_pressure",
+        "pending_cap",
+    ]
+    assert section["list"]["permission"] == section["image"]["permission"] == "commissioning.run"
+    assert section["image"]["photo_id"] == str(with_image.photo_id)
+    assert section["image"]["headers"] == {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    }
+    assert section["audit_operation"] == "episode_photo_read"
+
+
+def test_the_example_image_is_a_generated_decodable_jpeg_that_the_ingest_accepts(
+    committed: dict[str, Any],
+) -> None:
+    image = committed["episode_photos"]["image"]
+    data = base64.b64decode(image["data_base64"], validate=True)
+    assert data == synthetic_episode_jpeg()
+    assert hashlib.sha256(data).hexdigest() == image["sha256"]
+    (listed, _) = committed["episode_photos"]["list"]["response"]["photos"]
+    declared = {
+        "size_bytes": listed["image"]["size_bytes"],
+        "sha256": image["sha256"],
+        "width": listed["image"]["width"],
+        "height": listed["image"]["height"],
+    }
+    # La misma verificación que la ingesta (A-112): forma, marca, sin APPn ni cola.
+    assert image_violation(declared, data) is None
+    decoded = Image.open(io.BytesIO(data))
+    decoded.load()
+    assert (decoded.size, decoded.mode) == ((64, 64), "L")
+    assert decoded.getextrema() == (128, 128)  # gris uniforme: no hay nada que reconocer
+
+
+def test_a_changed_episode_example_without_regenerating_is_named(
+    committed: dict[str, Any],
+) -> None:
+    changed = json.loads(json.dumps(committed["episode_photos"]))
+    changed["image"]["headers"]["Cache-Control"] = "max-age=60"
+    current = {**committed, "episode_photos": changed}
+    assert ("field_differs", "episode_photos") in differences(committed, current)
+
+
+@pytest.mark.parametrize("sides", [(63, 64), (64, 1288), (0, 64)])
+def test_the_generated_jpeg_rejects_sides_outside_its_form(sides: tuple[int, int]) -> None:
+    with pytest.raises(ValueError, match="múltiplo de 8"):
+        synthetic_episode_jpeg(*sides)
 
 
 # --- Ciclo de vida (VIG-359) --------------------------------------------------------------------

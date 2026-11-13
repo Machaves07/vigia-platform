@@ -98,6 +98,8 @@ const POLICY_KINDS = {
   'GET /accreditation/exports/{export_id}': 'audited',
   'GET /accreditation/monthly-packages': 'audited',
   'GET /accreditation/monthly-packages/{package_id}/sample': 'audited',
+  // Episodios de la sombra (TASK-573, A-112): bajo concesión cada página deja su `fleet_read`.
+  'GET /zones/{zone_id}/episode-photos': 'audited',
 } as const satisfies Record<string, FreshnessKind>;
 
 /** Lectura de la aplicación con política declarada (`MÉTODO /ruta` de `app.yaml`). */
@@ -113,6 +115,8 @@ export const UNCACHED_READS: Readonly<Record<string, string>> = {
   'GET /accreditation/exports/{export_id}/download': 'descarga por navegación, nunca en caché',
   'GET /accreditation/monthly-packages/{plant_id}/{period}/download':
     'descarga por navegación, nunca en caché',
+  'GET /episode-photos/{photo_id}/image':
+    'imagen del mismo origen por <img src> (no-store, auditada en cada petición), nunca en caché',
 };
 
 export const READ_POLICIES: Readonly<Record<ReadOperation, QueryPolicy>> = Object.fromEntries(

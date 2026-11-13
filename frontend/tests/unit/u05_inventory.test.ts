@@ -48,6 +48,8 @@ const DESIGN_ABUSE = Array.from({ length: 10 }, (_, i) => `A-${String(i + 1)}`);
 
 const NODES = 'ruta del nodo (mTLS, contrato de U-01): la consume el nodo de U-06, no la SPA';
 const PLATFORM = 'operación `platform.*` del operador de plataforma: ninguna pantalla la expone';
+const EPISODES =
+  'episodios de la sombra (A-112): la API es de TASK-573 y su pantalla en SCR-06, de TASK-574';
 
 /**
  * Operaciones de `app.yaml` que ninguna pantalla consume, con su motivo. Cualquier cambio (una
@@ -71,6 +73,9 @@ const NOT_CONSUMED: Readonly<Record<string, string>> = {
   'POST /api/nodes/observability-events': NODES,
   'POST /api/nodes/update-results': NODES,
   'GET /api/nodes/zones/{zone_id}/catalog': NODES,
+  // TASK-573 (A-112) publica la API; la pantalla de SCR-06 que la consume es TASK-574.
+  'GET /zones/{zone_id}/episode-photos': EPISODES,
+  'GET /episode-photos/{photo_id}/image': EPISODES,
 };
 
 function files(dir: string): string[] {

@@ -12,6 +12,9 @@
   nodos de una planta con su ventana de mantenimiento informativa (TASK-226).
 - ``fleet_alarms``: ``GET /fleet/alarms`` (``fleet.read``), las alarmas de flota por transición,
   activas y recientes (TASK-225).
+- ``episode_photos``: ``GET /zones/{zone_id}/episode-photos`` y ``GET
+  /episode-photos/{photo_id}/image`` (``commissioning.run``), los episodios de la sombra con su
+  foto difuminada para la instaladora en SCR-06 (TASK-573, A-112).
 
 Los enrutadores no reciben dependencias al construirse (la especificación se exporta sin red,
 NFR-NUC-52): en cada petición toman los servicios de ``FleetHttp`` en ``app.state``, que la unidad
@@ -23,6 +26,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from vigia_platform.fleet.adapters.http.commissioning_clips import commissioning_clips_router
+from vigia_platform.fleet.adapters.http.episode_photos import episode_photos_router
 from vigia_platform.fleet.adapters.http.fleet_alarms import alarms_router
 from vigia_platform.fleet.adapters.http.fleet_thresholds import fleet_thresholds_router
 from vigia_platform.fleet.adapters.http.inventory import inventory_router
@@ -42,4 +46,5 @@ def fleet_routers() -> tuple[APIRouter, ...]:
         fleet_thresholds_router(),
         target_versions_router(),
         alarms_router(),
+        episode_photos_router(),
     )

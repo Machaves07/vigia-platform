@@ -9,7 +9,7 @@ import createClient, { type Client, type ClientOptions } from 'openapi-fetch';
 
 import type { paths } from './schema';
 
-/** Cliente tipado de las 152 operaciones de `app.yaml`; no guarda estado propio. */
+/** Cliente tipado de las 154 operaciones de `app.yaml`; no guarda estado propio. */
 export function createApiClient(options: ClientOptions = {}): Client<paths> {
   return createClient<paths>(options);
 }
@@ -273,6 +273,14 @@ export const OPERATIONS = {
     path: '/fleet/target-versions',
   },
   list_fleet_alarms_fleet_alarms_get: { method: 'get', path: '/fleet/alarms' },
+  episode_photos_zones__zone_id__episode_photos_get: {
+    method: 'get',
+    path: '/zones/{zone_id}/episode-photos',
+  },
+  episode_photo_image_episode_photos__photo_id__image_get: {
+    method: 'get',
+    path: '/episode-photos/{photo_id}/image',
+  },
   post_clip_upload: { method: 'post', path: '/api/nodes/clip-uploads' },
   post_clip_upload_confirmation: {
     method: 'post',

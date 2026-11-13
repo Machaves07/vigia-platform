@@ -204,7 +204,8 @@ def _compose_worker(runtime: RuntimeConfig, units: Sequence[PlatformUnit]) -> An
 
 
 def test_the_manifests_match_the_types_and_events_of_the_code() -> None:
-    assert len(U03_RECORD_TYPES) == 26 and len(U03_EVENT_TYPES) == 15 and len(U03_TASKS) == 7
+    # Ocho tareas desde TASK-573 (purge_episode_photos, A-112).
+    assert len(U03_RECORD_TYPES) == 26 and len(U03_EVENT_TYPES) == 15 and len(U03_TASKS) == 8
     assert {
         definition.record_type for definition in (*CATALOG_RECORD_TYPES, *FLEET_RECORD_TYPES)
     } == U03_RECORD_TYPES

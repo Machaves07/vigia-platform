@@ -1,7 +1,8 @@
 """Tareas periódicas y consumidores registrados al arrancar (TASK-153; U-03: TASK-227; U-04: 302).
 
 ``domain-entities.md`` §4.3 y su nota del 2026-09-20 fijan las **diez** tareas periódicas de
-U-02 y su cadencia; la nota de U-03 en esa sección y NFR-GOB-12 añaden las **siete** de U-03;
+U-02 y su cadencia; la nota de U-03 en esa sección y NFR-GOB-12 añaden las **siete** de U-03 y
+TASK-573 la octava (``purge_episode_photos``, A-112);
 ``shared.worker.main`` exige que un worker no arranque sin todos sus consumidores registrados.
 Contra PostgreSQL 16 real, como ``vigia_app``:
 
@@ -111,9 +112,11 @@ U03_TASKS: Final[dict[str, tuple[ScheduleKind, int, TaskIteration]]] = {
     "alert_expiring_certificates": (ScheduleKind.DAILY, 3 * 3600, TaskIteration.PER_ORGANIZATION),
     # Barrido de 60 s con la marca y regeneración diaria interna (nota de NFR-GOB-12; D-7).
     "regenerate_revocation_list": (ScheduleKind.EVERY, _MINUTE, TaskIteration.GLOBAL),
+    # TASK-573 (A-112): la purga diaria de la foto del episodio de la sombra.
+    "purge_episode_photos": (ScheduleKind.DAILY, 4 * 3600, TaskIteration.PER_ORGANIZATION),
 }
-"""Las siete tareas de U-03: horario, intervalo (cada N s) o desfase (diaria, a las HH UTC) e
-iteración."""
+"""Las ocho tareas de U-03 (siete de TASK-227 y la purga de TASK-573): horario, intervalo (cada N
+s) o desfase (diaria, a las HH UTC) e iteración."""
 
 U02_CONSUMERS: Final = (ALERTS_CONSUMER, INTEGRITY_ON_DEMAND_CONSUMER)
 
@@ -131,8 +134,9 @@ U04_CADENCES: Final = {
 }
 """Cadencias independientes del código de las tareas; reconstruir no es periódica (U04-H-14)."""
 
-TASK_COUNT: Final = 11 + 7 + 10
-"""Las once de U-02, las siete de U-03 y las del manifiesto de U-04 (TASK-302)."""
+TASK_COUNT: Final = 11 + 8 + 10
+"""Las once de U-02, las ocho de U-03 (TASK-227 y TASK-573) y las del manifiesto de U-04
+(TASK-302)."""
 
 
 def unit_of_task(name: str) -> str:
@@ -278,12 +282,13 @@ def test_the_ten_design_tasks_are_registered_with_their_cadence(
         _check_cadence(name, task.schedule, kind, offset)
 
 
-def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
+def test_exactly_eleven_plus_eight_tasks_with_their_cadence_unit_and_iteration(
     environment: WorkerEnvironment,
 ) -> None:
     catalog = u02_catalog(environment)
     every = {task.task_name: task for task in catalog.periodic_tasks.tasks()}
-    assert len(U03_TASKS) == 7
+    assert len(U03_TASKS) == 8
+    assert "purge_episode_photos" in every
     assert len(U04_TASKS) == 10
     assert {name: schedule for name, (schedule, _) in U04_TASKS.items()} == U04_CADENCES
     assert len(every) == TASK_COUNT
@@ -320,6 +325,8 @@ def test_exactly_eleven_plus_seven_tasks_with_their_cadence_unit_and_iteration(
         ("expire_walk_test_sessions", Schedule.weekly(hour=5)),
         ("alert_expiring_certificates", Schedule.daily()),
         ("regenerate_revocation_list", Schedule.daily()),
+        ("purge_episode_photos", Schedule.daily(hour=5)),
+        ("purge_episode_photos", Schedule.every(3600)),
     ],
 )
 def test_a_u03_cadence_other_than_the_declared_one_is_detected(

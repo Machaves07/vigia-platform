@@ -531,6 +531,16 @@ ROUTE_ADDITIONS: Final[Mapping[tuple[str, str], tuple[str, str]]] = {
         "A-55: recaptura del encuadre (precisión (c) de v1.5), marca la regresión con "
         "framing_recaptured sin versión nueva del catálogo; la interfaz no la lista",
     ),
+    ("GET", "/zones/{zone_id}/episode-photos"): (
+        "commissioning.run",
+        "A-112 (TASK-573, QF10): episodios de la sombra para la instaladora en SCR-06, material "
+        "de puesta en marcha posterior a la interfaz v1.5; la interfaz no la lista",
+    ),
+    ("GET", "/episode-photos/{photo_id}/image"): (
+        "commissioning.run",
+        "A-112 (TASK-573, QF10): imagen difuminada del episodio, del mismo origen y auditada en "
+        "cada petición; la interfaz no la lista",
+    ),
 }
 
 PERMISSION_DIFFERENCES: Final[Mapping[tuple[str, str], tuple[str, str]]] = {

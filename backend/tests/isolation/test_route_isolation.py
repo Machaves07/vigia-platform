@@ -63,6 +63,7 @@ from starlette.routing import BaseRoute
 
 from tests.api_support import World
 from tests.authz_support import Site
+from tests.episode_photo_support import jpeg
 from tests.examples.test_admin_routes import UnusedPasswords
 from tests.examples.test_ledger_routes import CLIP, StubEvidenceStorage
 from tests.factories import uuid7
@@ -162,6 +163,7 @@ from vigia_platform.fleet.adapters.s3.clip_storage import ClipObjectStore
 from vigia_platform.fleet.application.clip_confirmation import CommissioningClips
 from vigia_platform.fleet.application.common import FleetDependencies
 from vigia_platform.fleet.application.enrollment_codes import BundleRoots, EnrollmentCodeService
+from vigia_platform.fleet.application.episode_photo_read import EpisodePhotoReader
 from vigia_platform.fleet.application.fleet_alarms import FleetAlarms
 from vigia_platform.fleet.application.fleet_thresholds import FleetThresholdsService
 from vigia_platform.fleet.application.inventory_read import FleetInventory
@@ -343,6 +345,13 @@ def fleet_http(deps: FleetDependencies, provider_organization_id: uuid.UUID) -> 
             audit=deps.audit,
             clock=deps.clock,
             policy=VersionPolicy(),
+        ),
+        # TASK-573 (A-112): los episodios de la sombra de SCR-06 (commissioning.run).
+        episode_photos=EpisodePhotoReader(
+            database=deps.database,
+            authorizer=deps.authorizer,
+            audit=deps.audit,
+            clock=deps.clock,
         ),
     )
 
@@ -958,6 +967,14 @@ _U02_U03_CASES: Final[dict[tuple[str, str], Case]] = {
     # --- fleet (VIG-152) ---
     ("GET", "/zones/{zone_id}/commissioning-clips"): Case(
         Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.zone}/commissioning-clips")
+    ),
+    # TASK-573 (A-112): los episodios de la sombra, solo con commissioning.run; la zona de los
+    # episodios sigue en commissioning (la de los recursos de U-04 ya está en productive).
+    ("GET", "/zones/{zone_id}/episode-photos"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/zones/{i.episode_zone}/episode-photos")
+    ),
+    ("GET", "/episode-photos/{photo_id}/image"): Case(
+        Kind.RESOURCE, lambda i: Call("GET", f"/episode-photos/{i.episode_photo}/image")
     ),
     # --- Rutas del contrato (VIG-152): con el certificado de un nodo de A, la zona o el clip de
     # B responden node_zone_mismatch (tests/integration/test_fleet_clip_uploads_localstack.py).
@@ -1584,6 +1601,41 @@ class Isolation:
         )
         return record_id
 
+    def episode_photo(
+        self, organization_id: uuid.UUID, plant_id: uuid.UUID
+    ) -> tuple[uuid.UUID, uuid.UUID]:
+        """Una zona nueva en ``commissioning`` con un episodio de la sombra con imagen sintética
+        (TASK-573): ``(zona, foto)``."""
+        zone_id, photo_id = uuid7(), uuid7()
+        self.authz.add_zone(organization_id, plant_id, zone_id)
+        data = jpeg(scan=photo_id.bytes)
+        now = self.authz.now()
+        self.env.execute(
+            "INSERT INTO fleet.episode_photo (organization_id, photo_id, plant_id, zone_id,"
+            " node_id, episode_id, segment_index, classified_as, family, standard_id,"
+            " standard_version, max_confidence, started_at, ended_at, received_at, expires_at,"
+            " camera_id, frame_at, width, height, size_bytes, sha256, blur_params_version, image,"
+            " image_absent_reason, canonical_sha256, platform_record_id) VALUES ($1, $2, $3, $4,"
+            " $5, $6, 0, 'finding', 'coexistence', $7, 1, 0.9, $8, $8, $8,"
+            " $8::timestamptz + interval '30 days', $9, $8, 320, 240, $10, $11, 'blur-v1', $12,"
+            " NULL, $13, $14)",
+            organization_id,
+            photo_id,
+            plant_id,
+            zone_id,
+            uuid7(),
+            uuid7(),
+            uuid7(),
+            now,
+            uuid7(),
+            len(data),
+            hashlib.sha256(data).hexdigest(),
+            data,
+            hashlib.sha256(photo_id.bytes).hexdigest(),
+            uuid7(),
+        )
+        return zone_id, photo_id
+
     def resources(self, site: Site, plant_index: int) -> Ids:
         """Un recurso de cada tipo en la planta ``plant_index`` de ``site`` (filas reales)."""
         authz = self.authz
@@ -1614,6 +1666,7 @@ class Isolation:
         retired_node = self.fleet_node(organization_id, plant_id, user_id, revoked=True)
         self.catalog(site, plant_id, zone_id, user_id)
         walk_test_id, step_id = self.walk_test(site, plant_id, zone_id, node_id, user_id)
+        episode_zone, episode_photo = self.episode_photo(organization_id, plant_id)
         return seed_laz_resources(
             self,
             Ids(
@@ -1636,6 +1689,8 @@ class Isolation:
                 commissioning_record=self.commissioning_record(
                     site, plant_id, zone_id, node_id, user_id
                 ),
+                episode_zone=episode_zone,
+                episode_photo=episode_photo,
             ),
         )
 
@@ -2443,6 +2498,8 @@ def test_pr_nuc_01_under_concession_the_provider_installer_column_decides(
         "GET /commissioning-records/{record_id}/document",
         "POST /zones/{zone_id}/walk-tests/regression-rerun",
         "GET /zones/{zone_id}/commissioning-clips",
+        "GET /zones/{zone_id}/episode-photos",
+        "GET /episode-photos/{photo_id}/image",
     }
     # Ningún acceso del proveedor es invisible para el cliente (BR-NUC-41): cada provider_query
     # está en GET /concessions/{id}/queries.

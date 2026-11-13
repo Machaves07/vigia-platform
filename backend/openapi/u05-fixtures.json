@@ -1,10 +1,10 @@
 {
   "format": "vigia-platform/u05-fixtures",
-  "schema_version": 2,
+  "schema_version": 3,
   "generated": {
     "by": "uv run python -m vigia_platform.shared.api.export_u05_fixtures",
     "check": "uv run python -m vigia_platform.shared.api.export_u05_fixtures --check",
-    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del ciclo de vida del hallazgo que aplica el servidor."
+    "notice": "Generado: no se edita a mano. La canalizaci\u00f3n exige --check sin diferencia. Se consume por igualdad: permissions.effective[contexto][rol] son las claves que concede la asignaci\u00f3n de ese rol en ese contexto; free_text.vectors[].verdict es 'accepted' o el motivo de rechazo de la pol\u00edtica base, y normalized, el texto NFC que se guarda (null si se rechaza). Las longitudes cuentan caracteres Unicode tras NFC, no unidades UTF-16. lifecycle.transitions[] es la tabla del ciclo de vida del hallazgo que aplica el servidor. episode_photos es un ejemplo sint\u00e9tico de los episodios de la sombra (la imagen es un JPEG gris generado)."
   },
   "permissions": {
     "source": "identity/authz/matrix.py (MATRIX) evaluada como identity/authz/authorize.py",
@@ -4556,5 +4556,86 @@
         ]
       }
     ]
+  },
+  "episode_photos": {
+    "list": {
+      "path": "/zones/{zone_id}/episode-photos",
+      "permission": "commissioning.run",
+      "response": {
+        "photos": [
+          {
+            "photo_id": "0196a0a0-0000-7000-8000-00000000f001",
+            "zone_id": "0196a0a0-0000-7000-8000-00000000a112",
+            "node_id": "0196a0a0-0000-7000-8000-00000000c001",
+            "episode_id": "0196a0a0-0000-7000-8000-00000000e001",
+            "segment_index": 0,
+            "classified_as": "finding",
+            "family": "coexistence",
+            "standard": {
+              "standard_id": "0196a0a0-0000-7000-8000-00000000d001",
+              "version": 1
+            },
+            "max_confidence": 0.91,
+            "started_at": "2026-11-12T14:03:10.000Z",
+            "ended_at": "2026-11-12T14:03:14.000Z",
+            "received_at": "2026-11-12T14:03:15.250Z",
+            "expires_at": "2026-12-12T14:03:15.250Z",
+            "camera_id": "0196a0a0-0000-7000-8000-00000000c002",
+            "frame_at": "2026-11-12T14:03:11.000Z",
+            "image": {
+              "width": 64,
+              "height": 64,
+              "size_bytes": 178,
+              "blur_params_version": "blur-v1"
+            },
+            "image_absent_reason": null
+          },
+          {
+            "photo_id": "0196a0a0-0000-7000-8000-00000000f002",
+            "zone_id": "0196a0a0-0000-7000-8000-00000000a112",
+            "node_id": "0196a0a0-0000-7000-8000-00000000c001",
+            "episode_id": "0196a0a0-0000-7000-8000-00000000e002",
+            "segment_index": 0,
+            "classified_as": "finding",
+            "family": "coexistence",
+            "standard": {
+              "standard_id": "0196a0a0-0000-7000-8000-00000000d001",
+              "version": 1
+            },
+            "max_confidence": 0.91,
+            "started_at": "2026-11-12T13:40:02.000Z",
+            "ended_at": "2026-11-12T13:40:06.000Z",
+            "received_at": "2026-11-12T13:40:07.100Z",
+            "expires_at": "2026-12-12T13:40:07.100Z",
+            "camera_id": null,
+            "frame_at": null,
+            "image": null,
+            "image_absent_reason": "pending_cap"
+          }
+        ],
+        "next_after": null
+      }
+    },
+    "image": {
+      "path": "/episode-photos/{photo_id}/image",
+      "permission": "commissioning.run",
+      "photo_id": "0196a0a0-0000-7000-8000-00000000f001",
+      "headers": {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "no-store",
+        "Content-Disposition": "inline",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "sha256": "09355ceebd5e94d6a118f9eca7845263afb859b670c56aafd081dc2f432132b2",
+      "data_base64": "/9j//gAUdmlnaWFfYW5vbnltaXplZD0x/9sAQwABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB/8AACwgAQABAAQERAP/EABQAAQAAAAAAAAAAAAAAAAAAAAD/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAA/AAAAAAAAAAAAAAAAAAAAAAD/2Q=="
+    },
+    "absent_reasons": [
+      "frame_unavailable",
+      "too_large",
+      "disk_pressure",
+      "pending_cap"
+    ],
+    "audit_operation": "episode_photo_read"
   }
 }
